@@ -1,7 +1,10 @@
 #include "Arch_InteriorManager.h"
-#include "Engine/Engine.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Engine.h"
 #include "UObject/ConstructorHelpers.h"
 
 AArch_InteriorManager::AArch_InteriorManager()
@@ -9,262 +12,288 @@ AArch_InteriorManager::AArch_InteriorManager()
     PrimaryActorTick.bCanEverTick = true;
 
     // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
     RootComponent = RootSceneComponent;
 
-    // Create interior bounds
-    InteriorBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteriorBounds"));
-    InteriorBounds->SetupAttachment(RootComponent);
-    InteriorBounds->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+    // Create interior mesh component
+    InteriorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("InteriorMesh"));
+    InteriorMesh->SetupAttachment(RootComponent);
 
-    // Initialize default values
-    StructureType = EArch_StructureType::Dwelling;
-    InteriorSize = 500.0f;
-    bHasFirePit = true;
-    bHasSleepingArea = true;
-    bHasStorageArea = true;
+    // Create trigger volume for interior detection
+    InteriorTrigger = CreateDefaultSubobject<UBoxComponent>(TEXT("InteriorTrigger"));
+    InteriorTrigger->SetupAttachment(RootComponent);
+    InteriorTrigger->SetBoxExtent(FVector(300.0f, 300.0f, 200.0f));
+    InteriorTrigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteriorTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteriorTrigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create fire pit mesh
+    FirePitMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirePitMesh"));
+    FirePitMesh->SetupAttachment(RootComponent);
+    FirePitMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -50.0f));
+    FirePitMesh->SetVisibility(false);
+
+    // Create fire light
+    FireLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("FireLight"));
+    FireLight->SetupAttachment(FirePitMesh);
+    FireLight->SetRelativeLocation(FVector(0.0f, 0.0f, 20.0f));
+    FireLight->SetLightColor(FLinearColor(1.0f, 0.6f, 0.2f, 1.0f));
+    FireLight->SetIntensity(1000.0f);
+    FireLight->SetAttenuationRadius(500.0f);
+    FireLight->SetVisibility(false);
+
+    // Initialize default interior data
+    InteriorData.InteriorType = EArch_InteriorType::Cave;
+    InteriorData.ComfortLevel = 50.0f;
+    InteriorData.WarmthBonus = 25.0f;
+    InteriorData.bHasFirePit = false;
+    InteriorData.bHasSleepingArea = false;
+    InteriorData.MaxOccupants = 2;
+
+    bIsOccupied = false;
 }
 
 void AArch_InteriorManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: BeginPlay - Setting up interior"));
-    SetupInteriorForStructure(StructureType);
+
+    // Bind trigger events
+    if (InteriorTrigger)
+    {
+        InteriorTrigger->OnComponentBeginOverlap.AddDynamic(this, &AArch_InteriorManager::OnInteriorEnter);
+        InteriorTrigger->OnComponentEndOverlap.AddDynamic(this, &AArch_InteriorManager::OnInteriorExit);
+    }
+
+    SetupInteriorMesh();
+    ConfigureInteriorSettings();
 }
 
 void AArch_InteriorManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
+    // Update fire pit effects if active
+    if (InteriorData.bHasFirePit && FireLight->IsVisible())
+    {
+        UpdateFirePitVisuals();
+    }
+
+    // Update occupancy status
+    bIsOccupied = CurrentOccupants.Num() > 0;
 }
 
-void AArch_InteriorManager::SetupInteriorForStructure(EArch_StructureType InStructureType)
+void AArch_InteriorManager::SetupInteriorType(EArch_InteriorType NewType)
 {
-    StructureType = InStructureType;
-    ClearInterior();
+    InteriorData.InteriorType = NewType;
 
-    switch (StructureType)
+    switch (NewType)
     {
-        case EArch_StructureType::Dwelling:
-            SetupDwellingInterior();
+        case EArch_InteriorType::Cave:
+            InteriorData.ComfortLevel = 70.0f;
+            InteriorData.WarmthBonus = 35.0f;
+            InteriorData.MaxOccupants = 3;
             break;
-        case EArch_StructureType::Shelter:
-            SetupShelterInterior();
+
+        case EArch_InteriorType::StoneShelter:
+            InteriorData.ComfortLevel = 60.0f;
+            InteriorData.WarmthBonus = 30.0f;
+            InteriorData.MaxOccupants = 2;
             break;
-        case EArch_StructureType::Storage:
-            SetupStorageInterior();
+
+        case EArch_InteriorType::LogHut:
+            InteriorData.ComfortLevel = 55.0f;
+            InteriorData.WarmthBonus = 25.0f;
+            InteriorData.MaxOccupants = 2;
             break;
-        case EArch_StructureType::Workshop:
-            SetupWorkshopInterior();
+
+        case EArch_InteriorType::RockOverhang:
+            InteriorData.ComfortLevel = 40.0f;
+            InteriorData.WarmthBonus = 15.0f;
+            InteriorData.MaxOccupants = 1;
             break;
-        case EArch_StructureType::Ruins:
-            SetupRuinInterior();
+
+        case EArch_InteriorType::BuriedDwelling:
+            InteriorData.ComfortLevel = 80.0f;
+            InteriorData.WarmthBonus = 45.0f;
+            InteriorData.MaxOccupants = 4;
             break;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior setup complete for structure type %d"), (int32)StructureType);
+    ConfigureInteriorSettings();
 }
 
-bool AArch_InteriorManager::AddInteriorItem(EArch_InteriorType ItemType, FVector Location, FRotator Rotation)
+void AArch_InteriorManager::AddFurniture(UStaticMesh* FurnitureMesh, FVector RelativeLocation, FRotator RelativeRotation)
 {
-    // Check if location is within interior bounds
-    if (!IsLocationInsideInterior(Location))
+    if (!FurnitureMesh)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Location outside interior bounds"));
-        return false;
+        return;
     }
 
-    // Create new interior item
-    FArch_InteriorItem NewItem;
-    NewItem.ItemName = FString::Printf(TEXT("InteriorItem_%d"), InteriorItems.Num() + 1);
-    NewItem.ItemType = ItemType;
-    NewItem.RelativeLocation = Location - GetActorLocation();
-    NewItem.RelativeRotation = Rotation;
-    NewItem.bIsInteractable = (ItemType != EArch_InteriorType::Decoration);
-    NewItem.WearLevel = FMath::RandRange(0.0f, 0.3f);
-
-    // Add to interior items
-    InteriorItems.Add(NewItem);
-
-    // Spawn the visual representation
-    SpawnInteriorItem(NewItem);
-
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior item added: %s"), *NewItem.ItemName);
-    return true;
-}
-
-void AArch_InteriorManager::RemoveInteriorItem(int32 ItemIndex)
-{
-    if (InteriorItems.IsValidIndex(ItemIndex))
+    UStaticMeshComponent* NewFurniture = CreateDefaultSubobject<UStaticMeshComponent>(*FString::Printf(TEXT("Furniture_%d"), FurnitureComponents.Num()));
+    if (NewFurniture)
     {
-        InteriorItems.RemoveAt(ItemIndex);
-        UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior item removed at index %d"), ItemIndex);
+        NewFurniture->SetupAttachment(RootComponent);
+        NewFurniture->SetStaticMesh(FurnitureMesh);
+        NewFurniture->SetRelativeLocation(RelativeLocation);
+        NewFurniture->SetRelativeRotation(RelativeRotation);
+        FurnitureComponents.Add(NewFurniture);
+
+        // Increase comfort level based on furniture
+        InteriorData.ComfortLevel += 10.0f;
     }
 }
 
-TArray<FArch_InteriorItem> AArch_InteriorManager::GetInteractableItems()
+void AArch_InteriorManager::LightFirePit()
 {
-    TArray<FArch_InteriorItem> InteractableItems;
-    
-    for (const FArch_InteriorItem& Item : InteriorItems)
+    if (FirePitMesh && FireLight)
     {
-        if (Item.bIsInteractable)
+        InteriorData.bHasFirePit = true;
+        FirePitMesh->SetVisibility(true);
+        FireLight->SetVisibility(true);
+        InteriorData.WarmthBonus += 20.0f;
+        InteriorData.ComfortLevel += 15.0f;
+
+        UE_LOG(LogTemp, Log, TEXT("Fire pit lit in interior %s"), *GetName());
+    }
+}
+
+void AArch_InteriorManager::ExtinguishFirePit()
+{
+    if (FirePitMesh && FireLight)
+    {
+        InteriorData.bHasFirePit = false;
+        FirePitMesh->SetVisibility(false);
+        FireLight->SetVisibility(false);
+        InteriorData.WarmthBonus -= 20.0f;
+        InteriorData.ComfortLevel -= 15.0f;
+
+        UE_LOG(LogTemp, Log, TEXT("Fire pit extinguished in interior %s"), *GetName());
+    }
+}
+
+bool AArch_InteriorManager::CanAccommodateOccupant() const
+{
+    return CurrentOccupants.Num() < InteriorData.MaxOccupants;
+}
+
+void AArch_InteriorManager::AddOccupant(AActor* NewOccupant)
+{
+    if (NewOccupant && CanAccommodateOccupant())
+    {
+        CurrentOccupants.AddUnique(NewOccupant);
+        UE_LOG(LogTemp, Log, TEXT("Occupant %s added to interior %s"), *NewOccupant->GetName(), *GetName());
+    }
+}
+
+void AArch_InteriorManager::RemoveOccupant(AActor* OccupantToRemove)
+{
+    if (OccupantToRemove)
+    {
+        CurrentOccupants.Remove(OccupantToRemove);
+        UE_LOG(LogTemp, Log, TEXT("Occupant %s removed from interior %s"), *OccupantToRemove->GetName(), *GetName());
+    }
+}
+
+float AArch_InteriorManager::GetComfortLevel() const
+{
+    return InteriorData.ComfortLevel;
+}
+
+float AArch_InteriorManager::GetWarmthBonus() const
+{
+    return InteriorData.WarmthBonus;
+}
+
+void AArch_InteriorManager::OnInteriorEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<APawn>())
+    {
+        AddOccupant(OtherActor);
+        
+        // Notify player of interior benefits
+        if (GEngine)
         {
-            InteractableItems.Add(Item);
+            FString InteriorTypeStr;
+            switch (InteriorData.InteriorType)
+            {
+                case EArch_InteriorType::Cave: InteriorTypeStr = TEXT("Cave"); break;
+                case EArch_InteriorType::StoneShelter: InteriorTypeStr = TEXT("Stone Shelter"); break;
+                case EArch_InteriorType::LogHut: InteriorTypeStr = TEXT("Log Hut"); break;
+                case EArch_InteriorType::RockOverhang: InteriorTypeStr = TEXT("Rock Overhang"); break;
+                case EArch_InteriorType::BuriedDwelling: InteriorTypeStr = TEXT("Buried Dwelling"); break;
+            }
+
+            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, 
+                FString::Printf(TEXT("Entered %s - Comfort: %.0f%%, Warmth: +%.0f"), 
+                    *InteriorTypeStr, InteriorData.ComfortLevel, InteriorData.WarmthBonus));
         }
     }
-    
-    return InteractableItems;
 }
 
-void AArch_InteriorManager::GenerateRandomInterior()
+void AArch_InteriorManager::OnInteriorExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Arch_InteriorManager: Generating random interior"));
-    
-    ClearInterior();
-    
-    // Random structure type
-    StructureType = static_cast<EArch_StructureType>(FMath::RandRange(0, 4));
-    SetupInteriorForStructure(StructureType);
-}
-
-void AArch_InteriorManager::ClearInterior()
-{
-    InteriorItems.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Interior cleared"));
-}
-
-bool AArch_InteriorManager::IsLocationInsideInterior(FVector WorldLocation)
-{
-    if (InteriorBounds)
+    if (OtherActor && OtherActor->IsA<APawn>())
     {
-        FVector LocalLocation = InteriorBounds->GetComponentTransform().InverseTransformPosition(WorldLocation);
-        FVector BoxExtent = InteriorBounds->GetScaledBoxExtent();
-        
-        return (FMath::Abs(LocalLocation.X) <= BoxExtent.X &&
-                FMath::Abs(LocalLocation.Y) <= BoxExtent.Y &&
-                FMath::Abs(LocalLocation.Z) <= BoxExtent.Z);
-    }
-    
-    return false;
-}
+        RemoveOccupant(OtherActor);
 
-void AArch_InteriorManager::SpawnInteriorItem(const FArch_InteriorItem& Item)
-{
-    // Create a static mesh component for the item
-    UStaticMeshComponent* ItemMesh = CreateDefaultSubobject<UStaticMeshComponent>(
-        *FString::Printf(TEXT("ItemMesh_%d"), InteriorItems.Num())
-    );
-    
-    if (ItemMesh)
-    {
-        ItemMesh->SetupAttachment(RootComponent);
-        ItemMesh->SetRelativeLocation(Item.RelativeLocation);
-        ItemMesh->SetRelativeRotation(Item.RelativeRotation);
-        
-        // Apply wear-based scaling
-        float Scale = 1.0f - (Item.WearLevel * 0.2f);
-        ItemMesh->SetRelativeScale3D(FVector(Scale));
-        
-        UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Item mesh spawned for %s"), *Item.ItemName);
-    }
-}
-
-void AArch_InteriorManager::SetupDwellingInterior()
-{
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up dwelling interior"));
-    
-    // Central fire pit
-    if (bHasFirePit)
-    {
-        AddInteriorItem(EArch_InteriorType::FirePit, FVector(0, 0, 0), FRotator::ZeroRotator);
-    }
-    
-    // Sleeping areas around the edges
-    if (bHasSleepingArea)
-    {
-        for (int32 i = 0; i < 3; i++)
+        if (GEngine)
         {
-            float Angle = (i * 120.0f) * PI / 180.0f;
-            FVector SleepLocation = FVector(FMath::Cos(Angle) * 300.0f, FMath::Sin(Angle) * 300.0f, 0.0f);
-            AddInteriorItem(EArch_InteriorType::Furniture, SleepLocation, FRotator(0, i * 120.0f, 0));
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Left shelter"));
         }
     }
-    
-    // Storage areas
-    if (bHasStorageArea)
-    {
-        AddInteriorItem(EArch_InteriorType::Storage, FVector(200, 200, 0), FRotator::ZeroRotator);
-        AddInteriorItem(EArch_InteriorType::Storage, FVector(-200, 200, 0), FRotator::ZeroRotator);
-    }
-    
-    // Decorative elements
-    AddInteriorItem(EArch_InteriorType::Decoration, FVector(100, -200, 50), FRotator::ZeroRotator);
-    AddInteriorItem(EArch_InteriorType::Decoration, FVector(-100, -200, 50), FRotator::ZeroRotator);
 }
 
-void AArch_InteriorManager::SetupShelterInterior()
+void AArch_InteriorManager::UpdateFirePitVisuals()
 {
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up shelter interior"));
-    
-    // Simple fire pit
-    AddInteriorItem(EArch_InteriorType::FirePit, FVector(0, 0, 0), FRotator::ZeroRotator);
-    
-    // Basic sleeping area
-    AddInteriorItem(EArch_InteriorType::Furniture, FVector(150, 0, 0), FRotator::ZeroRotator);
-    
-    // Minimal storage
-    AddInteriorItem(EArch_InteriorType::Storage, FVector(-150, 0, 0), FRotator::ZeroRotator);
-}
-
-void AArch_InteriorManager::SetupStorageInterior()
-{
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up storage interior"));
-    
-    // Multiple storage containers
-    for (int32 i = 0; i < 6; i++)
+    if (FireLight)
     {
-        float Angle = (i * 60.0f) * PI / 180.0f;
-        FVector StorageLocation = FVector(FMath::Cos(Angle) * 200.0f, FMath::Sin(Angle) * 200.0f, 0.0f);
-        AddInteriorItem(EArch_InteriorType::Storage, StorageLocation, FRotator(0, i * 60.0f, 0));
+        // Create flickering fire effect
+        float FlickerIntensity = 1000.0f + FMath::Sin(GetWorld()->GetTimeSeconds() * 8.0f) * 200.0f;
+        FireLight->SetIntensity(FlickerIntensity);
+
+        // Subtle color variation
+        float ColorVariation = 0.8f + FMath::Sin(GetWorld()->GetTimeSeconds() * 12.0f) * 0.2f;
+        FireLight->SetLightColor(FLinearColor(1.0f, 0.6f * ColorVariation, 0.2f, 1.0f));
     }
 }
 
-void AArch_InteriorManager::SetupWorkshopInterior()
+void AArch_InteriorManager::SetupInteriorMesh()
 {
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up workshop interior"));
-    
-    // Central work area
-    AddInteriorItem(EArch_InteriorType::Furniture, FVector(0, 0, 0), FRotator::ZeroRotator);
-    
-    // Tool storage around edges
-    for (int32 i = 0; i < 4; i++)
+    // This would normally load appropriate meshes based on interior type
+    // For now, we'll use basic shapes as placeholders
+    if (InteriorMesh)
     {
-        float Angle = (i * 90.0f) * PI / 180.0f;
-        FVector ToolLocation = FVector(FMath::Cos(Angle) * 250.0f, FMath::Sin(Angle) * 250.0f, 0.0f);
-        AddInteriorItem(EArch_InteriorType::Storage, ToolLocation, FRotator(0, i * 90.0f, 0));
+        // Set basic collision and rendering properties
+        InteriorMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        InteriorMesh->SetCollisionResponseToAllChannels(ECR_Block);
+        InteriorMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
     }
-    
-    // Fire pit for metalworking
-    AddInteriorItem(EArch_InteriorType::FirePit, FVector(200, 0, 0), FRotator::ZeroRotator);
 }
 
-void AArch_InteriorManager::SetupRuinInterior()
+void AArch_InteriorManager::ConfigureInteriorSettings()
 {
-    UE_LOG(LogTemp, Log, TEXT("Arch_InteriorManager: Setting up ruin interior"));
-    
-    // Scattered debris and remnants
-    for (int32 i = 0; i < 5; i++)
+    // Adjust trigger size based on interior type
+    if (InteriorTrigger)
     {
-        FVector RandomLocation = FVector(
-            FMath::RandRange(-200.0f, 200.0f),
-            FMath::RandRange(-200.0f, 200.0f),
-            0.0f
-        );
-        
-        EArch_InteriorType RandomType = static_cast<EArch_InteriorType>(FMath::RandRange(0, 3));
-        FRotator RandomRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
-        
-        AddInteriorItem(RandomType, RandomLocation, RandomRotation);
+        FVector TriggerExtent;
+        switch (InteriorData.InteriorType)
+        {
+            case EArch_InteriorType::Cave:
+                TriggerExtent = FVector(400.0f, 400.0f, 250.0f);
+                break;
+            case EArch_InteriorType::StoneShelter:
+                TriggerExtent = FVector(300.0f, 300.0f, 200.0f);
+                break;
+            case EArch_InteriorType::LogHut:
+                TriggerExtent = FVector(250.0f, 250.0f, 180.0f);
+                break;
+            case EArch_InteriorType::RockOverhang:
+                TriggerExtent = FVector(200.0f, 150.0f, 120.0f);
+                break;
+            case EArch_InteriorType::BuriedDwelling:
+                TriggerExtent = FVector(350.0f, 350.0f, 150.0f);
+                break;
+        }
+        InteriorTrigger->SetBoxExtent(TriggerExtent);
     }
 }
