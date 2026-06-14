@@ -1,9 +1,45 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "NarrativeManager.generated.h"
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_StoryBeat
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString BeatID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString BeatTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString BeatDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> RequiredConditions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> CompletionFlags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsCompleted;
+
+    FNarr_StoryBeat()
+    {
+        BeatID = TEXT("");
+        BeatTitle = TEXT("");
+        BeatDescription = TEXT("");
+        bIsActive = false;
+        bIsCompleted = false;
+    }
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
@@ -17,47 +53,20 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration;
+    FString AudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    float Duration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> PlayerResponses;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("Unknown");
+        SpeakerName = TEXT("");
         DialogueText = TEXT("");
-        DisplayDuration = 3.0f;
-        bIsPlayerChoice = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_QuestObjective
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString ObjectiveID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsCompleted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentCount;
-
-    FNarr_QuestObjective()
-    {
-        ObjectiveID = TEXT("");
-        Description = TEXT("");
-        bIsCompleted = false;
-        RequiredCount = 1;
-        CurrentCount = 0;
+        AudioPath = TEXT("");
+        Duration = 3.0f;
     }
 };
 
@@ -68,36 +77,42 @@ class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue(const FString& DialogueID);
+    void StartStoryBeat(const FString& BeatID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void DisplayDialogueLine(const FNarr_DialogueLine& DialogueLine);
+    void CompleteStoryBeat(const FString& BeatID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CompleteQuestObjective(const FString& ObjectiveID);
+    bool IsStoryBeatActive(const FString& BeatID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsQuestObjectiveComplete(const FString& ObjectiveID);
+    bool IsStoryBeatCompleted(const FString& BeatID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarration(const FString& NarrationText, float Duration = 5.0f);
+    void TriggerDialogue(const FString& DialogueID, AActor* Speaker);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetStoryFlag(const FString& FlagName, bool bValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool GetStoryFlag(const FString& FlagName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FNarr_StoryBeat> GetActiveStoryBeats() const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FNarr_DialogueLine> CurrentDialogue;
+    UPROPERTY()
+    TArray<FNarr_StoryBeat> StoryBeats;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FNarr_QuestObjective> ActiveObjectives;
+    UPROPERTY()
+    TMap<FString, FNarr_DialogueLine> DialogueDatabase;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FString CurrentNarrationText;
+    UPROPERTY()
+    TMap<FString, bool> StoryFlags;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bIsDialogueActive;
-
-private:
-    void LoadDialogueData();
-    void ProcessDialogueChoice(int32 ChoiceIndex);
+    void LoadStoryData();
+    void InitializeMainStoryBeats();
 };
