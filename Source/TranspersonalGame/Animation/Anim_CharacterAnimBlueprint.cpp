@@ -1,45 +1,22 @@
 #include "Anim_CharacterAnimBlueprint.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimMontage.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UAnim_CharacterAnimBlueprint::UAnim_CharacterAnimBlueprint()
 {
-    // Set default animation thresholds
-    WalkSpeedThreshold = 100.0f;
-    RunSpeedThreshold = 400.0f;
-    IdleSpeedThreshold = 10.0f;
-    
-    // Initialize state tracking
-    PreviousMovementState = EAnim_MovementState::Idle;
-    StateChangeTimer = 0.0f;
-    bWasInAir = false;
-    
-    // Initialize references
     OwnerCharacter = nullptr;
     MovementComponent = nullptr;
-    JumpMontage = nullptr;
-    LandMontage = nullptr;
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 300.0f;
+    JumpVelocityThreshold = 100.0f;
+    FallVelocityThreshold = -100.0f;
 }
 
 void UAnim_CharacterAnimBlueprint::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    
-    // Get character reference
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("Animation Blueprint initialized for character: %s"), 
-               *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Blueprint failed to get character reference"));
-    }
+    UpdateCharacterReferences();
 }
 
 void UAnim_CharacterAnimBlueprint::NativeUpdateAnimation(float DeltaTimeX)
@@ -48,143 +25,136 @@ void UAnim_CharacterAnimBlueprint::NativeUpdateAnimation(float DeltaTimeX)
     
     if (!OwnerCharacter || !MovementComponent)
     {
+        UpdateCharacterReferences();
         return;
     }
-    
-    // Update movement data
-    MovementData.Velocity = OwnerCharacter->GetVelocity();
-    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
-    MovementData.Speed = MovementData.GroundSpeed;
+
+    UpdateMovementData();
+    UpdateMovementState();
+    CalculateDirection();
+}
+
+void UAnim_CharacterAnimBlueprint::UpdateCharacterReferences()
+{
+    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+    if (OwnerCharacter)
+    {
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
+    }
+}
+
+void UAnim_CharacterAnimBlueprint::UpdateMovementData()
+{
+    if (!OwnerCharacter || !MovementComponent)
+    {
+        return;
+    }
+
+    // Update basic movement data
+    FVector Velocity = MovementComponent->Velocity;
+    MovementData.Speed = Velocity.Size2D();
     MovementData.bIsInAir = MovementComponent->IsFalling();
     MovementData.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Calculate movement direction relative to character rotation
-    if (MovementData.GroundSpeed > IdleSpeedThreshold)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal2D();
-        float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
-        MovementData.Direction = UKismetMathLibrary::DegAcos(DotProduct);
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
-        {
-            MovementData.Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        MovementData.Direction = 0.0f;
-    }
-    
-    // Update movement state
-    UpdateMovementState();
-    
-    // Track state changes for animation blending
-    if (MovementData.MovementState != PreviousMovementState)
-    {
-        StateChangeTimer = 0.0f;
-        PreviousMovementState = MovementData.MovementState;
-    }
-    else
-    {
-        StateChangeTimer += DeltaTimeX;
-    }
-    
-    // Handle landing detection
-    if (bWasInAir && !MovementData.bIsInAir)
-    {
-        PlayLandMontage();
-    }
-    bWasInAir = MovementData.bIsInAir;
+    MovementData.bIsSwimming = MovementComponent->IsSwimming();
 }
 
 void UAnim_CharacterAnimBlueprint::UpdateMovementState()
 {
-    if (MovementData.bIsInAir)
+    if (!OwnerCharacter || !MovementComponent)
     {
-        if (MovementData.Velocity.Z > 0.0f)
-        {
-            MovementData.MovementState = EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            MovementData.MovementState = EAnim_MovementState::Falling;
-        }
+        MovementData.MovementState = EAnim_MovementState::Idle;
+        return;
+    }
+
+    // Priority order: Air states -> Ground states
+    if (ShouldEnterJumpState())
+    {
+        MovementData.MovementState = EAnim_MovementState::Jumping;
+    }
+    else if (ShouldEnterFallState())
+    {
+        MovementData.MovementState = EAnim_MovementState::Falling;
+    }
+    else if (MovementData.bIsSwimming)
+    {
+        MovementData.MovementState = EAnim_MovementState::Swimming;
     }
     else if (MovementData.bIsCrouching)
     {
         MovementData.MovementState = EAnim_MovementState::Crouching;
     }
-    else if (MovementData.GroundSpeed <= IdleSpeedThreshold)
+    else if (ShouldEnterRunState())
     {
-        MovementData.MovementState = EAnim_MovementState::Idle;
+        MovementData.MovementState = EAnim_MovementState::Running;
     }
-    else if (MovementData.GroundSpeed <= WalkSpeedThreshold)
+    else if (ShouldEnterWalkState())
     {
         MovementData.MovementState = EAnim_MovementState::Walking;
     }
     else
     {
-        MovementData.MovementState = EAnim_MovementState::Running;
+        MovementData.MovementState = EAnim_MovementState::Idle;
     }
 }
 
-bool UAnim_CharacterAnimBlueprint::ShouldPlayIdleAnimation() const
+void UAnim_CharacterAnimBlueprint::CalculateDirection()
 {
-    return MovementData.MovementState == EAnim_MovementState::Idle;
-}
-
-bool UAnim_CharacterAnimBlueprint::ShouldPlayWalkAnimation() const
-{
-    return MovementData.MovementState == EAnim_MovementState::Walking;
-}
-
-bool UAnim_CharacterAnimBlueprint::ShouldPlayRunAnimation() const
-{
-    return MovementData.MovementState == EAnim_MovementState::Running;
-}
-
-bool UAnim_CharacterAnimBlueprint::ShouldPlayJumpAnimation() const
-{
-    return MovementData.MovementState == EAnim_MovementState::Jumping || 
-           MovementData.MovementState == EAnim_MovementState::Falling;
-}
-
-float UAnim_CharacterAnimBlueprint::GetMovementDirection() const
-{
-    return MovementData.Direction;
-}
-
-float UAnim_CharacterAnimBlueprint::GetMovementSpeed() const
-{
-    return MovementData.Speed;
-}
-
-void UAnim_CharacterAnimBlueprint::PlayJumpMontage()
-{
-    if (JumpMontage && OwnerCharacter)
+    if (!OwnerCharacter || !MovementComponent)
     {
-        UAnimInstance* AnimInstance = OwnerCharacter->GetMesh()->GetAnimInstance();
-        if (AnimInstance && !AnimInstance->IsAnyMontagePlaying())
-        {
-            AnimInstance->Montage_Play(JumpMontage, 1.0f);
-            UE_LOG(LogTemp, Log, TEXT("Playing jump montage"));
-        }
+        MovementData.Direction = 0.0f;
+        return;
+    }
+
+    FVector Velocity = MovementComponent->Velocity;
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+    
+    if (Velocity.Size2D() > 0.1f)
+    {
+        FVector NormalizedVelocity = Velocity.GetSafeNormal2D();
+        float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
+        float CrossProduct = FVector::CrossProduct(ForwardVector, NormalizedVelocity).Z;
+        
+        MovementData.Direction = UKismetMathLibrary::DegAtan2(CrossProduct, DotProduct);
+    }
+    else
+    {
+        MovementData.Direction = 0.0f;
     }
 }
 
-void UAnim_CharacterAnimBlueprint::PlayLandMontage()
+bool UAnim_CharacterAnimBlueprint::ShouldEnterIdleState() const
 {
-    if (LandMontage && OwnerCharacter)
+    return MovementData.Speed < WalkSpeedThreshold && !MovementData.bIsInAir;
+}
+
+bool UAnim_CharacterAnimBlueprint::ShouldEnterWalkState() const
+{
+    return MovementData.Speed >= WalkSpeedThreshold && 
+           MovementData.Speed < RunSpeedThreshold && 
+           !MovementData.bIsInAir;
+}
+
+bool UAnim_CharacterAnimBlueprint::ShouldEnterRunState() const
+{
+    return MovementData.Speed >= RunSpeedThreshold && !MovementData.bIsInAir;
+}
+
+bool UAnim_CharacterAnimBlueprint::ShouldEnterJumpState() const
+{
+    if (!MovementComponent)
     {
-        UAnimInstance* AnimInstance = OwnerCharacter->GetMesh()->GetAnimInstance();
-        if (AnimInstance)
-        {
-            AnimInstance->Montage_Play(LandMontage, 1.0f);
-            UE_LOG(LogTemp, Log, TEXT("Playing land montage"));
-        }
+        return false;
     }
+    
+    return MovementData.bIsInAir && MovementComponent->Velocity.Z > JumpVelocityThreshold;
+}
+
+bool UAnim_CharacterAnimBlueprint::ShouldEnterFallState() const
+{
+    if (!MovementComponent)
+    {
+        return false;
+    }
+    
+    return MovementData.bIsInAir && MovementComponent->Velocity.Z < FallVelocityThreshold;
 }
