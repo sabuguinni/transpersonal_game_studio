@@ -1,403 +1,486 @@
 #include "NPCBehaviorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "GameFramework/Character.h"
+#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 
-UNPCBehaviorComponent::UNPCBehaviorComponent()
+UNPC_BehaviorComponent::UNPC_BehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
 
     // Initialize default values
-    CurrentBehaviorState = ENPC_BehaviorState::Idle;
-    CurrentEmotionalState = ENPC_EmotionalState::Calm;
-    AlertnessLevel = 0.3f;
-    EnergyLevel = 1.0f;
-    SocialNeed = 0.5f;
-
-    // Memory system defaults
-    MaxShortTermMemories = 10;
-    MaxLongTermMemories = 50;
-    LastMemoryConsolidationTime = 0.0f;
-
-    // Social system defaults
-    SocialInteractionRadius = 500.0f;
-    LastSocialUpdate = 0.0f;
-
-    // Patrol system defaults
-    CurrentPatrolIndex = 0;
-    PatrolSpeed = 200.0f;
-    PatrolWaitTime = 3.0f;
-    PatrolTimer = 0.0f;
-
-    // AI components
-    BehaviorTreeComponent = nullptr;
-    BlackboardComponent = nullptr;
+    NPCName = TEXT("Unnamed");
+    NPCRole = ENPC_Role::Gatherer;
+    Age = 25;
+    Experience = 50.0f;
+    
+    MaxMemories = 20;
+    MemoryDecayRate = 1.0f;
+    EmotionDecayRate = 0.5f;
+    
+    CurrentActivity = ENPC_Activity::Idle;
+    ActivityTimer = 0.0f;
+    HomeLocation = FVector::ZeroVector;
+    PatrolRadius = 1000.0f;
+    
+    SocialInteractionRange = 300.0f;
+    DangerThreshold = 70.0f;
+    FleeDistance = 2000.0f;
+    
+    LastEmotionUpdate = 0.0f;
+    LastMemoryCleanup = 0.0f;
+    
+    CurrentTarget = nullptr;
 }
 
-void UNPCBehaviorComponent::BeginPlay()
+void UNPC_BehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Initialize AI components
-    InitializeBehaviorTree();
-
-    // Set initial patrol points if none provided
-    if (PatrolPoints.Num() == 0)
+    
+    // Set home location to current position
+    if (AActor* Owner = GetOwner())
     {
-        FVector OwnerLocation = GetOwner()->GetActorLocation();
-        PatrolPoints.Add(OwnerLocation + FVector(500, 0, 0));
-        PatrolPoints.Add(OwnerLocation + FVector(0, 500, 0));
-        PatrolPoints.Add(OwnerLocation + FVector(-500, 0, 0));
-        PatrolPoints.Add(OwnerLocation + FVector(0, -500, 0));
+        HomeLocation = Owner->GetActorLocation();
     }
-
-    // Add initial memory of spawn location
-    AddMemory(GetOwner()->GetActorLocation(), ENPC_EmotionalState::Calm, TEXT("Spawn location"));
+    
+    // Initialize emotional state based on role
+    switch (NPCRole)
+    {
+        case ENPC_Role::Guard:
+            CurrentEmotions.Alertness = 80.0f;
+            CurrentEmotions.Fear = 30.0f;
+            break;
+        case ENPC_Role::Hunter:
+            CurrentEmotions.Alertness = 70.0f;
+            CurrentEmotions.Anger = 40.0f;
+            break;
+        case ENPC_Role::Elder:
+            CurrentEmotions.Fear = 40.0f;
+            CurrentEmotions.Curiosity = 60.0f;
+            break;
+        case ENPC_Role::Child:
+            CurrentEmotions.Curiosity = 80.0f;
+            CurrentEmotions.Fear = 60.0f;
+            break;
+        default:
+            // Keep default values
+            break;
+    }
 }
 
-void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPC_BehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update core systems
-    UpdateEnergyAndNeeds(DeltaTime);
-    ProcessSocialInteractions(DeltaTime);
-    UpdatePatrolBehavior(DeltaTime);
-    HandleEmotionalDecay(DeltaTime);
-
-    // Periodic memory consolidation
-    if (GetWorld()->GetTimeSeconds() - LastMemoryConsolidationTime > 30.0f)
+    
+    ActivityTimer += DeltaTime;
+    
+    // Update emotional state
+    UpdateEmotionalState(DeltaTime);
+    
+    // Clean up old memories periodically
+    if (GetWorld()->GetTimeSeconds() - LastMemoryCleanup > 30.0f)
     {
-        ConsolidateMemories();
-        LastMemoryConsolidationTime = GetWorld()->GetTimeSeconds();
+        ForgetOldMemories();
+        LastMemoryCleanup = GetWorld()->GetTimeSeconds();
     }
-
-    // Update AI blackboard
+    
+    // Check for threats and update behavior
+    if (ShouldFlee())
+    {
+        if (CurrentActivity != ENPC_Activity::Fleeing)
+        {
+            SetActivity(ENPC_Activity::Fleeing);
+            ModifyEmotion(TEXT("Fear"), 20.0f);
+        }
+    }
+    
+    // Update AI blackboard values
     UpdateBlackboardValues();
 }
 
-void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
+void UNPC_BehaviorComponent::RememberActor(AActor* Actor, float RelationshipValue, bool bIsHostile)
 {
-    if (CurrentBehaviorState != NewState)
+    if (!Actor) return;
+    
+    // Check if we already have a memory of this actor
+    FNPC_Memory* ExistingMemory = FindMemory(Actor);
+    
+    if (ExistingMemory)
     {
-        ENPC_BehaviorState OldState = CurrentBehaviorState;
-        CurrentBehaviorState = NewState;
-
-        // Add memory of state change
-        FString StateChangeDesc = FString::Printf(TEXT("Changed from %d to %d"), (int32)OldState, (int32)NewState);
-        AddMemory(GetOwner()->GetActorLocation(), CurrentEmotionalState, StateChangeDesc);
-
-        // Update blackboard
-        UpdateBlackboardValues();
+        // Update existing memory
+        ExistingMemory->Relationship = FMath::Clamp(RelationshipValue, -100.0f, 100.0f);
+        ExistingMemory->LastSeenLocation = Actor->GetActorLocation();
+        ExistingMemory->LastSeenTime = GetWorld()->GetTimeSeconds();
+        ExistingMemory->bIsHostile = bIsHostile;
     }
-}
-
-void UNPCBehaviorComponent::SetEmotionalState(ENPC_EmotionalState NewState)
-{
-    if (CurrentEmotionalState != NewState)
+    else
     {
-        CurrentEmotionalState = NewState;
+        // Create new memory
+        FNPC_Memory NewMemory;
+        NewMemory.RememberedActor = Actor;
+        NewMemory.Relationship = FMath::Clamp(RelationshipValue, -100.0f, 100.0f);
+        NewMemory.LastSeenLocation = Actor->GetActorLocation();
+        NewMemory.LastSeenTime = GetWorld()->GetTimeSeconds();
+        NewMemory.bIsHostile = bIsHostile;
         
-        // Emotional states affect alertness
-        switch (NewState)
-        {
-            case ENPC_EmotionalState::Afraid:
-                AlertnessLevel = FMath::Clamp(AlertnessLevel + 0.3f, 0.0f, 1.0f);
-                break;
-            case ENPC_EmotionalState::Angry:
-                AlertnessLevel = FMath::Clamp(AlertnessLevel + 0.2f, 0.0f, 1.0f);
-                break;
-            case ENPC_EmotionalState::Happy:
-                AlertnessLevel = FMath::Clamp(AlertnessLevel - 0.1f, 0.0f, 1.0f);
-                break;
-            case ENPC_EmotionalState::Tired:
-                EnergyLevel = FMath::Clamp(EnergyLevel - 0.2f, 0.0f, 1.0f);
-                break;
-        }
-    }
-}
-
-void UNPCBehaviorComponent::UpdateAlertnessLevel(float DeltaAlertness)
-{
-    AlertnessLevel = FMath::Clamp(AlertnessLevel + DeltaAlertness, 0.0f, 1.0f);
-    
-    // High alertness triggers alert behavior
-    if (AlertnessLevel > 0.8f && CurrentBehaviorState != ENPC_BehaviorState::Alert)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Alert);
-        SetEmotionalState(ENPC_EmotionalState::Afraid);
-    }
-}
-
-void UNPCBehaviorComponent::AddMemory(FVector Location, ENPC_EmotionalState Emotion, const FString& Description)
-{
-    FNPC_Memory NewMemory;
-    NewMemory.Location = Location;
-    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
-    NewMemory.EmotionalContext = Emotion;
-    NewMemory.EventDescription = Description;
-
-    ShortTermMemory.Add(NewMemory);
-
-    // Limit short-term memory size
-    if (ShortTermMemory.Num() > MaxShortTermMemories)
-    {
-        ShortTermMemory.RemoveAt(0);
-    }
-}
-
-void UNPCBehaviorComponent::ConsolidateMemories()
-{
-    // Move important short-term memories to long-term
-    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
-    {
-        const FNPC_Memory& Memory = ShortTermMemory[i];
+        Memories.Add(NewMemory);
         
-        // Consolidate memories with high emotional impact
-        if (Memory.EmotionalContext == ENPC_EmotionalState::Afraid || 
-            Memory.EmotionalContext == ENPC_EmotionalState::Angry ||
-            Memory.EmotionalContext == ENPC_EmotionalState::Happy)
+        // Remove oldest memory if we exceed max
+        if (Memories.Num() > MaxMemories)
         {
-            LongTermMemory.Add(Memory);
-            ShortTermMemory.RemoveAt(i);
+            Memories.RemoveAt(0);
         }
-    }
-
-    // Limit long-term memory size
-    if (LongTermMemory.Num() > MaxLongTermMemories)
-    {
-        LongTermMemory.RemoveAt(0);
     }
 }
 
-TArray<FNPC_Memory> UNPCBehaviorComponent::GetMemoriesAtLocation(FVector Location, float Radius)
+FNPC_Memory* UNPC_BehaviorComponent::FindMemory(AActor* Actor)
 {
-    TArray<FNPC_Memory> NearbyMemories;
+    if (!Actor) return nullptr;
     
-    // Check both short-term and long-term memories
-    for (const FNPC_Memory& Memory : ShortTermMemory)
+    for (FNPC_Memory& Memory : Memories)
     {
-        if (FVector::Dist(Memory.Location, Location) <= Radius)
+        if (Memory.RememberedActor == Actor)
         {
-            NearbyMemories.Add(Memory);
+            return &Memory;
         }
     }
     
-    for (const FNPC_Memory& Memory : LongTermMemory)
-    {
-        if (FVector::Dist(Memory.Location, Location) <= Radius)
-        {
-            NearbyMemories.Add(Memory);
-        }
-    }
-    
-    return NearbyMemories;
+    return nullptr;
 }
 
-void UNPCBehaviorComponent::UpdateSocialRelationship(APawn* TargetPawn, float TrustDelta, float FearDelta)
+void UNPC_BehaviorComponent::UpdateMemory(AActor* Actor, float RelationshipChange)
 {
-    if (!TargetPawn) return;
-
-    // Find existing relationship
-    FNPC_SocialRelationship* ExistingRelationship = nullptr;
-    for (FNPC_SocialRelationship& Relationship : SocialRelationships)
+    FNPC_Memory* Memory = FindMemory(Actor);
+    if (Memory)
     {
-        if (Relationship.TargetPawn == TargetPawn)
+        Memory->Relationship = FMath::Clamp(Memory->Relationship + RelationshipChange, -100.0f, 100.0f);
+        Memory->LastSeenTime = GetWorld()->GetTimeSeconds();
+        
+        // Update emotional response based on relationship change
+        if (RelationshipChange > 0)
         {
-            ExistingRelationship = &Relationship;
-            break;
+            ModifyEmotion(TEXT("SocialNeed"), -5.0f); // Satisfied by positive interaction
+        }
+        else if (RelationshipChange < 0)
+        {
+            ModifyEmotion(TEXT("Anger"), 10.0f);
+            ModifyEmotion(TEXT("Fear"), 5.0f);
         }
     }
-
-    // Create new relationship if none exists
-    if (!ExistingRelationship)
-    {
-        FNPC_SocialRelationship NewRelationship;
-        NewRelationship.TargetPawn = TargetPawn;
-        NewRelationship.TrustLevel = 0.5f;
-        NewRelationship.FearLevel = 0.0f;
-        NewRelationship.LastInteractionTime = GetWorld()->GetTimeSeconds();
-        SocialRelationships.Add(NewRelationship);
-        ExistingRelationship = &SocialRelationships.Last();
-    }
-
-    // Update relationship values
-    ExistingRelationship->TrustLevel = FMath::Clamp(ExistingRelationship->TrustLevel + TrustDelta, 0.0f, 1.0f);
-    ExistingRelationship->FearLevel = FMath::Clamp(ExistingRelationship->FearLevel + FearDelta, 0.0f, 1.0f);
-    ExistingRelationship->LastInteractionTime = GetWorld()->GetTimeSeconds();
-
-    // Add memory of social interaction
-    FString InteractionDesc = FString::Printf(TEXT("Interacted with %s"), *TargetPawn->GetName());
-    AddMemory(TargetPawn->GetActorLocation(), CurrentEmotionalState, InteractionDesc);
 }
 
-FNPC_SocialRelationship UNPCBehaviorComponent::GetSocialRelationship(APawn* TargetPawn)
+void UNPC_BehaviorComponent::ForgetOldMemories()
 {
-    for (const FNPC_SocialRelationship& Relationship : SocialRelationships)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float MemoryLifetime = 300.0f; // 5 minutes
+    
+    for (int32 i = Memories.Num() - 1; i >= 0; i--)
     {
-        if (Relationship.TargetPawn == TargetPawn)
+        if (CurrentTime - Memories[i].LastSeenTime > MemoryLifetime)
         {
-            return Relationship;
+            Memories.RemoveAt(i);
+        }
+    }
+}
+
+void UNPC_BehaviorComponent::ModifyEmotion(const FString& EmotionName, float Change)
+{
+    if (EmotionName == TEXT("Fear"))
+    {
+        CurrentEmotions.Fear = FMath::Clamp(CurrentEmotions.Fear + Change, 0.0f, 100.0f);
+    }
+    else if (EmotionName == TEXT("Anger"))
+    {
+        CurrentEmotions.Anger = FMath::Clamp(CurrentEmotions.Anger + Change, 0.0f, 100.0f);
+    }
+    else if (EmotionName == TEXT("Curiosity"))
+    {
+        CurrentEmotions.Curiosity = FMath::Clamp(CurrentEmotions.Curiosity + Change, 0.0f, 100.0f);
+    }
+    else if (EmotionName == TEXT("Alertness"))
+    {
+        CurrentEmotions.Alertness = FMath::Clamp(CurrentEmotions.Alertness + Change, 0.0f, 100.0f);
+    }
+    else if (EmotionName == TEXT("SocialNeed"))
+    {
+        CurrentEmotions.SocialNeed = FMath::Clamp(CurrentEmotions.SocialNeed + Change, 0.0f, 100.0f);
+    }
+}
+
+void UNPC_BehaviorComponent::UpdateEmotionalState(float DeltaTime)
+{
+    // Decay emotions over time toward baseline
+    DecayEmotions(DeltaTime);
+    
+    // Emotional reactions based on current situation
+    AActor* NearestThreat = FindNearestThreat();
+    if (NearestThreat)
+    {
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), NearestThreat->GetActorLocation());
+        if (Distance < 1500.0f)
+        {
+            ModifyEmotion(TEXT("Fear"), 2.0f * DeltaTime);
+            ModifyEmotion(TEXT("Alertness"), 3.0f * DeltaTime);
         }
     }
     
-    // Return default relationship
-    FNPC_SocialRelationship DefaultRelationship;
-    DefaultRelationship.TargetPawn = TargetPawn;
-    return DefaultRelationship;
+    // Social needs increase over time
+    if (CurrentEmotions.SocialNeed < 80.0f)
+    {
+        ModifyEmotion(TEXT("SocialNeed"), 0.5f * DeltaTime);
+    }
 }
 
-TArray<APawn*> UNPCBehaviorComponent::GetNearbyNPCs()
+void UNPC_BehaviorComponent::SetActivity(ENPC_Activity NewActivity)
 {
-    TArray<APawn*> NearbyNPCs;
-    TArray<AActor*> FoundActors;
+    if (CurrentActivity != NewActivity)
+    {
+        CurrentActivity = NewActivity;
+        ActivityTimer = 0.0f;
+        
+        // Emotional responses to activity changes
+        switch (NewActivity)
+        {
+            case ENPC_Activity::Fleeing:
+                ModifyEmotion(TEXT("Fear"), 15.0f);
+                ModifyEmotion(TEXT("Alertness"), 20.0f);
+                break;
+            case ENPC_Activity::Socializing:
+                ModifyEmotion(TEXT("SocialNeed"), -10.0f);
+                break;
+            case ENPC_Activity::Resting:
+                ModifyEmotion(TEXT("Fear"), -5.0f);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+bool UNPC_BehaviorComponent::ShouldFlee()
+{
+    AActor* NearestThreat = FindNearestThreat();
+    if (!NearestThreat) return false;
     
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), NearestThreat->GetActorLocation());
+    float FleeThreshold = FleeDistance * (CurrentEmotions.Fear / 100.0f);
+    
+    return Distance < FleeThreshold;
+}
+
+AActor* UNPC_BehaviorComponent::FindNearestThreat()
+{
+    if (!GetOwner()) return nullptr;
+    
+    AActor* NearestThreat = nullptr;
+    float NearestDistance = FLT_MAX;
     
     FVector MyLocation = GetOwner()->GetActorLocation();
+    
+    // Check for dinosaurs and other threats
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
+    
     for (AActor* Actor : FoundActors)
     {
-        APawn* Pawn = Cast<APawn>(Actor);
-        if (Pawn && Pawn != GetOwner() && FVector::Dist(Pawn->GetActorLocation(), MyLocation) <= SocialInteractionRadius)
+        if (IsActorThreat(Actor))
         {
-            NearbyNPCs.Add(Pawn);
+            float Distance = FVector::Dist(MyLocation, Actor->GetActorLocation());
+            if (Distance < NearestDistance)
+            {
+                NearestDistance = Distance;
+                NearestThreat = Actor;
+            }
         }
     }
     
-    return NearbyNPCs;
+    return NearestThreat;
 }
 
-void UNPCBehaviorComponent::SetPatrolPoints(const TArray<FVector>& NewPatrolPoints)
+AActor* UNPC_BehaviorComponent::FindNearestTribeMate()
 {
-    PatrolPoints = NewPatrolPoints;
-    CurrentPatrolIndex = 0;
-}
-
-FVector UNPCBehaviorComponent::GetNextPatrolPoint()
-{
-    if (PatrolPoints.Num() == 0)
+    if (!GetOwner()) return nullptr;
+    
+    AActor* NearestMate = nullptr;
+    float NearestDistance = FLT_MAX;
+    
+    FVector MyLocation = GetOwner()->GetActorLocation();
+    
+    for (AActor* TribeMate : TribeMates)
     {
-        return GetOwner()->GetActorLocation();
-    }
-    
-    return PatrolPoints[CurrentPatrolIndex];
-}
-
-void UNPCBehaviorComponent::AdvancePatrolPoint()
-{
-    if (PatrolPoints.Num() > 0)
-    {
-        CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-    }
-}
-
-void UNPCBehaviorComponent::UpdateBlackboardValues()
-{
-    if (!BlackboardComponent) return;
-
-    // Update behavior state
-    BlackboardComponent->SetValueAsEnum(TEXT("NPCState"), (uint8)CurrentBehaviorState);
-    
-    // Update patrol location
-    BlackboardComponent->SetValueAsVector(TEXT("PatrolLocation"), GetNextPatrolPoint());
-    
-    // Update alertness
-    BlackboardComponent->SetValueAsFloat(TEXT("AlertnessLevel"), AlertnessLevel);
-    
-    // Update energy
-    BlackboardComponent->SetValueAsFloat(TEXT("EnergyLevel"), EnergyLevel);
-}
-
-void UNPCBehaviorComponent::InitializeBehaviorTree()
-{
-    APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (!OwnerPawn) return;
-
-    // Get AI controller
-    if (AController* AIController = OwnerPawn->GetController())
-    {
-        BehaviorTreeComponent = AIController->FindComponentByClass<UBehaviorTreeComponent>();
-        BlackboardComponent = AIController->FindComponentByClass<UBlackboardComponent>();
-    }
-}
-
-void UNPCBehaviorComponent::UpdateEnergyAndNeeds(float DeltaTime)
-{
-    // Energy decreases over time
-    EnergyLevel = FMath::Clamp(EnergyLevel - (DeltaTime * 0.01f), 0.0f, 1.0f);
-    
-    // Social need increases over time
-    SocialNeed = FMath::Clamp(SocialNeed + (DeltaTime * 0.005f), 0.0f, 1.0f);
-    
-    // Low energy triggers tired state
-    if (EnergyLevel < 0.3f && CurrentEmotionalState != ENPC_EmotionalState::Tired)
-    {
-        SetEmotionalState(ENPC_EmotionalState::Tired);
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-    }
-    
-    // High social need triggers socializing behavior
-    if (SocialNeed > 0.8f && GetNearbyNPCs().Num() > 0)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Socializing);
-        SocialNeed = FMath::Clamp(SocialNeed - 0.1f, 0.0f, 1.0f);
-    }
-}
-
-void UNPCBehaviorComponent::ProcessSocialInteractions(float DeltaTime)
-{
-    if (GetWorld()->GetTimeSeconds() - LastSocialUpdate < 1.0f) return;
-    
-    TArray<APawn*> NearbyNPCs = GetNearbyNPCs();
-    for (APawn* NPC : NearbyNPCs)
-    {
-        // Positive interaction by default
-        UpdateSocialRelationship(NPC, 0.01f, 0.0f);
-    }
-    
-    LastSocialUpdate = GetWorld()->GetTimeSeconds();
-}
-
-void UNPCBehaviorComponent::UpdatePatrolBehavior(float DeltaTime)
-{
-    if (CurrentBehaviorState != ENPC_BehaviorState::Patrolling) return;
-    
-    PatrolTimer += DeltaTime;
-    
-    FVector CurrentLocation = GetOwner()->GetActorLocation();
-    FVector TargetLocation = GetNextPatrolPoint();
-    
-    // Check if reached patrol point
-    if (FVector::Dist(CurrentLocation, TargetLocation) < 100.0f)
-    {
-        if (PatrolTimer >= PatrolWaitTime)
+        if (TribeMate && TribeMate != GetOwner())
         {
-            AdvancePatrolPoint();
-            PatrolTimer = 0.0f;
+            float Distance = FVector::Dist(MyLocation, TribeMate->GetActorLocation());
+            if (Distance < NearestDistance)
+            {
+                NearestDistance = Distance;
+                NearestMate = TribeMate;
+            }
         }
     }
+    
+    return NearestMate;
 }
 
-void UNPCBehaviorComponent::HandleEmotionalDecay(float DeltaTime)
+void UNPC_BehaviorComponent::InitiateSocialInteraction(AActor* Target)
 {
-    // Gradually return to calm state
-    if (CurrentEmotionalState != ENPC_EmotionalState::Calm)
+    if (!Target || !IsInSocialRange(Target)) return;
+    
+    CurrentTarget = Target;
+    SetActivity(ENPC_Activity::Socializing);
+    
+    // Improve relationship through interaction
+    UpdateMemory(Target, 5.0f);
+    
+    // Reduce social need
+    ModifyEmotion(TEXT("SocialNeed"), -15.0f);
+}
+
+bool UNPC_BehaviorComponent::IsInSocialRange(AActor* Target)
+{
+    if (!Target || !GetOwner()) return false;
+    
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
+    return Distance <= SocialInteractionRange;
+}
+
+void UNPC_BehaviorComponent::UpdateBlackboardValues()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+    
+    ACharacter* Character = Cast<ACharacter>(Owner);
+    if (!Character) return;
+    
+    AAIController* AIController = Cast<AAIController>(Character->GetController());
+    if (!AIController) return;
+    
+    UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent();
+    if (!BlackboardComp) return;
+    
+    // Update blackboard with current state
+    BlackboardComp->SetValueAsFloat(TEXT("Fear"), CurrentEmotions.Fear);
+    BlackboardComp->SetValueAsFloat(TEXT("Alertness"), CurrentEmotions.Alertness);
+    BlackboardComp->SetValueAsFloat(TEXT("SocialNeed"), CurrentEmotions.SocialNeed);
+    
+    BlackboardComp->SetValueAsVector(TEXT("HomeLocation"), HomeLocation);
+    BlackboardComp->SetValueAsFloat(TEXT("PatrolRadius"), PatrolRadius);
+    
+    if (CurrentTarget)
     {
-        static float EmotionalDecayTimer = 0.0f;
-        EmotionalDecayTimer += DeltaTime;
+        BlackboardComp->SetValueAsObject(TEXT("CurrentTarget"), CurrentTarget);
+    }
+    
+    AActor* NearestThreat = FindNearestThreat();
+    if (NearestThreat)
+    {
+        BlackboardComp->SetValueAsObject(TEXT("NearestThreat"), NearestThreat);
+        BlackboardComp->SetValueAsVector(TEXT("ThreatLocation"), NearestThreat->GetActorLocation());
+    }
+    
+    AActor* NearestMate = FindNearestTribeMate();
+    if (NearestMate)
+    {
+        BlackboardComp->SetValueAsObject(TEXT("NearestTribeMate"), NearestMate);
+    }
+}
+
+void UNPC_BehaviorComponent::ReactToPerception(AActor* PerceivedActor, bool bCanSee)
+{
+    if (!PerceivedActor) return;
+    
+    if (bCanSee)
+    {
+        // Update memory of seen actor
+        float RelationshipValue = 0.0f;
+        bool bIsHostile = IsActorThreat(PerceivedActor);
         
-        if (EmotionalDecayTimer >= 10.0f) // 10 seconds to decay
+        if (bIsHostile)
         {
-            SetEmotionalState(ENPC_EmotionalState::Calm);
-            EmotionalDecayTimer = 0.0f;
+            RelationshipValue = -20.0f;
+            ModifyEmotion(TEXT("Fear"), 10.0f);
+            ModifyEmotion(TEXT("Alertness"), 15.0f);
+        }
+        else if (TribeMates.Contains(PerceivedActor))
+        {
+            RelationshipValue = 10.0f;
+            ModifyEmotion(TEXT("SocialNeed"), -5.0f);
+        }
+        
+        RememberActor(PerceivedActor, RelationshipValue, bIsHostile);
+    }
+}
+
+void UNPC_BehaviorComponent::DecayEmotions(float DeltaTime)
+{
+    float DecayAmount = EmotionDecayRate * DeltaTime;
+    
+    // Decay toward baseline values
+    float FearBaseline = (NPCRole == ENPC_Role::Child) ? 40.0f : 20.0f;
+    float AlertnessBaseline = (NPCRole == ENPC_Role::Guard) ? 60.0f : 40.0f;
+    
+    CurrentEmotions.Fear = FMath::FInterpTo(CurrentEmotions.Fear, FearBaseline, DeltaTime, DecayAmount);
+    CurrentEmotions.Anger = FMath::FInterpTo(CurrentEmotions.Anger, 10.0f, DeltaTime, DecayAmount);
+    CurrentEmotions.Curiosity = FMath::FInterpTo(CurrentEmotions.Curiosity, 30.0f, DeltaTime, DecayAmount);
+    CurrentEmotions.Alertness = FMath::FInterpTo(CurrentEmotions.Alertness, AlertnessBaseline, DeltaTime, DecayAmount);
+}
+
+void UNPC_BehaviorComponent::CleanupMemories()
+{
+    // Remove memories of destroyed actors
+    for (int32 i = Memories.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(Memories[i].RememberedActor))
+        {
+            Memories.RemoveAt(i);
+        }
+    }
+}
+
+bool UNPC_BehaviorComponent::IsActorThreat(AActor* Actor)
+{
+    if (!Actor) return false;
+    
+    // Check if actor is in threat classes
+    for (TSubclassOf<AActor> ThreatClass : ThreatClasses)
+    {
+        if (Actor->IsA(ThreatClass))
+        {
+            return true;
         }
     }
     
-    // Gradually reduce alertness
-    if (AlertnessLevel > 0.3f)
+    // Check for dinosaur actors by name
+    FString ActorName = Actor->GetName().ToLower();
+    if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("raptor")) || 
+        ActorName.Contains(TEXT("carno")) || ActorName.Contains(TEXT("dilo")))
     {
-        AlertnessLevel = FMath::Clamp(AlertnessLevel - (DeltaTime * 0.05f), 0.3f, 1.0f);
+        return true;
     }
+    
+    return false;
+}
+
+float UNPC_BehaviorComponent::CalculateRelationshipChange(AActor* Actor)
+{
+    if (!Actor) return 0.0f;
+    
+    // Positive interactions with tribe mates
+    if (TribeMates.Contains(Actor))
+    {
+        return FMath::RandRange(1.0f, 5.0f);
+    }
+    
+    // Negative interactions with threats
+    if (IsActorThreat(Actor))
+    {
+        return FMath::RandRange(-10.0f, -5.0f);
+    }
+    
+    // Neutral for unknown actors
+    return FMath::RandRange(-1.0f, 1.0f);
 }
