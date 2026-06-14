@@ -1,50 +1,77 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Build_SystemIntegrator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
-    Uninitialized   UMETA(DisplayName = "Uninitialized"),
-    Initializing    UMETA(DisplayName = "Initializing"),
-    Ready           UMETA(DisplayName = "Ready"),
-    Error           UMETA(DisplayName = "Error")
+    Healthy,
+    Moderate,
+    NeedsWork,
+    Critical
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemInfo
+struct TRANSPERSONALGAME_API FBuild_SystemMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActors = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    EBuild_SystemStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 CriticalSystemsLoaded = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    FString Version;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActiveSystems = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    float InitializationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float QualityScore = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "System")
-    TArray<FString> Dependencies;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::NeedsWork;
 
-    FBuild_SystemInfo()
-    {
-        SystemName = TEXT("");
-        Status = EBuild_SystemStatus::Uninitialized;
-        Version = TEXT("1.0.0");
-        InitializationTime = 0.0f;
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bLevelPlayable = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 HighImpactActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 MediumImpactActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 LowImpactActors = 0;
 };
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBuild_SystemIntegrator : public UGameInstanceSubsystem
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_CrossSystemTest
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIntegrationHealthy = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> Dependencies;
+};
+
+/**
+ * System Integrator - Manages cross-system integration and build validation
+ * Ensures all game systems work together cohesively
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuild_SystemIntegrator : public UWorldSubsystem
 {
     GENERATED_BODY()
 
@@ -55,57 +82,58 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System registration and management
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool RegisterSystem(const FString& SystemName, const FString& Version, const TArray<FString>& Dependencies);
+    FBuild_SystemMetrics ValidateSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool UnregisterSystem(const FString& SystemName);
+    TArray<FBuild_CrossSystemTest> RunCrossSystemTests();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    EBuild_SystemStatus GetSystemStatus(const FString& SystemName) const;
+    bool ValidateCriticalSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_SystemInfo> GetAllSystemInfo() const;
+    void EnforceActorCaps();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool InitializeAllSystems();
+    float CalculatePerformanceScore();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ShutdownAllSystems();
+    bool IsLevelPlayable();
 
-    // Cross-system communication
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool SendSystemMessage(const FString& FromSystem, const FString& ToSystem, const FString& Message);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetSystemMessages(const FString& SystemName);
-
-    // Integration validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateSystemIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
+    void RunFullIntegrationValidation();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FString GetIntegrationReport() const;
+    void GenerateIntegrationReport();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    TMap<FString, FBuild_SystemInfo> RegisteredSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_SystemMetrics CurrentMetrics;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIntegrationValid;
+    TArray<FBuild_CrossSystemTest> LastTestResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastIntegrationReport;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxActorCount = 8000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxDinosaurCount = 150;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float QualityThreshold = 0.8f;
 
 private:
-    bool InitializeSystem(const FString& SystemName);
-    bool CheckSystemDependencies(const FString& SystemName) const;
-    void UpdateSystemStatus(const FString& SystemName, EBuild_SystemStatus NewStatus);
-    
-    // Message system
-    TMap<FString, TArray<FString>> SystemMessages;
-    
-    // Integration timing
-    float TotalInitializationTime;
+    void ValidateWorldGeneration();
+    void ValidateEnvironmentSystems();
+    void ValidateCharacterSystems();
+    void ValidateAISystems();
+    void ValidateAudioVFXSystems();
+    void ValidateQuestNarrativeSystems();
+
+    bool CheckSystemDependencies(const FString& SystemName);
+    void CleanupRedundantActors();
+    void OptimizePerformance();
+
+    TArray<FString> CriticalSystemClasses;
+    TMap<FString, TArray<FString>> SystemDependencies;
 };
