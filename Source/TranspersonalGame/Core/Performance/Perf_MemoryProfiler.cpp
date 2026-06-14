@@ -1,21 +1,32 @@
 #include "Perf_MemoryProfiler.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "HAL/PlatformMemory.h"
 #include "Stats/Stats.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
-#include "Components/StaticMeshComponent.h"
-#include "GameFramework/Actor.h"
-#include "UObject/UObjectGlobals.h"
-#include "Engine/GarbageCollection.h"
+#include "Engine/Texture.h"
+#include "TimerManager.h"
 
 UPerf_MemoryProfiler::UPerf_MemoryProfiler()
 {
     bIsProfilingActive = false;
-    MemoryWarningThresholdMB = 6144.0f; // 6GB warning
-    MemoryCriticalThresholdMB = 7168.0f; // 7GB critical
-    MemoryHistory.Reserve(1000);
+    MemoryWarningThresholdMB = 4096.0f; // 4GB default threshold
+}
+
+void UPerf_MemoryProfiler::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Log, TEXT("Memory Profiler initialized"));
+    
+    // Start automatic profiling every 5 seconds
+    StartMemoryProfiling();
+}
+
+void UPerf_MemoryProfiler::Deinitialize()
+{
+    StopMemoryProfiling();
+    Super::Deinitialize();
 }
 
 FPerf_MemoryStats UPerf_MemoryProfiler::GetCurrentMemoryStats()
@@ -27,16 +38,14 @@ FPerf_MemoryStats UPerf_MemoryProfiler::GetCurrentMemoryStats()
     
     Stats.UsedPhysicalMemoryMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
     Stats.UsedVirtualMemoryMB = MemStats.UsedVirtual / (1024.0f * 1024.0f);
-    Stats.PeakUsedPhysicalMemoryMB = MemStats.PeakUsedPhysical / (1024.0f * 1024.0f);
-    Stats.AvailablePhysicalMemoryMB = MemStats.AvailablePhysical / (1024.0f * 1024.0f);
+    Stats.PeakPhysicalMemoryMB = MemStats.PeakUsedPhysical / (1024.0f * 1024.0f);
     
-    // Get game-specific stats
-    Stats.ActiveActorCount = CountActiveActors();
-    Stats.ActiveComponentCount = CountActiveComponents();
+    // Count loaded objects
+    Stats.NumLoadedObjects = GUObjectArray.GetObjectArrayNum();
+    Stats.NumStaticMeshes = CountObjectsByClass(UStaticMesh::StaticClass());
+    Stats.NumTextures = CountObjectsByClass(UTexture::StaticClass());
     Stats.TextureMemoryMB = GetTextureMemoryUsage();
-    Stats.MeshMemoryMB = GetMeshMemoryUsage();
     
-    LastRecordedStats = Stats;
     return Stats;
 }
 
@@ -45,20 +54,19 @@ void UPerf_MemoryProfiler::StartMemoryProfiling()
     if (!bIsProfilingActive)
     {
         bIsProfilingActive = true;
-        MemoryHistory.Empty();
-        UE_LOG(LogTemp, Warning, TEXT("Memory profiling started"));
         
-        // Start periodic memory updates
         if (UWorld* World = GetWorld())
         {
             World->GetTimerManager().SetTimer(
-                FTimerHandle(),
+                ProfilingTimerHandle,
                 this,
                 &UPerf_MemoryProfiler::UpdateMemoryStats,
-                1.0f, // Every second
+                5.0f, // Every 5 seconds
                 true
             );
         }
+        
+        UE_LOG(LogTemp, Log, TEXT("Memory profiling started"));
     }
 }
 
@@ -67,244 +75,90 @@ void UPerf_MemoryProfiler::StopMemoryProfiling()
     if (bIsProfilingActive)
     {
         bIsProfilingActive = false;
-        UE_LOG(LogTemp, Warning, TEXT("Memory profiling stopped. Recorded %d samples"), MemoryHistory.Num());
         
         if (UWorld* World = GetWorld())
         {
-            World->GetTimerManager().ClearAllTimersForObject(this);
+            World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
         }
+        
+        UE_LOG(LogTemp, Log, TEXT("Memory profiling stopped"));
     }
 }
 
-EPerf_MemoryWarningLevel UPerf_MemoryProfiler::GetMemoryWarningLevel()
+void UPerf_MemoryProfiler::LogMemoryReport()
 {
     FPerf_MemoryStats CurrentStats = GetCurrentMemoryStats();
     
-    if (CurrentStats.UsedPhysicalMemoryMB >= MemoryCriticalThresholdMB)
-    {
-        return EPerf_MemoryWarningLevel::Critical;
-    }
-    else if (CurrentStats.UsedPhysicalMemoryMB >= MemoryWarningThresholdMB)
-    {
-        return EPerf_MemoryWarningLevel::High;
-    }
-    else if (CurrentStats.UsedPhysicalMemoryMB >= MemoryWarningThresholdMB * 0.8f)
-    {
-        return EPerf_MemoryWarningLevel::Medium;
-    }
-    else if (CurrentStats.UsedPhysicalMemoryMB >= MemoryWarningThresholdMB * 0.6f)
-    {
-        return EPerf_MemoryWarningLevel::Low;
-    }
-    
-    return EPerf_MemoryWarningLevel::None;
+    UE_LOG(LogTemp, Warning, TEXT("=== MEMORY REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Physical Memory: %.2f MB"), CurrentStats.UsedPhysicalMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Virtual Memory: %.2f MB"), CurrentStats.UsedVirtualMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Peak Physical: %.2f MB"), CurrentStats.PeakPhysicalMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("Loaded Objects: %d"), CurrentStats.NumLoadedObjects);
+    UE_LOG(LogTemp, Warning, TEXT("Static Meshes: %d"), CurrentStats.NumStaticMeshes);
+    UE_LOG(LogTemp, Warning, TEXT("Textures: %d"), CurrentStats.NumTextures);
+    UE_LOG(LogTemp, Warning, TEXT("Texture Memory: %.2f MB"), CurrentStats.TextureMemoryMB);
+    UE_LOG(LogTemp, Warning, TEXT("====================="));
 }
 
 void UPerf_MemoryProfiler::ForceGarbageCollection()
 {
     UE_LOG(LogTemp, Warning, TEXT("Forcing garbage collection..."));
     
-    // Force full GC
-    GEngine->ForceGarbageCollection(true);
+    FPerf_MemoryStats BeforeGC = GetCurrentMemoryStats();
     
-    // Log memory improvement
-    FPerf_MemoryStats StatsAfterGC = GetCurrentMemoryStats();
-    UE_LOG(LogTemp, Warning, TEXT("GC Complete. Memory usage: %.1f MB"), StatsAfterGC.UsedPhysicalMemoryMB);
+    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+    
+    FPerf_MemoryStats AfterGC = GetCurrentMemoryStats();
+    
+    float MemoryFreed = BeforeGC.UsedPhysicalMemoryMB - AfterGC.UsedPhysicalMemoryMB;
+    int32 ObjectsFreed = BeforeGC.NumLoadedObjects - AfterGC.NumLoadedObjects;
+    
+    UE_LOG(LogTemp, Warning, TEXT("GC Complete: %.2f MB freed, %d objects collected"), 
+           MemoryFreed, ObjectsFreed);
 }
 
-void UPerf_MemoryProfiler::OptimizeMemoryUsage()
+bool UPerf_MemoryProfiler::IsMemoryUsageHigh()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Starting memory optimization..."));
-    
-    CleanupUnusedAssets();
-    OptimizeTextureMemory();
-    OptimizeMeshMemory();
-    ForceGarbageCollection();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Memory optimization complete"));
-}
-
-TArray<FString> UPerf_MemoryProfiler::GetMemoryHogs()
-{
-    TArray<FString> MemoryHogs;
-    
-    // Analyze textures
-    float LargestTextureSize = 0.0f;
-    FString LargestTextureName;
-    
-    for (TObjectIterator<UTexture2D> TextureItr; TextureItr; ++TextureItr)
-    {
-        UTexture2D* Texture = *TextureItr;
-        if (IsValid(Texture))
-        {
-            float TextureSize = Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips) / (1024.0f * 1024.0f);
-            if (TextureSize > LargestTextureSize)
-            {
-                LargestTextureSize = TextureSize;
-                LargestTextureName = Texture->GetName();
-            }
-        }
-    }
-    
-    if (LargestTextureSize > 50.0f) // More than 50MB
-    {
-        MemoryHogs.Add(FString::Printf(TEXT("Large Texture: %s (%.1f MB)"), *LargestTextureName, LargestTextureSize));
-    }
-    
-    // Analyze meshes
-    float LargestMeshSize = 0.0f;
-    FString LargestMeshName;
-    
-    for (TObjectIterator<UStaticMesh> MeshItr; MeshItr; ++MeshItr)
-    {
-        UStaticMesh* Mesh = *MeshItr;
-        if (IsValid(Mesh))
-        {
-            float MeshSize = Mesh->GetResourceSizeBytes(EResourceSizeMode::EstimatedTotal) / (1024.0f * 1024.0f);
-            if (MeshSize > LargestMeshSize)
-            {
-                LargestMeshSize = MeshSize;
-                LargestMeshName = Mesh->GetName();
-            }
-        }
-    }
-    
-    if (LargestMeshSize > 20.0f) // More than 20MB
-    {
-        MemoryHogs.Add(FString::Printf(TEXT("Large Mesh: %s (%.1f MB)"), *LargestMeshName, LargestMeshSize));
-    }
-    
-    return MemoryHogs;
-}
-
-void UPerf_MemoryProfiler::ProfileCurrentLevel()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== MEMORY PROFILE REPORT ==="));
-    
     FPerf_MemoryStats Stats = GetCurrentMemoryStats();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Physical Memory: %.1f MB used, %.1f MB available"), 
-        Stats.UsedPhysicalMemoryMB, Stats.AvailablePhysicalMemoryMB);
-    UE_LOG(LogTemp, Warning, TEXT("Virtual Memory: %.1f MB"), Stats.UsedVirtualMemoryMB);
-    UE_LOG(LogTemp, Warning, TEXT("Peak Physical: %.1f MB"), Stats.PeakUsedPhysicalMemoryMB);
-    UE_LOG(LogTemp, Warning, TEXT("Active Actors: %d"), Stats.ActiveActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Active Components: %d"), Stats.ActiveComponentCount);
-    UE_LOG(LogTemp, Warning, TEXT("Texture Memory: %.1f MB"), Stats.TextureMemoryMB);
-    UE_LOG(LogTemp, Warning, TEXT("Mesh Memory: %.1f MB"), Stats.MeshMemoryMB);
-    
-    TArray<FString> MemoryHogs = GetMemoryHogs();
-    if (MemoryHogs.Num() > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Memory Hogs:"));
-        for (const FString& Hog : MemoryHogs)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Hog);
-        }
-    }
-    
-    EPerf_MemoryWarningLevel WarningLevel = GetMemoryWarningLevel();
-    if (WarningLevel != EPerf_MemoryWarningLevel::None)
-    {
-        LogMemoryWarning(WarningLevel);
-    }
+    return Stats.UsedPhysicalMemoryMB > MemoryWarningThresholdMB;
+}
+
+void UPerf_MemoryProfiler::SetMemoryWarningThreshold(float ThresholdMB)
+{
+    MemoryWarningThresholdMB = ThresholdMB;
+    UE_LOG(LogTemp, Log, TEXT("Memory warning threshold set to %.2f MB"), ThresholdMB);
 }
 
 void UPerf_MemoryProfiler::UpdateMemoryStats()
 {
-    if (bIsProfilingActive)
+    if (!bIsProfilingActive) return;
+    
+    FPerf_MemoryStats CurrentStats = GetCurrentMemoryStats();
+    
+    // Add to history (keep last 100 entries)
+    MemoryHistory.Add(CurrentStats);
+    if (MemoryHistory.Num() > 100)
     {
-        FPerf_MemoryStats CurrentStats = GetCurrentMemoryStats();
-        MemoryHistory.Add(CurrentStats);
-        
-        // Keep only last 1000 samples
-        if (MemoryHistory.Num() > 1000)
-        {
-            MemoryHistory.RemoveAt(0);
-        }
-        
-        CheckMemoryThresholds();
+        MemoryHistory.RemoveAt(0);
     }
+    
+    CheckMemoryThresholds();
 }
 
 void UPerf_MemoryProfiler::CheckMemoryThresholds()
 {
-    EPerf_MemoryWarningLevel WarningLevel = GetMemoryWarningLevel();
+    FPerf_MemoryStats Stats = GetCurrentMemoryStats();
     
-    if (WarningLevel == EPerf_MemoryWarningLevel::Critical)
+    if (Stats.UsedPhysicalMemoryMB > MemoryWarningThresholdMB)
     {
-        LogMemoryWarning(WarningLevel);
-        OptimizeMemoryUsage();
-    }
-    else if (WarningLevel == EPerf_MemoryWarningLevel::High)
-    {
-        LogMemoryWarning(WarningLevel);
-        ForceGarbageCollection();
-    }
-}
-
-void UPerf_MemoryProfiler::LogMemoryWarning(EPerf_MemoryWarningLevel WarningLevel)
-{
-    FString WarningText;
-    switch (WarningLevel)
-    {
-        case EPerf_MemoryWarningLevel::Low:
-            WarningText = TEXT("LOW");
-            break;
-        case EPerf_MemoryWarningLevel::Medium:
-            WarningText = TEXT("MEDIUM");
-            break;
-        case EPerf_MemoryWarningLevel::High:
-            WarningText = TEXT("HIGH");
-            break;
-        case EPerf_MemoryWarningLevel::Critical:
-            WarningText = TEXT("CRITICAL");
-            break;
-        default:
-            return;
-    }
-    
-    UE_LOG(LogTemp, Error, TEXT("MEMORY WARNING [%s]: %.1f MB used"), 
-        *WarningText, LastRecordedStats.UsedPhysicalMemoryMB);
-}
-
-void UPerf_MemoryProfiler::CleanupUnusedAssets()
-{
-    // Mark unused assets for garbage collection
-    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-}
-
-void UPerf_MemoryProfiler::OptimizeTextureMemory()
-{
-    // This would implement texture streaming optimization
-    // For now, just log the action
-    UE_LOG(LogTemp, Warning, TEXT("Optimizing texture memory usage..."));
-}
-
-void UPerf_MemoryProfiler::OptimizeMeshMemory()
-{
-    // This would implement mesh LOD optimization
-    // For now, just log the action
-    UE_LOG(LogTemp, Warning, TEXT("Optimizing mesh memory usage..."));
-}
-
-void UPerf_MemoryProfiler::AnalyzeActorMemoryUsage()
-{
-    if (UWorld* World = GetWorld())
-    {
-        int32 TotalActors = 0;
-        int32 TotalComponents = 0;
+        UE_LOG(LogTemp, Warning, TEXT("HIGH MEMORY USAGE: %.2f MB (threshold: %.2f MB)"), 
+               Stats.UsedPhysicalMemoryMB, MemoryWarningThresholdMB);
         
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        // Auto-trigger GC if memory is critically high
+        if (Stats.UsedPhysicalMemoryMB > MemoryWarningThresholdMB * 1.2f)
         {
-            AActor* Actor = *ActorItr;
-            if (IsValid(Actor))
-            {
-                TotalActors++;
-                TotalComponents += Actor->GetRootComponent() ? Actor->GetRootComponent()->GetAttachChildren().Num() + 1 : 0;
-            }
+            ForceGarbageCollection();
         }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Actor Analysis: %d actors, %d components"), TotalActors, TotalComponents);
     }
 }
 
@@ -312,69 +166,29 @@ float UPerf_MemoryProfiler::GetTextureMemoryUsage()
 {
     float TotalTextureMemory = 0.0f;
     
-    for (TObjectIterator<UTexture2D> TextureItr; TextureItr; ++TextureItr)
+    for (TObjectIterator<UTexture> TextureIt; TextureIt; ++TextureIt)
     {
-        UTexture2D* Texture = *TextureItr;
+        UTexture* Texture = *TextureIt;
         if (IsValid(Texture))
         {
             TotalTextureMemory += Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips);
         }
     }
     
-    return TotalTextureMemory / (1024.0f * 1024.0f);
+    return TotalTextureMemory / (1024.0f * 1024.0f); // Convert to MB
 }
 
-float UPerf_MemoryProfiler::GetMeshMemoryUsage()
+int32 UPerf_MemoryProfiler::CountObjectsByClass(UClass* ObjectClass)
 {
-    float TotalMeshMemory = 0.0f;
+    int32 Count = 0;
     
-    for (TObjectIterator<UStaticMesh> MeshItr; MeshItr; ++MeshItr)
+    for (TObjectIterator<UObject> ObjectIt(ObjectClass); ObjectIt; ++ObjectIt)
     {
-        UStaticMesh* Mesh = *MeshItr;
-        if (IsValid(Mesh))
+        if (IsValid(*ObjectIt))
         {
-            TotalMeshMemory += Mesh->GetResourceSizeBytes(EResourceSizeMode::EstimatedTotal);
+            Count++;
         }
     }
     
-    return TotalMeshMemory / (1024.0f * 1024.0f);
-}
-
-int32 UPerf_MemoryProfiler::CountActiveActors()
-{
-    int32 ActorCount = 0;
-    
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            if (IsValid(*ActorItr))
-            {
-                ActorCount++;
-            }
-        }
-    }
-    
-    return ActorCount;
-}
-
-int32 UPerf_MemoryProfiler::CountActiveComponents()
-{
-    int32 ComponentCount = 0;
-    
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (IsValid(Actor))
-            {
-                TArray<UActorComponent*> Components;
-                Actor->GetComponents<UActorComponent>(Components);
-                ComponentCount += Components.Num();
-            }
-        }
-    }
-    
-    return ComponentCount;
+    return Count;
 }
