@@ -1,306 +1,154 @@
 #include "Core_TerrainPhysics.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Landscape/LandscapeComponent.h"
+#include "Landscape/LandscapeInfo.h"
 #include "Components/PrimitiveComponent.h"
-#include "CollisionQueryParams.h"
+#include "DrawDebugHelpers.h"
 
-ACore_TerrainPhysics::ACore_TerrainPhysics()
+UCore_TerrainPhysics::UCore_TerrainPhysics()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    // Initialize default terrain properties
-    InitializeTerrainProperties();
+    MaxFootprints = 500;
+    FootprintLifetime = 300.0f;
     
-    // Set default values
-    TerrainUpdateRate = 0.1f;
-    MaxImpactForce = 10000.0f;
-    bEnableTerrainDeformation = true;
-    bEnableFootprints = true;
-    bEnableTemperatureEffects = true;
-    LastUpdateTime = 0.0f;
+    InitializeTerrainPhysicsDefaults();
 }
 
-void ACore_TerrainPhysics::BeginPlay()
+void UCore_TerrainPhysics::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find and track all landscapes in the world
-    UpdateTrackedLandscapes();
+    InitializeTerrainPhysicsDefaults();
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysics: System initialized with %d tracked landscapes"), TrackedLandscapes.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysics: Component initialized with %d terrain types"), TerrainPhysicsMap.Num());
 }
 
-void ACore_TerrainPhysics::Tick(float DeltaTime)
+void UCore_TerrainPhysics::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update terrain systems at specified rate
-    if (GetWorld()->GetTimeSeconds() - LastUpdateTime >= TerrainUpdateRate)
-    {
-        ProcessTerrainImpacts(DeltaTime);
-        
-        if (bEnableTemperatureEffects)
-        {
-            UpdateTerrainTemperature(DeltaTime);
-        }
-        
-        ProcessEnvironmentalEffects(DeltaTime);
-        CleanupOldImpacts();
-        
-        LastUpdateTime = GetWorld()->GetTimeSeconds();
-    }
+    // Clean up old footprints every tick
+    ClearOldFootprints();
 }
 
-void ACore_TerrainPhysics::InitializeTerrainProperties()
+void UCore_TerrainPhysics::InitializeTerrainPhysicsDefaults()
 {
+    TerrainPhysicsMap.Empty();
+    
     // Grass terrain
-    FCore_TerrainPhysicsProperties GrassProps;
-    GrassProps.Friction = 0.8f;
-    GrassProps.Restitution = 0.2f;
-    GrassProps.Density = 0.5f;
-    GrassProps.Hardness = 0.3f;
-    GrassProps.Temperature = 20.0f;
-    GrassProps.bCanDeform = true;
-    GrassProps.bCausesFootprints = true;
-    TerrainProperties.Add(ECore_TerrainType::Grass, GrassProps);
+    FCore_TerrainPhysicsData GrassData;
+    GrassData.SurfaceFriction = 0.7f;
+    GrassData.Hardness = 0.6f;
+    GrassData.Stability = 0.8f;
+    GrassData.DeformationResistance = 0.5f;
+    GrassData.WaterAbsorption = 0.4f;
+    GrassData.TerrainType = ETerrainType::Grass;
+    TerrainPhysicsMap.Add(ETerrainType::Grass, GrassData);
     
     // Rock terrain
-    FCore_TerrainPhysicsProperties RockProps;
-    RockProps.Friction = 0.9f;
-    RockProps.Restitution = 0.1f;
-    RockProps.Density = 2.5f;
-    RockProps.Hardness = 1.0f;
-    RockProps.Temperature = 15.0f;
-    RockProps.bCanDeform = false;
-    RockProps.bCausesFootprints = false;
-    TerrainProperties.Add(ECore_TerrainType::Rock, RockProps);
-    
-    // Sand terrain
-    FCore_TerrainPhysicsProperties SandProps;
-    SandProps.Friction = 0.6f;
-    SandProps.Restitution = 0.1f;
-    SandProps.Density = 1.5f;
-    SandProps.Hardness = 0.2f;
-    SandProps.Temperature = 25.0f;
-    SandProps.bCanDeform = true;
-    SandProps.bCausesFootprints = true;
-    TerrainProperties.Add(ECore_TerrainType::Sand, SandProps);
+    FCore_TerrainPhysicsData RockData;
+    RockData.SurfaceFriction = 0.9f;
+    RockData.Hardness = 1.0f;
+    RockData.Stability = 1.0f;
+    RockData.DeformationResistance = 1.0f;
+    RockData.WaterAbsorption = 0.1f;
+    RockData.TerrainType = ETerrainType::Rock;
+    TerrainPhysicsMap.Add(ETerrainType::Rock, RockData);
     
     // Mud terrain
-    FCore_TerrainPhysicsProperties MudProps;
-    MudProps.Friction = 0.4f;
-    MudProps.Restitution = 0.05f;
-    MudProps.Density = 1.8f;
-    MudProps.Hardness = 0.1f;
-    MudProps.Temperature = 18.0f;
-    MudProps.bCanDeform = true;
-    MudProps.bIsSlippery = true;
-    MudProps.bCausesFootprints = true;
-    TerrainProperties.Add(ECore_TerrainType::Mud, MudProps);
+    FCore_TerrainPhysicsData MudData;
+    MudData.SurfaceFriction = 0.3f;
+    MudData.Hardness = 0.2f;
+    MudData.Stability = 0.3f;
+    MudData.DeformationResistance = 0.1f;
+    MudData.WaterAbsorption = 0.9f;
+    MudData.TerrainType = ETerrainType::Mud;
+    TerrainPhysicsMap.Add(ETerrainType::Mud, MudData);
     
-    // Snow terrain
-    FCore_TerrainPhysicsProperties SnowProps;
-    SnowProps.Friction = 0.3f;
-    SnowProps.Restitution = 0.1f;
-    SnowProps.Density = 0.3f;
-    SnowProps.Hardness = 0.1f;
-    SnowProps.Temperature = -5.0f;
-    SnowProps.bCanDeform = true;
-    SnowProps.bIsSlippery = true;
-    SnowProps.bCausesFootprints = true;
-    TerrainProperties.Add(ECore_TerrainType::Snow, SnowProps);
+    // Sand terrain
+    FCore_TerrainPhysicsData SandData;
+    SandData.SurfaceFriction = 0.5f;
+    SandData.Hardness = 0.4f;
+    SandData.Stability = 0.5f;
+    SandData.DeformationResistance = 0.3f;
+    SandData.WaterAbsorption = 0.6f;
+    SandData.TerrainType = ETerrainType::Sand;
+    TerrainPhysicsMap.Add(ETerrainType::Sand, SandData);
     
     // Water terrain
-    FCore_TerrainPhysicsProperties WaterProps;
-    WaterProps.Friction = 0.1f;
-    WaterProps.Restitution = 0.0f;
-    WaterProps.Density = 1.0f;
-    WaterProps.Hardness = 0.0f;
-    WaterProps.Temperature = 10.0f;
-    WaterProps.bCanDeform = false;
-    WaterProps.bIsSlippery = true;
-    TerrainProperties.Add(ECore_TerrainType::Water, WaterProps);
-    
-    // Ice terrain
-    FCore_TerrainPhysicsProperties IceProps;
-    IceProps.Friction = 0.05f;
-    IceProps.Restitution = 0.2f;
-    IceProps.Density = 0.9f;
-    IceProps.Hardness = 0.8f;
-    IceProps.Temperature = -10.0f;
-    IceProps.bCanDeform = false;
-    IceProps.bIsSlippery = true;
-    TerrainProperties.Add(ECore_TerrainType::Ice, IceProps);
-    
-    // Lava terrain
-    FCore_TerrainPhysicsProperties LavaProps;
-    LavaProps.Friction = 0.2f;
-    LavaProps.Restitution = 0.0f;
-    LavaProps.Density = 3.0f;
-    LavaProps.Hardness = 0.0f;
-    LavaProps.Temperature = 1000.0f;
-    LavaProps.bCanDeform = false;
-    LavaProps.bIsSlippery = false;
-    TerrainProperties.Add(ECore_TerrainType::Lava, LavaProps);
+    FCore_TerrainPhysicsData WaterData;
+    WaterData.SurfaceFriction = 0.1f;
+    WaterData.Hardness = 0.0f;
+    WaterData.Stability = 0.0f;
+    WaterData.DeformationResistance = 0.0f;
+    WaterData.WaterAbsorption = 1.0f;
+    WaterData.TerrainType = ETerrainType::Water;
+    TerrainPhysicsMap.Add(ETerrainType::Water, WaterData);
 }
 
-ECore_TerrainType ACore_TerrainPhysics::GetTerrainTypeAtLocation(const FVector& Location)
+FCore_TerrainPhysicsData UCore_TerrainPhysics::GetTerrainPhysicsAtLocation(const FVector& Location)
 {
-    // Perform line trace to hit the terrain
-    FHitResult HitResult;
-    FVector TraceStart = Location + FVector(0, 0, 1000);
-    FVector TraceEnd = Location - FVector(0, 0, 1000);
+    ETerrainType DetectedType = DetectTerrainTypeAtLocation(Location);
     
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = true;
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    if (TerrainPhysicsMap.Contains(DetectedType))
     {
-        // Check if we hit a landscape
-        if (ALandscape* Landscape = Cast<ALandscape>(HitResult.GetActor()))
-        {
-            return SampleTerrainTypeFromLandscape(HitResult.Location);
-        }
-        
-        // Check physical material
-        if (HitResult.PhysMaterial.IsValid())
-        {
-            FString MaterialName = HitResult.PhysMaterial->GetName();
-            if (MaterialName.Contains(TEXT("Rock"))) return ECore_TerrainType::Rock;
-            if (MaterialName.Contains(TEXT("Sand"))) return ECore_TerrainType::Sand;
-            if (MaterialName.Contains(TEXT("Mud"))) return ECore_TerrainType::Mud;
-            if (MaterialName.Contains(TEXT("Snow"))) return ECore_TerrainType::Snow;
-            if (MaterialName.Contains(TEXT("Water"))) return ECore_TerrainType::Water;
-            if (MaterialName.Contains(TEXT("Ice"))) return ECore_TerrainType::Ice;
-            if (MaterialName.Contains(TEXT("Lava"))) return ECore_TerrainType::Lava;
-        }
+        return TerrainPhysicsMap[DetectedType];
     }
     
-    // Default to grass
-    return ECore_TerrainType::Grass;
+    // Default to grass if not found
+    return TerrainPhysicsMap.Contains(ETerrainType::Grass) ? TerrainPhysicsMap[ETerrainType::Grass] : FCore_TerrainPhysicsData();
 }
 
-FCore_TerrainPhysicsProperties ACore_TerrainPhysics::GetTerrainPropertiesAtLocation(const FVector& Location)
+void UCore_TerrainPhysics::SetTerrainPhysicsData(ETerrainType TerrainType, const FCore_TerrainPhysicsData& PhysicsData)
 {
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(Location);
+    TerrainPhysicsMap.Add(TerrainType, PhysicsData);
+}
+
+float UCore_TerrainPhysics::CalculateMovementSpeedModifier(const FVector& Location, ECreatureSize CreatureSize)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    float BaseModifier = TerrainData.SurfaceFriction * TerrainData.Stability;
     
-    if (TerrainProperties.Contains(TerrainType))
+    // Slope influence
+    float Slope = CalculateTerrainSlope(Location);
+    float SlopeModifier = FMath::Clamp(1.0f - (Slope / 45.0f), 0.2f, 1.0f);
+    
+    // Creature size influence
+    float SizeModifier = 1.0f;
+    switch (CreatureSize)
     {
-        FCore_TerrainPhysicsProperties Props = TerrainProperties[TerrainType];
-        
-        // Apply temperature modifications if enabled
-        if (bEnableTemperatureEffects)
-        {
-            float CurrentTemp = GetTemperatureAtLocation(Location);
-            Props.Hardness = CalculateTerrainHardness(TerrainType, CurrentTemp);
-        }
-        
-        return Props;
+        case ECreatureSize::Small:
+            SizeModifier = 1.2f; // Small creatures less affected by terrain
+            break;
+        case ECreatureSize::Medium:
+            SizeModifier = 1.0f;
+            break;
+        case ECreatureSize::Large:
+            SizeModifier = 0.8f; // Large creatures more affected
+            break;
+        case ECreatureSize::Massive:
+            SizeModifier = 0.6f; // Massive creatures heavily affected
+            break;
     }
     
-    return FCore_TerrainPhysicsProperties();
+    return BaseModifier * SlopeModifier * SizeModifier;
 }
 
-float ACore_TerrainPhysics::GetTerrainSlopeAtLocation(const FVector& Location)
+bool UCore_TerrainPhysics::CanCreateFootprint(const FVector& Location, ECreatureSize CreatureSize)
 {
-    FVector Normal = GetTerrainNormalAtLocation(Location);
-    float Slope = FMath::Acos(FVector::DotProduct(Normal, FVector::UpVector));
-    return FMath::RadiansToDegrees(Slope);
-}
-
-FVector ACore_TerrainPhysics::GetTerrainNormalAtLocation(const FVector& Location)
-{
-    FHitResult HitResult;
-    FVector TraceStart = Location + FVector(0, 0, 1000);
-    FVector TraceEnd = Location - FVector(0, 0, 1000);
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
     
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = true;
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
-    {
-        return HitResult.Normal;
-    }
-    
-    return FVector::UpVector;
-}
-
-void ACore_TerrainPhysics::ApplyTerrainImpact(const FCore_TerrainImpactData& ImpactData)
-{
-    if (ImpactData.ImpactForce > MaxImpactForce)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysics: Impact force %f exceeds maximum %f"), ImpactData.ImpactForce, MaxImpactForce);
-        return;
-    }
-    
-    // Store impact for processing
-    FCore_TerrainImpactData ProcessedImpact = ImpactData;
-    ProcessedImpact.Timestamp = GetWorld()->GetTimeSeconds();
-    RecentImpacts.Add(ProcessedImpact);
-    
-    // Get terrain properties at impact location
-    FCore_TerrainPhysicsProperties TerrainProps = GetTerrainPropertiesAtLocation(ImpactData.ImpactLocation);
-    
-    // Create footprint if enabled and terrain supports it
-    if (bEnableFootprints && TerrainProps.bCausesFootprints)
-    {
-        float FootprintSize = FMath::Clamp(ImpactData.ImpactForce / 1000.0f, 0.1f, 2.0f);
-        float FootprintDepth = FMath::Clamp(ImpactData.ImpactForce / 5000.0f, 0.01f, 0.5f);
-        CreateFootprint(ImpactData.ImpactLocation, FootprintSize, FootprintDepth);
-    }
-    
-    // Deform terrain if enabled and terrain can deform
-    if (bEnableTerrainDeformation && TerrainProps.bCanDeform)
-    {
-        float DeformRadius = FMath::Clamp(ImpactData.ImpactForce / 2000.0f, 0.5f, 5.0f);
-        float DeformStrength = FMath::Clamp(ImpactData.ImpactForce / 10000.0f, 0.1f, 1.0f);
-        DeformTerrain(ImpactData.ImpactLocation, DeformRadius, DeformStrength);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Applied impact at %s with force %f"), *ImpactData.ImpactLocation.ToString(), ImpactData.ImpactForce);
-}
-
-void ACore_TerrainPhysics::CreateFootprint(const FVector& Location, float Size, float Depth)
-{
-    // This would integrate with a footprint system or decal system
-    // For now, we'll just log the footprint creation
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Created footprint at %s, Size: %f, Depth: %f"), *Location.ToString(), Size, Depth);
-    
-    // In a full implementation, this would:
-    // 1. Create a decal or modify landscape heightmap
-    // 2. Apply visual footprint texture
-    // 3. Store footprint data for persistence
-}
-
-void ACore_TerrainPhysics::DeformTerrain(const FVector& Location, float Radius, float Strength)
-{
-    // This would integrate with landscape modification system
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Deformed terrain at %s, Radius: %f, Strength: %f"), *Location.ToString(), Radius, Strength);
-    
-    // In a full implementation, this would:
-    // 1. Modify landscape heightmap data
-    // 2. Update collision mesh
-    // 3. Trigger landscape component updates
-}
-
-bool ACore_TerrainPhysics::IsLocationWalkable(const FVector& Location)
-{
-    float Slope = GetTerrainSlopeAtLocation(Location);
-    FCore_TerrainPhysicsProperties Props = GetTerrainPropertiesAtLocation(Location);
-    
-    // Check slope threshold (45 degrees is typically unwalkable)
-    if (Slope > 45.0f)
+    // Can't create footprints on very hard surfaces or water
+    if (TerrainData.DeformationResistance > 0.9f || TerrainData.TerrainType == ETerrainType::Water)
     {
         return false;
     }
     
-    // Check terrain type specific walkability
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(Location);
-    if (TerrainType == ECore_TerrainType::Lava || TerrainType == ECore_TerrainType::Water)
+    // Check if we're at max footprints
+    if (ActiveFootprints.Num() >= MaxFootprints)
     {
         return false;
     }
@@ -308,275 +156,271 @@ bool ACore_TerrainPhysics::IsLocationWalkable(const FVector& Location)
     return true;
 }
 
-void ACore_TerrainPhysics::UpdatePhysicsMaterialForTerrain(ECore_TerrainType TerrainType)
+void UCore_TerrainPhysics::CreateFootprint(const FVector& Location, ECreatureSize CreatureSize, float Force)
 {
-    if (!TerrainProperties.Contains(TerrainType))
+    if (!CanCreateFootprint(Location, CreatureSize))
     {
         return;
     }
     
-    FCore_TerrainPhysicsProperties Props = TerrainProperties[TerrainType];
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Updated physics material for terrain type %d"), (int32)TerrainType);
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    
+    FCore_FootprintData NewFootprint;
+    NewFootprint.Location = Location;
+    NewFootprint.CreatureSize = CreatureSize;
+    NewFootprint.Timestamp = GetWorld()->GetTimeSeconds();
+    
+    // Calculate footprint properties based on creature size and terrain
+    switch (CreatureSize)
+    {
+        case ECreatureSize::Small:
+            NewFootprint.Radius = 3.0f;
+            break;
+        case ECreatureSize::Medium:
+            NewFootprint.Radius = 8.0f;
+            break;
+        case ECreatureSize::Large:
+            NewFootprint.Radius = 15.0f;
+            break;
+        case ECreatureSize::Massive:
+            NewFootprint.Radius = 25.0f;
+            break;
+    }
+    
+    // Depth based on force, terrain resistance, and creature size
+    float BaseDepth = Force * (1.0f - TerrainData.DeformationResistance);
+    NewFootprint.Depth = BaseDepth * (static_cast<float>(CreatureSize) + 1.0f);
+    
+    ActiveFootprints.Add(NewFootprint);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Created footprint at %s, depth %.2f, radius %.2f"), 
+           *Location.ToString(), NewFootprint.Depth, NewFootprint.Radius);
 }
 
-void ACore_TerrainPhysics::ApplyTerrainEffectsToActor(AActor* Actor, const FVector& Location)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    FCore_TerrainPhysicsProperties Props = GetTerrainPropertiesAtLocation(Location);
-    
-    // Apply slippery effects
-    if (Props.bIsSlippery)
-    {
-        if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
-        {
-            // Reduce friction temporarily
-            // This would be implemented with custom physics materials
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Applied terrain effects to actor %s at location %s"), *Actor->GetName(), *Location.ToString());
-}
-
-float ACore_TerrainPhysics::GetTemperatureAtLocation(const FVector& Location)
-{
-    // Check if we have cached temperature data
-    FVector GridLocation = FVector(
-        FMath::RoundToFloat(Location.X / 100.0f) * 100.0f,
-        FMath::RoundToFloat(Location.Y / 100.0f) * 100.0f,
-        0.0f
-    );
-    
-    if (TemperatureMap.Contains(GridLocation))
-    {
-        return TemperatureMap[GridLocation];
-    }
-    
-    // Calculate base temperature based on terrain type
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(Location);
-    if (TerrainProperties.Contains(TerrainType))
-    {
-        float BaseTemp = TerrainProperties[TerrainType].Temperature;
-        
-        // Add some variation based on location
-        float HeightModifier = Location.Z * -0.01f; // Colder at higher altitudes
-        float RandomVariation = FMath::RandRange(-5.0f, 5.0f);
-        
-        float FinalTemp = BaseTemp + HeightModifier + RandomVariation;
-        TemperatureMap.Add(GridLocation, FinalTemp);
-        
-        return FinalTemp;
-    }
-    
-    return 20.0f; // Default temperature
-}
-
-void ACore_TerrainPhysics::UpdateTerrainTemperature(float DeltaTime)
-{
-    // Update temperature map based on environmental factors
-    // This is a simplified implementation
-    for (auto& TempPair : TemperatureMap)
-    {
-        float& Temperature = TempPair.Value;
-        
-        // Apply time-based temperature changes (day/night cycle, seasons)
-        float TimeOfDay = FMath::Fmod(GetWorld()->GetTimeSeconds() / 3600.0f, 24.0f); // Hours
-        float DayNightModifier = FMath::Sin((TimeOfDay / 24.0f) * 2.0f * PI) * 10.0f;
-        
-        Temperature += DayNightModifier * DeltaTime * 0.1f;
-    }
-}
-
-void ACore_TerrainPhysics::ProcessEnvironmentalEffects(float DeltaTime)
-{
-    // Process environmental effects like erosion, freezing, melting
-    // This is where complex terrain evolution would happen
-    
-    for (const FCore_TerrainImpactData& Impact : RecentImpacts)
-    {
-        // Process impact-based environmental changes
-        float TimeSinceImpact = GetWorld()->GetTimeSeconds() - Impact.Timestamp;
-        
-        if (TimeSinceImpact < 60.0f) // Effects last for 1 minute
-        {
-            // Apply ongoing effects from impacts
-            FCore_TerrainPhysicsProperties Props = GetTerrainPropertiesAtLocation(Impact.ImpactLocation);
-            
-            if (Props.bCanDeform && Impact.ImpactForce > 1000.0f)
-            {
-                // Continue deformation effects
-            }
-        }
-    }
-}
-
-void ACore_TerrainPhysics::ProcessTerrainImpacts(float DeltaTime)
-{
-    // Process all recent impacts and their ongoing effects
-    for (int32 i = RecentImpacts.Num() - 1; i >= 0; i--)
-    {
-        const FCore_TerrainImpactData& Impact = RecentImpacts[i];
-        float TimeSinceImpact = GetWorld()->GetTimeSeconds() - Impact.Timestamp;
-        
-        // Apply ongoing effects
-        if (TimeSinceImpact < 30.0f) // Effects last for 30 seconds
-        {
-            // Continue processing impact effects
-            ProcessEnvironmentalEffects(DeltaTime);
-        }
-    }
-}
-
-void ACore_TerrainPhysics::CleanupOldImpacts()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Remove impacts older than 5 minutes
-    RecentImpacts.RemoveAll([CurrentTime](const FCore_TerrainImpactData& Impact)
-    {
-        return (CurrentTime - Impact.Timestamp) > 300.0f;
-    });
-}
-
-void ACore_TerrainPhysics::UpdateTrackedLandscapes()
-{
-    TrackedLandscapes.Empty();
-    
-    // Find all landscape actors in the world
-    for (TActorIterator<ALandscape> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        ALandscape* Landscape = *ActorItr;
-        if (Landscape)
-        {
-            TrackedLandscapes.Add(Landscape);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Found %d landscapes to track"), TrackedLandscapes.Num());
-}
-
-ECore_TerrainType ACore_TerrainPhysics::SampleTerrainTypeFromLandscape(const FVector& Location)
-{
-    // This would sample landscape layer data to determine terrain type
-    // For now, return a simple height-based determination
-    
-    if (Location.Z < -100.0f)
-    {
-        return ECore_TerrainType::Water;
-    }
-    else if (Location.Z > 1000.0f)
-    {
-        return ECore_TerrainType::Snow;
-    }
-    else if (Location.Z > 500.0f)
-    {
-        return ECore_TerrainType::Rock;
-    }
-    else
-    {
-        return ECore_TerrainType::Grass;
-    }
-}
-
-float ACore_TerrainPhysics::CalculateTerrainHardness(ECore_TerrainType TerrainType, float Temperature)
-{
-    if (!TerrainProperties.Contains(TerrainType))
-    {
-        return 1.0f;
-    }
-    
-    float BaseHardness = TerrainProperties[TerrainType].Hardness;
-    
-    // Temperature affects hardness
-    if (Temperature < 0.0f) // Freezing makes things harder
-    {
-        BaseHardness *= 1.5f;
-    }
-    else if (Temperature > 50.0f) // Heat can soften some materials
-    {
-        BaseHardness *= 0.8f;
-    }
-    
-    return FMath::Clamp(BaseHardness, 0.1f, 2.0f);
-}
-
-void ACore_TerrainPhysics::ValidateTerrainPhysics()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== Core_TerrainPhysics Validation ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Terrain Properties Count: %d"), TerrainProperties.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Tracked Landscapes: %d"), TrackedLandscapes.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Recent Impacts: %d"), RecentImpacts.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Temperature Map Size: %d"), TemperatureMap.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Terrain Deformation: %s"), bEnableTerrainDeformation ? TEXT("Enabled") : TEXT("Disabled"));
-    UE_LOG(LogTemp, Warning, TEXT("Footprints: %s"), bEnableFootprints ? TEXT("Enabled") : TEXT("Disabled"));
-    UE_LOG(LogTemp, Warning, TEXT("Temperature Effects: %s"), bEnableTemperatureEffects ? TEXT("Enabled") : TEXT("Disabled"));
-    
-    // Test terrain sampling at actor location
-    FVector TestLocation = GetActorLocation();
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(TestLocation);
-    FCore_TerrainPhysicsProperties Props = GetTerrainPropertiesAtLocation(TestLocation);
-    float Slope = GetTerrainSlopeAtLocation(TestLocation);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Test Location: %s"), *TestLocation.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Terrain Type: %d"), (int32)TerrainType);
-    UE_LOG(LogTemp, Warning, TEXT("Friction: %f, Hardness: %f"), Props.Friction, Props.Hardness);
-    UE_LOG(LogTemp, Warning, TEXT("Slope: %f degrees"), Slope);
-    UE_LOG(LogTemp, Warning, TEXT("Walkable: %s"), IsLocationWalkable(TestLocation) ? TEXT("Yes") : TEXT("No"));
-}
-
-void ACore_TerrainPhysics::TestTerrainInteraction()
-{
-    FVector TestLocation = GetActorLocation();
-    
-    // Create a test impact
-    FCore_TerrainImpactData TestImpact;
-    TestImpact.ImpactLocation = TestLocation;
-    TestImpact.ImpactNormal = FVector::UpVector;
-    TestImpact.ImpactForce = 5000.0f;
-    TestImpact.TerrainType = GetTerrainTypeAtLocation(TestLocation);
-    TestImpact.ImpactingActor = this;
-    
-    ApplyTerrainImpact(TestImpact);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core_TerrainPhysics: Test impact applied at %s"), *TestLocation.ToString());
-}
-
-void ACore_TerrainPhysics::DebugDrawTerrainInfo()
+void UCore_TerrainPhysics::ClearOldFootprints()
 {
     if (!GetWorld())
     {
         return;
     }
     
-    FVector ActorLocation = GetActorLocation();
+    float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    // Draw terrain type info
-    ECore_TerrainType TerrainType = GetTerrainTypeAtLocation(ActorLocation);
-    FString TerrainTypeString = UEnum::GetValueAsString(TerrainType);
+    ActiveFootprints.RemoveAll([CurrentTime, this](const FCore_FootprintData& Footprint)
+    {
+        return (CurrentTime - Footprint.Timestamp) > FootprintLifetime;
+    });
+}
+
+TArray<FCore_FootprintData> UCore_TerrainPhysics::GetFootprintsInRadius(const FVector& Center, float Radius)
+{
+    TArray<FCore_FootprintData> NearbyFootprints;
     
-    // Draw debug text
-    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 200), 
-                   FString::Printf(TEXT("Terrain: %s"), *TerrainTypeString), 
-                   nullptr, FColor::White, 0.0f);
+    for (const FCore_FootprintData& Footprint : ActiveFootprints)
+    {
+        float Distance = FVector::Dist(Center, Footprint.Location);
+        if (Distance <= Radius)
+        {
+            NearbyFootprints.Add(Footprint);
+        }
+    }
     
-    // Draw slope indicator
-    float Slope = GetTerrainSlopeAtLocation(ActorLocation);
-    FColor SlopeColor = Slope > 30.0f ? FColor::Red : (Slope > 15.0f ? FColor::Yellow : FColor::Green);
-    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 150), 
-                   FString::Printf(TEXT("Slope: %.1f°"), Slope), 
-                   nullptr, SlopeColor, 0.0f);
+    return NearbyFootprints;
+}
+
+ETerrainType UCore_TerrainPhysics::DetectTerrainTypeAtLocation(const FVector& Location)
+{
+    if (!GetWorld())
+    {
+        return ETerrainType::Grass;
+    }
     
-    // Draw temperature info
-    float Temperature = GetTemperatureAtLocation(ActorLocation);
-    FColor TempColor = Temperature > 30.0f ? FColor::Red : (Temperature < 0.0f ? FColor::Cyan : FColor::Green);
-    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 100), 
-                   FString::Printf(TEXT("Temp: %.1f°C"), Temperature), 
-                   nullptr, TempColor, 0.0f);
+    // Perform line trace to detect surface material
+    FHitResult HitResult;
+    FVector StartLocation = Location + FVector(0, 0, 100);
+    FVector EndLocation = Location - FVector(0, 0, 100);
     
-    // Draw terrain normal
-    FVector TerrainNormal = GetTerrainNormalAtLocation(ActorLocation);
-    DrawDebugLine(GetWorld(), ActorLocation, ActorLocation + (TerrainNormal * 100.0f), FColor::Blue, false, 0.0f, 0, 2.0f);
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    {
+        if (HitResult.GetComponent())
+        {
+            // Check for landscape component
+            if (ULandscapeComponent* LandscapeComp = Cast<ULandscapeComponent>(HitResult.GetComponent()))
+            {
+                // For now, return based on height and slope
+                float Height = HitResult.Location.Z;
+                float Slope = CalculateTerrainSlope(HitResult.Location);
+                
+                if (Height < 0)
+                {
+                    return ETerrainType::Water;
+                }
+                else if (Slope > 30.0f)
+                {
+                    return ETerrainType::Rock;
+                }
+                else if (Height < 100)
+                {
+                    return ETerrainType::Mud;
+                }
+                else
+                {
+                    return ETerrainType::Grass;
+                }
+            }
+        }
+    }
+    
+    return ETerrainType::Grass;
+}
+
+float UCore_TerrainPhysics::CalculateTerrainSlope(const FVector& Location, float SampleRadius)
+{
+    if (!GetWorld())
+    {
+        return 0.0f;
+    }
+    
+    // Sample terrain height at multiple points around the location
+    TArray<FVector> SamplePoints;
+    SamplePoints.Add(Location + FVector(SampleRadius, 0, 0));
+    SamplePoints.Add(Location + FVector(-SampleRadius, 0, 0));
+    SamplePoints.Add(Location + FVector(0, SampleRadius, 0));
+    SamplePoints.Add(Location + FVector(0, -SampleRadius, 0));
+    
+    float MaxHeightDiff = 0.0f;
+    float CenterHeight = GetTerrainHeightAtLocation(Location);
+    
+    for (const FVector& SamplePoint : SamplePoints)
+    {
+        float SampleHeight = GetTerrainHeightAtLocation(SamplePoint);
+        float HeightDiff = FMath::Abs(SampleHeight - CenterHeight);
+        MaxHeightDiff = FMath::Max(MaxHeightDiff, HeightDiff);
+    }
+    
+    // Convert to slope angle in degrees
+    float SlopeAngle = FMath::RadiansToDegrees(FMath::Atan(MaxHeightDiff / SampleRadius));
+    return SlopeAngle;
+}
+
+bool UCore_TerrainPhysics::IsLocationStable(const FVector& Location, float MinStability)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    float Slope = CalculateTerrainSlope(Location);
+    
+    // Stability decreases with slope
+    float SlopeStabilityModifier = FMath::Clamp(1.0f - (Slope / 60.0f), 0.0f, 1.0f);
+    float EffectiveStability = TerrainData.Stability * SlopeStabilityModifier;
+    
+    return EffectiveStability >= MinStability;
+}
+
+void UCore_TerrainPhysics::ApplyTerrainDeformation(const FVector& Location, float Force, float Radius)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    
+    // Only deform if terrain allows it
+    if (TerrainData.DeformationResistance < 0.9f)
+    {
+        float DeformationAmount = Force * (1.0f - TerrainData.DeformationResistance);
+        
+        UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Applied deformation at %s, force %.2f, amount %.2f"), 
+               *Location.ToString(), Force, DeformationAmount);
+        
+        // In a full implementation, this would modify the landscape heightmap
+        // For now, we just log the deformation
+    }
+}
+
+void UCore_TerrainPhysics::UpdatePhysicsFromBiome(const FVector& Location)
+{
+    // This would integrate with the biome system to get biome-specific physics modifiers
+    // For now, we use the basic terrain detection
+    ETerrainType DetectedType = DetectTerrainTypeAtLocation(Location);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_TerrainPhysics: Updated physics from biome at %s, terrain type: %d"), 
+           *Location.ToString(), static_cast<int32>(DetectedType));
+}
+
+float UCore_TerrainPhysics::GetBiomeInfluencedFriction(const FVector& Location)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    
+    // Base friction modified by biome conditions
+    float BaseFriction = TerrainData.SurfaceFriction;
+    
+    // In a full implementation, this would query the biome system for weather/humidity modifiers
+    float BiomeModifier = 1.0f;
+    
+    return BaseFriction * BiomeModifier;
+}
+
+float UCore_TerrainPhysics::GetBiomeInfluencedHardness(const FVector& Location)
+{
+    FCore_TerrainPhysicsData TerrainData = GetTerrainPhysicsAtLocation(Location);
+    
+    // Base hardness modified by biome conditions
+    float BaseHardness = TerrainData.Hardness;
+    
+    // In a full implementation, this would query the biome system for temperature/moisture modifiers
+    float BiomeModifier = 1.0f;
+    
+    return BaseHardness * BiomeModifier;
+}
+
+void UCore_TerrainPhysics::CleanupFootprintArray()
+{
+    // Remove excess footprints if we're over the limit
+    if (ActiveFootprints.Num() > MaxFootprints)
+    {
+        int32 ExcessCount = ActiveFootprints.Num() - MaxFootprints;
+        ActiveFootprints.RemoveAt(0, ExcessCount);
+    }
+}
+
+float UCore_TerrainPhysics::GetTerrainHeightAtLocation(const FVector& Location)
+{
+    if (!GetWorld())
+    {
+        return 0.0f;
+    }
+    
+    FHitResult HitResult;
+    FVector StartLocation = Location + FVector(0, 0, 1000);
+    FVector EndLocation = Location - FVector(0, 0, 1000);
+    
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = false;
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    {
+        return HitResult.Location.Z;
+    }
+    
+    return Location.Z;
+}
+
+FVector UCore_TerrainPhysics::GetTerrainNormalAtLocation(const FVector& Location)
+{
+    if (!GetWorld())
+    {
+        return FVector::UpVector;
+    }
+    
+    FHitResult HitResult;
+    FVector StartLocation = Location + FVector(0, 0, 100);
+    FVector EndLocation = Location - FVector(0, 0, 100);
+    
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    {
+        return HitResult.Normal;
+    }
+    
+    return FVector::UpVector;
 }
