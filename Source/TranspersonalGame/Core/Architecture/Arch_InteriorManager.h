@@ -4,40 +4,50 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
-#include "SharedTypes.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/TriggerVolume.h"
 #include "Arch_InteriorManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EArch_InteriorType : uint8
+{
+    Cave = 0,
+    StoneShelter = 1,
+    LogHut = 2,
+    RockOverhang = 3,
+    BuriedDwelling = 4
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_InteriorItem
+struct FArch_InteriorData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FString ItemName;
+    EArch_InteriorType InteriorType = EArch_InteriorType::Cave;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    EArch_InteriorType ItemType;
+    float ComfortLevel = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FVector RelativeLocation;
+    float WarmthBonus = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FRotator RelativeRotation;
+    bool bHasFirePit = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bIsInteractable;
+    bool bHasSleepingArea = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float WearLevel;
+    int32 MaxOccupants = 1;
 
-    FArch_InteriorItem()
+    FArch_InteriorData()
     {
-        ItemName = TEXT("");
-        ItemType = EArch_InteriorType::Furniture;
-        RelativeLocation = FVector::ZeroVector;
-        RelativeRotation = FRotator::ZeroRotator;
-        bIsInteractable = true;
-        WearLevel = 0.0f;
+        ComfortLevel = 50.0f;
+        WarmthBonus = 25.0f;
+        bHasFirePit = false;
+        bHasSleepingArea = false;
+        MaxOccupants = 1;
     }
 };
 
@@ -53,58 +63,70 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    class USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* InteriorBounds;
+    class UStaticMeshComponent* InteriorMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    TArray<FArch_InteriorItem> InteriorItems;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UBoxComponent* InteriorTrigger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    EArch_StructureType StructureType;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UPointLightComponent* FireLight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    float InteriorSize;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* FirePitMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    bool bHasFirePit;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    FArch_InteriorData InteriorData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    bool bHasSleepingArea;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    TArray<class UStaticMeshComponent*> FurnitureComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Setup")
-    bool bHasStorageArea;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    bool bIsOccupied = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Settings")
+    TArray<AActor*> CurrentOccupants;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void SetupInteriorForStructure(EArch_StructureType InStructureType);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void SetupInteriorType(EArch_InteriorType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    bool AddInteriorItem(EArch_InteriorType ItemType, FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void AddFurniture(UStaticMesh* FurnitureMesh, FVector RelativeLocation, FRotator RelativeRotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void RemoveInteriorItem(int32 ItemIndex);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void LightFirePit();
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    TArray<FArch_InteriorItem> GetInteractableItems();
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void ExtinguishFirePit();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Interior Management")
-    void GenerateRandomInterior();
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    bool CanAccommodateOccupant() const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Interior Management")
-    void ClearInterior();
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void AddOccupant(AActor* NewOccupant);
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    bool IsLocationInsideInterior(FVector WorldLocation);
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void RemoveOccupant(AActor* OccupantToRemove);
+
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    float GetComfortLevel() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    float GetWarmthBonus() const;
+
+    UFUNCTION()
+    void OnInteriorEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnInteriorExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
-    void SpawnInteriorItem(const FArch_InteriorItem& Item);
-    void SetupDwellingInterior();
-    void SetupShelterInterior();
-    void SetupStorageInterior();
-    void SetupWorkshopInterior();
-    void SetupRuinInterior();
+    void UpdateFirePitVisuals();
+    void SetupInteriorMesh();
+    void ConfigureInteriorSettings();
 };
