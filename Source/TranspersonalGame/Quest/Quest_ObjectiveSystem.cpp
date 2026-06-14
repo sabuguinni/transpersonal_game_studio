@@ -1,321 +1,272 @@
 #include "Quest_ObjectiveSystem.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/PrimitiveComponent.h"
 
-void UQuest_ObjectiveSystem::Initialize(FSubsystemCollectionBase& Collection)
+UQuest_ObjectiveComponent::UQuest_ObjectiveComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f;
+    bAutoActivateOnBeginPlay = false;
+}
+
+void UQuest_ObjectiveComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    if (bAutoActivateOnBeginPlay)
+    {
+        ActivateObjective();
+    }
+    
+    BindToGameEvents();
+}
+
+void UQuest_ObjectiveComponent::BindToGameEvents()
+{
+    if (UQuest_ObjectiveSubsystem* ObjectiveSubsystem = GetWorld()->GetGameInstance()->GetSubsystem<UQuest_ObjectiveSubsystem>())
+    {
+        ObjectiveSubsystem->RegisterObjective(this);
+    }
+}
+
+void UQuest_ObjectiveComponent::ActivateObjective()
+{
+    ObjectiveData.Status = EQuest_ObjectiveStatus::Active;
+    ObjectiveData.CurrentCount = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("Quest Objective Activated: %s"), *ObjectiveData.Description);
+    
+    if (ObjectiveData.ObjectiveType == EQuest_ObjectiveType::Reach)
+    {
+        SetComponentTickEnabled(true);
+    }
+}
+
+void UQuest_ObjectiveComponent::CompleteObjective()
+{
+    if (ObjectiveData.Status == EQuest_ObjectiveStatus::Active)
+    {
+        ObjectiveData.Status = EQuest_ObjectiveStatus::Completed;
+        ObjectiveData.CurrentCount = ObjectiveData.RequiredCount;
+        
+        UE_LOG(LogTemp, Log, TEXT("Quest Objective Completed: %s"), *ObjectiveData.Description);
+        
+        SetComponentTickEnabled(false);
+    }
+}
+
+void UQuest_ObjectiveComponent::FailObjective()
+{
+    ObjectiveData.Status = EQuest_ObjectiveStatus::Failed;
+    UE_LOG(LogTemp, Warning, TEXT("Quest Objective Failed: %s"), *ObjectiveData.Description);
+    SetComponentTickEnabled(false);
+}
+
+void UQuest_ObjectiveComponent::UpdateProgress(int32 ProgressAmount)
+{
+    if (ObjectiveData.Status != EQuest_ObjectiveStatus::Active)
+    {
+        return;
+    }
+    
+    ObjectiveData.CurrentCount = FMath::Min(ObjectiveData.CurrentCount + ProgressAmount, ObjectiveData.RequiredCount);
+    
+    UE_LOG(LogTemp, Log, TEXT("Quest Objective Progress: %s (%d/%d)"), 
+           *ObjectiveData.Description, ObjectiveData.CurrentCount, ObjectiveData.RequiredCount);
+    
+    if (ObjectiveData.CurrentCount >= ObjectiveData.RequiredCount)
+    {
+        CompleteObjective();
+    }
+}
+
+bool UQuest_ObjectiveComponent::IsObjectiveComplete() const
+{
+    return ObjectiveData.Status == EQuest_ObjectiveStatus::Completed;
+}
+
+float UQuest_ObjectiveComponent::GetCompletionPercentage() const
+{
+    if (ObjectiveData.RequiredCount <= 0)
+    {
+        return 0.0f;
+    }
+    
+    return static_cast<float>(ObjectiveData.CurrentCount) / static_cast<float>(ObjectiveData.RequiredCount);
+}
+
+void UQuest_ObjectiveComponent::OnActorKilled(AActor* KilledActor, AActor* Killer)
+{
+    if (ObjectiveData.Status != EQuest_ObjectiveStatus::Active || ObjectiveData.ObjectiveType != EQuest_ObjectiveType::Kill)
+    {
+        return;
+    }
+    
+    if (KilledActor && KilledActor->Tags.Contains(FName(*ObjectiveData.TargetTag)))
+    {
+        UpdateProgress(1);
+    }
+}
+
+void UQuest_ObjectiveComponent::OnItemCollected(const FString& ItemTag, int32 Amount)
+{
+    if (ObjectiveData.Status != EQuest_ObjectiveStatus::Active || ObjectiveData.ObjectiveType != EQuest_ObjectiveType::Collect)
+    {
+        return;
+    }
+    
+    if (ItemTag == ObjectiveData.TargetTag)
+    {
+        UpdateProgress(Amount);
+    }
+}
+
+void UQuest_ObjectiveComponent::OnLocationReached(const FVector& Location, AActor* ReachingActor)
+{
+    if (ObjectiveData.Status != EQuest_ObjectiveStatus::Active || ObjectiveData.ObjectiveType != EQuest_ObjectiveType::Reach)
+    {
+        return;
+    }
+    
+    float Distance = FVector::Dist(Location, ObjectiveData.TargetLocation);
+    if (Distance <= ObjectiveData.InteractionRadius)
+    {
+        CompleteObjective();
+    }
+}
+
+void UQuest_ObjectiveComponent::CheckLocationObjective()
+{
+    if (ObjectiveData.ObjectiveType != EQuest_ObjectiveType::Reach || ObjectiveData.Status != EQuest_ObjectiveStatus::Active)
+    {
+        return;
+    }
+    
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    {
+        float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), ObjectiveData.TargetLocation);
+        if (Distance <= ObjectiveData.InteractionRadius)
+        {
+            CompleteObjective();
+        }
+    }
+}
+
+void UQuest_ObjectiveComponent::CheckInteractionObjective()
+{
+    // Implementation for interaction-based objectives
+    if (ObjectiveData.ObjectiveType == EQuest_ObjectiveType::Interact && ObjectiveData.Status == EQuest_ObjectiveStatus::Active)
+    {
+        // Check if player is within interaction range
+        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+        {
+            float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), GetOwner()->GetActorLocation());
+            if (Distance <= ObjectiveData.InteractionRadius)
+            {
+                // Objective can be completed via external trigger
+                UE_LOG(LogTemp, Log, TEXT("Player in interaction range for objective: %s"), *ObjectiveData.Description);
+            }
+        }
+    }
+}
+
+// Subsystem Implementation
+void UQuest_ObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    InitializeDefaultQuests();
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest Objective System initialized with %d quests"), AllQuests.Num());
+    UE_LOG(LogTemp, Log, TEXT("Quest Objective Subsystem Initialized"));
 }
 
-void UQuest_ObjectiveSystem::InitializeDefaultQuests()
+void UQuest_ObjectiveSubsystem::RegisterObjective(UQuest_ObjectiveComponent* Objective)
 {
-    // Quest 1: Survival Basics
-    FQuest_QuestData SurvivalQuest;
-    SurvivalQuest.QuestID = TEXT("QUEST_SURVIVAL_BASICS");
-    SurvivalQuest.QuestName = TEXT("First Steps to Survival");
-    SurvivalQuest.Description = TEXT("Learn the basics of survival in the prehistoric world. Collect resources and craft your first tools.");
-    SurvivalQuest.NPCGiver = TEXT("Elder_Krog");
-    SurvivalQuest.ExperienceReward = 100;
-
-    FQuest_ObjectiveData CollectSticks;
-    CollectSticks.ObjectiveID = TEXT("COLLECT_STICKS");
-    CollectSticks.Description = TEXT("Collect 5 sticks from the ground");
-    CollectSticks.Type = EQuest_ObjectiveType::CollectItem;
-    CollectSticks.TargetID = TEXT("Stick");
-    CollectSticks.RequiredCount = 5;
-
-    FQuest_ObjectiveData CollectRocks;
-    CollectRocks.ObjectiveID = TEXT("COLLECT_ROCKS");
-    CollectRocks.Description = TEXT("Collect 3 rocks for tool making");
-    CollectRocks.Type = EQuest_ObjectiveType::CollectItem;
-    CollectRocks.TargetID = TEXT("Rock");
-    CollectRocks.RequiredCount = 3;
-
-    FQuest_ObjectiveData CraftAxe;
-    CraftAxe.ObjectiveID = TEXT("CRAFT_AXE");
-    CraftAxe.Description = TEXT("Craft your first stone axe");
-    CraftAxe.Type = EQuest_ObjectiveType::Craft;
-    CraftAxe.TargetID = TEXT("StoneAxe");
-    CraftAxe.RequiredCount = 1;
-
-    SurvivalQuest.Objectives.Add(CollectSticks);
-    SurvivalQuest.Objectives.Add(CollectRocks);
-    SurvivalQuest.Objectives.Add(CraftAxe);
-    AllQuests.Add(SurvivalQuest.QuestID, SurvivalQuest);
-
-    // Quest 2: First Hunt
-    FQuest_QuestData HuntQuest;
-    HuntQuest.QuestID = TEXT("QUEST_FIRST_HUNT");
-    HuntQuest.QuestName = TEXT("The Hunter's Trial");
-    HuntQuest.Description = TEXT("Prove your hunting skills by taking down dangerous prey. Bring back trophies as proof of your prowess.");
-    HuntQuest.NPCGiver = TEXT("Warrior_Thok");
-    HuntQuest.ExperienceReward = 250;
-
-    FQuest_ObjectiveData KillRaptors;
-    KillRaptors.ObjectiveID = TEXT("KILL_RAPTORS");
-    KillRaptors.Description = TEXT("Hunt 3 Velociraptors in the hunting grounds");
-    KillRaptors.Type = EQuest_ObjectiveType::KillTarget;
-    KillRaptors.TargetID = TEXT("Velociraptor");
-    KillRaptors.RequiredCount = 3;
-
-    FQuest_ObjectiveData ReachHuntZone;
-    ReachHuntZone.ObjectiveID = TEXT("REACH_HUNT_ZONE");
-    ReachHuntZone.Description = TEXT("Travel to the designated hunting grounds");
-    ReachHuntZone.Type = EQuest_ObjectiveType::ReachLocation;
-    ReachHuntZone.TargetLocation = FVector(4000, 2000, 100);
-    ReachHuntZone.CompletionRadius = 1000.0f;
-
-    HuntQuest.Objectives.Add(ReachHuntZone);
-    HuntQuest.Objectives.Add(KillRaptors);
-    AllQuests.Add(HuntQuest.QuestID, HuntQuest);
-
-    // Quest 3: Valley Exploration
-    FQuest_QuestData ExploreQuest;
-    ExploreQuest.QuestID = TEXT("QUEST_VALLEY_EXPLORATION");
-    ExploreQuest.QuestName = TEXT("Secrets of the Valley");
-    ExploreQuest.Description = TEXT("Explore the mysterious valley and discover its hidden secrets. Find the ancient cave and the sacred water source.");
-    ExploreQuest.NPCGiver = TEXT("Scout_Vera");
-    ExploreQuest.ExperienceReward = 200;
-
-    FQuest_ObjectiveData FindCave;
-    FindCave.ObjectiveID = TEXT("FIND_CAVE");
-    FindCave.Description = TEXT("Discover the entrance to the ancient cave");
-    FindCave.Type = EQuest_ObjectiveType::ReachLocation;
-    FindCave.TargetLocation = FVector(-3000, -1000, 200);
-    FindCave.CompletionRadius = 500.0f;
-
-    FQuest_ObjectiveData FindWater;
-    FindWater.ObjectiveID = TEXT("FIND_WATER");
-    FindWater.Description = TEXT("Locate the fresh water source");
-    FindWater.Type = EQuest_ObjectiveType::ReachLocation;
-    FindWater.TargetLocation = FVector(1000, 3000, 150);
-    FindWater.CompletionRadius = 800.0f;
-
-    FQuest_ObjectiveData TalkToHealer;
-    TalkToHealer.ObjectiveID = TEXT("TALK_HEALER");
-    TalkToHealer.Description = TEXT("Report your findings to Healer Mira");
-    TalkToHealer.Type = EQuest_ObjectiveType::TalkToNPC;
-    TalkToHealer.TargetID = TEXT("Healer_Mira");
-
-    ExploreQuest.Objectives.Add(FindCave);
-    ExploreQuest.Objectives.Add(FindWater);
-    ExploreQuest.Objectives.Add(TalkToHealer);
-    AllQuests.Add(ExploreQuest.QuestID, ExploreQuest);
-}
-
-void UQuest_ObjectiveSystem::StartQuest(const FString& QuestID)
-{
-    if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
+    if (Objective && !ActiveObjectives.Contains(Objective))
     {
-        if (!Quest->bActive && !Quest->bCompleted)
+        ActiveObjectives.Add(Objective);
+        UE_LOG(LogTemp, Log, TEXT("Objective registered: %s"), *Objective->ObjectiveData.Description);
+    }
+}
+
+void UQuest_ObjectiveSubsystem::UnregisterObjective(UQuest_ObjectiveComponent* Objective)
+{
+    if (Objective)
+    {
+        ActiveObjectives.Remove(Objective);
+        UE_LOG(LogTemp, Log, TEXT("Objective unregistered: %s"), *Objective->ObjectiveData.Description);
+    }
+}
+
+TArray<UQuest_ObjectiveComponent*> UQuest_ObjectiveSubsystem::GetActiveObjectives() const
+{
+    TArray<UQuest_ObjectiveComponent*> ActiveOnly;
+    for (UQuest_ObjectiveComponent* Objective : ActiveObjectives)
+    {
+        if (Objective && Objective->ObjectiveData.Status == EQuest_ObjectiveStatus::Active)
         {
-            Quest->bActive = true;
-            ActiveQuestIDs.AddUnique(QuestID);
-            
-            UE_LOG(LogTemp, Log, TEXT("Started quest: %s"), *Quest->QuestName);
-            
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-                    FString::Printf(TEXT("Quest Started: %s"), *Quest->QuestName));
-            }
+            ActiveOnly.Add(Objective);
+        }
+    }
+    return ActiveOnly;
+}
+
+UQuest_ObjectiveComponent* UQuest_ObjectiveSubsystem::FindObjectiveByID(const FString& ObjectiveID) const
+{
+    for (UQuest_ObjectiveComponent* Objective : ActiveObjectives)
+    {
+        if (Objective && Objective->ObjectiveData.ObjectiveID == ObjectiveID)
+        {
+            return Objective;
+        }
+    }
+    return nullptr;
+}
+
+void UQuest_ObjectiveSubsystem::NotifyActorKilled(AActor* KilledActor, AActor* Killer)
+{
+    for (UQuest_ObjectiveComponent* Objective : ActiveObjectives)
+    {
+        if (Objective)
+        {
+            Objective->OnActorKilled(KilledActor, Killer);
         }
     }
 }
 
-void UQuest_ObjectiveSystem::CompleteQuest(const FString& QuestID)
+void UQuest_ObjectiveSubsystem::NotifyItemCollected(const FString& ItemTag, int32 Amount)
 {
-    if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
+    for (UQuest_ObjectiveComponent* Objective : ActiveObjectives)
     {
-        Quest->bCompleted = true;
-        Quest->bActive = false;
-        ActiveQuestIDs.Remove(QuestID);
-        
-        UE_LOG(LogTemp, Log, TEXT("Completed quest: %s"), *Quest->QuestName);
-        
-        OnQuestCompleted.Broadcast(QuestID);
-        
-        if (GEngine)
+        if (Objective)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Gold, 
-                FString::Printf(TEXT("Quest Completed: %s (+%d XP)"), *Quest->QuestName, Quest->ExperienceReward));
+            Objective->OnItemCollected(ItemTag, Amount);
         }
     }
 }
 
-void UQuest_ObjectiveSystem::UpdateObjective(const FString& QuestID, const FString& ObjectiveID, int32 Progress)
+void UQuest_ObjectiveSubsystem::NotifyLocationReached(const FVector& Location, AActor* ReachingActor)
 {
-    if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
+    for (UQuest_ObjectiveComponent* Objective : ActiveObjectives)
     {
-        if (Quest->bActive)
+        if (Objective)
         {
-            for (FQuest_ObjectiveData& Objective : Quest->Objectives)
-            {
-                if (Objective.ObjectiveID == ObjectiveID && !Objective.bCompleted)
-                {
-                    Objective.CurrentCount += Progress;
-                    
-                    CheckObjectiveCompletion(*Quest, Objective);
-                    CheckQuestCompletion(*Quest);
-                    
-                    OnObjectiveUpdated.Broadcast(QuestID, ObjectiveID);
-                    break;
-                }
-            }
+            Objective->OnLocationReached(Location, ReachingActor);
         }
     }
 }
 
-void UQuest_ObjectiveSystem::CheckLocationObjectives(const FVector& PlayerLocation)
+void UQuest_ObjectiveSubsystem::ProcessKillObjectives(AActor* KilledActor, AActor* Killer)
 {
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-        {
-            for (FQuest_ObjectiveData& Objective : Quest->Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::ReachLocation && !Objective.bCompleted)
-                {
-                    float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
-                    if (Distance <= Objective.CompletionRadius)
-                    {
-                        Objective.CurrentCount = 1;
-                        CheckObjectiveCompletion(*Quest, Objective);
-                        CheckQuestCompletion(*Quest);
-                        
-                        OnObjectiveUpdated.Broadcast(QuestID, Objective.ObjectiveID);
-                    }
-                }
-            }
-        }
-    }
+    NotifyActorKilled(KilledActor, Killer);
 }
 
-void UQuest_ObjectiveSystem::OnDinosaurKilled(const FString& DinosaurType)
+void UQuest_ObjectiveSubsystem::ProcessCollectionObjectives(const FString& ItemTag, int32 Amount)
 {
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-        {
-            for (FQuest_ObjectiveData& Objective : Quest->Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::KillTarget && 
-                    Objective.TargetID == DinosaurType && !Objective.bCompleted)
-                {
-                    UpdateObjective(QuestID, Objective.ObjectiveID, 1);
-                }
-            }
-        }
-    }
+    NotifyItemCollected(ItemTag, Amount);
 }
 
-void UQuest_ObjectiveSystem::OnItemCollected(const FString& ItemType, int32 Count)
+void UQuest_ObjectiveSubsystem::ProcessLocationObjectives(const FVector& Location, AActor* ReachingActor)
 {
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-        {
-            for (FQuest_ObjectiveData& Objective : Quest->Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::CollectItem && 
-                    Objective.TargetID == ItemType && !Objective.bCompleted)
-                {
-                    UpdateObjective(QuestID, Objective.ObjectiveID, Count);
-                }
-            }
-        }
-    }
-}
-
-void UQuest_ObjectiveSystem::OnNPCTalkedTo(const FString& NPCID)
-{
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-        {
-            for (FQuest_ObjectiveData& Objective : Quest->Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::TalkToNPC && 
-                    Objective.TargetID == NPCID && !Objective.bCompleted)
-                {
-                    UpdateObjective(QuestID, Objective.ObjectiveID, 1);
-                }
-            }
-        }
-    }
-}
-
-void UQuest_ObjectiveSystem::CheckObjectiveCompletion(FQuest_QuestData& Quest, FQuest_ObjectiveData& Objective)
-{
-    if (Objective.CurrentCount >= Objective.RequiredCount)
-    {
-        Objective.bCompleted = true;
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Blue, 
-                FString::Printf(TEXT("Objective Complete: %s"), *Objective.Description));
-        }
-    }
-}
-
-void UQuest_ObjectiveSystem::CheckQuestCompletion(FQuest_QuestData& Quest)
-{
-    bool bAllObjectivesComplete = true;
-    for (const FQuest_ObjectiveData& Objective : Quest.Objectives)
-    {
-        if (!Objective.bCompleted)
-        {
-            bAllObjectivesComplete = false;
-            break;
-        }
-    }
-    
-    if (bAllObjectivesComplete && !Quest.bCompleted)
-    {
-        CompleteQuest(Quest.QuestID);
-    }
-}
-
-bool UQuest_ObjectiveSystem::IsQuestActive(const FString& QuestID) const
-{
-    if (const FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-    {
-        return Quest->bActive;
-    }
-    return false;
-}
-
-bool UQuest_ObjectiveSystem::IsQuestCompleted(const FString& QuestID) const
-{
-    if (const FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-    {
-        return Quest->bCompleted;
-    }
-    return false;
-}
-
-TArray<FQuest_QuestData> UQuest_ObjectiveSystem::GetActiveQuests() const
-{
-    TArray<FQuest_QuestData> ActiveQuests;
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (const FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-        {
-            ActiveQuests.Add(*Quest);
-        }
-    }
-    return ActiveQuests;
-}
-
-FQuest_QuestData UQuest_ObjectiveSystem::GetQuestData(const FString& QuestID) const
-{
-    if (const FQuest_QuestData* Quest = AllQuests.Find(QuestID))
-    {
-        return *Quest;
-    }
-    return FQuest_QuestData();
+    NotifyLocationReached(Location, ReachingActor);
 }
