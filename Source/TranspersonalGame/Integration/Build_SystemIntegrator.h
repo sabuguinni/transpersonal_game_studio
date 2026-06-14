@@ -2,16 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Build_SystemIntegrator.generated.h"
 
 UENUM(BlueprintType)
 enum class EBuild_IntegrationStatus : uint8
 {
-    Healthy,
-    Moderate,
-    NeedsWork,
+    Unknown,
+    Stable,
+    NeedsAttention,
     Critical
 };
 
@@ -20,120 +20,89 @@ struct TRANSPERSONALGAME_API FBuild_SystemMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
     int32 TotalActors = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CriticalSystemsLoaded = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    int32 DinosaurCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActiveSystems = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    int32 VFXCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float QualityScore = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    int32 AudioCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::NeedsWork;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    int32 LightingCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bLevelPlayable = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    float BuildScore = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 HighImpactActors = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Metrics")
+    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::Unknown;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 MediumImpactActors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 LowImpactActors = 0;
+    FBuild_SystemMetrics()
+    {
+        TotalActors = 0;
+        DinosaurCount = 0;
+        VFXCount = 0;
+        AudioCount = 0;
+        LightingCount = 0;
+        BuildScore = 0.0f;
+        Status = EBuild_IntegrationStatus::Unknown;
+    }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CrossSystemTest
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 ActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIntegrationHealthy = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> Dependencies;
-};
-
-/**
- * System Integrator - Manages cross-system integration and build validation
- * Ensures all game systems work together cohesively
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_SystemIntegrator : public UWorldSubsystem
+class TRANSPERSONALGAME_API UBuild_SystemIntegrator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuild_SystemIntegrator();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuild_SystemMetrics ValidateSystemIntegration();
+    FBuild_SystemMetrics AnalyzeBuildHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuild_CrossSystemTest> RunCrossSystemTests();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCriticalSystems();
+    bool ValidateSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
     void EnforceActorCaps();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    float CalculatePerformanceScore();
+    EBuild_IntegrationStatus GetIntegrationStatus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsLevelPlayable();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void RunFullIntegrationValidation();
+    TArray<AActor*> GetActorsByCategory(const FString& Category);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport();
+    void GenerateBuildReport();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
     FBuild_SystemMetrics CurrentMetrics;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_CrossSystemTest> LastTestResults;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxTotalActors = 8000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 MaxActorCount = 8000;
+    int32 MaxDinosaurActors = 150;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 MaxDinosaurCount = 150;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float QualityThreshold = 0.8f;
+    float IntegrationCheckInterval = 30.0f;
 
 private:
-    void ValidateWorldGeneration();
-    void ValidateEnvironmentSystems();
-    void ValidateCharacterSystems();
-    void ValidateAISystems();
-    void ValidateAudioVFXSystems();
-    void ValidateQuestNarrativeSystems();
+    float LastIntegrationCheck = 0.0f;
 
-    bool CheckSystemDependencies(const FString& SystemName);
-    void CleanupRedundantActors();
-    void OptimizePerformance();
-
-    TArray<FString> CriticalSystemClasses;
-    TMap<FString, TArray<FString>> SystemDependencies;
+    void UpdateMetrics();
+    void ValidateModuleDependencies();
+    void CheckCrossSystemCompatibility();
+    float CalculateBuildScore(const FBuild_SystemMetrics& Metrics);
 };
