@@ -1,579 +1,322 @@
 #include "Quest_CrowdIntegrationManager.h"
-#include "AI/Crowd/Crowd_MassEntityManager.h"
-#include "Character/TranspersonalCharacter.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "../Crowd/Crowd_MassEntityManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/StaticMesh.h"
 
 AQuest_CrowdIntegrationManager::AQuest_CrowdIntegrationManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    
+    EventCheckInterval = 2.0f;
+    MaxSimultaneousEvents = 5;
+    bEnableCrowdQuestIntegration = true;
+    LastEventCheck = 0.0f;
+    CrowdManager = nullptr;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Initialize default crowd events
+    FQuest_CrowdEvent GatheringEvent;
+    GatheringEvent.EventID = TEXT("TribalGathering");
+    GatheringEvent.TriggerType = EQuest_ObjectiveType::Gather;
+    GatheringEvent.RequiredCrowdSize = 25;
+    GatheringEvent.EventRadius = 1500.0f;
+    GatheringEvent.EventDuration = 120.0f;
+    ActiveCrowdEvents.Add(GatheringEvent);
 
-    // Create detection sphere
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetupAttachment(RootComponent);
-    DetectionSphere->SetSphereRadius(1000.0f);
-    DetectionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    DetectionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    DetectionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    FQuest_CrowdEvent HuntingParty;
+    HuntingParty.EventID = TEXT("HuntingParty");
+    HuntingParty.TriggerType = EQuest_ObjectiveType::Hunt;
+    HuntingParty.RequiredCrowdSize = 15;
+    HuntingParty.EventRadius = 2000.0f;
+    HuntingParty.EventDuration = 180.0f;
+    ActiveCrowdEvents.Add(HuntingParty);
 
-    // Create quest marker mesh
-    QuestMarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("QuestMarkerMesh"));
-    QuestMarkerMesh->SetupAttachment(RootComponent);
-    QuestMarkerMesh->SetRelativeLocation(FVector(0, 0, 300));
-    QuestMarkerMesh->SetRelativeScale3D(FVector(2.0f, 2.0f, 2.0f));
+    // Initialize crowd responses
+    FQuest_CrowdResponse CelebrationResponse;
+    CelebrationResponse.ResponseID = TEXT("QuestCelebration");
+    CelebrationResponse.NewBehavior = ECrowd_BehaviorType::Gathering;
+    CelebrationResponse.ResponseIntensity = 2.0f;
+    CelebrationResponse.ResponseDuration = 60.0f;
+    CelebrationResponse.AffectedEntityCount = 100;
+    CrowdResponses.Add(CelebrationResponse);
 
-    // Initialize quest properties
-    CrowdInteractionRadius = 1000.0f;
-    CurrentCrowdCount = 0;
-    CrowdDensityThreshold = 50.0f;
-    bQuestSystemActive = true;
-    ActiveQuestCount = 0;
-    TotalQuestRewards = 0.0f;
-
-    // Initialize timers
-    EscortMissionTimer = 0.0f;
-    CrowdControlTimer = 0.0f;
-    EvacuationTimer = 0.0f;
-
-    // Initialize internal tracking
-    LastCrowdUpdateTime = 0.0f;
-    CompletedQuestCount = 0;
-    SystemStartTime = 0.0f;
-
-    // Initialize default escort objectives
-    FQuest_EscortObjective DefaultEscort;
-    DefaultEscort.ObjectiveName = TEXT("Escort Survivors to Safety");
-    DefaultEscort.RequiredCrowdSize = 15;
-    DefaultEscort.EscortRadius = 600.0f;
-    DefaultEscort.CompletionReward = 200.0f;
-    EscortObjectives.Add(DefaultEscort);
-
-    // Initialize default crowd control objectives
-    FQuest_CrowdControlObjective DefaultControl;
-    DefaultControl.ObjectiveName = TEXT("Maintain Order During Crisis");
-    DefaultControl.ControlRadius = 800.0f;
-    DefaultControl.MaxCrowdDensity = 30;
-    DefaultControl.TimeLimit = 240.0f;
-    DefaultControl.CompletionReward = 150.0f;
-    CrowdControlObjectives.Add(DefaultControl);
-
-    // Initialize default evacuation objectives
-    FQuest_CrowdEvacuationObjective DefaultEvacuation;
-    DefaultEvacuation.ObjectiveName = TEXT("Emergency Evacuation");
-    DefaultEvacuation.DangerZoneRadius = 1200.0f;
-    DefaultEvacuation.RequiredEvacuees = 20;
-    DefaultEvacuation.TimeLimit = 480.0f;
-    DefaultEvacuation.CompletionReward = 300.0f;
-    EvacuationObjectives.Add(DefaultEvacuation);
+    FQuest_CrowdResponse AlertResponse;
+    AlertResponse.ResponseID = TEXT("QuestAlert");
+    AlertResponse.NewBehavior = ECrowd_BehaviorType::Fleeing;
+    AlertResponse.ResponseIntensity = 3.0f;
+    AlertResponse.ResponseDuration = 45.0f;
+    AlertResponse.AffectedEntityCount = 200;
+    CrowdResponses.Add(AlertResponse);
 }
 
 void AQuest_CrowdIntegrationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    SystemStartTime = GetWorld()->GetTimeSeconds();
+    ValidateCrowdManager();
     
-    // Find crowd manager in the world
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), UCrowd_MassEntityManager::StaticClass(), FoundActors);
-    if (FoundActors.Num() > 0)
+    if (bEnableCrowdQuestIntegration)
     {
-        CrowdManager = Cast<UCrowd_MassEntityManager>(FoundActors[0]);
-        if (CrowdManager)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Quest system connected to crowd manager"));
-        }
+        GetWorldTimerManager().SetTimer(EventCheckTimer, this, &AQuest_CrowdIntegrationManager::CheckActiveEvents, EventCheckInterval, true);
+        UE_LOG(LogTemp, Log, TEXT("Quest-Crowd Integration Manager initialized with %d events"), ActiveCrowdEvents.Num());
     }
-
-    // Initialize progress tracking arrays
-    EscortProgressTracking.SetNum(EscortObjectives.Num());
-    CrowdControlProgressTracking.SetNum(CrowdControlObjectives.Num());
-    EvacuationProgressTracking.SetNum(EvacuationObjectives.Num());
-
-    for (int32 i = 0; i < EscortProgressTracking.Num(); i++)
-    {
-        EscortProgressTracking[i] = 0.0f;
-    }
-    for (int32 i = 0; i < CrowdControlProgressTracking.Num(); i++)
-    {
-        CrowdControlProgressTracking[i] = 0.0f;
-    }
-    for (int32 i = 0; i < EvacuationProgressTracking.Num(); i++)
-    {
-        EvacuationProgressTracking[i] = 0.0f;
-    }
-
-    UpdateQuestMarkers();
 }
 
 void AQuest_CrowdIntegrationManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (!bQuestSystemActive) return;
-
-    // Update crowd count
-    CurrentCrowdCount = GetNearbyCrowdCount();
     
-    // Process active objectives
-    ProcessEscortObjectives(DeltaTime);
-    ProcessCrowdControlObjectives(DeltaTime);
-    ProcessEvacuationObjectives(DeltaTime);
-
-    // Update timers
-    LastCrowdUpdateTime += DeltaTime;
-    if (LastCrowdUpdateTime >= 1.0f) // Update every second
+    if (bEnableCrowdQuestIntegration)
     {
-        LastCrowdUpdateTime = 0.0f;
-        float CurrentDensity = CalculateCrowdDensity();
-        OnCrowdDensityChanged(CurrentDensity);
-    }
-}
-
-void AQuest_CrowdIntegrationManager::StartEscortMission(int32 ObjectiveIndex)
-{
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < EscortObjectives.Num())
-    {
-        EscortObjectives[ObjectiveIndex].bIsActive = true;
-        EscortMissionTimer = 0.0f;
-        EscortProgressTracking[ObjectiveIndex] = 0.0f;
-        ActiveQuestCount++;
-        
-        UE_LOG(LogTemp, Log, TEXT("Started escort mission: %s"), *EscortObjectives[ObjectiveIndex].ObjectiveName);
-        
-        if (GEngine)
+        LastEventCheck += DeltaTime;
+        if (LastEventCheck >= EventCheckInterval)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-                FString::Printf(TEXT("Quest Started: %s"), *EscortObjectives[ObjectiveIndex].ObjectiveName));
+            UpdateQuestCrowdObjectives();
+            ProcessCrowdResponses();
+            LastEventCheck = 0.0f;
         }
     }
 }
 
-void AQuest_CrowdIntegrationManager::StartCrowdControlMission(int32 ObjectiveIndex)
+void AQuest_CrowdIntegrationManager::TriggerCrowdEvent(const FString& EventID, FVector Location, int32 CrowdSize)
 {
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < CrowdControlObjectives.Num())
+    if (!bEnableCrowdQuestIntegration || !CrowdManager)
     {
-        CrowdControlObjectives[ObjectiveIndex].bIsActive = true;
-        CrowdControlTimer = 0.0f;
-        CrowdControlProgressTracking[ObjectiveIndex] = 0.0f;
-        ActiveQuestCount++;
-        
-        UE_LOG(LogTemp, Log, TEXT("Started crowd control mission: %s"), *CrowdControlObjectives[ObjectiveIndex].ObjectiveName);
-        
-        if (GEngine)
+        UE_LOG(LogTemp, Warning, TEXT("Cannot trigger crowd event - integration disabled or no crowd manager"));
+        return;
+    }
+
+    for (FQuest_CrowdEvent& Event : ActiveCrowdEvents)
+    {
+        if (Event.EventID == EventID && !Event.bIsActive)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Blue, 
-                FString::Printf(TEXT("Quest Started: %s"), *CrowdControlObjectives[ObjectiveIndex].ObjectiveName));
+            Event.bIsActive = true;
+            Event.EventLocation = Location;
+            Event.RequiredCrowdSize = CrowdSize;
+            
+            // Trigger crowd behavior change
+            CrowdManager->SetBehaviorInRadius(Location, Event.EventRadius, ECrowd_BehaviorType::Gathering);
+            
+            UE_LOG(LogTemp, Log, TEXT("Triggered crowd event: %s at location (%f, %f, %f) with %d entities"), 
+                *EventID, Location.X, Location.Y, Location.Z, CrowdSize);
+            break;
         }
     }
 }
 
-void AQuest_CrowdIntegrationManager::StartEvacuationMission(int32 ObjectiveIndex)
+void AQuest_CrowdIntegrationManager::EndCrowdEvent(const FString& EventID)
 {
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < EvacuationObjectives.Num())
+    for (FQuest_CrowdEvent& Event : ActiveCrowdEvents)
     {
-        EvacuationObjectives[ObjectiveIndex].bIsActive = true;
-        EvacuationTimer = 0.0f;
-        EvacuationProgressTracking[ObjectiveIndex] = 0.0f;
-        ActiveQuestCount++;
-        
-        UE_LOG(LogTemp, Log, TEXT("Started evacuation mission: %s"), *EvacuationObjectives[ObjectiveIndex].ObjectiveName);
-        
-        if (GEngine)
+        if (Event.EventID == EventID && Event.bIsActive)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
-                FString::Printf(TEXT("Emergency Quest: %s"), *EvacuationObjectives[ObjectiveIndex].ObjectiveName));
-        }
-    }
-}
-
-void AQuest_CrowdIntegrationManager::CompleteQuest(const FString& QuestName, float RewardAmount)
-{
-    TotalQuestRewards += RewardAmount;
-    CompletedQuestCount++;
-    ActiveQuestCount = FMath::Max(0, ActiveQuestCount - 1);
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest completed: %s - Reward: %.2f"), *QuestName, RewardAmount);
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Yellow, 
-            FString::Printf(TEXT("Quest Complete! %s - Reward: %.0f"), *QuestName, RewardAmount));
-    }
-}
-
-void AQuest_CrowdIntegrationManager::FailQuest(const FString& QuestName)
-{
-    ActiveQuestCount = FMath::Max(0, ActiveQuestCount - 1);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest failed: %s"), *QuestName);
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
-            FString::Printf(TEXT("Quest Failed: %s"), *QuestName));
-    }
-}
-
-int32 AQuest_CrowdIntegrationManager::GetNearbyCrowdCount()
-{
-    int32 Count = 0;
-    
-    if (CrowdManager)
-    {
-        // This would interface with the crowd manager to get actual count
-        // For now, simulate based on detection sphere overlaps
-        TArray<AActor*> OverlappingActors;
-        DetectionSphere->GetOverlappingActors(OverlappingActors, APawn::StaticClass());
-        
-        // Filter for crowd entities (not player)
-        for (AActor* Actor : OverlappingActors)
-        {
-            if (Actor && !Actor->IsA<ATranspersonalCharacter>())
+            Event.bIsActive = false;
+            
+            if (CrowdManager)
             {
-                Count++;
+                // Reset crowd behavior to wandering
+                CrowdManager->SetBehaviorInRadius(Event.EventLocation, Event.EventRadius, ECrowd_BehaviorType::Wandering);
             }
+            
+            UE_LOG(LogTemp, Log, TEXT("Ended crowd event: %s"), *EventID);
+            break;
         }
     }
-    
-    return Count;
 }
 
-float AQuest_CrowdIntegrationManager::CalculateCrowdDensity()
+void AQuest_CrowdIntegrationManager::SetCrowdBehaviorForQuest(const FString& QuestID, ECrowd_BehaviorType NewBehavior, float Duration)
 {
-    if (CrowdInteractionRadius <= 0.0f) return 0.0f;
-    
-    float Area = PI * CrowdInteractionRadius * CrowdInteractionRadius;
-    return (float)CurrentCrowdCount / (Area / 10000.0f); // Normalize to per 100x100 unit area
-}
-
-void AQuest_CrowdIntegrationManager::TriggerCrowdPanic()
-{
-    if (CrowdManager)
+    if (!CrowdManager)
     {
-        // Interface with crowd manager to trigger panic behavior
-        UE_LOG(LogTemp, Warning, TEXT("Crowd panic triggered at quest location"));
-        
-        if (GEngine)
+        return;
+    }
+
+    // Find all active events related to this quest and update their behavior
+    for (FQuest_CrowdEvent& Event : ActiveCrowdEvents)
+    {
+        if (Event.bIsActive && Event.EventID.Contains(QuestID))
         {
-            GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("CROWD PANIC!"));
+            CrowdManager->SetBehaviorInRadius(Event.EventLocation, Event.EventRadius, NewBehavior);
+            
+            // Schedule behavior reset after duration
+            FTimerHandle ResetTimer;
+            FTimerDelegate ResetDelegate;
+            ResetDelegate.BindLambda([this, Event, Duration]()
+            {
+                if (CrowdManager)
+                {
+                    CrowdManager->SetBehaviorInRadius(Event.EventLocation, Event.EventRadius, ECrowd_BehaviorType::Wandering);
+                }
+            });
+            
+            GetWorldTimerManager().SetTimer(ResetTimer, ResetDelegate, Duration, false);
         }
     }
 }
 
-void AQuest_CrowdIntegrationManager::DirectCrowdToLocation(const FVector& TargetLocation)
+bool AQuest_CrowdIntegrationManager::IsCrowdEventActive(const FString& EventID) const
 {
-    if (CrowdManager)
+    for (const FQuest_CrowdEvent& Event : ActiveCrowdEvents)
     {
-        // Interface with crowd manager to direct crowd movement
-        UE_LOG(LogTemp, Log, TEXT("Directing crowd to location: %s"), *TargetLocation.ToString());
-    }
-}
-
-void AQuest_CrowdIntegrationManager::SetCrowdBehaviorZone(const FVector& Center, float Radius, int32 BehaviorType)
-{
-    if (CrowdManager)
-    {
-        // Interface with crowd manager to set behavior zones
-        UE_LOG(LogTemp, Log, TEXT("Setting crowd behavior zone at %s with radius %.2f"), *Center.ToString(), Radius);
-    }
-}
-
-bool AQuest_CrowdIntegrationManager::ValidateEscortProgress(int32 ObjectiveIndex)
-{
-    if (ObjectiveIndex < 0 || ObjectiveIndex >= EscortObjectives.Num()) return false;
-    
-    const FQuest_EscortObjective& Objective = EscortObjectives[ObjectiveIndex];
-    if (!Objective.bIsActive) return false;
-    
-    // Check if required crowd size is being escorted
-    int32 EscortedCount = GetNearbyCrowdCount();
-    bool bSufficientCrowd = EscortedCount >= Objective.RequiredCrowdSize;
-    
-    // Update progress
-    if (bSufficientCrowd)
-    {
-        EscortProgressTracking[ObjectiveIndex] += 0.1f; // Increment progress
-        if (EscortProgressTracking[ObjectiveIndex] >= 1.0f)
+        if (Event.EventID == EventID)
         {
-            OnEscortMissionComplete(ObjectiveIndex);
-            return true;
+            return Event.bIsActive;
         }
     }
-    
     return false;
 }
 
-bool AQuest_CrowdIntegrationManager::ValidateCrowdControlProgress(int32 ObjectiveIndex)
+int32 AQuest_CrowdIntegrationManager::GetCrowdSizeInRadius(FVector Center, float Radius) const
 {
-    if (ObjectiveIndex < 0 || ObjectiveIndex >= CrowdControlObjectives.Num()) return false;
-    
-    const FQuest_CrowdControlObjective& Objective = CrowdControlObjectives[ObjectiveIndex];
-    if (!Objective.bIsActive) return false;
-    
-    // Check crowd density within control radius
-    float CurrentDensity = CalculateCrowdDensity();
-    bool bDensityControlled = CurrentDensity <= (float)Objective.MaxCrowdDensity;
-    
-    // Update progress based on control maintenance
-    if (bDensityControlled)
+    if (!CrowdManager)
     {
-        CrowdControlProgressTracking[ObjectiveIndex] += 0.05f;
-        if (CrowdControlProgressTracking[ObjectiveIndex] >= 1.0f)
+        return 0;
+    }
+    
+    return CrowdManager->GetEntityCountInRadius(Center, Radius);
+}
+
+void AQuest_CrowdIntegrationManager::CreateQuestGatheringEvent(FVector Location, int32 RequiredPeople, float Duration)
+{
+    FQuest_CrowdEvent NewEvent;
+    NewEvent.EventID = FString::Printf(TEXT("Gathering_%d"), FMath::RandRange(1000, 9999));
+    NewEvent.TriggerType = EQuest_ObjectiveType::Gather;
+    NewEvent.RequiredCrowdSize = RequiredPeople;
+    NewEvent.EventRadius = 1200.0f;
+    NewEvent.EventLocation = Location;
+    NewEvent.EventDuration = Duration;
+    NewEvent.bIsActive = false;
+    
+    ActiveCrowdEvents.Add(NewEvent);
+    TriggerCrowdEvent(NewEvent.EventID, Location, RequiredPeople);
+    
+    UE_LOG(LogTemp, Log, TEXT("Created quest gathering event at (%f, %f, %f) for %d people"), 
+        Location.X, Location.Y, Location.Z, RequiredPeople);
+}
+
+void AQuest_CrowdIntegrationManager::CreateQuestEscortEvent(FVector StartLocation, FVector EndLocation, int32 EscortSize)
+{
+    FQuest_CrowdEvent NewEvent;
+    NewEvent.EventID = FString::Printf(TEXT("Escort_%d"), FMath::RandRange(1000, 9999));
+    NewEvent.TriggerType = EQuest_ObjectiveType::Escort;
+    NewEvent.RequiredCrowdSize = EscortSize;
+    NewEvent.EventRadius = 800.0f;
+    NewEvent.EventLocation = StartLocation;
+    NewEvent.EventDuration = 300.0f; // 5 minutes
+    NewEvent.bIsActive = false;
+    
+    ActiveCrowdEvents.Add(NewEvent);
+    
+    if (CrowdManager)
+    {
+        // Create escort path from start to end
+        CrowdManager->CreateEscortPath(StartLocation, EndLocation, EscortSize);
+        TriggerCrowdEvent(NewEvent.EventID, StartLocation, EscortSize);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Created quest escort event from (%f, %f, %f) to (%f, %f, %f) with %d entities"), 
+        StartLocation.X, StartLocation.Y, StartLocation.Z, EndLocation.X, EndLocation.Y, EndLocation.Z, EscortSize);
+}
+
+void AQuest_CrowdIntegrationManager::CreateQuestDefenseEvent(FVector DefenseLocation, float DefenseRadius, float Duration)
+{
+    FQuest_CrowdEvent NewEvent;
+    NewEvent.EventID = FString::Printf(TEXT("Defense_%d"), FMath::RandRange(1000, 9999));
+    NewEvent.TriggerType = EQuest_ObjectiveType::Defend;
+    NewEvent.RequiredCrowdSize = 30;
+    NewEvent.EventRadius = DefenseRadius;
+    NewEvent.EventLocation = DefenseLocation;
+    NewEvent.EventDuration = Duration;
+    NewEvent.bIsActive = false;
+    
+    ActiveCrowdEvents.Add(NewEvent);
+    
+    if (CrowdManager)
+    {
+        // Set defensive positions around the location
+        CrowdManager->SetBehaviorInRadius(DefenseLocation, DefenseRadius, ECrowd_BehaviorType::Gathering);
+        TriggerCrowdEvent(NewEvent.EventID, DefenseLocation, 30);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Created quest defense event at (%f, %f, %f) with radius %f for %f seconds"), 
+        DefenseLocation.X, DefenseLocation.Y, DefenseLocation.Z, DefenseRadius, Duration);
+}
+
+void AQuest_CrowdIntegrationManager::UpdateQuestCrowdObjectives()
+{
+    if (!CrowdManager)
+    {
+        return;
+    }
+
+    // Check each active event and update quest objectives based on crowd behavior
+    for (FQuest_CrowdEvent& Event : ActiveCrowdEvents)
+    {
+        if (Event.bIsActive)
         {
-            OnCrowdControlMissionComplete(ObjectiveIndex);
-            return true;
+            int32 CurrentCrowdSize = GetCrowdSizeInRadius(Event.EventLocation, Event.EventRadius);
+            
+            // Check if quest objective is met
+            if (CurrentCrowdSize >= Event.RequiredCrowdSize)
+            {
+                // Trigger quest completion logic here
+                UE_LOG(LogTemp, Log, TEXT("Quest crowd objective met for event %s: %d/%d people gathered"), 
+                    *Event.EventID, CurrentCrowdSize, Event.RequiredCrowdSize);
+                
+                // Could trigger quest completion callback here
+                // OnQuestObjectiveCompleted.Broadcast(Event.EventID);
+            }
         }
     }
-    else
-    {
-        CrowdControlProgressTracking[ObjectiveIndex] = FMath::Max(0.0f, CrowdControlProgressTracking[ObjectiveIndex] - 0.02f);
-    }
-    
-    return false;
 }
 
-bool AQuest_CrowdIntegrationManager::ValidateEvacuationProgress(int32 ObjectiveIndex)
+void AQuest_CrowdIntegrationManager::CheckActiveEvents()
 {
-    if (ObjectiveIndex < 0 || ObjectiveIndex >= EvacuationObjectives.Num()) return false;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    const FQuest_CrowdEvacuationObjective& Objective = EvacuationObjectives[ObjectiveIndex];
-    if (!Objective.bIsActive) return false;
-    
-    // Check evacuation progress (simplified - count crowd near safe zone)
-    FVector SafeZoneLocation = Objective.SafeZoneCenter;
-    int32 EvacuatedCount = 0;
-    
-    // This would check actual crowd positions relative to safe zone
-    // For now, simulate based on time and crowd management
-    float EvacuationRate = (float)CurrentCrowdCount / Objective.RequiredEvacuees;
-    EvacuationProgressTracking[ObjectiveIndex] += EvacuationRate * 0.01f;
-    
-    if (EvacuationProgressTracking[ObjectiveIndex] >= 1.0f)
+    for (FQuest_CrowdEvent& Event : ActiveCrowdEvents)
     {
-        OnEvacuationMissionComplete(ObjectiveIndex);
-        return true;
+        if (Event.bIsActive)
+        {
+            // Check if event duration has expired
+            if (CurrentTime - LastEventCheck > Event.EventDuration)
+            {
+                EndCrowdEvent(Event.EventID);
+            }
+        }
     }
-    
-    return false;
 }
 
-void AQuest_CrowdIntegrationManager::UpdateQuestMarkers()
+void AQuest_CrowdIntegrationManager::ProcessCrowdResponses()
 {
-    // Update visual markers based on active quests
-    if (QuestMarkerMesh)
+    // Process any pending crowd responses to quest events
+    for (const FQuest_CrowdResponse& Response : CrowdResponses)
     {
-        bool bHasActiveQuests = false;
+        if (CrowdManager)
+        {
+            // Apply crowd behavior changes based on quest state
+            // This could be expanded to respond to specific quest events
+            UE_LOG(LogTemp, Verbose, TEXT("Processing crowd response: %s"), *Response.ResponseID);
+        }
+    }
+}
+
+void AQuest_CrowdIntegrationManager::ValidateCrowdManager()
+{
+    if (!CrowdManager)
+    {
+        // Try to find the crowd manager in the world
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), UCrowd_MassEntityManager::StaticClass(), FoundActors);
         
-        // Check for any active objectives
-        for (const FQuest_EscortObjective& Escort : EscortObjectives)
+        if (FoundActors.Num() > 0)
         {
-            if (Escort.bIsActive) { bHasActiveQuests = true; break; }
+            CrowdManager = Cast<UCrowd_MassEntityManager>(FoundActors[0]);
+            UE_LOG(LogTemp, Log, TEXT("Found and linked to Crowd Manager"));
         }
-        for (const FQuest_CrowdControlObjective& Control : CrowdControlObjectives)
+        else
         {
-            if (Control.bIsActive) { bHasActiveQuests = true; break; }
-        }
-        for (const FQuest_CrowdEvacuationObjective& Evacuation : EvacuationObjectives)
-        {
-            if (Evacuation.bIsActive) { bHasActiveQuests = true; break; }
-        }
-        
-        QuestMarkerMesh->SetVisibility(bHasActiveQuests);
-    }
-}
-
-void AQuest_CrowdIntegrationManager::ResetAllQuests()
-{
-    // Reset all objectives
-    for (FQuest_EscortObjective& Escort : EscortObjectives)
-    {
-        Escort.bIsActive = false;
-    }
-    for (FQuest_CrowdControlObjective& Control : CrowdControlObjectives)
-    {
-        Control.bIsActive = false;
-    }
-    for (FQuest_CrowdEvacuationObjective& Evacuation : EvacuationObjectives)
-    {
-        Evacuation.bIsActive = false;
-    }
-    
-    // Reset counters
-    ActiveQuestCount = 0;
-    EscortMissionTimer = 0.0f;
-    CrowdControlTimer = 0.0f;
-    EvacuationTimer = 0.0f;
-    
-    // Reset progress tracking
-    for (int32 i = 0; i < EscortProgressTracking.Num(); i++)
-    {
-        EscortProgressTracking[i] = 0.0f;
-    }
-    for (int32 i = 0; i < CrowdControlProgressTracking.Num(); i++)
-    {
-        CrowdControlProgressTracking[i] = 0.0f;
-    }
-    for (int32 i = 0; i < EvacuationProgressTracking.Num(); i++)
-    {
-        EvacuationProgressTracking[i] = 0.0f;
-    }
-    
-    UpdateQuestMarkers();
-    
-    UE_LOG(LogTemp, Log, TEXT("All quests reset"));
-}
-
-FString AQuest_CrowdIntegrationManager::GetQuestStatusReport()
-{
-    FString Report = FString::Printf(TEXT("=== Quest System Status ===\n"));
-    Report += FString::Printf(TEXT("Active Quests: %d\n"), ActiveQuestCount);
-    Report += FString::Printf(TEXT("Completed Quests: %d\n"), CompletedQuestCount);
-    Report += FString::Printf(TEXT("Total Rewards: %.2f\n"), TotalQuestRewards);
-    Report += FString::Printf(TEXT("Crowd Count: %d\n"), CurrentCrowdCount);
-    Report += FString::Printf(TEXT("Crowd Density: %.2f\n"), CalculateCrowdDensity());
-    Report += FString::Printf(TEXT("System Uptime: %.2f seconds\n"), GetWorld()->GetTimeSeconds() - SystemStartTime);
-    
-    return Report;
-}
-
-void AQuest_CrowdIntegrationManager::ProcessEscortObjectives(float DeltaTime)
-{
-    EscortMissionTimer += DeltaTime;
-    
-    for (int32 i = 0; i < EscortObjectives.Num(); i++)
-    {
-        if (EscortObjectives[i].bIsActive)
-        {
-            ValidateEscortProgress(i);
+            UE_LOG(LogTemp, Warning, TEXT("No Crowd Manager found in world - quest-crowd integration disabled"));
         }
     }
-}
-
-void AQuest_CrowdIntegrationManager::ProcessCrowdControlObjectives(float DeltaTime)
-{
-    CrowdControlTimer += DeltaTime;
-    
-    for (int32 i = 0; i < CrowdControlObjectives.Num(); i++)
-    {
-        if (CrowdControlObjectives[i].bIsActive)
-        {
-            // Check time limit
-            if (CrowdControlTimer >= CrowdControlObjectives[i].TimeLimit)
-            {
-                if (CrowdControlProgressTracking[i] >= 1.0f)
-                {
-                    OnCrowdControlMissionComplete(i);
-                }
-                else
-                {
-                    FailQuest(CrowdControlObjectives[i].ObjectiveName);
-                    CrowdControlObjectives[i].bIsActive = false;
-                }
-            }
-            else
-            {
-                ValidateCrowdControlProgress(i);
-            }
-        }
-    }
-}
-
-void AQuest_CrowdIntegrationManager::ProcessEvacuationObjectives(float DeltaTime)
-{
-    EvacuationTimer += DeltaTime;
-    
-    for (int32 i = 0; i < EvacuationObjectives.Num(); i++)
-    {
-        if (EvacuationObjectives[i].bIsActive)
-        {
-            // Check time limit
-            if (EvacuationTimer >= EvacuationObjectives[i].TimeLimit)
-            {
-                if (EvacuationProgressTracking[i] >= 1.0f)
-                {
-                    OnEvacuationMissionComplete(i);
-                }
-                else
-                {
-                    FailQuest(EvacuationObjectives[i].ObjectiveName);
-                    EvacuationObjectives[i].bIsActive = false;
-                }
-            }
-            else
-            {
-                ValidateEvacuationProgress(i);
-            }
-        }
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnEscortMissionComplete(int32 ObjectiveIndex)
-{
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < EscortObjectives.Num())
-    {
-        FQuest_EscortObjective& Objective = EscortObjectives[ObjectiveIndex];
-        CompleteQuest(Objective.ObjectiveName, Objective.CompletionReward);
-        Objective.bIsActive = false;
-        EscortProgressTracking[ObjectiveIndex] = 0.0f;
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnCrowdControlMissionComplete(int32 ObjectiveIndex)
-{
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < CrowdControlObjectives.Num())
-    {
-        FQuest_CrowdControlObjective& Objective = CrowdControlObjectives[ObjectiveIndex];
-        CompleteQuest(Objective.ObjectiveName, Objective.CompletionReward);
-        Objective.bIsActive = false;
-        CrowdControlProgressTracking[ObjectiveIndex] = 0.0f;
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnEvacuationMissionComplete(int32 ObjectiveIndex)
-{
-    if (ObjectiveIndex >= 0 && ObjectiveIndex < EvacuationObjectives.Num())
-    {
-        FQuest_CrowdEvacuationObjective& Objective = EvacuationObjectives[ObjectiveIndex];
-        CompleteQuest(Objective.ObjectiveName, Objective.CompletionReward);
-        Objective.bIsActive = false;
-        EvacuationProgressTracking[ObjectiveIndex] = 0.0f;
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnCrowdDensityChanged(float NewDensity)
-{
-    if (NewDensity > CrowdDensityThreshold * 1.5f)
-    {
-        // High density - might trigger panic or control missions
-        UE_LOG(LogTemp, Warning, TEXT("High crowd density detected: %.2f"), NewDensity);
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnCrowdPanicTriggered()
-{
-    // Handle panic events - might auto-start evacuation missions
-    for (int32 i = 0; i < EvacuationObjectives.Num(); i++)
-    {
-        if (!EvacuationObjectives[i].bIsActive)
-        {
-            StartEvacuationMission(i);
-            break; // Start only one evacuation mission
-        }
-    }
-}
-
-void AQuest_CrowdIntegrationManager::OnCrowdReachedWaypoint(int32 WaypointIndex)
-{
-    // Handle waypoint events for escort missions
-    UE_LOG(LogTemp, Log, TEXT("Crowd reached waypoint %d"), WaypointIndex);
 }
