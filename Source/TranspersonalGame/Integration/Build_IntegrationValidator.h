@@ -7,12 +7,39 @@
 #include "Build_IntegrationValidator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_SystemStatus : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Functional  UMETA(DisplayName = "Functional"),
-    Degraded    UMETA(DisplayName = "Degraded"),
-    Failed      UMETA(DisplayName = "Failed")
+    Unknown,
+    Healthy,
+    Warning,
+    Critical,
+    Failed
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bIsLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ClassCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ErrorMessage;
+
+    FBuild_ModuleStatus()
+    {
+        ModuleName = TEXT("");
+        bIsLoaded = false;
+        ClassCount = 0;
+        ErrorMessage = TEXT("");
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -21,92 +48,102 @@ struct TRANSPERSONALGAME_API FBuild_SystemReport
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString SystemName;
+    int32 TotalActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    EBuild_SystemStatus Status;
+    int32 DinosaurCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ErrorMessage;
+    int32 LoadedModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float PerformanceScore;
+    EBuild_IntegrationStatus OverallStatus;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString BuildTimestamp;
 
     FBuild_SystemReport()
     {
-        SystemName = TEXT("");
-        Status = EBuild_SystemStatus::Unknown;
-        ErrorMessage = TEXT("");
-        PerformanceScore = 0.0f;
+        TotalActors = 0;
+        DinosaurCount = 0;
+        LoadedModules = 0;
+        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        BuildTimestamp = TEXT("");
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FBuild_SystemReport> SystemReports;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FunctionalSystemCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float OverallHealthScore;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsGameReady;
-
-    FBuild_IntegrationReport()
-    {
-        TotalActorCount = 0;
-        FunctionalSystemCount = 0;
-        OverallHealthScore = 0.0f;
-        bIsGameReady = false;
-    }
-};
-
+/**
+ * Integration validation system for Transpersonal Game Studio
+ * Monitors build health, module loading, and cross-system compatibility
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UObject
+class TRANSPERSONALGAME_API UBuild_IntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuild_IntegrationValidator();
 
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    FBuild_IntegrationReport ValidateAllSystems();
+    FBuild_SystemReport ValidateSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    FBuild_SystemReport ValidateSystem(const FString& SystemName, UClass* SystemClass);
+    bool ValidateModuleLoading();
 
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateModuleCompilation();
+    bool ValidateActorCounts();
 
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    int32 GetActorCount();
+    bool ValidateCoreGameplay();
 
     UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    float CalculatePerformanceScore();
+    void GenerateBuildReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor)
-    bool ValidateCriticalSystems();
+    // Status getters
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    EBuild_IntegrationStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
+
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    FBuild_SystemReport GetLastSystemReport() const { return LastSystemReport; }
+
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    bool IsSystemHealthy() const { return CurrentBuildStatus == EBuild_IntegrationStatus::Healthy; }
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> CriticalSystemNames;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FBuild_IntegrationReport LastReport;
+    // Internal validation helpers
+    FBuild_ModuleStatus ValidateModule(const FString& ModuleName, const FString& ClassName);
+    int32 CountActorsByKeyword(const TArray<FString>& Keywords);
+    void LogIntegrationStatus(const FString& Message, bool bIsError = false);
 
 private:
-    bool ValidateClassLoading(const FString& ClassName);
-    float MeasureSystemPerformance(UClass* SystemClass);
-    bool CheckSystemDependencies(const FString& SystemName);
-};
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    EBuild_IntegrationStatus CurrentBuildStatus;
 
-#include "Build_IntegrationValidator.generated.h"
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    FBuild_SystemReport LastSystemReport;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    float ValidationInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    int32 MaxActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    int32 MaxDinosaurCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> CoreModuleNames;
+
+    float LastValidationTime;
+    bool bValidationEnabled;
+};
