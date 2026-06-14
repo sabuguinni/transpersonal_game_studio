@@ -4,70 +4,69 @@
 #include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/DataTable.h"
 #include "Char_TribalWarrior.generated.h"
 
-// TODO_ASSET_GENERATION_FAILED: Meshy and DALL-E failed - manual asset creation needed
-// Character specifications for manual implementation:
-// - Primitive Cretaceous tribal warrior
-// - Weathered leather clothing from dinosaur hide
-// - Bone jewelry and ornaments
-// - Stone tools and weapons
-// - Realistic human proportions
-// - Facial features showing survival hardships
-// - Tribal tattoos or scars
-// - Target polycount: 25,000 triangles
-
-UENUM(BlueprintType)
-enum class EChar_WarriorState : uint8
-{
-    Idle            UMETA(DisplayName = "Idle"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Crafting        UMETA(DisplayName = "Crafting"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Wounded         UMETA(DisplayName = "Wounded"),
-    Resting         UMETA(DisplayName = "Resting")
-};
-
-UENUM(BlueprintType)
-enum class EChar_WeaponType : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    StoneSpear      UMETA(DisplayName = "Stone Spear"),
-    BoneClub        UMETA(DisplayName = "Bone Club"),
-    StoneAxe        UMETA(DisplayName = "Stone Axe"),
-    Sling           UMETA(DisplayName = "Sling"),
-    BoneKnife       UMETA(DisplayName = "Bone Knife")
-};
-
+// Character appearance variation data
 USTRUCT(BlueprintType)
-struct FChar_TribalStats
+struct TRANSPERSONALGAME_API FChar_TribalAppearance
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Health = 100.0f;
+    // Skin tone variations (0-1 range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float SkinTone = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Stamina = 100.0f;
+    // Body build variations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    float BodyBuild = 0.5f; // 0=lean, 1=muscular
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Hunger = 100.0f;
+    // Clothing style variations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    int32 ClothingStyle = 0; // 0-4 different hide patterns
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Thirst = 100.0f;
+    // Weapon loadout
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    int32 WeaponSet = 0; // 0=spear+knife, 1=bow+arrows, 2=club+axe
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float CombatExperience = 0.0f;
+    // Tribal markings/tattoos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    int32 TribalMarkings = 0; // 0-3 different patterns
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    float CraftingSkill = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float SurvivalInstinct = 50.0f;
+    FChar_TribalAppearance()
+    {
+        SkinTone = FMath::RandRange(0.2f, 0.8f);
+        BodyBuild = FMath::RandRange(0.3f, 0.9f);
+        ClothingStyle = FMath::RandRange(0, 4);
+        WeaponSet = FMath::RandRange(0, 2);
+        TribalMarkings = FMath::RandRange(0, 3);
+    }
 };
 
+// Equipment attachment points
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_EquipmentSlot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    FName SocketName = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    TSoftObjectPtr<UStaticMesh> EquipmentMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    FTransform RelativeTransform = FTransform::Identity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bIsVisible = true;
+};
+
+/**
+ * Tribal warrior character with customizable appearance and equipment
+ * Designed for Cretaceous period survival gameplay
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AChar_TribalWarrior : public ACharacter
 {
@@ -79,108 +78,78 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    // Character appearance system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    FChar_TribalAppearance AppearanceData;
+
+    // Base character materials
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Materials")
+    TArray<TSoftObjectPtr<UMaterialInterface>> SkinMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Materials")
+    TArray<TSoftObjectPtr<UMaterialInterface>> ClothingMaterials;
+
+    // Equipment system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    TArray<FChar_EquipmentSlot> EquipmentSlots;
+
+    // Equipment mesh components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
+    TArray<UStaticMeshComponent*> EquipmentComponents;
+
+    // Character stats for survival gameplay
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Stats")
+    float Strength = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Stats")
+    float Endurance = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Stats")
+    float Agility = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Stats")
+    float Survival = 50.0f;
+
 public:
-    virtual void Tick(float DeltaTime) override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    // Appearance customization functions
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void SetAppearanceData(const FChar_TribalAppearance& NewAppearance);
 
-    // Character State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character State")
-    EChar_WarriorState CurrentState = EChar_WarriorState::Idle;
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void RandomizeAppearance();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character State")
-    EChar_WeaponType EquippedWeapon = EChar_WeaponType::None;
+    UFUNCTION(BlueprintCallable, Category = "Character Appearance")
+    void ApplyAppearanceToMesh();
 
-    // Survival Stats
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    FChar_TribalStats TribalStats;
+    // Equipment management
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void AttachEquipment(int32 SlotIndex, UStaticMesh* EquipmentMesh);
 
-    // Equipment Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* WeaponMesh;
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void DetachEquipment(int32 SlotIndex);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* ShieldMesh;
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void SetEquipmentVisibility(int32 SlotIndex, bool bVisible);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
-    class UStaticMeshComponent* BackpackMesh;
+    // Character stats
+    UFUNCTION(BlueprintCallable, Category = "Character Stats")
+    void SetCharacterStats(float NewStrength, float NewEndurance, float NewAgility, float NewSurvival);
 
-    // Character Appearance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    class UMaterialInterface* SkinMaterial;
+    UFUNCTION(BlueprintPure, Category = "Character Stats")
+    float GetOverallFitness() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    class UMaterialInterface* ClothingMaterial;
+    // Editor functions for quick setup
+    UFUNCTION(CallInEditor, Category = "Character Setup")
+    void SetupDefaultAppearance();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    TArray<class UMaterialInterface*> TattooMaterials;
+    UFUNCTION(CallInEditor, Category = "Character Setup")
+    void SetupDefaultEquipment();
 
-    // Character Functions
-    UFUNCTION(BlueprintCallable, Category = "Character Actions")
-    void EquipWeapon(EChar_WeaponType WeaponType);
-
-    UFUNCTION(BlueprintCallable, Category = "Character Actions")
-    void UnequipWeapon();
-
-    UFUNCTION(BlueprintCallable, Category = "Character State")
-    void SetWarriorState(EChar_WarriorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void UpdateSurvivalStats(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void TakeDamage(float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void RestoreHealth(float HealAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ConsumeFood(float FoodValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void DrinkWater(float WaterValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void GainCombatExperience(float ExperienceAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void ImproveCraftingSkill(float SkillAmount);
-
-    // Visual Customization
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    void ApplySkinMaterial(class UMaterialInterface* NewSkinMaterial);
-
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    void ApplyClothingMaterial(class UMaterialInterface* NewClothingMaterial);
-
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    void AddTattoo(class UMaterialInterface* TattooMaterial);
-
-    UFUNCTION(BlueprintCallable, Category = "Appearance")
-    void RemoveAllTattoos();
-
-    // Utility Functions
-    UFUNCTION(BlueprintPure, Category = "Character State")
-    bool IsAlive() const;
-
-    UFUNCTION(BlueprintPure, Category = "Character State")
-    bool IsWounded() const;
-
-    UFUNCTION(BlueprintPure, Category = "Character State")
-    bool IsStarving() const;
-
-    UFUNCTION(BlueprintPure, Category = "Character State")
-    bool IsDehydrated() const;
-
-    UFUNCTION(BlueprintPure, Category = "Character State")
-    bool IsExhausted() const;
-
-    UFUNCTION(BlueprintPure, Category = "Combat")
-    float GetCombatEffectiveness() const;
+    UFUNCTION(CallInEditor, Category = "Character Setup")
+    void GenerateRandomVariant();
 
 private:
-    // Internal state management
-    void UpdateCharacterAppearance();
-    void HandleStateTransitions();
-    void ApplyWeaponMesh(EChar_WeaponType WeaponType);
-    void UpdateAnimationState();
+    void InitializeEquipmentComponents();
+    void UpdateMaterialParameters();
+    void ValidateEquipmentSlots();
 };
