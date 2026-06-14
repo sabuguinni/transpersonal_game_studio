@@ -2,122 +2,78 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/TargetPoint.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "../SharedTypes.h"
 #include "Quest_CrowdIntegrationManager.generated.h"
 
-// Forward declarations
 class UCrowd_MassEntityManager;
-class ATranspersonalCharacter;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_EscortObjective
+struct TRANSPERSONALGAME_API FQuest_CrowdEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
-    FString ObjectiveName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
+    EQuest_ObjectiveType TriggerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
     int32 RequiredCrowdSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
-    float EscortRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
+    float EventRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
-    TArray<ATargetPoint*> WaypointRoute;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
+    FVector EventLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
-    float CompletionReward;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
+    float EventDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Escort")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Event")
     bool bIsActive;
 
-    FQuest_EscortObjective()
+    FQuest_CrowdEvent()
     {
-        ObjectiveName = TEXT("Escort Mission");
+        EventID = TEXT("DefaultEvent");
+        TriggerType = EQuest_ObjectiveType::Gather;
         RequiredCrowdSize = 10;
-        EscortRadius = 500.0f;
-        CompletionReward = 100.0f;
+        EventRadius = 1000.0f;
+        EventLocation = FVector::ZeroVector;
+        EventDuration = 60.0f;
         bIsActive = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdControlObjective
+struct TRANSPERSONALGAME_API FQuest_CrowdResponse
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    FString ObjectiveName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Response")
+    FString ResponseID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    float ControlRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Response")
+    ECrowd_BehaviorType NewBehavior;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    int32 MaxCrowdDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Response")
+    float ResponseIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    float TimeLimit;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Response")
+    float ResponseDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    float CompletionReward;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Response")
+    int32 AffectedEntityCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Control")
-    bool bIsActive;
-
-    FQuest_CrowdControlObjective()
+    FQuest_CrowdResponse()
     {
-        ObjectiveName = TEXT("Crowd Control Mission");
-        ControlRadius = 1000.0f;
-        MaxCrowdDensity = 50;
-        TimeLimit = 300.0f;
-        CompletionReward = 150.0f;
-        bIsActive = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdEvacuationObjective
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    FString ObjectiveName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    FVector DangerZoneCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    float DangerZoneRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    FVector SafeZoneCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    int32 RequiredEvacuees;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    float TimeLimit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    float CompletionReward;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Evacuation")
-    bool bIsActive;
-
-    FQuest_CrowdEvacuationObjective()
-    {
-        ObjectiveName = TEXT("Evacuation Mission");
-        DangerZoneCenter = FVector::ZeroVector;
-        DangerZoneRadius = 1500.0f;
-        SafeZoneCenter = FVector(0, 0, 0);
-        RequiredEvacuees = 25;
-        TimeLimit = 600.0f;
-        CompletionReward = 200.0f;
-        bIsActive = false;
+        ResponseID = TEXT("DefaultResponse");
+        NewBehavior = ECrowd_BehaviorType::Wandering;
+        ResponseIntensity = 1.0f;
+        ResponseDuration = 30.0f;
+        AffectedEntityCount = 50;
     }
 };
 
@@ -131,134 +87,60 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* DetectionSphere;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
+    TArray<FQuest_CrowdEvent> ActiveCrowdEvents;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* QuestMarkerMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
+    TArray<FQuest_CrowdResponse> CrowdResponses;
 
-    // Quest objectives
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
-    TArray<FQuest_EscortObjective> EscortObjectives;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
-    TArray<FQuest_CrowdControlObjective> CrowdControlObjectives;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
-    TArray<FQuest_CrowdEvacuationObjective> EvacuationObjectives;
-
-    // Crowd integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Integration")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
     UCrowd_MassEntityManager* CrowdManager;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Integration")
-    float CrowdInteractionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
+    float EventCheckInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Integration")
-    int32 CurrentCrowdCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
+    int32 MaxSimultaneousEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Integration")
-    float CrowdDensityThreshold;
-
-    // Quest state
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest State")
-    bool bQuestSystemActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest State")
-    int32 ActiveQuestCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest State")
-    float TotalQuestRewards;
-
-    // Timers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Timers")
-    float EscortMissionTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Timers")
-    float CrowdControlTimer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Timers")
-    float EvacuationTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Crowd Integration")
+    bool bEnableCrowdQuestIntegration;
 
 public:
-    // Quest management functions
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void StartEscortMission(int32 ObjectiveIndex);
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void StartCrowdControlMission(int32 ObjectiveIndex);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void TriggerCrowdEvent(const FString& EventID, FVector Location, int32 CrowdSize);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void StartEvacuationMission(int32 ObjectiveIndex);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void EndCrowdEvent(const FString& EventID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void CompleteQuest(const FString& QuestName, float RewardAmount);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void SetCrowdBehaviorForQuest(const FString& QuestID, ECrowd_BehaviorType NewBehavior, float Duration);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Management")
-    void FailQuest(const FString& QuestName);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    bool IsCrowdEventActive(const FString& EventID) const;
 
-    // Crowd interaction functions
-    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
-    int32 GetNearbyCrowdCount();
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    int32 GetCrowdSizeInRadius(FVector Center, float Radius) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
-    float CalculateCrowdDensity();
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void CreateQuestGatheringEvent(FVector Location, int32 RequiredPeople, float Duration);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
-    void TriggerCrowdPanic();
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void CreateQuestEscortEvent(FVector StartLocation, FVector EndLocation, int32 EscortSize);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
-    void DirectCrowdToLocation(const FVector& TargetLocation);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void CreateQuestDefenseEvent(FVector DefenseLocation, float DefenseRadius, float Duration);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Interaction")
-    void SetCrowdBehaviorZone(const FVector& Center, float Radius, int32 BehaviorType);
-
-    // Quest validation functions
-    UFUNCTION(BlueprintCallable, Category = "Quest Validation")
-    bool ValidateEscortProgress(int32 ObjectiveIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Validation")
-    bool ValidateCrowdControlProgress(int32 ObjectiveIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Validation")
-    bool ValidateEvacuationProgress(int32 ObjectiveIndex);
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Quest Utilities")
-    void UpdateQuestMarkers();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Utilities")
-    void ResetAllQuests();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Utilities")
-    FString GetQuestStatusReport();
-
-protected:
-    // Internal quest processing
-    void ProcessEscortObjectives(float DeltaTime);
-    void ProcessCrowdControlObjectives(float DeltaTime);
-    void ProcessEvacuationObjectives(float DeltaTime);
-
-    // Quest completion handlers
-    void OnEscortMissionComplete(int32 ObjectiveIndex);
-    void OnCrowdControlMissionComplete(int32 ObjectiveIndex);
-    void OnEvacuationMissionComplete(int32 ObjectiveIndex);
-
-    // Crowd event handlers
-    void OnCrowdDensityChanged(float NewDensity);
-    void OnCrowdPanicTriggered();
-    void OnCrowdReachedWaypoint(int32 WaypointIndex);
+    UFUNCTION(BlueprintCallable, Category = "Quest Crowd Integration")
+    void UpdateQuestCrowdObjectives();
 
 private:
-    // Internal state tracking
-    TArray<float> EscortProgressTracking;
-    TArray<float> CrowdControlProgressTracking;
-    TArray<float> EvacuationProgressTracking;
-    
-    float LastCrowdUpdateTime;
-    int32 CompletedQuestCount;
-    float SystemStartTime;
+    void CheckActiveEvents();
+    void ProcessCrowdResponses();
+    void ValidateCrowdManager();
+
+    FTimerHandle EventCheckTimer;
+    float LastEventCheck;
 };
