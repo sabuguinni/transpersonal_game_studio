@@ -3,35 +3,57 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
-#include "SharedTypes.h"
+#include "GameFramework/Character.h"
 #include "NPC_TribalBehaviorComponent.generated.h"
-
-class AActor;
-class APawn;
 
 UENUM(BlueprintType)
 enum class ENPC_TribalRole : uint8
 {
-    Scout       UMETA(DisplayName = "Scout"),
-    Hunter      UMETA(DisplayName = "Hunter"), 
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Warrior     UMETA(DisplayName = "Warrior"),
-    Shaman      UMETA(DisplayName = "Shaman")
+    CampGuard       UMETA(DisplayName = "Camp Guard"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Crafter         UMETA(DisplayName = "Crafter"),
+    Elder           UMETA(DisplayName = "Elder"),
+    Child           UMETA(DisplayName = "Child")
 };
 
 UENUM(BlueprintType)
-enum class ENPC_TribalActivity : uint8
+enum class ENPC_DailyActivity : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Socializing UMETA(DisplayName = "Socializing"),
-    Sleeping    UMETA(DisplayName = "Sleeping"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Fighting    UMETA(DisplayName = "Fighting")
+    Sleeping        UMETA(DisplayName = "Sleeping"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Eating          UMETA(DisplayName = "Eating"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Fleeing         UMETA(DisplayName = "Fleeing")
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_DailySchedule
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    float StartHour;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    float EndHour;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    ENPC_DailyActivity Activity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    FVector TargetLocation;
+
+    FNPC_DailySchedule()
+    {
+        StartHour = 8.0f;
+        EndHour = 10.0f;
+        Activity = ENPC_DailyActivity::Resting;
+        TargetLocation = FVector::ZeroVector;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -39,30 +61,28 @@ struct FNPC_TribalMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector LastKnownThreatLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    AActor* RememberedActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    FVector LastSeenLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastSeenThreatTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float LastSeenTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> KnownResourceLocations;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<AActor*> TribeMembers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    bool bIsThreat;
 
     FNPC_TribalMemory()
     {
-        LastKnownThreatLocation = FVector::ZeroVector;
-        ThreatLevel = 0.0f;
-        LastSeenThreatTime = 0.0f;
+        RememberedActor = nullptr;
+        LastSeenLocation = FVector::ZeroVector;
+        LastSeenTime = 0.0f;
+        bIsThreat = false;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UNPC_TribalBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -72,108 +92,80 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core tribal properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Tribal role and identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
     ENPC_TribalRole TribalRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    ENPC_TribalActivity CurrentActivity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    FString TribeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    int32 Age;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float SocialRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    float ExperienceLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float PatrolRadius;
+    // Daily schedule system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Daily Routine")
+    TArray<FNPC_DailySchedule> DailySchedule;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float FleeRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routine")
+    ENPC_DailyActivity CurrentActivity;
 
-    // AI Memory and decision making
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Memory")
-    FNPC_TribalMemory TribalMemory;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routine")
+    float CurrentGameHour;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Memory")
-    float MemoryRetentionTime;
+    // Memory and awareness system
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TArray<FNPC_TribalMemory> MemoryBank;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Memory")
-    float DecisionUpdateInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDuration;
 
-    // Behavioral parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Courage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float SightRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float HearingRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability;
+    // Social relationships
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TMap<AActor*, float> RelationshipValues;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float TrustLevel;
 
-    // Current targets and goals
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    AActor* CurrentTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float FearLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    FVector CurrentDestination;
+    // Behavior functions
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void UpdateCurrentActivity();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    bool bIsInDanger;
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void AddMemory(AActor* Actor, FVector Location, bool bThreat);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    float CurrentFear;
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void UpdateRelationship(AActor* OtherActor, float DeltaValue);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    TArray<AActor*> NearbyTribeMembers;
-
-    // AI Functions
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void UpdateTribalBehavior(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void SetTribalRole(ENPC_TribalRole NewRole);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void SetCurrentActivity(ENPC_TribalActivity NewActivity);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void DetectThreat(AActor* ThreatActor, float ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void ShareThreatInformation(const FVector& ThreatLocation, float ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void FindNearbyTribeMembers();
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    FVector GetPatrolDestination();
-
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
     bool ShouldFlee();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    bool ShouldFight();
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    FVector GetCurrentTargetLocation();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void UpdateMemory(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void ReactToPlayer(AActor* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal AI")
-    void MakeDecision();
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void ReactToDinosaur(AActor* Dinosaur);
 
 private:
-    FTimerHandle DecisionTimerHandle;
-    FTimerHandle MemoryUpdateHandle;
-
-    void OnDecisionUpdate();
-    void OnMemoryUpdate();
-    
-    float LastDecisionTime;
-    float LastMemoryUpdate;
+    void CleanupOldMemories();
+    void PerformRoleSpecificBehavior();
+    void UpdateEmotionalState();
 };
