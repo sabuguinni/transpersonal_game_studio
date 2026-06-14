@@ -2,77 +2,80 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/TargetPoint.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/TriggerBox.h"
+#include "../SharedTypes.h"
 #include "Quest_ObjectiveManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQuest_ObjectiveType : uint8
 {
-    Hunt_Dinosaur,
-    Explore_Location,
-    Gather_Resources,
-    Craft_Item,
-    Survive_Time,
-    Reach_Location
+    Hunt        UMETA(DisplayName = "Hunt Target"),
+    Gather      UMETA(DisplayName = "Gather Resources"),
+    Explore     UMETA(DisplayName = "Explore Area"),
+    Defend      UMETA(DisplayName = "Defend Location"),
+    Escort      UMETA(DisplayName = "Escort NPC"),
+    Survive     UMETA(DisplayName = "Survive Duration")
 };
 
 UENUM(BlueprintType)
 enum class EQuest_ObjectiveStatus : uint8
 {
-    Inactive,
-    Active,
-    Completed,
-    Failed
+    Inactive    UMETA(DisplayName = "Inactive"),
+    Active      UMETA(DisplayName = "Active"),
+    Completed   UMETA(DisplayName = "Completed"),
+    Failed      UMETA(DisplayName = "Failed")
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_ObjectiveData
+struct TRANSPERSONALGAME_API FQuest_ObjectiveData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     FString ObjectiveID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString ObjectiveTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ObjectiveName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString ObjectiveDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     EQuest_ObjectiveType ObjectiveType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     EQuest_ObjectiveStatus Status;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FVector TargetLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    float CompletionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     int32 RequiredCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     int32 CurrentCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float CompletionRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FString> RequiredItems;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString TargetActorLabel;
 
     FQuest_ObjectiveData()
     {
         ObjectiveID = "";
-        ObjectiveTitle = "";
-        ObjectiveDescription = "";
-        ObjectiveType = EQuest_ObjectiveType::Reach_Location;
+        ObjectiveName = "";
+        Description = "";
+        ObjectiveType = EQuest_ObjectiveType::Hunt;
         Status = EQuest_ObjectiveStatus::Inactive;
-        TargetLocation = FVector::ZeroVector;
-        CompletionRadius = 200.0f;
         RequiredCount = 1;
         CurrentCount = 0;
+        TargetLocation = FVector::ZeroVector;
+        CompletionRadius = 500.0f;
+        TargetActorLabel = "";
     }
 };
 
@@ -87,29 +90,27 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* TriggerSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ObjectiveMarker;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
     TArray<FQuest_ObjectiveData> ActiveObjectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
     TArray<FQuest_ObjectiveData> CompletedObjectives;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
-    float ObjectiveCheckRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
+    TArray<ATriggerBox*> ObjectiveTriggers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Settings")
-    bool bAutoActivateObjectives;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
+    float ObjectiveCheckInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Objectives")
+    bool bDebugObjectives;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void AddObjective(const FQuest_ObjectiveData& NewObjective);
+    void CreateObjective(const FString& ObjectiveID, const FString& Name, const FString& Description, 
+                        EQuest_ObjectiveType Type, const FVector& Location, int32 RequiredCount = 1);
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
     void ActivateObjective(const FString& ObjectiveID);
@@ -119,6 +120,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
     void FailObjective(const FString& ObjectiveID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
     bool IsObjectiveActive(const FString& ObjectiveID) const;
@@ -133,39 +137,19 @@ public:
     TArray<FQuest_ObjectiveData> GetActiveObjectives() const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void UpdateObjectiveProgress(const FString& ObjectiveID, int32 ProgressAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
     void CheckLocationObjectives(const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void CheckHuntingObjectives(const FString& DinosaurType);
+    void CheckHuntObjectives(const FString& KilledActorLabel);
 
     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
-    void CheckGatheringObjectives(const FString& ItemType, int32 Amount);
+    void CheckGatherObjectives(const FString& GatheredItem, int32 Amount);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnObjectiveActivated(const FQuest_ObjectiveData& Objective);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnObjectiveCompleted(const FQuest_ObjectiveData& Objective);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnObjectiveFailed(const FQuest_ObjectiveData& Objective);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Quest Events")
-    void OnObjectiveProgressUpdated(const FQuest_ObjectiveData& Objective);
-
-protected:
-    UFUNCTION()
-    void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-                              bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void SetupDefaultObjectives();
 
 private:
-    void InitializeDefaultObjectives();
-    void UpdateObjectiveMarkers();
+    void CheckObjectiveCompletion();
+    void UpdateObjectiveTriggers();
     FQuest_ObjectiveData* FindObjectiveByID(const FString& ObjectiveID);
 };
-
-#include "Quest_ObjectiveManager.generated.h"
