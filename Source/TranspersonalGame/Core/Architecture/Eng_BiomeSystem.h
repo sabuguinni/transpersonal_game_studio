@@ -1,11 +1,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "SharedTypes.h"
 #include "Eng_BiomeSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Grassland       UMETA(DisplayName = "Grassland"),
+    Forest          UMETA(DisplayName = "Forest"),
+    Desert          UMETA(DisplayName = "Desert"),
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Mountain        UMETA(DisplayName = "Mountain"),
+    River           UMETA(DisplayName = "River"),
+    Lake            UMETA(DisplayName = "Lake"),
+    Volcanic        UMETA(DisplayName = "Volcanic")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_BiomeData
@@ -13,7 +26,7 @@ struct TRANSPERSONALGAME_API FEng_BiomeData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Plains;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f;
@@ -22,83 +35,16 @@ struct TRANSPERSONALGAME_API FEng_BiomeData
     float Humidity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 0.0f;
+    float Fertility = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSubclassOf<class AActor>> VegetationTypes;
+    TArray<FString> DinosaurSpecies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSubclassOf<class APawn>> DinosaurTypes;
+    TArray<FString> VegetationTypes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DinosaurSpawnRate = 0.1f;
-
-    FEng_BiomeData()
-    {
-        BiomeType = EBiomeType::Plains;
-        Temperature = 25.0f;
-        Humidity = 0.5f;
-        Elevation = 0.0f;
-        VegetationDensity = 1.0f;
-        DinosaurSpawnRate = 0.1f;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_BiomeManager : public UGameInstanceSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    UEng_BiomeManager();
-
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeData GetBiomeData(EBiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SetBiomeData(EBiomeType BiomeType, const FEng_BiomeData& BiomeData);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EBiomeType> GetAllBiomeTypes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetTemperatureAtLocation(const FVector& WorldLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetHumidityAtLocation(const FVector& WorldLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void GenerateBiomeMap(int32 WorldSize = 10000);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UpdateBiomeTransitions();
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TMap<EBiomeType, FEng_BiomeData> BiomeDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TArray<FVector2D> BiomeRegions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    float BiomeTransitionDistance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    int32 BiomeMapResolution = 512;
-
-private:
-    void InitializeBiomeDatabase();
-    EBiomeType CalculateBiomeFromEnvironment(float Temperature, float Humidity, float Elevation);
-    float GetNoiseValue(const FVector2D& Location, float Scale = 0.001f);
+    float SpawnDensity = 1.0f;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -115,27 +61,66 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Component")
-    void UpdateCurrentBiome();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FEng_BiomeData BiomeData;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Component")
-    EBiomeType GetCurrentBiome() const { return CurrentBiome; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float BiomeRadius = 5000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Component")
-    FEng_BiomeData GetCurrentBiomeData() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetBiomeType() const;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeChanged, EBiomeType, OldBiome, EBiomeType, NewBiome);
-    UPROPERTY(BlueprintAssignable, Category = "Biome Component")
-    FOnBiomeChanged OnBiomeChanged;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetTemperature() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetHumidity() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    bool IsLocationInBiome(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UpdateBiomeInfluence(float DeltaTime);
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AEng_BiomeManager();
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Component")
-    EBiomeType CurrentBiome = EBiomeType::Plains;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Component")
-    float UpdateInterval = 1.0f;
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Manager")
+    TArray<UEng_BiomeComponent*> ActiveBiomes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Manager")
+    float BiomeUpdateInterval = 5.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    FEng_BiomeData GetBiomeDataAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    void RegisterBiome(UEng_BiomeComponent* BiomeComponent);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    void UnregisterBiome(UEng_BiomeComponent* BiomeComponent);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Manager")
+    TArray<UEng_BiomeComponent*> GetBiomesInRange(const FVector& Location, float Range) const;
 
 private:
-    float TimeSinceLastUpdate = 0.0f;
-    UEng_BiomeManager* BiomeManager = nullptr;
+    float LastUpdateTime = 0.0f;
+
+    void UpdateAllBiomes(float DeltaTime);
+    UEng_BiomeComponent* FindClosestBiome(const FVector& Location) const;
 };
