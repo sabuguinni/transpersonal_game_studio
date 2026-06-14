@@ -4,300 +4,385 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 UCore_PhysicsManager::UCore_PhysicsManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    // Initialize default physics settings
-    RealisticSettings.GravityScale = 1.0f;
-    RealisticSettings.LinearDamping = 0.01f;
-    RealisticSettings.AngularDamping = 0.0f;
-    RealisticSettings.MaxAngularVelocity = 3600.0f;
-    RealisticSettings.bEnableGravity = true;
-    RealisticSettings.bSimulatePhysics = true;
-
-    ArcadeSettings.GravityScale = 0.7f;
-    ArcadeSettings.LinearDamping = 0.05f;
-    ArcadeSettings.AngularDamping = 0.1f;
-    ArcadeSettings.MaxAngularVelocity = 1800.0f;
-    ArcadeSettings.bEnableGravity = true;
-    ArcadeSettings.bSimulatePhysics = true;
-
-    CinematicSettings.GravityScale = 0.3f;
-    CinematicSettings.LinearDamping = 0.2f;
-    CinematicSettings.AngularDamping = 0.5f;
-    CinematicSettings.MaxAngularVelocity = 900.0f;
-    CinematicSettings.bEnableGravity = false;
-    CinematicSettings.bSimulatePhysics = false;
-
-    CurrentPhysicsMode = ECore_PhysicsMode::Realistic;
-    CurrentPhysicsMaterial = nullptr;
-    bPhysicsEnabled = true;
+    LastPhysicsFrameTime = 0.0f;
+    ActivePhysicsActorCount = 0;
 }
 
-void UCore_PhysicsManager::BeginPlay()
+void UCore_PhysicsManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializePhysicsSettings();
-    ApplyPhysicsSettings(GetCurrentPhysicsSettings());
-}
-
-void UCore_PhysicsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    InitializePhysicsProfiles();
     
-    // Update physics state if needed
-    if (bPhysicsEnabled)
+    // Start metrics update timer
+    if (UWorld* World = GetWorld())
     {
-        UpdateWorldPhysicsSettings();
+        World->GetTimerManager().SetTimer(MetricsUpdateTimer, this, &UCore_PhysicsManager::UpdatePhysicsMetrics, 1.0f, true);
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager initialized"));
 }
 
-void UCore_PhysicsManager::SetPhysicsMode(ECore_PhysicsMode NewMode)
+void UCore_PhysicsManager::Deinitialize()
 {
-    if (CurrentPhysicsMode != NewMode)
+    if (UWorld* World = GetWorld())
     {
-        CurrentPhysicsMode = NewMode;
-        ApplyPhysicsSettings(GetCurrentPhysicsSettings());
+        World->GetTimerManager().ClearTimer(MetricsUpdateTimer);
+    }
+    
+    TrackedPhysicsActors.Empty();
+    Super::Deinitialize();
+}
+
+bool UCore_PhysicsManager::ShouldCreateSubsystem(UObject* Outer) const
+{
+    return Super::ShouldCreateSubsystem(Outer);
+}
+
+void UCore_PhysicsManager::InitializePhysicsProfiles()
+{
+    // Default profile
+    FCore_PhysicsSettings DefaultSettings;
+    DefaultSettings.Mass = 1.0f;
+    DefaultSettings.LinearDamping = 0.01f;
+    DefaultSettings.AngularDamping = 0.0f;
+    DefaultSettings.Restitution = 0.3f;
+    DefaultSettings.Friction = 0.7f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Default, DefaultSettings);
+    
+    // Character profile
+    FCore_PhysicsSettings CharacterSettings;
+    CharacterSettings.Mass = 80.0f;
+    CharacterSettings.LinearDamping = 0.1f;
+    CharacterSettings.AngularDamping = 0.1f;
+    CharacterSettings.Restitution = 0.1f;
+    CharacterSettings.Friction = 1.0f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Character, CharacterSettings);
+    
+    // Dinosaur profile
+    FCore_PhysicsSettings DinosaurSettings;
+    DinosaurSettings.Mass = 500.0f;
+    DinosaurSettings.LinearDamping = 0.05f;
+    DinosaurSettings.AngularDamping = 0.05f;
+    DinosaurSettings.Restitution = 0.2f;
+    DinosaurSettings.Friction = 0.8f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Dinosaur, DinosaurSettings);
+    
+    // Environment profile
+    FCore_PhysicsSettings EnvironmentSettings;
+    EnvironmentSettings.Mass = 100.0f;
+    EnvironmentSettings.LinearDamping = 0.02f;
+    EnvironmentSettings.AngularDamping = 0.02f;
+    EnvironmentSettings.Restitution = 0.4f;
+    EnvironmentSettings.Friction = 0.9f;
+    EnvironmentSettings.bSimulatePhysics = false;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Environment, EnvironmentSettings);
+    
+    // Projectile profile
+    FCore_PhysicsSettings ProjectileSettings;
+    ProjectileSettings.Mass = 0.1f;
+    ProjectileSettings.LinearDamping = 0.0f;
+    ProjectileSettings.AngularDamping = 0.0f;
+    ProjectileSettings.Restitution = 0.6f;
+    ProjectileSettings.Friction = 0.3f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Projectile, ProjectileSettings);
+    
+    // Debris profile
+    FCore_PhysicsSettings DebrisSettings;
+    DebrisSettings.Mass = 5.0f;
+    DebrisSettings.LinearDamping = 0.1f;
+    DebrisSettings.AngularDamping = 0.1f;
+    DebrisSettings.Restitution = 0.5f;
+    DebrisSettings.Friction = 0.6f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Debris, DebrisSettings);
+    
+    // Ragdoll profile
+    FCore_PhysicsSettings RagdollSettings;
+    RagdollSettings.Mass = 80.0f;
+    RagdollSettings.LinearDamping = 0.2f;
+    RagdollSettings.AngularDamping = 0.2f;
+    RagdollSettings.Restitution = 0.1f;
+    RagdollSettings.Friction = 0.8f;
+    PhysicsProfiles.Add(ECore_PhysicsProfile::Ragdoll, RagdollSettings);
+}
+
+void UCore_PhysicsManager::ApplyPhysicsProfile(UPrimitiveComponent* Component, ECore_PhysicsProfile Profile)
+{
+    if (!Component)
+    {
+        return;
+    }
+    
+    const FCore_PhysicsSettings* Settings = PhysicsProfiles.Find(Profile);
+    if (!Settings)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Physics profile not found: %d"), (int32)Profile);
+        return;
+    }
+    
+    FBodyInstance* BodyInstance = Component->GetBodyInstance();
+    if (BodyInstance)
+    {
+        BodyInstance->SetMassOverride(Settings->Mass, true);
+        BodyInstance->LinearDamping = Settings->LinearDamping;
+        BodyInstance->AngularDamping = Settings->AngularDamping;
+        BodyInstance->bEnableGravity = Settings->bEnableGravity;
+        BodyInstance->SetInstanceSimulatePhysics(Settings->bSimulatePhysics);
         
-        UE_LOG(LogTemp, Log, TEXT("Physics mode changed to: %d"), (int32)NewMode);
-    }
-}
-
-void UCore_PhysicsManager::ApplyPhysicsSettings(const FCore_PhysicsSettings& Settings)
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Apply gravity settings
-    if (World->GetPhysicsScene())
-    {
-        SetGlobalGravity(Settings.GravityScale * -980.0f); // Standard Earth gravity
-    }
-
-    // Apply settings to owner actor if it has physics components
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(Owner);
-        if (PrimComp && PrimComp->IsSimulatingPhysics())
+        // Set physical material properties
+        if (UPhysicalMaterial* PhysMat = BodyInstance->GetSimplePhysicalMaterial())
         {
-            PrimComp->SetLinearDamping(Settings.LinearDamping);
-            PrimComp->SetAngularDamping(Settings.AngularDamping);
-            PrimComp->SetMaxAngularVelocityInRadians(FMath::DegreesToRadians(Settings.MaxAngularVelocity));
-            PrimComp->SetEnableGravity(Settings.bEnableGravity);
-            PrimComp->SetSimulatePhysics(Settings.bSimulatePhysics);
+            PhysMat->Restitution = Settings->Restitution;
+            PhysMat->Friction = Settings->Friction;
         }
-    }
-}
-
-FCore_PhysicsSettings UCore_PhysicsManager::GetCurrentPhysicsSettings() const
-{
-    switch (CurrentPhysicsMode)
-    {
-        case ECore_PhysicsMode::Arcade:
-            return ArcadeSettings;
-        case ECore_PhysicsMode::Cinematic:
-            return CinematicSettings;
-        case ECore_PhysicsMode::Realistic:
-        default:
-            return RealisticSettings;
-    }
-}
-
-void UCore_PhysicsManager::SetGlobalGravity(float NewGravity)
-{
-    UWorld* World = GetWorld();
-    if (World && World->GetPhysicsScene())
-    {
-        World->GetPhysicsScene()->SetGravityZ(NewGravity);
-        UE_LOG(LogTemp, Log, TEXT("Global gravity set to: %f"), NewGravity);
-    }
-}
-
-float UCore_PhysicsManager::GetGlobalGravity() const
-{
-    UWorld* World = GetWorld();
-    if (World && World->GetPhysicsScene())
-    {
-        return World->GetPhysicsScene()->GetGravityZ();
-    }
-    return -980.0f; // Default gravity
-}
-
-void UCore_PhysicsManager::EnablePhysicsSimulation(bool bEnable)
-{
-    bPhysicsEnabled = bEnable;
-    
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(Owner);
-        if (PrimComp)
+        
+        // Track this actor if it has physics simulation enabled
+        if (Settings->bSimulatePhysics && Component->GetOwner())
         {
-            PrimComp->SetSimulatePhysics(bEnable);
+            TrackedPhysicsActors.AddUnique(Component->GetOwner());
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Physics simulation %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+    UE_LOG(LogTemp, Log, TEXT("Applied physics profile %d to component %s"), 
+           (int32)Profile, *Component->GetName());
 }
 
-bool UCore_PhysicsManager::IsPhysicsSimulationEnabled() const
+FCore_PhysicsSettings UCore_PhysicsManager::GetPhysicsProfileSettings(ECore_PhysicsProfile Profile) const
 {
-    return bPhysicsEnabled;
+    const FCore_PhysicsSettings* Settings = PhysicsProfiles.Find(Profile);
+    return Settings ? *Settings : FCore_PhysicsSettings();
 }
 
-void UCore_PhysicsManager::SetPhysicsMaterial(UPhysicalMaterial* NewMaterial)
+void UCore_PhysicsManager::SetPhysicsProfileSettings(ECore_PhysicsProfile Profile, const FCore_PhysicsSettings& Settings)
 {
-    CurrentPhysicsMaterial = NewMaterial;
-    
-    AActor* Owner = GetOwner();
-    if (Owner && NewMaterial)
-    {
-        UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(Owner);
-        if (PrimComp)
-        {
-            PrimComp->SetPhysMaterialOverride(NewMaterial);
-        }
-    }
+    PhysicsProfiles.Add(Profile, Settings);
 }
 
-UPhysicalMaterial* UCore_PhysicsManager::GetPhysicsMaterial() const
-{
-    return CurrentPhysicsMaterial;
-}
-
-void UCore_PhysicsManager::ApplyForceToActor(AActor* TargetActor, FVector Force, bool bAccelChange)
-{
-    if (!TargetActor)
-    {
-        return;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    if (PrimComp && PrimComp->IsSimulatingPhysics())
-    {
-        PrimComp->AddForce(Force, NAME_None, bAccelChange);
-    }
-}
-
-void UCore_PhysicsManager::ApplyImpulseToActor(AActor* TargetActor, FVector Impulse, bool bVelChange)
-{
-    if (!TargetActor)
-    {
-        return;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    if (PrimComp && PrimComp->IsSimulatingPhysics())
-    {
-        PrimComp->AddImpulse(Impulse, NAME_None, bVelChange);
-    }
-}
-
-void UCore_PhysicsManager::ApplyTorqueToActor(AActor* TargetActor, FVector Torque, bool bAccelChange)
-{
-    if (!TargetActor)
-    {
-        return;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    if (PrimComp && PrimComp->IsSimulatingPhysics())
-    {
-        PrimComp->AddTorqueInRadians(Torque, NAME_None, bAccelChange);
-    }
-}
-
-bool UCore_PhysicsManager::IsActorPhysicsEnabled(AActor* TargetActor) const
-{
-    if (!TargetActor)
-    {
-        return false;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    return PrimComp ? PrimComp->IsSimulatingPhysics() : false;
-}
-
-FVector UCore_PhysicsManager::GetActorVelocity(AActor* TargetActor) const
-{
-    if (!TargetActor)
-    {
-        return FVector::ZeroVector;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    return PrimComp ? PrimComp->GetPhysicsLinearVelocity() : FVector::ZeroVector;
-}
-
-FVector UCore_PhysicsManager::GetActorAngularVelocity(AActor* TargetActor) const
-{
-    if (!TargetActor)
-    {
-        return FVector::ZeroVector;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    return PrimComp ? PrimComp->GetPhysicsAngularVelocityInRadians() : FVector::ZeroVector;
-}
-
-float UCore_PhysicsManager::GetActorMass(AActor* TargetActor) const
-{
-    if (!TargetActor)
-    {
-        return 0.0f;
-    }
-
-    UPrimitiveComponent* PrimComp = GetActorPrimitiveComponent(TargetActor);
-    return PrimComp ? PrimComp->GetMass() : 0.0f;
-}
-
-void UCore_PhysicsManager::InitializePhysicsSettings()
-{
-    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsManager initialized with mode: %d"), (int32)CurrentPhysicsMode);
-}
-
-void UCore_PhysicsManager::UpdateWorldPhysicsSettings()
-{
-    // Periodic physics state updates if needed
-    // This can be used for dynamic physics adjustments based on gameplay conditions
-}
-
-UPrimitiveComponent* UCore_PhysicsManager::GetActorPrimitiveComponent(AActor* Actor) const
+void UCore_PhysicsManager::EnablePhysicsSimulation(AActor* Actor, bool bEnable)
 {
     if (!Actor)
     {
-        return nullptr;
+        return;
     }
-
-    // Try to get the root primitive component first
-    UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-    if (PrimComp)
+    
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
     {
-        return PrimComp;
+        Component->SetSimulatePhysics(bEnable);
+        
+        if (bEnable)
+        {
+            TrackedPhysicsActors.AddUnique(Actor);
+        }
+        else
+        {
+            TrackedPhysicsActors.RemoveSingle(Actor);
+        }
     }
+}
 
-    // If root is not primitive, try to find the first primitive component
-    UStaticMeshComponent* StaticMeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
-    if (StaticMeshComp)
+void UCore_PhysicsManager::SetActorMass(AActor* Actor, float NewMass)
+{
+    if (!Actor)
     {
-        return StaticMeshComp;
+        return;
     }
-
-    USkeletalMeshComponent* SkeletalMeshComp = Actor->FindComponentByClass<USkeletalMeshComponent>();
-    if (SkeletalMeshComp)
+    
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
     {
-        return SkeletalMeshComp;
+        if (FBodyInstance* BodyInstance = Component->GetBodyInstance())
+        {
+            BodyInstance->SetMassOverride(NewMass, true);
+        }
     }
+}
 
-    return nullptr;
+void UCore_PhysicsManager::AddImpulseToActor(AActor* Actor, FVector Impulse, bool bVelChange)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* RootComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+    {
+        RootComponent->AddImpulse(Impulse, NAME_None, bVelChange);
+        
+        // Broadcast impact event
+        OnPhysicsImpact.Broadcast(Actor, Actor->GetActorLocation(), Impulse.Size());
+    }
+}
+
+void UCore_PhysicsManager::AddForceToActor(AActor* Actor, FVector Force, bool bAccelChange)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* RootComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+    {
+        RootComponent->AddForce(Force, NAME_None, bAccelChange);
+    }
+}
+
+bool UCore_PhysicsManager::LineTracePhysics(const FVector& Start, const FVector& End, FHitResult& HitResult, bool bTraceComplex)
+{
+    if (UWorld* World = GetWorld())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.bTraceComplex = bTraceComplex;
+        QueryParams.bReturnPhysicalMaterial = true;
+        
+        return World->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams);
+    }
+    
+    return false;
+}
+
+bool UCore_PhysicsManager::SphereTracePhysics(const FVector& Start, const FVector& End, float Radius, FHitResult& HitResult)
+{
+    if (UWorld* World = GetWorld())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.bReturnPhysicalMaterial = true;
+        
+        return World->SweepSingleByChannel(HitResult, Start, End, FQuat::Identity, 
+                                          ECC_WorldStatic, FCollisionShape::MakeSphere(Radius), QueryParams);
+    }
+    
+    return false;
+}
+
+TArray<AActor*> UCore_PhysicsManager::GetOverlappingActors(const FVector& Location, float Radius)
+{
+    TArray<AActor*> OverlappingActors;
+    
+    if (UWorld* World = GetWorld())
+    {
+        TArray<FOverlapResult> OverlapResults;
+        FCollisionQueryParams QueryParams;
+        
+        if (World->OverlapMultiByChannel(OverlapResults, Location, FQuat::Identity, 
+                                        ECC_WorldDynamic, FCollisionShape::MakeSphere(Radius), QueryParams))
+        {
+            for (const FOverlapResult& Result : OverlapResults)
+            {
+                if (Result.GetActor())
+                {
+                    OverlappingActors.Add(Result.GetActor());
+                }
+            }
+        }
+    }
+    
+    return OverlappingActors;
+}
+
+int32 UCore_PhysicsManager::GetActivePhysicsActorCount() const
+{
+    return ActivePhysicsActorCount;
+}
+
+float UCore_PhysicsManager::GetPhysicsFrameTime() const
+{
+    return LastPhysicsFrameTime;
+}
+
+void UCore_PhysicsManager::SetPhysicsSubsteps(int32 MaxSubsteps, float FixedTimeStep)
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+        {
+            PhysicsSettings->MaxSubsteps = MaxSubsteps;
+            PhysicsSettings->FixedTimeStep = FixedTimeStep;
+        }
+    }
+}
+
+void UCore_PhysicsManager::UpdatePhysicsMetrics()
+{
+    // Clean up invalid actor references
+    TrackedPhysicsActors.RemoveAll([](const TWeakObjectPtr<AActor>& ActorPtr) {
+        return !ActorPtr.IsValid();
+    });
+    
+    // Count active physics actors
+    ActivePhysicsActorCount = 0;
+    for (const TWeakObjectPtr<AActor>& ActorPtr : TrackedPhysicsActors)
+    {
+        if (AActor* Actor = ActorPtr.Get())
+        {
+            if (UPrimitiveComponent* RootComponent = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+            {
+                if (RootComponent->IsSimulatingPhysics())
+                {
+                    ActivePhysicsActorCount++;
+                }
+            }
+        }
+    }
+    
+    // Update frame time
+    if (UWorld* World = GetWorld())
+    {
+        LastPhysicsFrameTime = World->GetDeltaSeconds();
+    }
+}
+
+void UCore_PhysicsManager::ValidatePhysicsSetup()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== Physics System Validation ==="));
+    UE_LOG(LogTemp, Log, TEXT("Active Physics Actors: %d"), GetActivePhysicsActorCount());
+    UE_LOG(LogTemp, Log, TEXT("Physics Frame Time: %f ms"), GetPhysicsFrameTime() * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("Physics Profiles Loaded: %d"), PhysicsProfiles.Num());
+    
+    // Validate each physics profile
+    for (const auto& ProfilePair : PhysicsProfiles)
+    {
+        const FCore_PhysicsSettings& Settings = ProfilePair.Value;
+        UE_LOG(LogTemp, Log, TEXT("Profile %d - Mass: %f, Damping: %f/%f, Restitution: %f"), 
+               (int32)ProfilePair.Key, Settings.Mass, Settings.LinearDamping, 
+               Settings.AngularDamping, Settings.Restitution);
+    }
+}
+
+void UCore_PhysicsManager::OptimizePhysicsPerformance()
+{
+    int32 OptimizedCount = 0;
+    
+    for (const TWeakObjectPtr<AActor>& ActorPtr : TrackedPhysicsActors)
+    {
+        if (AActor* Actor = ActorPtr.Get())
+        {
+            // Disable physics for distant actors
+            if (UWorld* World = GetWorld())
+            {
+                if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+                {
+                    float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
+                    if (Distance > 5000.0f) // 50 meters
+                    {
+                        EnablePhysicsSimulation(Actor, false);
+                        OptimizedCount++;
+                    }
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Physics optimization disabled simulation for %d distant actors"), OptimizedCount);
 }
