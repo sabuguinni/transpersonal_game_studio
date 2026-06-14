@@ -1,145 +1,140 @@
 #include "DialogueComponent.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/World.h"
 
 UDialogueComponent::UDialogueComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
     
-    bDialogueEnabled = true;
-    DefaultDialogueID = TEXT("");
-    DialogueRange = 500.0f;
-    bAutoTriggerOnOverlap = false;
-    bDialogueActive = false;
-    CurrentDialogueID = TEXT("");
-    NarrativeManager = nullptr;
+    CharacterName = TEXT("Unnamed NPC");
+    InteractionRange = 300.0f;
+    bCanRepeatDialogue = true;
+    CurrentInteractor = nullptr;
 }
 
 void UDialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeNarrativeManager();
-}
-
-void UDialogueComponent::TriggerDialogue(const FString& DialogueID)
-{
-    if (!bDialogueEnabled || bDialogueActive)
-    {
-        return;
-    }
-
-    if (!IsPlayerInRange())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Player not in range for dialogue: %s"), *DialogueID);
-        return;
-    }
-
-    FString DialogueToTrigger = DialogueID.IsEmpty() ? DefaultDialogueID : DialogueID;
-    
-    if (DialogueToTrigger.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: No dialogue ID specified"));
-        return;
-    }
-
-    bDialogueActive = true;
-    CurrentDialogueID = DialogueToTrigger;
-    CurrentDialogueOptions.Empty();
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Triggering dialogue: %s"), *DialogueToTrigger);
-
-    // Trigger dialogue through narrative manager
-    if (NarrativeManager)
-    {
-        NarrativeManager->TriggerDialogue(DialogueToTrigger, GetOwner());
-    }
-
-    // Broadcast dialogue triggered event
-    OnDialogueTriggered.Broadcast(DialogueToTrigger, GetOwner());
-}
-
-void UDialogueComponent::SetDialogueEnabled(bool bEnabled)
-{
-    bDialogueEnabled = bEnabled;
-    
-    if (!bEnabled && bDialogueActive)
-    {
-        // End current dialogue if disabling
-        bDialogueActive = false;
-        CurrentDialogueID = TEXT("");
-        CurrentDialogueOptions.Empty();
-        OnDialogueCompleted.Broadcast(CurrentDialogueID);
-    }
-}
-
-bool UDialogueComponent::IsDialogueActive() const
-{
-    return bDialogueActive;
-}
-
-void UDialogueComponent::AddDialogueOption(const FString& DialogueID, const FString& OptionText)
-{
-    if (!bDialogueActive)
-    {
-        return;
-    }
-
-    CurrentDialogueOptions.Add(OptionText);
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Added dialogue option: %s"), *OptionText);
-}
-
-void UDialogueComponent::SelectDialogueOption(int32 OptionIndex)
-{
-    if (!bDialogueActive || !CurrentDialogueOptions.IsValidIndex(OptionIndex))
-    {
-        return;
-    }
-
-    FString SelectedOption = CurrentDialogueOptions[OptionIndex];
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Selected dialogue option: %s"), *SelectedOption);
-
-    // Process the selected option
-    // This could trigger new dialogue, complete quests, etc.
-    
-    // For now, end the dialogue
-    bDialogueActive = false;
-    FString CompletedDialogueID = CurrentDialogueID;
-    CurrentDialogueID = TEXT("");
-    CurrentDialogueOptions.Empty();
-    
-    OnDialogueCompleted.Broadcast(CompletedDialogueID);
-}
-
-void UDialogueComponent::InitializeNarrativeManager()
-{
-    if (UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this))
+    if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
     {
         NarrativeManager = GameInstance->GetSubsystem<UNarrativeManager>();
-        if (NarrativeManager)
-        {
-            UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Connected to NarrativeManager"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Failed to get NarrativeManager"));
-        }
     }
 }
 
-bool UDialogueComponent::IsPlayerInRange() const
+void UDialogueComponent::TriggerDialogue(int32 DialogueIndex)
 {
-    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
-    if (!PlayerController || !PlayerController->GetPawn())
+    if (!CanInteract())
+    {
+        return;
+    }
+
+    if (AvailableDialogues.IsValidIndex(DialogueIndex))
+    {
+        const FString& DialogueID = AvailableDialogues[DialogueIndex];
+        
+        if (NarrativeManager)
+        {
+            NarrativeManager->TriggerDialogue(DialogueID, GetOwner());
+        }
+
+        // Mark dialogue as used if it can't be repeated
+        if (!bCanRepeatDialogue && !UsedDialogues.Contains(DialogueID))
+        {
+            UsedDialogues.Add(DialogueID);
+        }
+
+        // Broadcast the dialogue event
+        OnDialogueTriggered.Broadcast(DialogueID, CharacterName);
+        
+        UE_LOG(LogTemp, Log, TEXT("Dialogue triggered: %s from %s"), *DialogueID, *CharacterName);
+    }
+}
+
+bool UDialogueComponent::CanInteract() const
+{
+    if (!CheckStoryRequirements())
     {
         return false;
     }
 
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    if (!bCanRepeatDialogue && UsedDialogues.Num() >= AvailableDialogues.Num())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+TArray<FString> UDialogueComponent::GetAvailableDialogueOptions() const
+{
+    TArray<FString> Options;
     
-    float Distance = FVector::Dist(PlayerLocation, OwnerLocation);
-    return Distance <= DialogueRange;
+    for (const FString& DialogueID : AvailableDialogues)
+    {
+        if (bCanRepeatDialogue || !UsedDialogues.Contains(DialogueID))
+        {
+            Options.Add(DialogueID);
+        }
+    }
+    
+    return Options;
+}
+
+void UDialogueComponent::StartConversation(AActor* Interactor)
+{
+    if (!CanInteract())
+    {
+        return;
+    }
+
+    CurrentInteractor = Interactor;
+    
+    // Trigger the first available dialogue automatically
+    TArray<FString> Options = GetAvailableDialogueOptions();
+    if (Options.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, Options.Num() - 1);
+        FString SelectedDialogue = Options[RandomIndex];
+        
+        int32 OriginalIndex = AvailableDialogues.Find(SelectedDialogue);
+        if (OriginalIndex != INDEX_NONE)
+        {
+            TriggerDialogue(OriginalIndex);
+        }
+    }
+}
+
+void UDialogueComponent::EndConversation()
+{
+    CurrentInteractor = nullptr;
+}
+
+bool UDialogueComponent::CheckStoryRequirements() const
+{
+    if (!NarrativeManager)
+    {
+        return true; // If no narrative manager, allow all dialogues
+    }
+
+    for (const FString& RequiredFlag : RequiredStoryFlags)
+    {
+        if (!NarrativeManager->GetStoryFlag(RequiredFlag))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+FString UDialogueComponent::GetRandomAvailableDialogue() const
+{
+    TArray<FString> Options = GetAvailableDialogueOptions();
+    if (Options.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, Options.Num() - 1);
+        return Options[RandomIndex];
+    }
+    return TEXT("");
 }
