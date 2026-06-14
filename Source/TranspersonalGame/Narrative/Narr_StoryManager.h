@@ -5,86 +5,39 @@
 #include "SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
-{
-    Awakening       UMETA(DisplayName = "First Awakening"),
-    Exploration     UMETA(DisplayName = "World Exploration"),
-    FirstHunt       UMETA(DisplayName = "First Successful Hunt"),
-    TribalContact   UMETA(DisplayName = "Tribal Contact"),
-    PackFormation   UMETA(DisplayName = "Pack Formation"),
-    TerritoryWars   UMETA(DisplayName = "Territory Wars"),
-    AlphaRise       UMETA(DisplayName = "Rise to Alpha"),
-    LegendStatus    UMETA(DisplayName = "Legend Status")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
+struct TRANSPERSONALGAME_API FNarr_StoryState
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventID;
+    int32 CurrentChapter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventTitle;
+    TArray<FString> CompletedQuests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText EventDescription;
+    TArray<FString> ActiveQuests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryPhase RequiredPhase;
+    bool bHasMetElderThok;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
+    bool bHasEnteredValley;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> UnlockEvents;
+    bool bHasFoundAncientRuins;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float CompletionTime;
+    int32 DinosaurKillCount;
 
-    FNarr_StoryEvent()
+    FNarr_StoryState()
     {
-        EventID = TEXT("default");
-        EventTitle = TEXT("Unknown Event");
-        EventDescription = FText::FromString(TEXT("An unknown event has occurred."));
-        RequiredPhase = ENarr_StoryPhase::Awakening;
-        bIsCompleted = false;
-        CompletionTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_PlayerProgress
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    ENarr_StoryPhase CurrentPhase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 DinosaurKills;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 Dayssurvived;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    int32 TribalAllies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    float TerritorySize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
-    TArray<FString> CompletedEvents;
-
-    FNarr_PlayerProgress()
-    {
-        CurrentPhase = ENarr_StoryPhase::Awakening;
-        DinosaurKills = 0;
-        DaysSelected = 0;
-        TribalAllies = 0;
-        TerritorySize = 0.0f;
+        CurrentChapter = 1;
+        bHasMetElderThok = false;
+        bHasEnteredValley = false;
+        bHasFoundAncientRuins = false;
+        DinosaurKillCount = 0;
     }
 };
 
@@ -95,43 +48,35 @@ class TRANSPERSONALGAME_API UNarr_StoryManager : public UGameInstanceSubsystem
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void TriggerStoryEvent(const FString& EventID);
+    void AdvanceStory(const FString& EventName);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceStoryPhase();
+    bool IsQuestActive(const FString& QuestName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    ENarr_StoryPhase GetCurrentPhase() const;
+    bool IsQuestCompleted(const FString& QuestName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    FNarr_PlayerProgress GetPlayerProgress() const;
+    void CompleteQuest(const FString& QuestName);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    void UpdatePlayerStats(int32 Kills, int32 Days, int32 Allies, float Territory);
+    void StartQuest(const FString& QuestName);
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FNarr_StoryEvent> GetAvailableEvents() const;
+    FString GetCurrentChapterTitle() const;
 
     UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsEventCompleted(const FString& EventID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    FText GetPhaseDescription(ENarr_StoryPhase Phase) const;
+    void TriggerStoryEvent(const FString& EventName, const FVector& Location);
 
 protected:
-    UPROPERTY()
-    FNarr_PlayerProgress PlayerProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Story")
+    FNarr_StoryState StoryState;
 
-    UPROPERTY()
-    TMap<FString, FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(EditDefaultsOnly, Category = "Story")
+    TMap<int32, FString> ChapterTitles;
 
-    UPROPERTY()
-    TArray<FString> ActiveEventQueue;
-
-    void InitializeStoryEvents();
-    void CheckPhaseProgression();
-    void UnlockNewEvents(const TArray<FString>& EventsToUnlock);
+    void InitializeChapterTitles();
+    void HandleStoryTrigger(const FString& TriggerName, const FVector& Location);
 };
