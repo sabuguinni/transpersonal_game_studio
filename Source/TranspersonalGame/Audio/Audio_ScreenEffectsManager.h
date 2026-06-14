@@ -1,141 +1,106 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/PostProcessComponent.h"
+#include "Engine/GameInstance.h"
+#include "Components/ActorComponent.h"
 #include "Engine/PostProcessVolume.h"
 #include "Materials/MaterialParameterCollection.h"
-#include "Camera/CameraShakeBase.h"
+#include "SharedTypes.h"
 #include "Audio_ScreenEffectsManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_EffectIntensity : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Light       UMETA(DisplayName = "Light"),
-    Medium      UMETA(DisplayName = "Medium"),
-    Heavy       UMETA(DisplayName = "Heavy"),
-    Extreme     UMETA(DisplayName = "Extreme")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DamageFlashSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FlashIntensity = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FlashDuration = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    FLinearColor FlashColor = FLinearColor::Red;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FadeOutSpeed = 2.0f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ScreenShakeSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float ShakeIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float ShakeDuration = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float ShakeRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float FalloffExponent = 1.0f;
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_ScreenEffectsManager : public AActor
+class TRANSPERSONALGAME_API UAudio_ScreenEffectsManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_ScreenEffectsManager();
+    UAudio_ScreenEffectsManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // Post Process Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPostProcessComponent* PostProcessComponent;
-
-    // Damage Flash Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects|Damage Flash")
-    FAudio_DamageFlashSettings DamageFlashSettings;
-
-    // Screen Shake Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects|Screen Shake")
-    FAudio_ScreenShakeSettings TRexShakeSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects|Screen Shake")
-    FAudio_ScreenShakeSettings RaptorShakeSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects|Screen Shake")
-    FAudio_ScreenShakeSettings BrachiosaurusShakeSettings;
-
-    // Current Effect State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bDamageFlashActive = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentFlashIntensity = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float FlashTimer = 0.0f;
-
-    // Camera Shake Class
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects|Camera Shake")
-    TSubclassOf<UCameraShakeBase> CameraShakeClass;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Damage Flash Functions
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerDamageFlash(float Intensity = 1.0f, FLinearColor Color = FLinearColor::Red);
+    // Screen shake system
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void TriggerScreenShake(float Intensity, float Duration, float Frequency = 10.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void StopDamageFlash();
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void TriggerDinosaurProximityShake(float Distance, float DinosaurSize = 1.0f);
 
-    // Screen Shake Functions
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerTRexFootstepShake(FVector ShakeLocation);
+    // Damage flash effect
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void TriggerDamageFlash(float Intensity = 1.0f, FLinearColor FlashColor = FLinearColor::Red);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerRaptorMovementShake(FVector ShakeLocation);
+    // Day/night cycle effects
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void UpdateTimeOfDayEffects(float TimeOfDay);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerBrachiosaurusShake(FVector ShakeLocation);
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void SetNightVisionMode(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerCustomShake(FVector ShakeLocation, EAudio_EffectIntensity Intensity);
+    // Environmental screen effects
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void TriggerWeatherEffect(EWeatherType WeatherType, float Intensity);
 
-    // Distance-based Effect Triggers
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void CheckDinosaurProximity();
-
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void OnPlayerDamaged(float DamageAmount, AActor* DamageSource);
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void UpdateFearEffect(float FearLevel);
 
 protected:
-    // Internal Functions
+    // Screen shake properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float CurrentShakeIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float ShakeDecayRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float MaxShakeDistance;
+
+    // Damage flash properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    float DamageFlashDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    float CurrentFlashIntensity;
+
+    // Post process volume reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    APostProcessVolume* PostProcessVolume;
+
+    // Material parameter collection for global effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialParameterCollection* GlobalEffectsCollection;
+
+    // Time of day effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Effects")
+    float CurrentTimeOfDay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Effects")
+    bool bNightVisionActive;
+
+    // Environmental effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float CurrentWeatherIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    EWeatherType CurrentWeatherType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float CurrentFearLevel;
+
+private:
+    // Internal shake calculation
+    void UpdateScreenShake(float DeltaTime);
     void UpdateDamageFlash(float DeltaTime);
     void ApplyPostProcessEffects();
-    float CalculateShakeIntensityByDistance(float Distance, float MaxDistance);
     
-    // Player Reference
-    UPROPERTY()
-    class APawn* PlayerPawn;
-
-    UPROPERTY()
-    class APlayerController* PlayerController;
+    // Shake timing
+    float ShakeTimer;
+    float ShakeDuration;
+    float ShakeFrequency;
+    
+    // Flash timing
+    float FlashTimer;
+    FLinearColor FlashColor;
 };
