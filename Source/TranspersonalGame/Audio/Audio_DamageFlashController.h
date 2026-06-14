@@ -2,45 +2,47 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Components/PostProcessComponent.h"
-#include "Engine/PostProcessVolume.h"
 #include "TimerManager.h"
 #include "Audio_DamageFlashController.generated.h"
 
+UENUM(BlueprintType)
+enum class EAudio_DamageType : uint8
+{
+    Light       UMETA(DisplayName = "Light Damage"),
+    Medium      UMETA(DisplayName = "Medium Damage"),
+    Heavy       UMETA(DisplayName = "Heavy Damage"),
+    Critical    UMETA(DisplayName = "Critical Damage")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DamageFlashSettings
+struct FAudio_DamageFlashSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    FLinearColor FlashColor = FLinearColor::Red;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Settings")
+    float FlashIntensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FlashIntensity = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Settings")
     float FlashDuration = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    float FadeOutTime = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Settings")
+    FLinearColor FlashColor = FLinearColor::Red;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Flash")
-    bool bUseHeartbeatEffect = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Settings")
+    float FadeOutTime = 0.2f;
 
     FAudio_DamageFlashSettings()
     {
-        FlashColor = FLinearColor(1.0f, 0.0f, 0.0f, 0.8f);
-        FlashIntensity = 0.8f;
+        FlashIntensity = 0.5f;
         FlashDuration = 0.3f;
+        FlashColor = FLinearColor::Red;
         FadeOutTime = 0.2f;
-        bUseHeartbeatEffect = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAudio_DamageFlashController : public UActorComponent
 {
     GENERATED_BODY()
@@ -50,70 +52,61 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Damage flash functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void TriggerDamageFlash(float DamageAmount, FLinearColor CustomColor = FLinearColor::Red);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void TriggerCriticalDamageFlash(float DamageAmount);
+    // Main flash trigger function
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void TriggerDamageFlash(EAudio_DamageType DamageType, float CustomIntensity = -1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void TriggerLowHealthFlash();
+    // Direct flash with custom settings
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void TriggerCustomFlash(const FAudio_DamageFlashSettings& FlashSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Damage Flash")
-    void StopAllFlashEffects();
+    // Stop current flash immediately
+    UFUNCTION(BlueprintCallable, Category = "Damage Flash")
+    void StopFlash();
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Normal Damage")
-    FAudio_DamageFlashSettings NormalDamageSettings;
+    // Check if flash is currently active
+    UFUNCTION(BlueprintPure, Category = "Damage Flash")
+    bool IsFlashing() const { return bIsFlashing; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Damage")
+protected:
+    // Flash settings for different damage types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Configuration")
+    FAudio_DamageFlashSettings LightDamageSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Configuration")
+    FAudio_DamageFlashSettings MediumDamageSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Configuration")
+    FAudio_DamageFlashSettings HeavyDamageSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flash Configuration")
     FAudio_DamageFlashSettings CriticalDamageSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Low Health")
-    FAudio_DamageFlashSettings LowHealthSettings;
+    // Runtime state
+    UPROPERTY(BlueprintReadOnly, Category = "Flash State")
+    bool bIsFlashing = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
-    float PostProcessBlendWeight = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Flash State")
+    float CurrentFlashAlpha = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health Thresholds")
-    float CriticalDamageThreshold = 50.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Flash State")
+    float FlashTimer = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health Thresholds")
-    float LowHealthThreshold = 25.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Flash State")
+    FAudio_DamageFlashSettings ActiveFlashSettings;
 
 private:
-    // Internal functions
-    void ExecuteDamageFlash(const FAudio_DamageFlashSettings& Settings);
-    void UpdateFlashIntensity(float DeltaTime);
-    void CreatePostProcessVolume();
-    void UpdatePostProcessSettings();
-    void FadeOutFlash();
+    // Internal flash management
+    void UpdateFlash(float DeltaTime);
+    void EndFlash();
+    FAudio_DamageFlashSettings GetFlashSettingsForDamageType(EAudio_DamageType DamageType) const;
 
-    // Post-process components
-    UPROPERTY()
-    APostProcessVolume* DamageFlashVolume;
-
-    UPROPERTY()
-    UMaterialInstanceDynamic* FlashMaterial;
-
-    // State tracking
-    bool bIsFlashing = false;
-    float CurrentFlashIntensity = 0.0f;
-    float FlashTimer = 0.0f;
-    float FlashDuration = 0.0f;
-    float FadeOutDuration = 0.0f;
-    FLinearColor CurrentFlashColor = FLinearColor::Red;
-
-    // Timers
+    // Timer handle for flash duration
     FTimerHandle FlashTimerHandle;
-    FTimerHandle FadeOutTimerHandle;
-
-    // Heartbeat effect
-    bool bHeartbeatActive = false;
-    float HeartbeatTimer = 0.0f;
-    float HeartbeatFrequency = 1.2f; // beats per second
 };
+
+#include "Audio_DamageFlashController.generated.h"
