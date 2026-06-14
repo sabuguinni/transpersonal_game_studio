@@ -1,32 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Engine/TriggerVolume.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
 #include "../SharedTypes.h"
 #include "Quest_MissionManager.generated.h"
-
-UENUM(BlueprintType)
-enum class EQuest_MissionType : uint8
-{
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Escort          UMETA(DisplayName = "Escort"),
-    Evacuation      UMETA(DisplayName = "Evacuation"),
-    Hunt            UMETA(DisplayName = "Hunt"),
-    Exploration     UMETA(DisplayName = "Exploration"),
-    Defense         UMETA(DisplayName = "Defense")
-};
-
-UENUM(BlueprintType)
-enum class EQuest_MissionStatus : uint8
-{
-    Inactive        UMETA(DisplayName = "Inactive"),
-    Available       UMETA(DisplayName = "Available"),
-    Active          UMETA(DisplayName = "Active"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Failed          UMETA(DisplayName = "Failed")
-};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FQuest_MissionObjective
@@ -37,153 +17,117 @@ struct TRANSPERSONALGAME_API FQuest_MissionObjective
     FString ObjectiveText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 TargetCount;
+    bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentCount;
+    FVector TargetLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsCompleted;
+    float CompletionRadius;
 
     FQuest_MissionObjective()
     {
-        ObjectiveText = TEXT("");
-        TargetCount = 1;
-        CurrentCount = 0;
-        bIsCompleted = false;
+        ObjectiveText = TEXT("Default Objective");
+        bCompleted = false;
+        TargetLocation = FVector::ZeroVector;
+        CompletionRadius = 500.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_MissionData
+struct TRANSPERSONALGAME_API FQuest_Mission
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString MissionID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     FString MissionName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString MissionDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_MissionType MissionType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_MissionStatus MissionStatus;
+    FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_MissionObjective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    ATriggerVolume* TriggerZone;
+    bool bActive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    APawn* QuestGiver;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float ElapsedTime;
+    bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     int32 ExperienceReward;
 
-    FQuest_MissionData()
+    FQuest_Mission()
     {
-        MissionID = TEXT("");
-        MissionName = TEXT("");
-        MissionDescription = TEXT("");
-        MissionType = EQuest_MissionType::Gathering;
-        MissionStatus = EQuest_MissionStatus::Inactive;
-        TriggerZone = nullptr;
-        QuestGiver = nullptr;
-        TimeLimit = 0.0f;
-        ElapsedTime = 0.0f;
+        MissionName = TEXT("Default Mission");
+        Description = TEXT("A basic survival mission");
+        bActive = false;
+        bCompleted = false;
         ExperienceReward = 100;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_MissionManager : public UGameInstanceSubsystem
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API AQuest_MissionManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_MissionManager();
-
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Mission management
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CreateMission(const FString& MissionID, const FString& Name, const FString& Description, EQuest_MissionType Type);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool StartMission(const FString& MissionID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteMission(const FString& MissionID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool FailMission(const FString& MissionID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_MissionData GetMissionData(const FString& MissionID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    TArray<FQuest_MissionData> GetActiveMissions();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    TArray<FQuest_MissionData> GetAvailableMissions();
-
-    // Objective management
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool AddObjective(const FString& MissionID, const FString& ObjectiveText, int32 TargetCount = 1);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool UpdateObjectiveProgress(const FString& MissionID, int32 ObjectiveIndex, int32 Progress = 1);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& MissionID, int32 ObjectiveIndex);
-
-    // Crowd integration
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void OnCrowdEventTriggered(const FString& EventType, const FVector& Location, int32 CrowdSize);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void RegisterCrowdMission(const FString& MissionID, const FString& CrowdEventType);
-
-    // Timer and updates
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void UpdateMissionTimers(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CheckMissionCompletion();
+    AQuest_MissionManager();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TMap<FString, FQuest_MissionData> ActiveMissions;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TMap<FString, FQuest_MissionData> AvailableMissions;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* ManagerMesh;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TMap<FString, FString> CrowdMissionRegistry;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* InteractionSphere;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_Mission> ActiveMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_Mission> CompletedMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
     int32 MaxActiveMissions;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    bool bIsInitialized;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    float ObjectiveCheckInterval;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void StartMission(const FQuest_Mission& Mission);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CompleteMission(const FString& MissionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateObjective(const FString& MissionName, int32 ObjectiveIndex, bool bComplete);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CheckObjectiveCompletion(const FQuest_MissionObjective& Objective, const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_Mission> GetActiveMissions() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_Mission GetMissionByName(const FString& MissionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateHuntMission(const FString& DinosaurType, const FVector& HuntLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateGatherMission(const FString& ResourceType, int32 Quantity);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateExplorationMission(const FVector& ExploreLocation, float ExploreRadius);
 
 private:
-    void InitializeDefaultMissions();
-    void SetupCrowdIntegration();
-    bool ValidateMissionData(const FQuest_MissionData& MissionData);
-    void BroadcastMissionEvent(const FString& MissionID, const FString& EventType);
+    void CheckAllObjectives();
+    void GenerateRandomMissions();
+    FTimer ObjectiveCheckTimer;
 };
