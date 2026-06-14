@@ -1,110 +1,105 @@
 #include "Char_TribalWarriorAsset.h"
-#include "Engine/Engine.h"
 
 UChar_TribalWarriorAsset::UChar_TribalWarriorAsset()
 {
-    // Initialize default values for tribal warrior customization
-    SkinWeathering = 0.7f;
-    ScarIntensity = 0.5f;
-    HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f); // Dark brown
-    SkinTone = FLinearColor(0.6f, 0.4f, 0.3f, 1.0f); // Weathered tan
-    MuscleMass = 0.8f;
-    BattleExperience = 0.6f;
+    CharacterName = TEXT("Tribal Warrior");
+    Rank = EChar_TribalRank::Warrior;
+    Biography = FText::FromString(TEXT("A skilled warrior of the Cretaceous tribes, hardened by survival in a world of giants."));
+    
+    BaseMesh = nullptr;
+    SkinMaterial = nullptr;
+    ClothingMaterial = nullptr;
+    MetalMaterial = nullptr;
+    
+    // Default appearance
+    Appearance.SkinTone = EChar_SkinTone::Medium;
+    Appearance.BodyBuild = EChar_BodyBuild::Athletic;
+    Appearance.WarPaintColor = FLinearColor::Red;
+    Appearance.bHasWarPaint = true;
+    Appearance.bHasScarring = false;
+    Appearance.MuscleMass = 1.0f;
+    
+    // Default stats
+    BaseHealth = 100.0f;
+    BaseStamina = 100.0f;
+    MovementSpeed = 400.0f;
+    AttackDamage = 25.0f;
+    DefenseRating = 15.0f;
 }
 
-void UChar_TribalWarriorAsset::ApplyRandomTribalVariation()
+FString UChar_TribalWarriorAsset::GetCharacterDescription() const
 {
-    // Generate random tribal warrior appearance variation
-    SkinWeathering = FMath::RandRange(0.5f, 0.9f);
-    ScarIntensity = FMath::RandRange(0.3f, 0.8f);
+    FString Description = FString::Printf(TEXT("%s - %s"), 
+        *CharacterName, 
+        *UEnum::GetValueAsString(Rank));
     
-    // Random hair color variations (browns and blacks)
-    float HueVariation = FMath::RandRange(0.15f, 0.25f);
-    float Saturation = FMath::RandRange(0.4f, 0.8f);
-    float Brightness = FMath::RandRange(0.1f, 0.3f);
-    HairColor = FLinearColor(HueVariation, Saturation * 0.5f, Brightness, 1.0f);
+    // Add appearance details
+    FString SkinToneStr = UEnum::GetValueAsString(Appearance.SkinTone);
+    FString BodyBuildStr = UEnum::GetValueAsString(Appearance.BodyBuild);
     
-    // Random skin tone variations (earth tones)
-    float SkinHue = FMath::RandRange(0.5f, 0.7f);
-    float SkinSat = FMath::RandRange(0.3f, 0.5f);
-    float SkinBright = FMath::RandRange(0.25f, 0.45f);
-    SkinTone = FLinearColor(SkinHue, SkinSat, SkinBright, 1.0f);
+    Description += FString::Printf(TEXT("\nAppearance: %s skin, %s build"), 
+        *SkinToneStr, *BodyBuildStr);
     
-    // Random physical attributes
-    MuscleMass = FMath::RandRange(0.6f, 1.0f);
-    BattleExperience = FMath::RandRange(0.2f, 0.9f);
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied random tribal variation: Weathering=%.2f, Scars=%.2f, Muscle=%.2f"), 
-           SkinWeathering, ScarIntensity, MuscleMass);
-}
-
-void UChar_TribalWarriorAsset::SetScarPattern(int32 PatternIndex)
-{
-    // Apply specific scar pattern based on index
-    switch (PatternIndex)
+    if (Appearance.bHasWarPaint)
     {
-        case 0: // Young warrior - minimal scars
-            ScarIntensity = 0.2f;
-            BattleExperience = 0.3f;
-            break;
-            
-        case 1: // Experienced hunter - moderate scars
-            ScarIntensity = 0.5f;
-            BattleExperience = 0.6f;
-            break;
-            
-        case 2: // Veteran warrior - heavy scarring
-            ScarIntensity = 0.8f;
-            BattleExperience = 0.9f;
-            break;
-            
-        case 3: // Ritual scars - ceremonial patterns
-            ScarIntensity = 0.6f;
-            BattleExperience = 0.4f;
-            break;
-            
-        case 4: // Survivor - random battle damage
-            ScarIntensity = FMath::RandRange(0.7f, 0.9f);
-            BattleExperience = FMath::RandRange(0.8f, 1.0f);
-            break;
-            
-        default:
-            ScarIntensity = 0.5f;
-            BattleExperience = 0.5f;
-            break;
+        Description += TEXT(", war paint");
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Applied scar pattern %d: Intensity=%.2f, Experience=%.2f"), 
-           PatternIndex, ScarIntensity, BattleExperience);
+    if (Appearance.bHasScarring)
+    {
+        Description += TEXT(", battle scars");
+    }
+    
+    // Add equipment summary
+    int32 EquippedItems = 0;
+    if (Equipment.WeaponMesh.IsValid()) EquippedItems++;
+    if (Equipment.ShieldMesh.IsValid()) EquippedItems++;
+    if (Equipment.ClothingMesh.IsValid()) EquippedItems++;
+    if (Equipment.JewelryMesh.IsValid()) EquippedItems++;
+    if (Equipment.HeadgearMesh.IsValid()) EquippedItems++;
+    if (Equipment.FootwearMesh.IsValid()) EquippedItems++;
+    
+    Description += FString::Printf(TEXT("\nEquipment: %d/6 slots equipped"), EquippedItems);
+    
+    // Add stats summary
+    Description += FString::Printf(TEXT("\nStats: HP %.0f, Stamina %.0f, Speed %.0f"), 
+        BaseHealth, BaseStamina, MovementSpeed);
+    
+    Description += FString::Printf(TEXT("\nCombat: Attack %.0f, Defense %.0f"), 
+        AttackDamage, DefenseRating);
+    
+    return Description;
 }
 
-void UChar_TribalWarriorAsset::SetTribalWeaponSet(int32 WeaponSetIndex)
+bool UChar_TribalWarriorAsset::IsValidConfiguration() const
 {
-    // Configure weapon loadout based on tribal role
-    switch (WeaponSetIndex)
+    // Check if we have minimum required assets
+    if (!BaseMesh.IsValid())
     {
-        case 0: // Hunter - spear and knife
-            UE_LOG(LogTemp, Log, TEXT("Equipped hunter weapon set: Spear + Knife"));
-            break;
-            
-        case 1: // Warrior - axe and spear
-            UE_LOG(LogTemp, Log, TEXT("Equipped warrior weapon set: Axe + Spear"));
-            break;
-            
-        case 2: // Scout - light weapons
-            UE_LOG(LogTemp, Log, TEXT("Equipped scout weapon set: Knife + Sling"));
-            break;
-            
-        case 3: // Chieftain - ceremonial weapons
-            UE_LOG(LogTemp, Log, TEXT("Equipped chieftain weapon set: Decorated Axe + Staff"));
-            break;
-            
-        case 4: // Shaman - ritual tools
-            UE_LOG(LogTemp, Log, TEXT("Equipped shaman weapon set: Staff + Bone Dagger"));
-            break;
-            
-        default:
-            UE_LOG(LogTemp, Log, TEXT("Equipped default weapon set"));
-            break;
+        UE_LOG(LogTemp, Warning, TEXT("TribalWarriorAsset %s: Missing base mesh"), *CharacterName);
+        return false;
     }
+    
+    if (!SkinMaterial.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TribalWarriorAsset %s: Missing skin material"), *CharacterName);
+        return false;
+    }
+    
+    // Check stats are reasonable
+    if (BaseHealth <= 0.0f || BaseStamina <= 0.0f || MovementSpeed <= 0.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TribalWarriorAsset %s: Invalid stats"), *CharacterName);
+        return false;
+    }
+    
+    // Check appearance values are in valid ranges
+    if (Appearance.MuscleMass < 0.1f || Appearance.MuscleMass > 2.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TribalWarriorAsset %s: Invalid muscle mass %.2f"), 
+            *CharacterName, Appearance.MuscleMass);
+        return false;
+    }
+    
+    return true;
 }
