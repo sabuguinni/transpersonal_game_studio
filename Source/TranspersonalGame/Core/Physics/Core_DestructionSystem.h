@@ -1,22 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "GameFramework/Actor.h"
+#include "Components/PrimitiveComponent.h"
 #include "Core_DestructionSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ECore_DestructionType : uint8
 {
     None            UMETA(DisplayName = "None"),
-    Fracture        UMETA(DisplayName = "Fracture"),
-    Shatter         UMETA(DisplayName = "Shatter"),
-    Crumble         UMETA(DisplayName = "Crumble"),
-    Explode         UMETA(DisplayName = "Explode")
+    Fragmentation   UMETA(DisplayName = "Fragmentation"),
+    Collapse        UMETA(DisplayName = "Collapse"),
+    Explosion       UMETA(DisplayName = "Explosion"),
+    Erosion         UMETA(DisplayName = "Erosion")
 };
 
 USTRUCT(BlueprintType)
@@ -25,35 +23,35 @@ struct FCore_DestructionData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    ECore_DestructionType DestructionType = ECore_DestructionType::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
     float Health = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float FragmentCount = 8.0f;
+    float DamageThreshold = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float ExplosionForce = 500.0f;
+    ECore_DestructionType DestructionType = ECore_DestructionType::Fragmentation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    bool bCanRegenerate = false;
+    int32 FragmentCount = 8;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float RegenerationTime = 30.0f;
+    float FragmentLifetime = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    bool bApplyPhysicsToFragments = true;
 
     FCore_DestructionData()
     {
-        DestructionType = ECore_DestructionType::None;
         Health = 100.0f;
-        FragmentCount = 8.0f;
-        ExplosionForce = 500.0f;
-        bCanRegenerate = false;
-        RegenerationTime = 30.0f;
+        DamageThreshold = 50.0f;
+        DestructionType = ECore_DestructionType::Fragmentation;
+        FragmentCount = 8;
+        FragmentLifetime = 10.0f;
+        bApplyPhysicsToFragments = true;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_DestructionSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -67,47 +65,64 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
+    // Destruction Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction", meta = (AllowPrivateAccess = "true"))
     FCore_DestructionData DestructionData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    TArray<UStaticMesh*> FragmentMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    bool bCanBeDestroyed = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction Settings")
-    UMaterialInterface* FragmentMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    bool bDestroyOnZeroHealth = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
-    bool bIsDestroyed = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    float ImpactForceMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
-    float CurrentHealth;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Destruction State")
-    float RegenerationTimer = 0.0f;
+    // Destruction Methods
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void ApplyDamage(float DamageAmount, FVector ImpactLocation = FVector::ZeroVector, FVector ImpactForce = FVector::ZeroVector);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void ApplyDamage(float DamageAmount, const FVector& ImpactPoint, const FVector& ImpactNormal);
+    void TriggerDestruction(FVector ImpactLocation = FVector::ZeroVector, FVector ImpactForce = FVector::ZeroVector);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void TriggerDestruction(const FVector& ImpactPoint, const FVector& ImpactDirection);
+    void CreateFragments(FVector ImpactLocation, FVector ImpactForce);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void StartRegeneration();
+    void HandleCollapse(FVector ImpactLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void ResetDestruction();
+    void HandleExplosion(FVector ImpactLocation, float ExplosionRadius = 500.0f);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Destruction Events")
-    void OnDestructionTriggered(const FVector& ImpactPoint);
+    // Utility Methods
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    bool IsDestroyed() const { return DestructionData.Health <= 0.0f; }
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Destruction Events")
-    void OnRegenerationComplete();
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    float GetHealthPercentage() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void RepairDamage(float RepairAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Destruction")
+    void SetDestructionType(ECore_DestructionType NewType);
+
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDestruction, AActor*, DestroyedActor, FVector, ImpactLocation, ECore_DestructionType, DestructionType);
+    UPROPERTY(BlueprintAssignable, Category = "Destruction")
+    FOnDestruction OnDestruction;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDamageReceived, float, DamageAmount, float, RemainingHealth);
+    UPROPERTY(BlueprintAssignable, Category = "Destruction")
+    FOnDamageReceived OnDamageReceived;
 
 private:
-    void CreateFragments(const FVector& ImpactPoint, const FVector& ImpactDirection);
-    void ProcessRegeneration(float DeltaTime);
-
+    // Internal state
+    bool bIsDestroyed = false;
     TArray<AActor*> SpawnedFragments;
-    UStaticMeshComponent* OriginalMeshComponent;
-    bool bRegenerationInProgress = false;
+
+    // Helper methods
+    UStaticMeshComponent* GetOwnerMeshComponent() const;
+    void CleanupFragments();
+    FVector CalculateFragmentVelocity(FVector ImpactLocation, FVector FragmentLocation, FVector ImpactForce) const;
 };
