@@ -1,69 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "PhysicsEngine/PhysicsAsset.h"
+#include "SharedTypes.h"
 #include "Core_RagdollSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ECore_RagdollState : uint8
-{
-    Inactive UMETA(DisplayName = "Inactive"),
-    Transitioning UMETA(DisplayName = "Transitioning"),
-    Active UMETA(DisplayName = "Active"),
-    Recovering UMETA(DisplayName = "Recovering")
-};
-
-UENUM(BlueprintType)
-enum class ECore_RagdollTrigger : uint8
-{
-    Death UMETA(DisplayName = "Death"),
-    Impact UMETA(DisplayName = "Impact"),
-    Explosion UMETA(DisplayName = "Explosion"),
-    Manual UMETA(DisplayName = "Manual")
-};
-
-USTRUCT(BlueprintType)
-struct FCore_RagdollSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float TransitionTime = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RecoveryTime = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MinImpactForce = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float MaxRagdollTime = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bAutoRecover = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bBlendPhysics = true;
-
-    FCore_RagdollSettings()
-    {
-        TransitionTime = 0.2f;
-        RecoveryTime = 1.0f;
-        MinImpactForce = 500.0f;
-        MaxRagdollTime = 10.0f;
-        bAutoRecover = true;
-        bBlendPhysics = true;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FCore_OnRagdollStateChanged, ECore_RagdollState, NewState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCore_OnRagdollTriggered, ECore_RagdollTrigger, Trigger, float, ImpactForce);
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
+/**
+ * Core Ragdoll System Component
+ * Handles realistic ragdoll physics for character death, knockdown, and impact reactions
+ * Integrates with dinosaur AI and player character for immersive survival gameplay
+ */
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_RagdollSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -73,66 +23,131 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    /** Skeletal mesh component to apply ragdoll physics to */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
+
+    /** Current ragdoll state */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    ECore_RagdollState RagdollState;
+
+    /** Ragdoll activation threshold (damage required to trigger) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
+    float ActivationThreshold;
+
+    /** Time before ragdoll automatically recovers (0 = manual recovery only) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings", meta = (ClampMin = "0.0", ClampMax = "30.0"))
+    float AutoRecoveryTime;
+
+    /** Impulse force multiplier for ragdoll activation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    float ImpulseMultiplier;
+
+    /** Bone names that are critical for ragdoll physics */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
+    TArray<FName> CriticalBones;
+
+    /** Physics constraints for ragdoll joints */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
+    TMap<FName, FCore_RagdollConstraint> BoneConstraints;
+
+    /** Current ragdoll timer */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    float CurrentRagdollTime;
+
+    /** Damage that triggered current ragdoll state */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    float TriggerDamage;
+
+    /** Location where ragdoll was triggered */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    FVector TriggerLocation;
+
+    /** Timer handle for auto recovery */
+    FTimerHandle RecoveryTimerHandle;
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Settings")
-    FCore_RagdollSettings RagdollSettings;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll State")
-    ECore_RagdollState CurrentState;
+    /** Initialize ragdoll system with target skeletal mesh */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void InitializeRagdoll(USkeletalMeshComponent* InTargetMesh);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Components")
-    USkeletalMeshComponent* TargetMesh;
+    /** Activate ragdoll physics with damage and impact force */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    bool ActivateRagdoll(float Damage, const FVector& ImpactPoint, const FVector& ImpactForce);
 
-    UPROPERTY(BlueprintAssignable, Category = "Ragdoll Events")
-    FCore_OnRagdollStateChanged OnRagdollStateChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Ragdoll Events")
-    FCore_OnRagdollTriggered OnRagdollTriggered;
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    void ActivateRagdoll(ECore_RagdollTrigger Trigger = ECore_RagdollTrigger::Manual, float ImpactForce = 0.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
+    /** Deactivate ragdoll and return to normal animation */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
     void DeactivateRagdoll();
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Control")
-    void SetRagdollSettings(const FCore_RagdollSettings& NewSettings);
+    /** Force immediate ragdoll activation (bypass threshold) */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void ForceRagdollActivation(const FVector& ImpactPoint, const FVector& ImpactForce);
 
-    UFUNCTION(BlueprintPure, Category = "Ragdoll State")
+    /** Check if ragdoll is currently active */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
     bool IsRagdollActive() const;
 
-    UFUNCTION(BlueprintPure, Category = "Ragdoll State")
-    float GetRagdollActiveTime() const;
+    /** Get current ragdoll state */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    ECore_RagdollState GetRagdollState() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Physics")
-    void ApplyImpactForce(const FVector& Force, const FVector& Location);
+    /** Apply impulse to specific bone during ragdoll */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void ApplyBoneImpulse(const FName& BoneName, const FVector& Impulse);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Physics")
-    void SetPhysicsBlendWeight(float BlendWeight);
+    /** Set bone constraint parameters */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void SetBoneConstraint(const FName& BoneName, const FCore_RagdollConstraint& Constraint);
 
-protected:
-    UPROPERTY()
-    float StateTimer;
+    /** Get bone velocity during ragdoll */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    FVector GetBoneVelocity(const FName& BoneName) const;
 
-    UPROPERTY()
-    float RagdollActiveTime;
+    /** Check if bone is moving above threshold */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    bool IsBoneMoving(const FName& BoneName, float VelocityThreshold = 50.0f) const;
 
-    UPROPERTY()
-    bool bWasSimulatingPhysics;
+    /** Blend from ragdoll back to animation */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void BlendToAnimation(float BlendTime = 1.0f);
 
-    UPROPERTY()
-    UAnimInstance* CachedAnimInstance;
+    /** Set ragdoll auto recovery time */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void SetAutoRecoveryTime(float NewTime);
 
-    void UpdateRagdollState(float DeltaTime);
-    void TransitionToState(ECore_RagdollState NewState);
-    void HandleStateTransition(float DeltaTime);
-    void HandleActiveRagdoll(float DeltaTime);
-    void HandleRecovery(float DeltaTime);
-    void BlendPhysicsWeight(float TargetWeight, float DeltaTime);
+    /** Get time remaining until auto recovery */
+    UFUNCTION(BlueprintPure, Category = "Ragdoll System")
+    float GetRecoveryTimeRemaining() const;
+
+    /** Event called when ragdoll is activated */
+    UPROPERTY(BlueprintAssignable, Category = "Ragdoll Events")
+    FOnRagdollActivated OnRagdollActivated;
+
+    /** Event called when ragdoll is deactivated */
+    UPROPERTY(BlueprintAssignable, Category = "Ragdoll Events")
+    FOnRagdollDeactivated OnRagdollDeactivated;
+
+    /** Event called when bone impact is detected */
+    UPROPERTY(BlueprintAssignable, Category = "Ragdoll Events")
+    FOnBoneImpact OnBoneImpact;
 
 private:
-    float CurrentPhysicsBlend;
-    float TargetPhysicsBlend;
+    /** Internal function to setup physics constraints */
+    void SetupPhysicsConstraints();
+
+    /** Internal function to apply impulse forces */
+    void ApplyImpulseForces(const FVector& ImpactPoint, const FVector& ImpactForce);
+
+    /** Internal function to handle auto recovery timer */
+    UFUNCTION()
+    void HandleAutoRecovery();
+
+    /** Internal function to validate bone names */
+    bool ValidateBoneName(const FName& BoneName) const;
+
+    /** Internal function to calculate optimal impulse distribution */
+    TMap<FName, FVector> CalculateImpulseDistribution(const FVector& ImpactPoint, const FVector& ImpactForce) const;
 };
