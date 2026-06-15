@@ -1,242 +1,210 @@
 #include "Anim_CharacterMovementBlueprint.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
 
 UAnim_CharacterMovementBlueprint::UAnim_CharacterMovementBlueprint()
 {
-    OwningCharacter = nullptr;
+    // Initialize movement variables
+    Speed = 0.0f;
+    Direction = 0.0f;
+    bIsInAir = false;
+    bIsAccelerating = false;
+    bIsCrouching = false;
+    bIsRunning = false;
+    bIsIdle = true;
+    bIsWalking = false;
+
+    // Initialize combat variables
+    bIsInCombat = false;
+    bIsAttacking = false;
+    bIsBlocking = false;
+    bIsDodging = false;
+
+    // Initialize survival variables
+    bIsInjured = false;
+    bIsExhausted = false;
+    bIsHungry = false;
+    bIsThirsty = false;
+
+    // Set animation thresholds
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 400.0f;
+    IdleThreshold = 10.0f;
+
+    // Initialize references
+    OwnerCharacter = nullptr;
     MovementComponent = nullptr;
-    
-    IdleAnimation = nullptr;
-    WalkAnimation = nullptr;
-    RunAnimation = nullptr;
-    JumpAnimation = nullptr;
-    CrouchAnimation = nullptr;
+
+    // Initialize internal state
+    LastFrameVelocity = FVector::ZeroVector;
+    AccelerationTimer = 0.0f;
+    IdleTimer = 0.0f;
 }
 
 void UAnim_CharacterMovementBlueprint::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    
-    // Get the owning character
-    OwningCharacter = Cast<ACharacter>(GetOwningActor());
-    
-    if (OwningCharacter)
+
+    // Get owner character and movement component
+    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwnerCharacter)
     {
-        MovementComponent = OwningCharacter->GetCharacterMovement();
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-                FString::Printf(TEXT("Animation Blueprint initialized for: %s"), 
-                *OwningCharacter->GetName()));
-        }
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
     }
 }
 
 void UAnim_CharacterMovementBlueprint::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
-    
-    if (OwningCharacter && MovementComponent)
-    {
-        UpdateMovementData();
-        UpdateMovementState();
-    }
-}
 
-void UAnim_CharacterMovementBlueprint::UpdateMovementData()
-{
-    if (!OwningCharacter || !MovementComponent)
+    if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
-    
-    // Get velocity and speed
-    FVector Velocity = MovementComponent->Velocity;
-    MovementData.Speed = Velocity.Size();
-    
-    // Calculate movement direction relative to character facing
-    if (MovementData.Speed > 0.1f)
+
+    // Update all animation variables
+    UpdateMovementVariables();
+    UpdateCombatVariables();
+    UpdateSurvivalVariables();
+    CalculateDirection();
+    DetermineMovementState();
+
+    // Update timers
+    if (Speed > IdleThreshold)
     {
-        CalculateMovementDirection();
+        IdleTimer = 0.0f;
+        AccelerationTimer += DeltaTimeX;
     }
     else
     {
-        MovementData.Direction = 0.0f;
+        IdleTimer += DeltaTimeX;
+        AccelerationTimer = 0.0f;
     }
-    
-    // Check if character is in air
-    MovementData.bIsInAir = MovementComponent->IsFalling();
-    
-    // Check if character is crouching
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Determine current movement state
-    MovementData.MovementState = DetermineMovementState();
+
+    // Store velocity for next frame
+    LastFrameVelocity = MovementComponent->Velocity;
 }
 
-void UAnim_CharacterMovementBlueprint::CalculateMovementDirection()
-{
-    if (!OwningCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    FVector Velocity = MovementComponent->Velocity;
-    FVector ForwardVector = OwningCharacter->GetActorForwardVector();
-    
-    // Normalize velocity (remove Z component for ground movement)
-    FVector GroundVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-    GroundVelocity.Normalize();
-    
-    // Calculate dot product to get direction
-    float DotProduct = FVector::DotProduct(ForwardVector, GroundVelocity);
-    
-    // Calculate cross product to determine left/right
-    FVector CrossProduct = FVector::CrossProduct(ForwardVector, GroundVelocity);
-    float CrossZ = CrossProduct.Z;
-    
-    // Convert to angle (-180 to 180)
-    MovementData.Direction = FMath::RadiansToDegrees(FMath::Atan2(CrossZ, DotProduct));
-}
-
-EAnim_MovementState UAnim_CharacterMovementBlueprint::DetermineMovementState()
+void UAnim_CharacterMovementBlueprint::UpdateMovementVariables()
 {
     if (!MovementComponent)
     {
-        return EAnim_MovementState::Idle;
+        return;
     }
-    
-    // Check if falling/jumping first
-    if (MovementData.bIsInAir)
-    {
-        if (MovementComponent->Velocity.Z > 0.0f)
-        {
-            return EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
-    
-    // Check if crouching
-    if (MovementData.bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
-    
-    // Check if swimming
-    if (MovementComponent->IsSwimming())
-    {
-        return EAnim_MovementState::Swimming;
-    }
-    
-    // Check movement speed for ground movement
-    if (MovementData.Speed > 10.0f)
-    {
-        // Determine walk vs run based on speed threshold
-        float WalkThreshold = MovementComponent->MaxWalkSpeed * 0.6f;
-        
-        if (MovementData.Speed > WalkThreshold)
-        {
-            return EAnim_MovementState::Running;
-        }
-        else
-        {
-            return EAnim_MovementState::Walking;
-        }
-    }
-    
-    return EAnim_MovementState::Idle;
+
+    // Calculate speed from velocity
+    FVector Velocity = MovementComponent->Velocity;
+    Speed = Velocity.Size2D();
+
+    // Check if character is in air
+    bIsInAir = MovementComponent->IsFalling();
+
+    // Check if character is crouching
+    bIsCrouching = MovementComponent->IsCrouching();
+
+    // Calculate acceleration
+    FVector CurrentAcceleration = (Velocity - LastFrameVelocity);
+    bIsAccelerating = CurrentAcceleration.Size2D() > 50.0f;
 }
 
-void UAnim_CharacterMovementBlueprint::UpdateMovementState()
+void UAnim_CharacterMovementBlueprint::UpdateCombatVariables()
 {
-    // This function can be called from Blueprint to force an update
-    if (OwningCharacter && MovementComponent)
+    // TODO: Integrate with combat system when available
+    // For now, use placeholder logic based on input or game state
+    
+    // These would typically be set by a combat component or game state
+    // bIsInCombat = CombatComponent ? CombatComponent->IsInCombat() : false;
+    // bIsAttacking = CombatComponent ? CombatComponent->IsAttacking() : false;
+    // bIsBlocking = CombatComponent ? CombatComponent->IsBlocking() : false;
+    // bIsDodging = CombatComponent ? CombatComponent->IsDodging() : false;
+}
+
+void UAnim_CharacterMovementBlueprint::UpdateSurvivalVariables()
+{
+    // TODO: Integrate with survival system when available
+    // For now, use placeholder logic
+    
+    // These would typically be set by a survival component or character stats
+    // bIsInjured = SurvivalComponent ? SurvivalComponent->GetHealth() < 0.5f : false;
+    // bIsExhausted = SurvivalComponent ? SurvivalComponent->GetStamina() < 0.2f : false;
+    // bIsHungry = SurvivalComponent ? SurvivalComponent->GetHunger() < 0.3f : false;
+    // bIsThirsty = SurvivalComponent ? SurvivalComponent->GetThirst() < 0.3f : false;
+}
+
+void UAnim_CharacterMovementBlueprint::CalculateDirection()
+{
+    if (!OwnerCharacter || !MovementComponent)
     {
-        UpdateMovementData();
+        Direction = 0.0f;
+        return;
+    }
+
+    // Get character's forward vector and velocity
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+    FVector Velocity = MovementComponent->Velocity;
+
+    if (Velocity.Size2D() > IdleThreshold)
+    {
+        // Normalize velocity to get direction
+        FVector VelocityDirection = Velocity.GetSafeNormal2D();
         
-        // Debug output for movement state changes
-        static EAnim_MovementState LastState = EAnim_MovementState::Idle;
-        if (MovementData.MovementState != LastState)
-        {
-            if (GEngine)
-            {
-                FString StateName;
-                switch (MovementData.MovementState)
-                {
-                    case EAnim_MovementState::Idle: StateName = TEXT("Idle"); break;
-                    case EAnim_MovementState::Walking: StateName = TEXT("Walking"); break;
-                    case EAnim_MovementState::Running: StateName = TEXT("Running"); break;
-                    case EAnim_MovementState::Jumping: StateName = TEXT("Jumping"); break;
-                    case EAnim_MovementState::Falling: StateName = TEXT("Falling"); break;
-                    case EAnim_MovementState::Crouching: StateName = TEXT("Crouching"); break;
-                    case EAnim_MovementState::Swimming: StateName = TEXT("Swimming"); break;
-                    case EAnim_MovementState::Climbing: StateName = TEXT("Climbing"); break;
-                }
-                
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, 
-                    FString::Printf(TEXT("Movement State: %s (Speed: %.1f)"), 
-                    *StateName, MovementData.Speed));
-            }
-            
-            LastState = MovementData.MovementState;
-        }
+        // Calculate angle between forward vector and velocity direction
+        float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
+        float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection).Z;
+        
+        // Convert to angle in degrees (-180 to 180)
+        Direction = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
+    }
+    else
+    {
+        Direction = 0.0f;
     }
 }
 
-void UAnim_CharacterMovementBlueprint::SetArchetypeState(EAnim_TribalArchetype NewArchetype)
+void UAnim_CharacterMovementBlueprint::DetermineMovementState()
 {
-    MovementData.ArchetypeState = NewArchetype;
-    
-    // Apply archetype-specific animation modifications
-    switch (NewArchetype)
+    // Reset all movement states
+    bIsIdle = false;
+    bIsWalking = false;
+    bIsRunning = false;
+
+    // Determine current movement state based on speed
+    if (Speed <= IdleThreshold)
     {
-        case EAnim_TribalArchetype::Hunter:
-            // Hunters move more cautiously, with lower stance
-            break;
-            
-        case EAnim_TribalArchetype::Gatherer:
-            // Gatherers have more relaxed, flowing movements
-            break;
-            
-        case EAnim_TribalArchetype::Elder:
-            // Elders move slower, with more deliberate steps
-            break;
-            
-        case EAnim_TribalArchetype::Shaman:
-            // Shamans have mystical, flowing movements
-            break;
-            
-        case EAnim_TribalArchetype::Warrior:
-            // Warriors have aggressive, powerful movements
-            break;
-            
-        case EAnim_TribalArchetype::Scout:
-            // Scouts move quickly and efficiently
-            break;
+        bIsIdle = true;
     }
-    
-    if (GEngine)
+    else if (Speed <= WalkSpeedThreshold)
     {
-        FString ArchetypeName;
-        switch (NewArchetype)
+        bIsWalking = true;
+    }
+    else if (Speed <= RunSpeedThreshold)
+    {
+        bIsRunning = true;
+    }
+    else
+    {
+        // Sprint state - use running animation for now
+        bIsRunning = true;
+    }
+
+    // Override states based on special conditions
+    if (bIsInAir)
+    {
+        // In air - use jump/fall animations
+        bIsIdle = false;
+        bIsWalking = false;
+        bIsRunning = false;
+    }
+
+    if (bIsCrouching)
+    {
+        // Crouching - modify states accordingly
+        if (Speed > IdleThreshold)
         {
-            case EAnim_TribalArchetype::Hunter: ArchetypeName = TEXT("Hunter"); break;
-            case EAnim_TribalArchetype::Gatherer: ArchetypeName = TEXT("Gatherer"); break;
-            case EAnim_TribalArchetype::Elder: ArchetypeName = TEXT("Elder"); break;
-            case EAnim_TribalArchetype::Shaman: ArchetypeName = TEXT("Shaman"); break;
-            case EAnim_TribalArchetype::Warrior: ArchetypeName = TEXT("Warrior"); break;
-            case EAnim_TribalArchetype::Scout: ArchetypeName = TEXT("Scout"); break;
+            bIsWalking = true;
+            bIsRunning = false;
         }
-        
-        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, 
-            FString::Printf(TEXT("Character Archetype set to: %s"), *ArchetypeName));
     }
 }
