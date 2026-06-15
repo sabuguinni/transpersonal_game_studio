@@ -1,126 +1,213 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Engine/HitResult.h"
+#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Core/SharedTypes.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPhysicsImpact, AActor*, HitActor, FVector, ImpactPoint, float, ImpactForce);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPhysicsBreak, AActor*, BrokenActor, FVector, BreakLocation);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsSettings
+{
+    GENERATED_BODY()
 
-/**
- * Core Physics System Manager - Manages all physics interactions in the prehistoric survival world
- * Handles realistic physics responses for dinosaur combat, environmental destruction, and survival mechanics
- * Integrates with UE5's Chaos Physics for authentic prehistoric world simulation
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSubsystem
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float GlobalGravityScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float DefaultLinearDamping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float DefaultAngularDamping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MaxPhysicsSubsteps;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableAsyncPhysics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float PhysicsTimeStep;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float CollisionTolerance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    int32 MaxPhysicsObjects;
+
+    FCore_PhysicsSettings()
+    {
+        GlobalGravityScale = 1.0f;
+        DefaultLinearDamping = 0.01f;
+        DefaultAngularDamping = 0.0f;
+        MaxPhysicsSubsteps = 6.0f;
+        bEnableAsyncPhysics = true;
+        PhysicsTimeStep = 0.016667f; // 60fps
+        CollisionTolerance = 0.1f;
+        MaxPhysicsObjects = 10000;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsObjectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    AActor* PhysicsActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Mass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    FVector Velocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    FVector AngularVelocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bIsSimulating;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    ECore_PhysicsType PhysicsType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LastUpdateTime;
+
+    FCore_PhysicsObjectData()
+    {
+        PhysicsActor = nullptr;
+        Mass = 1.0f;
+        Velocity = FVector::ZeroVector;
+        AngularVelocity = FVector::ZeroVector;
+        bIsSimulating = true;
+        PhysicsType = ECore_PhysicsType::Dynamic;
+        LastUpdateTime = 0.0f;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCore_PhysicsSystemManager();
 
-    // Subsystem lifecycle
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Physics impact events
-    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
-    FOnPhysicsImpact OnPhysicsImpact;
+public:
+    // Core Physics Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializePhysicsSystem();
 
-    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
-    FOnPhysicsBreak OnPhysicsBreak;
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings);
 
-    // Core physics management
-    UFUNCTION(BlueprintCallable, Category = "Physics Management")
-    void RegisterPhysicsActor(AActor* Actor, ECore_PhysicsType PhysicsType = ECore_PhysicsType::Dynamic);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void RegisterPhysicsObject(AActor* Actor, ECore_PhysicsType PhysicsType = ECore_PhysicsType::Dynamic);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Management")
-    void UnregisterPhysicsActor(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UnregisterPhysicsObject(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Management")
-    void SetGlobalPhysicsSettings(float Gravity = -980.0f, float LinearDamping = 0.01f, float AngularDamping = 0.0f);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetGlobalGravity(float NewGravityScale);
 
-    // Impact and force application
-    UFUNCTION(BlueprintCallable, Category = "Physics Forces")
-    void ApplyImpactForce(AActor* TargetActor, FVector ImpactLocation, FVector ForceDirection, float ForceMagnitude);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnablePhysicsSimulation(AActor* Actor, bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Forces")
-    void ApplyRadialForce(FVector Origin, float Radius, float Strength, bool bVelChange = false);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyImpulse(AActor* Actor, const FVector& Impulse, const FVector& Location = FVector::ZeroVector);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Forces")
-    void ApplyExplosionForce(FVector ExplosionOrigin, float InnerRadius, float OuterRadius, float Strength, bool bLinearFalloff = true);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyForce(AActor* Actor, const FVector& Force);
 
-    // Collision and physics queries
-    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
-    bool LineTracePhysics(FVector Start, FVector End, FHitResult& HitResult, bool bTraceComplex = false);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetObjectMass(AActor* Actor, float NewMass);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
-    TArray<FHitResult> SphereTracePhysics(FVector Center, float Radius, TArray<AActor*> IgnoreActors);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetLinearDamping(AActor* Actor, float Damping);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Queries")
-    float CalculateImpactDamage(float ImpactVelocity, float ActorMass, ECore_PhysicsType PhysicsType);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetAngularDamping(AActor* Actor, float Damping);
 
-    // Environmental physics
-    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
-    void SimulateRockfall(FVector Origin, int32 RockCount = 10, float SpreadRadius = 500.0f);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void FreezeObject(AActor* Actor, bool bFreezePosition = true, bool bFreezeRotation = true);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
-    void SimulateTreeFall(AActor* TreeActor, FVector ImpactDirection, float ImpactForce);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void WakeUpObject(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
-    void CreateDebrisField(FVector Origin, float Radius, int32 DebrisCount = 20);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void PutObjectToSleep(AActor* Actor);
 
-    // Physics material management
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    void SetActorPhysicsMaterial(AActor* Actor, ECore_SurfaceType SurfaceType);
+    // Physics Queries
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    bool IsObjectSimulating(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    ECore_SurfaceType GetSurfaceTypeFromHit(const FHitResult& HitResult);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    FVector GetObjectVelocity(AActor* Actor) const;
 
-    // Performance and optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizePhysicsForPerformance(float MaxPhysicsDistance = 5000.0f);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    float GetObjectMass(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    int32 GetActivePhysicsObjectCount() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    TArray<AActor*> GetPhysicsObjects() const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void OptimizePhysicsPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
     void SetPhysicsLOD(AActor* Actor, int32 LODLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Debug")
-    void DebugDrawPhysicsInfo(bool bEnabled = true, float Duration = 5.0f);
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnablePhysicsMultithreading(bool bEnable);
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics System")
+    void DebugDrawPhysicsObjects();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics System")
+    void LogPhysicsSystemStats();
 
 protected:
-    // Internal physics tracking
-    UPROPERTY()
-    TMap<AActor*, ECore_PhysicsType> RegisteredPhysicsActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
+    FCore_PhysicsSettings PhysicsSettings;
 
-    UPROPERTY()
-    TArray<AActor*> ActivePhysicsActors;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Objects", meta = (AllowPrivateAccess = "true"))
+    TArray<FCore_PhysicsObjectData> RegisteredObjects;
 
-    // Physics settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
-    float GlobalGravityScale;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    int32 ActivePhysicsObjects;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
-    float MaxPhysicsSimulationDistance;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    float PhysicsUpdateTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
-    bool bEnablePhysicsOptimization;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    bool bPhysicsSystemInitialized;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
-    int32 MaxActivePhysicsActors;
+private:
+    void UpdatePhysicsObjectData(float DeltaTime);
+    void CleanupInvalidObjects();
+    UPrimitiveComponent* GetPhysicsComponent(AActor* Actor) const;
+    void ApplyPhysicsLOD(AActor* Actor, int32 LODLevel);
+    void ValidatePhysicsSettings();
 
-    // Internal methods
-    void UpdatePhysicsActors(float DeltaTime);
-    void ProcessPhysicsEvents();
-    void CleanupInactivePhysicsActors();
-    
-    // Timer handles
-    FTimerHandle PhysicsUpdateTimer;
-    FTimerHandle PhysicsCleanupTimer;
+    float LastOptimizationTime;
+    int32 PhysicsFrameCounter;
+    TArray<AActor*> PendingRegistration;
+    TArray<AActor*> PendingUnregistration;
 };
