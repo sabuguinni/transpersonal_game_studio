@@ -1,50 +1,51 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "Perf_FrameRateMonitor.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameData
+struct FPerf_FrameData
 {
     GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float DeltaTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float FrameRate = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameTime = 0.0f;
+    float FrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TotalActors = 0;
+    float GameThreadTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VisibleActors = 0;
+    float RenderThreadTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 Triangles = 0;
 
     FPerf_FrameData()
     {
-        DeltaTime = 0.0f;
-        FrameRate = 60.0f;
-        AverageFrameTime = 16.67f;
-        TotalActors = 0;
-        VisibleActors = 0;
+        FrameRate = 0.0f;
+        FrameTime = 0.0f;
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
+        GPUTime = 0.0f;
+        DrawCalls = 0;
+        Triangles = 0;
     }
 };
 
-UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
-{
-    Optimal     UMETA(DisplayName = "Optimal (60+ FPS)"),
-    Good        UMETA(DisplayName = "Good (45-60 FPS)"),
-    Acceptable  UMETA(DisplayName = "Acceptable (30-45 FPS)"),
-    Poor        UMETA(DisplayName = "Poor (15-30 FPS)"),
-    Critical    UMETA(DisplayName = "Critical (<15 FPS)")
-};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceAlert, float, CurrentFPS);
 
-UCLASS(BlueprintType)
+UCLASS()
 class TRANSPERSONALGAME_API UPerf_FrameRateMonitor : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -53,51 +54,87 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartMonitoring();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopMonitoring();
-
+    // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
     FPerf_FrameData GetCurrentFrameData() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
+    float GetAverageFrameRate() const { return AverageFrameRate; }
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetAverageFrameRate() const;
+    float GetMinimumFrameRate() const { return MinFrameRate; }
 
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetMaximumFrameRate() const { return MaxFrameRate; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceGood() const { return GetAverageFrameRate() >= TargetFrameRate * 0.9f; }
+
+    // Performance Targets
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetTargetFrameRate(float NewTargetFPS) { TargetFrameRate = NewTargetFPS; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetTargetFrameRate() const { return TargetFrameRate; }
+
+    // Performance Alerts
+    UPROPERTY(BlueprintAssignable, Category = "Performance")
+    FOnPerformanceAlert OnPerformanceAlert;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnablePerformanceAlerts(bool bEnable) { bPerformanceAlertsEnabled = bEnable; }
+
+    // Statistics
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void ResetStatistics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsMonitoring() const { return bIsMonitoring; }
+    int32 GetSampleCount() const { return FrameSamples.Num(); }
 
-private:
-    void UpdateFrameData();
-    void CalculatePerformanceLevel();
+protected:
+    // Performance Targets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceAlertThreshold = 0.8f; // Alert when FPS drops below 80% of target
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bPerformanceAlertsEnabled = true;
+
+    // Sample Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSamples = 300; // 5 seconds at 60fps
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float SampleInterval = 0.016f; // Sample every frame at 60fps
+
+    // Internal Data
+    UPROPERTY()
+    TArray<float> FrameSamples;
 
     UPROPERTY()
-    bool bIsMonitoring = false;
+    float AverageFrameRate = 0.0f;
 
     UPROPERTY()
-    FPerf_FrameData CurrentFrameData;
+    float MinFrameRate = 0.0f;
 
     UPROPERTY()
-    EPerf_PerformanceLevel CurrentPerformanceLevel = EPerf_PerformanceLevel::Optimal;
+    float MaxFrameRate = 0.0f;
 
     UPROPERTY()
-    TArray<float> FrameTimeHistory;
+    float LastSampleTime = 0.0f;
 
     UPROPERTY()
-    float TotalFrameTime = 0.0f;
+    bool bInitialized = false;
 
-    UPROPERTY()
-    int32 FrameCount = 0;
+    // Tick Function
+    FTickerDelegate TickDelegate;
+    FTSTicker::FDelegateHandle TickDelegateHandle;
 
-    UPROPERTY()
-    float MonitoringStartTime = 0.0f;
-
-    FTimerHandle MonitoringTimerHandle;
+    bool Tick(float DeltaTime);
+    void UpdateFrameStatistics();
+    void CheckPerformanceAlerts();
+    void AddFrameSample(float FrameRate);
+    float CalculateCurrentFrameRate() const;
 };
