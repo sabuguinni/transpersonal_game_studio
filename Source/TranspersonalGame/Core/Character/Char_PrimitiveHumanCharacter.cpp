@@ -1,233 +1,296 @@
 #include "Char_PrimitiveHumanCharacter.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/Engine.h"
 #include "UObject/ConstructorHelpers.h"
 
 AChar_PrimitiveHumanCharacter::AChar_PrimitiveHumanCharacter()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize character customization defaults
-    CharacterCustomization.SkinTone = EChar_SkinTone::Medium;
-    CharacterCustomization.ClothingStyle = EChar_ClothingStyle::BasicHide;
-    CharacterCustomization.BodyMassIndex = 1.0f;
-    CharacterCustomization.Height = 1.0f;
-    CharacterCustomization.bHasTribalMarkings = false;
-    CharacterCustomization.bHasBoneJewelry = true;
-    CharacterCustomization.bHasScars = false;
+    // Set up character mesh
+    CharacterMesh = GetMesh();
+    if (CharacterMesh)
+    {
+        CharacterMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
+        CharacterMesh->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+        
+        // Try to load default mannequin mesh
+        static ConstructorHelpers::FObjectFinder<USkeletalMesh> MeshAsset(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny"));
+        if (MeshAsset.Succeeded())
+        {
+            CharacterMesh->SetSkeletalMesh(MeshAsset.Object);
+        }
+    }
+
+    // Create bone tool belt component
+    BoneToolBelt = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BoneToolBelt"));
+    BoneToolBelt->SetupAttachment(CharacterMesh, TEXT("pelvis"));
+    BoneToolBelt->SetRelativeLocation(FVector(0.0f, 15.0f, 0.0f));
+
+    // Create spear weapon component
+    SpearWeapon = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SpearWeapon"));
+    SpearWeapon->SetupAttachment(CharacterMesh, TEXT("hand_r"));
+    SpearWeapon->SetRelativeLocation(FVector(0.0f, 0.0f, 10.0f));
+    SpearWeapon->SetRelativeRotation(FRotator(0.0f, 0.0f, 90.0f));
+
+    // Initialize customization settings
+    CustomizationSettings.SkinTone = EChar_SkinTone::Medium;
+    CustomizationSettings.ClothingStyle = EChar_ClothingStyle::BasicLeather;
+    CustomizationSettings.FacePaintColor = FLinearColor::Red;
+    CustomizationSettings.bHasFacePaint = true;
+    CustomizationSettings.MuscleMass = 0.7f;
+    CustomizationSettings.WeatheringLevel = 0.5f;
 
     // Initialize character stats
+    SurvivalExperience = 50.0f;
     TribalRank = 1.0f;
-    SurvivalExperience = 0.0f;
-    CraftingSkill = 1.0f;
-    HuntingSkill = 1.0f;
+    CraftingSkill = 25.0f;
+    HuntingSkill = 30.0f;
 
-    // Create weapon components
-    StoneAxeComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StoneAxeComponent"));
-    StoneAxeComponent->SetupAttachment(GetMesh(), TEXT("hand_r"));
-    StoneAxeComponent->SetVisibility(false);
-
-    SpearComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SpearComponent"));
-    SpearComponent->SetupAttachment(GetMesh(), TEXT("hand_l"));
-    SpearComponent->SetVisibility(false);
-
-    // Create clothing components
-    HideClothingComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HideClothingComponent"));
-    HideClothingComponent->SetupAttachment(GetMesh());
-
-    BoneJewelryComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BoneJewelryComponent"));
-    BoneJewelryComponent->SetupAttachment(GetMesh());
-    BoneJewelryComponent->SetVisibility(CharacterCustomization.bHasBoneJewelry);
-
-    // Set default mesh to UE5 Mannequin if available
-    static ConstructorHelpers::FObjectFinder<USkeletalMesh> MeshAsset(TEXT("/Engine/Characters/Mannequins/Meshes/SKM_Manny"));
-    if (MeshAsset.Succeeded())
-    {
-        GetMesh()->SetSkeletalMesh(MeshAsset.Object);
-        GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
-        GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-    }
+    // Set default collision
+    GetCapsuleComponent()->SetCapsuleSize(42.0f, 96.0f);
 }
 
 void AChar_PrimitiveHumanCharacter::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Apply initial customization
-    ApplyCharacterCustomization(CharacterCustomization);
+    SetupDefaultEquipment();
+    ApplyCustomization(CustomizationSettings);
 }
 
-void AChar_PrimitiveHumanCharacter::ApplyCharacterCustomization(const FChar_CharacterCustomization& NewCustomization)
+void AChar_PrimitiveHumanCharacter::Tick(float DeltaTime)
 {
-    CharacterCustomization = NewCustomization;
+    Super::Tick(DeltaTime);
+
+    // Update weathering over time
+    if (GetWorld() && GetWorld()->GetTimeSeconds() - LastCustomizationTime > 60.0f)
+    {
+        CustomizationSettings.WeatheringLevel = FMath::Clamp(
+            CustomizationSettings.WeatheringLevel + (DeltaTime * 0.001f), 
+            0.0f, 1.0f
+        );
+        LastCustomizationTime = GetWorld()->GetTimeSeconds();
+    }
+}
+
+void AChar_PrimitiveHumanCharacter::ApplyCustomization(const FChar_CharacterCustomization& NewCustomization)
+{
+    CustomizationSettings = NewCustomization;
     
-    UpdateMeshMaterials();
-    UpdateClothingMesh();
-    UpdateJewelryVisibility();
+    UpdateCharacterMaterials();
+    UpdateClothing();
+    UpdateFacePaint();
     
-    // Apply body scaling
-    FVector NewScale = FVector(
-        CharacterCustomization.BodyMassIndex,
-        CharacterCustomization.BodyMassIndex,
-        CharacterCustomization.Height
-    );
-    GetMesh()->SetRelativeScale3D(NewScale);
+    bIsCustomizationApplied = true;
+    LastCustomizationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    UE_LOG(LogTemp, Warning, TEXT("Applied customization to character: %s"), *GetCharacterDescription());
 }
 
 void AChar_PrimitiveHumanCharacter::SetSkinTone(EChar_SkinTone NewSkinTone)
 {
-    CharacterCustomization.SkinTone = NewSkinTone;
-    UpdateMeshMaterials();
+    CustomizationSettings.SkinTone = NewSkinTone;
+    UpdateCharacterMaterials();
 }
 
-void AChar_PrimitiveHumanCharacter::SetClothingStyle(EChar_ClothingStyle NewClothingStyle)
+void AChar_PrimitiveHumanCharacter::SetClothingStyle(EChar_ClothingStyle NewStyle)
 {
-    CharacterCustomization.ClothingStyle = NewClothingStyle;
-    UpdateClothingMesh();
+    CustomizationSettings.ClothingStyle = NewStyle;
+    UpdateClothing();
 }
 
-void AChar_PrimitiveHumanCharacter::ToggleTribalMarkings(bool bEnabled)
+void AChar_PrimitiveHumanCharacter::SetFacePaint(bool bEnabled, FLinearColor Color)
 {
-    CharacterCustomization.bHasTribalMarkings = bEnabled;
-    UpdateMeshMaterials();
+    CustomizationSettings.bHasFacePaint = bEnabled;
+    CustomizationSettings.FacePaintColor = Color;
+    UpdateFacePaint();
 }
 
-void AChar_PrimitiveHumanCharacter::ToggleBoneJewelry(bool bEnabled)
+void AChar_PrimitiveHumanCharacter::AddSurvivalExperience(float Amount)
 {
-    CharacterCustomization.bHasBoneJewelry = bEnabled;
-    UpdateJewelryVisibility();
+    SurvivalExperience = FMath::Clamp(SurvivalExperience + Amount, 0.0f, 100.0f);
+    
+    // Increase weathering with experience
+    CustomizationSettings.WeatheringLevel = FMath::Clamp(
+        SurvivalExperience * 0.01f, 
+        0.0f, 1.0f
+    );
+    
+    UpdateCharacterMaterials();
 }
 
-void AChar_PrimitiveHumanCharacter::ToggleScars(bool bEnabled)
+void AChar_PrimitiveHumanCharacter::SetTribalRank(float NewRank)
 {
-    CharacterCustomization.bHasScars = bEnabled;
-    UpdateMeshMaterials();
+    TribalRank = FMath::Clamp(NewRank, 1.0f, 10.0f);
+    
+    // Higher rank = better equipment
+    if (TribalRank > 5.0f)
+    {
+        CustomizationSettings.ClothingStyle = EChar_ClothingStyle::BoneArmor;
+        UpdateClothing();
+    }
 }
 
-void AChar_PrimitiveHumanCharacter::EquipStoneAxe(bool bEquipped)
+void AChar_PrimitiveHumanCharacter::EquipBoneTools()
 {
-    StoneAxeComponent->SetVisibility(bEquipped);
+    if (BoneToolBelt)
+    {
+        BoneToolBelt->SetVisibility(true);
+        UE_LOG(LogTemp, Log, TEXT("Equipped bone tools on character"));
+    }
 }
 
-void AChar_PrimitiveHumanCharacter::EquipSpear(bool bEquipped)
+void AChar_PrimitiveHumanCharacter::EquipSpear()
 {
-    SpearComponent->SetVisibility(bEquipped);
+    if (SpearWeapon)
+    {
+        SpearWeapon->SetVisibility(true);
+        UE_LOG(LogTemp, Log, TEXT("Equipped spear on character"));
+    }
 }
 
 FString AChar_PrimitiveHumanCharacter::GetCharacterDescription() const
 {
-    FString Description = TEXT("Primitive Human - ");
-    
-    // Add skin tone description
-    switch (CharacterCustomization.SkinTone)
+    FString SkinToneStr;
+    switch (CustomizationSettings.SkinTone)
     {
-        case EChar_SkinTone::Light:
-            Description += TEXT("Light skin, ");
-            break;
-        case EChar_SkinTone::Medium:
-            Description += TEXT("Medium skin, ");
-            break;
-        case EChar_SkinTone::Dark:
-            Description += TEXT("Dark skin, ");
-            break;
-        case EChar_SkinTone::Weathered:
-            Description += TEXT("Weathered skin, ");
-            break;
+        case EChar_SkinTone::Light: SkinToneStr = TEXT("Light"); break;
+        case EChar_SkinTone::Medium: SkinToneStr = TEXT("Medium"); break;
+        case EChar_SkinTone::Dark: SkinToneStr = TEXT("Dark"); break;
+        case EChar_SkinTone::Weathered: SkinToneStr = TEXT("Weathered"); break;
+        default: SkinToneStr = TEXT("Unknown"); break;
     }
-    
-    // Add clothing description
-    switch (CharacterCustomization.ClothingStyle)
+
+    FString ClothingStr;
+    switch (CustomizationSettings.ClothingStyle)
     {
-        case EChar_ClothingStyle::BasicHide:
-            Description += TEXT("basic hide clothing");
-            break;
-        case EChar_ClothingStyle::FurTrim:
-            Description += TEXT("fur-trimmed clothing");
-            break;
-        case EChar_ClothingStyle::BoneArmor:
-            Description += TEXT("bone armor");
-            break;
-        case EChar_ClothingStyle::Tribal:
-            Description += TEXT("tribal clothing");
-            break;
+        case EChar_ClothingStyle::BasicLeather: ClothingStr = TEXT("Basic Leather"); break;
+        case EChar_ClothingStyle::FurWraps: ClothingStr = TEXT("Fur Wraps"); break;
+        case EChar_ClothingStyle::BoneArmor: ClothingStr = TEXT("Bone Armor"); break;
+        case EChar_ClothingStyle::TribalGear: ClothingStr = TEXT("Tribal Gear"); break;
+        default: ClothingStr = TEXT("Unknown"); break;
     }
-    
-    // Add features
-    if (CharacterCustomization.bHasTribalMarkings)
-    {
-        Description += TEXT(", tribal markings");
-    }
-    
-    if (CharacterCustomization.bHasBoneJewelry)
-    {
-        Description += TEXT(", bone jewelry");
-    }
-    
-    if (CharacterCustomization.bHasScars)
-    {
-        Description += TEXT(", battle scars");
-    }
-    
-    return Description;
+
+    return FString::Printf(TEXT("Primitive Human - Skin: %s, Clothing: %s, Experience: %.1f, Rank: %.1f"), 
+        *SkinToneStr, *ClothingStr, SurvivalExperience, TribalRank);
 }
 
-float AChar_PrimitiveHumanCharacter::GetOverallSkillLevel() const
+void AChar_PrimitiveHumanCharacter::TestCharacterCustomization()
 {
-    return (CraftingSkill + HuntingSkill + SurvivalExperience) / 3.0f;
+    // Cycle through different customizations for testing
+    static int32 TestIndex = 0;
+    
+    switch (TestIndex % 4)
+    {
+        case 0:
+            CustomizationSettings.SkinTone = EChar_SkinTone::Light;
+            CustomizationSettings.ClothingStyle = EChar_ClothingStyle::BasicLeather;
+            break;
+        case 1:
+            CustomizationSettings.SkinTone = EChar_SkinTone::Medium;
+            CustomizationSettings.ClothingStyle = EChar_ClothingStyle::FurWraps;
+            break;
+        case 2:
+            CustomizationSettings.SkinTone = EChar_SkinTone::Dark;
+            CustomizationSettings.ClothingStyle = EChar_ClothingStyle::BoneArmor;
+            break;
+        case 3:
+            CustomizationSettings.SkinTone = EChar_SkinTone::Weathered;
+            CustomizationSettings.ClothingStyle = EChar_ClothingStyle::TribalGear;
+            break;
+    }
+    
+    TestIndex++;
+    ApplyCustomization(CustomizationSettings);
 }
 
-void AChar_PrimitiveHumanCharacter::UpdateMeshMaterials()
+void AChar_PrimitiveHumanCharacter::UpdateCharacterMaterials()
 {
-    // This would typically load and apply different materials based on skin tone,
-    // tribal markings, and scars. For now, we'll log the changes.
-    if (GEngine)
+    if (!CharacterMesh) return;
+
+    // Create dynamic material instance for skin
+    if (SkinMaterials.Num() > 0)
     {
-        FString SkinToneStr;
-        switch (CharacterCustomization.SkinTone)
+        int32 MaterialIndex = static_cast<int32>(CustomizationSettings.SkinTone);
+        if (SkinMaterials.IsValidIndex(MaterialIndex))
         {
-            case EChar_SkinTone::Light: SkinToneStr = TEXT("Light"); break;
-            case EChar_SkinTone::Medium: SkinToneStr = TEXT("Medium"); break;
-            case EChar_SkinTone::Dark: SkinToneStr = TEXT("Dark"); break;
-            case EChar_SkinTone::Weathered: SkinToneStr = TEXT("Weathered"); break;
+            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(
+                SkinMaterials[MaterialIndex], this
+            );
+            
+            if (DynamicMaterial)
+            {
+                DynamicMaterial->SetScalarParameterValue(TEXT("MuscleMass"), CustomizationSettings.MuscleMass);
+                DynamicMaterial->SetScalarParameterValue(TEXT("Weathering"), CustomizationSettings.WeatheringLevel);
+                CharacterMesh->SetMaterial(0, DynamicMaterial);
+            }
         }
-        
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            FString::Printf(TEXT("Updated skin tone to: %s"), *SkinToneStr));
     }
 }
 
-void AChar_PrimitiveHumanCharacter::UpdateClothingMesh()
+void AChar_PrimitiveHumanCharacter::UpdateClothing()
 {
-    // This would typically swap out clothing meshes based on the clothing style
-    if (HideClothingComponent && GEngine)
+    if (!CharacterMesh) return;
+
+    // Apply clothing material based on style
+    if (ClothingMaterials.Num() > 0)
     {
-        FString ClothingStr;
-        switch (CharacterCustomization.ClothingStyle)
+        int32 MaterialIndex = static_cast<int32>(CustomizationSettings.ClothingStyle);
+        if (ClothingMaterials.IsValidIndex(MaterialIndex))
         {
-            case EChar_ClothingStyle::BasicHide: ClothingStr = TEXT("Basic Hide"); break;
-            case EChar_ClothingStyle::FurTrim: ClothingStr = TEXT("Fur Trim"); break;
-            case EChar_ClothingStyle::BoneArmor: ClothingStr = TEXT("Bone Armor"); break;
-            case EChar_ClothingStyle::Tribal: ClothingStr = TEXT("Tribal"); break;
+            CharacterMesh->SetMaterial(1, ClothingMaterials[MaterialIndex]);
         }
-        
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Blue, 
-            FString::Printf(TEXT("Updated clothing to: %s"), *ClothingStr));
     }
 }
 
-void AChar_PrimitiveHumanCharacter::UpdateJewelryVisibility()
+void AChar_PrimitiveHumanCharacter::UpdateFacePaint()
 {
-    if (BoneJewelryComponent)
+    if (!CharacterMesh || !FacePaintMaterial) return;
+
+    if (CustomizationSettings.bHasFacePaint)
     {
-        BoneJewelryComponent->SetVisibility(CharacterCustomization.bHasBoneJewelry);
+        UMaterialInstanceDynamic* DynamicPaint = UMaterialInstanceDynamic::Create(
+            FacePaintMaterial, this
+        );
         
-        if (GEngine)
+        if (DynamicPaint)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-                FString::Printf(TEXT("Bone jewelry: %s"), 
-                CharacterCustomization.bHasBoneJewelry ? TEXT("Visible") : TEXT("Hidden")));
+            DynamicPaint->SetVectorParameterValue(TEXT("PaintColor"), CustomizationSettings.FacePaintColor);
+            CharacterMesh->SetMaterial(2, DynamicPaint);
+        }
+    }
+    else
+    {
+        CharacterMesh->SetMaterial(2, nullptr);
+    }
+}
+
+void AChar_PrimitiveHumanCharacter::SetupDefaultEquipment()
+{
+    // Set up basic bone tools
+    if (BoneToolBelt)
+    {
+        // Try to load a basic static mesh for tools
+        static ConstructorHelpers::FObjectFinder<UStaticMesh> ToolMesh(TEXT("/Engine/BasicShapes/Cube"));
+        if (ToolMesh.Succeeded())
+        {
+            BoneToolBelt->SetStaticMesh(ToolMesh.Object);
+            BoneToolBelt->SetWorldScale3D(FVector(0.1f, 0.5f, 0.1f));
+        }
+    }
+
+    // Set up basic spear
+    if (SpearWeapon)
+    {
+        static ConstructorHelpers::FObjectFinder<UStaticMesh> SpearMesh(TEXT("/Engine/BasicShapes/Cylinder"));
+        if (SpearMesh.Succeeded())
+        {
+            SpearWeapon->SetStaticMesh(SpearMesh.Object);
+            SpearWeapon->SetWorldScale3D(FVector(0.05f, 0.05f, 2.0f));
         }
     }
 }
