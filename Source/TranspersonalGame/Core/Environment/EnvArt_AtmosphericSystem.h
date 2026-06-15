@@ -3,51 +3,72 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/ExponentialHeightFog.h"
+#include "Components/VolumetricFogComponent.h"
+#include "Components/AudioComponent.h"
+#include "Engine/TriggerBox.h"
 #include "EnvArt_AtmosphericSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EEnvArt_TimeOfDay : uint8
-{
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Morning     UMETA(DisplayName = "Morning"),
-    Noon        UMETA(DisplayName = "Noon"),
-    Afternoon   UMETA(DisplayName = "Afternoon"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
-};
-
 USTRUCT(BlueprintType)
-struct FEnvArt_LightingPreset
+struct TRANSPERSONALGAME_API FEnvArt_LightingSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor LightColor;
+    FLinearColor SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float LightIntensity;
+    float SunIntensity = 3.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FRotator SunRotation;
+    float SunAngle = -15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunAzimuth = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    bool bEnableVolumetricShadows = true;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_FogSettings
+{
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogDensity;
+    FLinearColor FogAlbedo = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor;
+    float ScatteringDistribution = 0.2f;
 
-    FEnvArt_LightingPreset()
-    {
-        LightColor = FLinearColor::White;
-        LightIntensity = 3.0f;
-        SunRotation = FRotator(-30.0f, 45.0f, 0.0f);
-        FogDensity = 0.02f;
-        FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float ExtinctionScale = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float ScatteringScale = 1.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FVector FogScale = FVector(20.0f, 20.0f, 5.0f);
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_AudioZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString ZoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FVector Location;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float VolumeMultiplier = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float PitchMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bAutoActivate = true;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -64,66 +85,40 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Lighting presets for different times of day
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    TMap<EEnvArt_TimeOfDay, FEnvArt_LightingPreset> LightingPresets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric System")
+    FEnvArt_LightingSettings LightingSettings;
 
-    // Current time of day
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    EEnvArt_TimeOfDay CurrentTimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric System")
+    FEnvArt_FogSettings FogSettings;
 
-    // Auto cycle through day/night
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    bool bAutoCycleDayNight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric System")
+    TArray<FEnvArt_AudioZone> AudioZones;
 
-    // Day cycle duration in seconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float DayCycleDuration;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UDirectionalLightComponent* DirectionalLightComponent;
 
-    // References to world lighting actors
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    ADirectionalLight* SunLight;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UVolumetricFogComponent* VolumetricFogComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    AExponentialHeightFog* AtmosphericFog;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TArray<class UAudioComponent*> AudioComponents;
 
-    // Atmospheric effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
-    bool bEnableVolumetricFog;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric System")
+    void ApplyGoldenHourLighting();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
-    bool bEnableGodRays;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric System")
+    void SetupVolumetricFog(const FVector& Location, const FVector& Scale);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
-    float ParticleIntensity;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric System")
+    void CreateAudioZone(const FEnvArt_AudioZone& AudioZone);
 
-public:
-    // Blueprint callable functions
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric System")
+    void UpdateAtmosphericSettings();
 
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void ApplyLightingPreset(const FEnvArt_LightingPreset& Preset);
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void CreateAtmosphericFog();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void UpdateSunPosition();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void EnableGoldenHourLighting();
-
-    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
-    void SpawnParticleEffects();
-
-protected:
-    // Internal functions
-    void InitializeLightingPresets();
-    void FindWorldLightingActors();
-    void UpdateDayCycle(float DeltaTime);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Atmospheric System")
+    void RefreshAtmosphericSystem();
 
 private:
-    float CurrentDayTime;
-    bool bSystemInitialized;
+    void InitializeComponents();
+    void SetupDefaultSettings();
 };
