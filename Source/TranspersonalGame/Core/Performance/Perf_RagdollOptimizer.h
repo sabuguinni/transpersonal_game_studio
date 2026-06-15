@@ -2,47 +2,83 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsAsset.h"
 #include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Perf_RagdollOptimizer.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_RagdollQuality : uint8
+enum class EPerf_RagdollLODLevel : uint8
 {
-    Disabled    UMETA(DisplayName = "Disabled"),
-    Low         UMETA(DisplayName = "Low Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
     High        UMETA(DisplayName = "High Quality"),
-    Ultra       UMETA(DisplayName = "Ultra Quality")
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    Low         UMETA(DisplayName = "Low Quality"),
+    Disabled    UMETA(DisplayName = "Disabled")
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_RagdollPerformanceMetrics
+struct TRANSPERSONALGAME_API FPerf_RagdollPerformanceSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveRagdolls = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxRagdollDistance = 5000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 PhysicsBodies = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousRagdolls = 8;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PhysicsTimeMs = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float BoneConstraintCullDistance = 2000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RagdollMemoryMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsUpdateRate = 60.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bPerformanceWarning = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseDistanceBasedLOD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bCullOffscreenRagdolls = true;
+
+    FPerf_RagdollPerformanceSettings()
+    {
+        MaxRagdollDistance = 5000.0f;
+        MaxSimultaneousRagdolls = 8;
+        BoneConstraintCullDistance = 2000.0f;
+        PhysicsUpdateRate = 60.0f;
+        bUseDistanceBasedLOD = true;
+        bCullOffscreenRagdolls = true;
+    }
 };
 
-/**
- * Advanced ragdoll performance optimization system
- * Manages ragdoll LOD, culling, and performance monitoring
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_RagdollInstance
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    TWeakObjectPtr<class UCore_RagdollSystem> RagdollComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    float DistanceToPlayer = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    EPerf_RagdollLODLevel CurrentLOD = EPerf_RagdollLODLevel::High;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    bool bIsOnScreen = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll")
+    float LastUpdateTime = 0.0f;
+
+    FPerf_RagdollInstance()
+    {
+        DistanceToPlayer = 0.0f;
+        CurrentLOD = EPerf_RagdollLODLevel::High;
+        bIsOnScreen = true;
+        LastUpdateTime = 0.0f;
+    }
+};
+
 UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPerf_RagdollOptimizer : public UActorComponent
 {
@@ -57,109 +93,84 @@ protected:
 
 public:
     // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Performance")
-    EPerf_RagdollQuality RagdollQuality = EPerf_RagdollQuality::Medium;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    FPerf_RagdollPerformanceSettings PerformanceSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Performance", meta = (ClampMin = "1", ClampMax = "50"))
-    int32 MaxActiveRagdolls = 10;
+    // LOD Distance Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float HighLODDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Performance", meta = (ClampMin = "100", ClampMax = "5000"))
-    float RagdollCullDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float MediumLODDistance = 2500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll Performance", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float RagdollLifetime = 5.0f;
-
-    // LOD Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD0Distance = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD1Distance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD2Distance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float LowLODDistance = 5000.0f;
 
     // Performance Monitoring
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Metrics")
-    FPerf_RagdollPerformanceMetrics CurrentMetrics;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
+    int32 ActiveRagdollCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Monitoring")
-    bool bEnablePerformanceMonitoring = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
+    float AverageFrameTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Monitoring")
-    float PerformanceUpdateInterval = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitoring")
+    float RagdollPhysicsCost = 0.0f;
 
-    // Performance Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float MaxPhysicsTimeMs = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float MaxRagdollMemoryMB = 100.0f;
-
-public:
     // Ragdoll Management
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    void EnableRagdoll(USkeletalMeshComponent* SkeletalMesh, bool bApplyLOD = true);
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll Management")
+    TArray<FPerf_RagdollInstance> ActiveRagdolls;
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    void DisableRagdoll(USkeletalMeshComponent* SkeletalMesh);
+    // Blueprint Functions
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void RegisterRagdoll(class UCore_RagdollSystem* RagdollComponent);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
-    void OptimizeAllRagdolls();
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void UnregisterRagdoll(class UCore_RagdollSystem* RagdollComponent);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll Management")
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void OptimizeRagdollLOD(class UCore_RagdollSystem* RagdollComponent, EPerf_RagdollLODLevel LODLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    EPerf_RagdollLODLevel CalculateOptimalLOD(float Distance, bool bIsOnScreen);
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void UpdateRagdollPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
     void CullDistantRagdolls();
 
-    // LOD Management
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    void UpdateRagdollLOD(USkeletalMeshComponent* SkeletalMesh, float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll Performance")
+    void EnforceRagdollLimit();
 
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    int32 CalculateLODLevel(float Distance) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    float GetCurrentFPS() const;
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    float GetPhysicsFrameTime() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceOptimal() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitoring")
+    void LogPerformanceStats();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyPerformanceOptimizations();
+    UFUNCTION(BlueprintCallable, Category = "Performance Settings")
+    void SetPerformanceProfile(bool bHighPerformance);
 
-    // Quality Settings
-    UFUNCTION(BlueprintCallable, Category = "Quality")
-    void SetRagdollQuality(EPerf_RagdollQuality NewQuality);
-
-    UFUNCTION(BlueprintCallable, Category = "Quality")
-    void ApplyQualitySettings();
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    TArray<USkeletalMeshComponent*> GetActiveRagdolls() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    float GetDistanceToPlayer(AActor* Actor) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void CleanupExpiredRagdolls();
+    UFUNCTION(BlueprintCallable, Category = "Performance Settings")
+    void ApplyPerformanceSettings(const FPerf_RagdollPerformanceSettings& NewSettings);
 
 private:
-    // Internal tracking
-    UPROPERTY()
-    TArray<USkeletalMeshComponent*> ActiveRagdolls;
-
-    UPROPERTY()
-    TMap<USkeletalMeshComponent*, float> RagdollActivationTimes;
-
-    // Performance tracking
+    // Internal Functions
+    void UpdateRagdollDistances();
+    void UpdateRagdollLODs();
+    void CheckScreenVisibility();
+    void MonitorPerformanceMetrics();
+    
+    // Performance Tracking
     float LastPerformanceUpdate = 0.0f;
-    float AccumulatedPhysicsTime = 0.0f;
-    int32 PhysicsFrameCount = 0;
-
-    // Internal methods
-    void RemoveInvalidRagdolls();
-    void ApplyLODToRagdoll(USkeletalMeshComponent* SkeletalMesh, int32 LODLevel);
-    float CalculateRagdollMemoryUsage() const;
-    void LogPerformanceWarning(const FString& Warning) const;
+    float PerformanceUpdateInterval = 1.0f;
+    TArray<float> FrameTimeHistory;
+    int32 FrameTimeHistorySize = 60;
+    
+    // Player Reference
+    UPROPERTY()
+    class APawn* PlayerPawn;
 };
