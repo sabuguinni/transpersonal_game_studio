@@ -1,121 +1,122 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "../SharedTypes.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Engine/World.h"
 #include "Narr_EnvironmentalNarrator.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_EnvironmentalEvent : uint8
+enum class ENarr_EnvironmentType : uint8
 {
-    None UMETA(DisplayName = "None"),
-    EnteringForest UMETA(DisplayName = "Entering Forest"),
-    LeavingForest UMETA(DisplayName = "Leaving Forest"),
-    NearWater UMETA(DisplayName = "Near Water"),
-    HighGround UMETA(DisplayName = "High Ground"),
-    DangerousArea UMETA(DisplayName = "Dangerous Area"),
-    SafeZone UMETA(DisplayName = "Safe Zone"),
-    WeatherChange UMETA(DisplayName = "Weather Change"),
-    TimeOfDay UMETA(DisplayName = "Time of Day")
+    Forest        UMETA(DisplayName = "Forest"),
+    River         UMETA(DisplayName = "River"),
+    Cave          UMETA(DisplayName = "Cave"),
+    Plains        UMETA(DisplayName = "Plains"),
+    Mountain      UMETA(DisplayName = "Mountain"),
+    Swamp         UMETA(DisplayName = "Swamp"),
+    Desert        UMETA(DisplayName = "Desert"),
+    Coastline     UMETA(DisplayName = "Coastline")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_EnvironmentalTrigger
+struct FNarr_EnvironmentalCue
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    ENarr_EnvironmentalEvent EventType;
+    ENarr_EnvironmentType EnvironmentType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
     FString NarrativeText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    float TriggerRadius;
+    TSoftObjectPtr<USoundCue> AudioCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    float CooldownTime;
+    float TriggerChance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
-    bool bIsActive;
+    float MinTimeBetweenTriggers;
 
-    FNarr_EnvironmentalTrigger()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    bool bRequiresPlayerPresence;
+
+    FNarr_EnvironmentalCue()
     {
-        EventType = ENarr_EnvironmentalEvent::None;
-        NarrativeText = TEXT("The environment whispers its secrets...");
-        TriggerRadius = 500.0f;
-        CooldownTime = 30.0f;
-        bIsActive = true;
+        EnvironmentType = ENarr_EnvironmentType::Forest;
+        NarrativeText = TEXT("The wilderness whispers its ancient secrets...");
+        TriggerChance = 0.3f;
+        MinTimeBetweenTriggers = 60.0f;
+        bRequiresPlayerPresence = true;
     }
 };
 
-UCLASS(ClassGroup=(Narrative), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_EnvironmentalNarrator : public UActorComponent
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API ANarr_EnvironmentalNarrator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UNarr_EnvironmentalNarrator();
+    ANarr_EnvironmentalNarrator();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narrative")
-    TArray<FNarr_EnvironmentalTrigger> EnvironmentalTriggers;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narration")
+    TArray<FNarr_EnvironmentalCue> EnvironmentalCues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
     float CheckInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narrative")
-    bool bEnableEnvironmentalNarration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float PlayerDetectionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narrative")
-    float NarrationVolume;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float LastNarrationTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental Narrative")
-    float NarrationDuration;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsNarrating;
 
-private:
-    UPROPERTY()
-    class APawn* PlayerPawn;
-
-    UPROPERTY()
-    TMap<ENarr_EnvironmentalEvent, float> LastTriggerTimes;
-
-    float TimeSinceLastCheck;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    ENarr_EnvironmentType CurrentEnvironment;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Environmental Narrative")
-    void TriggerEnvironmentalNarration(ENarr_EnvironmentalEvent EventType, const FString& CustomText = TEXT(""));
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Narrative")
-    void AddEnvironmentalTrigger(ENarr_EnvironmentalEvent EventType, const FString& NarrativeText, float Radius, float Cooldown);
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    void TriggerEnvironmentalNarration(ENarr_EnvironmentType EnvironmentType);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Narrative")
-    void SetEnvironmentalNarrationEnabled(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    void StopCurrentNarration();
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Narrative")
-    bool IsEventOnCooldown(ENarr_EnvironmentalEvent EventType) const;
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    bool CanTriggerNarration(const FNarr_EnvironmentalCue& Cue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    ENarr_EnvironmentType DetectCurrentEnvironment() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    bool IsPlayerNearby() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Narration")
+    FNarr_EnvironmentalCue GetCueForEnvironment(ENarr_EnvironmentType EnvironmentType) const;
 
 protected:
     UFUNCTION()
-    void CheckEnvironmentalConditions();
+    void OnNarrationFinished();
 
-    UFUNCTION()
-    void ProcessEnvironmentalEvent(const FNarr_EnvironmentalTrigger& Trigger);
+    UFUNCTION(BlueprintImplementableEvent, Category = "Environmental Narration")
+    void OnEnvironmentalNarrationTriggered(const FNarr_EnvironmentalCue& Cue);
 
-    UFUNCTION()
-    bool IsPlayerInForest() const;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Environmental Narration")
+    void OnEnvironmentalNarrationCompleted(const FNarr_EnvironmentalCue& Cue);
 
-    UFUNCTION()
-    bool IsPlayerNearWater() const;
-
-    UFUNCTION()
-    bool IsPlayerOnHighGround() const;
-
-    UFUNCTION()
-    bool IsPlayerInDangerousArea() const;
+private:
+    FTimerHandle CheckTimer;
+    void CheckForNarrationTrigger();
 };
