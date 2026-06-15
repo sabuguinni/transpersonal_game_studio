@@ -1,44 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "AIController.h"
-#include "Perception/AIPerceptionComponent.h"
 #include "Components/ActorComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "AIController.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "../SharedTypes.h"
 #include "NPCBehaviorTreeManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
-{
-    Idle = 0,
-    Patrolling = 1,
-    Investigating = 2,
-    Fleeing = 3,
-    Socializing = 4,
-    Working = 5,
-    Sleeping = 6,
-    Hunting = 7,
-    Gathering = 8
-};
-
-UENUM(BlueprintType)
-enum class ENPC_SocialRole : uint8
-{
-    Leader = 0,
-    Hunter = 1,
-    Gatherer = 2,
-    Crafter = 3,
-    Guard = 4,
-    Elder = 5,
-    Child = 6,
-    Shaman = 7
-};
+class APawn;
+class AAIController;
 
 USTRUCT(BlueprintType)
-struct FNPC_MemoryEntry
+struct TRANSPERSONALGAME_API FNPC_MemoryEntry
 {
     GENERATED_BODY()
 
@@ -46,174 +23,196 @@ struct FNPC_MemoryEntry
     FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    AActor* RelatedActor;
+    float Timestamp;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Importance;
+    ENPC_MemoryType MemoryType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float TimeStamp;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FString EventDescription;
+    float Intensity;
 
     FNPC_MemoryEntry()
     {
         Location = FVector::ZeroVector;
-        RelatedActor = nullptr;
-        Importance = 0.0f;
-        TimeStamp = 0.0f;
-        EventDescription = TEXT("");
+        Timestamp = 0.0f;
+        MemoryType = ENPC_MemoryType::Neutral;
+        Intensity = 1.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_SocialRelationship
+struct TRANSPERSONALGAME_API FNPC_SocialRelation
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    AActor* TargetActor;
+    TWeakObjectPtr<APawn> TargetPawn;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
     float RelationshipValue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float Trust;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float Fear;
+    ENPC_RelationType RelationType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
     float LastInteractionTime;
 
-    FNPC_SocialRelationship()
+    FNPC_SocialRelation()
     {
-        TargetActor = nullptr;
+        TargetPawn = nullptr;
         RelationshipValue = 0.0f;
-        Trust = 0.0f;
-        Fear = 0.0f;
+        RelationType = ENPC_RelationType::Neutral;
         LastInteractionTime = 0.0f;
     }
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorTreeManager : public UActorComponent
+class TRANSPERSONALGAME_API UNPC_BehaviorTreeManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorTreeManager();
+    UNPC_BehaviorTreeManager();
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Behavior Tree Management
+public:
+    // Core Behavior Tree Management
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void InitializeBehaviorTree(UBehaviorTree* NewBehaviorTree);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree, bool bForceRestart = true);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void PauseBehaviorTree();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void ResumeBehaviorTree();
+
+    // Memory System
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void AddMemory(FVector Location, ENPC_MemoryType MemoryType, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    TArray<FNPC_MemoryEntry> GetMemoriesInRadius(FVector Center, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    FNPC_MemoryEntry GetStrongestMemory(ENPC_MemoryType MemoryType);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void ClearOldMemories(float MaxAge = 300.0f);
+
+    // Social System
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    void UpdateRelationship(APawn* TargetPawn, float DeltaValue, ENPC_RelationType NewRelationType = ENPC_RelationType::Neutral);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    FNPC_SocialRelation GetRelationship(APawn* TargetPawn);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    TArray<FNPC_SocialRelation> GetAllRelationships();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Social")
+    void ProcessSocialInteraction(APawn* TargetPawn, ENPC_InteractionType InteractionType);
+
+    // Daily Routine System
+    UFUNCTION(BlueprintCallable, Category = "NPC Routine")
+    void SetDailyRoutine(const TArray<FNPC_RoutineTask>& NewRoutine);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Routine")
+    FNPC_RoutineTask GetCurrentRoutineTask();
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Routine")
+    void AdvanceToNextRoutineTask();
+
+    // Blackboard Management
+    UFUNCTION(BlueprintCallable, Category = "NPC Blackboard")
+    void SetBlackboardValue(FName KeyName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Blackboard")
+    void SetBlackboardVector(FName KeyName, FVector Value);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Blackboard")
+    void SetBlackboardObject(FName KeyName, UObject* Value);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Blackboard")
+    float GetBlackboardValue(FName KeyName);
+
+    // State Management
+    UFUNCTION(BlueprintCallable, Category = "NPC State")
+    void SetNPCState(ENPC_BehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC State")
+    ENPC_BehaviorState GetNPCState() const { return CurrentBehaviorState; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC State")
+    bool IsInCombat() const { return CurrentBehaviorState == ENPC_BehaviorState::Combat; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC State")
+    bool IsPatrolling() const { return CurrentBehaviorState == ENPC_BehaviorState::Patrol; }
+
+protected:
+    // Core References
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBlackboardComponent* BlackboardComponent;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
     UBehaviorTree* DefaultBehaviorTree;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    UBehaviorTree* CombatBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    UBehaviorTree* SocialBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    UBlackboardComponent* NPCBlackboard;
-
-    // NPC State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    ENPC_BehaviorState CurrentBehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    ENPC_SocialRole SocialRole;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    float Energy;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    float Hunger;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    float Fear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    float Alertness;
+    UBehaviorTree* CurrentBehaviorTree;
 
     // Memory System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    TArray<FNPC_MemoryEntry> ShortTermMemory;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory")
+    TArray<FNPC_MemoryEntry> Memories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    TArray<FNPC_MemoryEntry> LongTermMemory;
+    int32 MaxMemories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    int32 MaxShortTermMemories;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    int32 MaxLongTermMemories;
+    float MemoryDecayRate;
 
     // Social System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TArray<FNPC_SocialRelationship> SocialRelationships;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Social")
+    TArray<FNPC_SocialRelation> SocialRelations;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float SocialRadius;
+    float SocialUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float CommunicationCooldown;
+    // Daily Routine
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    TArray<FNPC_RoutineTask> DailyRoutine;
 
-    // Daily Routines
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routines")
-    TArray<FVector> PatrolPoints;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Routine")
+    int32 CurrentRoutineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routines")
-    FVector HomeLocation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Routine")
+    float RoutineStartTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routines")
-    FVector WorkLocation;
+    // State Management
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    ENPC_BehaviorState CurrentBehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routines")
-    float DailyRoutineTimer;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    ENPC_BehaviorState PreviousBehaviorState;
 
-    // Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemoryEntry(FVector Location, AActor* Actor, float Importance, const FString& Description);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ProcessMemoryDecay(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void UpdateSocialRelationship(AActor* TargetActor, float RelationshipChange, float TrustChange, float FearChange);
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    FNPC_SocialRelationship GetSocialRelationship(AActor* TargetActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Routines")
-    void ExecuteDailyRoutine(float TimeOfDay);
-
-    UFUNCTION(BlueprintCallable, Category = "Perception")
-    void OnPerceptionUpdated(AActor* Actor, float Stimulus);
-
-    UFUNCTION(BlueprintCallable, Category = "Communication")
-    void SendSocialSignal(const FString& Message, float Range);
-
-    UFUNCTION(BlueprintCallable, Category = "Communication")
-    void ReceiveSocialSignal(AActor* Sender, const FString& Message);
+    // Timers
+    FTimerHandle MemoryCleanupTimer;
+    FTimerHandle SocialUpdateTimer;
+    FTimerHandle RoutineUpdateTimer;
 
 private:
-    void UpdateNeeds(float DeltaTime);
-    void ProcessSocialInteractions(float DeltaTime);
-    void ManageMemoryCapacity();
-    AActor* FindNearestActorOfType(TSubclassOf<AActor> ActorClass, float MaxDistance);
-    bool IsInSocialRange(AActor* TargetActor);
+    // Internal Methods
+    void UpdateMemorySystem(float DeltaTime);
+    void UpdateSocialSystem(float DeltaTime);
+    void UpdateRoutineSystem(float DeltaTime);
+    void CleanupExpiredMemories();
+    void DecayMemoryIntensity(float DeltaTime);
+    AAIController* GetOwnerAIController();
 };
