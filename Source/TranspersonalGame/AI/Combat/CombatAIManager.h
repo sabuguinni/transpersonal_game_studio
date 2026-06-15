@@ -2,56 +2,66 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/TriggerBox.h"
+#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "../../SharedTypes.h"
+#include "SharedTypes.h"
 #include "CombatAIManager.generated.h"
 
+class UCombat_TacticalComponent;
+class ACombat_DinosaurPawn;
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_ThreatLevel
+struct TRANSPERSONALGAME_API FCombat_ThreatAssessment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float ThreatValue = 0.0f;
+    float ThreatLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float DetectionRadius = 1000.0f;
+    FVector ThreatLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AggressionLevel = 0.5f;
+    AActor* ThreatActor;
 
-    FCombat_ThreatLevel()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float LastAssessmentTime;
+
+    FCombat_ThreatAssessment()
     {
-        ThreatValue = 0.0f;
-        DetectionRadius = 1000.0f;
-        AggressionLevel = 0.5f;
+        ThreatLevel = 0.0f;
+        ThreatLocation = FVector::ZeroVector;
+        ThreatActor = nullptr;
+        LastAssessmentTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_BehaviorState
+struct TRANSPERSONALGAME_API FCombat_PackFormation
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    ECombat_AIState CurrentState = ECombat_AIState::Patrol;
+    TArray<AActor*> PackMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    AActor* TargetActor = nullptr;
+    AActor* AlphaLeader;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    FVector LastKnownLocation = FVector::ZeroVector;
+    FVector FormationCenter;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float StateTimer = 0.0f;
+    float FormationRadius;
 
-    FCombat_BehaviorState()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    ECombat_FormationType FormationType;
+
+    FCombat_PackFormation()
     {
-        CurrentState = ECombat_AIState::Patrol;
-        TargetActor = nullptr;
-        LastKnownLocation = FVector::ZeroVector;
-        StateTimer = 0.0f;
+        AlphaLeader = nullptr;
+        FormationCenter = FVector::ZeroVector;
+        FormationRadius = 500.0f;
+        FormationType = ECombat_FormationType::Circle;
     }
 };
 
@@ -67,75 +77,71 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Combat AI Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    TArray<AActor*> RegisteredCombatants;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    class USceneComponent* RootSceneComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    TArray<ATriggerBox*> CombatZones;
+    TArray<FCombat_ThreatAssessment> ActiveThreats;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float GlobalThreatLevel = 0.0f;
+    TArray<FCombat_PackFormation> ActivePacks;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    int32 MaxActiveCombatants = 10;
+    float ThreatScanRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float CombatUpdateInterval = 0.5f;
+    float ThreatScanInterval;
 
-    // Dinosaur Limits
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Management")
-    int32 DinosaurHardCap = 150;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float PackCoordinationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Management")
-    int32 CurrentDinosaurCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    int32 MaxPackSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnablePackHunting;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnableTacticalRetreat;
 
 private:
-    float CombatUpdateTimer = 0.0f;
-    TMap<AActor*, FCombat_BehaviorState> CombatantStates;
-    TMap<AActor*, FCombat_ThreatLevel> ThreatLevels;
+    float LastThreatScanTime;
+    float LastPackUpdateTime;
 
 public:
-    // Combat Management Functions
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RegisterCombatant(AActor* Combatant, const FCombat_ThreatLevel& ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UnregisterCombatant(AActor* Combatant);
+    void ScanForThreats();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateCombatBehaviors();
+    void UpdatePackFormations();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetCombatState(AActor* Combatant, ECombat_AIState NewState);
+    void RegisterCombatActor(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_AIState GetCombatState(AActor* Combatant) const;
+    void UnregisterCombatActor(AActor* Actor);
 
-    // Dinosaur Management Functions
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Management")
-    void EnforceDinosaurLimit();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FCombat_ThreatAssessment AssessThreat(AActor* PotentialThreat, AActor* Observer);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Management")
-    int32 CountDinosaurs() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldEngageTarget(AActor* Predator, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Management")
-    bool CanSpawnDinosaur() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldRetreat(AActor* Actor);
 
-    // Combat Zone Management
-    UFUNCTION(BlueprintCallable, Category = "Combat Zones")
-    void RegisterCombatZone(ATriggerBox* Zone);
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FVector GetOptimalFlankingPosition(AActor* Predator, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Zones")
-    void CheckCombatZoneActivation();
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinatePackAttack(const FCombat_PackFormation& Pack, AActor* Target);
 
-    // Threat Assessment
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    float CalculateGlobalThreat() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void InitiateTacticalRetreat(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    AActor* FindNearestThreat(AActor* FromActor, float SearchRadius = 2000.0f) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<AActor*> GetNearbyAllies(AActor* Actor, float SearchRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    TArray<AActor*> GetThreatsInRadius(const FVector& Location, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<AActor*> GetNearbyEnemies(AActor* Actor, float SearchRadius);
 };
