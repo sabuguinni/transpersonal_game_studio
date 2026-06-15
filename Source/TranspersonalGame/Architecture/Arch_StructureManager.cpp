@@ -1,337 +1,356 @@
 #include "Arch_StructureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 AArch_StructureManager::AArch_StructureManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Create main structure mesh component
-    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
-    MainStructureMesh->SetupAttachment(RootComponent);
-
-    // Initialize defaults
-    StructureType = EArch_StructureType::Dwelling;
-    CurrentWeatheringLevel = 0.3f;
-    bInteriorPopulated = false;
-
-    // Set default structure data
-    StructureData.StructureName = TEXT("Prehistoric Dwelling");
-    StructureData.BiomeType = EBiomeType::Savanna;
-    StructureData.WeatheringLevel = 0.3f;
-    StructureData.bIsRuin = false;
+    MaxStructuresPerBiome = 10;
+    MinDistanceBetweenStructures = 5000.0f;
+    WeatheringRate = 0.1f;
+    bEnableWeatheringSystem = true;
 }
 
 void AArch_StructureManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Apply initial weathering and biome-specific materials
-    ApplyBiomeSpecificWeathering();
-    UpdateStructureAppearance();
-    
-    if (UE_LOG_ACTIVE(LogTemp, Log))
-    {
-        UE_LOG(LogTemp, Log, TEXT("Arch_StructureManager: %s initialized at %s"), 
-               *StructureData.StructureName, *GetActorLocation().ToString());
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Architecture Structure Manager initialized"));
 }
 
 void AArch_StructureManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Gradual weathering over time (very slow)
-    if (CurrentWeatheringLevel < 1.0f)
+
+    if (bEnableWeatheringSystem)
     {
-        float WeatheringRate = 0.00001f; // Very slow weathering
-        CurrentWeatheringLevel = FMath::Min(1.0f, CurrentWeatheringLevel + (WeatheringRate * DeltaTime));
-        
-        if (FMath::Abs(CurrentWeatheringLevel - StructureData.WeatheringLevel) > 0.1f)
-        {
-            StructureData.WeatheringLevel = CurrentWeatheringLevel;
-            UpdateStructureAppearance();
-        }
+        ApplyWeathering(DeltaTime);
     }
 }
 
-void AArch_StructureManager::InitializeStructure(const FArch_StructureData& InStructureData, EArch_StructureType InType)
+bool AArch_StructureManager::SpawnStructure(EArch_StructureType StructureType, FVector Location, EBiomeType BiomeType)
 {
-    StructureData = InStructureData;
-    StructureType = InType;
-    CurrentWeatheringLevel = StructureData.WeatheringLevel;
-    
-    // Set actor location and rotation
-    SetActorLocation(StructureData.Location);
-    SetActorRotation(StructureData.Rotation);
-    
-    // Update appearance based on new data
-    ApplyBiomeSpecificWeathering();
-    UpdateStructureAppearance();
-    
-    // Populate interior if not a ruin
-    if (!StructureData.bIsRuin && StructureType != EArch_StructureType::Ruin)
+    if (!IsLocationValidForStructure(Location, StructureType))
     {
-        PopulateInterior();
+        UE_LOG(LogTemp, Warning, TEXT("Invalid location for structure spawn"));
+        return false;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Structure initialized: %s (Type: %d)"), 
-           *StructureData.StructureName, (int32)StructureType);
-}
 
-void AArch_StructureManager::ApplyWeathering(float WeatheringAmount)
-{
-    CurrentWeatheringLevel = FMath::Clamp(CurrentWeatheringLevel + WeatheringAmount, 0.0f, 1.0f);
-    StructureData.WeatheringLevel = CurrentWeatheringLevel;
-    
-    UpdateStructureAppearance();
-    
-    // Convert to ruin if heavily weathered
-    if (CurrentWeatheringLevel > 0.8f && !StructureData.bIsRuin)
+    // Check if we've reached the limit for this biome
+    TArray<FArch_StructureData> BiomeStructures = GetStructuresInBiome(BiomeType);
+    if (BiomeStructures.Num() >= MaxStructuresPerBiome)
     {
-        ConvertToRuin(CurrentWeatheringLevel);
+        UE_LOG(LogTemp, Warning, TEXT("Max structures reached for biome"));
+        return false;
     }
-}
 
-void AArch_StructureManager::PopulateInterior()
-{
-    if (bInteriorPopulated)
-    {
-        ClearInterior();
-    }
-    
-    // Define interior layouts based on structure type
-    TArray<FVector> PropLocations;
-    TArray<FRotator> PropRotations;
-    TArray<int32> PropIndices;
-    
+    // Create the structure based on type
     switch (StructureType)
     {
-        case EArch_StructureType::Dwelling:
-            // Basic dwelling: fire pit, sleeping area, storage
-            PropLocations.Add(FVector(0, 0, 10));      // Fire pit center
-            PropLocations.Add(FVector(-150, 100, 0));  // Sleeping area
-            PropLocations.Add(FVector(150, -100, 0));  // Storage area
-            PropRotations.Add(FRotator::ZeroRotator);
-            PropRotations.Add(FRotator(0, 45, 0));
-            PropRotations.Add(FRotator(0, -30, 0));
-            PropIndices = {0, 1, 2}; // Assuming first 3 props are for dwelling
+        case EArch_StructureType::StoneCircle:
+            CreateStoneCircle(Location, BiomeType);
             break;
-            
-        case EArch_StructureType::Workshop:
-            // Workshop: work bench, tool storage, materials
-            PropLocations.Add(FVector(0, -50, 20));    // Work bench
-            PropLocations.Add(FVector(-100, 0, 0));    // Tool storage
-            PropLocations.Add(FVector(100, 50, 0));    // Materials pile
-            PropRotations.Add(FRotator::ZeroRotator);
-            PropRotations.Add(FRotator(0, 90, 0));
-            PropRotations.Add(FRotator(0, -45, 0));
-            PropIndices = {0, 1, 2};
+        case EArch_StructureType::CaveEntrance:
+            CreateCaveEntrance(Location, BiomeType);
             break;
-            
-        case EArch_StructureType::Storage:
-            // Storage: multiple containers
-            for (int32 i = 0; i < 4; i++)
-            {
-                float Angle = i * 90.0f;
-                FVector Location = FVector(
-                    FMath::Cos(FMath::DegreesToRadians(Angle)) * 80,
-                    FMath::Sin(FMath::DegreesToRadians(Angle)) * 80,
-                    0
-                );
-                PropLocations.Add(Location);
-                PropRotations.Add(FRotator(0, Angle, 0));
-                PropIndices.Add(0); // Storage containers
-            }
+        case EArch_StructureType::RockFormation:
+            CreateRockFormation(Location, BiomeType);
             break;
-            
+        case EArch_StructureType::AncientRuin:
+            CreateAncientRuin(Location, BiomeType);
+            break;
+        case EArch_StructureType::NaturalArch:
+            CreateNaturalArch(Location, BiomeType);
+            break;
+    }
+
+    // Add to managed structures
+    FArch_StructureData NewStructure;
+    NewStructure.StructureType = StructureType;
+    NewStructure.Location = Location;
+    NewStructure.AssociatedBiome = BiomeType;
+    NewStructure.WeatheringLevel = FMath::RandRange(0.3f, 0.7f);
+    ManagedStructures.Add(NewStructure);
+
+    UE_LOG(LogTemp, Warning, TEXT("Structure spawned successfully"));
+    return true;
+}
+
+void AArch_StructureManager::RemoveStructure(int32 StructureIndex)
+{
+    if (ManagedStructures.IsValidIndex(StructureIndex))
+    {
+        ManagedStructures.RemoveAt(StructureIndex);
+        UE_LOG(LogTemp, Warning, TEXT("Structure removed"));
+    }
+}
+
+TArray<FArch_StructureData> AArch_StructureManager::GetStructuresInBiome(EBiomeType BiomeType)
+{
+    TArray<FArch_StructureData> BiomeStructures;
+    
+    for (const FArch_StructureData& Structure : ManagedStructures)
+    {
+        if (Structure.AssociatedBiome == BiomeType)
+        {
+            BiomeStructures.Add(Structure);
+        }
+    }
+    
+    return BiomeStructures;
+}
+
+void AArch_StructureManager::ApplyWeathering(float DeltaTime)
+{
+    for (FArch_StructureData& Structure : ManagedStructures)
+    {
+        Structure.WeatheringLevel += WeatheringRate * DeltaTime * 0.01f; // Very slow weathering
+        Structure.WeatheringLevel = FMath::Clamp(Structure.WeatheringLevel, 0.0f, 1.0f);
+    }
+}
+
+void AArch_StructureManager::GenerateStructuresForAllBiomes()
+{
+    TArray<EBiomeType> BiomeTypes = {
+        EBiomeType::Forest,
+        EBiomeType::Savanna,
+        EBiomeType::Swamp,
+        EBiomeType::Mountain,
+        EBiomeType::Desert
+    };
+
+    for (EBiomeType BiomeType : BiomeTypes)
+    {
+        for (int32 i = 0; i < 3; i++) // Generate 3 structures per biome
+        {
+            FVector RandomLocation = GetRandomLocationInBiome(BiomeType);
+            EArch_StructureType RandomType = static_cast<EArch_StructureType>(FMath::RandRange(0, 4));
+            SpawnStructure(RandomType, RandomLocation, BiomeType);
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Generated structures for all biomes"));
+}
+
+bool AArch_StructureManager::IsLocationValidForStructure(FVector Location, EArch_StructureType StructureType)
+{
+    // Check minimum distance from existing structures
+    for (const FArch_StructureData& ExistingStructure : ManagedStructures)
+    {
+        float Distance = FVector::Dist(Location, ExistingStructure.Location);
+        if (Distance < MinDistanceBetweenStructures)
+        {
+            return false;
+        }
+    }
+
+    // Additional validation based on structure type
+    switch (StructureType)
+    {
+        case EArch_StructureType::CaveEntrance:
+            // Cave entrances should be near elevated terrain
+            return Location.Z > 100.0f;
+        case EArch_StructureType::StoneCircle:
+            // Stone circles should be on relatively flat ground
+            return Location.Z < 300.0f;
         default:
-            // Minimal props for other types
-            PropLocations.Add(FVector::ZeroVector);
-            PropRotations.Add(FRotator::ZeroRotator);
-            PropIndices.Add(0);
-            break;
-    }
-    
-    // Spawn props
-    for (int32 i = 0; i < PropLocations.Num() && i < InteriorProps.Num(); i++)
-    {
-        if (InteriorProps[PropIndices[i % PropIndices.Num()]])
-        {
-            SpawnInteriorProp(
-                InteriorProps[PropIndices[i % PropIndices.Num()]], 
-                PropLocations[i], 
-                PropRotations[i]
-            );
-        }
-    }
-    
-    bInteriorPopulated = true;
-    UE_LOG(LogTemp, Log, TEXT("Interior populated with %d props"), SpawnedInteriorActors.Num());
-}
-
-void AArch_StructureManager::ClearInterior()
-{
-    for (AActor* Actor : SpawnedInteriorActors)
-    {
-        if (IsValid(Actor))
-        {
-            Actor->Destroy();
-        }
-    }
-    SpawnedInteriorActors.Empty();
-    bInteriorPopulated = false;
-}
-
-void AArch_StructureManager::ConvertToRuin(float DestructionLevel)
-{
-    StructureData.bIsRuin = true;
-    StructureType = EArch_StructureType::Ruin;
-    
-    // Clear interior when converting to ruin
-    ClearInterior();
-    
-    // Apply heavy weathering
-    CurrentWeatheringLevel = FMath::Max(0.7f, DestructionLevel);
-    StructureData.WeatheringLevel = CurrentWeatheringLevel;
-    
-    UpdateStructureAppearance();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Structure %s converted to ruin (Destruction: %.2f)"), 
-           *StructureData.StructureName, DestructionLevel);
-}
-
-void AArch_StructureManager::SetStructureType(EArch_StructureType NewType)
-{
-    if (StructureType != NewType)
-    {
-        StructureType = NewType;
-        
-        // Re-populate interior for new type
-        if (!StructureData.bIsRuin)
-        {
-            PopulateInterior();
-        }
+            return true;
     }
 }
 
-void AArch_StructureManager::UpdateMaterialsForBiome(EBiomeType BiomeType)
+FVector AArch_StructureManager::GetRandomLocationInBiome(EBiomeType BiomeType)
 {
-    StructureData.BiomeType = BiomeType;
-    ApplyBiomeSpecificWeathering();
-    UpdateStructureAppearance();
-}
-
-bool AArch_StructureManager::ValidateStructurePlacement() const
-{
-    // Check if structure is placed on valid ground
-    FVector StartLocation = GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0, 0, 1000);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-    
-    UWorld* World = GetWorld();
-    if (World && World->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    // Define biome boundaries (simplified)
+    switch (BiomeType)
     {
-        // Check if ground is reasonably flat
-        FVector HitNormal = HitResult.Normal;
-        float SlopeAngle = FMath::Acos(FVector::DotProduct(HitNormal, FVector::UpVector));
-        
-        return FMath::RadiansToDegrees(SlopeAngle) < 30.0f; // Max 30 degree slope
-    }
-    
-    return false;
-}
-
-void AArch_StructureManager::SpawnInteriorProp(UStaticMesh* PropMesh, const FVector& RelativeLocation, const FRotator& RelativeRotation)
-{
-    if (!PropMesh || !GetWorld())
-    {
-        return;
-    }
-    
-    FVector WorldLocation = GetActorLocation() + GetActorTransform().TransformVector(RelativeLocation);
-    FRotator WorldRotation = GetActorRotation() + RelativeRotation;
-    
-    AStaticMeshActor* PropActor = GetWorld()->SpawnActor<AStaticMeshActor>(
-        AStaticMeshActor::StaticClass(),
-        WorldLocation,
-        WorldRotation
-    );
-    
-    if (PropActor)
-    {
-        PropActor->GetStaticMeshComponent()->SetStaticMesh(PropMesh);
-        PropActor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
-        SpawnedInteriorActors.Add(PropActor);
-    }
-}
-
-void AArch_StructureManager::ApplyBiomeSpecificWeathering()
-{
-    // Different biomes cause different weathering patterns
-    switch (StructureData.BiomeType)
-    {
-        case EBiomeType::Swamp:
-            // High humidity causes more moss and decay
-            CurrentWeatheringLevel += 0.1f;
-            break;
-            
-        case EBiomeType::Desert:
-            // Sand erosion and heat cracking
-            CurrentWeatheringLevel += 0.05f;
-            break;
-            
-        case EBiomeType::Mountain:
-            // Freeze-thaw cycles cause structural damage
-            CurrentWeatheringLevel += 0.08f;
-            break;
-            
         case EBiomeType::Forest:
-            // Root growth and moisture
-            CurrentWeatheringLevel += 0.06f;
-            break;
-            
+            return FVector(FMath::RandRange(-10000, 20000), FMath::RandRange(-10000, 20000), 100);
         case EBiomeType::Savanna:
+            return FVector(FMath::RandRange(30000, 70000), FMath::RandRange(30000, 70000), 100);
+        case EBiomeType::Swamp:
+            return FVector(FMath::RandRange(-50000, -20000), FMath::RandRange(20000, 50000), 50);
+        case EBiomeType::Mountain:
+            return FVector(FMath::RandRange(60000, 100000), FMath::RandRange(-40000, 0), 500);
+        case EBiomeType::Desert:
+            return FVector(FMath::RandRange(-70000, -30000), FMath::RandRange(-50000, -10000), 20);
         default:
-            // Moderate weathering
-            CurrentWeatheringLevel += 0.03f;
-            break;
+            return FVector::ZeroVector;
     }
-    
-    CurrentWeatheringLevel = FMath::Clamp(CurrentWeatheringLevel, 0.0f, 1.0f);
 }
 
-void AArch_StructureManager::UpdateStructureAppearance()
+void AArch_StructureManager::CreateStoneCircle(FVector CenterLocation, EBiomeType BiomeType)
 {
-    if (!MainStructureMesh)
+    const int32 NumStones = 5;
+    const float Radius = 800.0f;
+    
+    for (int32 i = 0; i < NumStones; i++)
+    {
+        float Angle = (i * 72.0f) * PI / 180.0f; // 72 degrees apart
+        FVector StoneLocation = CenterLocation + FVector(
+            Radius * FMath::Cos(Angle),
+            Radius * FMath::Sin(Angle),
+            0
+        );
+        
+        FRotator StoneRotation = FRotator(0, FMath::RandRange(0, 360), FMath::RandRange(-5, 5));
+        FVector StoneScale = FVector(0.8f, 0.4f, 3.5f);
+        
+        FString BiomeName = UEnum::GetValueAsString(BiomeType);
+        FString StoneLabel = FString::Printf(TEXT("Stone_%s_%03d"), *BiomeName, i + 1);
+        
+        SpawnStructureActor(StoneLocation, StoneRotation, StoneScale, StoneLabel);
+    }
+}
+
+void AArch_StructureManager::CreateCaveEntrance(FVector Location, EBiomeType BiomeType)
+{
+    FRotator CaveRotation = FRotator(0, FMath::RandRange(0, 360), 0);
+    FVector CaveScale = FVector(4.0f, 2.0f, 2.0f);
+    
+    FString BiomeName = UEnum::GetValueAsString(BiomeType);
+    FString CaveLabel = FString::Printf(TEXT("Cave_%s_001"), *BiomeName);
+    
+    SpawnStructureActor(Location, CaveRotation, CaveScale, CaveLabel);
+}
+
+void AArch_StructureManager::CreateRockFormation(FVector Location, EBiomeType BiomeType)
+{
+    const int32 NumRocks = FMath::RandRange(3, 7);
+    
+    for (int32 i = 0; i < NumRocks; i++)
+    {
+        FVector RockOffset = FVector(
+            FMath::RandRange(-500, 500),
+            FMath::RandRange(-500, 500),
+            0
+        );
+        
+        FVector RockLocation = Location + RockOffset;
+        FRotator RockRotation = FRotator(
+            FMath::RandRange(-10, 10),
+            FMath::RandRange(0, 360),
+            FMath::RandRange(-10, 10)
+        );
+        
+        FVector RockScale = FVector(
+            FMath::RandRange(1.5f, 3.0f),
+            FMath::RandRange(1.5f, 3.0f),
+            FMath::RandRange(2.0f, 4.0f)
+        );
+        
+        FString BiomeName = UEnum::GetValueAsString(BiomeType);
+        FString RockLabel = FString::Printf(TEXT("Rock_%s_%03d"), *BiomeName, i + 1);
+        
+        SpawnStructureActor(RockLocation, RockRotation, RockScale, RockLabel);
+    }
+}
+
+void AArch_StructureManager::CreateAncientRuin(FVector Location, EBiomeType BiomeType)
+{
+    // Create a simple ruined structure with multiple pieces
+    TArray<FVector> RuinPieces = {
+        FVector(0, 0, 0),      // Center piece
+        FVector(300, 0, 0),    // East wall
+        FVector(-300, 0, 0),   // West wall
+        FVector(0, 300, 0),    // North wall
+        FVector(0, -300, 0)    // South wall
+    };
+    
+    for (int32 i = 0; i < RuinPieces.Num(); i++)
+    {
+        FVector PieceLocation = Location + RuinPieces[i];
+        FRotator PieceRotation = FRotator(0, FMath::RandRange(0, 360), FMath::RandRange(-15, 15));
+        FVector PieceScale = FVector(2.0f, 0.5f, 2.5f);
+        
+        FString BiomeName = UEnum::GetValueAsString(BiomeType);
+        FString RuinLabel = FString::Printf(TEXT("Ruin_%s_%03d"), *BiomeName, i + 1);
+        
+        SpawnStructureActor(PieceLocation, PieceRotation, PieceScale, RuinLabel);
+    }
+}
+
+void AArch_StructureManager::CreateNaturalArch(FVector Location, EBiomeType BiomeType)
+{
+    // Create arch supports and top piece
+    FVector LeftSupport = Location + FVector(-200, 0, 0);
+    FVector RightSupport = Location + FVector(200, 0, 0);
+    FVector ArchTop = Location + FVector(0, 0, 400);
+    
+    TArray<FVector> ArchPieces = { LeftSupport, RightSupport, ArchTop };
+    TArray<FVector> ArchScales = {
+        FVector(1.0f, 1.0f, 4.0f),  // Left support
+        FVector(1.0f, 1.0f, 4.0f),  // Right support
+        FVector(4.0f, 1.0f, 0.5f)   // Top piece
+    };
+    
+    for (int32 i = 0; i < ArchPieces.Num(); i++)
+    {
+        FRotator ArchRotation = FRotator(0, 0, 0);
+        
+        FString BiomeName = UEnum::GetValueAsString(BiomeType);
+        FString ArchLabel = FString::Printf(TEXT("Arch_%s_%03d"), *BiomeName, i + 1);
+        
+        SpawnStructureActor(ArchPieces[i], ArchRotation, ArchScales[i], ArchLabel);
+    }
+}
+
+AActor* AArch_StructureManager::SpawnStructureActor(FVector Location, FRotator Rotation, FVector Scale, const FString& Label)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    // Spawn a static mesh actor as placeholder
+    AStaticMeshActor* StructureActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+    if (StructureActor)
+    {
+        StructureActor->SetActorScale3D(Scale);
+        StructureActor->SetActorLabel(Label);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Structure actor spawned: %s"), *Label);
+        return StructureActor;
+    }
+    
+    return nullptr;
+}
+
+void AArch_StructureManager::ApplyWeatheringToActor(AActor* StructureActor, float WeatheringLevel)
+{
+    if (!StructureActor)
     {
         return;
     }
-    
-    // Apply weathered materials based on weathering level
-    int32 MaterialIndex = FMath::FloorToInt(CurrentWeatheringLevel * (WeatheredMaterials.Num() - 1));
-    MaterialIndex = FMath::Clamp(MaterialIndex, 0, WeatheredMaterials.Num() - 1);
-    
-    if (WeatheredMaterials.IsValidIndex(MaterialIndex) && WeatheredMaterials[MaterialIndex])
+
+    // Apply weathering effects to the actor's materials
+    AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(StructureActor);
+    if (MeshActor && MeshActor->GetStaticMeshComponent())
     {
-        MainStructureMesh->SetMaterial(0, WeatheredMaterials[MaterialIndex]);
-    }
-    
-    // Adjust scale slightly based on weathering (ruins shrink)
-    if (StructureData.bIsRuin)
-    {
-        float RuinScale = FMath::Lerp(1.0f, 0.7f, CurrentWeatheringLevel);
-        SetActorScale3D(FVector(RuinScale));
+        UStaticMeshComponent* MeshComp = MeshActor->GetStaticMeshComponent();
+        
+        // Create dynamic material instance if needed
+        UMaterialInterface* CurrentMaterial = MeshComp->GetMaterial(0);
+        if (CurrentMaterial)
+        {
+            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(CurrentMaterial, this);
+            if (DynamicMaterial)
+            {
+                // Apply weathering parameters
+                DynamicMaterial->SetScalarParameterValue(TEXT("Weathering"), WeatheringLevel);
+                DynamicMaterial->SetScalarParameterValue(TEXT("MossAmount"), WeatheringLevel * 0.5f);
+                MeshComp->SetMaterial(0, DynamicMaterial);
+            }
+        }
     }
 }
