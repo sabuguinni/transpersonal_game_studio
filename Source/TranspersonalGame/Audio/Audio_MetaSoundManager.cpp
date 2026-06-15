@@ -1,293 +1,291 @@
 #include "Audio_MetaSoundManager.h"
+#include "Components/SceneComponent.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundBase.h"
-#include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Sound/SoundBase.h"
+#include "Engine/Engine.h"
 
 AAudio_MetaSoundManager::AAudio_MetaSoundManager()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Initialize audio components
-    AmbienceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceAudioComponent"));
-    RootComponent = AmbienceAudioComponent;
-    AmbienceAudioComponent->bAutoActivate = false;
-    
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
-    MusicAudioComponent->SetupAttachment(RootComponent);
-    MusicAudioComponent->bAutoActivate = false;
-    
-    SFXAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SFXAudioComponent"));
-    SFXAudioComponent->SetupAttachment(RootComponent);
-    SFXAudioComponent->bAutoActivate = false;
-    
-    // Set default values
-    CurrentMasterVolume = 1.0f;
-    CurrentMusicIntensity = EAudio_IntensityLevel::Calm;
-    bIsFadingAmbience = false;
-    bIsFadingMusic = false;
-    
-    // Initialize default ambience settings
-    CurrentAmbienceSettings.AmbienceType = EAudio_AmbienceType::Forest;
-    CurrentAmbienceSettings.Volume = 0.5f;
-    CurrentAmbienceSettings.FadeInTime = 2.0f;
-    CurrentAmbienceSettings.FadeOutTime = 2.0f;
-    CurrentAmbienceSettings.bLooping = true;
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default ambience zones
+    FAudio_AmbienceZone ForestZone;
+    ForestZone.AmbienceType = EAudio_AmbienceType::Forest;
+    ForestZone.Location = FVector(2000, -1000, 200);
+    ForestZone.Radius = 2000.0f;
+    ForestZone.Volume = 0.6f;
+    AmbienceZones.Add(ForestZone);
+
+    FAudio_AmbienceZone DangerZone;
+    DangerZone.AmbienceType = EAudio_AmbienceType::Danger;
+    DangerZone.Location = FVector(-2000, 3000, 150);
+    DangerZone.Radius = 1500.0f;
+    DangerZone.Volume = 0.8f;
+    AmbienceZones.Add(DangerZone);
+
+    FAudio_AmbienceZone CampfireZone;
+    CampfireZone.AmbienceType = EAudio_AmbienceType::Campfire;
+    CampfireZone.Location = FVector(500, 500, 100);
+    CampfireZone.Radius = 800.0f;
+    CampfireZone.Volume = 0.7f;
+    AmbienceZones.Add(CampfireZone);
+
+    FAudio_AmbienceZone DrumsZone;
+    DrumsZone.AmbienceType = EAudio_AmbienceType::TribalDrums;
+    DrumsZone.Location = FVector(-500, -500, 120);
+    DrumsZone.Radius = 1200.0f;
+    DrumsZone.Volume = 0.5f;
+    AmbienceZones.Add(DrumsZone);
+
+    // Initialize narrative triggers
+    FAudio_NarrativeTrigger NarrativeTrigger1;
+    NarrativeTrigger1.TriggerName = TEXT("PrehistoricNarrator_001");
+    NarrativeTrigger1.TriggerLocation = FVector(1000, 1000, 150);
+    NarrativeTrigger1.TriggerRadius = 600.0f;
+    NarrativeTrigger1.bCanRepeat = true;
+    NarrativeTriggers.Add(NarrativeTrigger1);
+
+    FAudio_NarrativeTrigger NarrativeTrigger2;
+    NarrativeTrigger2.TriggerName = TEXT("TribalScout_001");
+    NarrativeTrigger2.TriggerLocation = FVector(-1000, 1000, 150);
+    NarrativeTrigger2.TriggerRadius = 600.0f;
+    NarrativeTrigger2.bCanRepeat = true;
+    NarrativeTriggers.Add(NarrativeTrigger2);
+
+    MasterVolume = 1.0f;
+    AmbienceVolume = 0.7f;
+    NarrativeVolume = 1.0f;
+    FootstepVolume = 0.8f;
 }
 
 void AAudio_MetaSoundManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeAudioComponents();
-    LoadDefaultAudioAssets();
-    
-    // Start with default forest ambience
-    SetAmbienceType(EAudio_AmbienceType::Forest);
-    SetMusicIntensity(EAudio_IntensityLevel::Calm);
+    InitializeAudioZones();
 }
 
 void AAudio_MetaSoundManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    UpdateDynamicParameters();
+    // Get player location for proximity calculations
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
+    {
+        FVector PlayerLocation = PlayerPawn->GetActorLocation();
+        UpdatePlayerProximity(PlayerLocation);
+        CheckNarrativeTriggers(PlayerLocation);
+    }
+    
+    UpdateAmbienceAudio(DeltaTime);
 }
 
-void AAudio_MetaSoundManager::InitializeAudioComponents()
+void AAudio_MetaSoundManager::InitializeAudioZones()
 {
-    if (AmbienceAudioComponent)
+    // Create audio components for each ambience zone
+    for (int32 i = 0; i < AmbienceZones.Num(); i++)
     {
-        AmbienceAudioComponent->SetVolumeMultiplier(CurrentAmbienceSettings.Volume * CurrentMasterVolume);
-        AmbienceAudioComponent->bOverrideAttenuation = true;
-        AmbienceAudioComponent->AttenuationOverrides.bAttenuate = false;
-    }
-    
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(0.3f * CurrentMasterVolume);
-        MusicAudioComponent->bOverrideAttenuation = true;
-        MusicAudioComponent->AttenuationOverrides.bAttenuate = false;
-    }
-    
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->SetVolumeMultiplier(0.8f * CurrentMasterVolume);
-        SFXAudioComponent->bOverrideAttenuation = true;
-        SFXAudioComponent->AttenuationOverrides.bAttenuate = false;
-    }
-}
-
-void AAudio_MetaSoundManager::LoadDefaultAudioAssets()
-{
-    // Note: In a real implementation, these would be loaded from content browser paths
-    // For now, we initialize empty maps that can be populated in Blueprint or at runtime
-    
-    AmbienceSounds.Empty();
-    MusicTracks.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Default audio assets loaded"));
-}
-
-void AAudio_MetaSoundManager::SetAmbienceType(EAudio_AmbienceType NewAmbienceType)
-{
-    if (CurrentAmbienceSettings.AmbienceType == NewAmbienceType && AmbienceAudioComponent && AmbienceAudioComponent->IsPlaying())
-    {
-        return; // Already playing this ambience type
-    }
-    
-    CurrentAmbienceSettings.AmbienceType = NewAmbienceType;
-    
-    // Find the appropriate sound for this ambience type
-    USoundBase** FoundSound = AmbienceSounds.Find(NewAmbienceType);
-    if (FoundSound && *FoundSound && AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->SetSound(*FoundSound);
-        AmbienceAudioComponent->FadeIn(CurrentAmbienceSettings.FadeInTime, CurrentAmbienceSettings.Volume * CurrentMasterVolume);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Set ambience type to %d"), (int32)NewAmbienceType);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: No sound found for ambience type %d"), (int32)NewAmbienceType);
-    }
-}
-
-void AAudio_MetaSoundManager::SetMusicIntensity(EAudio_IntensityLevel NewIntensity)
-{
-    if (CurrentMusicIntensity == NewIntensity)
-    {
-        return; // Already at this intensity
-    }
-    
-    CurrentMusicIntensity = NewIntensity;
-    
-    // Find the appropriate music track for this intensity
-    USoundBase** FoundMusic = MusicTracks.Find(NewIntensity);
-    if (FoundMusic && *FoundMusic && MusicAudioComponent)
-    {
-        MusicAudioComponent->SetSound(*FoundMusic);
-        MusicAudioComponent->FadeIn(2.0f, 0.3f * CurrentMasterVolume);
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Set music intensity to %d"), (int32)NewIntensity);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: No music found for intensity %d"), (int32)NewIntensity);
-    }
-    
-    // Update MetaSound parameters if available
-    if (AdaptiveMusicMetaSound)
-    {
-        UpdateMetaSoundParameter(TEXT("Intensity"), (float)NewIntensity);
-    }
-}
-
-void AAudio_MetaSoundManager::PlaySFX(USoundBase* SFXSound, float Volume)
-{
-    if (!SFXSound)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Attempted to play null SFX sound"));
-        return;
-    }
-    
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->SetSound(SFXSound);
-        SFXAudioComponent->SetVolumeMultiplier(Volume * CurrentMasterVolume);
-        SFXAudioComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing SFX at volume %f"), Volume);
-    }
-}
-
-void AAudio_MetaSoundManager::FadeToAmbience(EAudio_AmbienceType NewAmbienceType, float FadeTime)
-{
-    if (bIsFadingAmbience)
-    {
-        return; // Already fading
-    }
-    
-    bIsFadingAmbience = true;
-    
-    // Fade out current ambience
-    if (AmbienceAudioComponent && AmbienceAudioComponent->IsPlaying())
-    {
-        AmbienceAudioComponent->FadeOut(FadeTime, 0.0f);
-        
-        // Set timer to start new ambience after fade out
-        FTimerHandle FadeTimer;
-        GetWorld()->GetTimerManager().SetTimer(FadeTimer, [this, NewAmbienceType]()
+        UAudioComponent* NewAudioComponent = CreateAudioComponent();
+        if (NewAudioComponent)
         {
-            SetAmbienceType(NewAmbienceType);
-            bIsFadingAmbience = false;
-        }, FadeTime, false);
+            AudioComponents.Add(NewAudioComponent);
+            
+            // Set initial position
+            FVector RelativeLocation = AmbienceZones[i].Location - GetActorLocation();
+            NewAudioComponent->SetRelativeLocation(RelativeLocation);
+            NewAudioComponent->SetVolumeMultiplier(AmbienceZones[i].Volume * AmbienceVolume * MasterVolume);
+        }
     }
-    else
-    {
-        // No current ambience, start new one immediately
-        SetAmbienceType(NewAmbienceType);
-        bIsFadingAmbience = false;
-    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio MetaSound Manager initialized with %d ambience zones"), AmbienceZones.Num());
 }
 
-void AAudio_MetaSoundManager::StopAllAudio()
+void AAudio_MetaSoundManager::UpdatePlayerProximity(const FVector& PlayerLocation)
 {
-    if (AmbienceAudioComponent)
+    for (int32 i = 0; i < AmbienceZones.Num() && i < AudioComponents.Num(); i++)
     {
-        AmbienceAudioComponent->Stop();
-    }
-    
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->Stop();
-    }
-    
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->Stop();
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: All audio stopped"));
-}
-
-void AAudio_MetaSoundManager::SetMasterVolume(float Volume)
-{
-    CurrentMasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all audio component volumes
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->SetVolumeMultiplier(CurrentAmbienceSettings.Volume * CurrentMasterVolume);
-    }
-    
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(0.3f * CurrentMasterVolume);
-    }
-    
-    if (SFXAudioComponent)
-    {
-        SFXAudioComponent->SetVolumeMultiplier(0.8f * CurrentMasterVolume);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Master volume set to %f"), CurrentMasterVolume);
-}
-
-void AAudio_MetaSoundManager::UpdateMetaSoundParameter(const FString& ParameterName, float Value)
-{
-    // Update dynamic ambience MetaSound
-    if (DynamicAmbienceMetaSound && AmbienceAudioComponent)
-    {
-        // Note: This would require MetaSound parameter interface implementation
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated MetaSound parameter %s to %f"), *ParameterName, Value);
-    }
-    
-    // Update adaptive music MetaSound
-    if (AdaptiveMusicMetaSound && MusicAudioComponent)
-    {
-        // Note: This would require MetaSound parameter interface implementation
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated music MetaSound parameter %s to %f"), *ParameterName, Value);
-    }
-}
-
-void AAudio_MetaSoundManager::TriggerMetaSoundEvent(const FString& EventName)
-{
-    if (DynamicAmbienceMetaSound || AdaptiveMusicMetaSound)
-    {
-        // Note: This would require MetaSound event triggering implementation
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Triggered MetaSound event %s"), *EventName);
-    }
-}
-
-void AAudio_MetaSoundManager::UpdateDynamicParameters()
-{
-    // Update parameters based on game state
-    // This could include time of day, weather, player stress level, etc.
-    
-    // Example: Update ambience intensity based on nearby threats
-    if (GetWorld())
-    {
-        // In a real implementation, this would query the game state for threats, weather, etc.
-        float ThreatLevel = 0.0f; // Placeholder
-        float TimeOfDay = 0.5f;   // Placeholder (0.0 = midnight, 0.5 = noon)
+        if (!AmbienceZones[i].bIsActive || !AudioComponents[i])
+        {
+            continue;
+        }
         
-        UpdateMetaSoundParameter(TEXT("ThreatLevel"), ThreatLevel);
-        UpdateMetaSoundParameter(TEXT("TimeOfDay"), TimeOfDay);
+        float Distance = FVector::Dist(PlayerLocation, AmbienceZones[i].Location);
+        float Attenuation = CalculateDistanceAttenuation(AmbienceZones[i].Location, PlayerLocation, AmbienceZones[i].Radius);
+        
+        float FinalVolume = AmbienceZones[i].Volume * AmbienceVolume * MasterVolume * Attenuation;
+        AudioComponents[i]->SetVolumeMultiplier(FinalVolume);
+        
+        // Auto-play/stop based on distance
+        if (Attenuation > 0.1f && !AudioComponents[i]->IsPlaying())
+        {
+            AudioComponents[i]->Play();
+        }
+        else if (Attenuation <= 0.1f && AudioComponents[i]->IsPlaying())
+        {
+            AudioComponents[i]->Stop();
+        }
     }
 }
 
-void AAudio_MetaSoundManager::OnAmbienceFadeComplete()
+void AAudio_MetaSoundManager::TriggerNarrativeAudio(const FString& TriggerName)
 {
-    bIsFadingAmbience = false;
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Ambience fade completed"));
+    for (FAudio_NarrativeTrigger& Trigger : NarrativeTriggers)
+    {
+        if (Trigger.TriggerName == TriggerName)
+        {
+            if (!Trigger.bHasTriggered || Trigger.bCanRepeat)
+            {
+                // Create temporary audio component for narrative playback
+                UAudioComponent* NarrativeAudioComp = CreateAudioComponent();
+                if (NarrativeAudioComp && Trigger.NarrativeAudio.LoadSynchronous())
+                {
+                    NarrativeAudioComp->SetSound(Trigger.NarrativeAudio.LoadSynchronous());
+                    NarrativeAudioComp->SetVolumeMultiplier(NarrativeVolume * MasterVolume);
+                    NarrativeAudioComp->Play();
+                    
+                    Trigger.bHasTriggered = true;
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Triggered narrative audio: %s"), *TriggerName);
+                }
+            }
+            break;
+        }
+    }
 }
 
-void AAudio_MetaSoundManager::OnMusicFadeComplete()
+void AAudio_MetaSoundManager::SetAmbienceVolume(float NewVolume)
 {
-    bIsFadingMusic = false;
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Music fade completed"));
+    AmbienceVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+    
+    // Update all ambience audio components
+    for (int32 i = 0; i < AudioComponents.Num() && i < AmbienceZones.Num(); i++)
+    {
+        if (AudioComponents[i])
+        {
+            float FinalVolume = AmbienceZones[i].Volume * AmbienceVolume * MasterVolume;
+            AudioComponents[i]->SetVolumeMultiplier(FinalVolume);
+        }
+    }
+}
+
+void AAudio_MetaSoundManager::SetNarrativeVolume(float NewVolume)
+{
+    NarrativeVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+}
+
+void AAudio_MetaSoundManager::PlayFootstepAudio(const FVector& Location, float Intensity)
+{
+    // Create temporary audio component for footstep sound
+    UAudioComponent* FootstepAudioComp = CreateAudioComponent();
+    if (FootstepAudioComp)
+    {
+        FVector RelativeLocation = Location - GetActorLocation();
+        FootstepAudioComp->SetRelativeLocation(RelativeLocation);
+        FootstepAudioComp->SetVolumeMultiplier(FootstepVolume * Intensity * MasterVolume);
+        
+        // Auto-destroy after playback
+        FootstepAudioComp->bAutoDestroy = true;
+        FootstepAudioComp->Play();
+    }
+}
+
+void AAudio_MetaSoundManager::CreateAmbienceZone(EAudio_AmbienceType Type, const FVector& Location, float Radius)
+{
+    FAudio_AmbienceZone NewZone;
+    NewZone.AmbienceType = Type;
+    NewZone.Location = Location;
+    NewZone.Radius = Radius;
+    NewZone.Volume = 0.7f;
+    NewZone.bIsActive = true;
+    
+    AmbienceZones.Add(NewZone);
+    
+    // Create corresponding audio component
+    UAudioComponent* NewAudioComponent = CreateAudioComponent();
+    if (NewAudioComponent)
+    {
+        AudioComponents.Add(NewAudioComponent);
+        FVector RelativeLocation = Location - GetActorLocation();
+        NewAudioComponent->SetRelativeLocation(RelativeLocation);
+    }
+}
+
+void AAudio_MetaSoundManager::RemoveAmbienceZone(int32 ZoneIndex)
+{
+    if (ZoneIndex >= 0 && ZoneIndex < AmbienceZones.Num())
+    {
+        AmbienceZones.RemoveAt(ZoneIndex);
+        
+        if (ZoneIndex < AudioComponents.Num() && AudioComponents[ZoneIndex])
+        {
+            AudioComponents[ZoneIndex]->DestroyComponent();
+            AudioComponents.RemoveAt(ZoneIndex);
+        }
+    }
+}
+
+void AAudio_MetaSoundManager::UpdateAmbienceAudio(float DeltaTime)
+{
+    // Implement dynamic audio mixing and transitions
+    for (int32 i = 0; i < AudioComponents.Num(); i++)
+    {
+        if (AudioComponents[i] && AmbienceZones.IsValidIndex(i))
+        {
+            // Smooth volume transitions
+            float CurrentVolume = AudioComponents[i]->GetVolumeMultiplier();
+            float TargetVolume = AmbienceZones[i].Volume * AmbienceVolume * MasterVolume;
+            
+            if (FMath::Abs(CurrentVolume - TargetVolume) > 0.01f)
+            {
+                float NewVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, 2.0f);
+                AudioComponents[i]->SetVolumeMultiplier(NewVolume);
+            }
+        }
+    }
+}
+
+void AAudio_MetaSoundManager::CheckNarrativeTriggers(const FVector& PlayerLocation)
+{
+    for (FAudio_NarrativeTrigger& Trigger : NarrativeTriggers)
+    {
+        if (!Trigger.bHasTriggered || Trigger.bCanRepeat)
+        {
+            float Distance = FVector::Dist(PlayerLocation, Trigger.TriggerLocation);
+            if (Distance <= Trigger.TriggerRadius)
+            {
+                TriggerNarrativeAudio(Trigger.TriggerName);
+            }
+        }
+    }
+}
+
+UAudioComponent* AAudio_MetaSoundManager::CreateAudioComponent()
+{
+    UAudioComponent* NewAudioComponent = CreateDefaultSubobject<UAudioComponent>(FName(*FString::Printf(TEXT("AudioComponent_%d"), AudioComponents.Num())));
+    if (NewAudioComponent)
+    {
+        NewAudioComponent->SetupAttachment(RootComponent);
+        NewAudioComponent->bAutoActivate = false;
+        NewAudioComponent->SetVolumeMultiplier(1.0f);
+    }
+    return NewAudioComponent;
+}
+
+float AAudio_MetaSoundManager::CalculateDistanceAttenuation(const FVector& SourceLocation, const FVector& ListenerLocation, float MaxDistance)
+{
+    float Distance = FVector::Dist(SourceLocation, ListenerLocation);
+    if (Distance >= MaxDistance)
+    {
+        return 0.0f;
+    }
+    
+    // Linear falloff with smooth curve
+    float NormalizedDistance = Distance / MaxDistance;
+    return FMath::Clamp(1.0f - (NormalizedDistance * NormalizedDistance), 0.0f, 1.0f);
 }
