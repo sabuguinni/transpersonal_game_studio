@@ -1,33 +1,33 @@
 #include "Perf_LODManager.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
-#include "Camera/CameraComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "DrawDebugHelpers.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
 
 UPerf_LODManager::UPerf_LODManager()
 {
-    LODSettings = FPerf_LODSettings();
-    bLODSystemEnabled = true;
-    UpdateFrequency = 0.1f;
     LastUpdateTime = 0.0f;
+    UpdateFrequency = 0.1f;
 }
 
 void UPerf_LODManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Perf_LODManager: Initialized successfully"));
+    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: Initialized"));
     
-    // Set up tick delegate
+    // Start the LOD update timer
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().SetTimer(
-            FTimerHandle(),
+            LODUpdateTimer,
             this,
-            &UPerf_LODManager::UpdateLODForAllMeshes,
+            &UPerf_LODManager::PerformLODUpdate,
             UpdateFrequency,
             true
         );
@@ -36,198 +36,154 @@ void UPerf_LODManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UPerf_LODManager::Deinitialize()
 {
-    RegisteredMeshes.Empty();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(LODUpdateTimer);
+    }
+    
+    RegisteredActors.Empty();
+    
     Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: Deinitialized"));
 }
 
-void UPerf_LODManager::Tick(float DeltaTime)
+void UPerf_LODManager::RegisterActor(AActor* Actor)
 {
-    if (!bLODSystemEnabled)
-    {
-        return;
-    }
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastUpdateTime >= UpdateFrequency)
-    {
-        UpdateLODForAllMeshes();
-        LastUpdateTime = CurrentTime;
-    }
-}
-
-bool UPerf_LODManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
-void UPerf_LODManager::RegisterMeshComponent(UStaticMeshComponent* MeshComponent)
-{
-    if (!MeshComponent || !IsValid(MeshComponent))
+    if (!Actor)
     {
         return;
     }
 
     // Check if already registered
-    for (const FPerf_MeshLODData& ExistingData : RegisteredMeshes)
+    for (const TWeakObjectPtr<AActor>& WeakActor : RegisteredActors)
     {
-        if (ExistingData.MeshComponent == MeshComponent)
+        if (WeakActor.Get() == Actor)
         {
             return; // Already registered
         }
     }
 
-    // Create new LOD data
-    FPerf_MeshLODData NewMeshData;
-    NewMeshData.MeshComponent = MeshComponent;
-    NewMeshData.CurrentLODLevel = EPerf_LODLevel::LOD_High;
-    NewMeshData.LastUpdateTime = GetWorld()->GetTimeSeconds();
-    NewMeshData.DistanceToPlayer = 0.0f;
-    NewMeshData.bIsVisible = true;
-
-    RegisteredMeshes.Add(NewMeshData);
-
-    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: Registered mesh component. Total: %d"), RegisteredMeshes.Num());
+    RegisteredActors.Add(Actor);
+    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: Registered actor %s"), *Actor->GetName());
 }
 
-void UPerf_LODManager::UnregisterMeshComponent(UStaticMeshComponent* MeshComponent)
+void UPerf_LODManager::UnregisterActor(AActor* Actor)
 {
-    if (!MeshComponent)
+    if (!Actor)
     {
         return;
     }
 
-    RegisteredMeshes.RemoveAll([MeshComponent](const FPerf_MeshLODData& Data)
+    RegisteredActors.RemoveAll([Actor](const TWeakObjectPtr<AActor>& WeakActor)
     {
-        return Data.MeshComponent == MeshComponent;
+        return WeakActor.Get() == Actor;
     });
+    
+    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: Unregistered actor %s"), *Actor->GetName());
 }
 
-void UPerf_LODManager::UpdateLODForAllMeshes()
+void UPerf_LODManager::UpdateLODForActor(AActor* Actor, APawn* ViewerPawn)
 {
-    if (!bLODSystemEnabled || RegisteredMeshes.Num() == 0)
+    if (!Actor || !ViewerPawn)
     {
         return;
     }
 
-    // Clean up invalid meshes first
-    CleanupInvalidMeshes();
+    float Distance = GetDistanceToViewer(Actor, ViewerPawn);
+    EPerf_LODLevel LODLevel = GetLODLevelForDistance(Distance);
 
-    // Update LOD for each registered mesh
-    for (FPerf_MeshLODData& MeshData : RegisteredMeshes)
+    // Apply frustum culling if enabled
+    if (LODSettings.bEnableFrustumCulling && !IsActorInViewFrustum(Actor, ViewerPawn))
     {
-        UpdateMeshLOD(MeshData);
+        LODLevel = EPerf_LODLevel::LOD_Culled;
+    }
+
+    // Apply LOD to all mesh components
+    TArray<UStaticMeshComponent*> StaticMeshes;
+    Actor->GetComponents<UStaticMeshComponent>(StaticMeshes);
+    for (UStaticMeshComponent* MeshComp : StaticMeshes)
+    {
+        ApplyLODToStaticMesh(MeshComp, LODLevel);
+    }
+
+    TArray<USkeletalMeshComponent*> SkeletalMeshes;
+    Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshes);
+    for (USkeletalMeshComponent* MeshComp : SkeletalMeshes)
+    {
+        ApplyLODToSkeletalMesh(MeshComp, LODLevel);
     }
 }
 
-EPerf_LODLevel UPerf_LODManager::CalculateLODLevel(float Distance) const
+void UPerf_LODManager::UpdateAllLODs()
 {
-    if (Distance <= LODSettings.HighQualityDistance)
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Get the first player pawn as viewer
+    APawn* ViewerPawn = nullptr;
+    if (APlayerController* PC = World->GetFirstPlayerController())
+    {
+        ViewerPawn = PC->GetPawn();
+    }
+
+    if (!ViewerPawn)
+    {
+        return;
+    }
+
+    // Clean up invalid weak pointers
+    RegisteredActors.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor)
+    {
+        return !WeakActor.IsValid();
+    });
+
+    // Update LOD for all registered actors
+    for (const TWeakObjectPtr<AActor>& WeakActor : RegisteredActors)
+    {
+        if (AActor* Actor = WeakActor.Get())
+        {
+            UpdateLODForActor(Actor, ViewerPawn);
+        }
+    }
+}
+
+EPerf_LODLevel UPerf_LODManager::GetLODLevelForDistance(float Distance) const
+{
+    if (!LODSettings.bEnableDistanceCulling)
     {
         return EPerf_LODLevel::LOD_High;
     }
-    else if (Distance <= LODSettings.MediumQualityDistance)
+
+    if (Distance > LODSettings.CullDistance)
     {
-        return EPerf_LODLevel::LOD_Medium;
+        return EPerf_LODLevel::LOD_Culled;
     }
-    else if (Distance <= LODSettings.LowQualityDistance)
+    else if (Distance > LODSettings.LowQualityDistance)
     {
         return EPerf_LODLevel::LOD_Low;
     }
-    else if (Distance <= LODSettings.CullDistance)
+    else if (Distance > LODSettings.MediumQualityDistance)
     {
-        return EPerf_LODLevel::LOD_Low; // Keep visible but lowest quality
+        return EPerf_LODLevel::LOD_Medium;
     }
     else
     {
-        return EPerf_LODLevel::LOD_Culled;
+        return EPerf_LODLevel::LOD_High;
     }
 }
 
 void UPerf_LODManager::SetLODSettings(const FPerf_LODSettings& NewSettings)
 {
     LODSettings = NewSettings;
-    
-    // Force update all LODs with new settings
-    ForceUpdateAllLODs();
+    UE_LOG(LogTemp, Log, TEXT("Perf_LODManager: LOD settings updated"));
 }
 
-void UPerf_LODManager::ForceUpdateAllLODs()
+void UPerf_LODManager::ApplyLODToStaticMesh(UStaticMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
 {
-    for (FPerf_MeshLODData& MeshData : RegisteredMeshes)
-    {
-        if (UStaticMeshComponent* MeshComp = MeshData.MeshComponent.Get())
-        {
-            float Distance = GetDistanceToPlayer(MeshComp->GetComponentLocation());
-            EPerf_LODLevel NewLODLevel = CalculateLODLevel(Distance);
-            ApplyLODLevel(MeshComp, NewLODLevel);
-            
-            MeshData.CurrentLODLevel = NewLODLevel;
-            MeshData.DistanceToPlayer = Distance;
-            MeshData.LastUpdateTime = GetWorld()->GetTimeSeconds();
-        }
-    }
-}
-
-void UPerf_LODManager::EnableLODSystem(bool bEnabled)
-{
-    bLODSystemEnabled = bEnabled;
-    
-    if (!bEnabled)
-    {
-        // Reset all meshes to high quality when disabled
-        for (FPerf_MeshLODData& MeshData : RegisteredMeshes)
-        {
-            if (UStaticMeshComponent* MeshComp = MeshData.MeshComponent.Get())
-            {
-                ApplyLODLevel(MeshComp, EPerf_LODLevel::LOD_High);
-                MeshData.CurrentLODLevel = EPerf_LODLevel::LOD_High;
-            }
-        }
-    }
-}
-
-void UPerf_LODManager::UpdateMeshLOD(FPerf_MeshLODData& MeshData)
-{
-    UStaticMeshComponent* MeshComponent = MeshData.MeshComponent.Get();
-    if (!MeshComponent || !IsValid(MeshComponent))
-    {
-        return;
-    }
-
-    // Calculate distance to player
-    float Distance = GetDistanceToPlayer(MeshComponent->GetComponentLocation());
-    MeshData.DistanceToPlayer = Distance;
-
-    // Check frustum culling if enabled
-    bool bInFrustum = true;
-    if (LODSettings.bEnableFrustumCulling)
-    {
-        bInFrustum = IsMeshInViewFrustum(MeshComponent->GetComponentLocation());
-    }
-
-    // Calculate new LOD level
-    EPerf_LODLevel NewLODLevel = CalculateLODLevel(Distance);
-    
-    // Apply frustum culling
-    if (!bInFrustum && LODSettings.bEnableFrustumCulling)
-    {
-        NewLODLevel = EPerf_LODLevel::LOD_Culled;
-    }
-
-    // Apply LOD level if changed
-    if (NewLODLevel != MeshData.CurrentLODLevel)
-    {
-        ApplyLODLevel(MeshComponent, NewLODLevel);
-        MeshData.CurrentLODLevel = NewLODLevel;
-    }
-
-    MeshData.LastUpdateTime = GetWorld()->GetTimeSeconds();
-    MeshData.bIsVisible = (NewLODLevel != EPerf_LODLevel::LOD_Culled);
-}
-
-void UPerf_LODManager::ApplyLODLevel(UStaticMeshComponent* MeshComponent, EPerf_LODLevel LODLevel)
-{
-    if (!MeshComponent || !IsValid(MeshComponent))
+    if (!MeshComp)
     {
         return;
     }
@@ -235,86 +191,81 @@ void UPerf_LODManager::ApplyLODLevel(UStaticMeshComponent* MeshComponent, EPerf_
     switch (LODLevel)
     {
         case EPerf_LODLevel::LOD_High:
-            MeshComponent->SetVisibility(true);
-            MeshComponent->SetForcedLodModel(0); // Highest quality LOD
-            MeshComponent->SetCastShadow(true);
+            MeshComp->SetForcedLodModel(0);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             break;
-
         case EPerf_LODLevel::LOD_Medium:
-            MeshComponent->SetVisibility(true);
-            MeshComponent->SetForcedLodModel(1); // Medium quality LOD
-            MeshComponent->SetCastShadow(true);
+            MeshComp->SetForcedLodModel(1);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
             break;
-
         case EPerf_LODLevel::LOD_Low:
-            MeshComponent->SetVisibility(true);
-            MeshComponent->SetForcedLodModel(2); // Low quality LOD
-            MeshComponent->SetCastShadow(false); // Disable shadows for performance
+            MeshComp->SetForcedLodModel(2);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             break;
-
         case EPerf_LODLevel::LOD_Culled:
-            MeshComponent->SetVisibility(false);
+            MeshComp->SetVisibility(false);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             break;
     }
 }
 
-float UPerf_LODManager::GetDistanceToPlayer(const FVector& MeshLocation) const
+void UPerf_LODManager::ApplyLODToSkeletalMesh(USkeletalMeshComponent* MeshComp, EPerf_LODLevel LODLevel)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!MeshComp)
     {
-        return 0.0f;
+        return;
     }
 
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController)
+    switch (LODLevel)
     {
-        return 0.0f;
+        case EPerf_LODLevel::LOD_High:
+            MeshComp->SetForcedLOD(0);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            break;
+        case EPerf_LODLevel::LOD_Medium:
+            MeshComp->SetForcedLOD(1);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            break;
+        case EPerf_LODLevel::LOD_Low:
+            MeshComp->SetForcedLOD(2);
+            MeshComp->SetVisibility(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            break;
+        case EPerf_LODLevel::LOD_Culled:
+            MeshComp->SetVisibility(false);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            break;
     }
-
-    APawn* PlayerPawn = PlayerController->GetPawn();
-    if (!PlayerPawn)
-    {
-        return 0.0f;
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    return FVector::Dist(PlayerLocation, MeshLocation);
 }
 
-bool UPerf_LODManager::IsMeshInViewFrustum(const FVector& MeshLocation) const
+bool UPerf_LODManager::IsActorInViewFrustum(AActor* Actor, APawn* ViewerPawn) const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!Actor || !ViewerPawn)
     {
-        return true; // Default to visible if we can't check
+        return false;
     }
 
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController)
-    {
-        return true;
-    }
-
-    // Get player camera location and rotation
-    FVector CameraLocation;
-    FRotator CameraRotation;
-    PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-
-    // Simple frustum check - check if mesh is roughly in front of camera
-    FVector ToMesh = (MeshLocation - CameraLocation).GetSafeNormal();
-    FVector CameraForward = CameraRotation.Vector();
-    
-    float DotProduct = FVector::DotProduct(ToMesh, CameraForward);
-    
-    // Consider mesh visible if it's within a 120-degree cone in front of camera
-    return DotProduct > -0.5f; // cos(120°) ≈ -0.5
+    // Simple frustum check - in a real implementation, you'd use the camera's frustum
+    // For now, just return true as a placeholder
+    return true;
 }
 
-void UPerf_LODManager::CleanupInvalidMeshes()
+float UPerf_LODManager::GetDistanceToViewer(AActor* Actor, APawn* ViewerPawn) const
 {
-    RegisteredMeshes.RemoveAll([](const FPerf_MeshLODData& Data)
+    if (!Actor || !ViewerPawn)
     {
-        return !Data.MeshComponent.IsValid() || !IsValid(Data.MeshComponent.Get());
-    });
+        return 0.0f;
+    }
+
+    return FVector::Dist(Actor->GetActorLocation(), ViewerPawn->GetActorLocation());
+}
+
+void UPerf_LODManager::PerformLODUpdate()
+{
+    UpdateAllLODs();
 }
