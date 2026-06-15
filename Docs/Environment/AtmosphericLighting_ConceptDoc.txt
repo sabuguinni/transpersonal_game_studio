@@ -1,0 +1,46 @@
+# ATMOSPHERIC LIGHTING CONCEPT DOCUMENTATION
+## Transpersonal Game Studio - Environment Artist #6
+
+### CRETACEOUS FOREST ATMOSPHERE VISION
+
+**GOLDEN HOUR LIGHTING SYSTEM**
+The prehistoric forest comes alive during the golden hour, when warm sunlight filters through the canopy of ancient ferns, cycads, and primitive conifers. This lighting creates a sense of primordial wonder and establishes the temporal setting through atmospheric cues.
+
+**Key Visual Elements:**
+- Volumetric fog rays piercing through dense vegetation
+- Dust particles and pollen floating in warm sunbeams
+- Atmospheric perspective creating depth in the forest
+- Moss-covered fallen logs casting dramatic shadows
+- Weathered boulders with lichen growth catching light
+- Dappled light patterns on the forest floor
+
+**Technical Implementation:**
+- Directional Light positioned at 15-degree angle for golden hour
+- Exponential Height Fog with warm orange/amber tinting
+- Volumetric Fog enabled with high scattering intensity
+- Light shafts using Volumetric Lightmaps
+- Particle systems for floating dust and pollen
+- Material parameter collections for time-of-day transitions
+
+**Atmospheric Storytelling:**
+The lighting tells the story of an ancient world where time moves differently. The warm, hazy atmosphere suggests a climate warmer than modern Earth, while the quality of light filtering through primitive vegetation creates an otherworldly feeling that reinforces the prehistoric setting.
+
+**Environmental Narrative:**
+- Morning mist rising from primordial swamps
+- Afternoon heat creating shimmer effects
+- Evening fog rolling through valleys
+- Night bioluminescence from primitive organisms
+
+**Material Properties for Atmospheric Assets:**
+- Moss materials with subsurface scattering for realistic light penetration
+- Lichen materials with slight emissive properties
+- Rock materials with proper roughness for light interaction
+- Vegetation materials with translucency for backlighting effects
+
+**Performance Considerations:**
+- LOD system for volumetric effects based on distance
+- Dynamic fog density based on weather conditions
+- Optimized particle counts for atmospheric effects
+- Efficient light shaft rendering using screen-space techniques
+
+This atmospheric system creates the foundation for environmental storytelling, where every ray of light and wisp of fog contributes to the player's immersion in the Cretaceous period.
