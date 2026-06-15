@@ -1,238 +1,359 @@
 #include "Audio_NarrativeAudioManager.h"
+#include "Components/SceneComponent.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundWave.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 
 AAudio_NarrativeAudioManager::AAudio_NarrativeAudioManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create audio component for narrative playback
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create audio components
     NarrativeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrativeAudioComponent"));
-    RootComponent = NarrativeAudioComponent;
+    NarrativeAudioComponent->SetupAttachment(RootComponent);
+    NarrativeAudioComponent->bAutoActivate = false;
 
-    // Initialize default values
-    MasterNarrativeVolume = 0.8f;
-    VoicelineAttenuation = 0.5f;
-    MaxAudibleDistance = 2000.0f;
-    bIsPlayingVoiceLine = false;
-    CurrentVoiceLineTimer = 0.0f;
-    CurrentCharacterSpeaking = TEXT("");
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
 
-    // Setup audio component properties
-    if (NarrativeAudioComponent)
-    {
-        NarrativeAudioComponent->bAutoActivate = false;
-        NarrativeAudioComponent->VolumeMultiplier = MasterNarrativeVolume;
-        NarrativeAudioComponent->AttenuationSettings = nullptr; // Will be set dynamically
-    }
+    // Initialize default settings
+    MasterVolume = 1.0f;
+    NarrativeVolume = 0.8f;
+    AmbientVolume = 0.6f;
+    FadeInTime = 2.0f;
+    FadeOutTime = 1.5f;
 
-    // Initialize character voices with generated samples
-    FAudio_CharacterVoiceData ThaneVoice;
-    ThaneVoice.CharacterName = TEXT("Thane");
-    ThaneVoice.VoiceURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1780053363055_NarratorSurvival.mp3");
-    ThaneVoice.Duration = 15.0f;
-    ThaneVoice.PersonalityTrait = EAudio_PersonalityTrait::Wise;
-    CharacterVoices.Add(TEXT("Thane"), ThaneVoice);
-
-    FAudio_CharacterVoiceData DangerVoice;
-    DangerVoice.CharacterName = TEXT("DangerAlert");
-    DangerVoice.VoiceURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1780053367668_DangerAlert.mp3");
-    DangerVoice.Duration = 11.0f;
-    DangerVoice.PersonalityTrait = EAudio_PersonalityTrait::Aggressive;
-    CharacterVoices.Add(TEXT("DangerAlert"), DangerVoice);
+    // Internal state
+    CurrentNarrativeClip = TEXT("");
+    CurrentAmbientZone = TEXT("");
+    LastTriggerCheckTime = 0.0f;
+    TriggerCheckInterval = 0.5f; // Check triggers twice per second
+    PlayerPawn = nullptr;
 }
 
 void AAudio_NarrativeAudioManager::BeginPlay()
 {
     Super::BeginPlay();
+    
+    InitializeAudioComponents();
+    UpdatePlayerReference();
 
-    UE_LOG(LogTemp, Warning, TEXT("Audio_NarrativeAudioManager initialized with %d character voices"), CharacterVoices.Num());
+    // Initialize default narrative clips for testing
+    FAudio_NarrativeClip CaveClip;
+    CaveClip.ClipName = TEXT("CaveWarning");
+    CaveClip.TriggerLocation = TEXT("CaveEntrance");
+    CaveClip.TriggerRadius = 800.0f;
+    CaveClip.bPlayOnce = false;
+    CaveClip.CooldownTime = 45.0f;
+    NarrativeClips.Add(CaveClip);
 
-    // Setup default narrative events
-    FAudio_NarrativeEvent WelcomeEvent;
-    WelcomeEvent.EventName = TEXT("PlayerEnterWorld");
-    WelcomeEvent.TriggerRadius = 1000.0f;
-    WelcomeEvent.bIsOneShot = true;
-    
-    if (CharacterVoices.Contains(TEXT("Thane")))
-    {
-        WelcomeEvent.VoiceLines.Add(CharacterVoices[TEXT("Thane")]);
-    }
-    
-    NarrativeEvents.Add(WelcomeEvent);
+    FAudio_NarrativeClip RiverClip;
+    RiverClip.ClipName = TEXT("RiverCrossing");
+    RiverClip.TriggerLocation = TEXT("RiverCrossing");
+    RiverClip.TriggerRadius = 600.0f;
+    RiverClip.bPlayOnce = true;
+    RiverClip.CooldownTime = 0.0f;
+    NarrativeClips.Add(RiverClip);
 
-    FAudio_NarrativeEvent DangerEvent;
-    DangerEvent.EventName = TEXT("TRexNearby");
-    DangerEvent.TriggerRadius = 1500.0f;
-    DangerEvent.bIsOneShot = false;
-    
-    if (CharacterVoices.Contains(TEXT("DangerAlert")))
-    {
-        DangerEvent.VoiceLines.Add(CharacterVoices[TEXT("DangerAlert")]);
-    }
-    
-    NarrativeEvents.Add(DangerEvent);
+    // Initialize default ambient zones
+    FAudio_AmbientZone ForestZone;
+    ForestZone.ZoneName = TEXT("Forest");
+    ForestZone.ZoneLocation = FVector(0, 0, 0);
+    ForestZone.ZoneRadius = 2000.0f;
+    ForestZone.VolumeMultiplier = 0.7f;
+    ForestZone.bLooping = true;
+    AmbientZones.Add(ForestZone);
+
+    FAudio_AmbientZone CaveZone;
+    CaveZone.ZoneName = TEXT("Cave");
+    CaveZone.ZoneLocation = FVector(2000, 0, 0);
+    CaveZone.ZoneRadius = 1000.0f;
+    CaveZone.VolumeMultiplier = 0.5f;
+    CaveZone.bLooping = true;
+    AmbientZones.Add(CaveZone);
+
+    UE_LOG(LogTemp, Warning, TEXT("Audio_NarrativeAudioManager initialized with %d clips and %d zones"), 
+           NarrativeClips.Num(), AmbientZones.Num());
 }
 
 void AAudio_NarrativeAudioManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    UpdateVoiceLinePlayback(DeltaTime);
-}
 
-void AAudio_NarrativeAudioManager::UpdateVoiceLinePlayback(float DeltaTime)
-{
-    if (bIsPlayingVoiceLine && CurrentVoiceLineTimer > 0.0f)
+    // Update player reference if needed
+    if (!PlayerPawn)
     {
-        CurrentVoiceLineTimer -= DeltaTime;
-        
-        if (CurrentVoiceLineTimer <= 0.0f)
-        {
-            OnVoiceLineComplete();
-        }
+        UpdatePlayerReference();
+    }
+
+    // Check triggers at intervals
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastTriggerCheckTime >= TriggerCheckInterval)
+    {
+        CheckNarrativeTriggers();
+        CheckAmbientZones();
+        LastTriggerCheckTime = CurrentTime;
     }
 }
 
-void AAudio_NarrativeAudioManager::OnVoiceLineComplete()
+void AAudio_NarrativeAudioManager::InitializeAudioComponents()
 {
-    bIsPlayingVoiceLine = false;
-    CurrentVoiceLineTimer = 0.0f;
-    CurrentCharacterSpeaking = TEXT("");
-    
+    if (NarrativeAudioComponent)
+    {
+        NarrativeAudioComponent->SetVolumeMultiplier(NarrativeVolume * MasterVolume);
+        NarrativeAudioComponent->bOverrideAttenuation = true;
+    }
+
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
+        AmbientAudioComponent->bOverrideAttenuation = true;
+    }
+}
+
+void AAudio_NarrativeAudioManager::UpdatePlayerReference()
+{
+    if (UWorld* World = GetWorld())
+    {
+        PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    }
+}
+
+void AAudio_NarrativeAudioManager::PlayNarrativeClip(const FString& ClipName)
+{
+    for (FAudio_NarrativeClip& Clip : NarrativeClips)
+    {
+        if (Clip.ClipName == ClipName && CanPlayNarrativeClip(Clip))
+        {
+            if (NarrativeAudioComponent && Clip.AudioClip)
+            {
+                // Stop current narrative audio
+                StopNarrativeAudio();
+
+                // Play new clip
+                NarrativeAudioComponent->SetSound(Clip.AudioClip);
+                NarrativeAudioComponent->Play();
+
+                // Update clip state
+                Clip.bHasPlayed = true;
+                Clip.LastPlayTime = GetWorld()->GetTimeSeconds();
+                CurrentNarrativeClip = ClipName;
+
+                UE_LOG(LogTemp, Warning, TEXT("Playing narrative clip: %s"), *ClipName);
+                return;
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Could not play narrative clip: %s"), *ClipName);
+}
+
+void AAudio_NarrativeAudioManager::StopNarrativeAudio()
+{
     if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
     {
         NarrativeAudioComponent->Stop();
+        CurrentNarrativeClip = TEXT("");
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Voice line playback completed"));
 }
 
-void AAudio_NarrativeAudioManager::PlayCharacterVoiceLine(const FString& CharacterName, const FString& VoiceURL)
+void AAudio_NarrativeAudioManager::SetAmbientZone(const FString& ZoneName)
 {
-    if (!CanPlayVoiceLine(CharacterName))
+    if (CurrentAmbientZone == ZoneName)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot play voice line for character: %s"), *CharacterName);
+        return; // Already in this zone
+    }
+
+    for (FAudio_AmbientZone& Zone : AmbientZones)
+    {
+        if (Zone.ZoneName == ZoneName)
+        {
+            // Stop current ambient audio
+            StopAmbientAudio();
+
+            // Start new zone audio
+            if (AmbientAudioComponent && Zone.AmbientSound)
+            {
+                AmbientAudioComponent->SetSound(Zone.AmbientSound);
+                AmbientAudioComponent->SetVolumeMultiplier(Zone.VolumeMultiplier * AmbientVolume * MasterVolume);
+                AmbientAudioComponent->Play();
+
+                Zone.bIsActive = true;
+                CurrentAmbientZone = ZoneName;
+
+                UE_LOG(LogTemp, Warning, TEXT("Switched to ambient zone: %s"), *ZoneName);
+            }
+            return;
+        }
+    }
+}
+
+void AAudio_NarrativeAudioManager::StopAmbientAudio()
+{
+    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
+    {
+        AmbientAudioComponent->Stop();
+        
+        // Mark all zones as inactive
+        for (FAudio_AmbientZone& Zone : AmbientZones)
+        {
+            Zone.bIsActive = false;
+        }
+        
+        CurrentAmbientZone = TEXT("");
+    }
+}
+
+void AAudio_NarrativeAudioManager::CheckNarrativeTriggers()
+{
+    if (!PlayerPawn)
+    {
         return;
     }
 
-    if (CharacterVoices.Contains(CharacterName))
-    {
-        const FAudio_CharacterVoiceData& VoiceData = CharacterVoices[CharacterName];
-        
-        // Stop current voice line if playing
-        if (bIsPlayingVoiceLine)
-        {
-            StopCurrentVoiceLine();
-        }
-        
-        // Start new voice line
-        bIsPlayingVoiceLine = true;
-        CurrentVoiceLineTimer = VoiceData.Duration;
-        CurrentCharacterSpeaking = CharacterName;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Playing voice line for %s: %s (Duration: %.1fs)"), 
-               *CharacterName, *VoiceData.VoiceURL, VoiceData.Duration);
-        
-        // In a real implementation, we would load and play the audio from URL
-        // For now, we simulate playback with the timer system
-        if (NarrativeAudioComponent)
-        {
-            NarrativeAudioComponent->SetVolumeMultiplier(MasterNarrativeVolume);
-            // Note: Actual audio loading from URL would require custom implementation
-        }
-    }
-}
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
 
-void AAudio_NarrativeAudioManager::TriggerNarrativeEvent(const FString& EventName, FVector PlayerLocation)
-{
-    for (const FAudio_NarrativeEvent& Event : NarrativeEvents)
+    for (const FAudio_NarrativeClip& Clip : NarrativeClips)
     {
-        if (Event.EventName == EventName)
+        if (!CanPlayNarrativeClip(Clip))
         {
-            float DistanceToPlayer = FVector::Dist(GetActorLocation(), PlayerLocation);
-            
-            if (DistanceToPlayer <= Event.TriggerRadius)
-            {
-                if (Event.VoiceLines.Num() > 0)
-                {
-                    // Play random voice line from event
-                    int32 RandomIndex = FMath::RandRange(0, Event.VoiceLines.Num() - 1);
-                    const FAudio_CharacterVoiceData& VoiceLine = Event.VoiceLines[RandomIndex];
-                    
-                    PlayCharacterVoiceLine(VoiceLine.CharacterName, VoiceLine.VoiceURL);
-                    
-                    UE_LOG(LogTemp, Warning, TEXT("Triggered narrative event: %s"), *EventName);
-                }
-            }
-            break;
+            continue;
+        }
+
+        // For now, use simple distance check based on trigger location name
+        // In a full implementation, this would check against actual trigger volumes
+        FVector TriggerLocation = FVector::ZeroVector;
+        
+        if (Clip.TriggerLocation == TEXT("CaveEntrance"))
+        {
+            TriggerLocation = FVector(2000, 0, 100);
+        }
+        else if (Clip.TriggerLocation == TEXT("RiverCrossing"))
+        {
+            TriggerLocation = FVector(-1500, 1000, 100);
+        }
+        else if (Clip.TriggerLocation == TEXT("HuntingGrounds"))
+        {
+            TriggerLocation = FVector(0, -2000, 100);
+        }
+        else if (Clip.TriggerLocation == TEXT("MigrationPath"))
+        {
+            TriggerLocation = FVector(3000, 2000, 100);
+        }
+
+        float Distance = FVector::Dist(PlayerLocation, TriggerLocation);
+        if (Distance <= Clip.TriggerRadius)
+        {
+            PlayNarrativeClip(Clip.ClipName);
+            break; // Only play one clip at a time
         }
     }
 }
 
-void AAudio_NarrativeAudioManager::RegisterCharacterVoice(const FString& CharacterName, const FString& VoiceURL, float Duration, EAudio_PersonalityTrait Trait)
+void AAudio_NarrativeAudioManager::CheckAmbientZones()
 {
-    FAudio_CharacterVoiceData NewVoiceData;
-    NewVoiceData.CharacterName = CharacterName;
-    NewVoiceData.VoiceURL = VoiceURL;
-    NewVoiceData.Duration = Duration;
-    NewVoiceData.PersonalityTrait = Trait;
-    
-    CharacterVoices.Add(CharacterName, NewVoiceData);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Registered voice for character: %s"), *CharacterName);
-}
-
-bool AAudio_NarrativeAudioManager::IsVoiceLineActive() const
-{
-    return bIsPlayingVoiceLine;
-}
-
-void AAudio_NarrativeAudioManager::StopCurrentVoiceLine()
-{
-    if (bIsPlayingVoiceLine)
+    if (!PlayerPawn)
     {
-        OnVoiceLineComplete();
+        return;
+    }
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    FString ClosestZone = TEXT("");
+    float ClosestDistance = FLT_MAX;
+
+    for (const FAudio_AmbientZone& Zone : AmbientZones)
+    {
+        float Distance = FVector::Dist(PlayerLocation, Zone.ZoneLocation);
+        if (Distance <= Zone.ZoneRadius && Distance < ClosestDistance)
+        {
+            ClosestDistance = Distance;
+            ClosestZone = Zone.ZoneName;
+        }
+    }
+
+    if (!ClosestZone.IsEmpty() && ClosestZone != CurrentAmbientZone)
+    {
+        SetAmbientZone(ClosestZone);
+    }
+    else if (ClosestZone.IsEmpty() && !CurrentAmbientZone.IsEmpty())
+    {
+        StopAmbientAudio();
     }
 }
 
-void AAudio_NarrativeAudioManager::SetNarrativeVolume(float Volume)
+void AAudio_NarrativeAudioManager::RegisterNarrativeClip(const FAudio_NarrativeClip& NewClip)
 {
-    MasterNarrativeVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (NarrativeAudioComponent)
+    NarrativeClips.Add(NewClip);
+    UE_LOG(LogTemp, Warning, TEXT("Registered narrative clip: %s"), *NewClip.ClipName);
+}
+
+void AAudio_NarrativeAudioManager::RegisterAmbientZone(const FAudio_AmbientZone& NewZone)
+{
+    AmbientZones.Add(NewZone);
+    UE_LOG(LogTemp, Warning, TEXT("Registered ambient zone: %s"), *NewZone.ZoneName);
+}
+
+bool AAudio_NarrativeAudioManager::IsNarrativeClipAvailable(const FString& ClipName)
+{
+    for (const FAudio_NarrativeClip& Clip : NarrativeClips)
     {
-        NarrativeAudioComponent->SetVolumeMultiplier(MasterNarrativeVolume);
+        if (Clip.ClipName == ClipName)
+        {
+            return CanPlayNarrativeClip(Clip);
+        }
     }
+    return false;
 }
 
-FAudio_CharacterVoiceData AAudio_NarrativeAudioManager::GetCharacterVoiceData(const FString& CharacterName) const
+float AAudio_NarrativeAudioManager::GetDistanceToPlayer(const FVector& Location)
 {
-    if (CharacterVoices.Contains(CharacterName))
+    if (PlayerPawn)
     {
-        return CharacterVoices[CharacterName];
+        return FVector::Dist(PlayerPawn->GetActorLocation(), Location);
     }
-    
-    return FAudio_CharacterVoiceData();
+    return FLT_MAX;
 }
 
-TArray<FString> AAudio_NarrativeAudioManager::GetAvailableCharacterVoices() const
+bool AAudio_NarrativeAudioManager::CanPlayNarrativeClip(const FAudio_NarrativeClip& Clip)
 {
-    TArray<FString> VoiceNames;
-    CharacterVoices.GetKeys(VoiceNames);
-    return VoiceNames;
-}
-
-bool AAudio_NarrativeAudioManager::CanPlayVoiceLine(const FString& CharacterName) const
-{
-    // Don't interrupt if same character is already speaking
-    if (bIsPlayingVoiceLine && CurrentCharacterSpeaking == CharacterName)
+    // Check if already played and set to play once
+    if (Clip.bPlayOnce && Clip.bHasPlayed)
     {
         return false;
     }
-    
-    // Check if character voice exists
-    return CharacterVoices.Contains(CharacterName);
+
+    // Check cooldown
+    if (Clip.CooldownTime > 0.0f)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float TimeSinceLastPlay = CurrentTime - Clip.LastPlayTime;
+        if (TimeSinceLastPlay < Clip.CooldownTime)
+        {
+            return false;
+        }
+    }
+
+    // Check if currently playing narrative audio
+    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void AAudio_NarrativeAudioManager::FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float Duration)
+{
+    if (AudioComp)
+    {
+        // Simple fade implementation - in full version would use timeline or tween
+        AudioComp->SetVolumeMultiplier(TargetVolume);
+    }
 }
