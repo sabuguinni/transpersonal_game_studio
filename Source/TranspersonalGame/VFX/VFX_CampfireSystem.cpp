@@ -1,458 +1,330 @@
 #include "VFX_CampfireSystem.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "Components/PointLightComponent.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "TimerManager.h"
 
 UVFX_CampfireSystem::UVFX_CampfireSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
-    
-    // Initialize default values
-    CurrentFuel = 50.0f;
-    CurrentIntensity = EVFX_FireIntensity::Medium;
-    bFireActive = false;
-    LightFlickerTimer = 0.0f;
-    BaseLightIntensity = 2000.0f;
-    
-    // Create components in constructor
-    CreateComponents();
-}
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-void UVFX_CampfireSystem::CreateComponents()
-{
-    // Create Niagara components
-    FlameEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("FlameEffect"));
-    SmokeEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("SmokeEffect"));
-    SparkEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("SparkEffect"));
-    EmberEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("EmberEffect"));
-    
-    // Create light component
-    FireLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("FireLight"));
-    FireLight->SetIntensity(BaseLightIntensity);
-    FireLight->SetAttenuationRadius(500.0f);
-    FireLight->SetLightColor(FLinearColor(1.0f, 0.6f, 0.2f, 1.0f));
-    FireLight->SetCastShadows(true);
-    FireLight->SetSourceRadius(25.0f);
-    
-    // Create audio component
-    FireAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("FireAudio"));
-    FireAudio->bAutoActivate = false;
-    
-    // Set initial states
-    if (FlameEffect) FlameEffect->SetAutoActivate(false);
-    if (SmokeEffect) SmokeEffect->SetAutoActivate(false);
-    if (SparkEffect) SparkEffect->SetAutoActivate(false);
-    if (EmberEffect) EmberEffect->SetAutoActivate(false);
-    if (FireLight) FireLight->SetVisibility(false);
+    // Initialize default values
+    CurrentState = EVFX_CampfireState::Unlit;
+    FuelLevel = 100.0f;
+    FuelConsumptionRate = 1.0f;
+    WindInfluence = 0.0f;
+    bAffectedByWeather = true;
+    StateTransitionTimer = 0.0f;
+    LastSparkTime = 0.0f;
+    SparkInterval = 2.0f;
+
+    // Create components
+    FlameComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("FlameComponent"));
+    SmokeComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("SmokeComponent"));
+    EmberComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("EmberComponent"));
+    SparkComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("SparkComponent"));
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+
+    // Initialize effects data
+    CampfireEffects.FlameIntensity = 1.0f;
+    CampfireEffects.SmokeIntensity = 0.8f;
 }
 
 void UVFX_CampfireSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    LoadAssets();
+    CreateNiagaraComponents();
     
-    // Initialize fire parameters
-    FireParams = GetParametersForIntensity(CurrentIntensity);
-    
-    // Start with a medium fire if desired
-    if (bFireActive)
+    // Set initial state
+    if (CurrentState == EVFX_CampfireState::Unlit)
     {
-        StartFire(CurrentIntensity);
-    }
-}
-
-void UVFX_CampfireSystem::LoadAssets()
-{
-    // Load Niagara systems (these would be created in the editor)
-    // For now, we'll set them to null and log that they need to be assigned
-    if (!NS_CampfireFlames)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_CampfireSystem: NS_CampfireFlames not assigned. Please assign in Blueprint."));
-    }
-    
-    if (!NS_CampfireSmoke)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_CampfireSystem: NS_CampfireSmoke not assigned. Please assign in Blueprint."));
-    }
-    
-    if (!NS_CampfireSparks)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_CampfireSystem: NS_CampfireSparks not assigned. Please assign in Blueprint."));
-    }
-    
-    if (!NS_CampfireEmbers)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_CampfireSystem: NS_CampfireEmbers not assigned. Please assign in Blueprint."));
-    }
-    
-    // Assign systems to components if available
-    if (FlameEffect && NS_CampfireFlames)
-    {
-        FlameEffect->SetAsset(NS_CampfireFlames);
-    }
-    
-    if (SmokeEffect && NS_CampfireSmoke)
-    {
-        SmokeEffect->SetAsset(NS_CampfireSmoke);
-    }
-    
-    if (SparkEffect && NS_CampfireSparks)
-    {
-        SparkEffect->SetAsset(NS_CampfireSparks);
-    }
-    
-    if (EmberEffect && NS_CampfireEmbers)
-    {
-        EmberEffect->SetAsset(NS_CampfireEmbers);
-    }
-    
-    // Load audio assets
-    if (!FireCrackleSound)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_CampfireSystem: FireCrackleSound not assigned. Please assign in Blueprint."));
-    }
-    
-    if (FireAudio && FireCrackleSound)
-    {
-        FireAudio->SetSound(FireCrackleSound);
+        if (FlameComponent) FlameComponent->Deactivate();
+        if (SmokeComponent) SmokeComponent->Deactivate();
+        if (EmberComponent) EmberComponent->Deactivate();
+        if (SparkComponent) SparkComponent->Deactivate();
+        if (AudioComponent) AudioComponent->Stop();
     }
 }
 
 void UVFX_CampfireSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bFireActive)
+
+    StateTransitionTimer += DeltaTime;
+
+    switch (CurrentState)
     {
-        // Consume fuel over time
-        ConsumeFuel(DeltaTime);
-        
-        // Update light flickering
-        UpdateLightFlicker(DeltaTime);
-        
-        // Update wind effects
-        if (bEnableWindEffect)
+        case EVFX_CampfireState::Burning:
         {
-            UpdateWindEffects();
+            // Consume fuel
+            FuelLevel = FMath::Max(0.0f, FuelLevel - (FuelConsumptionRate * DeltaTime));
+            
+            // Check if fuel is running low
+            if (FuelLevel <= 10.0f)
+            {
+                TransitionToState(EVFX_CampfireState::Dying);
+            }
+            
+            // Generate sparks periodically
+            if (StateTransitionTimer - LastSparkTime >= SparkInterval)
+            {
+                if (SparkComponent && SparkComponent->GetAsset())
+                {
+                    SparkComponent->Activate(true);
+                    LastSparkTime = StateTransitionTimer;
+                }
+            }
+            
+            UpdateEffectIntensities();
+            break;
         }
         
-        // Update fire effects based on current state
-        UpdateFireEffects();
-        
-        // Auto-extinguish if out of fuel
-        if (bAutoExtinguishWhenOutOfFuel && CurrentFuel <= 0.0f)
+        case EVFX_CampfireState::Dying:
         {
-            ExtinguishFire();
+            FuelLevel = FMath::Max(0.0f, FuelLevel - (FuelConsumptionRate * 0.5f * DeltaTime));
+            
+            if (FuelLevel <= 0.0f)
+            {
+                TransitionToState(EVFX_CampfireState::Extinguished);
+            }
+            
+            // Reduce effect intensities
+            float DyingIntensity = FuelLevel / 10.0f;
+            CampfireEffects.FlameIntensity = DyingIntensity;
+            CampfireEffects.SmokeIntensity = 0.3f + (DyingIntensity * 0.5f);
+            UpdateEffectIntensities();
+            break;
+        }
+        
+        case EVFX_CampfireState::Igniting:
+        {
+            if (StateTransitionTimer >= 3.0f)
+            {
+                TransitionToState(EVFX_CampfireState::Burning);
+            }
+            
+            // Gradually increase flame intensity during ignition
+            float IgnitionProgress = StateTransitionTimer / 3.0f;
+            CampfireEffects.FlameIntensity = IgnitionProgress;
+            UpdateEffectIntensities();
+            break;
+        }
+        
+        case EVFX_CampfireState::Extinguished:
+        {
+            // Only smoke remains for a while
+            if (StateTransitionTimer >= 10.0f)
+            {
+                if (SmokeComponent) SmokeComponent->Deactivate();
+            }
+            break;
         }
     }
+
+    UpdateAudioVolume();
 }
 
-void UVFX_CampfireSystem::StartFire(EVFX_FireIntensity Intensity)
+void UVFX_CampfireSystem::IgniteCampfire()
 {
-    if (bFireActive)
+    if (CurrentState == EVFX_CampfireState::Unlit && FuelLevel > 0.0f)
     {
-        SetFireIntensity(Intensity);
-        return;
+        TransitionToState(EVFX_CampfireState::Igniting);
+        
+        // Start effects
+        if (FlameComponent && CampfireEffects.FlameEffect)
+        {
+            FlameComponent->SetAsset(CampfireEffects.FlameEffect);
+            FlameComponent->Activate(true);
+        }
+        
+        if (SmokeComponent && CampfireEffects.SmokeEffect)
+        {
+            SmokeComponent->SetAsset(CampfireEffects.SmokeEffect);
+            SmokeComponent->Activate(true);
+        }
+        
+        if (AudioComponent && CampfireEffects.CracklingSound)
+        {
+            AudioComponent->SetSound(CampfireEffects.CracklingSound);
+            AudioComponent->Play();
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Campfire ignited"));
     }
-    
-    bFireActive = true;
-    CurrentIntensity = Intensity;
-    
-    // Get parameters for this intensity
-    FireParams = GetParametersForIntensity(Intensity);
-    
-    // Activate effects
-    if (FlameEffect && NS_CampfireFlames)
-    {
-        FlameEffect->Activate();
-    }
-    
-    if (SmokeEffect && NS_CampfireSmoke)
-    {
-        SmokeEffect->Activate();
-    }
-    
-    if (SparkEffect && NS_CampfireSparks)
-    {
-        SparkEffect->Activate();
-    }
-    
-    if (EmberEffect && NS_CampfireEmbers)
-    {
-        EmberEffect->Activate();
-    }
-    
-    // Turn on light
-    if (FireLight)
-    {
-        FireLight->SetVisibility(true);
-        BaseLightIntensity = FireParams.LightIntensity;
-        FireLight->SetIntensity(BaseLightIntensity);
-        FireLight->SetAttenuationRadius(FireParams.LightRadius);
-        FireLight->SetLightColor(FireParams.FireColor);
-    }
-    
-    // Start audio
-    if (FireAudio && FireCrackleSound)
-    {
-        FireAudio->Play();
-    }
-    
-    // Play ignite sound
-    if (FireIgniteSound && GetOwner())
-    {
-        UGameplayStatics::PlaySoundAtLocation(GetWorld(), FireIgniteSound, GetOwner()->GetActorLocation());
-    }
-    
-    // Apply fire parameters to effects
-    ApplyFireParameters(FireParams);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_CampfireSystem: Fire started with intensity %d"), (int32)Intensity);
 }
 
-void UVFX_CampfireSystem::ExtinguishFire()
+void UVFX_CampfireSystem::ExtinguishCampfire()
 {
-    if (!bFireActive) return;
-    
-    bFireActive = false;
-    
-    // Deactivate effects
-    if (FlameEffect) FlameEffect->Deactivate();
-    if (SmokeEffect) SmokeEffect->Deactivate();
-    if (SparkEffect) SparkEffect->Deactivate();
-    if (EmberEffect) EmberEffect->Deactivate();
-    
-    // Turn off light
-    if (FireLight)
+    if (CurrentState == EVFX_CampfireState::Burning || CurrentState == EVFX_CampfireState::Dying)
     {
-        FireLight->SetVisibility(false);
+        TransitionToState(EVFX_CampfireState::Extinguished);
+        
+        // Stop flame and ember effects
+        if (FlameComponent) FlameComponent->Deactivate();
+        if (EmberComponent) EmberComponent->Deactivate();
+        if (SparkComponent) SparkComponent->Deactivate();
+        
+        // Keep smoke for a while
+        CampfireEffects.SmokeIntensity = 0.6f;
+        UpdateEffectIntensities();
+        
+        // Stop audio
+        if (AudioComponent) AudioComponent->Stop();
+        
+        UE_LOG(LogTemp, Log, TEXT("Campfire extinguished"));
     }
-    
-    // Stop audio
-    if (FireAudio)
-    {
-        FireAudio->Stop();
-    }
-    
-    // Play extinguish sound
-    if (FireExtinguishSound && GetOwner())
-    {
-        UGameplayStatics::PlaySoundAtLocation(GetWorld(), FireExtinguishSound, GetOwner()->GetActorLocation());
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_CampfireSystem: Fire extinguished"));
-}
-
-void UVFX_CampfireSystem::SetFireIntensity(EVFX_FireIntensity NewIntensity)
-{
-    if (!bFireActive) return;
-    
-    CurrentIntensity = NewIntensity;
-    FireParams = GetParametersForIntensity(NewIntensity);
-    
-    // Update light
-    if (FireLight)
-    {
-        BaseLightIntensity = FireParams.LightIntensity;
-        FireLight->SetAttenuationRadius(FireParams.LightRadius);
-        FireLight->SetLightColor(FireParams.FireColor);
-    }
-    
-    // Apply new parameters
-    ApplyFireParameters(FireParams);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_CampfireSystem: Fire intensity changed to %d"), (int32)NewIntensity);
 }
 
 void UVFX_CampfireSystem::AddFuel(float FuelAmount)
 {
-    CurrentFuel = FMath::Clamp(CurrentFuel + FuelAmount, 0.0f, MaxFuel);
-    UE_LOG(LogTemp, Log, TEXT("VFX_CampfireSystem: Added %.1f fuel. Current fuel: %.1f"), FuelAmount, CurrentFuel);
-}
-
-void UVFX_CampfireSystem::SetWindDirection(FVector WindDir)
-{
-    WindDirection = WindDir.GetSafeNormal();
-}
-
-void UVFX_CampfireSystem::SetWindStrength(float Strength)
-{
-    WindStrength = FMath::Clamp(Strength, 0.0f, 2.0f);
-}
-
-FVFX_FireParameters UVFX_CampfireSystem::GetParametersForIntensity(EVFX_FireIntensity Intensity)
-{
-    FVFX_FireParameters Params;
+    FuelLevel = FMath::Min(100.0f, FuelLevel + FuelAmount);
     
-    switch (Intensity)
+    if (CurrentState == EVFX_CampfireState::Dying && FuelLevel > 10.0f)
     {
-        case EVFX_FireIntensity::Embers:
-            Params.FlameHeight = 30.0f;
-            Params.FlameIntensity = 0.2f;
-            Params.SmokeAmount = 0.1f;
-            Params.SparkCount = 5.0f;
-            Params.LightRadius = 200.0f;
-            Params.LightIntensity = 500.0f;
-            Params.FireColor = FLinearColor(1.0f, 0.4f, 0.1f, 1.0f);
-            break;
-            
-        case EVFX_FireIntensity::Low:
-            Params.FlameHeight = 60.0f;
-            Params.FlameIntensity = 0.5f;
-            Params.SmokeAmount = 0.3f;
-            Params.SparkCount = 15.0f;
-            Params.LightRadius = 350.0f;
-            Params.LightIntensity = 1200.0f;
-            Params.FireColor = FLinearColor(1.0f, 0.5f, 0.15f, 1.0f);
-            break;
-            
-        case EVFX_FireIntensity::Medium:
-            Params.FlameHeight = 100.0f;
-            Params.FlameIntensity = 1.0f;
-            Params.SmokeAmount = 0.5f;
-            Params.SparkCount = 30.0f;
-            Params.LightRadius = 500.0f;
-            Params.LightIntensity = 2000.0f;
-            Params.FireColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
-            break;
-            
-        case EVFX_FireIntensity::High:
-            Params.FlameHeight = 150.0f;
-            Params.FlameIntensity = 1.5f;
-            Params.SmokeAmount = 0.7f;
-            Params.SparkCount = 50.0f;
-            Params.LightRadius = 700.0f;
-            Params.LightIntensity = 3000.0f;
-            Params.FireColor = FLinearColor(1.0f, 0.7f, 0.3f, 1.0f);
-            break;
-            
-        case EVFX_FireIntensity::Bonfire:
-            Params.FlameHeight = 250.0f;
-            Params.FlameIntensity = 2.0f;
-            Params.SmokeAmount = 1.0f;
-            Params.SparkCount = 80.0f;
-            Params.LightRadius = 1000.0f;
-            Params.LightIntensity = 4500.0f;
-            Params.FireColor = FLinearColor(1.0f, 0.8f, 0.4f, 1.0f);
-            break;
+        TransitionToState(EVFX_CampfireState::Burning);
+        CampfireEffects.FlameIntensity = 1.0f;
+        CampfireEffects.SmokeIntensity = 0.8f;
     }
     
-    return Params;
+    UE_LOG(LogTemp, Log, TEXT("Fuel added. Current level: %f"), FuelLevel);
 }
 
-void UVFX_CampfireSystem::ApplyFireParameters(const FVFX_FireParameters& Params)
+void UVFX_CampfireSystem::SetWindStrength(float WindStrength)
 {
-    // Apply parameters to Niagara effects
-    if (FlameEffect && FlameEffect->GetAsset())
+    WindInfluence = FMath::Clamp(WindStrength, 0.0f, 2.0f);
+    
+    // Wind affects flame and smoke direction/intensity
+    if (FlameComponent)
     {
-        FlameEffect->SetFloatParameter(TEXT("FlameHeight"), Params.FlameHeight);
-        FlameEffect->SetFloatParameter(TEXT("FlameIntensity"), Params.FlameIntensity);
-        FlameEffect->SetColorParameter(TEXT("FireColor"), Params.FireColor);
+        FlameComponent->SetFloatParameter(TEXT("WindStrength"), WindInfluence);
     }
     
-    if (SmokeEffect && SmokeEffect->GetAsset())
+    if (SmokeComponent)
     {
-        SmokeEffect->SetFloatParameter(TEXT("SmokeAmount"), Params.SmokeAmount);
-    }
-    
-    if (SparkEffect && SparkEffect->GetAsset())
-    {
-        SparkEffect->SetFloatParameter(TEXT("SparkCount"), Params.SparkCount);
-    }
-    
-    if (EmberEffect && EmberEffect->GetAsset())
-    {
-        EmberEffect->SetFloatParameter(TEXT("EmberIntensity"), Params.FlameIntensity * 0.5f);
+        SmokeComponent->SetFloatParameter(TEXT("WindStrength"), WindInfluence);
+        SmokeComponent->SetVectorParameter(TEXT("WindDirection"), FVector(WindInfluence, 0.0f, 0.0f));
     }
 }
 
-void UVFX_CampfireSystem::UpdateFireEffects()
+void UVFX_CampfireSystem::SetWeatherInfluence(bool bRaining, float RainIntensity)
 {
-    // Adjust effects based on fuel level
-    float FuelRatio = CurrentFuel / MaxFuel;
-    float IntensityMultiplier = FMath::Clamp(FuelRatio, 0.1f, 1.0f);
+    if (!bAffectedByWeather) return;
     
-    // Reduce intensity as fuel runs low
-    if (FlameEffect && FlameEffect->GetAsset())
+    if (bRaining && RainIntensity > 0.3f)
     {
-        FlameEffect->SetFloatParameter(TEXT("FuelMultiplier"), IntensityMultiplier);
+        // Rain reduces flame intensity and may extinguish the fire
+        float RainReduction = RainIntensity * 0.5f;
+        CampfireEffects.FlameIntensity = FMath::Max(0.1f, CampfireEffects.FlameIntensity - RainReduction);
+        
+        if (RainIntensity > 0.8f && CurrentState == EVFX_CampfireState::Burning)
+        {
+            // Heavy rain extinguishes the fire
+            ExtinguishCampfire();
+        }
+        
+        // Increase smoke when rain hits fire
+        CampfireEffects.SmokeIntensity = FMath::Min(2.0f, CampfireEffects.SmokeIntensity + (RainIntensity * 0.3f));
     }
     
-    // Smoke increases as fuel runs low (incomplete combustion)
-    if (SmokeEffect && SmokeEffect->GetAsset())
+    UpdateEffectIntensities();
+}
+
+void UVFX_CampfireSystem::UpdateEffectIntensities()
+{
+    if (FlameComponent)
     {
-        float SmokeMultiplier = FMath::Lerp(1.5f, 1.0f, FuelRatio);
-        SmokeEffect->SetFloatParameter(TEXT("SmokeMultiplier"), SmokeMultiplier);
+        FlameComponent->SetFloatParameter(TEXT("FlameIntensity"), CampfireEffects.FlameIntensity);
+        FlameComponent->SetFloatParameter(TEXT("FuelLevel"), FuelLevel / 100.0f);
+    }
+    
+    if (SmokeComponent)
+    {
+        SmokeComponent->SetFloatParameter(TEXT("SmokeIntensity"), CampfireEffects.SmokeIntensity);
+    }
+    
+    if (EmberComponent && CurrentState == EVFX_CampfireState::Burning)
+    {
+        EmberComponent->SetFloatParameter(TEXT("EmberIntensity"), CampfireEffects.FlameIntensity * 0.8f);
+        if (!EmberComponent->IsActive() && CampfireEffects.EmberEffect)
+        {
+            EmberComponent->SetAsset(CampfireEffects.EmberEffect);
+            EmberComponent->Activate(true);
+        }
     }
 }
 
-void UVFX_CampfireSystem::UpdateLightFlicker(float DeltaTime)
+void UVFX_CampfireSystem::UpdateAudioVolume()
 {
-    if (!FireLight) return;
-    
-    LightFlickerTimer += DeltaTime;
-    
-    // Create realistic fire flicker using multiple sine waves
-    float Flicker1 = FMath::Sin(LightFlickerTimer * 8.0f) * 0.1f;
-    float Flicker2 = FMath::Sin(LightFlickerTimer * 12.0f) * 0.05f;
-    float Flicker3 = FMath::Sin(LightFlickerTimer * 20.0f) * 0.03f;
-    
-    float TotalFlicker = Flicker1 + Flicker2 + Flicker3;
-    float FlickeredIntensity = BaseLightIntensity * (1.0f + TotalFlicker);
-    
-    // Reduce flicker based on fuel level
-    float FuelRatio = CurrentFuel / MaxFuel;
-    FlickeredIntensity *= FMath::Clamp(FuelRatio, 0.1f, 1.0f);
-    
-    FireLight->SetIntensity(FlickeredIntensity);
-}
-
-void UVFX_CampfireSystem::UpdateWindEffects()
-{
-    // Apply wind to flame direction
-    if (FlameEffect && FlameEffect->GetAsset())
+    if (AudioComponent && AudioComponent->IsPlaying())
     {
-        FVector WindForce = WindDirection * WindStrength;
-        FlameEffect->SetVectorParameter(TEXT("WindDirection"), WindForce);
-    }
-    
-    // Apply wind to smoke
-    if (SmokeEffect && SmokeEffect->GetAsset())
-    {
-        FVector SmokeWind = WindDirection * WindStrength * 0.7f; // Smoke is less affected by wind
-        SmokeEffect->SetVectorParameter(TEXT("WindDirection"), SmokeWind);
-    }
-    
-    // Sparks are more affected by wind
-    if (SparkEffect && SparkEffect->GetAsset())
-    {
-        FVector SparkWind = WindDirection * WindStrength * 1.5f;
-        SparkEffect->SetVectorParameter(TEXT("WindDirection"), SparkWind);
+        float VolumeMultiplier = 1.0f;
+        
+        switch (CurrentState)
+        {
+            case EVFX_CampfireState::Igniting:
+                VolumeMultiplier = StateTransitionTimer / 3.0f;
+                break;
+            case EVFX_CampfireState::Burning:
+                VolumeMultiplier = CampfireEffects.FlameIntensity;
+                break;
+            case EVFX_CampfireState::Dying:
+                VolumeMultiplier = FuelLevel / 10.0f;
+                break;
+            default:
+                VolumeMultiplier = 0.0f;
+                break;
+        }
+        
+        AudioComponent->SetVolumeMultiplier(FMath::Clamp(VolumeMultiplier, 0.0f, 1.0f));
     }
 }
 
-void UVFX_CampfireSystem::ConsumeFuel(float DeltaTime)
+void UVFX_CampfireSystem::TransitionToState(EVFX_CampfireState NewState)
 {
-    if (CurrentFuel <= 0.0f) return;
-    
-    // Consumption rate varies by intensity
-    float IntensityMultiplier = 1.0f;
-    switch (CurrentIntensity)
+    if (CurrentState != NewState)
     {
-        case EVFX_FireIntensity::Embers:    IntensityMultiplier = 0.2f; break;
-        case EVFX_FireIntensity::Low:       IntensityMultiplier = 0.5f; break;
-        case EVFX_FireIntensity::Medium:    IntensityMultiplier = 1.0f; break;
-        case EVFX_FireIntensity::High:      IntensityMultiplier = 1.5f; break;
-        case EVFX_FireIntensity::Bonfire:   IntensityMultiplier = 2.5f; break;
+        CurrentState = NewState;
+        StateTransitionTimer = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Campfire state changed to: %d"), (int32)NewState);
+    }
+}
+
+void UVFX_CampfireSystem::CreateNiagaraComponents()
+{
+    // Ensure all Niagara components are properly initialized
+    if (FlameComponent)
+    {
+        FlameComponent->SetAutoActivate(false);
+        FlameComponent->bAutoManageAttachment = true;
     }
     
-    float Consumption = FuelConsumptionRate * IntensityMultiplier * DeltaTime;
-    CurrentFuel = FMath::Max(0.0f, CurrentFuel - Consumption);
+    if (SmokeComponent)
+    {
+        SmokeComponent->SetAutoActivate(false);
+        SmokeComponent->bAutoManageAttachment = true;
+    }
+    
+    if (EmberComponent)
+    {
+        EmberComponent->SetAutoActivate(false);
+        EmberComponent->bAutoManageAttachment = true;
+    }
+    
+    if (SparkComponent)
+    {
+        SparkComponent->SetAutoActivate(false);
+        SparkComponent->bAutoManageAttachment = true;
+    }
+    
+    if (AudioComponent)
+    {
+        AudioComponent->SetAutoActivate(false);
+        AudioComponent->bAutoManageAttachment = true;
+    }
 }
