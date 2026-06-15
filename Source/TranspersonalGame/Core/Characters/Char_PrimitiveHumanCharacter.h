@@ -2,68 +2,97 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Engine/DataTable.h"
-#include "../SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Char_PrimitiveHumanCharacter.generated.h"
 
-// Character customization data structure
+UENUM(BlueprintType)
+enum class EChar_TribalRole : uint8
+{
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Child       UMETA(DisplayName = "Child"),
+    Warrior     UMETA(DisplayName = "Warrior")
+};
+
+UENUM(BlueprintType)
+enum class EChar_SkinTone : uint8
+{
+    Light       UMETA(DisplayName = "Light Weathered"),
+    Medium      UMETA(DisplayName = "Medium Weathered"),
+    Dark        UMETA(DisplayName = "Dark Weathered"),
+    Tanned      UMETA(DisplayName = "Sun Tanned"),
+    Scarred     UMETA(DisplayName = "Battle Scarred")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_HumanCustomization
+struct FChar_TribalAppearance
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float SkinTone = 0.5f; // 0.0 = pale, 1.0 = dark
+    EChar_SkinTone SkinTone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyBuild = 0.5f; // 0.0 = lean, 1.0 = muscular
+    FLinearColor SkinColor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float WeatheringLevel = 0.3f; // 0.0 = clean, 1.0 = heavily weathered
+    float BodyScale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 ScarPattern = 0; // Different scar configurations
+    bool bHasScars;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    int32 ClothingVariant = 0; // Different fur/leather combinations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    bool bHasTribalPaint;
+
+    FChar_TribalAppearance()
+    {
+        SkinTone = EChar_SkinTone::Medium;
+        SkinColor = FLinearColor(0.4f, 0.25f, 0.15f, 1.0f);
+        BodyScale = 1.0f;
+        bHasScars = false;
+        bHasTribalPaint = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FChar_TribalEquipment
+{
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    TArray<int32> EquippedTools; // Bone tools, stone weapons
+    class UStaticMesh* SpearMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    class UStaticMesh* ClothingMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    class UStaticMesh* ToolMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bHasSpear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bHasClothing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
+    bool bHasTool;
+
+    FChar_TribalEquipment()
+    {
+        SpearMesh = nullptr;
+        ClothingMesh = nullptr;
+        ToolMesh = nullptr;
+        bHasSpear = true;
+        bHasClothing = true;
+        bHasTool = false;
+    }
 };
 
-// Survival stats for primitive humans
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_SurvivalStats
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Hunger = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Thirst = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Warmth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Stamina = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Fear = 0.0f; // 0.0 = calm, 100.0 = terrified
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Exhaustion = 0.0f;
-};
-
-/**
- * Primitive human character for Cretaceous survival gameplay
- * Represents early humans adapted to prehistoric environments
- * Features dynamic customization, survival stats, and tool usage
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AChar_PrimitiveHumanCharacter : public ACharacter
 {
@@ -74,144 +103,101 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-
-    // Character customization
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Customization")
-    FChar_HumanCustomization CustomizationData;
-
-    // Survival system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    FChar_SurvivalStats SurvivalStats;
-
-    // Visual components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USkeletalMeshComponent* BodyMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* SpearComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StoneToolComponent;
-
-    // Dynamic materials for customization
-    UPROPERTY()
-    UMaterialInstanceDynamic* BodyMaterialInstance;
-
-    UPROPERTY()
-    UMaterialInstanceDynamic* ClothingMaterialInstance;
-
-    // Customization assets
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Assets")
-    TArray<USkeletalMesh*> BodyMeshVariants;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Assets")
-    TArray<UStaticMesh*> SpearVariants;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Assets")
-    TArray<UStaticMesh*> ToolVariants;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Assets")
-    UMaterialInterface* BaseSkinMaterial;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Assets")
-    UMaterialInterface* BaseClothingMaterial;
 
 public:
-    // Character customization functions
+    virtual void Tick(float DeltaTime) override;
+
+    // Character Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    EChar_TribalRole TribalRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    FChar_TribalAppearance Appearance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    FChar_TribalEquipment Equipment;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    FString TribalName;
+
+    // Equipment Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* SpearComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* ClothingComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* ToolComponent;
+
+    // Dynamic Materials
+    UPROPERTY(BlueprintReadOnly, Category = "Materials")
+    class UMaterialInstanceDynamic* SkinMaterial;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Materials")
+    class UMaterialInstanceDynamic* ClothingMaterial;
+
+    // Atmospheric Lighting Integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    bool bRespondToAtmosphericLighting;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float LightingResponseIntensity;
+
+    // Character Customization Functions
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyCustomization(const FChar_HumanCustomization& NewCustomization);
+    void SetTribalRole(EChar_TribalRole NewRole);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetSkinTone(float NewSkinTone);
+    void SetSkinTone(EChar_SkinTone NewSkinTone);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetBodyBuild(float NewBodyBuild);
+    void SetBodyScale(float NewScale);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetWeatheringLevel(float NewWeathering);
+    void ApplyTribalAppearance(const FChar_TribalAppearance& NewAppearance);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetClothingVariant(int32 VariantIndex);
+    void EquipSpear(class UStaticMesh* SpearMesh);
 
-    // Equipment functions
-    UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void EquipSpear(int32 SpearIndex);
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void EquipClothing(class UStaticMesh* ClothingMesh);
 
-    UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void EquipTool(int32 ToolIndex);
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void EquipTool(class UStaticMesh* ToolMesh);
 
-    UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void UnequipWeapons();
+    // Atmospheric Lighting Response
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void UpdateAtmosphericLightingResponse(float TimeOfDay, float WeatherIntensity);
 
-    // Survival functions
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void UpdateSurvivalStats(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void SetLightingResponseEnabled(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ModifyHunger(float Amount);
+    // Character Behavior
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void PlayTribalAnimation(const FString& AnimationName);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ModifyThirst(float Amount);
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void SetTribalStance(bool bCombatReady);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ModifyFear(float Amount);
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    FLinearColor GetSkinColorForTone(EChar_SkinTone SkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsStarving() const;
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    FString GetTribalRoleName(EChar_TribalRole Role);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsDehydrated() const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void RandomizeAppearance();
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsTerrified() const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void ApplyPresetAppearance(EChar_TribalRole Role);
 
-    // Animation and movement
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlaySurvivalAnimation(const FString& AnimationName);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementStyle(bool bIsSneaking);
-
-    // Interaction with environment
-    UFUNCTION(BlueprintCallable, Category = "Interaction")
-    void InteractWithObject(AActor* TargetObject);
-
-    UFUNCTION(BlueprintCallable, Category = "Interaction")
-    void GatherResource(AActor* ResourceObject);
-
-    // Combat functions
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ThrowSpear(FVector TargetLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void MeleeAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void DefensiveStance(bool bActivate);
-
-protected:
-    // Internal customization helpers
-    void UpdateBodyMaterial();
+private:
+    void InitializeComponents();
+    void SetupMaterials();
+    void ConfigureForAtmosphericLighting();
+    void AttachEquipment();
+    void UpdateSkinMaterial();
     void UpdateClothingMaterial();
-    void UpdateEquipmentVisibility();
-    void ApplySurvivalEffects();
-
-    // Survival timers
-    float HungerDecayRate = 1.0f; // Per minute
-    float ThirstDecayRate = 1.5f; // Per minute
-    float StaminaRegenRate = 10.0f; // Per minute
-    float FearDecayRate = 5.0f; // Per minute
-
-    // Animation state
-    bool bIsSneaking = false;
-    bool bIsInCombat = false;
-    bool bIsGathering = false;
-
-    // Equipment state
-    bool bHasSpearEquipped = false;
-    bool bHasToolEquipped = false;
-    int32 CurrentSpearIndex = -1;
-    int32 CurrentToolIndex = -1;
 };
