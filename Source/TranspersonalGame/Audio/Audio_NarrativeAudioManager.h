@@ -3,62 +3,91 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "SharedTypes.h"
+#include "Engine/TriggerBox.h"
+#include "Sound/SoundBase.h"
 #include "Audio_NarrativeAudioManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_CharacterVoiceData
+struct TRANSPERSONALGAME_API FAudio_NarrativeClip
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    FString ClipName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    FString VoiceURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    USoundBase* AudioClip;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    FString TriggerLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice")
-    EAudio_PersonalityTrait PersonalityTrait;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    float TriggerRadius;
 
-    FAudio_CharacterVoiceData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    bool bPlayOnce;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    float CooldownTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative Audio")
+    bool bHasPlayed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative Audio")
+    float LastPlayTime;
+
+    FAudio_NarrativeClip()
     {
-        CharacterName = TEXT("");
-        VoiceURL = TEXT("");
-        Duration = 0.0f;
-        PersonalityTrait = EAudio_PersonalityTrait::Neutral;
+        ClipName = TEXT("DefaultClip");
+        AudioClip = nullptr;
+        TriggerLocation = TEXT("Default");
+        TriggerRadius = 500.0f;
+        bPlayOnce = false;
+        CooldownTime = 30.0f;
+        bHasPlayed = false;
+        LastPlayTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_NarrativeEvent
+struct TRANSPERSONALGAME_API FAudio_AmbientZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    FString ZoneName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FAudio_CharacterVoiceData> VoiceLines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    USoundBase* AmbientSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float TriggerRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    FVector ZoneLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsOneShot;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    float ZoneRadius;
 
-    FAudio_NarrativeEvent()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    float VolumeMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    bool bLooping;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ambient Audio")
+    bool bIsActive;
+
+    FAudio_AmbientZone()
     {
-        EventName = TEXT("");
-        TriggerRadius = 500.0f;
-        bIsOneShot = true;
+        ZoneName = TEXT("DefaultZone");
+        AmbientSound = nullptr;
+        ZoneLocation = FVector::ZeroVector;
+        ZoneRadius = 1000.0f;
+        VolumeMultiplier = 1.0f;
+        bLooping = true;
+        bIsActive = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API AAudio_NarrativeAudioManager : public AActor
 {
     GENERATED_BODY()
@@ -68,58 +97,89 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
-    class UAudioComponent* NarrativeAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    TArray<FAudio_NarrativeEvent> NarrativeEvents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    TMap<FString, FAudio_CharacterVoiceData> CharacterVoices;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MasterNarrativeVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float VoicelineAttenuation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MaxAudibleDistance;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* NarrativeAudioComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AmbientAudioComponent;
+
+public:
+    // Narrative Audio Database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative System")
+    TArray<FAudio_NarrativeClip> NarrativeClips;
+
+    // Ambient Audio Zones
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient System")
+    TArray<FAudio_AmbientZone> AmbientZones;
+
+    // System Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MasterVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float NarrativeVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float AmbientVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float FadeInTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float FadeOutTime;
+
+    // Player Reference
+    UPROPERTY(BlueprintReadOnly, Category = "Player")
+    class APawn* PlayerPawn;
+
+    // Audio Control Functions
     UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void PlayCharacterVoiceLine(const FString& CharacterName, const FString& VoiceURL);
+    void PlayNarrativeClip(const FString& ClipName);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void TriggerNarrativeEvent(const FString& EventName, FVector PlayerLocation);
+    void StopNarrativeAudio();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void RegisterCharacterVoice(const FString& CharacterName, const FString& VoiceURL, float Duration, EAudio_PersonalityTrait Trait);
+    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
+    void SetAmbientZone(const FString& ZoneName);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    bool IsVoiceLineActive() const;
+    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
+    void StopAmbientAudio();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void StopCurrentVoiceLine();
+    // Trigger System
+    UFUNCTION(BlueprintCallable, Category = "Audio Triggers")
+    void CheckNarrativeTriggers();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void SetNarrativeVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio Triggers")
+    void CheckAmbientZones();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    FAudio_CharacterVoiceData GetCharacterVoiceData(const FString& CharacterName) const;
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RegisterNarrativeClip(const FAudio_NarrativeClip& NewClip);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    TArray<FString> GetAvailableCharacterVoices() const;
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RegisterAmbientZone(const FAudio_AmbientZone& NewZone);
+
+    UFUNCTION(BlueprintPure, Category = "Audio System")
+    bool IsNarrativeClipAvailable(const FString& ClipName);
+
+    UFUNCTION(BlueprintPure, Category = "Audio System")
+    float GetDistanceToPlayer(const FVector& Location);
 
 private:
-    bool bIsPlayingVoiceLine;
-    float CurrentVoiceLineTimer;
-    FString CurrentCharacterSpeaking;
+    // Internal state
+    FString CurrentNarrativeClip;
+    FString CurrentAmbientZone;
+    float LastTriggerCheckTime;
+    float TriggerCheckInterval;
 
-    void UpdateVoiceLinePlayback(float DeltaTime);
-    void OnVoiceLineComplete();
-    bool CanPlayVoiceLine(const FString& CharacterName) const;
+    // Helper functions
+    void InitializeAudioComponents();
+    void UpdatePlayerReference();
+    bool CanPlayNarrativeClip(const FAudio_NarrativeClip& Clip);
+    void FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float Duration);
 };
