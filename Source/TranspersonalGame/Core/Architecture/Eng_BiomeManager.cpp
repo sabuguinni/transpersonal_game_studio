@@ -1,163 +1,152 @@
 #include "Eng_BiomeManager.h"
+#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 
-UEng_BiomeManager::UEng_BiomeManager()
+AEng_BiomeManager::AEng_BiomeManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootComponent = RootSceneComponent;
+
     BiomeTransitionDistance = 1000.0f;
-    BiomeResolution = 512;
+    MaxDinosaursPerBiome = 25;
+
+    InitializeDefaultBiomes();
 }
 
-void UEng_BiomeManager::BeginPlay()
+void AEng_BiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeBiomeSystem();
-}
-
-void UEng_BiomeManager::InitializeBiomeSystem()
-{
-    SetupDefaultBiomes();
     
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-            TEXT("BiomeManager: System initialized with biome database"));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized with %d biome configs"), BiomeConfigs.Num());
+    GenerateBiomeLayout();
 }
 
-void UEng_BiomeManager::SetupDefaultBiomes()
+void AEng_BiomeManager::InitializeDefaultBiomes()
 {
-    // Grassland biome
-    FEng_BiomeData GrasslandData;
-    GrasslandData.BiomeType = EBiomeType::Grassland;
-    GrasslandData.Temperature = 22.0f;
-    GrasslandData.Humidity = 0.6f;
-    GrasslandData.Elevation = 100.0f;
-    GrasslandData.AllowedVegetation = {"Grass", "Wildflowers", "SmallTrees"};
-    GrasslandData.AllowedDinosaurs = {"Triceratops", "Parasaurolophus", "Edmontosaurus"};
-    BiomeDatabase.Add(EBiomeType::Grassland, GrasslandData);
+    BiomeConfigs.Empty();
+
+    // Savanna biome
+    FEng_BiomeConfig SavannaConfig;
+    SavannaConfig.BiomeType = EEng_BiomeType::Savanna;
+    SavannaConfig.Temperature = 28.0f;
+    SavannaConfig.Humidity = 0.3f;
+    SavannaConfig.VegetationDensity = 0.4f;
+    SavannaConfig.DinosaurSpecies.Add(TEXT("TRex"));
+    SavannaConfig.DinosaurSpecies.Add(TEXT("Triceratops"));
+    BiomeConfigs.Add(SavannaConfig);
 
     // Forest biome
-    FEng_BiomeData ForestData;
-    ForestData.BiomeType = EBiomeType::Forest;
-    ForestData.Temperature = 18.0f;
-    ForestData.Humidity = 0.8f;
-    ForestData.Elevation = 200.0f;
-    ForestData.AllowedVegetation = {"LargeTrees", "Ferns", "Moss", "Undergrowth"};
-    ForestData.AllowedDinosaurs = {"Velociraptor", "Compsognathus", "Therizinosaurus"};
-    BiomeDatabase.Add(EBiomeType::Forest, ForestData);
-
-    // Desert biome
-    FEng_BiomeData DesertData;
-    DesertData.BiomeType = EBiomeType::Desert;
-    DesertData.Temperature = 35.0f;
-    DesertData.Humidity = 0.2f;
-    DesertData.Elevation = 50.0f;
-    DesertData.AllowedVegetation = {"Cacti", "SparseGrass", "DesertShrubs"};
-    DesertData.AllowedDinosaurs = {"Carnotaurus", "Dilophosaurus", "Ouranosaurus"};
-    BiomeDatabase.Add(EBiomeType::Desert, DesertData);
+    FEng_BiomeConfig ForestConfig;
+    ForestConfig.BiomeType = EEng_BiomeType::Forest;
+    ForestConfig.Temperature = 22.0f;
+    ForestConfig.Humidity = 0.8f;
+    ForestConfig.VegetationDensity = 0.9f;
+    ForestConfig.DinosaurSpecies.Add(TEXT("Velociraptor"));
+    ForestConfig.DinosaurSpecies.Add(TEXT("Parasaurolophus"));
+    BiomeConfigs.Add(ForestConfig);
 
     // Swamp biome
-    FEng_BiomeData SwampData;
-    SwampData.BiomeType = EBiomeType::Swamp;
-    SwampData.Temperature = 26.0f;
-    SwampData.Humidity = 0.9f;
-    SwampData.Elevation = -10.0f;
-    SwampData.AllowedVegetation = {"SwampTrees", "Reeds", "WaterLilies", "Moss"};
-    SwampData.AllowedDinosaurs = {"Spinosaurus", "Baryonyx", "Deinosuchus"};
-    BiomeDatabase.Add(EBiomeType::Swamp, SwampData);
+    FEng_BiomeConfig SwampConfig;
+    SwampConfig.BiomeType = EEng_BiomeType::Swamp;
+    SwampConfig.Temperature = 26.0f;
+    SwampConfig.Humidity = 0.95f;
+    SwampConfig.VegetationDensity = 0.7f;
+    SwampConfig.DinosaurSpecies.Add(TEXT("Brachiosaurus"));
+    SwampConfig.DinosaurSpecies.Add(TEXT("Ankylosaurus"));
+    BiomeConfigs.Add(SwampConfig);
 }
 
-EBiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation)
+EEng_BiomeType AEng_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
 {
-    // Simple noise-based biome determination
-    float NoiseX = WorldLocation.X / 10000.0f;
-    float NoiseY = WorldLocation.Y / 10000.0f;
-    
-    float Temperature = 20.0f + FMath::PerlinNoise2D(FVector2D(NoiseX, NoiseY)) * 15.0f;
-    float Humidity = 0.5f + FMath::PerlinNoise2D(FVector2D(NoiseX * 1.5f, NoiseY * 1.5f)) * 0.4f;
-    float Elevation = WorldLocation.Z;
-    
-    return CalculateBiomeFromEnvironment(Temperature, Humidity, Elevation);
+    // Simple biome determination based on location
+    float X = Location.X;
+    float Y = Location.Y;
+
+    if (X > 2000.0f && Y > 2000.0f)
+        return EEng_BiomeType::Forest;
+    else if (X < -2000.0f && Y > 2000.0f)
+        return EEng_BiomeType::Swamp;
+    else if (X > 2000.0f && Y < -2000.0f)
+        return EEng_BiomeType::Desert;
+    else if (X < -2000.0f && Y < -2000.0f)
+        return EEng_BiomeType::Mountain;
+    else if (FMath::Abs(X) < 500.0f || FMath::Abs(Y) < 500.0f)
+        return EEng_BiomeType::River;
+    else
+        return EEng_BiomeType::Savanna;
 }
 
-FEng_BiomeData UEng_BiomeManager::GetBiomeData(EBiomeType BiomeType)
+FEng_BiomeConfig AEng_BiomeManager::GetBiomeConfig(EEng_BiomeType BiomeType) const
 {
-    if (BiomeDatabase.Contains(BiomeType))
+    for (const FEng_BiomeConfig& Config : BiomeConfigs)
     {
-        return BiomeDatabase[BiomeType];
+        if (Config.BiomeType == BiomeType)
+        {
+            return Config;
+        }
     }
-    
-    // Return default grassland if biome not found
-    FEng_BiomeData DefaultData;
-    DefaultData.BiomeType = EBiomeType::Grassland;
-    return DefaultData;
+
+    // Return default savanna config if not found
+    FEng_BiomeConfig DefaultConfig;
+    DefaultConfig.BiomeType = EEng_BiomeType::Savanna;
+    return DefaultConfig;
 }
 
-TArray<EBiomeType> UEng_BiomeManager::GetAdjacentBiomes(const FVector& WorldLocation, float Radius)
+void AEng_BiomeManager::GenerateBiomeLayout()
 {
-    TArray<EBiomeType> AdjacentBiomes;
-    
-    // Sample biomes in a grid around the location
-    int32 SampleCount = 8;
-    for (int32 i = 0; i < SampleCount; i++)
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Generating biome layout for Milestone 1"));
+
+    // Generate dinosaurs for each biome
+    TArray<EEng_BiomeType> BiomeTypes = {
+        EEng_BiomeType::Savanna,
+        EEng_BiomeType::Forest,
+        EEng_BiomeType::Swamp
+    };
+
+    for (EEng_BiomeType BiomeType : BiomeTypes)
     {
-        float Angle = (2.0f * PI * i) / SampleCount;
-        FVector SampleLocation = WorldLocation + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            0.0f
-        );
-        
-        EBiomeType BiomeAtSample = GetBiomeAtLocation(SampleLocation);
-        AdjacentBiomes.AddUnique(BiomeAtSample);
+        FVector BiomeCenter = GetBiomeCenterLocation(BiomeType);
+        SpawnDinosaursForBiome(BiomeType, BiomeCenter);
     }
-    
-    return AdjacentBiomes;
 }
 
-float UEng_BiomeManager::GetBiomeInfluence(const FVector& WorldLocation, EBiomeType BiomeType)
+void AEng_BiomeManager::SpawnDinosaursForBiome(EEng_BiomeType BiomeType, const FVector& BiomeCenter)
 {
-    EBiomeType LocalBiome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
     
-    if (LocalBiome == BiomeType)
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Spawning dinosaurs for biome %d at location %s"), 
+           (int32)BiomeType, *BiomeCenter.ToString());
+
+    // This will be implemented by the Dinosaur AI agent
+    // For now, just log the intent
+    for (const FString& Species : Config.DinosaurSpecies)
     {
-        return 1.0f;
+        UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Should spawn %s in biome %d"), 
+               *Species, (int32)BiomeType);
     }
-    
-    // Calculate influence based on distance to biome boundaries
-    TArray<EBiomeType> AdjacentBiomes = GetAdjacentBiomes(WorldLocation, BiomeTransitionDistance);
-    
-    if (AdjacentBiomes.Contains(BiomeType))
-    {
-        return 0.3f; // Partial influence in transition zones
-    }
-    
-    return 0.0f; // No influence
 }
 
-EBiomeType UEng_BiomeManager::CalculateBiomeFromEnvironment(float Temperature, float Humidity, float Elevation)
+FVector AEng_BiomeManager::GetBiomeCenterLocation(EEng_BiomeType BiomeType) const
 {
-    // Desert: hot and dry
-    if (Temperature > 30.0f && Humidity < 0.3f)
+    switch (BiomeType)
     {
-        return EBiomeType::Desert;
+        case EEng_BiomeType::Savanna:
+            return FVector(0.0f, 0.0f, 0.0f);
+        case EEng_BiomeType::Forest:
+            return FVector(3000.0f, 3000.0f, 0.0f);
+        case EEng_BiomeType::Swamp:
+            return FVector(-3000.0f, 3000.0f, 0.0f);
+        case EEng_BiomeType::Desert:
+            return FVector(3000.0f, -3000.0f, 0.0f);
+        case EEng_BiomeType::Mountain:
+            return FVector(-3000.0f, -3000.0f, 200.0f);
+        case EEng_BiomeType::River:
+            return FVector(0.0f, 0.0f, -50.0f);
+        default:
+            return FVector::ZeroVector;
     }
-    
-    // Swamp: warm and very humid, low elevation
-    if (Temperature > 24.0f && Humidity > 0.8f && Elevation < 50.0f)
-    {
-        return EBiomeType::Swamp;
-    }
-    
-    // Forest: moderate temperature, high humidity
-    if (Temperature > 15.0f && Temperature < 25.0f && Humidity > 0.7f)
-    {
-        return EBiomeType::Forest;
-    }
-    
-    // Default to grassland
-    return EBiomeType::Grassland;
 }
