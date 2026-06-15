@@ -2,166 +2,114 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/Engine.h"
 #include "Eng_ArchitectureValidator.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitect, Log, All);
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleComplianceReport
+UENUM(BlueprintType)
+enum class EEng_ValidationStatus : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bHasValidHeaders = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bHasMatchingCppFiles = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bFollowsNamingConvention = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bCompilesSuccessfully = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> MissingCppFiles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> CompilationErrors;
-
-    FEng_ModuleComplianceReport()
-    {
-        ModuleName = TEXT("Unknown");
-    }
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Valid           UMETA(DisplayName = "Valid"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Critical        UMETA(DisplayName = "Critical"),
+    Failed          UMETA(DisplayName = "Failed")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemDependency
+struct TRANSPERSONALGAME_API FEng_ModuleValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> RequiredModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    EEng_ValidationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> OptionalModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 Priority = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 ClassCount;
 
-    FEng_SystemDependency()
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationTime;
+
+    FEng_ModuleValidationResult()
     {
-        SystemName = TEXT("Unknown");
+        ModuleName = TEXT("");
+        Status = EEng_ValidationStatus::Unknown;
+        ErrorMessage = TEXT("");
+        ClassCount = 0;
+        ValidationTime = 0.0f;
     }
 };
 
 /**
- * Engine Architect validation system that enforces technical architecture rules
- * across all agent-created modules and ensures compilation compliance
+ * Engine Architecture Validator - Ensures compilation integrity and cross-module dependencies
+ * Validates all C++ modules, checks for missing implementations, and prevents conflicts
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_ArchitectureValidator : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_ArchitectureValidator();
+
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Architecture validation methods
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateModuleCompliance(const FString& ModulePath);
+    // Validation Functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    bool ValidateAllModules();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    FEng_ModuleComplianceReport GenerateComplianceReport(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor = true)
+    FEng_ModuleValidationResult ValidateModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateHeaderCppPairs();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CheckCompilationIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool EnforceNamingConventions();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetMissingImplementations();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    TArray<FString> GetMissingCppFiles();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetConflictingTypes();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateSystemDependencies();
+    // Status Queries
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    EEng_ValidationStatus GetOverallStatus() const { return OverallStatus; }
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    void RegisterSystemDependency(const FEng_SystemDependency& Dependency);
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    TArray<FEng_ModuleValidationResult> GetValidationResults() const { return ValidationResults; }
 
-    // Compilation validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateCompilation();
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    int32 GetTotalClassCount() const { return TotalClassCount; }
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    TArray<FString> GetCompilationErrors();
-
-    // Performance architecture rules
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidatePerformanceCompliance();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool EnforceMemoryLimits();
-
-    // Blueprint integration validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateBlueprintExposure();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    TArray<FString> GetUndocumentedBlueprintFunctions();
-
-    // Critical system validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect")
-    bool ValidateCriticalSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architect", CallInEditor = true)
-    void RunFullArchitectureAudit();
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    float GetLastValidationTime() const { return LastValidationTime; }
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_ModuleComplianceReport> ComplianceReports;
+    EEng_ValidationStatus OverallStatus;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_SystemDependency> SystemDependencies;
+    TArray<FEng_ModuleValidationResult> ValidationResults;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> CriticalSystems;
+    int32 TotalClassCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bArchitectureValid = false;
+    float LastValidationTime;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    float LastValidationTime = 0.0f;
+    TArray<FString> KnownModules;
 
 private:
-    // Internal validation helpers
-    bool ValidateHeaderFile(const FString& HeaderPath);
-    bool ValidateCppFile(const FString& CppPath);
-    bool CheckIncludeStructure(const FString& FilePath);
-    bool ValidateUPropertyMacros(const FString& FilePath);
-    bool ValidateUFunctionMacros(const FString& FilePath);
-    
-    // Naming convention enforcement
-    bool ValidateClassName(const FString& ClassName);
-    bool ValidateVariableName(const FString& VariableName);
-    bool ValidateFunctionName(const FString& FunctionName);
-    
-    // Dependency analysis
-    void AnalyzeDependencyChain();
-    bool DetectCircularDependencies();
-    
-    // Performance validation
-    bool CheckMemoryUsage();
-    bool ValidateTickFrequency();
-    bool CheckRenderingCompliance();
+    void ValidateModuleClasses(const FString& ModuleName, FEng_ModuleValidationResult& Result);
+    void CheckHeaderCppPairs(const FString& ModuleName, FEng_ModuleValidationResult& Result);
+    void ValidateSharedTypes();
+    void LogValidationResults();
 };
