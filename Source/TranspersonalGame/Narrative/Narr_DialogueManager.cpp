@@ -1,337 +1,316 @@
 #include "Narr_DialogueManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
-#include "TimerManager.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
-UNarr_DialogueManager::UNarr_DialogueManager()
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    CurrentLocation = TEXT("");
-    NearbyDinosaur = TEXT("");
-    PlayerHealth = 100.0f;
-    PlayerHunger = 100.0f;
-    PlayerThirst = 100.0f;
-    PlayerFear = 0.0f;
-    CurrentTimeOfDay = 12.0f;
-    DialogueAudioComponent = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create trigger sphere
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetupAttachment(RootComponent);
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+
+    // Initialize default values
+    CurrentState = ENarr_DialogueState::Inactive;
+    CooldownDuration = 30.0f;
+    TriggerRadius = 500.0f;
+    VolumeMultiplier = 1.0f;
+    PitchMultiplier = 1.0f;
+    PlayerDetectionRange = 1000.0f;
+    bAutoTriggerOnEnter = true;
+    bRequireLineOfSight = false;
+    bTrackPlayerMovement = true;
+    
+    // Internal state
+    CooldownTimer = 0.0f;
+    CurrentDialogueIndex = -1;
+    bPlayerInRange = false;
+    PlayerPawn = nullptr;
 }
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void ANarr_DialogueManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Initializing dialogue system"));
-    
-    // Start dialogue update timer
-    if (UWorld* World = GetWorld())
+    Super::BeginPlay();
+
+    // Bind trigger events
+    if (TriggerSphere)
     {
-        World->GetTimerManager().SetTimer(DialogueUpdateTimer, this, &UNarr_DialogueManager::TickDialogueSystem, 1.0f, true);
+        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueManager::OnTriggerEnter);
+        TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueManager::OnTriggerExit);
     }
+
+    // Find player pawn
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     
-    // Initialize default dialogue lines
-    FNarr_DialogueLine WelcomeDialogue;
-    WelcomeDialogue.DialogueID = TEXT("WELCOME_001");
-    WelcomeDialogue.CharacterType = ENarr_CharacterType::TribalElder;
-    WelcomeDialogue.DialogueText = TEXT("Welcome to the ancient lands, young hunter. The great beasts roam these territories.");
-    WelcomeDialogue.TriggerType = ENarr_DialogueTrigger::LocationEnter;
-    WelcomeDialogue.TriggerCondition = TEXT("StartingArea");
-    WelcomeDialogue.Priority = 10;
-    WelcomeDialogue.Duration = 8.0f;
-    RegisterDialogueLine(WelcomeDialogue);
-    
-    FNarr_DialogueLine DinosaurWarning;
-    DinosaurWarning.DialogueID = TEXT("DINO_WARNING_001");
-    DinosaurWarning.CharacterType = ENarr_CharacterType::TribalScout;
-    DinosaurWarning.DialogueText = TEXT("Massive predator spotted ahead. Approach with extreme caution.");
-    DinosaurWarning.TriggerType = ENarr_DialogueTrigger::DinosaurSighted;
-    DinosaurWarning.TriggerCondition = TEXT("TRex");
-    DinosaurWarning.Priority = 15;
-    DinosaurWarning.Duration = 6.0f;
-    RegisterDialogueLine(DinosaurWarning);
-    
-    FNarr_DialogueLine SurvivalCritical;
-    SurvivalCritical.DialogueID = TEXT("SURVIVAL_CRITICAL_001");
-    SurvivalCritical.CharacterType = ENarr_CharacterType::PlayerThought;
-    SurvivalCritical.DialogueText = TEXT("My strength fades... I must find food and water soon or I will not survive.");
-    SurvivalCritical.TriggerType = ENarr_DialogueTrigger::SurvivalCritical;
-    SurvivalCritical.TriggerCondition = TEXT("LowHealth");
-    SurvivalCritical.Priority = 20;
-    SurvivalCritical.Duration = 7.0f;
-    RegisterDialogueLine(SurvivalCritical);
+    // Set initial state
+    SetDialogueState(ENarr_DialogueState::Ready);
 }
 
-void UNarr_DialogueManager::Deinitialize()
+void ANarr_DialogueManager::Tick(float DeltaTime)
 {
-    if (UWorld* World = GetWorld())
+    Super::Tick(DeltaTime);
+
+    // Update cooldown timer
+    if (CurrentState == ENarr_DialogueState::Cooldown)
     {
-        World->GetTimerManager().ClearTimer(DialogueUpdateTimer);
+        CooldownTimer -= DeltaTime;
+        if (CooldownTimer <= 0.0f)
+        {
+            SetDialogueState(ENarr_DialogueState::Ready);
+        }
     }
-    
-    StopCurrentDialogue();
-    DialogueDatabase.Empty();
-    DialogueCooldowns.Empty();
-    
-    Super::Deinitialize();
+
+    // Update player detection
+    if (bTrackPlayerMovement)
+    {
+        UpdatePlayerDetection();
+    }
+
+    // Process dialogue triggers
+    ProcessDialogueTriggers();
+
+    // Check if current dialogue finished
+    if (CurrentState == ENarr_DialogueState::Playing && AudioComponent && !AudioComponent->IsPlaying())
+    {
+        SetDialogueState(ENarr_DialogueState::Completed);
+    }
 }
 
-void UNarr_DialogueManager::TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FString& Condition)
+void ANarr_DialogueManager::PlayDialogue(int32 DialogueIndex)
 {
-    if (IsDialoguePlaying())
+    if (!DialogueEntries.IsValidIndex(DialogueIndex) || CurrentState == ENarr_DialogueState::Playing)
     {
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Dialogue already playing, ignoring trigger"));
         return;
     }
-    
-    FNarr_DialogueLine* BestDialogue = FindBestDialogue(TriggerType, Condition);
-    if (BestDialogue)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Triggering dialogue: %s"), *BestDialogue->DialogueID);
-        PlayDialogueLine(*BestDialogue);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: No suitable dialogue found for trigger"));
-    }
-}
 
-void UNarr_DialogueManager::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
-{
-    if (IsDialoguePlaying())
+    const FNarr_DialogueEntry& Entry = DialogueEntries[DialogueIndex];
+    
+    if (Entry.AudioClip && AudioComponent)
     {
-        StopCurrentDialogue();
-    }
-    
-    CurrentDialogue.DialogueLine = DialogueLine;
-    CurrentDialogue.TimeStarted = GetWorld()->GetTimeSeconds();
-    CurrentDialogue.bIsPlaying = true;
-    
-    // Create audio component if needed
-    if (!DialogueAudioComponent && GetWorld())
-    {
-        DialogueAudioComponent = NewObject<UAudioComponent>(this);
-        if (DialogueAudioComponent)
-        {
-            DialogueAudioComponent->RegisterComponent();
-        }
-    }
-    
-    // Play audio if available
-    if (DialogueAudioComponent && DialogueLine.AudioAsset.LoadSynchronous())
-    {
-        DialogueAudioComponent->SetSound(DialogueLine.AudioAsset.Get());
-        DialogueAudioComponent->Play();
-        CurrentDialogue.AudioComponent = DialogueAudioComponent;
-    }
-    
-    // Add cooldown
-    AddDialogueCooldown(DialogueLine.DialogueID, DialogueLine.Cooldown);
-    
-    // Set timer to end dialogue
-    if (UWorld* World = GetWorld())
-    {
-        FTimerHandle DialogueEndTimer;
-        World->GetTimerManager().SetTimer(DialogueEndTimer, this, &UNarr_DialogueManager::OnDialogueFinished, DialogueLine.Duration, false);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Playing dialogue: %s"), *DialogueLine.DialogueText);
-}
-
-void UNarr_DialogueManager::StopCurrentDialogue()
-{
-    if (CurrentDialogue.bIsPlaying)
-    {
-        CurrentDialogue.bIsPlaying = false;
+        CurrentDialogueIndex = DialogueIndex;
+        AudioComponent->SetSound(Entry.AudioClip);
+        AudioComponent->SetVolumeMultiplier(VolumeMultiplier);
+        AudioComponent->SetPitchMultiplier(PitchMultiplier);
+        AudioComponent->Play();
         
-        if (CurrentDialogue.AudioComponent)
-        {
-            CurrentDialogue.AudioComponent->Stop();
-            CurrentDialogue.AudioComponent = nullptr;
-        }
+        SetDialogueState(ENarr_DialogueState::Playing);
         
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Stopped current dialogue"));
+        // Log dialogue for debugging
+        UE_LOG(LogTemp, Warning, TEXT("Playing dialogue: %s - %s"), *Entry.CharacterName, *Entry.DialogueText);
     }
 }
 
-bool UNarr_DialogueManager::IsDialoguePlaying() const
+void ANarr_DialogueManager::StopDialogue()
 {
-    return CurrentDialogue.bIsPlaying;
-}
-
-void UNarr_DialogueManager::RegisterDialogueLine(const FNarr_DialogueLine& DialogueLine)
-{
-    DialogueDatabase.Add(DialogueLine);
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Registered dialogue line: %s"), *DialogueLine.DialogueID);
-}
-
-void UNarr_DialogueManager::LoadDialogueDatabase(UDataTable* DialogueTable)
-{
-    if (!DialogueTable)
+    if (AudioComponent && AudioComponent->IsPlaying())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Invalid dialogue table"));
+        AudioComponent->Stop();
+    }
+    
+    SetDialogueState(ENarr_DialogueState::Ready);
+    CurrentDialogueIndex = -1;
+}
+
+void ANarr_DialogueManager::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
+{
+    DialogueEntries.Add(NewEntry);
+}
+
+bool ANarr_DialogueManager::IsDialoguePlaying() const
+{
+    return CurrentState == ENarr_DialogueState::Playing;
+}
+
+FNarr_DialogueEntry ANarr_DialogueManager::GetCurrentDialogue() const
+{
+    if (DialogueEntries.IsValidIndex(CurrentDialogueIndex))
+    {
+        return DialogueEntries[CurrentDialogueIndex];
+    }
+    
+    return FNarr_DialogueEntry();
+}
+
+void ANarr_DialogueManager::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor || !OtherActor->IsA<APawn>())
+    {
         return;
     }
-    
-    DialogueDatabase.Empty();
-    
-    TArray<FName> RowNames = DialogueTable->GetRowNames();
-    for (const FName& RowName : RowNames)
+
+    APawn* Pawn = Cast<APawn>(OtherActor);
+    if (Pawn && Pawn->IsPlayerControlled())
     {
-        if (FNarr_DialogueLine* Row = DialogueTable->FindRow<FNarr_DialogueLine>(RowName, TEXT("")))
+        bPlayerInRange = true;
+        
+        if (bAutoTriggerOnEnter && CanTriggerDialogue())
         {
-            RegisterDialogueLine(*Row);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Loaded %d dialogue lines from table"), DialogueDatabase.Num());
-}
-
-void UNarr_DialogueManager::SetPlayerLocation(const FString& LocationName)
-{
-    if (CurrentLocation != LocationName)
-    {
-        FString PreviousLocation = CurrentLocation;
-        CurrentLocation = LocationName;
-        
-        // Trigger location enter dialogue
-        TriggerDialogue(ENarr_DialogueTrigger::LocationEnter, LocationName);
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Player location changed to: %s"), *LocationName);
-    }
-}
-
-void UNarr_DialogueManager::SetNearbyDinosaur(const FString& DinosaurType)
-{
-    if (NearbyDinosaur != DinosaurType && !DinosaurType.IsEmpty())
-    {
-        NearbyDinosaur = DinosaurType;
-        
-        // Trigger dinosaur sighted dialogue
-        TriggerDialogue(ENarr_DialogueTrigger::DinosaurSighted, DinosaurType);
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Dinosaur sighted: %s"), *DinosaurType);
-    }
-}
-
-void UNarr_DialogueManager::SetSurvivalState(float Health, float Hunger, float Thirst, float Fear)
-{
-    PlayerHealth = Health;
-    PlayerHunger = Hunger;
-    PlayerThirst = Thirst;
-    PlayerFear = Fear;
-    
-    // Check for critical survival states
-    if (Health < 25.0f || Hunger < 20.0f || Thirst < 20.0f)
-    {
-        TriggerDialogue(ENarr_DialogueTrigger::SurvivalCritical, TEXT("LowHealth"));
-    }
-    else if (Fear > 80.0f)
-    {
-        TriggerDialogue(ENarr_DialogueTrigger::SurvivalCritical, TEXT("HighFear"));
-    }
-}
-
-void UNarr_DialogueManager::SetTimeOfDay(float TimeHours)
-{
-    float PreviousTime = CurrentTimeOfDay;
-    CurrentTimeOfDay = TimeHours;
-    
-    // Trigger time-based dialogue
-    if ((PreviousTime < 6.0f && TimeHours >= 6.0f) || (PreviousTime < 18.0f && TimeHours >= 18.0f))
-    {
-        FString TimeCondition = (TimeHours >= 6.0f && TimeHours < 18.0f) ? TEXT("Dawn") : TEXT("Dusk");
-        TriggerDialogue(ENarr_DialogueTrigger::TimeOfDay, TimeCondition);
-    }
-}
-
-bool UNarr_DialogueManager::CanPlayDialogue(const FString& DialogueID) const
-{
-    if (const float* CooldownTime = DialogueCooldowns.Find(DialogueID))
-    {
-        return GetWorld()->GetTimeSeconds() >= *CooldownTime;
-    }
-    return true;
-}
-
-void UNarr_DialogueManager::AddDialogueCooldown(const FString& DialogueID, float CooldownTime)
-{
-    float EndTime = GetWorld()->GetTimeSeconds() + CooldownTime;
-    DialogueCooldowns.Add(DialogueID, EndTime);
-}
-
-FNarr_DialogueLine* UNarr_DialogueManager::FindBestDialogue(ENarr_DialogueTrigger TriggerType, const FString& Condition)
-{
-    FNarr_DialogueLine* BestDialogue = nullptr;
-    int32 BestPriority = -1;
-    
-    for (FNarr_DialogueLine& DialogueLine : DialogueDatabase)
-    {
-        if (DialogueLine.TriggerType == TriggerType)
-        {
-            if (CanPlayDialogue(DialogueLine.DialogueID))
+            // Find first available dialogue
+            for (int32 i = 0; i < DialogueEntries.Num(); i++)
             {
-                if (EvaluateDialogueCondition(DialogueLine, Condition))
+                const FNarr_DialogueEntry& Entry = DialogueEntries[i];
+                if (Entry.TriggerType == ENarr_DialogueTrigger::OnEnterZone)
                 {
-                    if (DialogueLine.Priority > BestPriority)
-                    {
-                        BestPriority = DialogueLine.Priority;
-                        BestDialogue = &DialogueLine;
-                    }
+                    PlayDialogue(i);
+                    break;
                 }
             }
         }
     }
-    
-    return BestDialogue;
 }
 
-bool UNarr_DialogueManager::EvaluateDialogueCondition(const FNarr_DialogueLine& DialogueLine, const FString& Condition)
+void ANarr_DialogueManager::OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
 {
-    if (DialogueLine.TriggerCondition.IsEmpty() || Condition.IsEmpty())
+    if (!OtherActor || !OtherActor->IsA<APawn>())
     {
-        return true;
+        return;
     }
-    
-    return DialogueLine.TriggerCondition.Equals(Condition, ESearchCase::IgnoreCase);
-}
 
-void UNarr_DialogueManager::UpdateCooldowns()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    TArray<FString> ExpiredCooldowns;
-    for (const auto& Cooldown : DialogueCooldowns)
+    APawn* Pawn = Cast<APawn>(OtherActor);
+    if (Pawn && Pawn->IsPlayerControlled())
     {
-        if (CurrentTime >= Cooldown.Value)
+        bPlayerInRange = false;
+        
+        // Trigger exit dialogues
+        for (int32 i = 0; i < DialogueEntries.Num(); i++)
         {
-            ExpiredCooldowns.Add(Cooldown.Key);
+            const FNarr_DialogueEntry& Entry = DialogueEntries[i];
+            if (Entry.TriggerType == ENarr_DialogueTrigger::OnExitZone && CanTriggerDialogue())
+            {
+                PlayDialogue(i);
+                break;
+            }
         }
     }
+}
+
+void ANarr_DialogueManager::SetDialogueState(ENarr_DialogueState NewState)
+{
+    CurrentState = NewState;
     
-    for (const FString& ExpiredID : ExpiredCooldowns)
+    if (NewState == ENarr_DialogueState::Completed)
     {
-        DialogueCooldowns.Remove(ExpiredID);
+        // Start cooldown if dialogue is not repeatable
+        if (DialogueEntries.IsValidIndex(CurrentDialogueIndex))
+        {
+            const FNarr_DialogueEntry& Entry = DialogueEntries[CurrentDialogueIndex];
+            if (!Entry.bIsRepeatable)
+            {
+                CooldownTimer = CooldownDuration;
+                SetDialogueState(ENarr_DialogueState::Cooldown);
+                return;
+            }
+        }
+        
+        SetDialogueState(ENarr_DialogueState::Ready);
     }
 }
 
-void UNarr_DialogueManager::OnDialogueFinished()
+bool ANarr_DialogueManager::CanTriggerDialogue() const
 {
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueManager: Dialogue finished"));
-    StopCurrentDialogue();
+    if (CurrentState != ENarr_DialogueState::Ready)
+    {
+        return false;
+    }
+    
+    if (bRequireLineOfSight && !CheckLineOfSight())
+    {
+        return false;
+    }
+    
+    return true;
 }
 
-void UNarr_DialogueManager::TickDialogueSystem()
+void ANarr_DialogueManager::ResetCooldown()
 {
-    UpdateCooldowns();
-    
-    // Check if current dialogue has exceeded its duration
-    if (CurrentDialogue.bIsPlaying)
+    CooldownTimer = 0.0f;
+    if (CurrentState == ENarr_DialogueState::Cooldown)
     {
-        float ElapsedTime = GetWorld()->GetTimeSeconds() - CurrentDialogue.TimeStarted;
-        if (ElapsedTime >= CurrentDialogue.DialogueLine.Duration)
+        SetDialogueState(ENarr_DialogueState::Ready);
+    }
+}
+
+void ANarr_DialogueManager::UpdatePlayerDetection()
+{
+    if (!PlayerPawn)
+    {
+        PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        return;
+    }
+    
+    float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    bool bWasInRange = bPlayerInRange;
+    bPlayerInRange = Distance <= PlayerDetectionRange;
+    
+    // Trigger range-based events
+    if (bPlayerInRange && !bWasInRange)
+    {
+        // Player entered detection range
+    }
+    else if (!bPlayerInRange && bWasInRange)
+    {
+        // Player left detection range
+    }
+}
+
+void ANarr_DialogueManager::ProcessDialogueTriggers()
+{
+    if (!CanTriggerDialogue() || !bPlayerInRange)
+    {
+        return;
+    }
+    
+    // Process time-based triggers
+    for (int32 i = 0; i < DialogueEntries.Num(); i++)
+    {
+        const FNarr_DialogueEntry& Entry = DialogueEntries[i];
+        if (Entry.TriggerType == ENarr_DialogueTrigger::OnTimeElapsed)
         {
-            OnDialogueFinished();
+            // Time-based logic would go here
+            // For now, we'll skip this type
         }
     }
+}
+
+bool ANarr_DialogueManager::CheckLineOfSight() const
+{
+    if (!PlayerPawn)
+    {
+        return false;
+    }
+    
+    FVector Start = GetActorLocation();
+    FVector End = PlayerPawn->GetActorLocation();
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+    QueryParams.AddIgnoredActor(PlayerPawn);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        Start,
+        End,
+        ECC_Visibility,
+        QueryParams
+    );
+    
+    return !bHit; // No obstruction means clear line of sight
 }
