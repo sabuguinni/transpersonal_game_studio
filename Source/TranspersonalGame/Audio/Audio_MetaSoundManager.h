@@ -2,61 +2,58 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
+#include "MetasoundSource.h"
+#include "Sound/SoundCue.h"
 #include "Audio_MetaSoundManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_SoundCategory : uint8
+enum class EAudio_AmbienceType : uint8
 {
-    Ambient,
-    Dialogue,
-    Music,
-    SFX,
-    Narration
+    Forest UMETA(DisplayName = "Forest"),
+    Valley UMETA(DisplayName = "Valley"),
+    River UMETA(DisplayName = "River"),
+    Cave UMETA(DisplayName = "Cave"),
+    Plains UMETA(DisplayName = "Plains")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_IntensityLevel : uint8
+{
+    Calm UMETA(DisplayName = "Calm"),
+    Tense UMETA(DisplayName = "Tense"),
+    Danger UMETA(DisplayName = "Danger"),
+    Combat UMETA(DisplayName = "Combat")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_SoundEntry
+struct TRANSPERSONALGAME_API FAudio_AmbienceSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString SoundID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    EAudio_AmbienceType AmbienceType = EAudio_AmbienceType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_SoundCategory Category;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    float Volume = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> SoundAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    float FadeInTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Volume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    float FadeOutTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Pitch = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    bool bLooping = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bLooping = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 0.0f;
-
-    FAudio_SoundEntry()
+    FAudio_AmbienceSettings()
     {
-        SoundID = TEXT("");
-        Category = EAudio_SoundCategory::SFX;
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        bLooping = false;
-        FadeInTime = 0.0f;
-        FadeOutTime = 0.0f;
+        AmbienceType = EAudio_AmbienceType::Forest;
+        Volume = 0.5f;
+        FadeInTime = 2.0f;
+        FadeOutTime = 2.0f;
+        bLooping = true;
     }
 };
 
@@ -71,64 +68,71 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    TArray<FAudio_SoundEntry> RegisteredSounds;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* AmbienceAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio System")
-    TMap<FString, UAudioComponent*> ActiveAudioComponents;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* MusicAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float MasterVolume = 1.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* SFXAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float AmbientVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    FAudio_AmbienceSettings CurrentAmbienceSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float DialogueVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    TMap<EAudio_AmbienceType, class USoundBase*> AmbienceSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float MusicVolume = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    TMap<EAudio_IntensityLevel, class USoundBase*> MusicTracks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    float SFXVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    class UMetaSoundSource* DynamicAmbienceMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
+    class UMetaSoundSource* AdaptiveMusicMetaSound;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void RegisterSound(const FString& SoundID, EAudio_SoundCategory Category, USoundBase* SoundAsset, 
-                      float Volume = 1.0f, float Pitch = 1.0f, bool bLooping = false);
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    bool PlaySound(const FString& SoundID, FVector Location = FVector::ZeroVector, bool bAttachToActor = false, AActor* ActorToAttachTo = nullptr);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void SetAmbienceType(EAudio_AmbienceType NewAmbienceType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopSound(const FString& SoundID, bool bFadeOut = true);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void SetMusicIntensity(EAudio_IntensityLevel NewIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopAllSounds(EAudio_SoundCategory Category = EAudio_SoundCategory::SFX, bool bFadeOut = true);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void PlaySFX(class USoundBase* SFXSound, float Volume = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void FadeToAmbience(EAudio_AmbienceType NewAmbienceType, float FadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    float GetCategoryVolume(EAudio_SoundCategory Category) const;
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void StopAllAudio();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void SetMasterVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayAmbientLoop(const FString& AmbientID, float FadeInTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
+    void UpdateMetaSoundParameter(const FString& ParameterName, float Value);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayNarration(const FString& NarrationID);
+    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
+    void TriggerMetaSoundEvent(const FString& EventName);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    bool IsSoundPlaying(const FString& SoundID) const;
+protected:
+    UFUNCTION()
+    void OnAmbienceFadeComplete();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializePrehistoricAudio();
+    UFUNCTION()
+    void OnMusicFadeComplete();
 
 private:
-    FAudio_SoundEntry* FindSoundEntry(const FString& SoundID);
-    float GetVolumeForCategory(EAudio_SoundCategory Category) const;
-    void CleanupFinishedComponents();
+    float CurrentMasterVolume = 1.0f;
+    EAudio_IntensityLevel CurrentMusicIntensity = EAudio_IntensityLevel::Calm;
+    bool bIsFadingAmbience = false;
+    bool bIsFadingMusic = false;
+
+    void InitializeAudioComponents();
+    void LoadDefaultAudioAssets();
+    void UpdateDynamicParameters();
 };
