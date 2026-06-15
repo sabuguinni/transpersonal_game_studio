@@ -2,34 +2,38 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/PostProcessComponent.h"
-#include "Engine/PostProcessVolume.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SpotLight.h"
+#include "Engine/PointLight.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "TranspersonalGame.h"
 #include "Light_CinematicLightingManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ELight_TimeOfDay : uint8
+enum class ELight_LightingZone : uint8
 {
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Morning     UMETA(DisplayName = "Morning"),
-    Noon        UMETA(DisplayName = "Noon"),
-    Afternoon   UMETA(DisplayName = "Afternoon"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
+    Ambient         UMETA(DisplayName = "Ambient Zone"),
+    Dramatic        UMETA(DisplayName = "Dramatic Zone"),
+    Mysterious      UMETA(DisplayName = "Mysterious Zone"),
+    Warm            UMETA(DisplayName = "Warm Zone"),
+    Cool            UMETA(DisplayName = "Cool Zone")
 };
 
 UENUM(BlueprintType)
-enum class ELight_WeatherType : uint8
+enum class ELight_TimeOfDay : uint8
 {
-    Clear       UMETA(DisplayName = "Clear"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Stormy      UMETA(DisplayName = "Stormy"),
-    Foggy       UMETA(DisplayName = "Foggy"),
-    Dusty       UMETA(DisplayName = "Dusty")
+    Dawn            UMETA(DisplayName = "Dawn"),
+    Morning         UMETA(DisplayName = "Morning"),
+    Midday          UMETA(DisplayName = "Midday"),
+    Afternoon       UMETA(DisplayName = "Afternoon"),
+    GoldenHour      UMETA(DisplayName = "Golden Hour"),
+    Dusk            UMETA(DisplayName = "Dusk"),
+    Night           UMETA(DisplayName = "Night")
 };
 
 USTRUCT(BlueprintType)
@@ -37,33 +41,65 @@ struct TRANSPERSONALGAME_API FLight_LightingPreset
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    float SunIntensity = 8.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    FString PresetName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    FLinearColor DirectionalLightColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    FRotator SunRotation = FRotator(-45.0f, 30.0f, 0.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    float DirectionalLightIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogDensity = 0.008f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    FRotator DirectionalLightRotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor = FLinearColor(0.9f, 0.85f, 0.7f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    FLinearColor FogColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float VolumetricScattering = 1.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    float FogDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
-    float WhiteTemperature = 6200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
-    float BloomIntensity = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Preset")
+    float VolumetricScattering;
 
     FLight_LightingPreset()
     {
-        // Default constructor with preset values
+        PresetName = TEXT("Default");
+        DirectionalLightColor = FLinearColor(1.0f, 0.9f, 0.8f, 1.0f);
+        DirectionalLightIntensity = 3.5f;
+        DirectionalLightRotation = FRotator(-30.0f, 45.0f, 0.0f);
+        FogColor = FLinearColor(0.8f, 0.7f, 0.6f, 1.0f);
+        FogDensity = 0.02f;
+        VolumetricScattering = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_CinematicZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Zone")
+    FVector ZoneCenter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Zone")
+    float ZoneRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Zone")
+    ELight_LightingZone ZoneType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Zone")
+    TArray<AActor*> ZoneLights;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Zone")
+    bool bIsActive;
+
+    FLight_CinematicZone()
+    {
+        ZoneCenter = FVector::ZeroVector;
+        ZoneRadius = 1000.0f;
+        ZoneType = ELight_LightingZone::Ambient;
+        bIsActive = true;
     }
 };
 
@@ -77,103 +113,108 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core lighting components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
-    class UDirectionalLightComponent* MainSunLight;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
-    class USpotLightComponent* RimLight;
+    // Lighting System Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    ELight_TimeOfDay CurrentTimeOfDay;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting", meta = (AllowPrivateAccess = "true"))
-    class UExponentialHeightFogComponent* AtmosphericFog;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    float TimeOfDayProgress;
 
-    // Time and weather system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
-    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::Noon;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    bool bEnableDynamicTimeOfDay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
-    ELight_WeatherType CurrentWeather = ELight_WeatherType::Clear;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    float DayDurationMinutes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
-    float DayDurationMinutes = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    TArray<FLight_LightingPreset> TimeOfDayPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
-    bool bAutoProgressTime = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic Lighting")
+    TArray<FLight_CinematicZone> CinematicZones;
 
-    // Lighting presets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    TMap<ELight_TimeOfDay, FLight_LightingPreset> TimeOfDayPresets;
+    // Volumetric Fog Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    bool bEnableVolumetricFog;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    TMap<ELight_WeatherType, FLight_LightingPreset> WeatherPresets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    float BaseFogDensity;
 
-    // Cinematic lighting controls
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic")
-    bool bCinematicMode = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    FLinearColor FogInscatteringColor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic")
-    float CinematicTransitionDuration = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    float VolumetricFogScatteringDistribution;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cinematic")
-    FLight_LightingPreset CinematicPreset;
+    // Light References
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    ADirectionalLight* MainDirectionalLight;
 
-    // Public functions
-    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
-    void SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay, bool bInstant = false);
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    AExponentialHeightFog* MainFogActor;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Control")
-    void SetWeather(ELight_WeatherType NewWeather, bool bInstant = false);
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    TArray<ASpotLight*> CinematicSpotLights;
 
-    UFUNCTION(BlueprintCallable, Category = "Cinematic Control")
-    void EnableCinematicMode(const FLight_LightingPreset& Preset, float TransitionTime = 2.0f);
+    UPROPERTY(BlueprintReadOnly, Category = "Light References")
+    TArray<APointLight*> CinematicPointLights;
 
-    UFUNCTION(BlueprintCallable, Category = "Cinematic Control")
-    void DisableCinematicMode(float TransitionTime = 2.0f);
+public:
+    // Lighting Control Functions
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
-    void ApplyLightingPreset(const FLight_LightingPreset& Preset, float TransitionTime = 0.0f);
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void SetTimeOfDayProgress(float Progress);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
-    FLight_LightingPreset GetCurrentLightingSettings() const;
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void ApplyLightingPreset(const FLight_LightingPreset& Preset);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetVolumetricFogDensity(float Density);
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void CreateCinematicZone(FVector Center, float Radius, ELight_LightingZone ZoneType);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetAtmosphericScattering(float ScatteringIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void UpdateCinematicZone(int32 ZoneIndex, bool bActivate);
 
-    UFUNCTION(BlueprintCallable, Category = "Post Process Control")
-    void UpdatePostProcessSettings(float WhiteTemp, float BloomIntensity, float Saturation);
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Lighting")
+    void SetVolumetricFogProperties(float Density, FLinearColor InscatteringColor, float ScatteringDistribution);
+
+    // Cinematic Lighting Effects
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Effects")
+    void CreateDramaticRimLighting(FVector TargetLocation, FLinearColor LightColor, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Effects")
+    void CreateAtmosphericPointLight(FVector Location, FLinearColor Color, float Intensity, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Cinematic Effects")
+    void CreateVolumetricSpotlight(FVector Location, FRotator Rotation, FLinearColor Color, float Intensity);
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Lighting Utilities")
+    void FindAndCacheLightReferences();
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting Utilities")
+    void ValidateLightingSetup();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void InitializeDefaultLightingPresets();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor Tools")
+    void CreateTestCinematicZones();
 
 protected:
-    // Internal state
-    float CurrentTimeProgress = 0.0f;
-    bool bIsTransitioning = false;
-    float TransitionProgress = 0.0f;
-    float TransitionDuration = 0.0f;
-    FLight_LightingPreset TransitionStartPreset;
-    FLight_LightingPreset TransitionTargetPreset;
+    // Internal Functions
+    void UpdateTimeOfDay(float DeltaTime);
+    void InterpolateLightingPresets(const FLight_LightingPreset& PresetA, const FLight_LightingPreset& PresetB, float Alpha);
+    void UpdateVolumetricFog();
+    void UpdateCinematicZones();
+    FLight_LightingPreset GetPresetForTimeOfDay(ELight_TimeOfDay TimeOfDay);
 
-    // Reference to post process volume
-    UPROPERTY()
-    class APostProcessVolume* MainPostProcessVolume;
-
-    // Internal functions
-    void InitializeLightingPresets();
-    void UpdateTimeProgression(float DeltaTime);
-    void UpdateLightingTransition(float DeltaTime);
-    void ApplyPresetToComponents(const FLight_LightingPreset& Preset);
-    FLight_LightingPreset InterpolateLightingPresets(const FLight_LightingPreset& A, const FLight_LightingPreset& B, float Alpha) const;
-    void FindOrCreatePostProcessVolume();
-    void SetupAtmosphericComponents();
-    
-    // Cinematic lighting functions
-    void CreateCinematicRimLighting();
-    void CreateAtmosphericFillLights();
-    void EnhanceVolumetricFog();
-    void ConfigureCinematicPostProcess();
+private:
+    float TimeAccumulator;
+    bool bLightingSystemInitialized;
 };
