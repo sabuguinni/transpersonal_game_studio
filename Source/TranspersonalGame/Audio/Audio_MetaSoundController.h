@@ -2,40 +2,52 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/TriggerVolume.h"
 #include "Sound/SoundBase.h"
 #include "MetasoundSource.h"
 #include "Audio_MetaSoundController.generated.h"
 
+UENUM(BlueprintType)
+enum class EAudio_AmbienceType : uint8
+{
+    Forest      UMETA(DisplayName = "Forest"),
+    Savanna     UMETA(DisplayName = "Savanna"), 
+    River       UMETA(DisplayName = "River"),
+    Mountain    UMETA(DisplayName = "Mountain"),
+    Cave        UMETA(DisplayName = "Cave"),
+    Swamp       UMETA(DisplayName = "Swamp")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_MetaSoundConfig
+struct TRANSPERSONALGAME_API FAudio_AmbienceZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_AmbienceType AmbienceType = EAudio_AmbienceType::Forest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TSoftObjectPtr<UMetaSoundSource> MetaSoundAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound Config")
-    FString ParameterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound Config")
-    float DefaultValue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FadeDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound Config")
-    float MinValue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bLooping = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound Config")
-    float MaxValue;
-
-    FAudio_MetaSoundConfig()
-        : DefaultValue(1.0f)
-        , MinValue(0.0f)
-        , MaxValue(1.0f)
+    FAudio_AmbienceZone()
     {
+        AmbienceType = EAudio_AmbienceType::Forest;
+        VolumeMultiplier = 1.0f;
+        FadeDistance = 2000.0f;
+        bLooping = true;
     }
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudio_MetaSoundController : public UActorComponent
 {
     GENERATED_BODY()
@@ -45,60 +57,72 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // MetaSound configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    TArray<FAudio_MetaSoundConfig> MetaSoundConfigs;
+public:
+    // Ambience zone management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambience")
+    TArray<FAudio_AmbienceZone> AmbienceZones;
 
-    // Dynamic parameter control
-    UFUNCTION(BlueprintCallable, Category = "MetaSound")
-    void SetMetaSoundParameter(const FString& ParameterName, float Value);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambience")
+    float GlobalVolumeMultiplier = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "MetaSound")
-    void PlayMetaSound(const FString& ConfigName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambience")
+    float AmbienceFadeSpeed = 2.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "MetaSound")
-    void StopMetaSound(const FString& ConfigName);
+    // Footstep audio system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footsteps")
+    TSoftObjectPtr<UMetaSoundSource> PlayerFootstepMetaSound;
 
-    // Prehistoric-specific audio controls
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayDinosaurFootsteps(float Intensity, float Speed);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footsteps")
+    TSoftObjectPtr<UMetaSoundSource> DinosaurFootstepMetaSound;
 
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayDinosaurRoar(float Aggression, float Distance);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footsteps")
+    float FootstepVolumeRange = 1500.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void UpdateAmbientForest(float TimeOfDay, float WeatherIntensity);
+    // Dynamic audio mixing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Mixing")
+    float DangerProximityThreshold = 1000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Audio")
-    void PlayCraftingSound(const FString& MaterialType);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Mixing")
+    float TensionVolumeMultiplier = 1.5f;
+
+    // Audio functions
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayAmbienceForZone(EAudio_AmbienceType ZoneType, FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void TriggerFootstepAudio(FVector FootstepLocation, bool bIsPlayerFootstep = true);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateDynamicMixing(float DangerLevel, float StaminaLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetGlobalAudioVolume(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    EAudio_AmbienceType GetCurrentAmbienceType() const { return CurrentAmbienceType; }
 
 private:
-    // Internal MetaSound management
+    // Internal state
     UPROPERTY()
-    TMap<FString, class UAudioComponent*> ActiveMetaSounds;
-
-    // Parameter interpolation
-    UPROPERTY()
-    TMap<FString, float> TargetParameters;
+    EAudio_AmbienceType CurrentAmbienceType = EAudio_AmbienceType::Forest;
 
     UPROPERTY()
-    TMap<FString, float> CurrentParameters;
-
-    UPROPERTY(EditAnywhere, Category = "MetaSound")
-    float ParameterInterpolationSpeed;
-
-    // Prehistoric audio state
-    UPROPERTY()
-    float CurrentFootstepIntensity;
+    float CurrentAmbienceVolume = 1.0f;
 
     UPROPERTY()
-    float CurrentAmbientLevel;
+    float TargetAmbienceVolume = 1.0f;
 
-    void InitializeMetaSounds();
-    void UpdateParameterInterpolation(float DeltaTime);
-    UAudioComponent* GetOrCreateAudioComponent(const FString& ConfigName);
+    // Audio component references
+    UPROPERTY()
+    class UAudioComponent* CurrentAmbienceComponent;
+
+    UPROPERTY()
+    TArray<class UAudioComponent*> FootstepComponents;
+
+    // Helper functions
+    void UpdateAmbienceVolume(float DeltaTime);
+    void CleanupFinishedAudioComponents();
+    FAudio_AmbienceZone* FindAmbienceZoneByType(EAudio_AmbienceType ZoneType);
 };
