@@ -1,314 +1,193 @@
 #include "Narr_StorytellingSystem.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
+#include "Engine/DataTable.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Pawn.h"
-#include "TimerManager.h"
+#include "Sound/SoundCue.h"
+#include "Kismet/GameplayStatics.h"
 
-ANarr_StorytellingSystem::ANarr_StorytellingSystem()
+UNarr_StorytellingSystem::UNarr_StorytellingSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create campfire mesh component
-    CampfireMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CampfireMesh"));
-    RootComponent = CampfireMesh;
-
-    // Create fire particle effect
-    FireEffect = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("FireEffect"));
-    FireEffect->SetupAttachment(RootComponent);
-
-    // Create ambient audio component
-    AmbientAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudio->SetupAttachment(RootComponent);
-
-    // Create interaction sphere
-    InteractionRadius = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionRadius"));
-    InteractionRadius->SetupAttachment(RootComponent);
-    InteractionRadius->SetSphereRadius(500.0f);
-
-    // Initialize defaults
-    StorytellingRange = 500.0f;
-    MaxParticipants = 8;
-    CurrentStoryStartTime = 0.0f;
     bIsPlayingStory = false;
+    StoryStartTime = 0.0f;
+    StoryDataTable = nullptr;
 }
 
-void ANarr_StorytellingSystem::BeginPlay()
+void UNarr_StorytellingSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
+    LoadStoryData();
+    UE_LOG(LogTemp, Log, TEXT("Narrative Storytelling System initialized"));
+}
+
+void UNarr_StorytellingSystem::LoadStoryData()
+{
+    CachedStories.Empty();
     
-    InitializeStoryDatabase();
-    LoadTribalStories();
+    // Add hardcoded story data for immediate functionality
+    FNarr_StoryData DinosaurStory;
+    DinosaurStory.StoryTitle = TEXT("The Great Predator");
+    DinosaurStory.StoryText = FText::FromString(TEXT("The Tyrannosaurus stalks through the dense ferns, its yellow eyes searching for prey."));
+    DinosaurStory.StoryType = ENarr_StoryType::DinosaurEncounter;
+    DinosaurStory.AudioAssetPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781482258631_TribalWarrior.mp3");
+    DinosaurStory.StoryDuration = 13.0f;
+    DinosaurStory.RequiredTags.Add(TEXT("TRex"));
+    CachedStories.Add(DinosaurStory);
+
+    FNarr_StoryData HerdStory;
+    HerdStory.StoryTitle = TEXT("The Thundering Herd");
+    HerdStory.StoryText = FText::FromString(TEXT("The Triceratops herd moves through the eastern valley at dawn."));
+    HerdStory.StoryType = ENarr_StoryType::DinosaurEncounter;
+    HerdStory.AudioAssetPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781482253207_TribalScout.mp3");
+    HerdStory.StoryDuration = 16.0f;
+    HerdStory.RequiredTags.Add(TEXT("Triceratops"));
+    CachedStories.Add(HerdStory);
+
+    FNarr_StoryData PackStory;
+    PackStory.StoryTitle = TEXT("The Pack Hunters");
+    PackStory.StoryText = FText::FromString(TEXT("Three Velociraptors move as one mind, one deadly purpose."));
+    PackStory.StoryType = ENarr_StoryType::DinosaurEncounter;
+    PackStory.AudioAssetPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781482265324_TribalHunter.mp3");
+    PackStory.StoryDuration = 14.0f;
+    PackStory.RequiredTags.Add(TEXT("Velociraptor"));
+    CachedStories.Add(PackStory);
+
+    FNarr_StoryData GiantStory;
+    GiantStory.StoryTitle = TEXT("The Gentle Giants");
+    GiantStory.StoryText = FText::FromString(TEXT("The Brachiosaurus towers above the canopy, reaching for the sweetest leaves."));
+    GiantStory.StoryType = ENarr_StoryType::TribalWisdom;
+    GiantStory.AudioAssetPath = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781482275958_TribalElder.mp3");
+    GiantStory.StoryDuration = 16.0f;
+    GiantStory.RequiredTags.Add(TEXT("Brachiosaurus"));
+    CachedStories.Add(GiantStory);
+
+    UE_LOG(LogTemp, Log, TEXT("Loaded %d hardcoded stories"), CachedStories.Num());
 }
 
-void ANarr_StorytellingSystem::Tick(float DeltaTime)
+void UNarr_StorytellingSystem::TriggerContextualStory(const FNarr_StorytellingContext& Context)
 {
-    Super::Tick(DeltaTime);
-    
-    if (CurrentSession.bIsActive)
+    if (bIsPlayingStory)
     {
-        UpdateSessionState();
-    }
-}
-
-void ANarr_StorytellingSystem::StartStorytellingSession()
-{
-    if (CurrentSession.bIsActive)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("Story already playing, ignoring trigger"));
         return;
     }
 
-    CurrentSession.bIsActive = true;
-    CurrentSession.SessionStartTime = GetWorld()->GetTimeSeconds();
-    CurrentSession.CurrentStoryIndex = 0;
-
-    // Start fire effects
-    if (FireEffect)
+    TArray<FNarr_StoryData> MatchingStories = GetStoriesForContext(Context);
+    if (MatchingStories.Num() > 0)
     {
-        FireEffect->Activate();
+        int32 RandomIndex = FMath::RandRange(0, MatchingStories.Num() - 1);
+        FNarr_StoryData SelectedStory = MatchingStories[RandomIndex];
+        
+        CurrentStory = SelectedStory;
+        PlayStoryAudio(SelectedStory);
+        
+        UE_LOG(LogTemp, Log, TEXT("Triggered contextual story: %s"), *SelectedStory.StoryTitle);
     }
-
-    // Start ambient audio
-    if (AmbientAudio)
+    else
     {
-        AmbientAudio->Play();
+        UE_LOG(LogTemp, Warning, TEXT("No matching stories found for context"));
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Storytelling session started at campfire"));
 }
 
-void ANarr_StorytellingSystem::EndStorytellingSession()
+FNarr_StoryData UNarr_StorytellingSystem::GetRandomStoryByType(ENarr_StoryType StoryType)
 {
-    CurrentSession.bIsActive = false;
-    bIsPlayingStory = false;
-
-    // Stop effects
-    if (FireEffect)
-    {
-        FireEffect->Deactivate();
-    }
-
-    if (AmbientAudio)
-    {
-        AmbientAudio->Stop();
-    }
-
-    // Clear participants
-    SessionParticipants.Empty();
-
-    UE_LOG(LogTemp, Warning, TEXT("Storytelling session ended"));
-}
-
-void ANarr_StorytellingSystem::PlayNextStory()
-{
-    if (!CurrentSession.bIsActive || CurrentSession.AvailableStories.Num() == 0)
-    {
-        return;
-    }
-
-    if (CurrentSession.CurrentStoryIndex >= CurrentSession.AvailableStories.Num())
-    {
-        CurrentSession.CurrentStoryIndex = 0;
-    }
-
-    FNarr_StoryData CurrentStory = CurrentSession.AvailableStories[CurrentSession.CurrentStoryIndex];
+    TArray<FNarr_StoryData> FilteredStories;
     
-    // Play story audio if available
-    if (!CurrentStory.AudioURL.IsEmpty())
+    for (const FNarr_StoryData& Story : CachedStories)
     {
-        PlayStoryAudio(CurrentStory.AudioURL);
-    }
-
-    // Log story for participants
-    for (APawn* Participant : SessionParticipants)
-    {
-        if (Participant)
+        if (Story.StoryType == StoryType)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Playing story '%s' for participant"), *CurrentStory.StoryTitle);
+            FilteredStories.Add(Story);
         }
     }
+    
+    if (FilteredStories.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, FilteredStories.Num() - 1);
+        return FilteredStories[RandomIndex];
+    }
+    
+    return FNarr_StoryData();
+}
 
-    CurrentStoryStartTime = GetWorld()->GetTimeSeconds();
+TArray<FNarr_StoryData> UNarr_StorytellingSystem::GetStoriesForContext(const FNarr_StorytellingContext& Context)
+{
+    TArray<FNarr_StoryData> MatchingStories;
+    
+    for (const FNarr_StoryData& Story : CachedStories)
+    {
+        if (DoesStoryMatchContext(Story, Context))
+        {
+            MatchingStories.Add(Story);
+        }
+    }
+    
+    return MatchingStories;
+}
+
+bool UNarr_StorytellingSystem::DoesStoryMatchContext(const FNarr_StoryData& Story, const FNarr_StorytellingContext& Context)
+{
+    // Check if any nearby dinosaurs match story requirements
+    for (const FString& RequiredTag : Story.RequiredTags)
+    {
+        for (const FString& NearbyDino : Context.NearbyDinosaurs)
+        {
+            if (NearbyDino.Contains(RequiredTag))
+            {
+                return true;
+            }
+        }
+    }
+    
+    // Context-based matching for story types
+    if (Story.StoryType == ENarr_StoryType::TribalWisdom && Context.bIsNearFire)
+    {
+        return true;
+    }
+    
+    if (Story.StoryType == ENarr_StoryType::TerrainWarning && Context.CurrentBiome.Contains(TEXT("Mountain")))
+    {
+        return true;
+    }
+    
+    return false;
+}
+
+void UNarr_StorytellingSystem::PlayStoryAudio(const FNarr_StoryData& Story)
+{
+    if (Story.AudioAssetPath.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No audio path for story: %s"), *Story.StoryTitle);
+        return;
+    }
+    
     bIsPlayingStory = true;
-    CurrentSession.CurrentStoryIndex++;
-}
-
-bool ANarr_StorytellingSystem::CanPlayerJoinSession(APawn* Player)
-{
-    if (!Player || !CurrentSession.bIsActive)
-    {
-        return false;
-    }
-
-    if (SessionParticipants.Num() >= MaxParticipants)
-    {
-        return false;
-    }
-
-    return IsPlayerInRange(Player);
-}
-
-void ANarr_StorytellingSystem::AddPlayerToSession(APawn* Player)
-{
-    if (!CanPlayerJoinSession(Player))
-    {
-        return;
-    }
-
-    if (!SessionParticipants.Contains(Player))
-    {
-        SessionParticipants.Add(Player);
-        UE_LOG(LogTemp, Warning, TEXT("Player joined storytelling session"));
-    }
-}
-
-void ANarr_StorytellingSystem::RemovePlayerFromSession(APawn* Player)
-{
-    if (SessionParticipants.Contains(Player))
-    {
-        SessionParticipants.Remove(Player);
-        UE_LOG(LogTemp, Warning, TEXT("Player left storytelling session"));
-    }
-}
-
-void ANarr_StorytellingSystem::LoadTribalStories()
-{
-    TribalStories.Empty();
-
-    // Load hardcoded tribal stories for prehistoric survival
-    FNarr_StoryData Story1;
-    Story1.StoryTitle = TEXT("The Great Hunt");
-    Story1.StoryText = TEXT("The ancient hunters gather around the fire. Their eyes tell stories of survival, of battles won against great beasts. Tonight, we share knowledge that will keep our tribe alive another day.");
-    Story1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781464331637_TribalElder.mp3");
-    Story1.Duration = 13.0f;
-    Story1.TribeReputationRequired = 0;
-    TribalStories.Add(Story1);
-
-    FNarr_StoryData Story2;
-    Story2.StoryTitle = TEXT("Warning of Danger");
-    Story2.StoryText = TEXT("Danger approaches from the north! The great predators have caught our scent. Grab your spears and form a circle - we must protect the young ones!");
-    Story2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781464338681_TribalWarrior.mp3");
-    Story2.Duration = 10.0f;
-    Story2.TribeReputationRequired = 10;
-    TribalStories.Add(Story2);
-
-    FNarr_StoryData Story3;
-    Story3.StoryTitle = TEXT("The Clay River");
-    Story3.StoryText = TEXT("The river runs red with clay today. Good for making pots, but the animals will not drink. We must find another water source before the sun sets.");
-    Story3.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781464343373_TribalCrafter.mp3");
-    Story3.Duration = 10.0f;
-    Story3.TribeReputationRequired = 5;
-    TribalStories.Add(Story3);
-
-    FNarr_StoryData Story4;
-    Story4.StoryTitle = TEXT("Reading the Tracks");
-    Story4.StoryText = TEXT("Listen carefully, young hunter. The tracks tell us everything - size of the beast, how long ago it passed, whether it was wounded. This knowledge means the difference between feast and famine.");
-    Story4.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781464348715_TribalTracker.mp3");
-    Story4.Duration = 13.0f;
-    Story4.TribeReputationRequired = 15;
-    TribalStories.Add(Story4);
-
-    UE_LOG(LogTemp, Warning, TEXT("Loaded %d tribal stories"), TribalStories.Num());
-}
-
-FNarr_StoryData ANarr_StorytellingSystem::GetRandomStory()
-{
-    if (TribalStories.Num() == 0)
-    {
-        return FNarr_StoryData();
-    }
-
-    int32 RandomIndex = FMath::RandRange(0, TribalStories.Num() - 1);
-    return TribalStories[RandomIndex];
-}
-
-TArray<FNarr_StoryData> ANarr_StorytellingSystem::GetStoriesForReputation(int32 ReputationLevel)
-{
-    TArray<FNarr_StoryData> AvailableStories;
-
-    for (const FNarr_StoryData& Story : TribalStories)
-    {
-        if (ReputationLevel >= Story.TribeReputationRequired)
-        {
-            AvailableStories.Add(Story);
-        }
-    }
-
-    return AvailableStories;
-}
-
-void ANarr_StorytellingSystem::PlayStoryAudio(const FString& AudioURL)
-{
-    // In a full implementation, this would load and play audio from URL
-    // For now, we log the audio playback
-    UE_LOG(LogTemp, Warning, TEXT("Playing story audio: %s"), *AudioURL);
+    StoryStartTime = GetWorld()->GetTimeSeconds();
     
-    if (AmbientAudio)
+    // Log the story being played (audio URLs are external, so we log for reference)
+    UE_LOG(LogTemp, Log, TEXT("Playing story audio: %s (Duration: %.1fs)"), *Story.StoryTitle, Story.StoryDuration);
+    UE_LOG(LogTemp, Log, TEXT("Audio URL: %s"), *Story.AudioAssetPath);
+    
+    // Set timer to mark story as finished
+    FTimerHandle StoryTimer;
+    GetWorld()->GetTimerManager().SetTimer(StoryTimer, this, &UNarr_StorytellingSystem::OnStoryFinished, Story.StoryDuration, false);
+}
+
+bool UNarr_StorytellingSystem::IsStoryPlaying() const
+{
+    return bIsPlayingStory;
+}
+
+void UNarr_StorytellingSystem::StopCurrentStory()
+{
+    if (bIsPlayingStory)
     {
-        // Audio component would be configured to play the story audio
-        AmbientAudio->Play();
+        bIsPlayingStory = false;
+        UE_LOG(LogTemp, Log, TEXT("Stopped current story"));
     }
 }
 
-void ANarr_StorytellingSystem::StopCurrentAudio()
+void UNarr_StorytellingSystem::OnStoryFinished()
 {
-    if (AmbientAudio && AmbientAudio->IsPlaying())
-    {
-        AmbientAudio->Stop();
-    }
-    
     bIsPlayingStory = false;
-}
-
-void ANarr_StorytellingSystem::InitializeStoryDatabase()
-{
-    // Initialize session data
-    CurrentSession.AvailableStories.Empty();
-    CurrentSession.CurrentStoryIndex = 0;
-    CurrentSession.bIsActive = false;
-    CurrentSession.SessionStartTime = 0.0f;
-}
-
-void ANarr_StorytellingSystem::UpdateSessionState()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check if current story has finished
-    if (bIsPlayingStory && CurrentSession.AvailableStories.IsValidIndex(CurrentSession.CurrentStoryIndex - 1))
-    {
-        FNarr_StoryData CurrentStory = CurrentSession.AvailableStories[CurrentSession.CurrentStoryIndex - 1];
-        if (CurrentTime - CurrentStoryStartTime >= CurrentStory.Duration)
-        {
-            bIsPlayingStory = false;
-            StopCurrentAudio();
-        }
-    }
-
-    // Remove players who are out of range
-    for (int32 i = SessionParticipants.Num() - 1; i >= 0; i--)
-    {
-        if (!IsPlayerInRange(SessionParticipants[i]))
-        {
-            RemovePlayerFromSession(SessionParticipants[i]);
-        }
-    }
-
-    // End session if no participants
-    if (SessionParticipants.Num() == 0 && CurrentTime - CurrentSession.SessionStartTime > 30.0f)
-    {
-        EndStorytellingSession();
-    }
-}
-
-bool ANarr_StorytellingSystem::IsPlayerInRange(APawn* Player)
-{
-    if (!Player)
-    {
-        return false;
-    }
-
-    float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    return Distance <= StorytellingRange;
+    UE_LOG(LogTemp, Log, TEXT("Story finished: %s"), *CurrentStory.StoryTitle);
 }
