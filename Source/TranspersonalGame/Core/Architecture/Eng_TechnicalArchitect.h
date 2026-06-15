@@ -1,129 +1,137 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_TechnicalArchitect.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitecturalLayer
+UENUM(BlueprintType)
+enum class EEng_ArchitecturalLayer : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString LayerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bIsInitialized;
-
-    FEng_ArchitecturalLayer()
-    {
-        LayerName = TEXT("");
-        Priority = 0;
-        bIsInitialized = false;
-    }
+    Core = 0,           // Engine, Physics, Memory
+    World = 1,          // Terrain, Biomes, Weather
+    Character = 2,      // Player, NPCs, Movement
+    AI = 3,             // Behavior Trees, Crowd Simulation
+    Audio = 4,          // Sound, Music, Voice
+    VFX = 5,            // Particles, Post-Process
+    UI = 6              // HUD, Menus, Inventory
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleDefinition
+struct TRANSPERSONALGAME_API FEng_ModuleInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    UPROPERTY(BlueprintReadOnly)
     FString ModuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    FString LayerAssignment;
+    UPROPERTY(BlueprintReadOnly)
+    EEng_ArchitecturalLayer Layer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    TArray<FString> RequiredModules;
+    UPROPERTY(BlueprintReadOnly)
+    int32 Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    bool bIsCompiled;
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> Dependencies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    float PerformanceWeight;
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsInitialized;
 
-    FEng_ModuleDefinition()
+    UPROPERTY(BlueprintReadOnly)
+    float InitializationTime;
+
+    FEng_ModuleInfo()
     {
         ModuleName = TEXT("");
-        LayerAssignment = TEXT("");
-        bIsCompiled = false;
-        PerformanceWeight = 1.0f;
+        Layer = EEng_ArchitecturalLayer::Core;
+        Priority = 0;
+        bIsInitialized = false;
+        InitializationTime = 0.0f;
     }
 };
 
-UCLASS()
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceTargets
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    float TargetFPS;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 MaxActors;
+
+    UPROPERTY(BlueprintReadOnly)
+    float MaxMemoryMB;
+
+    UPROPERTY(BlueprintReadOnly)
+    float MaxDrawCalls;
+
+    FEng_PerformanceTargets()
+    {
+        TargetFPS = 60.0f;
+        MaxActors = 8000;
+        MaxMemoryMB = 4096.0f;
+        MaxDrawCalls = 2000.0f;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_TechnicalArchitect : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UEng_TechnicalArchitect();
+
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void DefineArchitecturalLayers();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void RegisterModule(const FString& ModuleName, EEng_ArchitecturalLayer Layer, int32 Priority, const TArray<FString>& Dependencies);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool RegisterModule(const FString& ModuleName, const FString& Layer, const TArray<FString>& Dependencies);
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidateModuleDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateArchitecture();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void InitializeModulesInOrder();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetInitializationOrder();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool IsModuleInitialized(const FString& ModuleName);
 
-    // Performance Architecture
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTargets(float TargetFPS, int32 MaxActors, float MaxMemoryMB);
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FEng_PerformanceTargets GetPerformanceTargets() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceCompliance();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidatePerformance();
 
-    // Module Communication Standards
-    UFUNCTION(BlueprintCallable, Category = "Communication")
-    void DefineInterfaceStandards();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    TArray<FString> GetCircularDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Communication")
-    bool ValidateModuleInterfaces();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void SetPerformanceTarget(float FPS, int32 MaxActors, float MaxMemoryMB);
 
-    // Technical Standards Enforcement
-    UFUNCTION(BlueprintCallable, Category = "Standards")
-    void EnforceCodingStandards();
-
-    UFUNCTION(BlueprintCallable, Category = "Standards")
-    TArray<FString> GetArchitectureViolations();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    TArray<FEng_ModuleInfo> GetModulesByLayer(EEng_ArchitecturalLayer Layer);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_ArchitecturalLayer> ArchitecturalLayers;
+    UPROPERTY(BlueprintReadOnly, Category = "Technical Architecture")
+    TArray<FEng_ModuleInfo> RegisteredModules;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_ModuleDefinition> RegisteredModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Technical Architecture")
+    FEng_PerformanceTargets PerformanceTargets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Technical Architecture")
+    bool bArchitectureValidated;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsage;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ArchitectureViolations;
+    UPROPERTY(BlueprintReadOnly, Category = "Technical Architecture")
+    float LastValidationTime;
 
 private:
-    void InitializeCoreArchitecture();
-    void ValidateModuleDependencies();
-    bool CheckCircularDependencies();
-    void GenerateInitializationSequence();
+    void SortModulesByPriority();
+    bool HasCircularDependency(const FString& ModuleName, TArray<FString>& VisitedModules);
+    FEng_ModuleInfo* FindModule(const FString& ModuleName);
+    void InitializeModule(FEng_ModuleInfo& Module);
+    bool CheckDependenciesInitialized(const FEng_ModuleInfo& Module);
 };
