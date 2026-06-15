@@ -6,17 +6,16 @@
 #include "BuildValidationSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationStatus : uint8
+enum class EBuild_ValidationResult : uint8
 {
-    Unknown,
-    Passed,
-    Failed,
-    Warning,
-    Critical
+    Pass        UMETA(DisplayName = "Pass"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Fail        UMETA(DisplayName = "Fail"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+struct FBuild_ValidationReport
 {
     GENERATED_BODY()
 
@@ -24,7 +23,7 @@ struct TRANSPERSONALGAME_API FBuild_ValidationResult
     FString TestName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationStatus Status;
+    EBuild_ValidationResult Result;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     FString Message;
@@ -32,133 +31,62 @@ struct TRANSPERSONALGAME_API FBuild_ValidationResult
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     float ExecutionTime;
 
-    FBuild_ValidationResult()
+    FBuild_ValidationReport()
     {
         TestName = TEXT("");
-        Status = EBuild_ValidationStatus::Unknown;
+        Result = EBuild_ValidationResult::Pass;
         Message = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemHealth
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    bool bIsOperational;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    int32 LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    int32 ActiveActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Health")
-    TArray<FString> Dependencies;
-
-    FBuild_SystemHealth()
-    {
-        SystemName = TEXT("");
-        bIsOperational = false;
-        LoadedClasses = 0;
-        ActiveActors = 0;
-    }
-};
-
-/**
- * Build Validation System - Integration Agent #19
- * Comprehensive validation framework for all game systems
- * Monitors compilation status, class loading, and cross-system integration
- */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildValidationSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
     void RunFullValidationSuite();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateClassLoading();
+    void ValidateActorCounts();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateCrossSystemIntegration();
+    void ValidateSystemIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateMapIntegrity();
+    void ValidatePerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateCompilationStatus();
-
-    // Health monitoring
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_SystemHealth> GetSystemHealthReport();
+    TArray<FBuild_ValidationReport> GetValidationReports() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsSystemOperational(const FString& SystemName);
-
-    // Results access
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ValidationResult> GetValidationResults() const { return ValidationResults; }
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    int32 GetPassedTestsCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    int32 GetFailedTestsCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    float GetOverallHealthScore() const;
-
-    // Automated monitoring
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void StartContinuousMonitoring(float IntervalSeconds = 30.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void StopContinuousMonitoring();
+    bool HasCriticalErrors() const;
 
 protected:
-    // Internal validation methods
-    void ValidateWorldGeneration();
-    void ValidateCharacterSystems();
-    void ValidateAISystems();
-    void ValidateEnvironmentSystems();
-    void ValidateQuestSystems();
-    void ValidateAudioSystems();
-    void ValidateVFXSystems();
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FBuild_ValidationReport> ValidationReports;
 
-    // Helper methods
-    void AddValidationResult(const FString& TestName, EBuild_ValidationStatus Status, const FString& Message, float ExecutionTime = 0.0f);
-    bool CheckClassExists(const FString& ClassName);
-    int32 CountActorsOfType(const FString& ActorType);
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bValidationInProgress;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float LastValidationTime;
 
 private:
-    UPROPERTY()
-    TArray<FBuild_ValidationResult> ValidationResults;
-
-    UPROPERTY()
-    TArray<FBuild_SystemHealth> SystemHealthData;
-
-    UPROPERTY()
-    FTimerHandle MonitoringTimerHandle;
-
-    UPROPERTY()
-    bool bIsContinuousMonitoringActive;
-
-    // Core system class names for validation
-    TArray<FString> CoreSystemClasses;
-    
-    // System dependency mapping
-    TMap<FString, TArray<FString>> SystemDependencies;
+    void AddValidationReport(const FString& TestName, EBuild_ValidationResult Result, const FString& Message, float ExecutionTime);
+    void ValidateWorldState();
+    void ValidateGameSystems();
+    void ValidateMemoryUsage();
+    void ValidateDinosaurPopulation();
+    void ValidatePlayerSystems();
+    void ValidateEnvironmentSystems();
+    void ValidateAudioSystems();
+    void ValidateRenderingSystems();
+    void ValidateNetworkingSystems();
+    void ValidateInputSystems();
 };
