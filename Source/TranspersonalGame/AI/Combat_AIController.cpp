@@ -1,233 +1,248 @@
 #include "Combat_AIController.h"
-#include "Engine/Engine.h"
+#include "Combat_BehaviorTreeManager.h"
+#include "Combat_DinosaurPawn.h"
+#include "TranspersonalCharacter.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardData.h"
-#include "Kismet/GameplayStatics.h"
-#include "Perception/AIPerceptionStimuliSourceComponent.h"
 
 ACombat_AIController::ACombat_AIController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize components
+
+    // Initialize AI Components
     BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
     BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-    
-    // Setup sight configuration
-    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+
+    // Configure AI Perception - Sight
+    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
     SightConfig->SightRadius = SightRadius;
-    SightConfig->LoseSightRadius = LoseSightRadius;
-    SightConfig->PeripheralVisionAngleDegrees = FieldOfView;
-    SightConfig->SetMaxAge(5.0f);
-    SightConfig->AutoSuccessRangeFromLastSeenLocation = 900.0f;
+    SightConfig->LoseSightRadius = SightRadius * 1.2f;
+    SightConfig->PeripheralVisionAngleDegrees = 120.0f;
     SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
     SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
     SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-    
-    // Setup hearing configuration
-    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    AIPerceptionComponent->ConfigureSense(*SightConfig);
+
+    // Configure AI Perception - Hearing
+    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
     HearingConfig->HearingRange = HearingRadius;
-    HearingConfig->SetMaxAge(3.0f);
     HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
     HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
     HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-    
-    // Configure AI Perception
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
     AIPerceptionComponent->ConfigureSense(*HearingConfig);
+
     AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-    
-    // Initialize state
-    CurrentTarget = nullptr;
-    LastAttackTime = 0.0f;
-    bIsFleeingFromThreat = false;
-    bIsPackLeader = false;
-    LastKnownTargetLocation = FVector::ZeroVector;
+
+    // Initialize Combat State
+    TacticalState.CurrentBehaviorState = ECombat_AIBehaviorState::Idle;
+    TacticalState.FormationRole = ECombat_FormationRole::Solo;
+    TacticalState.AggressionLevel = 0.5f;
+    TacticalState.FearLevel = 0.0f;
+    TacticalState.bInCombat = false;
+    TacticalState.CombatTimer = 0.0f;
+
+    // Initialize Threat Assessment
+    CurrentThreat.ThreatLevel = 0.0f;
+    CurrentThreat.Distance = 0.0f;
+    CurrentThreat.LastKnownLocation = FVector::ZeroVector;
+    CurrentThreat.TimeSinceLastSeen = 0.0f;
+    CurrentThreat.bIsPlayerTarget = false;
 }
 
 void ACombat_AIController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Bind perception events
+
+    // Initialize Behavior Tree Manager
+    BehaviorTreeManager = NewObject<UCombat_BehaviorTreeManager>(this);
+    if (BehaviorTreeManager)
+    {
+        BehaviorTreeManager->Initialize(this);
+    }
+
+    // Bind Perception Events
     if (AIPerceptionComponent)
     {
         AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombat_AIController::OnPerceptionUpdated);
         AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombat_AIController::OnTargetPerceptionUpdated);
     }
-    
-    // Start behavior tree if available
-    if (BehaviorTree && BlackboardComponent)
+
+    // Start Behavior Tree if available
+    if (BehaviorTreeManager && BehaviorTreeManager->GetDefaultBehaviorTree())
     {
-        UseBlackboard(BehaviorTree->BlackboardAsset);
-        RunBehaviorTree(BehaviorTree);
+        RunBehaviorTree(BehaviorTreeManager->GetDefaultBehaviorTree());
     }
-    
-    // Initialize pack behavior
-    UpdatePackBehavior();
 }
 
 void ACombat_AIController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    UpdateCombatState();
-    HandleCombatBehavior();
+
+    UpdateCombatState(DeltaTime);
 }
 
-void ACombat_AIController::SetCombatTarget(AActor* NewTarget)
+void ACombat_AIController::OnPossess(APawn* InPawn)
 {
-    CurrentTarget = NewTarget;
-    
-    if (BlackboardComponent && NewTarget)
+    Super::OnPossess(InPawn);
+
+    if (BlackboardComponent && BehaviorTreeManager)
     {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), NewTarget);
-        BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), NewTarget->GetActorLocation());
-        LastKnownTargetLocation = NewTarget->GetActorLocation();
-        
-        // Update AI state
-        CurrentAIState = ECombat_AIState::Combat;
-        BlackboardComponent->SetValueAsEnum(TEXT("AIState"), static_cast<uint8>(CurrentAIState));
-        
-        // Alert pack members
-        BroadcastThreatToPackMembers(NewTarget);
+        BlackboardComponent->InitializeBlackboard(*BehaviorTreeManager->GetBlackboardAsset());
     }
 }
 
-void ACombat_AIController::ClearCombatTarget()
+void ACombat_AIController::SetBehaviorState(ECombat_AIBehaviorState NewState)
 {
-    CurrentTarget = nullptr;
+    if (TacticalState.CurrentBehaviorState != NewState)
+    {
+        TacticalState.CurrentBehaviorState = NewState;
+        
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Combat AI: Behavior state changed to %d"), static_cast<int32>(NewState));
+    }
+}
+
+void ACombat_AIController::AssignFormationRole(ECombat_FormationRole NewRole)
+{
+    TacticalState.FormationRole = NewRole;
     
     if (BlackboardComponent)
     {
-        BlackboardComponent->ClearValue(TEXT("TargetActor"));
-        BlackboardComponent->SetValueAsVector(TEXT("LastKnownTargetLocation"), LastKnownTargetLocation);
-        
-        // Return to patrol state
-        CurrentAIState = ECombat_AIState::Patrol;
-        BlackboardComponent->SetValueAsEnum(TEXT("AIState"), static_cast<uint8>(CurrentAIState));
+        BlackboardComponent->SetValueAsEnum(TEXT("FormationRole"), static_cast<uint8>(NewRole));
     }
 }
 
-bool ACombat_AIController::IsInCombat() const
+void ACombat_AIController::UpdateThreatAssessment(AActor* ThreatActor, float ThreatLevel)
 {
-    return CurrentTarget != nullptr && CurrentAIState == ECombat_AIState::Combat;
-}
-
-void ACombat_AIController::ExecuteAttack()
-{
-    if (!CanAttackTarget())
+    if (!ThreatActor)
     {
         return;
     }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastAttackTime < AttackCooldown)
+
+    CurrentThreat.ThreatLevel = ThreatLevel;
+    CurrentThreat.Distance = FVector::Dist(GetPawn()->GetActorLocation(), ThreatActor->GetActorLocation());
+    CurrentThreat.LastKnownLocation = ThreatActor->GetActorLocation();
+    CurrentThreat.TimeSinceLastSeen = 0.0f;
+    CurrentThreat.bIsPlayerTarget = ThreatActor->IsA<ATranspersonalCharacter>();
+
+    PrimaryTarget = ThreatActor;
+
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), ThreatActor);
+        BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), ThreatActor->GetActorLocation());
+        BlackboardComponent->SetValueAsFloat(TEXT("ThreatLevel"), ThreatLevel);
+    }
+}
+
+void ACombat_AIController::ExecuteTacticalManeuver(ECombat_TacticalManeuver Maneuver)
+{
+    if (!GetPawn() || !PrimaryTarget)
     {
         return;
     }
-    
-    LastAttackTime = CurrentTime;
-    
-    // Execute attack based on dinosaur species
-    switch (DinosaurSpecies)
+
+    FVector TargetLocation = FVector::ZeroVector;
+
+    switch (Maneuver)
     {
-        case ECombat_DinosaurSpecies::TRex:
-            // Powerful bite attack
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("T-Rex executes devastating bite attack!"));
-            }
+        case ECombat_TacticalManeuver::DirectAssault:
+            TargetLocation = PrimaryTarget->GetActorLocation();
+            SetBehaviorState(ECombat_AIBehaviorState::Attacking);
             break;
-            
-        case ECombat_DinosaurSpecies::Raptor:
-            // Quick claw strike
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("Raptor executes swift claw strike!"));
-            }
+
+        case ECombat_TacticalManeuver::FlankLeft:
+        case ECombat_TacticalManeuver::FlankRight:
+            TargetLocation = CalculateFlankingPosition(PrimaryTarget);
+            SetBehaviorState(ECombat_AIBehaviorState::Flanking);
             break;
-            
-        case ECombat_DinosaurSpecies::Triceratops:
-            // Charge attack
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("Triceratops charges with horns!"));
-            }
+
+        case ECombat_TacticalManeuver::Retreat:
+            TargetLocation = FindOptimalCoverPosition();
+            SetBehaviorState(ECombat_AIBehaviorState::Retreating);
             break;
-            
-        default:
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::White, TEXT("Dinosaur executes basic attack!"));
-            }
+
+        case ECombat_TacticalManeuver::Ambush:
+            SetBehaviorState(ECombat_AIBehaviorState::Ambushing);
+            break;
+
+        case ECombat_TacticalManeuver::Distraction:
+            SetBehaviorState(ECombat_AIBehaviorState::Distracting);
             break;
     }
-    
-    // Update blackboard
-    if (BlackboardComponent)
+
+    if (BlackboardComponent && !TargetLocation.IsZero())
     {
-        BlackboardComponent->SetValueAsFloat(TEXT("LastAttackTime"), LastAttackTime);
+        BlackboardComponent->SetValueAsVector(TEXT("MoveToLocation"), TargetLocation);
     }
 }
 
-void ACombat_AIController::ExecuteFlee()
+bool ACombat_AIController::CanExecuteAttack() const
 {
-    bIsFleeingFromThreat = true;
-    CurrentAIState = ECombat_AIState::Flee;
-    
-    if (BlackboardComponent)
+    if (!GetPawn() || !PrimaryTarget)
     {
-        BlackboardComponent->SetValueAsEnum(TEXT("AIState"), static_cast<uint8>(CurrentAIState));
-        BlackboardComponent->SetValueAsBool(TEXT("IsFleeingFromThreat"), true);
-        
-        // Set flee direction away from threat
-        if (CurrentTarget && GetPawn())
-        {
-            FVector FleeDirection = (GetPawn()->GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
-            FVector FleeLocation = GetPawn()->GetActorLocation() + (FleeDirection * 2000.0f);
-            BlackboardComponent->SetValueAsVector(TEXT("FleeLocation"), FleeLocation);
-        }
+        return false;
     }
-    
-    if (GEngine)
+
+    float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), PrimaryTarget->GetActorLocation());
+    return DistanceToTarget <= AttackRange && TacticalState.bInCombat;
+}
+
+FVector ACombat_AIController::CalculateFlankingPosition(AActor* Target) const
+{
+    if (!Target || !GetPawn())
     {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Dinosaur is fleeing from threat!"));
+        return FVector::ZeroVector;
+    }
+
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    FVector DirectionToTarget = (TargetLocation - MyLocation).GetSafeNormal();
+    
+    // Calculate perpendicular vector for flanking
+    FVector FlankDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+    
+    // Randomize left or right flanking
+    if (FMath::RandBool())
+    {
+        FlankDirection *= -1.0f;
+    }
+
+    return TargetLocation + (FlankDirection * FlankingDistance);
+}
+
+void ACombat_AIController::RegisterAlliedUnit(AActor* AllyActor)
+{
+    if (AllyActor && !AlliedUnits.Contains(AllyActor))
+    {
+        AlliedUnits.Add(AllyActor);
     }
 }
 
-void ACombat_AIController::CallForBackup()
+void ACombat_AIController::UnregisterAlliedUnit(AActor* AllyActor)
 {
-    // Alert nearby pack members
-    for (ACombat_AIController* PackMember : PackMembers)
-    {
-        if (PackMember && PackMember != this && CurrentTarget)
-        {
-            PackMember->SetCombatTarget(CurrentTarget);
-        }
-    }
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, FString::Printf(TEXT("Called %d pack members for backup!"), PackMembers.Num()));
-    }
+    AlliedUnits.Remove(AllyActor);
 }
 
 void ACombat_AIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (Actor && Actor->IsA<APawn>() && Actor != GetPawn())
+        if (Actor && Actor->IsA<ATranspersonalCharacter>())
         {
-            // Check if this is a potential threat (player or other dinosaur)
-            if (Actor->ActorHasTag(TEXT("Player")) || Actor->ActorHasTag(TEXT("Dinosaur")))
-            {
-                SetCombatTarget(Actor);
-                break;
-            }
+            float ThreatLevel = 1.0f; // Player is always high threat
+            UpdateThreatAssessment(Actor, ThreatLevel);
+            break;
         }
     }
 }
@@ -238,141 +253,218 @@ void ACombat_AIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus 
     {
         return;
     }
-    
+
     if (Stimulus.WasSuccessfullySensed())
     {
-        // Target detected
-        if (Actor->ActorHasTag(TEXT("Player")))
+        if (Actor->IsA<ATranspersonalCharacter>())
         {
-            SetCombatTarget(Actor);
+            UpdateThreatAssessment(Actor, 1.0f);
+            SetBehaviorState(ECombat_AIBehaviorState::Alert);
         }
     }
     else
     {
-        // Target lost
-        if (Actor == CurrentTarget)
+        // Lost sight of target
+        CurrentThreat.TimeSinceLastSeen = 0.0f;
+        if (TacticalState.CurrentBehaviorState == ECombat_AIBehaviorState::Alert)
         {
-            LastKnownTargetLocation = Actor->GetActorLocation();
-            ClearCombatTarget();
+            SetBehaviorState(ECombat_AIBehaviorState::Investigating);
         }
     }
 }
 
-void ACombat_AIController::UpdateCombatState()
+void ACombat_AIController::UpdateCombatState(float DeltaTime)
 {
-    if (!GetPawn())
+    LastThreatUpdateTime += DeltaTime;
+    LastCommunicationTime += DeltaTime;
+    TacticalState.CombatTimer += DeltaTime;
+    CurrentThreat.TimeSinceLastSeen += DeltaTime;
+
+    if (LastThreatUpdateTime >= CombatStateUpdateInterval)
+    {
+        ProcessThreatAssessment();
+        ExecuteCombatBehavior();
+        LastThreatUpdateTime = 0.0f;
+    }
+
+    if (LastCommunicationTime >= CommunicationInterval)
+    {
+        HandleCombatCommunication();
+        LastCommunicationTime = 0.0f;
+    }
+}
+
+void ACombat_AIController::ProcessThreatAssessment()
+{
+    if (!PrimaryTarget)
+    {
+        TacticalState.bInCombat = false;
+        if (TacticalState.CurrentBehaviorState != ECombat_AIBehaviorState::Idle)
+        {
+            SetBehaviorState(ECombat_AIBehaviorState::Idle);
+        }
+        return;
+    }
+
+    // Update threat distance
+    CurrentThreat.Distance = FVector::Dist(GetPawn()->GetActorLocation(), PrimaryTarget->GetActorLocation());
+
+    // Determine if in combat range
+    bool bWasInCombat = TacticalState.bInCombat;
+    TacticalState.bInCombat = CurrentThreat.Distance <= (AttackRange * 2.0f);
+
+    // Update aggression and fear based on threat assessment
+    if (TacticalState.bInCombat)
+    {
+        TacticalState.AggressionLevel = FMath::Clamp(TacticalState.AggressionLevel + 0.1f, 0.0f, 1.0f);
+        TacticalState.FearLevel = FMath::Clamp(CurrentThreat.ThreatLevel - 0.5f, 0.0f, 1.0f);
+    }
+    else
+    {
+        TacticalState.AggressionLevel = FMath::Clamp(TacticalState.AggressionLevel - 0.05f, 0.0f, 1.0f);
+        TacticalState.FearLevel = FMath::Clamp(TacticalState.FearLevel - 0.1f, 0.0f, 1.0f);
+    }
+
+    // State transitions based on combat status
+    if (!bWasInCombat && TacticalState.bInCombat)
+    {
+        SetBehaviorState(ECombat_AIBehaviorState::Engaging);
+    }
+    else if (bWasInCombat && !TacticalState.bInCombat && CurrentThreat.TimeSinceLastSeen > 5.0f)
+    {
+        SetBehaviorState(ECombat_AIBehaviorState::Idle);
+    }
+}
+
+void ACombat_AIController::ExecuteCombatBehavior()
+{
+    if (!TacticalState.bInCombat || !PrimaryTarget)
     {
         return;
     }
-    
-    // Check health for flee condition
-    // Note: This would typically check the pawn's health component
-    // For now, we'll use a placeholder condition
-    
-    // Update target distance if we have a target
-    if (CurrentTarget)
-    {
-        float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-        
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->SetValueAsFloat(TEXT("DistanceToTarget"), DistanceToTarget);
-        }
-        
-        // Check if target is in attack range
-        if (DistanceToTarget <= AttackRange && CurrentAIState == ECombat_AIState::Combat)
-        {
-            ExecuteAttack();
-        }
-    }
+
+    ECombat_TacticalManeuver OptimalManeuver = SelectOptimalManeuver();
+    ExecuteTacticalManeuver(OptimalManeuver);
 }
 
-void ACombat_AIController::HandleCombatBehavior()
+void ACombat_AIController::UpdateFormationPosition()
 {
-    switch (CurrentAIState)
+    if (TacticalState.FormationRole == ECombat_FormationRole::Solo)
     {
-        case ECombat_AIState::Patrol:
-            // Patrol behavior handled by behavior tree
-            break;
-            
-        case ECombat_AIState::Combat:
-            if (CurrentTarget)
-            {
-                // Combat behavior handled by behavior tree and ExecuteAttack
-            }
-            else
-            {
-                // No target, return to patrol
-                CurrentAIState = ECombat_AIState::Patrol;
-                if (BlackboardComponent)
-                {
-                    BlackboardComponent->SetValueAsEnum(TEXT("AIState"), static_cast<uint8>(CurrentAIState));
-                }
-            }
-            break;
-            
-        case ECombat_AIState::Flee:
-            // Flee behavior handled by behavior tree
-            break;
-            
-        case ECombat_AIState::Hunt:
-            // Hunt behavior for predators
-            break;
+        return;
     }
-}
 
-void ACombat_AIController::UpdatePackBehavior()
-{
-    // Find nearby pack members of the same species
-    PackMembers.Empty();
-    
-    if (GetWorld())
-    {
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACombat_AIController::StaticClass(), FoundActors);
-        
-        for (AActor* Actor : FoundActors)
-        {
-            ACombat_AIController* OtherController = Cast<ACombat_AIController>(Actor);
-            if (OtherController && OtherController != this && OtherController->DinosaurSpecies == DinosaurSpecies)
-            {
-                float Distance = FVector::Dist(GetActorLocation(), OtherController->GetActorLocation());
-                if (Distance <= 3000.0f) // Pack range
-                {
-                    PackMembers.Add(OtherController);
-                }
-            }
-        }
-    }
-    
-    // Determine pack leadership (first controller becomes leader)
-    bIsPackLeader = PackMembers.Num() > 0;
-    
+    FVector FormationPosition = CalculateFormationPosition();
     if (BlackboardComponent)
     {
-        BlackboardComponent->SetValueAsBool(TEXT("IsPackLeader"), bIsPackLeader);
-        BlackboardComponent->SetValueAsInt(TEXT("PackSize"), PackMembers.Num() + 1);
+        BlackboardComponent->SetValueAsVector(TEXT("FormationPosition"), FormationPosition);
     }
 }
 
-bool ACombat_AIController::CanAttackTarget() const
+void ACombat_AIController::HandleCombatCommunication()
 {
-    if (!CurrentTarget || !GetPawn())
+    // Placeholder for combat communication system
+    // This would integrate with audio system for tactical callouts
+}
+
+ECombat_TacticalManeuver ACombat_AIController::SelectOptimalManeuver() const
+{
+    if (ShouldRetreat())
     {
-        return false;
+        return ECombat_TacticalManeuver::Retreat;
     }
+
+    if (CurrentThreat.Distance <= AttackRange)
+    {
+        return ECombat_TacticalManeuver::DirectAssault;
+    }
+
+    // Formation-based maneuver selection
+    switch (TacticalState.FormationRole)
+    {
+        case ECombat_FormationRole::Alpha:
+            return ECombat_TacticalManeuver::DirectAssault;
+        case ECombat_FormationRole::Flanker:
+            return FMath::RandBool() ? ECombat_TacticalManeuver::FlankLeft : ECombat_TacticalManeuver::FlankRight;
+        case ECombat_FormationRole::Distractor:
+            return ECombat_TacticalManeuver::Distraction;
+        case ECombat_FormationRole::Ambusher:
+            return ECombat_TacticalManeuver::Ambush;
+        default:
+            return ECombat_TacticalManeuver::DirectAssault;
+    }
+}
+
+bool ACombat_AIController::ShouldEngageTarget() const
+{
+    return TacticalState.AggressionLevel > 0.6f && TacticalState.FearLevel < 0.4f;
+}
+
+bool ACombat_AIController::ShouldRetreat() const
+{
+    return TacticalState.FearLevel > RetreatThreshold || 
+           (CurrentThreat.ThreatLevel > 0.8f && TacticalState.AggressionLevel < 0.3f);
+}
+
+FVector ACombat_AIController::FindOptimalCoverPosition() const
+{
+    if (!GetPawn())
+    {
+        return FVector::ZeroVector;
+    }
+
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    FVector RetreatDirection = -GetPawn()->GetActorForwardVector();
     
-    float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-    return DistanceToTarget <= AttackRange;
+    return MyLocation + (RetreatDirection * 1000.0f);
 }
 
-void ACombat_AIController::BroadcastThreatToPackMembers(AActor* Threat)
+void ACombat_AIController::UpdateFormationRole()
 {
-    for (ACombat_AIController* PackMember : PackMembers)
+    // Dynamic role assignment based on combat situation
+    if (AlliedUnits.Num() <= 1)
     {
-        if (PackMember && PackMember != this)
+        AssignFormationRole(ECombat_FormationRole::Solo);
+    }
+    else if (TacticalState.FormationRole == ECombat_FormationRole::Solo)
+    {
+        // Assign role based on position in pack
+        AssignFormationRole(ECombat_FormationRole::Flanker);
+    }
+}
+
+FVector ACombat_AIController::CalculateFormationPosition() const
+{
+    if (!PrimaryTarget || AlliedUnits.Num() == 0)
+    {
+        return GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+    }
+
+    FVector TargetLocation = PrimaryTarget->GetActorLocation();
+    
+    switch (TacticalState.FormationRole)
+    {
+        case ECombat_FormationRole::Alpha:
+            return TargetLocation + (GetPawn()->GetActorForwardVector() * -AttackRange);
+        case ECombat_FormationRole::Flanker:
+            return CalculateFlankingPosition(PrimaryTarget);
+        default:
+            return GetPawn()->GetActorLocation();
+    }
+}
+
+void ACombat_AIController::CoordinateWithAllies()
+{
+    // Placeholder for ally coordination system
+    for (AActor* Ally : AlliedUnits)
+    {
+        if (ACombat_AIController* AllyController = Cast<ACombat_AIController>(Cast<APawn>(Ally)->GetController()))
         {
-            PackMember->SetCombatTarget(Threat);
+            // Share threat information
+            if (PrimaryTarget)
+            {
+                AllyController->UpdateThreatAssessment(PrimaryTarget, CurrentThreat.ThreatLevel);
+            }
         }
     }
 }
