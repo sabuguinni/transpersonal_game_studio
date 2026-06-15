@@ -3,115 +3,59 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "Animation/AnimSequence.h"
+#include "Animation/BlendSpace1D.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "SharedTypes.h"
 #include "Anim_SurvivalAnimInstance.generated.h"
 
 UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
+enum class EAnim_SurvivalState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Walking     UMETA(DisplayName = "Walking"),
     Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
     Crouching   UMETA(DisplayName = "Crouching"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
+    Crafting    UMETA(DisplayName = "Crafting"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Gathering   UMETA(DisplayName = "Gathering"),
+    Climbing    UMETA(DisplayName = "Climbing"),
     Swimming    UMETA(DisplayName = "Swimming"),
-    Climbing    UMETA(DisplayName = "Climbing")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_SurvivalAction : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Crafting        UMETA(DisplayName = "Crafting"),
-    Combat          UMETA(DisplayName = "Combat"),
-    SpearThrow      UMETA(DisplayName = "Spear Throw"),
-    StoneKnapping   UMETA(DisplayName = "Stone Knapping"),
-    FireMaking      UMETA(DisplayName = "Fire Making"),
-    Cooking         UMETA(DisplayName = "Cooking"),
-    Building        UMETA(DisplayName = "Building"),
-    Healing         UMETA(DisplayName = "Healing"),
-    Sleeping        UMETA(DisplayName = "Sleeping"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Eating          UMETA(DisplayName = "Eating")
+    Injured     UMETA(DisplayName = "Injured"),
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Alert       UMETA(DisplayName = "Alert")
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_MotionMatchingData
+struct TRANSPERSONALGAME_API FAnim_FootIKData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    FVector Velocity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    FVector Acceleration;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    bool bIsCrouching;
-
-    FAnim_MotionMatchingData()
-    {
-        Velocity = FVector::ZeroVector;
-        Acceleration = FVector::ZeroVector;
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsMoving = false;
-        bIsInAir = false;
-        bIsCrouching = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FAnim_IKFootData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     FVector LeftFootLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     FVector RightFootLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     FRotator LeftFootRotation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     FRotator RightFootRotation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     float LeftFootAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     float RightFootAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
     float HipOffset;
 
-    FAnim_IKFootData()
+    FAnim_FootIKData()
     {
         LeftFootLocation = FVector::ZeroVector;
         RightFootLocation = FVector::ZeroVector;
@@ -123,6 +67,52 @@ struct FAnim_IKFootData
     }
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_MovementData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FVector Velocity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FVector Acceleration;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsCrouching;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float GroundDistance;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float LeanAmount;
+
+    FAnim_MovementData()
+    {
+        Speed = 0.0f;
+        Direction = 0.0f;
+        Velocity = FVector::ZeroVector;
+        Acceleration = FVector::ZeroVector;
+        bIsInAir = false;
+        bIsCrouching = false;
+        GroundDistance = 0.0f;
+        LeanAmount = 0.0f;
+    }
+};
+
+/**
+ * Advanced Animation Instance for primitive human survival gameplay
+ * Handles complex state transitions, IK foot placement, and survival-specific animations
+ */
 UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UAnim_SurvivalAnimInstance : public UAnimInstance
 {
@@ -135,116 +125,143 @@ protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Movement State Management
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_MovementState CurrentMovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_SurvivalAction CurrentSurvivalAction;
-
-    // Motion Matching Data
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    FAnim_MotionMatchingData MotionData;
-
-    // IK Foot Placement
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FAnim_IKFootData IKData;
-
-    // Character Reference
+    // Character reference
     UPROPERTY(BlueprintReadOnly, Category = "Character")
     ACharacter* OwningCharacter;
 
     UPROPERTY(BlueprintReadOnly, Category = "Character")
-    UCharacterMovementComponent* MovementComponent;
+    UCharacterMovementComponent* CharacterMovement;
 
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    UBlendSpace* LocomotionBlendSpace;
+    // Current survival state
+    UPROPERTY(BlueprintReadOnly, Category = "Survival State")
+    EAnim_SurvivalState CurrentSurvivalState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* IdleAnimation;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival State")
+    EAnim_SurvivalState PreviousSurvivalState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpStartAnimation;
+    // Movement data
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FAnim_MovementData MovementData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpLoopAnimation;
+    // Foot IK system
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FAnim_FootIKData FootIKData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    UAnimSequence* JumpEndAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    bool bEnableFootIK;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animations")
-    TMap<EAnim_SurvivalAction, UAnimMontage*> SurvivalActionMontages;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float FootIKTraceDistance;
 
-    // Animation Parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    float MovementSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float FootIKInterpSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    float MovementDirection;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    bool bIsClimbing;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Parameters")
-    bool bIsSwimming;
-
-    // Survival Action Parameters
+    // Survival stats influence on animation
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsHunting;
+    float HealthPercentage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsGathering;
+    float StaminaPercentage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsCrafting;
+    float HungerPercentage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    bool bIsInCombat;
+    float FearLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float StaminaLevel;
+    // Animation assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UBlendSpace1D* LocomotionBlendSpace;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float HealthLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* CraftingMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* HuntingMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* GatheringMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UAnimMontage* ClimbingMontage;
+
+    // State transition parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transitions")
+    float IdleToWalkThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transitions")
+    float WalkToRunThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transitions")
+    float StateTransitionTime;
+
+    // Environmental awareness
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    bool bIsNearPredator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    bool bIsNearWater;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    bool bIsOnSteepSlope;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    float SlopeAngle;
 
 private:
-    // Internal Methods
-    void UpdateMovementState();
-    void UpdateMotionMatchingData();
-    void UpdateIKFootPlacement();
-    void CalculateFootIK(const FName& FootBoneName, const FName& IKBoneName, float& FootAlpha, FVector& FootLocation, FRotator& FootRotation);
-    FVector PerformLineTrace(const FVector& StartLocation, float TraceDistance) const;
+    // Internal update functions
+    void UpdateMovementData(float DeltaTime);
+    void UpdateSurvivalState(float DeltaTime);
+    void UpdateFootIK(float DeltaTime);
+    void UpdateSurvivalStats(float DeltaTime);
+    void UpdateEnvironmentalAwareness(float DeltaTime);
+
+    // Foot IK helper functions
+    FVector PerformFootTrace(const FVector& FootLocation, const FName& SocketName);
+    void CalculateFootIKValues(float DeltaTime);
+
+    // State transition logic
+    EAnim_SurvivalState DetermineSurvivalState();
+    bool CanTransitionToState(EAnim_SurvivalState NewState);
+
+    // Cached values for smooth transitions
+    float CachedSpeed;
+    float CachedDirection;
+    float StateTransitionTimer;
 
 public:
-    // Blueprint Callable Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlaySurvivalAction(EAnim_SurvivalAction Action);
+    // Blueprint callable functions
+    UFUNCTION(BlueprintCallable, Category = "Survival Animation")
+    void PlaySurvivalMontage(EAnim_SurvivalState SurvivalAction);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopSurvivalAction();
+    UFUNCTION(BlueprintCallable, Category = "Survival Animation")
+    void SetSurvivalState(EAnim_SurvivalState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool IsSurvivalActionPlaying() const;
+    UFUNCTION(BlueprintCallable, Category = "Survival Animation")
+    bool IsInSurvivalState(EAnim_SurvivalState StateToCheck) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EAnim_MovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "IK")
+    UFUNCTION(BlueprintCallable, Category = "Foot IK")
     void EnableFootIK(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementSpeedRatio() const;
+    UFUNCTION(BlueprintCallable, Category = "Environmental")
+    void SetEnvironmentalState(bool bNearPredator, bool bNearWater, bool bOnSteepSlope);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FVector GetMovementDirection() const;
+    // Getters for animation blueprint
+    UFUNCTION(BlueprintPure, Category = "Movement")
+    float GetMovementSpeed() const { return MovementData.Speed; }
+
+    UFUNCTION(BlueprintPure, Category = "Movement")
+    float GetMovementDirection() const { return MovementData.Direction; }
+
+    UFUNCTION(BlueprintPure, Category = "Movement")
+    bool IsMoving() const { return MovementData.Speed > IdleToWalkThreshold; }
+
+    UFUNCTION(BlueprintPure, Category = "Movement")
+    bool IsRunning() const { return MovementData.Speed > WalkToRunThreshold; }
+
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    EAnim_SurvivalState GetCurrentSurvivalState() const { return CurrentSurvivalState; }
+
+    UFUNCTION(BlueprintPure, Category = "Foot IK")
+    FAnim_FootIKData GetFootIKData() const { return FootIKData; }
 };
