@@ -4,79 +4,14 @@
 #include "Engine/DataAsset.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
+#include "SharedTypes.h"
 #include "Anim_CombatAnimSet.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_CombatState : uint8
-{
-    Idle            UMETA(DisplayName = "Idle"),
-    Ready           UMETA(DisplayName = "Combat Ready"),
-    Attacking       UMETA(DisplayName = "Attacking"),
-    Blocking        UMETA(DisplayName = "Blocking"),
-    Dodging         UMETA(DisplayName = "Dodging"),
-    Stunned         UMETA(DisplayName = "Stunned"),
-    Dead            UMETA(DisplayName = "Dead")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_WeaponType : uint8
-{
-    Unarmed         UMETA(DisplayName = "Unarmed"),
-    Spear           UMETA(DisplayName = "Spear"),
-    Club            UMETA(DisplayName = "Club"),
-    Bow             UMETA(DisplayName = "Bow"),
-    Stone           UMETA(DisplayName = "Stone Tool"),
-    Torch           UMETA(DisplayName = "Torch")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_CombatMontages
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attack Montages")
-    TArray<UAnimMontage*> LightAttacks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attack Montages")
-    TArray<UAnimMontage*> HeavyAttacks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defense Montages")
-    UAnimMontage* BlockStart;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defense Montages")
-    UAnimMontage* BlockLoop;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defense Montages")
-    UAnimMontage* BlockEnd;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Montages")
-    UAnimMontage* DodgeLeft;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Montages")
-    UAnimMontage* DodgeRight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Montages")
-    UAnimMontage* DodgeBack;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction Montages")
-    TArray<UAnimMontage*> HitReactions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction Montages")
-    UAnimMontage* Death;
-
-    FAnim_CombatMontages()
-    {
-        BlockStart = nullptr;
-        BlockLoop = nullptr;
-        BlockEnd = nullptr;
-        DodgeLeft = nullptr;
-        DodgeRight = nullptr;
-        DodgeBack = nullptr;
-        Death = nullptr;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
+/**
+ * Data asset containing all combat animations for primitive human characters
+ * Organized by weapon type and combat action for prehistoric survival gameplay
+ */
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UAnim_CombatAnimSet : public UDataAsset
 {
     GENERATED_BODY()
@@ -84,40 +19,133 @@ class TRANSPERSONALGAME_API UAnim_CombatAnimSet : public UDataAsset
 public:
     UAnim_CombatAnimSet();
 
-    // Combat animation sets for different weapon types
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Animations")
-    TMap<EAnim_WeaponType, FAnim_CombatMontages> WeaponAnimSets;
+    // Unarmed Combat Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedAttack1;
 
-    // Shared animations (weapon-independent)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shared Animations")
-    UAnimSequence* CombatIdleAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedAttack2;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shared Animations")
-    UAnimSequence* CombatWalkAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedAttack3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shared Animations")
-    UAnimSequence* CombatRunAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedBlock;
 
-    // Animation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float AttackComboWindow;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedDodgeLeft;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float BlockTransitionSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedDodgeRight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float DodgeInvulnerabilityTime;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Unarmed Combat")
+    class UAnimMontage* UnarmedDodgeBack;
 
-    // Utility functions
+    // Stone Tool Combat Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneAxeAttack1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneAxeAttack2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneAxeHeavyAttack;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneKnifeStab;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneKnifeSlash;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stone Tools")
+    class UAnimMontage* StoneHammerSmash;
+
+    // Spear Combat Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spear Combat")
+    class UAnimMontage* SpearThrust;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spear Combat")
+    class UAnimMontage* SpearSweep;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spear Combat")
+    class UAnimMontage* SpearThrow;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spear Combat")
+    class UAnimMontage* SpearBlock;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spear Combat")
+    class UAnimMontage* SpearRetrieve;
+
+    // Bow Combat Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bow Combat")
+    class UAnimMontage* BowDraw;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bow Combat")
+    class UAnimMontage* BowAim;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bow Combat")
+    class UAnimMontage* BowRelease;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bow Combat")
+    class UAnimMontage* BowReload;
+
+    // Defensive Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Defense")
+    class UAnimMontage* ShieldBlock;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Defense")
+    class UAnimMontage* ShieldBash;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Defense")
+    class UAnimMontage* RollDodge;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Defense")
+    class UAnimMontage* CrouchBlock;
+
+    // Reaction Animations
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* HitReactionLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* HitReactionMedium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* HitReactionHeavy;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* KnockdownFront;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* KnockdownBack;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* GetUpFront;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* GetUpBack;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Reactions")
+    class UAnimMontage* Death;
+
+    // Utility Functions
     UFUNCTION(BlueprintCallable, Category = "Combat Animations")
-    FAnim_CombatMontages GetCombatMontages(EAnim_WeaponType WeaponType) const;
+    UAnimMontage* GetUnarmedAttackMontage(int32 AttackIndex) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Animations")
-    UAnimMontage* GetRandomAttackMontage(EAnim_WeaponType WeaponType, bool bHeavyAttack = false) const;
+    UAnimMontage* GetWeaponAttackMontage(EAnim_WeaponType WeaponType, int32 AttackIndex) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Animations")
-    UAnimMontage* GetRandomHitReaction(EAnim_WeaponType WeaponType) const;
+    UAnimMontage* GetDefenseMontage(EAnim_DefenseType DefenseType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat Animations")
-    bool HasAnimationsForWeapon(EAnim_WeaponType WeaponType) const;
+    UAnimMontage* GetReactionMontage(EAnim_HitReactionType ReactionType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Animations")
+    TArray<UAnimMontage*> GetAllMontagesForWeapon(EAnim_WeaponType WeaponType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Animations")
+    bool HasValidMontages() const;
+
+private:
+    void ValidateAnimationAssets();
 };
