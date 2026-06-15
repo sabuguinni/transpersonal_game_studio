@@ -1,87 +1,77 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_PerformanceMonitor.generated.h"
 
 USTRUCT(BlueprintType)
-struct FEng_PerformanceMetrics
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    float FrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentFPS;
 
-    UPROPERTY(BlueprintReadOnly)
-    float FrameTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFPS;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 DrawCalls;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveActorCount;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 ActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveDinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float MemoryUsageMB;
 
-    UPROPERTY(BlueprintReadOnly)
-    float CPUTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    float GPUTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CPUUsagePercent;
 
     FEng_PerformanceMetrics()
     {
-        FrameRate = 0.0f;
-        FrameTime = 0.0f;
-        DrawCalls = 0;
-        ActorCount = 0;
+        CurrentFPS = 60.0f;
+        AverageFPS = 60.0f;
+        ActiveActorCount = 0;
+        ActiveDinosaurCount = 0;
         MemoryUsageMB = 0.0f;
-        CPUTime = 0.0f;
-        GPUTime = 0.0f;
+        CPUUsagePercent = 0.0f;
     }
 };
 
-UCLASS()
-class TRANSPERSONALGAME_API UEng_PerformanceMonitor : public UGameInstanceSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_PerformanceMonitor : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
     virtual void Tick(float DeltaTime) override;
-    virtual bool IsTickable() const override { return true; }
-    virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UEng_PerformanceMonitor, STATGROUP_Tickables); }
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_PerformanceMetrics GetCurrentMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartProfiling();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopProfiling();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsProfilingActive() const { return bIsProfilingActive; }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceReport();
-
-private:
-    UPROPERTY()
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY()
-    bool bIsProfilingActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    TArray<float> FPSHistory;
 
-    UPROPERTY()
-    float ProfilingInterval;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MonitoringInterval;
 
-    UPROPERTY()
-    float TimeSinceLastUpdate;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float LastMonitorTime;
 
-    void UpdateMetrics();
-    void CheckPerformanceThresholds();
+public:
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FEng_PerformanceMetrics GetCurrentMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceAcceptable();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void TriggerPerformanceOptimization();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFPS(int32 SampleCount = 60);
 };
