@@ -3,16 +3,16 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
+#include "Components/ActorComponent.h"
 #include "QA_TestManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
-    NotRun      UMETA(DisplayName = "Not Run"),
-    Pass        UMETA(DisplayName = "Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
-    Warning     UMETA(DisplayName = "Warning")
+    Pass,
+    Fail,
+    Warning,
+    Info
 };
 
 USTRUCT(BlueprintType)
@@ -20,104 +20,121 @@ struct FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
-    FString TestDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     EQA_TestResult Result;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
-    FString ErrorMessage;
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     float ExecutionTime;
 
     FQA_TestCase()
     {
         TestName = TEXT("");
-        TestDescription = TEXT("");
-        Result = EQA_TestResult::NotRun;
-        ErrorMessage = TEXT("");
+        Result = EQA_TestResult::Info;
+        Description = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQA_TestManager : public AActor
+class TRANSPERSONALGAME_API UQA_TestManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQA_TestManager();
+    UQA_TestManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Testing")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Testing")
-    bool bAutoRunOnBeginPlay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Testing")
-    float TestInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Testing")
-    int32 PassedTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Testing")
-    int32 FailedTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Testing")
-    int32 WarningTests;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Testing")
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Test execution functions
+    UFUNCTION(BlueprintCallable, Category = "QA")
     void RunAllTests();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    void RunSingleTest(const FString& TestName);
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void RunCharacterTests();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void RunWorldTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void RunDinosaurTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void RunPerformanceTests();
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void RunIntegrationTests();
+
+    // Test result management
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    void AddTestResult(const FString& TestName, EQA_TestResult Result, const FString& Description);
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    TArray<FQA_TestCase> GetTestResults() const { return TestResults; }
+
+    UFUNCTION(BlueprintCallable, Category = "QA")
     void ClearTestResults();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    FQA_TestCase GetTestResult(const FString& TestName);
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    int32 GetPassCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    TArray<FQA_TestCase> GetAllTestResults();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    int32 GetFailCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    void AddTestCase(const FString& Name, const FString& Description);
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    float GetOverallHealthScore() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    bool ValidateGameMode();
+    // Validation utilities
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    bool ValidateActorCount();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    bool ValidateCharacterSystems();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    bool ValidatePerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    bool ValidateWorldGeneration();
+    UFUNCTION(BlueprintCallable, Category = "QA")
+    bool ValidateSystemIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    bool ValidateVFXSystems();
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    TArray<FQA_TestCase> TestResults;
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    bool ValidateAudioSystems();
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    int32 MaxActorCount;
 
-    UFUNCTION(BlueprintCallable, Category = "Testing")
-    void GenerateTestReport();
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    int32 MaxDinosaurCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    float TargetFrameRate;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    bool bAutoRunTests;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    float TestInterval;
 
 private:
-    FTimerHandle TestTimerHandle;
-    
-    void ExecuteTest(FQA_TestCase& TestCase);
-    void LogTestResult(const FQA_TestCase& TestCase);
-    void UpdateTestStatistics();
+    float LastTestTime;
+    bool bTestsRunning;
+
+    // Internal test functions
+    void TestCharacterSpawning();
+    void TestDinosaurBehavior();
+    void TestWorldGeneration();
+    void TestLightingSetup();
+    void TestAudioSystems();
+    void TestUIElements();
+    void TestSaveSystem();
+    void TestNetworking();
+    void TestMemoryUsage();
+    void TestFrameRate();
 };
