@@ -1,266 +1,370 @@
 #include "Arch_StructureManager.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/Engine.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
 AArch_StructureManager::AArch_StructureManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
-    // Create structure mesh component
-    StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
-    StructureMesh->SetupAttachment(RootComponent);
-
-    // Create protection zone
-    ProtectionZone = CreateDefaultSubobject<UBoxComponent>(TEXT("ProtectionZone"));
-    ProtectionZone->SetupAttachment(RootComponent);
-    ProtectionZone->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
-    ProtectionZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    ProtectionZone->SetCollisionResponseToAllChannels(ECR_Ignore);
-    ProtectionZone->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Bind overlap events
-    ProtectionZone->OnComponentBeginOverlap.AddDynamic(this, &AArch_StructureManager::OnProtectionZoneBeginOverlap);
-    ProtectionZone->OnComponentEndOverlap.AddDynamic(this, &AArch_StructureManager::OnProtectionZoneEndOverlap);
-
-    // Initialize default config
-    StructureConfig.StructureType = EArch_StructureType::StoneArchway;
-    StructureConfig.ProtectionRadius = 500.0f;
-    StructureConfig.TemperatureModifier = 5.0f;
-    StructureConfig.bProvidesWeatherProtection = true;
-    StructureConfig.MaxOccupants = 4;
-
-    CurrentOccupants.Empty();
+    MinDistanceBetweenStructures = 500.0f;
+    MaxStructuresPerBiome = 10;
 }
 
 void AArch_StructureManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UpdateStructureMesh();
-    UpdateProtectionRadius();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Structure initialized - Type: %d, Protection Radius: %.1f"), 
-           (int32)StructureConfig.StructureType, StructureConfig.ProtectionRadius);
 }
 
-void AArch_StructureManager::Tick(float DeltaTime)
+void AArch_StructureManager::SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation)
 {
-    Super::Tick(DeltaTime);
-
-    // Clean up invalid occupants
-    CurrentOccupants.RemoveAll([](AActor* Actor) {
-        return !IsValid(Actor);
-    });
-
-    // Update protection effects for occupants
-    for (AActor* Occupant : CurrentOccupants)
-    {
-        if (IsValid(Occupant))
-        {
-            // Apply temperature modifier and weather protection
-            // This would integrate with survival system
-            FVector OccupantLocation = Occupant->GetActorLocation();
-            float ProtectionLevel = GetProtectionLevel(OccupantLocation);
-            
-            // Log protection status for debugging
-            if (GEngine && GetWorld()->GetTimeSeconds() - GetWorld()->GetDeltaSeconds() < 1.0f)
-            {
-                FString DebugMsg = FString::Printf(TEXT("Occupant %s - Protection: %.1f%%"), 
-                                                 *Occupant->GetName(), ProtectionLevel * 100.0f);
-                GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Green, DebugMsg);
-            }
-        }
-    }
-}
-
-bool AArch_StructureManager::CanEnterStructure(AActor* Actor)
-{
-    if (!IsValid(Actor))
-    {
-        return false;
-    }
-
-    // Check if already inside
-    if (CurrentOccupants.Contains(Actor))
-    {
-        return false;
-    }
-
-    // Check occupancy limit
-    if (CurrentOccupants.Num() >= StructureConfig.MaxOccupants)
-    {
-        return false;
-    }
-
-    // Check if actor is within protection zone
-    FVector ActorLocation = Actor->GetActorLocation();
-    return IsLocationProtected(ActorLocation);
-}
-
-bool AArch_StructureManager::EnterStructure(AActor* Actor)
-{
-    if (!CanEnterStructure(Actor))
-    {
-        return false;
-    }
-
-    CurrentOccupants.AddUnique(Actor);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Actor %s entered structure. Occupants: %d/%d"), 
-           *Actor->GetName(), CurrentOccupants.Num(), StructureConfig.MaxOccupants);
-    
-    return true;
-}
-
-bool AArch_StructureManager::ExitStructure(AActor* Actor)
-{
-    if (!IsValid(Actor))
-    {
-        return false;
-    }
-
-    bool bWasRemoved = CurrentOccupants.Remove(Actor) > 0;
-    
-    if (bWasRemoved)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Actor %s exited structure. Occupants: %d/%d"), 
-               *Actor->GetName(), CurrentOccupants.Num(), StructureConfig.MaxOccupants);
-    }
-    
-    return bWasRemoved;
-}
-
-float AArch_StructureManager::GetProtectionLevel(const FVector& Location)
-{
-    if (!StructureConfig.bProvidesWeatherProtection)
-    {
-        return 0.0f;
-    }
-
-    FVector StructureLocation = GetActorLocation();
-    float Distance = FVector::Dist(Location, StructureLocation);
-    
-    if (Distance <= StructureConfig.ProtectionRadius)
-    {
-        // Linear falloff from center to edge
-        float ProtectionLevel = 1.0f - (Distance / StructureConfig.ProtectionRadius);
-        return FMath::Clamp(ProtectionLevel, 0.0f, 1.0f);
-    }
-    
-    return 0.0f;
-}
-
-bool AArch_StructureManager::IsLocationProtected(const FVector& Location)
-{
-    return GetProtectionLevel(Location) > 0.0f;
-}
-
-void AArch_StructureManager::SetStructureType(EArch_StructureType NewType)
-{
-    if (StructureConfig.StructureType != NewType)
-    {
-        StructureConfig.StructureType = NewType;
-        UpdateStructureMesh();
-        UpdateProtectionRadius();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Structure type changed to %d"), (int32)NewType);
-    }
-}
-
-void AArch_StructureManager::OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (IsValid(OtherActor) && OtherActor != this)
-    {
-        // Auto-enter for player characters
-        if (OtherActor->IsA<APawn>())
-        {
-            EnterStructure(OtherActor);
-        }
-    }
-}
-
-void AArch_StructureManager::OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (IsValid(OtherActor) && OtherActor != this)
-    {
-        ExitStructure(OtherActor);
-    }
-}
-
-void AArch_StructureManager::UpdateStructureMesh()
-{
-    if (!StructureMesh)
+    if (!IsValidSpawnLocation(Location))
     {
         return;
     }
 
-    // Set appropriate mesh based on structure type
-    UStaticMesh* MeshToUse = nullptr;
-    
-    switch (StructureConfig.StructureType)
+    AActor* NewStructure = nullptr;
+
+    switch (StructureType)
     {
-        case EArch_StructureType::StoneArchway:
-            // Use default cube for now - will be replaced with proper archway mesh
-            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-            if (MeshToUse)
-            {
-                StructureMesh->SetWorldScale3D(FVector(4.0f, 1.0f, 3.0f));
-            }
+        case EArch_StructureType::StoneCircle:
+            NewStructure = CreateStoneCircle(Location, Rotation);
             break;
-            
         case EArch_StructureType::CaveEntrance:
-            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-            if (MeshToUse)
-            {
-                StructureMesh->SetWorldScale3D(FVector(3.0f, 3.0f, 2.0f));
-            }
+            NewStructure = CreateCaveEntrance(Location, Rotation);
             break;
-            
-        case EArch_StructureType::RockShelter:
-            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-            if (MeshToUse)
-            {
-                StructureMesh->SetWorldScale3D(FVector(5.0f, 5.0f, 2.0f));
-            }
+        case EArch_StructureType::RockFormation:
+            NewStructure = CreateRockFormation(Location, Rotation);
             break;
-            
-        case EArch_StructureType::StonePlatform:
-            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-            if (MeshToUse)
-            {
-                StructureMesh->SetWorldScale3D(FVector(4.0f, 4.0f, 0.5f));
-            }
+        case EArch_StructureType::AncientRuin:
+            NewStructure = CreateAncientRuin(Location, Rotation);
             break;
-            
-        case EArch_StructureType::AncientRuins:
-            MeshToUse = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-            if (MeshToUse)
-            {
-                StructureMesh->SetWorldScale3D(FVector(6.0f, 6.0f, 4.0f));
-            }
+        case EArch_StructureType::NaturalArch:
+            NewStructure = CreateNaturalArch(Location, Rotation);
             break;
     }
-    
-    if (MeshToUse)
+
+    if (NewStructure)
     {
-        StructureMesh->SetStaticMesh(MeshToUse);
-        UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Mesh updated for structure type %d"), (int32)StructureConfig.StructureType);
+        SpawnedStructures.Add(NewStructure);
     }
 }
 
-void AArch_StructureManager::UpdateProtectionRadius()
+void AArch_StructureManager::GenerateStructuresInRadius(FVector CenterLocation, float Radius, int32 StructureCount)
 {
-    if (ProtectionZone)
+    for (int32 i = 0; i < StructureCount; i++)
     {
-        FVector BoxExtent = FVector(StructureConfig.ProtectionRadius, StructureConfig.ProtectionRadius, 300.0f);
-        ProtectionZone->SetBoxExtent(BoxExtent);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Arch_StructureManager: Protection radius updated to %.1f"), StructureConfig.ProtectionRadius);
+        FVector RandomLocation = CenterLocation + FVector(
+            FMath::RandRange(-Radius, Radius),
+            FMath::RandRange(-Radius, Radius),
+            0.0f
+        );
+
+        EArch_StructureType RandomType = static_cast<EArch_StructureType>(FMath::RandRange(0, 4));
+        FRotator RandomRotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
+
+        SpawnStructureAtLocation(RandomType, RandomLocation, RandomRotation);
     }
+}
+
+void AArch_StructureManager::ApplyWeatheringToStructure(AActor* StructureActor, float WeatheringLevel)
+{
+    if (!StructureActor)
+    {
+        return;
+    }
+
+    UMaterialInterface* MaterialToApply = StoneMaterial;
+
+    if (WeatheringLevel > 0.7f && MossyStoneMaterial)
+    {
+        MaterialToApply = MossyStoneMaterial;
+    }
+    else if (WeatheringLevel > 0.3f && WeatheredStoneMaterial)
+    {
+        MaterialToApply = WeatheredStoneMaterial;
+    }
+
+    ApplyMaterialToActor(StructureActor, MaterialToApply);
+}
+
+TArray<AActor*> AArch_StructureManager::GetAllStructuresInRadius(FVector CenterLocation, float Radius)
+{
+    TArray<AActor*> StructuresInRadius;
+
+    for (AActor* Structure : SpawnedStructures)
+    {
+        if (Structure && FVector::Dist(Structure->GetActorLocation(), CenterLocation) <= Radius)
+        {
+            StructuresInRadius.Add(Structure);
+        }
+    }
+
+    return StructuresInRadius;
+}
+
+void AArch_StructureManager::GeneratePrehistoricStructures()
+{
+    ClearAllStructures();
+
+    // Generate stone circles
+    for (int32 i = 0; i < 3; i++)
+    {
+        FVector Location = FVector(
+            FMath::RandRange(-5000.0f, 5000.0f),
+            FMath::RandRange(-5000.0f, 5000.0f),
+            100.0f
+        );
+        SpawnStructureAtLocation(EArch_StructureType::StoneCircle, Location);
+    }
+
+    // Generate cave entrances
+    for (int32 i = 0; i < 2; i++)
+    {
+        FVector Location = FVector(
+            FMath::RandRange(-3000.0f, 3000.0f),
+            FMath::RandRange(-3000.0f, 3000.0f),
+            200.0f
+        );
+        SpawnStructureAtLocation(EArch_StructureType::CaveEntrance, Location);
+    }
+
+    // Generate rock formations
+    GenerateStructuresInRadius(FVector::ZeroVector, 8000.0f, 5);
+}
+
+void AArch_StructureManager::ClearAllStructures()
+{
+    for (AActor* Structure : SpawnedStructures)
+    {
+        if (Structure)
+        {
+            Structure->Destroy();
+        }
+    }
+    SpawnedStructures.Empty();
+}
+
+AActor* AArch_StructureManager::CreateStoneCircle(FVector Location, FRotator Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    // Create parent actor for the stone circle
+    AActor* CircleParent = World->SpawnActor<AActor>(AActor::StaticClass(), Location, Rotation);
+    if (!CircleParent)
+    {
+        return nullptr;
+    }
+
+    CircleParent->SetActorLabel(TEXT("Stone_Circle"));
+
+    // Create individual stones in a circle
+    const int32 StoneCount = 8;
+    const float CircleRadius = 1000.0f;
+
+    for (int32 i = 0; i < StoneCount; i++)
+    {
+        float Angle = (2.0f * PI * i) / StoneCount;
+        FVector StoneOffset = FVector(
+            CircleRadius * FMath::Cos(Angle),
+            CircleRadius * FMath::Sin(Angle),
+            0.0f
+        );
+
+        AStaticMeshActor* StoneActor = World->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            Location + StoneOffset,
+            Rotation
+        );
+
+        if (StoneActor)
+        {
+            StoneActor->AttachToActor(CircleParent, FAttachmentTransformRules::KeepWorldTransform);
+            StoneActor->SetActorScale3D(FVector(0.5f, 0.5f, 3.0f));
+        }
+    }
+
+    return CircleParent;
+}
+
+AActor* AArch_StructureManager::CreateCaveEntrance(FVector Location, FRotator Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    AStaticMeshActor* CaveActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        Location,
+        Rotation
+    );
+
+    if (CaveActor)
+    {
+        CaveActor->SetActorLabel(TEXT("Cave_Entrance"));
+        CaveActor->SetActorScale3D(FVector(4.0f, 2.0f, 3.0f));
+    }
+
+    return CaveActor;
+}
+
+AActor* AArch_StructureManager::CreateRockFormation(FVector Location, FRotator Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    AActor* FormationParent = World->SpawnActor<AActor>(AActor::StaticClass(), Location, Rotation);
+    if (!FormationParent)
+    {
+        return nullptr;
+    }
+
+    FormationParent->SetActorLabel(TEXT("Rock_Formation"));
+
+    // Create cluster of rocks
+    const int32 RockCount = FMath::RandRange(3, 7);
+    for (int32 i = 0; i < RockCount; i++)
+    {
+        FVector RockOffset = FVector(
+            FMath::RandRange(-300.0f, 300.0f),
+            FMath::RandRange(-300.0f, 300.0f),
+            0.0f
+        );
+
+        AStaticMeshActor* RockActor = World->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            Location + RockOffset,
+            FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f)
+        );
+
+        if (RockActor)
+        {
+            RockActor->AttachToActor(FormationParent, FAttachmentTransformRules::KeepWorldTransform);
+            float RandomScale = FMath::RandRange(0.8f, 2.5f);
+            RockActor->SetActorScale3D(FVector(RandomScale));
+        }
+    }
+
+    return FormationParent;
+}
+
+AActor* AArch_StructureManager::CreateAncientRuin(FVector Location, FRotator Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    AActor* RuinParent = World->SpawnActor<AActor>(AActor::StaticClass(), Location, Rotation);
+    if (!RuinParent)
+    {
+        return nullptr;
+    }
+
+    RuinParent->SetActorLabel(TEXT("Ancient_Ruin"));
+
+    // Create broken pillars and wall segments
+    const int32 PillarCount = 4;
+    for (int32 i = 0; i < PillarCount; i++)
+    {
+        FVector PillarOffset = FVector(
+            (i % 2) * 400.0f - 200.0f,
+            (i / 2) * 600.0f - 300.0f,
+            0.0f
+        );
+
+        AStaticMeshActor* PillarActor = World->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            Location + PillarOffset,
+            Rotation
+        );
+
+        if (PillarActor)
+        {
+            PillarActor->AttachToActor(RuinParent, FAttachmentTransformRules::KeepWorldTransform);
+            // Broken pillar - random height
+            float BrokenHeight = FMath::RandRange(1.0f, 4.0f);
+            PillarActor->SetActorScale3D(FVector(0.6f, 0.6f, BrokenHeight));
+        }
+    }
+
+    return RuinParent;
+}
+
+AActor* AArch_StructureManager::CreateNaturalArch(FVector Location, FRotator Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    AStaticMeshActor* ArchActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        Location,
+        Rotation
+    );
+
+    if (ArchActor)
+    {
+        ArchActor->SetActorLabel(TEXT("Natural_Arch"));
+        ArchActor->SetActorScale3D(FVector(6.0f, 2.0f, 4.0f));
+    }
+
+    return ArchActor;
+}
+
+void AArch_StructureManager::ApplyMaterialToActor(AActor* Actor, UMaterialInterface* Material)
+{
+    if (!Actor || !Material)
+    {
+        return;
+    }
+
+    TArray<UStaticMeshComponent*> MeshComponents;
+    Actor->GetComponents<UStaticMeshComponent>(MeshComponents);
+
+    for (UStaticMeshComponent* MeshComp : MeshComponents)
+    {
+        if (MeshComp)
+        {
+            MeshComp->SetMaterial(0, Material);
+        }
+    }
+}
+
+bool AArch_StructureManager::IsValidSpawnLocation(FVector Location)
+{
+    // Check minimum distance from other structures
+    for (AActor* ExistingStructure : SpawnedStructures)
+    {
+        if (ExistingStructure)
+        {
+            float Distance = FVector::Dist(ExistingStructure->GetActorLocation(), Location);
+            if (Distance < MinDistanceBetweenStructures)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
