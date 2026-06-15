@@ -2,59 +2,59 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Components/PointLightComponent.h"
 #include "VFX_CampfireSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_FireIntensity : uint8
+enum class EVFX_CampfireState : uint8
 {
-    Embers      UMETA(DisplayName = "Dying Embers"),
-    Low         UMETA(DisplayName = "Low Flames"),
-    Medium      UMETA(DisplayName = "Medium Fire"),
-    High        UMETA(DisplayName = "Roaring Fire"),
-    Bonfire     UMETA(DisplayName = "Large Bonfire")
+    Unlit       UMETA(DisplayName = "Unlit"),
+    Igniting    UMETA(DisplayName = "Igniting"),
+    Burning     UMETA(DisplayName = "Burning"),
+    Dying       UMETA(DisplayName = "Dying"),
+    Extinguished UMETA(DisplayName = "Extinguished")
 };
 
 USTRUCT(BlueprintType)
-struct FVFX_FireParameters
+struct FVFX_CampfireEffects
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float FlameHeight = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* FlameEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float FlameIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* SmokeEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float SmokeAmount = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* EmberEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float SparkCount = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* SparkEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    FLinearColor FireColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* CracklingSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float LightRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float FlameIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire")
-    float LightIntensity = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float SmokeIntensity;
 
-    FVFX_FireParameters()
+    FVFX_CampfireEffects()
     {
-        FlameHeight = 100.0f;
+        FlameEffect = nullptr;
+        SmokeEffect = nullptr;
+        EmberEffect = nullptr;
+        SparkEffect = nullptr;
+        CracklingSound = nullptr;
         FlameIntensity = 1.0f;
-        SmokeAmount = 0.5f;
-        SparkCount = 50.0f;
-        FireColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f);
-        LightRadius = 500.0f;
-        LightIntensity = 2000.0f;
+        SmokeIntensity = 1.0f;
     }
 };
 
@@ -70,114 +70,71 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UNiagaraComponent* FlameComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UNiagaraComponent* SmokeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UNiagaraComponent* EmberComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UNiagaraComponent* SparkComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVFX_CampfireEffects CampfireEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    EVFX_CampfireState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float FuelLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float FuelConsumptionRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float WindInfluence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bAffectedByWeather;
+
 public:
-    // Fire Control
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void StartFire(EVFX_FireIntensity Intensity = EVFX_FireIntensity::Medium);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void IgniteCampfire();
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void ExtinguishFire();
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void ExtinguishCampfire();
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void SetFireIntensity(EVFX_FireIntensity NewIntensity);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void AddFuel(float FuelAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void AddFuel(float FuelAmount = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SetWindStrength(float WindStrength);
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    bool IsFireActive() const { return bFireActive; }
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SetWeatherInfluence(bool bRaining, float RainIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    float GetFuelLevel() const { return CurrentFuel; }
+    UFUNCTION(BlueprintPure, Category = "VFX State")
+    EVFX_CampfireState GetCampfireState() const { return CurrentState; }
 
-    // Wind Effects
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void SetWindDirection(FVector WindDir);
+    UFUNCTION(BlueprintPure, Category = "VFX State")
+    float GetFuelLevel() const { return FuelLevel; }
 
-    UFUNCTION(BlueprintCallable, Category = "Campfire VFX")
-    void SetWindStrength(float Strength);
-
-protected:
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UNiagaraComponent* FlameEffect;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UNiagaraComponent* SmokeEffect;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UNiagaraComponent* SparkEffect;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UNiagaraComponent* EmberEffect;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPointLightComponent* FireLight;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* FireAudio;
-
-    // Niagara Systems
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
-    class UNiagaraSystem* NS_CampfireFlames;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
-    class UNiagaraSystem* NS_CampfireSmoke;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
-    class UNiagaraSystem* NS_CampfireSparks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
-    class UNiagaraSystem* NS_CampfireEmbers;
-
-    // Audio Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    class USoundCue* FireCrackleSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    class USoundCue* FireIgniteSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    class USoundCue* FireExtinguishSound;
-
-    // Fire Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire Settings")
-    FVFX_FireParameters FireParams;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire Settings")
-    float MaxFuel = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire Settings")
-    float FuelConsumptionRate = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire Settings")
-    bool bAutoExtinguishWhenOutOfFuel = true;
-
-    // Wind Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Settings")
-    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Settings")
-    float WindStrength = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Settings")
-    bool bEnableWindEffect = true;
+    UFUNCTION(BlueprintPure, Category = "VFX State")
+    bool IsBurning() const { return CurrentState == EVFX_CampfireState::Burning; }
 
 private:
-    // State
-    bool bFireActive = false;
-    float CurrentFuel = 50.0f;
-    EVFX_FireIntensity CurrentIntensity = EVFX_FireIntensity::Medium;
-    float LightFlickerTimer = 0.0f;
-    float BaseLightIntensity = 2000.0f;
+    void UpdateEffectIntensities();
+    void UpdateAudioVolume();
+    void TransitionToState(EVFX_CampfireState NewState);
+    void CreateNiagaraComponents();
 
-    // Internal Methods
-    void UpdateFireEffects();
-    void UpdateLightFlicker(float DeltaTime);
-    void UpdateWindEffects();
-    void ConsumeFuel(float DeltaTime);
-    FVFX_FireParameters GetParametersForIntensity(EVFX_FireIntensity Intensity);
-    void ApplyFireParameters(const FVFX_FireParameters& Params);
-    void CreateComponents();
-    void LoadAssets();
+    float StateTransitionTimer;
+    float LastSparkTime;
+    float SparkInterval;
 };
