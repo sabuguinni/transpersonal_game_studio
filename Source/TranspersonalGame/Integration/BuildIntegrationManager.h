@@ -1,9 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "BuildIntegrationManager.generated.h"
 
 UENUM(BlueprintType)
@@ -11,146 +10,178 @@ enum class EBuild_IntegrationStatus : uint8
 {
     Unknown,
     Initializing,
-    SystemsValidated,
-    CrossSystemTested,
-    PerformanceOptimized,
-    Ready,
+    Stable,
+    Unstable,
+    Critical,
     Failed
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemMetrics
+struct FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 TotalActors = 0;
+    UPROPERTY(BlueprintReadOnly)
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 DinosaurCount = 0;
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsLoaded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 StaticMeshCount = 0;
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsFunctional;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 SkeletalMeshCount = 0;
+    UPROPERTY(BlueprintReadOnly)
+    int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 LightCount = 0;
+    UPROPERTY(BlueprintReadOnly)
+    float PerformanceScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 DegenerateLabelCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    bool bEssentialSystemsPresent = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float ValidationTime = 0.0f;
+    FBuild_SystemHealth()
+    {
+        SystemName = TEXT("Unknown");
+        bIsLoaded = false;
+        bIsFunctional = false;
+        ActorCount = 0;
+        PerformanceScore = 0.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationResult
+struct FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_IntegrationStatus Status = EBuild_IntegrationStatus::Unknown;
+    UPROPERTY(BlueprintReadOnly)
+    EBuild_IntegrationStatus OverallStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FBuild_SystemMetrics Metrics;
+    UPROPERTY(BlueprintReadOnly)
+    int32 TotalActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ErrorMessages;
+    UPROPERTY(BlueprintReadOnly)
+    int32 DinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> WarningMessages;
+    UPROPERTY(BlueprintReadOnly)
+    int32 DegenerateLabelCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bPerformanceWithinLimits = true;
+    UPROPERTY(BlueprintReadOnly)
+    float FrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bCrossSystemCompatible = true;
+    UPROPERTY(BlueprintReadOnly)
+    float MemoryUsage;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FBuild_SystemHealth> SystemHealthReports;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString LastValidationTime;
+
+    FBuild_IntegrationReport()
+    {
+        OverallStatus = EBuild_IntegrationStatus::Unknown;
+        TotalActors = 0;
+        DinosaurCount = 0;
+        DegenerateLabelCount = 0;
+        FrameRate = 0.0f;
+        MemoryUsage = 0.0f;
+        LastValidationTime = TEXT("Never");
+    }
 };
 
 /**
- * Build Integration Manager - Orchestrates validation and integration of all game systems
- * Ensures compatibility between different agent outputs and maintains build stability
+ * Build Integration Manager - Agent #19 Core System
+ * Manages cross-system integration, validation, and build health monitoring
+ * Ensures all agent outputs work together cohesively
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UBuildIntegrationManager();
+
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core integration functions
+    // Core Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_ValidationResult ValidateCurrentBuild();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCoreGameSystems();
+    void ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCharacterWorldIntegration();
+    FBuild_IntegrationReport GetIntegrationReport() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAIEnvironmentIntegration();
+    void CleanupDegenerateLabels();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAudioVisualSynchronization();
+    void EnforceActorLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_SystemMetrics GatherSystemMetrics();
+    bool ValidateSystemCompatibility();
+
+    // System Health Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_SystemHealth CheckSystemHealth(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool EnforcePerformanceLimits();
+    void RegisterSystemForMonitoring(const FString& SystemName, UClass* SystemClass);
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    float GetCurrentFrameRate() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CleanupDegenerateLabels();
+    float GetMemoryUsage() const;
+
+    // Actor Management
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    int32 CountActorsByType(const FString& ActorType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool SaveValidatedMap();
+    TArray<AActor*> GetActorsWithDegenerateLabels() const;
 
-    // Status and monitoring
+    // Integration Status
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_IntegrationStatus GetCurrentIntegrationStatus() const { return CurrentStatus; }
+    EBuild_IntegrationStatus GetCurrentIntegrationStatus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_ValidationResult GetLastValidationResult() const { return LastValidationResult; }
+    void SetIntegrationStatus(EBuild_IntegrationStatus NewStatus);
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxTotalActors = 8000;
+    // Validation Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIntegrationStatusChanged, EBuild_IntegrationStatus, NewStatus);
+    UPROPERTY(BlueprintAssignable)
+    FOnIntegrationStatusChanged OnIntegrationStatusChanged;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxDinosaurCount = 150;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxLabelLength = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Limits")
-    int32 MaxLabelUnderscores = 5;
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSystemValidationComplete, const FBuild_IntegrationReport&, Report);
+    UPROPERTY(BlueprintAssignable)
+    FOnSystemValidationComplete OnSystemValidationComplete;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    EBuild_IntegrationStatus CurrentStatus = EBuild_IntegrationStatus::Unknown;
+    // Internal state
+    UPROPERTY()
+    EBuild_IntegrationStatus CurrentStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    FBuild_ValidationResult LastValidationResult;
+    UPROPERTY()
+    FBuild_IntegrationReport LastReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    float LastValidationTime = 0.0f;
+    UPROPERTY()
+    TMap<FString, UClass*> MonitoredSystems;
 
-private:
-    // Internal validation helpers
-    bool ValidateEssentialSystems();
-    bool ValidateSpawnLocations();
-    bool ValidateNavigationMesh();
-    bool CheckPerformanceMetrics(const FBuild_SystemMetrics& Metrics);
-    void LogValidationResults(const FBuild_ValidationResult& Result);
-    TArray<AActor*> GetActorsByLabelPattern(const FString& Pattern);
-    void CleanupActorsByType(const TArray<AActor*>& Actors, int32 MaxCount);
+    UPROPERTY()
+    float LastValidationTime;
+
+    // Internal validation functions
+    void ValidateCharacterSystem();
+    void ValidateWorldGeneration();
+    void ValidateFoliageSystem();
+    void ValidateCrowdSimulation();
+    void ValidateLightingSystem();
+    void ValidateTerrainSystem();
+    
+    // Utility functions
+    bool IsSystemClassLoaded(UClass* SystemClass) const;
+    int32 CountDegenerateLabels() const;
+    void OptimizePerformance();
+    void GenerateIntegrationReport();
 };
