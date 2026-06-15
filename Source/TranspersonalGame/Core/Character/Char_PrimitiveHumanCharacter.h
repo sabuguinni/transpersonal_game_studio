@@ -2,16 +2,18 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Materials/MaterialInterface.h"
+#include "SharedTypes.h"
 #include "Char_PrimitiveHumanCharacter.generated.h"
 
 UENUM(BlueprintType)
 enum class EChar_SkinTone : uint8
 {
     Light       UMETA(DisplayName = "Light"),
-    Medium      UMETA(DisplayName = "Medium"), 
+    Medium      UMETA(DisplayName = "Medium"),
     Dark        UMETA(DisplayName = "Dark"),
     Weathered   UMETA(DisplayName = "Weathered")
 };
@@ -19,10 +21,10 @@ enum class EChar_SkinTone : uint8
 UENUM(BlueprintType)
 enum class EChar_ClothingStyle : uint8
 {
-    BasicHide   UMETA(DisplayName = "Basic Hide"),
-    FurTrim     UMETA(DisplayName = "Fur Trim"),
-    BoneArmor   UMETA(DisplayName = "Bone Armor"),
-    Tribal      UMETA(DisplayName = "Tribal")
+    BasicLeather    UMETA(DisplayName = "Basic Leather"),
+    FurWraps        UMETA(DisplayName = "Fur Wraps"),
+    BoneArmor       UMETA(DisplayName = "Bone Armor"),
+    TribalGear      UMETA(DisplayName = "Tribal Gear")
 };
 
 USTRUCT(BlueprintType)
@@ -34,25 +36,22 @@ struct FChar_CharacterCustomization
     EChar_SkinTone SkinTone = EChar_SkinTone::Medium;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    EChar_ClothingStyle ClothingStyle = EChar_ClothingStyle::BasicHide;
+    EChar_ClothingStyle ClothingStyle = EChar_ClothingStyle::BasicLeather;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyMassIndex = 1.0f;
+    FLinearColor FacePaintColor = FLinearColor::Red;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Height = 1.0f;
+    bool bHasFacePaint = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasTribalMarkings = false;
+    float MuscleMass = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasBoneJewelry = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasScars = false;
+    float WeatheringLevel = 0.5f;
 };
 
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AChar_PrimitiveHumanCharacter : public ACharacter
 {
     GENERATED_BODY()
@@ -63,73 +62,79 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // Character customization
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character Components")
+    class USkeletalMeshComponent* CharacterMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character Components")
+    class UStaticMeshComponent* BoneToolBelt;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character Components")
+    class UStaticMeshComponent* SpearWeapon;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Customization")
-    FChar_CharacterCustomization CharacterCustomization;
+    FChar_CharacterCustomization CustomizationSettings;
 
-    // Weapon components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapons")
-    UStaticMeshComponent* StoneAxeComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<class UMaterialInterface*> SkinMaterials;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapons")
-    UStaticMeshComponent* SpearComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<class UMaterialInterface*> ClothingMaterials;
 
-    // Clothing/Armor components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* HideClothingComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* FacePaintMaterial;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clothing")
-    UStaticMeshComponent* BoneJewelryComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float SurvivalExperience = 50.0f;
 
-    // Character stats
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
     float TribalRank = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
-    float SurvivalExperience = 0.0f;
+    float CraftingSkill = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
-    float CraftingSkill = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
-    float HuntingSkill = 1.0f;
+    float HuntingSkill = 30.0f;
 
 public:
-    // Customization functions
+    virtual void Tick(float DeltaTime) override;
+
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ApplyCharacterCustomization(const FChar_CharacterCustomization& NewCustomization);
+    void ApplyCustomization(const FChar_CharacterCustomization& NewCustomization);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
     void SetSkinTone(EChar_SkinTone NewSkinTone);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void SetClothingStyle(EChar_ClothingStyle NewClothingStyle);
+    void SetClothingStyle(EChar_ClothingStyle NewStyle);
 
     UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ToggleTribalMarkings(bool bEnabled);
+    void SetFacePaint(bool bEnabled, FLinearColor Color = FLinearColor::Red);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ToggleBoneJewelry(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Character Stats")
+    void AddSurvivalExperience(float Amount);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Customization")
-    void ToggleScars(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Character Stats")
+    void SetTribalRank(float NewRank);
 
-    // Equipment functions
-    UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void EquipStoneAxe(bool bEquipped);
+    UFUNCTION(BlueprintCallable, Category = "Character Equipment")
+    void EquipBoneTools();
 
-    UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void EquipSpear(bool bEquipped);
+    UFUNCTION(BlueprintCallable, Category = "Character Equipment")
+    void EquipSpear();
 
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Character")
+    UFUNCTION(BlueprintPure, Category = "Character Info")
     FString GetCharacterDescription() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Character")
-    float GetOverallSkillLevel() const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Character Testing")
+    void TestCharacterCustomization();
+
+protected:
+    void UpdateCharacterMaterials();
+    void UpdateClothing();
+    void UpdateFacePaint();
+    void SetupDefaultEquipment();
 
 private:
-    void UpdateMeshMaterials();
-    void UpdateClothingMesh();
-    void UpdateJewelryVisibility();
+    bool bIsCustomizationApplied = false;
+    float LastCustomizationTime = 0.0f;
 };
