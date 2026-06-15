@@ -1,416 +1,249 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "EngineUtils.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
-#include "Stats/Stats.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "TimerManager.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bIsMonitoringPerformance = false;
-    LastFrameRateCheck = 0.0f;
-    MaxAllowedActors = 8000;
-    MaxAllowedDinosaurs = 150;
+    ValidationInterval = 30.0f;
+    bAutoValidateOnStartup = true;
+    InitializeCoreSystemsList();
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing build integration system"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing..."));
     
-    // Initialize module tracking
-    ModuleStatuses.Empty();
+    InitializeCoreSystemsList();
     
-    // Set up initial system health
-    CurrentSystemHealth = FBuild_SystemHealth();
-    
-    // Start monitoring
-    StartPerformanceMonitoring();
-    
-    // Validate initial state
-    ValidateAllModules();
-    UpdateSystemHealth();
+    if (bAutoValidateOnStartup)
+    {
+        // Delay initial validation to allow other systems to initialize
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(
+                ValidationTimerHandle,
+                this,
+                &UBuildIntegrationManager::PeriodicValidation,
+                5.0f,
+                false
+            );
+        }
+    }
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    StopPerformanceMonitoring();
-    LogBuildReport();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+    }
     
     Super::Deinitialize();
 }
 
-void UBuildIntegrationManager::ValidateAllModules()
+void UBuildIntegrationManager::InitializeCoreSystemsList()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating all modules"));
+    CoreSystemNames.Empty();
+    CoreSystemNames.Add(TEXT("TranspersonalGameState"));
+    CoreSystemNames.Add(TEXT("TranspersonalCharacter"));
+    CoreSystemNames.Add(TEXT("PCGWorldGenerator"));
+    CoreSystemNames.Add(TEXT("FoliageManager"));
+    CoreSystemNames.Add(TEXT("CrowdSimulationManager"));
+    CoreSystemNames.Add(TEXT("ProceduralWorldManager"));
+    CoreSystemNames.Add(TEXT("QA_ValidationManager"));
+}
+
+FBuild_IntegrationReport UBuildIntegrationManager::ValidateAllSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Running full system validation..."));
     
-    ModuleStatuses.Empty();
+    FBuild_IntegrationReport Report;
+    Report.TotalSystems = CoreSystemNames.Num();
+    Report.LoadedSystems = 0;
+    Report.InitializedSystems = 0;
+    Report.LastValidationTime = FDateTime::Now();
     
-    // Core modules to validate
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("Engine"),
-        TEXT("UnrealEd")
-    };
-    
-    for (const FString& ModuleName : CoreModules)
+    for (const FString& SystemName : CoreSystemNames)
     {
-        FBuild_ModuleStatus Status;
-        Status.ModuleName = ModuleName;
-        Status.bIsCompiled = true; // Assume compiled if we're running
-        Status.bIsLoaded = true;
-        Status.ClassCount = 0;
+        FBuild_SystemStatus Status;
+        Status.SystemName = SystemName;
         
-        // Count classes in this module (simplified)
-        if (ModuleName == TEXT("TranspersonalGame"))
+        // Test loading
+        Status.bIsLoaded = TestSystemLoading(SystemName);
+        if (Status.bIsLoaded)
         {
-            Status.ClassCount = 25; // Estimated based on current codebase
-        }
-        
-        ModuleStatuses.Add(Status);
-    }
-    
-    CheckModuleCompilation();
-}
-
-FBuild_ModuleStatus UBuildIntegrationManager::GetModuleStatus(const FString& ModuleName)
-{
-    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
-    {
-        if (Status.ModuleName == ModuleName)
-        {
-            return Status;
-        }
-    }
-    
-    // Return empty status if not found
-    return FBuild_ModuleStatus();
-}
-
-TArray<FBuild_ModuleStatus> UBuildIntegrationManager::GetAllModuleStatuses()
-{
-    return ModuleStatuses;
-}
-
-FBuild_SystemHealth UBuildIntegrationManager::GetSystemHealth()
-{
-    UpdateSystemHealth();
-    return CurrentSystemHealth;
-}
-
-void UBuildIntegrationManager::EnforceActorCaps()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    // Count different types of actors
-    TArray<AActor*> DinosaurActors;
-    TArray<AActor*> PropActors;
-    TArray<AActor*> EssentialActors;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
+            Report.LoadedSystems++;
         }
         
-        FString ActorName = Actor->GetName().ToLower();
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
-        
-        // Check for dinosaurs
-        if (ActorName.Contains(TEXT("dino")) || ActorName.Contains(TEXT("trex")) || 
-            ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("brachi")) ||
-            ActorLabel.Contains(TEXT("dino")) || ActorLabel.Contains(TEXT("trex")) ||
-            ActorLabel.Contains(TEXT("raptor")) || ActorLabel.Contains(TEXT("brachi")))
+        // Test initialization
+        Status.bIsInitialized = TestSystemInitialization(SystemName);
+        if (Status.bIsInitialized)
         {
-            DinosaurActors.Add(Actor);
-        }
-        // Check for essential actors
-        else if (ActorName.Contains(TEXT("playerstart")) || ActorName.Contains(TEXT("light")) ||
-                 ActorName.Contains(TEXT("sky")) || ActorName.Contains(TEXT("fog")) ||
-                 ActorLabel.Contains(TEXT("playerstart")) || ActorLabel.Contains(TEXT("light")) ||
-                 ActorLabel.Contains(TEXT("sky")) || ActorLabel.Contains(TEXT("fog")))
-        {
-            EssentialActors.Add(Actor);
-        }
-        else
-        {
-            PropActors.Add(Actor);
-        }
-    }
-    
-    // Enforce dinosaur cap
-    if (DinosaurActors.Num() > MaxAllowedDinosaurs)
-    {
-        int32 ToRemove = DinosaurActors.Num() - MaxAllowedDinosaurs;
-        for (int32 i = 0; i < ToRemove && i < DinosaurActors.Num(); i++)
-        {
-            if (DinosaurActors[i])
-            {
-                DinosaurActors[i]->Destroy();
-            }
-        }
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Removed %d excess dinosaurs"), ToRemove);
-    }
-    
-    // Enforce total actor cap
-    int32 TotalActors = AllActors.Num();
-    if (TotalActors > MaxAllowedActors)
-    {
-        int32 ToRemove = TotalActors - MaxAllowedActors;
-        int32 Removed = 0;
-        
-        // Remove props first
-        for (AActor* PropActor : PropActors)
-        {
-            if (Removed >= ToRemove)
-            {
-                break;
-            }
-            
-            if (PropActor)
-            {
-                PropActor->Destroy();
-                Removed++;
-            }
+            Report.InitializedSystems++;
         }
         
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Removed %d excess actors"), Removed);
+        // Calculate health percentage
+        Status.HealthPercentage = (Status.bIsLoaded ? 50.0f : 0.0f) + (Status.bIsInitialized ? 50.0f : 0.0f);
+        
+        Report.SystemStatuses.Add(Status);
+        SystemStatusMap.Add(SystemName, Status);
     }
     
-    UpdateSystemHealth();
+    // Calculate overall health
+    Report.OverallHealth = Report.TotalSystems > 0 ? 
+        ((float)(Report.LoadedSystems + Report.InitializedSystems) / (float)(Report.TotalSystems * 2)) * 100.0f : 0.0f;
+    
+    LastReport = Report;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete. Overall health: %.1f%%"), Report.OverallHealth);
+    
+    return Report;
 }
 
-void UBuildIntegrationManager::ValidateGameplayReadiness()
+bool UBuildIntegrationManager::ValidateSystem(const FString& SystemName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating gameplay readiness"));
+    bool bLoaded = TestSystemLoading(SystemName);
+    bool bInitialized = TestSystemInitialization(SystemName);
     
-    bool bIsReady = IsMinimumViablePrototypeReady();
+    UpdateSystemStatus(SystemName, bLoaded, bInitialized);
     
-    if (bIsReady)
+    return bLoaded && bInitialized;
+}
+
+FBuild_SystemStatus UBuildIntegrationManager::GetSystemStatus(const FString& SystemName)
+{
+    if (SystemStatusMap.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Minimum viable prototype is READY"));
+        return SystemStatusMap[SystemName];
     }
-    else
+    
+    // Return default status if not found
+    FBuild_SystemStatus DefaultStatus;
+    DefaultStatus.SystemName = SystemName;
+    DefaultStatus.LastError = TEXT("System not found in status map");
+    return DefaultStatus;
+}
+
+TArray<FString> UBuildIntegrationManager::GetFailedSystems()
+{
+    TArray<FString> FailedSystems;
+    
+    for (const auto& StatusPair : SystemStatusMap)
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Minimum viable prototype is NOT READY"));
+        const FBuild_SystemStatus& Status = StatusPair.Value;
+        if (!Status.bIsLoaded || !Status.bIsInitialized)
+        {
+            FailedSystems.Add(Status.SystemName);
+        }
+    }
+    
+    return FailedSystems;
+}
+
+float UBuildIntegrationManager::GetOverallSystemHealth()
+{
+    return LastReport.OverallHealth;
+}
+
+void UBuildIntegrationManager::RunIntegrationTests()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Running integration tests..."));
+    
+    FBuild_IntegrationReport Report = ValidateAllSystems();
+    
+    // Log detailed results
+    for (const FBuild_SystemStatus& Status : Report.SystemStatuses)
+    {
+        FString StatusText = Status.bIsLoaded && Status.bIsInitialized ? TEXT("PASS") : TEXT("FAIL");
+        UE_LOG(LogTemp, Warning, TEXT("Integration Test - %s: %s (%.1f%%)"), 
+            *Status.SystemName, *StatusText, Status.HealthPercentage);
     }
 }
 
-bool UBuildIntegrationManager::IsMinimumViablePrototypeReady()
+void UBuildIntegrationManager::GenerateIntegrationReport()
 {
-    return ValidateMinimumGameplayElements();
-}
-
-void UBuildIntegrationManager::StartPerformanceMonitoring()
-{
-    bIsMonitoringPerformance = true;
-    LastFrameRateCheck = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Generating integration report..."));
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Started performance monitoring"));
-}
-
-void UBuildIntegrationManager::StopPerformanceMonitoring()
-{
-    bIsMonitoringPerformance = false;
+    FBuild_IntegrationReport Report = ValidateAllSystems();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Stopped performance monitoring"));
-}
-
-void UBuildIntegrationManager::LogBuildReport()
-{
     UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION REPORT ==="));
-    
-    // Module status
-    UE_LOG(LogTemp, Warning, TEXT("Modules: %d total"), ModuleStatuses.Num());
-    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  %s: Compiled=%s, Loaded=%s, Classes=%d"), 
-               *Status.ModuleName, 
-               Status.bIsCompiled ? TEXT("YES") : TEXT("NO"),
-               Status.bIsLoaded ? TEXT("YES") : TEXT("NO"),
-               Status.ClassCount);
-    }
-    
-    // System health
-    UE_LOG(LogTemp, Warning, TEXT("System Health:"));
-    UE_LOG(LogTemp, Warning, TEXT("  Total Actors: %d"), CurrentSystemHealth.TotalActors);
-    UE_LOG(LogTemp, Warning, TEXT("  Dinosaurs: %d"), CurrentSystemHealth.DinosaurCount);
-    UE_LOG(LogTemp, Warning, TEXT("  Props: %d"), CurrentSystemHealth.PropCount);
-    UE_LOG(LogTemp, Warning, TEXT("  Frame Rate: %.1f"), CurrentSystemHealth.FrameRate);
-    UE_LOG(LogTemp, Warning, TEXT("  Memory: %.1f MB"), CurrentSystemHealth.MemoryUsageMB);
-    UE_LOG(LogTemp, Warning, TEXT("  Performance Healthy: %s"), 
-           CurrentSystemHealth.bIsPerformanceHealthy ? TEXT("YES") : TEXT("NO"));
-    
-    // Gameplay readiness
-    bool bReady = IsMinimumViablePrototypeReady();
-    UE_LOG(LogTemp, Warning, TEXT("Minimum Viable Prototype: %s"), bReady ? TEXT("READY") : TEXT("NOT READY"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END BUILD REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Systems: %d"), Report.TotalSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Loaded Systems: %d"), Report.LoadedSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Initialized Systems: %d"), Report.InitializedSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Health: %.1f%%"), Report.OverallHealth);
+    UE_LOG(LogTemp, Warning, TEXT("Validation Time: %s"), *Report.LastValidationTime.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("================================"));
 }
 
-void UBuildIntegrationManager::CheckModuleCompilation()
+bool UBuildIntegrationManager::TestSystemLoading(const FString& SystemName)
 {
-    // This would normally check compilation logs, but for now we assume success
-    // if the subsystem is running
+    FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
     
-    for (FBuild_ModuleStatus& Status : ModuleStatuses)
+    try
     {
-        Status.bIsCompiled = true;
-        Status.bIsLoaded = true;
+        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
+        return SystemClass != nullptr;
     }
-}
-
-void UBuildIntegrationManager::UpdateSystemHealth()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    ValidateActorCounts();
-    CheckPerformanceMetrics();
-}
-
-void UBuildIntegrationManager::ValidateActorCounts()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    CurrentSystemHealth.TotalActors = AllActors.Num();
-    CurrentSystemHealth.DinosaurCount = 0;
-    CurrentSystemHealth.PropCount = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        FString ActorName = Actor->GetName().ToLower();
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
-        
-        if (ActorName.Contains(TEXT("dino")) || ActorName.Contains(TEXT("trex")) || 
-            ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("brachi")) ||
-            ActorLabel.Contains(TEXT("dino")) || ActorLabel.Contains(TEXT("trex")) ||
-            ActorLabel.Contains(TEXT("raptor")) || ActorLabel.Contains(TEXT("brachi")))
-        {
-            CurrentSystemHealth.DinosaurCount++;
-        }
-        else if (!ActorName.Contains(TEXT("playerstart")) && !ActorName.Contains(TEXT("light")) &&
-                 !ActorName.Contains(TEXT("sky")) && !ActorName.Contains(TEXT("fog")) &&
-                 !ActorLabel.Contains(TEXT("playerstart")) && !ActorLabel.Contains(TEXT("light")) &&
-                 !ActorLabel.Contains(TEXT("sky")) && !ActorLabel.Contains(TEXT("fog")))
-        {
-            CurrentSystemHealth.PropCount++;
-        }
-    }
-}
-
-void UBuildIntegrationManager::CheckPerformanceMetrics()
-{
-    if (!bIsMonitoringPerformance)
-    {
-        return;
-    }
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Get frame rate (simplified)
-    float CurrentTime = World->GetTimeSeconds();
-    float DeltaTime = CurrentTime - LastFrameRateCheck;
-    
-    if (DeltaTime > 0.0f)
-    {
-        CurrentSystemHealth.FrameRate = 1.0f / DeltaTime;
-    }
-    
-    LastFrameRateCheck = CurrentTime;
-    
-    // Estimate memory usage (simplified)
-    CurrentSystemHealth.MemoryUsageMB = CurrentSystemHealth.TotalActors * 0.5f; // Rough estimate
-    
-    // Check if performance is healthy
-    CurrentSystemHealth.bIsPerformanceHealthy = 
-        (CurrentSystemHealth.FrameRate > 30.0f) && 
-        (CurrentSystemHealth.TotalActors < MaxAllowedActors) &&
-        (CurrentSystemHealth.DinosaurCount < MaxAllowedDinosaurs);
-}
-
-bool UBuildIntegrationManager::ValidateMinimumGameplayElements()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    catch (...)
     {
         return false;
     }
+}
+
+bool UBuildIntegrationManager::TestSystemInitialization(const FString& SystemName)
+{
+    // For now, assume initialization is successful if loading succeeded
+    // In a more complex system, we would test actual initialization
+    return TestSystemLoading(SystemName);
+}
+
+void UBuildIntegrationManager::UpdateSystemStatus(const FString& SystemName, bool bLoaded, bool bInitialized, const FString& Error)
+{
+    FBuild_SystemStatus Status;
+    Status.SystemName = SystemName;
+    Status.bIsLoaded = bLoaded;
+    Status.bIsInitialized = bInitialized;
+    Status.HealthPercentage = (bLoaded ? 50.0f : 0.0f) + (bInitialized ? 50.0f : 0.0f);
+    Status.LastError = Error;
     
-    // Check for essential gameplay elements
-    bool bHasPlayerStart = false;
-    bool bHasLighting = false;
-    bool bHasTerrain = false;
-    bool bHasDinosaurs = false;
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    SystemStatusMap.Add(SystemName, Status);
+}
+
+void UBuildIntegrationManager::CalculateOverallHealth()
+{
+    if (SystemStatusMap.Num() == 0)
     {
-        if (!Actor)
-        {
-            continue;
-        }
-        
-        FString ActorName = Actor->GetName().ToLower();
-        FString ActorLabel = Actor->GetActorLabel().ToLower();
-        
-        if (ActorName.Contains(TEXT("playerstart")) || ActorLabel.Contains(TEXT("playerstart")))
-        {
-            bHasPlayerStart = true;
-        }
-        else if (ActorName.Contains(TEXT("light")) || ActorLabel.Contains(TEXT("light")))
-        {
-            bHasLighting = true;
-        }
-        else if (ActorName.Contains(TEXT("landscape")) || ActorName.Contains(TEXT("terrain")) ||
-                 ActorLabel.Contains(TEXT("landscape")) || ActorLabel.Contains(TEXT("terrain")))
-        {
-            bHasTerrain = true;
-        }
-        else if (ActorName.Contains(TEXT("dino")) || ActorName.Contains(TEXT("trex")) || 
-                 ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("brachi")) ||
-                 ActorLabel.Contains(TEXT("dino")) || ActorLabel.Contains(TEXT("trex")) ||
-                 ActorLabel.Contains(TEXT("raptor")) || ActorLabel.Contains(TEXT("brachi")))
-        {
-            bHasDinosaurs = true;
-        }
+        LastReport.OverallHealth = 0.0f;
+        return;
     }
     
-    return bHasPlayerStart && bHasLighting && bHasTerrain && bHasDinosaurs;
+    float TotalHealth = 0.0f;
+    for (const auto& StatusPair : SystemStatusMap)
+    {
+        TotalHealth += StatusPair.Value.HealthPercentage;
+    }
+    
+    LastReport.OverallHealth = TotalHealth / (float)SystemStatusMap.Num();
+}
+
+void UBuildIntegrationManager::PeriodicValidation()
+{
+    ValidateAllSystems();
+    
+    // Schedule next validation
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &UBuildIntegrationManager::PeriodicValidation,
+            ValidationInterval,
+            false
+        );
+    }
 }
