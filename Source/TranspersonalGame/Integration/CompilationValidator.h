@@ -1,247 +1,134 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "CompilationValidator.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogCompilationValidator, Log, All);
-
-/**
- * Estrutura para armazenar resultados de validação de compilação
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCompilationValidationResult
+struct TRANSPERSONALGAME_API FBuild_CompilationError
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    FString ErrorType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     FString FileName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bHasHeader;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bHasImplementation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bCompilesSuccessfully;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ErrorMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 LineCount;
-
-    FCompilationValidationResult()
-    {
-        FileName = TEXT("");
-        bHasHeader = false;
-        bHasImplementation = false;
-        bCompilesSuccessfully = false;
-        ErrorMessage = TEXT("");
-        LineCount = 0;
-    }
-};
-
-/**
- * Enumeração para tipos de problemas de compilação
- */
-UENUM(BlueprintType)
-enum class ECompilationIssueType : uint8
-{
-    OrphanHeader        UMETA(DisplayName = "Orphan Header"),
-    MissingImplementation UMETA(DisplayName = "Missing Implementation"),
-    CompilationError    UMETA(DisplayName = "Compilation Error"),
-    DuplicateDefinition UMETA(DisplayName = "Duplicate Definition"),
-    MissingDependency   UMETA(DisplayName = "Missing Dependency"),
-    IncludeError        UMETA(DisplayName = "Include Error")
-};
-
-/**
- * Estrutura para problemas de compilação detectados
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCompilationIssue
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Issue")
-    ECompilationIssueType IssueType;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Issue")
-    FString FileName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Issue")
-    FString Description;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     int32 LineNumber;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Issue")
-    ESeverityLevel Severity;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    FString ErrorMessage;
 
-    FCompilationIssue()
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    FString SuggestedFix;
+
+    FBuild_CompilationError()
     {
-        IssueType = ECompilationIssueType::OrphanHeader;
+        ErrorType = TEXT("Unknown");
         FileName = TEXT("");
-        Description = TEXT("");
         LineNumber = 0;
-        Severity = ESeverityLevel::Warning;
+        ErrorMessage = TEXT("");
+        SuggestedFix = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bCompilationSuccessful;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 TotalErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 TotalWarnings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FBuild_CompilationError> Errors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> MissingImplementations;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> DuplicateDefinitions;
+
+    FBuild_ValidationResult()
+    {
+        bCompilationSuccessful = false;
+        TotalErrors = 0;
+        TotalWarnings = 0;
     }
 };
 
 /**
- * Componente responsável por validar a integridade da compilação do projeto
- * Detecta headers órfãos, implementações faltando, erros de compilação
+ * Compilation Validator - Validates C++ code compilation and identifies common issues
+ * Part of the Integration & Build system
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCompilationValidator : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCompilationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCompilationValidator();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // Subsystem Interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    /**
-     * Executa validação completa de compilação
-     */
+    // Validation Functions
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    void PerformFullCompilationValidation();
+    FBuild_ValidationResult ValidateProjectCompilation();
 
-    /**
-     * Valida apenas headers órfãos
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    void ValidateOrphanHeaders();
+    bool CheckHeaderImplementationPairs();
 
-    /**
-     * Valida implementações faltando
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    void ValidateMissingImplementations();
+    TArray<FString> FindMissingImplementations();
 
-    /**
-     * Tenta compilar o projeto e detecta erros
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    void ValidateProjectCompilation();
+    TArray<FString> FindDuplicateDefinitions();
 
-    /**
-     * Obtém lista de todos os problemas detectados
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    TArray<FCompilationIssue> GetDetectedIssues() const;
+    bool ValidateIncludePaths();
 
-    /**
-     * Obtém contagem de problemas por tipo
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    int32 GetIssueCountByType(ECompilationIssueType IssueType) const;
+    bool ValidateUE5APIUsage();
 
-    /**
-     * Limpa todos os resultados de validação
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    void ClearValidationResults();
+    void GenerateCompilationReport();
 
-    /**
-     * Gera relatório detalhado de compilação
-     */
+    // Error Analysis
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    FString GenerateCompilationReport() const;
+    TArray<FBuild_CompilationError> AnalyzeCompilationErrors(const FString& LogContent);
 
-    /**
-     * Verifica se o projeto está em estado compilável
-     */
     UFUNCTION(BlueprintCallable, Category = "Compilation Validation")
-    bool IsProjectCompilable() const;
+    FString SuggestFixForError(const FBuild_CompilationError& Error);
 
 protected:
-    /**
-     * Escaneia diretório em busca de arquivos .h e .cpp
-     */
-    void ScanSourceDirectory(const FString& DirectoryPath);
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validation")
+    FBuild_ValidationResult LastValidationResult;
 
-    /**
-     * Verifica se um header tem implementação correspondente
-     */
-    bool HasCorrespondingImplementation(const FString& HeaderPath) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validation")
+    TArray<FString> KnownSourceFiles;
 
-    /**
-     * Conta linhas de código em um arquivo
-     */
-    int32 CountLinesInFile(const FString& FilePath) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validation")
+    TArray<FString> KnownHeaderFiles;
 
-    /**
-     * Detecta problemas específicos em um arquivo
-     */
-    void AnalyzeFileForIssues(const FString& FilePath);
-
-    /**
-     * Adiciona um problema detectado à lista
-     */
-    void AddDetectedIssue(ECompilationIssueType IssueType, const FString& FileName, 
-                         const FString& Description, int32 LineNumber = 0, 
-                         ESeverityLevel Severity = ESeverityLevel::Warning);
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation Validation")
+    bool bValidationInProgress;
 
 private:
-    /**
-     * Lista de resultados de validação por arquivo
-     */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results", meta = (AllowPrivateAccess = "true"))
-    TArray<FCompilationValidationResult> ValidationResults;
-
-    /**
-     * Lista de problemas detectados
-     */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results", meta = (AllowPrivateAccess = "true"))
-    TArray<FCompilationIssue> DetectedIssues;
-
-    /**
-     * Caminho para o diretório Source do projeto
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    FString SourceDirectoryPath;
-
-    /**
-     * Se deve executar validação automaticamente no BeginPlay
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    bool bAutoValidateOnStartup;
-
-    /**
-     * Se deve logar resultados detalhados
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    bool bLogDetailedResults;
-
-    /**
-     * Extensões de arquivo para considerar na validação
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> ValidFileExtensions;
-
-    /**
-     * Diretórios para ignorar na validação
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> IgnoredDirectories;
-
-    /**
-     * Timer para validação periódica
-     */
-    FTimerHandle ValidationTimerHandle;
-
-    /**
-     * Intervalo para validação automática (0 = desabilitado)
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    float ValidationInterval;
+    void ScanSourceFiles();
+    void ValidateFileStructure();
+    bool CheckFileExists(const FString& FilePath);
+    FString GetImplementationPath(const FString& HeaderPath);
+    FString GetHeaderPath(const FString& ImplementationPath);
+    void LogValidationResults();
 };
