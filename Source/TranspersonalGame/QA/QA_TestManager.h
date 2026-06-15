@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
 #include "QA_TestManager.generated.h"
 
@@ -12,7 +12,7 @@ enum class EQA_TestResult : uint8
     Pass,
     Fail,
     Warning,
-    Info
+    Skipped
 };
 
 USTRUCT(BlueprintType)
@@ -20,22 +20,22 @@ struct FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString TestName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     EQA_TestResult Result;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     FString Description;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA")
     float ExecutionTime;
 
     FQA_TestCase()
     {
         TestName = TEXT("");
-        Result = EQA_TestResult::Info;
+        Result = EQA_TestResult::Skipped;
         Description = TEXT("");
         ExecutionTime = 0.0f;
     }
@@ -49,24 +49,8 @@ class TRANSPERSONALGAME_API UQA_TestManager : public UActorComponent
 public:
     UQA_TestManager();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Test execution functions
-    UFUNCTION(BlueprintCallable, Category = "QA")
+    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
     void RunAllTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void RunCharacterTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void RunWorldTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void RunDinosaurTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
     void RunPerformanceTests();
@@ -74,36 +58,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "QA")
     void RunIntegrationTests();
 
-    // Test result management
     UFUNCTION(BlueprintCallable, Category = "QA")
-    void AddTestResult(const FString& TestName, EQA_TestResult Result, const FString& Description);
+    void RunStabilityTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    TArray<FQA_TestCase> GetTestResults() const { return TestResults; }
+    void ValidateActorCounts();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    void ClearTestResults();
+    void ValidateGameplayElements();
 
     UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetPassCount() const;
+    void GenerateQAReport();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    int32 GetFailCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    float GetOverallHealthScore() const;
-
-    // Validation utilities
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidateActorCount();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    bool ValidateSystemIntegrity();
-
-protected:
     UPROPERTY(BlueprintReadOnly, Category = "QA")
     TArray<FQA_TestCase> TestResults;
 
@@ -116,25 +82,15 @@ protected:
     UPROPERTY(BlueprintReadWrite, Category = "QA")
     float TargetFrameRate;
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    bool bAutoRunTests;
-
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    float TestInterval;
+protected:
+    virtual void BeginPlay() override;
 
 private:
-    float LastTestTime;
-    bool bTestsRunning;
-
-    // Internal test functions
-    void TestCharacterSpawning();
-    void TestDinosaurBehavior();
-    void TestWorldGeneration();
-    void TestLightingSetup();
-    void TestAudioSystems();
-    void TestUIElements();
-    void TestSaveSystem();
-    void TestNetworking();
-    void TestMemoryUsage();
-    void TestFrameRate();
+    void AddTestResult(const FString& TestName, EQA_TestResult Result, const FString& Description, float ExecutionTime = 0.0f);
+    
+    bool ValidateClassLoading();
+    bool ValidateMapActors();
+    bool ValidatePlayerSetup();
+    bool ValidateLightingSetup();
+    bool ValidatePerformanceMetrics();
 };
