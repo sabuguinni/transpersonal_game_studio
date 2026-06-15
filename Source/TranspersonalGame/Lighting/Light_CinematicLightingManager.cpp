@@ -1,427 +1,430 @@
 #include "Light_CinematicLightingManager.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SpotLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/PostProcessComponent.h"
-#include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/SceneComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SpotLight.h"
+#include "Engine/PointLight.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SpotLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 
 ALight_CinematicLightingManager::ALight_CinematicLightingManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create main sun light component
-    MainSunLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("MainSunLight"));
-    MainSunLight->SetupAttachment(RootComponent);
-    MainSunLight->SetIntensity(8.0f);
-    MainSunLight->SetLightColor(FLinearColor(1.0f, 0.95f, 0.8f, 1.0f));
-    MainSunLight->SetCastVolumetricShadow(true);
-    MainSunLight->SetVolumetricScatteringIntensity(1.8f);
-    MainSunLight->SetLightShaftOcclusion(true);
-    MainSunLight->SetLightShaftBloomScale(0.3f);
-    MainSunLight->SetLightShaftBloomThreshold(0.8f);
-
-    // Create rim light component
-    RimLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("RimLight"));
-    RimLight->SetupAttachment(RootComponent);
-    RimLight->SetIntensity(12.0f);
-    RimLight->SetLightColor(FLinearColor(0.8f, 0.9f, 1.0f, 1.0f));
-    RimLight->SetInnerConeAngle(15.0f);
-    RimLight->SetOuterConeAngle(45.0f);
-    RimLight->SetAttenuationRadius(5000.0f);
-    RimLight->SetCastVolumetricShadow(true);
-    RimLight->SetVolumetricScatteringIntensity(2.0f);
-
-    // Create atmospheric fog component
-    AtmosphericFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("AtmosphericFog"));
-    AtmosphericFog->SetupAttachment(RootComponent);
-    AtmosphericFog->SetFogDensity(0.008f);
-    AtmosphericFog->SetFogHeightFalloff(0.1f);
-    AtmosphericFog->SetVolumetricFog(true);
-    AtmosphericFog->SetVolumetricFogScatteringDistribution(0.6f);
-    AtmosphericFog->SetVolumetricFogAlbedo(FLinearColor(0.9f, 0.85f, 0.7f, 1.0f));
-    AtmosphericFog->SetVolumetricFogEmissive(FLinearColor(0.02f, 0.015f, 0.01f, 1.0f));
-    AtmosphericFog->SetVolumetricFogExtinctionScale(1.2f);
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
     // Initialize default values
-    CurrentTimeOfDay = ELight_TimeOfDay::Noon;
-    CurrentWeather = ELight_WeatherType::Clear;
+    CurrentTimeOfDay = ELight_TimeOfDay::GoldenHour;
+    TimeOfDayProgress = 0.0f;
+    bEnableDynamicTimeOfDay = false;
     DayDurationMinutes = 20.0f;
-    bAutoProgressTime = true;
-    bCinematicMode = false;
-    CinematicTransitionDuration = 2.0f;
     
-    // Initialize state
-    CurrentTimeProgress = 0.0f;
-    bIsTransitioning = false;
-    TransitionProgress = 0.0f;
-    TransitionDuration = 0.0f;
-    MainPostProcessVolume = nullptr;
+    bEnableVolumetricFog = true;
+    BaseFogDensity = 0.02f;
+    FogInscatteringColor = FLinearColor(0.8f, 0.7f, 0.6f, 1.0f);
+    VolumetricFogScatteringDistribution = 0.6f;
+
+    MainDirectionalLight = nullptr;
+    MainFogActor = nullptr;
+    TimeAccumulator = 0.0f;
+    bLightingSystemInitialized = false;
 }
 
 void ALight_CinematicLightingManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeLightingPresets();
-    FindOrCreatePostProcessVolume();
-    SetupAtmosphericComponents();
+    FindAndCacheLightReferences();
+    InitializeDefaultLightingPresets();
+    ValidateLightingSetup();
     
-    // Apply initial lighting preset
-    if (TimeOfDayPresets.Contains(CurrentTimeOfDay))
-    {
-        ApplyLightingPreset(TimeOfDayPresets[CurrentTimeOfDay]);
-    }
+    bLightingSystemInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("CinematicLightingManager: System initialized successfully"));
 }
 
 void ALight_CinematicLightingManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    if (bAutoProgressTime && !bCinematicMode)
+
+    if (!bLightingSystemInitialized)
     {
-        UpdateTimeProgression(DeltaTime);
-    }
-    
-    if (bIsTransitioning)
-    {
-        UpdateLightingTransition(DeltaTime);
-    }
-}
-
-void ALight_CinematicLightingManager::InitializeLightingPresets()
-{
-    // Dawn preset
-    FLight_LightingPreset DawnPreset;
-    DawnPreset.SunIntensity = 3.0f;
-    DawnPreset.SunColor = FLinearColor(1.0f, 0.7f, 0.4f, 1.0f);
-    DawnPreset.SunRotation = FRotator(-10.0f, 75.0f, 0.0f);
-    DawnPreset.FogDensity = 0.015f;
-    DawnPreset.FogColor = FLinearColor(0.9f, 0.6f, 0.4f, 1.0f);
-    DawnPreset.VolumetricScattering = 2.5f;
-    DawnPreset.WhiteTemperature = 3200.0f;
-    DawnPreset.BloomIntensity = 1.2f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Dawn, DawnPreset);
-
-    // Morning preset
-    FLight_LightingPreset MorningPreset;
-    MorningPreset.SunIntensity = 6.0f;
-    MorningPreset.SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-    MorningPreset.SunRotation = FRotator(-30.0f, 45.0f, 0.0f);
-    MorningPreset.FogDensity = 0.010f;
-    MorningPreset.FogColor = FLinearColor(0.9f, 0.8f, 0.6f, 1.0f);
-    MorningPreset.VolumetricScattering = 2.0f;
-    MorningPreset.WhiteTemperature = 5500.0f;
-    MorningPreset.BloomIntensity = 0.9f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Morning, MorningPreset);
-
-    // Noon preset
-    FLight_LightingPreset NoonPreset;
-    NoonPreset.SunIntensity = 10.0f;
-    NoonPreset.SunColor = FLinearColor(1.0f, 1.0f, 0.95f, 1.0f);
-    NoonPreset.SunRotation = FRotator(-80.0f, 0.0f, 0.0f);
-    NoonPreset.FogDensity = 0.005f;
-    NoonPreset.FogColor = FLinearColor(0.8f, 0.85f, 0.9f, 1.0f);
-    NoonPreset.VolumetricScattering = 1.5f;
-    NoonPreset.WhiteTemperature = 6500.0f;
-    NoonPreset.BloomIntensity = 0.6f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Noon, NoonPreset);
-
-    // Afternoon preset
-    FLight_LightingPreset AfternoonPreset;
-    AfternoonPreset.SunIntensity = 8.0f;
-    AfternoonPreset.SunColor = FLinearColor(1.0f, 0.85f, 0.6f, 1.0f);
-    AfternoonPreset.SunRotation = FRotator(-45.0f, -30.0f, 0.0f);
-    AfternoonPreset.FogDensity = 0.008f;
-    AfternoonPreset.FogColor = FLinearColor(0.9f, 0.75f, 0.5f, 1.0f);
-    AfternoonPreset.VolumetricScattering = 1.8f;
-    AfternoonPreset.WhiteTemperature = 5800.0f;
-    AfternoonPreset.BloomIntensity = 0.8f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Afternoon, AfternoonPreset);
-
-    // Dusk preset
-    FLight_LightingPreset DuskPreset;
-    DuskPreset.SunIntensity = 4.0f;
-    DuskPreset.SunColor = FLinearColor(1.0f, 0.5f, 0.2f, 1.0f);
-    DuskPreset.SunRotation = FRotator(-5.0f, -75.0f, 0.0f);
-    DuskPreset.FogDensity = 0.020f;
-    DuskPreset.FogColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
-    DuskPreset.VolumetricScattering = 3.0f;
-    DuskPreset.WhiteTemperature = 2800.0f;
-    DuskPreset.BloomIntensity = 1.5f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Dusk, DuskPreset);
-
-    // Night preset
-    FLight_LightingPreset NightPreset;
-    NightPreset.SunIntensity = 0.5f;
-    NightPreset.SunColor = FLinearColor(0.2f, 0.3f, 0.8f, 1.0f);
-    NightPreset.SunRotation = FRotator(30.0f, 0.0f, 0.0f);
-    NightPreset.FogDensity = 0.012f;
-    NightPreset.FogColor = FLinearColor(0.1f, 0.2f, 0.4f, 1.0f);
-    NightPreset.VolumetricScattering = 1.0f;
-    NightPreset.WhiteTemperature = 4000.0f;
-    NightPreset.BloomIntensity = 0.4f;
-    TimeOfDayPresets.Add(ELight_TimeOfDay::Night, NightPreset);
-
-    // Weather presets
-    FLight_LightingPreset ClearWeather;
-    ClearWeather.FogDensity = 0.005f;
-    ClearWeather.VolumetricScattering = 1.5f;
-    WeatherPresets.Add(ELight_WeatherType::Clear, ClearWeather);
-
-    FLight_LightingPreset OvercastWeather;
-    OvercastWeather.SunIntensity = 4.0f;
-    OvercastWeather.FogDensity = 0.015f;
-    OvercastWeather.VolumetricScattering = 0.8f;
-    WeatherPresets.Add(ELight_WeatherType::Overcast, OvercastWeather);
-
-    FLight_LightingPreset FoggyWeather;
-    FoggyWeather.SunIntensity = 2.0f;
-    FoggyWeather.FogDensity = 0.050f;
-    FoggyWeather.VolumetricScattering = 0.5f;
-    WeatherPresets.Add(ELight_WeatherType::Foggy, FoggyWeather);
-}
-
-void ALight_CinematicLightingManager::UpdateTimeProgression(float DeltaTime)
-{
-    if (DayDurationMinutes <= 0.0f) return;
-
-    float TimeIncrement = DeltaTime / (DayDurationMinutes * 60.0f);
-    CurrentTimeProgress += TimeIncrement;
-
-    if (CurrentTimeProgress >= 1.0f)
-    {
-        CurrentTimeProgress = 0.0f;
-        
-        // Progress to next time of day
-        int32 CurrentIndex = static_cast<int32>(CurrentTimeOfDay);
-        CurrentIndex = (CurrentIndex + 1) % 6; // 6 time periods
-        CurrentTimeOfDay = static_cast<ELight_TimeOfDay>(CurrentIndex);
-        
-        if (TimeOfDayPresets.Contains(CurrentTimeOfDay))
-        {
-            SetTimeOfDay(CurrentTimeOfDay, false);
-        }
-    }
-}
-
-void ALight_CinematicLightingManager::UpdateLightingTransition(float DeltaTime)
-{
-    if (!bIsTransitioning || TransitionDuration <= 0.0f) return;
-
-    TransitionProgress += DeltaTime / TransitionDuration;
-    
-    if (TransitionProgress >= 1.0f)
-    {
-        TransitionProgress = 1.0f;
-        bIsTransitioning = false;
+        return;
     }
 
-    FLight_LightingPreset InterpolatedPreset = InterpolateLightingPresets(
-        TransitionStartPreset, 
-        TransitionTargetPreset, 
-        TransitionProgress
-    );
-    
-    ApplyPresetToComponents(InterpolatedPreset);
+    if (bEnableDynamicTimeOfDay)
+    {
+        UpdateTimeOfDay(DeltaTime);
+    }
+
+    UpdateVolumetricFog();
+    UpdateCinematicZones();
 }
 
-void ALight_CinematicLightingManager::SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay, bool bInstant)
+void ALight_CinematicLightingManager::SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay)
 {
-    if (!TimeOfDayPresets.Contains(NewTimeOfDay)) return;
-
     CurrentTimeOfDay = NewTimeOfDay;
-    FLight_LightingPreset TargetPreset = TimeOfDayPresets[NewTimeOfDay];
-
-    if (bInstant)
-    {
-        ApplyLightingPreset(TargetPreset, 0.0f);
-    }
-    else
-    {
-        ApplyLightingPreset(TargetPreset, 3.0f);
-    }
-}
-
-void ALight_CinematicLightingManager::SetWeather(ELight_WeatherType NewWeather, bool bInstant)
-{
-    if (!WeatherPresets.Contains(NewWeather)) return;
-
-    CurrentWeather = NewWeather;
-    FLight_LightingPreset WeatherModifier = WeatherPresets[NewWeather];
+    FLight_LightingPreset Preset = GetPresetForTimeOfDay(NewTimeOfDay);
+    ApplyLightingPreset(Preset);
     
-    // Combine current time of day with weather modifier
-    FLight_LightingPreset CombinedPreset = TimeOfDayPresets[CurrentTimeOfDay];
-    CombinedPreset.SunIntensity *= WeatherModifier.SunIntensity / 8.0f; // Normalize
-    CombinedPreset.FogDensity = WeatherModifier.FogDensity;
-    CombinedPreset.VolumetricScattering = WeatherModifier.VolumetricScattering;
-
-    if (bInstant)
-    {
-        ApplyLightingPreset(CombinedPreset, 0.0f);
-    }
-    else
-    {
-        ApplyLightingPreset(CombinedPreset, 2.0f);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("CinematicLightingManager: Time of day set to %d"), (int32)NewTimeOfDay);
 }
 
-void ALight_CinematicLightingManager::EnableCinematicMode(const FLight_LightingPreset& Preset, float TransitionTime)
+void ALight_CinematicLightingManager::SetTimeOfDayProgress(float Progress)
 {
-    bCinematicMode = true;
-    CinematicPreset = Preset;
-    ApplyLightingPreset(Preset, TransitionTime);
-}
-
-void ALight_CinematicLightingManager::DisableCinematicMode(float TransitionTime)
-{
-    bCinematicMode = false;
+    TimeOfDayProgress = FMath::Clamp(Progress, 0.0f, 1.0f);
     
-    if (TimeOfDayPresets.Contains(CurrentTimeOfDay))
+    // Determine current and next time periods
+    int32 CurrentIndex = (int32)(Progress * 7.0f);
+    int32 NextIndex = (CurrentIndex + 1) % 7;
+    float Alpha = FMath::Fmod(Progress * 7.0f, 1.0f);
+    
+    ELight_TimeOfDay CurrentPeriod = (ELight_TimeOfDay)CurrentIndex;
+    ELight_TimeOfDay NextPeriod = (ELight_TimeOfDay)NextIndex;
+    
+    FLight_LightingPreset CurrentPreset = GetPresetForTimeOfDay(CurrentPeriod);
+    FLight_LightingPreset NextPreset = GetPresetForTimeOfDay(NextPeriod);
+    
+    InterpolateLightingPresets(CurrentPreset, NextPreset, Alpha);
+}
+
+void ALight_CinematicLightingManager::ApplyLightingPreset(const FLight_LightingPreset& Preset)
+{
+    if (MainDirectionalLight && MainDirectionalLight->GetLightComponent())
     {
-        ApplyLightingPreset(TimeOfDayPresets[CurrentTimeOfDay], TransitionTime);
+        UDirectionalLightComponent* DirLightComp = MainDirectionalLight->GetLightComponent();
+        DirLightComp->SetLightColor(Preset.DirectionalLightColor);
+        DirLightComp->SetIntensity(Preset.DirectionalLightIntensity);
+        DirLightComp->SetCastVolumetricShadow(true);
+        DirLightComp->SetVolumetricScatteringIntensity(Preset.VolumetricScattering);
+        
+        MainDirectionalLight->SetActorRotation(Preset.DirectionalLightRotation);
+    }
+
+    if (MainFogActor && MainFogActor->GetComponent())
+    {
+        UExponentialHeightFogComponent* FogComp = MainFogActor->GetComponent();
+        FogComp->SetFogDensity(Preset.FogDensity);
+        FogComp->SetFogInscatteringColor(Preset.FogColor);
+        FogComp->SetVolumetricFog(bEnableVolumetricFog);
+        FogComp->SetVolumetricFogScatteringDistribution(VolumetricFogScatteringDistribution);
     }
 }
 
-void ALight_CinematicLightingManager::ApplyLightingPreset(const FLight_LightingPreset& Preset, float TransitionTime)
+void ALight_CinematicLightingManager::CreateCinematicZone(FVector Center, float Radius, ELight_LightingZone ZoneType)
 {
-    if (TransitionTime <= 0.0f)
+    FLight_CinematicZone NewZone;
+    NewZone.ZoneCenter = Center;
+    NewZone.ZoneRadius = Radius;
+    NewZone.ZoneType = ZoneType;
+    NewZone.bIsActive = true;
+
+    // Create appropriate lights based on zone type
+    switch (ZoneType)
     {
-        ApplyPresetToComponents(Preset);
-        bIsTransitioning = false;
+        case ELight_LightingZone::Dramatic:
+            CreateDramaticRimLighting(Center, FLinearColor(1.0f, 0.8f, 0.6f, 1.0f), 2500.0f);
+            break;
+        case ELight_LightingZone::Mysterious:
+            CreateAtmosphericPointLight(Center + FVector(0, 0, 150), FLinearColor(0.6f, 0.7f, 1.0f, 1.0f), 1500.0f, 800.0f);
+            break;
+        case ELight_LightingZone::Warm:
+            CreateAtmosphericPointLight(Center + FVector(0, 0, 100), FLinearColor(1.0f, 0.7f, 0.4f, 1.0f), 2000.0f, 1000.0f);
+            break;
+        case ELight_LightingZone::Cool:
+            CreateVolumetricSpotlight(Center + FVector(300, 300, 200), FRotator(-45, -135, 0), FLinearColor(0.5f, 0.8f, 1.0f, 1.0f), 1800.0f);
+            break;
+        default:
+            CreateAtmosphericPointLight(Center + FVector(0, 0, 120), FLinearColor(0.9f, 0.8f, 0.7f, 1.0f), 1200.0f, 600.0f);
+            break;
     }
-    else
-    {
-        TransitionStartPreset = GetCurrentLightingSettings();
-        TransitionTargetPreset = Preset;
-        TransitionDuration = TransitionTime;
-        TransitionProgress = 0.0f;
-        bIsTransitioning = true;
-    }
+
+    CinematicZones.Add(NewZone);
+    
+    UE_LOG(LogTemp, Warning, TEXT("CinematicLightingManager: Created cinematic zone at %s"), *Center.ToString());
 }
 
-FLight_LightingPreset ALight_CinematicLightingManager::GetCurrentLightingSettings() const
+void ALight_CinematicLightingManager::UpdateCinematicZone(int32 ZoneIndex, bool bActivate)
 {
-    FLight_LightingPreset CurrentSettings;
-    
-    if (MainSunLight)
+    if (CinematicZones.IsValidIndex(ZoneIndex))
     {
-        CurrentSettings.SunIntensity = MainSunLight->Intensity;
-        CurrentSettings.SunColor = MainSunLight->GetLightColor();
-        CurrentSettings.SunRotation = GetActorRotation();
-    }
-    
-    if (AtmosphericFog)
-    {
-        CurrentSettings.FogDensity = AtmosphericFog->FogDensity;
-        CurrentSettings.VolumetricScattering = MainSunLight ? MainSunLight->VolumetricScatteringIntensity : 1.0f;
-    }
-    
-    return CurrentSettings;
-}
-
-void ALight_CinematicLightingManager::ApplyPresetToComponents(const FLight_LightingPreset& Preset)
-{
-    if (MainSunLight)
-    {
-        MainSunLight->SetIntensity(Preset.SunIntensity);
-        MainSunLight->SetLightColor(Preset.SunColor);
-        MainSunLight->SetVolumetricScatteringIntensity(Preset.VolumetricScattering);
-        SetActorRotation(Preset.SunRotation);
-    }
-    
-    if (AtmosphericFog)
-    {
-        AtmosphericFog->SetFogDensity(Preset.FogDensity);
-        AtmosphericFog->SetVolumetricFogAlbedo(Preset.FogColor);
-    }
-    
-    UpdatePostProcessSettings(Preset.WhiteTemperature, Preset.BloomIntensity, 1.0f);
-}
-
-FLight_LightingPreset ALight_CinematicLightingManager::InterpolateLightingPresets(
-    const FLight_LightingPreset& A, 
-    const FLight_LightingPreset& B, 
-    float Alpha) const
-{
-    FLight_LightingPreset Result;
-    
-    Result.SunIntensity = FMath::Lerp(A.SunIntensity, B.SunIntensity, Alpha);
-    Result.SunColor = FLinearColor::LerpUsingHSV(A.SunColor, B.SunColor, Alpha);
-    Result.SunRotation = FMath::Lerp(A.SunRotation, B.SunRotation, Alpha);
-    Result.FogDensity = FMath::Lerp(A.FogDensity, B.FogDensity, Alpha);
-    Result.FogColor = FLinearColor::LerpUsingHSV(A.FogColor, B.FogColor, Alpha);
-    Result.VolumetricScattering = FMath::Lerp(A.VolumetricScattering, B.VolumetricScattering, Alpha);
-    Result.WhiteTemperature = FMath::Lerp(A.WhiteTemperature, B.WhiteTemperature, Alpha);
-    Result.BloomIntensity = FMath::Lerp(A.BloomIntensity, B.BloomIntensity, Alpha);
-    
-    return Result;
-}
-
-void ALight_CinematicLightingManager::SetVolumetricFogDensity(float Density)
-{
-    if (AtmosphericFog)
-    {
-        AtmosphericFog->SetFogDensity(Density);
-    }
-}
-
-void ALight_CinematicLightingManager::SetAtmosphericScattering(float ScatteringIntensity)
-{
-    if (MainSunLight)
-    {
-        MainSunLight->SetVolumetricScatteringIntensity(ScatteringIntensity);
-    }
-}
-
-void ALight_CinematicLightingManager::UpdatePostProcessSettings(float WhiteTemp, float BloomIntensity, float Saturation)
-{
-    if (MainPostProcessVolume && MainPostProcessVolume->Settings.bOverride_WhiteTemp)
-    {
-        MainPostProcessVolume->Settings.WhiteTemp = WhiteTemp;
-        MainPostProcessVolume->Settings.BloomIntensity = BloomIntensity;
-        MainPostProcessVolume->Settings.ColorSaturation = FVector4(Saturation, Saturation, Saturation, 1.0f);
-    }
-}
-
-void ALight_CinematicLightingManager::FindOrCreatePostProcessVolume()
-{
-    // Try to find existing post process volume
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APostProcessVolume::StaticClass(), FoundActors);
-    
-    if (FoundActors.Num() > 0)
-    {
-        MainPostProcessVolume = Cast<APostProcessVolume>(FoundActors[0]);
-    }
-    else
-    {
-        // Create new post process volume
-        MainPostProcessVolume = GetWorld()->SpawnActor<APostProcessVolume>();
-        if (MainPostProcessVolume)
+        CinematicZones[ZoneIndex].bIsActive = bActivate;
+        
+        for (AActor* Light : CinematicZones[ZoneIndex].ZoneLights)
         {
-            MainPostProcessVolume->bUnbound = true;
-            MainPostProcessVolume->Priority = 1.0f;
+            if (Light)
+            {
+                Light->SetActorHiddenInGame(!bActivate);
+            }
         }
     }
 }
 
-void ALight_CinematicLightingManager::SetupAtmosphericComponents()
+void ALight_CinematicLightingManager::SetVolumetricFogProperties(float Density, FLinearColor InscatteringColor, float ScatteringDistribution)
 {
-    // Additional atmospheric setup if needed
-    if (AtmosphericFog)
+    BaseFogDensity = Density;
+    FogInscatteringColor = InscatteringColor;
+    VolumetricFogScatteringDistribution = ScatteringDistribution;
+    
+    UpdateVolumetricFog();
+}
+
+void ALight_CinematicLightingManager::CreateDramaticRimLighting(FVector TargetLocation, FLinearColor LightColor, float Intensity)
+{
+    if (UWorld* World = GetWorld())
     {
-        AtmosphericFog->SetVolumetricFog(true);
-        AtmosphericFog->SetVolumetricFogScatteringDistribution(0.6f);
-        AtmosphericFog->SetVolumetricFogExtinctionScale(1.2f);
+        FVector SpawnLocation = TargetLocation + FVector(300, 300, 200);
+        FRotator SpawnRotation = FRotator(-30, -135, 0);
+        
+        ASpotLight* RimLight = World->SpawnActor<ASpotLight>(ASpotLight::StaticClass(), SpawnLocation, SpawnRotation);
+        if (RimLight && RimLight->GetLightComponent())
+        {
+            USpotLightComponent* SpotComp = RimLight->GetLightComponent();
+            SpotComp->SetLightColor(LightColor);
+            SpotComp->SetIntensity(Intensity);
+            SpotComp->SetInnerConeAngle(25.0f);
+            SpotComp->SetOuterConeAngle(45.0f);
+            SpotComp->SetCastVolumetricShadow(true);
+            SpotComp->SetAttenuationRadius(1200.0f);
+            
+            RimLight->SetActorLabel(TEXT("DramaticRimLight"));
+            CinematicSpotLights.Add(RimLight);
+        }
     }
+}
+
+void ALight_CinematicLightingManager::CreateAtmosphericPointLight(FVector Location, FLinearColor Color, float Intensity, float Radius)
+{
+    if (UWorld* World = GetWorld())
+    {
+        APointLight* AtmoLight = World->SpawnActor<APointLight>(APointLight::StaticClass(), Location, FRotator::ZeroRotator);
+        if (AtmoLight && AtmoLight->GetLightComponent())
+        {
+            UPointLightComponent* PointComp = AtmoLight->GetLightComponent();
+            PointComp->SetLightColor(Color);
+            PointComp->SetIntensity(Intensity);
+            PointComp->SetAttenuationRadius(Radius);
+            PointComp->SetCastVolumetricShadow(true);
+            PointComp->SetSourceRadius(50.0f);
+            
+            AtmoLight->SetActorLabel(TEXT("AtmosphericPointLight"));
+            CinematicPointLights.Add(AtmoLight);
+        }
+    }
+}
+
+void ALight_CinematicLightingManager::CreateVolumetricSpotlight(FVector Location, FRotator Rotation, FLinearColor Color, float Intensity)
+{
+    if (UWorld* World = GetWorld())
+    {
+        ASpotLight* VolumetricSpot = World->SpawnActor<ASpotLight>(ASpotLight::StaticClass(), Location, Rotation);
+        if (VolumetricSpot && VolumetricSpot->GetLightComponent())
+        {
+            USpotLightComponent* SpotComp = VolumetricSpot->GetLightComponent();
+            SpotComp->SetLightColor(Color);
+            SpotComp->SetIntensity(Intensity);
+            SpotComp->SetInnerConeAngle(20.0f);
+            SpotComp->SetOuterConeAngle(40.0f);
+            SpotComp->SetCastVolumetricShadow(true);
+            SpotComp->SetAttenuationRadius(1000.0f);
+            SpotComp->SetVolumetricScatteringIntensity(2.0f);
+            
+            VolumetricSpot->SetActorLabel(TEXT("VolumetricSpotlight"));
+            CinematicSpotLights.Add(VolumetricSpot);
+        }
+    }
+}
+
+void ALight_CinematicLightingManager::FindAndCacheLightReferences()
+{
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), FoundActors);
+        
+        if (FoundActors.Num() > 0)
+        {
+            MainDirectionalLight = Cast<ADirectionalLight>(FoundActors[0]);
+        }
+
+        FoundActors.Empty();
+        UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FoundActors);
+        
+        if (FoundActors.Num() > 0)
+        {
+            MainFogActor = Cast<AExponentialHeightFog>(FoundActors[0]);
+        }
+    }
+}
+
+void ALight_CinematicLightingManager::ValidateLightingSetup()
+{
+    bool bIsValid = true;
+    
+    if (!MainDirectionalLight)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CinematicLightingManager: No DirectionalLight found in scene"));
+        bIsValid = false;
+    }
+    
+    if (!MainFogActor)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CinematicLightingManager: No ExponentialHeightFog found in scene"));
+        bIsValid = false;
+    }
+    
+    if (bIsValid)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CinematicLightingManager: Lighting setup validation passed"));
+    }
+}
+
+void ALight_CinematicLightingManager::InitializeDefaultLightingPresets()
+{
+    TimeOfDayPresets.Empty();
+    
+    // Dawn
+    FLight_LightingPreset Dawn;
+    Dawn.PresetName = TEXT("Dawn");
+    Dawn.DirectionalLightColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    Dawn.DirectionalLightIntensity = 2.5f;
+    Dawn.DirectionalLightRotation = FRotator(-15.0f, 75.0f, 0.0f);
+    Dawn.FogColor = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f);
+    Dawn.FogDensity = 0.035f;
+    Dawn.VolumetricScattering = 1.5f;
+    TimeOfDayPresets.Add(Dawn);
+    
+    // Golden Hour
+    FLight_LightingPreset GoldenHour;
+    GoldenHour.PresetName = TEXT("Golden Hour");
+    GoldenHour.DirectionalLightColor = FLinearColor(1.0f, 0.85f, 0.7f, 1.0f);
+    GoldenHour.DirectionalLightIntensity = 4.5f;
+    GoldenHour.DirectionalLightRotation = FRotator(-25.0f, 45.0f, 0.0f);
+    GoldenHour.FogColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
+    GoldenHour.FogDensity = 0.025f;
+    GoldenHour.VolumetricScattering = 1.2f;
+    TimeOfDayPresets.Add(GoldenHour);
+    
+    // Night
+    FLight_LightingPreset Night;
+    Night.PresetName = TEXT("Night");
+    Night.DirectionalLightColor = FLinearColor(0.3f, 0.4f, 0.6f, 1.0f);
+    Night.DirectionalLightIntensity = 0.8f;
+    Night.DirectionalLightRotation = FRotator(-80.0f, 180.0f, 0.0f);
+    Night.FogColor = FLinearColor(0.2f, 0.3f, 0.5f, 1.0f);
+    Night.FogDensity = 0.015f;
+    Night.VolumetricScattering = 0.8f;
+    TimeOfDayPresets.Add(Night);
+}
+
+void ALight_CinematicLightingManager::CreateTestCinematicZones()
+{
+    CreateCinematicZone(FVector(1000, 1000, 0), 800.0f, ELight_LightingZone::Dramatic);
+    CreateCinematicZone(FVector(-1000, 1000, 0), 600.0f, ELight_LightingZone::Mysterious);
+    CreateCinematicZone(FVector(0, -1500, 0), 1000.0f, ELight_LightingZone::Warm);
+    
+    UE_LOG(LogTemp, Warning, TEXT("CinematicLightingManager: Test cinematic zones created"));
+}
+
+void ALight_CinematicLightingManager::UpdateTimeOfDay(float DeltaTime)
+{
+    TimeAccumulator += DeltaTime;
+    
+    float DayDurationSeconds = DayDurationMinutes * 60.0f;
+    TimeOfDayProgress = FMath::Fmod(TimeAccumulator / DayDurationSeconds, 1.0f);
+    
+    SetTimeOfDayProgress(TimeOfDayProgress);
+}
+
+void ALight_CinematicLightingManager::InterpolateLightingPresets(const FLight_LightingPreset& PresetA, const FLight_LightingPreset& PresetB, float Alpha)
+{
+    FLight_LightingPreset InterpolatedPreset;
+    
+    InterpolatedPreset.DirectionalLightColor = FMath::Lerp(PresetA.DirectionalLightColor, PresetB.DirectionalLightColor, Alpha);
+    InterpolatedPreset.DirectionalLightIntensity = FMath::Lerp(PresetA.DirectionalLightIntensity, PresetB.DirectionalLightIntensity, Alpha);
+    InterpolatedPreset.DirectionalLightRotation = FMath::Lerp(PresetA.DirectionalLightRotation, PresetB.DirectionalLightRotation, Alpha);
+    InterpolatedPreset.FogColor = FMath::Lerp(PresetA.FogColor, PresetB.FogColor, Alpha);
+    InterpolatedPreset.FogDensity = FMath::Lerp(PresetA.FogDensity, PresetB.FogDensity, Alpha);
+    InterpolatedPreset.VolumetricScattering = FMath::Lerp(PresetA.VolumetricScattering, PresetB.VolumetricScattering, Alpha);
+    
+    ApplyLightingPreset(InterpolatedPreset);
+}
+
+void ALight_CinematicLightingManager::UpdateVolumetricFog()
+{
+    if (MainFogActor && MainFogActor->GetComponent())
+    {
+        UExponentialHeightFogComponent* FogComp = MainFogActor->GetComponent();
+        FogComp->SetVolumetricFog(bEnableVolumetricFog);
+        FogComp->SetVolumetricFogScatteringDistribution(VolumetricFogScatteringDistribution);
+        FogComp->SetVolumetricFogAlbedo(FLinearColor(0.9f, 0.85f, 0.7f, 1.0f));
+    }
+}
+
+void ALight_CinematicLightingManager::UpdateCinematicZones()
+{
+    for (FLight_CinematicZone& Zone : CinematicZones)
+    {
+        if (!Zone.bIsActive)
+        {
+            continue;
+        }
+        
+        // Update zone lights based on current lighting conditions
+        for (AActor* Light : Zone.ZoneLights)
+        {
+            if (Light)
+            {
+                // Adjust light intensity based on time of day
+                float IntensityMultiplier = 1.0f;
+                if (CurrentTimeOfDay == ELight_TimeOfDay::Night)
+                {
+                    IntensityMultiplier = 1.5f;
+                }
+                else if (CurrentTimeOfDay == ELight_TimeOfDay::Midday)
+                {
+                    IntensityMultiplier = 0.7f;
+                }
+                
+                if (APointLight* PointLight = Cast<APointLight>(Light))
+                {
+                    if (PointLight->GetLightComponent())
+                    {
+                        float BaseIntensity = 1800.0f;
+                        PointLight->GetLightComponent()->SetIntensity(BaseIntensity * IntensityMultiplier);
+                    }
+                }
+                else if (ASpotLight* SpotLight = Cast<ASpotLight>(Light))
+                {
+                    if (SpotLight->GetLightComponent())
+                    {
+                        float BaseIntensity = 2500.0f;
+                        SpotLight->GetLightComponent()->SetIntensity(BaseIntensity * IntensityMultiplier);
+                    }
+                }
+            }
+        }
+    }
+}
+
+FLight_LightingPreset ALight_CinematicLightingManager::GetPresetForTimeOfDay(ELight_TimeOfDay TimeOfDay)
+{
+    for (const FLight_LightingPreset& Preset : TimeOfDayPresets)
+    {
+        if (Preset.PresetName.Contains(TEXT("Dawn")) && TimeOfDay == ELight_TimeOfDay::Dawn)
+            return Preset;
+        if (Preset.PresetName.Contains(TEXT("Golden")) && TimeOfDay == ELight_TimeOfDay::GoldenHour)
+            return Preset;
+        if (Preset.PresetName.Contains(TEXT("Night")) && TimeOfDay == ELight_TimeOfDay::Night)
+            return Preset;
+    }
+    
+    // Return default golden hour preset if not found
+    return TimeOfDayPresets.Num() > 1 ? TimeOfDayPresets[1] : FLight_LightingPreset();
 }
