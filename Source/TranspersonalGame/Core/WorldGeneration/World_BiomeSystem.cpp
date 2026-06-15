@@ -1,214 +1,277 @@
 #include "World_BiomeSystem.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
+#include "Kismet/GameplayStatics.h"
 
 UWorld_BiomeSystem::UWorld_BiomeSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
-
-    // Initialize default biome definitions
-    BiomeDefinitions.Empty();
-    
-    // Tropical Forest
-    FWorld_BiomeData TropicalForest;
-    TropicalForest.BiomeType = EWorld_BiomeType::TropicalForest;
-    TropicalForest.BiomeName = "Tropical Forest";
-    TropicalForest.FogColor = FLinearColor(0.2f, 0.6f, 0.3f, 1.0f);
-    TropicalForest.FogDensity = 0.05f;
-    TropicalForest.Temperature = 28.0f;
-    TropicalForest.Humidity = 0.85f;
-    BiomeDefinitions.Add(TropicalForest);
-
-    // Desert Canyon
-    FWorld_BiomeData DesertCanyon;
-    DesertCanyon.BiomeType = EWorld_BiomeType::DesertCanyon;
-    DesertCanyon.BiomeName = "Desert Canyon";
-    DesertCanyon.FogColor = FLinearColor(0.9f, 0.7f, 0.4f, 1.0f);
-    DesertCanyon.FogDensity = 0.01f;
-    DesertCanyon.Temperature = 35.0f;
-    DesertCanyon.Humidity = 0.15f;
-    BiomeDefinitions.Add(DesertCanyon);
-
-    // Swampland
-    FWorld_BiomeData Swampland;
-    Swampland.BiomeType = EWorld_BiomeType::Swampland;
-    Swampland.BiomeName = "Swampland";
-    Swampland.FogColor = FLinearColor(0.4f, 0.5f, 0.3f, 1.0f);
-    Swampland.FogDensity = 0.08f;
-    Swampland.Temperature = 22.0f;
-    Swampland.Humidity = 0.95f;
-    BiomeDefinitions.Add(Swampland);
-
-    BiomeTransitionRadius = 5000.0f;
-    WeatherUpdateInterval = 30.0f;
-    CurrentBiome = EWorld_BiomeType::TropicalForest;
-    CurrentTemperature = 25.0f;
-    CurrentHumidity = 0.5f;
-    WeatherTimer = 0.0f;
+    PrimaryComponentTick.TickInterval = 2.0f; // Update every 2 seconds
 }
 
 void UWorld_BiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomeLocations();
-    UpdateCurrentBiome();
-    
-    UE_LOG(LogTemp, Log, TEXT("World_BiomeSystem initialized with %d biomes"), BiomeDefinitions.Num());
+    if (!bIsInitialized)
+    {
+        InitializeDefaultBiomes();
+        
+        if (bAutoGenerateBiomes && ActiveBiomes.Num() == 0)
+        {
+            GenerateRandomBiomes();
+        }
+        
+        bIsInitialized = true;
+        UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Initialized with %d biomes"), ActiveBiomes.Num());
+    }
 }
 
 void UWorld_BiomeSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    WeatherTimer += DeltaTime;
-    if (WeatherTimer >= WeatherUpdateInterval)
-    {
-        UpdateCurrentBiome();
-        UpdateWeatherForBiome(CurrentBiome);
-        WeatherTimer = 0.0f;
-    }
-}
-
-void UWorld_BiomeSystem::InitializeBiomeLocations()
-{
-    BiomeCenterLocations.Empty();
     
-    // Define biome center locations in world space
-    BiomeCenterLocations.Add(EWorld_BiomeType::TropicalForest, FVector(-5000.0f, -5000.0f, 0.0f));
-    BiomeCenterLocations.Add(EWorld_BiomeType::DesertCanyon, FVector(5000.0f, 0.0f, 0.0f));
-    BiomeCenterLocations.Add(EWorld_BiomeType::Swampland, FVector(0.0f, 5000.0f, 0.0f));
-    BiomeCenterLocations.Add(EWorld_BiomeType::RockyPlains, FVector(-3000.0f, 3000.0f, 0.0f));
-    BiomeCenterLocations.Add(EWorld_BiomeType::VolcanicRegion, FVector(3000.0f, -3000.0f, 0.0f));
-    BiomeCenterLocations.Add(EWorld_BiomeType::CoastalBeach, FVector(0.0f, -8000.0f, 0.0f));
+    // Optional: Update biome transitions or dynamic effects
 }
 
-EWorld_BiomeType UWorld_BiomeSystem::GetBiomeAtLocation(const FVector& Location) const
+void UWorld_BiomeSystem::GenerateRandomBiomes()
 {
-    float MinDistance = FLT_MAX;
-    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::TropicalForest;
-
-    for (const auto& BiomePair : BiomeCenterLocations)
+    ClearAllBiomes();
+    
+    // Generate biomes in a grid pattern with some randomization
+    int32 GridSize = FMath::Sqrt(MaxBiomes);
+    float CellSize = WorldBounds.X / GridSize;
+    
+    for (int32 i = 0; i < MaxBiomes; i++)
     {
-        float Distance = FVector::Dist(Location, BiomePair.Value);
-        if (Distance < MinDistance)
+        FWorld_BiomeData NewBiome;
+        
+        // Calculate grid position with random offset
+        int32 GridX = i % GridSize;
+        int32 GridY = i / GridSize;
+        
+        float BaseX = (GridX * CellSize) - (WorldBounds.X * 0.5f) + (CellSize * 0.5f);
+        float BaseY = (GridY * CellSize) - (WorldBounds.Y * 0.5f) + (CellSize * 0.5f);
+        
+        // Add random offset within cell
+        float OffsetX = FMath::RandRange(-CellSize * 0.3f, CellSize * 0.3f);
+        float OffsetY = FMath::RandRange(-CellSize * 0.3f, CellSize * 0.3f);
+        
+        NewBiome.BiomeCenter = FVector2D(BaseX + OffsetX, BaseY + OffsetY);
+        NewBiome.BiomeRadius = FMath::RandRange(CellSize * 0.4f, CellSize * 0.8f);
+        
+        // Randomly assign biome type
+        int32 BiomeTypeIndex = FMath::RandRange(0, 5);
+        NewBiome.BiomeType = static_cast<EWorld_BiomeType>(BiomeTypeIndex);
+        
+        // Set biome-specific properties
+        switch (NewBiome.BiomeType)
         {
-            MinDistance = Distance;
-            ClosestBiome = BiomePair.Key;
+            case EWorld_BiomeType::Forest:
+                NewBiome.VegetationDensity = FMath::RandRange(0.7f, 0.9f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.05f, 0.15f);
+                NewBiome.RockDensity = FMath::RandRange(0.1f, 0.3f);
+                NewBiome.VegetationTypes = {"Fern", "Conifer", "Oak", "Moss"};
+                NewBiome.DinosaurSpecies = {"Triceratops", "Parasaurolophus", "Ankylosaurus"};
+                break;
+                
+            case EWorld_BiomeType::Plains:
+                NewBiome.VegetationDensity = FMath::RandRange(0.2f, 0.4f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.02f, 0.08f);
+                NewBiome.RockDensity = FMath::RandRange(0.05f, 0.15f);
+                NewBiome.VegetationTypes = {"Grass", "Shrub", "Palm"};
+                NewBiome.DinosaurSpecies = {"Brachiosaurus", "Velociraptor", "Pachycephalosaurus"};
+                break;
+                
+            case EWorld_BiomeType::RiverValley:
+                NewBiome.VegetationDensity = FMath::RandRange(0.5f, 0.7f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.2f, 0.4f);
+                NewBiome.RockDensity = FMath::RandRange(0.2f, 0.4f);
+                NewBiome.VegetationTypes = {"Fern", "Reed", "Willow", "Moss"};
+                NewBiome.DinosaurSpecies = {"Parasaurolophus", "Tsintaosaurus", "Protoceratops"};
+                break;
+                
+            case EWorld_BiomeType::RockyOutcrop:
+                NewBiome.VegetationDensity = FMath::RandRange(0.1f, 0.3f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.0f, 0.05f);
+                NewBiome.RockDensity = FMath::RandRange(0.6f, 0.9f);
+                NewBiome.VegetationTypes = {"Moss", "Lichen", "Hardy_Shrub"};
+                NewBiome.DinosaurSpecies = {"Ankylosaurus", "Protoceratops"};
+                break;
+                
+            case EWorld_BiomeType::Wetlands:
+                NewBiome.VegetationDensity = FMath::RandRange(0.6f, 0.8f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.3f, 0.6f);
+                NewBiome.RockDensity = FMath::RandRange(0.05f, 0.2f);
+                NewBiome.VegetationTypes = {"Reed", "Cattail", "Moss", "Fern"};
+                NewBiome.DinosaurSpecies = {"Tsintaosaurus", "Parasaurolophus"};
+                break;
+                
+            case EWorld_BiomeType::VolcanicRegion:
+                NewBiome.VegetationDensity = FMath::RandRange(0.1f, 0.4f);
+                NewBiome.WaterCoverage = FMath::RandRange(0.0f, 0.1f);
+                NewBiome.RockDensity = FMath::RandRange(0.7f, 0.95f);
+                NewBiome.VegetationTypes = {"Hardy_Shrub", "Volcanic_Moss"};
+                NewBiome.DinosaurSpecies = {"Ankylosaurus"};
+                break;
+        }
+        
+        ActiveBiomes.Add(NewBiome);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Generated %d random biomes"), ActiveBiomes.Num());
+}
+
+EWorld_BiomeType UWorld_BiomeSystem::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    FVector2D Location2D(WorldLocation.X, WorldLocation.Y);
+    
+    float MaxInfluence = 0.0f;
+    EWorld_BiomeType DominantBiome = EWorld_BiomeType::Forest;
+    
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
+    {
+        float Influence = CalculateBiomeInfluence(WorldLocation, Biome);
+        if (Influence > MaxInfluence)
+        {
+            MaxInfluence = Influence;
+            DominantBiome = Biome.BiomeType;
         }
     }
-
-    return ClosestBiome;
+    
+    return DominantBiome;
 }
 
 FWorld_BiomeData UWorld_BiomeSystem::GetBiomeData(EWorld_BiomeType BiomeType) const
 {
-    for (const FWorld_BiomeData& BiomeData : BiomeDefinitions)
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
     {
-        if (BiomeData.BiomeType == BiomeType)
+        if (Biome.BiomeType == BiomeType)
         {
-            return BiomeData;
+            return Biome;
         }
     }
-
+    
     // Return default if not found
-    return BiomeDefinitions.Num() > 0 ? BiomeDefinitions[0] : FWorld_BiomeData();
+    FWorld_BiomeData DefaultBiome;
+    DefaultBiome.BiomeType = BiomeType;
+    return DefaultBiome;
 }
 
-void UWorld_BiomeSystem::UpdateWeatherForBiome(EWorld_BiomeType BiomeType)
+void UWorld_BiomeSystem::AddBiome(const FWorld_BiomeData& NewBiome)
 {
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    CurrentTemperature = BiomeData.Temperature + FMath::RandRange(-5.0f, 5.0f);
-    CurrentHumidity = FMath::Clamp(BiomeData.Humidity + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("Weather updated for %s: Temp=%.1f, Humidity=%.2f"), 
-           *BiomeData.BiomeName, CurrentTemperature, CurrentHumidity);
-}
-
-void UWorld_BiomeSystem::TransitionToBiome(EWorld_BiomeType NewBiome, float TransitionTime)
-{
-    if (CurrentBiome != NewBiome)
+    if (ActiveBiomes.Num() < MaxBiomes)
     {
-        CurrentBiome = NewBiome;
-        FWorld_BiomeData BiomeData = GetBiomeData(NewBiome);
-        
-        UE_LOG(LogTemp, Log, TEXT("Transitioning to biome: %s"), *BiomeData.BiomeName);
-        
-        // Immediate weather update for new biome
-        UpdateWeatherForBiome(NewBiome);
+        ActiveBiomes.Add(NewBiome);
+        UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Added biome at (%.0f, %.0f)"), 
+               NewBiome.BiomeCenter.X, NewBiome.BiomeCenter.Y);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Cannot add biome - maximum limit reached"));
     }
 }
 
-TArray<FVector> UWorld_BiomeSystem::GetBiomeCenters() const
+void UWorld_BiomeSystem::ClearAllBiomes()
 {
-    TArray<FVector> Centers;
-    BiomeCenterLocations.GenerateValueArray(Centers);
-    return Centers;
+    ActiveBiomes.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("BiomeSystem: Cleared all biomes"));
 }
 
-void UWorld_BiomeSystem::SpawnBiomeVegetation(const FVector& Location, float Radius, EWorld_BiomeType BiomeType)
+TArray<FVector> UWorld_BiomeSystem::GetWaterSourceLocations() const
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
+    TArray<FVector> WaterSources;
     
-    // Spawn vegetation based on biome type
-    int32 VegetationCount = FMath::RandRange(5, 15);
-    for (int32 i = 0; i < VegetationCount; i++)
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
     {
-        FVector SpawnLocation = Location + FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-
-        // Create a basic vegetation actor (placeholder)
-        AStaticMeshActor* VegetationActor = World->SpawnActor<AStaticMeshActor>(SpawnLocation, FRotator::ZeroRotator);
-        if (VegetationActor)
+        if (Biome.WaterCoverage > 0.15f) // Only biomes with significant water
         {
-            FString VegLabel = FString::Printf(TEXT("Vegetation_%s_%d"), *BiomeData.BiomeName, i);
-            VegetationActor->SetActorLabel(VegLabel);
+            // Add center as primary water source
+            FVector WaterLocation(Biome.BiomeCenter.X, Biome.BiomeCenter.Y, 0.0f);
+            WaterSources.Add(WaterLocation);
+            
+            // Add additional water sources for large water biomes
+            if (Biome.WaterCoverage > 0.3f)
+            {
+                for (int32 i = 0; i < 3; i++)
+                {
+                    float Angle = (i * 120.0f) * PI / 180.0f;
+                    float Distance = Biome.BiomeRadius * 0.6f;
+                    FVector AdditionalWater(
+                        Biome.BiomeCenter.X + FMath::Cos(Angle) * Distance,
+                        Biome.BiomeCenter.Y + FMath::Sin(Angle) * Distance,
+                        0.0f
+                    );
+                    WaterSources.Add(AdditionalWater);
+                }
+            }
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Spawned %d vegetation actors for %s biome at %s"), 
-           VegetationCount, *BiomeData.BiomeName, *Location.ToString());
-}
-
-void UWorld_BiomeSystem::UpdateCurrentBiome()
-{
-    FVector PlayerLocation = GetPlayerLocation();
-    EWorld_BiomeType NewBiome = GetBiomeAtLocation(PlayerLocation);
     
-    if (NewBiome != CurrentBiome)
+    return WaterSources;
+}
+
+float UWorld_BiomeSystem::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
+{
+    FVector2D Location2D(WorldLocation.X, WorldLocation.Y);
+    float TotalDensity = 0.0f;
+    float TotalInfluence = 0.0f;
+    
+    for (const FWorld_BiomeData& Biome : ActiveBiomes)
     {
-        TransitionToBiome(NewBiome);
+        float Influence = CalculateBiomeInfluence(WorldLocation, Biome);
+        if (Influence > 0.0f)
+        {
+            TotalDensity += Biome.VegetationDensity * Influence;
+            TotalInfluence += Influence;
+        }
+    }
+    
+    return TotalInfluence > 0.0f ? TotalDensity / TotalInfluence : 0.3f;
+}
+
+TArray<FString> UWorld_BiomeSystem::GetDinosaurSpeciesAtLocation(const FVector& WorldLocation) const
+{
+    EWorld_BiomeType DominantBiome = GetBiomeAtLocation(WorldLocation);
+    FWorld_BiomeData BiomeData = GetBiomeData(DominantBiome);
+    return BiomeData.DinosaurSpecies;
+}
+
+void UWorld_BiomeSystem::InitializeDefaultBiomes()
+{
+    // This can be overridden in Blueprint or called manually
+    // Default implementation creates a basic forest biome
+    if (ActiveBiomes.Num() == 0)
+    {
+        FWorld_BiomeData DefaultForest;
+        DefaultForest.BiomeType = EWorld_BiomeType::Forest;
+        DefaultForest.BiomeCenter = FVector2D(0.0f, 0.0f);
+        DefaultForest.BiomeRadius = 10000.0f;
+        DefaultForest.VegetationDensity = 0.7f;
+        DefaultForest.WaterCoverage = 0.1f;
+        DefaultForest.RockDensity = 0.2f;
+        ActiveBiomes.Add(DefaultForest);
     }
 }
 
-FVector UWorld_BiomeSystem::GetPlayerLocation() const
+float UWorld_BiomeSystem::CalculateBiomeInfluence(const FVector& WorldLocation, const FWorld_BiomeData& Biome) const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    FVector2D Location2D(WorldLocation.X, WorldLocation.Y);
+    float Distance = FVector2D::Distance(Location2D, Biome.BiomeCenter);
+    
+    if (Distance <= Biome.BiomeRadius)
     {
-        return FVector::ZeroVector;
+        // Full influence at center, fading to zero at edge
+        float NormalizedDistance = Distance / Biome.BiomeRadius;
+        return 1.0f - (NormalizedDistance * NormalizedDistance); // Quadratic falloff
     }
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (PC && PC->GetPawn())
+    else if (Distance <= Biome.BiomeRadius + BiomeBlendDistance)
     {
-        return PC->GetPawn()->GetActorLocation();
+        // Blend zone - gradual falloff
+        float BlendFactor = (Distance - Biome.BiomeRadius) / BiomeBlendDistance;
+        return FMath::Max(0.0f, 1.0f - BlendFactor);
     }
-
-    return FVector::ZeroVector;
+    
+    return 0.0f;
 }
