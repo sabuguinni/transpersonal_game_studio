@@ -1,260 +1,311 @@
 #include "Crowd_MigrationManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Math/UnrealMathUtility.h"
 
-UCrowd_MigrationManager::UCrowd_MigrationManager()
+ACrowd_MigrationManager::ACrowd_MigrationManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
     
-    UpdateInterval = 0.5f;
-    SeasonalMigrationChance = 0.1f;
-    LastUpdateTime = 0.0f;
+    // Initialize default settings
+    RouteUpdateInterval = 2.0f;
+    GroupFormationRadius = 1000.0f;
+    MaxSimultaneousGroups = 8;
+    bEnableSeasonalMigration = true;
+    SeasonalMigrationChance = 0.3f;
+    
+    LastRouteUpdateTime = 0.0f;
+    LastSeasonalCheckTime = 0.0f;
+    
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 }
 
-void UCrowd_MigrationManager::BeginPlay()
+void ACrowd_MigrationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default migration routes for different biomes
-    FCrowd_MigrationRoute SavanaRoute;
-    SavanaRoute.Waypoints.Add(FVector(0, 0, 100));
-    SavanaRoute.Waypoints.Add(FVector(5000, 5000, 100));
-    SavanaRoute.Waypoints.Add(FVector(-5000, 5000, 100));
-    SavanaRoute.Waypoints.Add(FVector(-5000, -5000, 100));
-    SavanaRoute.Speed = 300.0f;
-    SavanaRoute.MaxGroupSize = 50;
-    MigrationRoutes.Add(SavanaRoute);
+    InitializeMigrationRoutes();
     
-    FCrowd_MigrationRoute ForestRoute;
-    ForestRoute.Waypoints.Add(FVector(-45000, 40000, 100));
-    ForestRoute.Waypoints.Add(FVector(-43000, 42000, 100));
-    ForestRoute.Waypoints.Add(FVector(-47000, 42000, 100));
-    ForestRoute.Waypoints.Add(FVector(-47000, 38000, 100));
-    ForestRoute.Speed = 200.0f;
-    ForestRoute.MaxGroupSize = 30;
-    MigrationRoutes.Add(ForestRoute);
+    if (bEnableSeasonalMigration)
+    {
+        // Start seasonal migration timer
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &ACrowd_MigrationManager::HandleSeasonalMigration,
+            30.0f,
+            true
+        );
+    }
 }
 
-void UCrowd_MigrationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_MigrationManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= UpdateInterval)
+    LastRouteUpdateTime += DeltaTime;
+    
+    if (LastRouteUpdateTime >= RouteUpdateInterval)
     {
         UpdateMigrationGroups(DeltaTime);
-        LastUpdateTime = 0.0f;
+        CleanupCompletedMigrations();
+        LastRouteUpdateTime = 0.0f;
     }
 }
 
-void UCrowd_MigrationManager::StartMigration(const FCrowd_MigrationRoute& Route, const TArray<AActor*>& Actors)
+void ACrowd_MigrationManager::InitializeMigrationRoutes()
 {
-    if (Actors.Num() == 0) return;
+    MigrationRoutes.Empty();
     
+    // Create herbivore migration routes (grazing patterns)
+    FCrowd_MigrationRoute HerbivoreRoute1;
+    HerbivoreRoute1.StartLocation = FVector(-5000, -3000, 100);
+    HerbivoreRoute1.EndLocation = FVector(8000, 4000, 200);
+    HerbivoreRoute1.RouteDistance = FVector::Dist(HerbivoreRoute1.StartLocation, HerbivoreRoute1.EndLocation);
+    HerbivoreRoute1.SpeciesType = TEXT("Herbivore");
+    HerbivoreRoute1.MaxGroupSize = 25;
+    HerbivoreRoute1.MigrationSpeed = 250.0f;
+    MigrationRoutes.Add(HerbivoreRoute1);
+    
+    FCrowd_MigrationRoute HerbivoreRoute2;
+    HerbivoreRoute2.StartLocation = FVector(6000, -2000, 150);
+    HerbivoreRoute2.EndLocation = FVector(-4000, 5000, 180);
+    HerbivoreRoute2.RouteDistance = FVector::Dist(HerbivoreRoute2.StartLocation, HerbivoreRoute2.EndLocation);
+    HerbivoreRoute2.SpeciesType = TEXT("Herbivore");
+    HerbivoreRoute2.MaxGroupSize = 30;
+    HerbivoreRoute2.MigrationSpeed = 200.0f;
+    MigrationRoutes.Add(HerbivoreRoute2);
+    
+    // Create carnivore hunting migration routes
+    FCrowd_MigrationRoute CarnivoreRoute;
+    CarnivoreRoute.StartLocation = FVector(-2000, 1000, 120);
+    CarnivoreRoute.EndLocation = FVector(3000, -4000, 160);
+    CarnivoreRoute.RouteDistance = FVector::Dist(CarnivoreRoute.StartLocation, CarnivoreRoute.EndLocation);
+    CarnivoreRoute.SpeciesType = TEXT("Carnivore");
+    CarnivoreRoute.MaxGroupSize = 8;
+    CarnivoreRoute.MigrationSpeed = 400.0f;
+    MigrationRoutes.Add(CarnivoreRoute);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Migration Manager: Initialized %d migration routes"), MigrationRoutes.Num());
+}
+
+void ACrowd_MigrationManager::StartMigration(const FString& SpeciesType, int32 GroupSize)
+{
+    if (ActiveMigrationGroups.Num() >= MaxSimultaneousGroups)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Migration Manager: Max groups reached, cannot start new migration"));
+        return;
+    }
+    
+    // Find suitable route for species
+    FCrowd_MigrationRoute* SelectedRoute = nullptr;
+    for (FCrowd_MigrationRoute& Route : MigrationRoutes)
+    {
+        if (Route.SpeciesType == SpeciesType && Route.bIsActive)
+        {
+            SelectedRoute = &Route;
+            break;
+        }
+    }
+    
+    if (SelectedRoute)
+    {
+        int32 ActualGroupSize = FMath::Min(GroupSize, SelectedRoute->MaxGroupSize);
+        CreateMigrationGroup(*SelectedRoute, ActualGroupSize);
+        UE_LOG(LogTemp, Log, TEXT("Migration Manager: Started %s migration with %d members"), *SpeciesType, ActualGroupSize);
+    }
+}
+
+void ACrowd_MigrationManager::UpdateMigrationGroups(float DeltaTime)
+{
+    for (FCrowd_MigrationGroup& Group : ActiveMigrationGroups)
+    {
+        if (Group.GroupMembers.Num() > 0 && !Group.bReachedDestination)
+        {
+            MoveMigrationGroup(Group, DeltaTime);
+            
+            if (IsGroupAtDestination(Group))
+            {
+                AdvanceGroupToNextWaypoint(Group);
+            }
+        }
+    }
+}
+
+void ACrowd_MigrationManager::CreateMigrationGroup(const FCrowd_MigrationRoute& Route, int32 GroupSize)
+{
     FCrowd_MigrationGroup NewGroup;
-    NewGroup.Members = Actors;
-    NewGroup.CurrentWaypointIndex = 0;
+    NewGroup.CurrentDestination = Route.EndLocation;
+    NewGroup.RouteIndex = 0;
+    NewGroup.GroupCohesion = FMath::RandRange(0.6f, 0.9f);
     
-    if (Route.Waypoints.Num() > 0)
+    // Spawn group members around start location
+    for (int32 i = 0; i < GroupSize; i++)
     {
-        NewGroup.CurrentTarget = Route.Waypoints[0];
-    }
-    
-    ActiveGroups.Add(NewGroup);
-}
-
-void UCrowd_MigrationManager::StopMigration(int32 GroupIndex)
-{
-    if (ActiveGroups.IsValidIndex(GroupIndex))
-    {
-        ActiveGroups.RemoveAt(GroupIndex);
-    }
-}
-
-void UCrowd_MigrationManager::UpdateMigrationGroups(float DeltaTime)
-{
-    for (int32 i = ActiveGroups.Num() - 1; i >= 0; i--)
-    {
-        FCrowd_MigrationGroup& Group = ActiveGroups[i];
+        FVector SpawnLocation = Route.StartLocation + FVector(
+            FMath::RandRange(-GroupFormationRadius, GroupFormationRadius),
+            FMath::RandRange(-GroupFormationRadius, GroupFormationRadius),
+            0
+        );
         
-        // Remove null actors
-        Group.Members.RemoveAll([](AActor* Actor) { return !IsValid(Actor); });
+        FRotator SpawnRotation = FRotator::ZeroRotator;
         
-        if (Group.Members.Num() == 0)
+        // Create basic crowd member (placeholder for now)
+        AActor* CrowdMember = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, SpawnRotation);
+        if (CrowdMember)
         {
-            ActiveGroups.RemoveAt(i);
-            continue;
-        }
-        
-        UpdateGroupMovement(Group, DeltaTime);
-        ApplyFlockingBehavior(Group, DeltaTime);
-    }
-}
-
-FVector UCrowd_MigrationManager::CalculateGroupCenter(const FCrowd_MigrationGroup& Group)
-{
-    if (Group.Members.Num() == 0) return FVector::ZeroVector;
-    
-    FVector Center = FVector::ZeroVector;
-    for (AActor* Actor : Group.Members)
-    {
-        if (IsValid(Actor))
-        {
-            Center += Actor->GetActorLocation();
+            CrowdMember->SetActorLabel(FString::Printf(TEXT("MigrationMember_%s_%d"), *Route.SpeciesType, i));
+            NewGroup.GroupMembers.Add(CrowdMember);
         }
     }
     
-    return Center / Group.Members.Num();
+    ActiveMigrationGroups.Add(NewGroup);
+    UE_LOG(LogTemp, Log, TEXT("Migration Manager: Created group with %d members"), NewGroup.GroupMembers.Num());
 }
 
-void UCrowd_MigrationManager::ApplyFlockingBehavior(FCrowd_MigrationGroup& Group, float DeltaTime)
+void ACrowd_MigrationManager::MoveMigrationGroup(FCrowd_MigrationGroup& Group, float DeltaTime)
 {
-    for (AActor* Actor : Group.Members)
+    if (Group.GroupMembers.Num() == 0) return;
+    
+    // Calculate group center
+    FVector GroupCenter = FVector::ZeroVector;
+    int32 ValidMembers = 0;
+    
+    for (AActor* Member : Group.GroupMembers)
     {
-        if (!IsValid(Actor)) continue;
-        
-        FVector Separation = CalculateSeparation(Actor, Group);
-        FVector Alignment = CalculateAlignment(Actor, Group);
-        FVector Cohesion = CalculateCohesion(Actor, Group);
-        
-        // Combine flocking forces
-        FVector FlockingForce = Separation * 2.0f + Alignment * 1.0f + Cohesion * 1.5f;
-        
-        // Apply movement
-        FVector CurrentLocation = Actor->GetActorLocation();
-        FVector NewLocation = CurrentLocation + FlockingForce * DeltaTime;
-        
-        Actor->SetActorLocation(NewLocation);
-        
-        // Update rotation to face movement direction
-        if (!FlockingForce.IsNearlyZero())
+        if (IsValid(Member))
         {
-            FRotator NewRotation = UKismetMathLibrary::FindLookAtRotation(CurrentLocation, NewLocation);
-            Actor->SetActorRotation(NewRotation);
+            GroupCenter += Member->GetActorLocation();
+            ValidMembers++;
+        }
+    }
+    
+    if (ValidMembers == 0) return;
+    
+    GroupCenter /= ValidMembers;
+    
+    // Move each member toward destination with cohesion
+    FVector DirectionToDestination = (Group.CurrentDestination - GroupCenter).GetSafeNormal();
+    
+    for (AActor* Member : Group.GroupMembers)
+    {
+        if (IsValid(Member))
+        {
+            FVector MemberLocation = Member->GetActorLocation();
+            FVector ToCenter = (GroupCenter - MemberLocation).GetSafeNormal();
+            
+            // Combine destination movement with group cohesion
+            FVector MovementDirection = (DirectionToDestination * (1.0f - Group.GroupCohesion)) + 
+                                      (ToCenter * Group.GroupCohesion);
+            
+            FVector NewLocation = MemberLocation + (MovementDirection * 300.0f * DeltaTime);
+            Member->SetActorLocation(NewLocation);
         }
     }
 }
 
-void UCrowd_MigrationManager::UpdateGroupMovement(FCrowd_MigrationGroup& Group, float DeltaTime)
+bool ACrowd_MigrationManager::IsGroupAtDestination(const FCrowd_MigrationGroup& Group, float Tolerance)
 {
-    if (MigrationRoutes.Num() == 0) return;
+    if (Group.GroupMembers.Num() == 0) return true;
     
-    // Use first route for now (can be expanded for multiple routes)
-    const FCrowd_MigrationRoute& Route = MigrationRoutes[0];
+    // Check if majority of group is within tolerance of destination
+    int32 MembersAtDestination = 0;
     
-    if (Route.Waypoints.Num() == 0) return;
-    
-    FVector GroupCenter = CalculateGroupCenter(Group);
-    FVector TargetWaypoint = Route.Waypoints[Group.CurrentWaypointIndex];
-    
-    float DistanceToTarget = FVector::Dist(GroupCenter, TargetWaypoint);
-    
-    // Check if group reached current waypoint
-    if (DistanceToTarget < Route.GroupRadius)
+    for (AActor* Member : Group.GroupMembers)
     {
-        Group.CurrentWaypointIndex = (Group.CurrentWaypointIndex + 1) % Route.Waypoints.Num();
-        Group.CurrentTarget = Route.Waypoints[Group.CurrentWaypointIndex];
-    }
-    else
-    {
-        Group.CurrentTarget = TargetWaypoint;
-    }
-}
-
-FVector UCrowd_MigrationManager::CalculateSeparation(AActor* Actor, const FCrowd_MigrationGroup& Group)
-{
-    if (!IsValid(Actor)) return FVector::ZeroVector;
-    
-    FVector SeparationForce = FVector::ZeroVector;
-    FVector ActorLocation = Actor->GetActorLocation();
-    int32 NeighborCount = 0;
-    
-    for (AActor* Other : Group.Members)
-    {
-        if (!IsValid(Other) || Other == Actor) continue;
-        
-        FVector OtherLocation = Other->GetActorLocation();
-        float Distance = FVector::Dist(ActorLocation, OtherLocation);
-        
-        if (Distance < 500.0f && Distance > 0.0f) // Separation radius
+        if (IsValid(Member))
         {
-            FVector AwayVector = (ActorLocation - OtherLocation).GetSafeNormal();
-            SeparationForce += AwayVector / Distance; // Closer = stronger force
-            NeighborCount++;
+            float DistanceToDestination = FVector::Dist(Member->GetActorLocation(), Group.CurrentDestination);
+            if (DistanceToDestination <= Tolerance)
+            {
+                MembersAtDestination++;
+            }
         }
     }
     
-    if (NeighborCount > 0)
-    {
-        SeparationForce /= NeighborCount;
-        SeparationForce = SeparationForce.GetSafeNormal() * 100.0f; // Separation strength
-    }
-    
-    return SeparationForce;
+    return (MembersAtDestination >= Group.GroupMembers.Num() * 0.7f); // 70% threshold
 }
 
-FVector UCrowd_MigrationManager::CalculateAlignment(AActor* Actor, const FCrowd_MigrationGroup& Group)
+void ACrowd_MigrationManager::AdvanceGroupToNextWaypoint(FCrowd_MigrationGroup& Group)
 {
-    if (!IsValid(Actor)) return FVector::ZeroVector;
+    Group.RouteIndex++;
     
-    FVector AverageVelocity = FVector::ZeroVector;
-    FVector ActorLocation = Actor->GetActorLocation();
-    int32 NeighborCount = 0;
+    // For now, mark as completed after reaching first destination
+    // In full implementation, would have multiple waypoints
+    Group.bReachedDestination = true;
     
-    for (AActor* Other : Group.Members)
-    {
-        if (!IsValid(Other) || Other == Actor) continue;
-        
-        FVector OtherLocation = Other->GetActorLocation();
-        float Distance = FVector::Dist(ActorLocation, OtherLocation);
-        
-        if (Distance < 1000.0f) // Alignment radius
-        {
-            FVector OtherForward = Other->GetActorForwardVector();
-            AverageVelocity += OtherForward;
-            NeighborCount++;
-        }
-    }
-    
-    if (NeighborCount > 0)
-    {
-        AverageVelocity /= NeighborCount;
-        AverageVelocity = AverageVelocity.GetSafeNormal() * 50.0f; // Alignment strength
-    }
-    
-    return AverageVelocity;
+    UE_LOG(LogTemp, Log, TEXT("Migration Manager: Group reached destination, migration complete"));
 }
 
-FVector UCrowd_MigrationManager::CalculateCohesion(AActor* Actor, const FCrowd_MigrationGroup& Group)
+void ACrowd_MigrationManager::HandleSeasonalMigration()
 {
-    if (!IsValid(Actor)) return FVector::ZeroVector;
+    LastSeasonalCheckTime += 30.0f;
     
-    FVector CenterOfMass = FVector::ZeroVector;
-    FVector ActorLocation = Actor->GetActorLocation();
-    int32 NeighborCount = 0;
-    
-    for (AActor* Other : Group.Members)
+    if (FMath::RandRange(0.0f, 1.0f) < SeasonalMigrationChance)
     {
-        if (!IsValid(Other) || Other == Actor) continue;
+        // Trigger random seasonal migration
+        TArray<FString> SpeciesTypes = {TEXT("Herbivore"), TEXT("Carnivore")};
+        FString RandomSpecies = SpeciesTypes[FMath::RandRange(0, SpeciesTypes.Num() - 1)];
+        int32 RandomGroupSize = FMath::RandRange(5, 20);
         
-        FVector OtherLocation = Other->GetActorLocation();
-        float Distance = FVector::Dist(ActorLocation, OtherLocation);
+        StartMigration(RandomSpecies, RandomGroupSize);
+        UE_LOG(LogTemp, Log, TEXT("Migration Manager: Seasonal migration triggered for %s"), *RandomSpecies);
+    }
+}
+
+TArray<FVector> ACrowd_MigrationManager::GenerateWaypointsForRoute(const FCrowd_MigrationRoute& Route)
+{
+    TArray<FVector> Waypoints;
+    
+    // Generate intermediate waypoints between start and end
+    int32 NumWaypoints = FMath::RandRange(3, 6);
+    
+    for (int32 i = 0; i <= NumWaypoints; i++)
+    {
+        float Alpha = static_cast<float>(i) / NumWaypoints;
+        FVector Waypoint = FMath::Lerp(Route.StartLocation, Route.EndLocation, Alpha);
         
-        if (Distance < 1500.0f) // Cohesion radius
+        // Add some randomness to avoid straight lines
+        Waypoint += FVector(
+            FMath::RandRange(-1000, 1000),
+            FMath::RandRange(-1000, 1000),
+            0
+        );
+        
+        Waypoints.Add(Waypoint);
+    }
+    
+    return Waypoints;
+}
+
+void ACrowd_MigrationManager::CleanupCompletedMigrations()
+{
+    for (int32 i = ActiveMigrationGroups.Num() - 1; i >= 0; i--)
+    {
+        FCrowd_MigrationGroup& Group = ActiveMigrationGroups[i];
+        
+        if (Group.bReachedDestination)
         {
-            CenterOfMass += OtherLocation;
-            NeighborCount++;
+            // Clean up group members
+            for (AActor* Member : Group.GroupMembers)
+            {
+                if (IsValid(Member))
+                {
+                    Member->Destroy();
+                }
+            }
+            
+            ActiveMigrationGroups.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("Migration Manager: Cleaned up completed migration group"));
         }
     }
-    
-    if (NeighborCount > 0)
-    {
-        CenterOfMass /= NeighborCount;
-        FVector CohesionForce = (CenterOfMass - ActorLocation).GetSafeNormal() * 75.0f;
-        return CohesionForce;
-    }
-    
-    return FVector::ZeroVector;
+}
+
+void ACrowd_MigrationManager::OnMigrationGroupReachedDestination(FCrowd_MigrationGroup& Group)
+{
+    Group.bReachedDestination = true;
+    UE_LOG(LogTemp, Log, TEXT("Migration Manager: Migration group reached final destination"));
 }
