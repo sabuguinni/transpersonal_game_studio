@@ -3,20 +3,20 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
 #include "BuildValidationSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuild_ValidationStatus : uint8
 {
-    Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"), 
-    Fail        UMETA(DisplayName = "Fail"),
-    Critical    UMETA(DisplayName = "Critical")
+    Unknown,
+    Passed,
+    Failed,
+    Warning,
+    Critical
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
 {
     GENERATED_BODY()
 
@@ -24,7 +24,7 @@ struct TRANSPERSONALGAME_API FBuild_ValidationReport
     FString TestName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result;
+    EBuild_ValidationStatus Status;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     FString Message;
@@ -32,16 +32,12 @@ struct TRANSPERSONALGAME_API FBuild_ValidationReport
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
     float ExecutionTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FDateTime Timestamp;
-
-    FBuild_ValidationReport()
+    FBuild_ValidationResult()
     {
         TestName = TEXT("");
-        Result = EBuild_ValidationResult::Pass;
+        Status = EBuild_ValidationStatus::Unknown;
         Message = TEXT("");
         ExecutionTime = 0.0f;
-        Timestamp = FDateTime::Now();
     }
 };
 
@@ -50,50 +46,41 @@ struct TRANSPERSONALGAME_API FBuild_SystemHealth
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
     FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
     bool bIsOperational;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 ErrorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    int32 LoadedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 WarningCount;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    int32 ActiveActors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    float HealthScore;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    FDateTime LastCheck;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    TArray<FString> Dependencies;
 
     FBuild_SystemHealth()
     {
         SystemName = TEXT("");
-        bIsOperational = true;
-        ErrorCount = 0;
-        WarningCount = 0;
-        HealthScore = 100.0f;
-        LastCheck = FDateTime::Now();
+        bIsOperational = false;
+        LoadedClasses = 0;
+        ActiveActors = 0;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, const TArray<FBuild_ValidationReport>&, Reports);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSystemHealthChanged, const FString&, SystemName, const FBuild_SystemHealth&, Health);
-
 /**
- * Build Validation System - Comprehensive integration testing and health monitoring
- * Validates cross-system compatibility, performance metrics, and build integrity
+ * Build Validation System - Integration Agent #19
+ * Comprehensive validation framework for all game systems
+ * Monitors compilation status, class loading, and cross-system integration
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildValidationSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UBuildValidationSystem();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
@@ -103,101 +90,75 @@ public:
     void RunFullValidationSuite();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunQuickHealthCheck();
+    void ValidateClassLoading();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateSystemIntegration(const FString& SystemName);
+    void ValidateCrossSystemIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidatePerformanceMetrics();
+    void ValidateMapIntegrity();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ValidateCompilationStatus();
 
     // Health monitoring
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_SystemHealth GetSystemHealth(const FString& SystemName) const;
+    TArray<FBuild_SystemHealth> GetSystemHealthReport();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_SystemHealth> GetAllSystemHealth() const;
+    bool IsSystemOperational(const FString& SystemName);
+
+    // Results access
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_ValidationResult> GetValidationResults() const { return ValidationResults; }
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    int32 GetPassedTestsCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    int32 GetFailedTestsCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
     float GetOverallHealthScore() const;
 
-    // Report management
+    // Automated monitoring
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ValidationReport> GetValidationReports() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ValidationReport> GetReportsByResult(EBuild_ValidationResult ResultType) const;
+    void StartContinuousMonitoring(float IntervalSeconds = 30.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ClearValidationReports();
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void SetValidationEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void SetAutoValidationInterval(float IntervalSeconds);
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
-    FOnValidationComplete OnValidationComplete;
-
-    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
-    FOnSystemHealthChanged OnSystemHealthChanged;
+    void StopContinuousMonitoring();
 
 protected:
     // Internal validation methods
-    void ValidateClassLoading();
-    void ValidateActorIntegration();
-    void ValidateComponentSystems();
     void ValidateWorldGeneration();
-    void ValidateAIBehavior();
+    void ValidateCharacterSystems();
+    void ValidateAISystems();
+    void ValidateEnvironmentSystems();
+    void ValidateQuestSystems();
     void ValidateAudioSystems();
     void ValidateVFXSystems();
-    void ValidatePhysicsSystems();
-    void ValidateNetworking();
-    void ValidateMemoryUsage();
 
-    // Health monitoring
-    void UpdateSystemHealth(const FString& SystemName, bool bOperational, int32 Errors, int32 Warnings);
-    void CalculateHealthScores();
-
-    // Utility functions
-    FBuild_ValidationReport CreateReport(const FString& TestName, EBuild_ValidationResult Result, const FString& Message);
-    void AddValidationReport(const FBuild_ValidationReport& Report);
+    // Helper methods
+    void AddValidationResult(const FString& TestName, EBuild_ValidationStatus Status, const FString& Message, float ExecutionTime = 0.0f);
+    bool CheckClassExists(const FString& ClassName);
+    int32 CountActorsOfType(const FString& ActorType);
 
 private:
-    // Validation state
     UPROPERTY()
-    TArray<FBuild_ValidationReport> ValidationReports;
-
-    UPROPERTY()
-    TMap<FString, FBuild_SystemHealth> SystemHealthMap;
+    TArray<FBuild_ValidationResult> ValidationResults;
 
     UPROPERTY()
-    bool bValidationEnabled;
+    TArray<FBuild_SystemHealth> SystemHealthData;
 
     UPROPERTY()
-    float AutoValidationInterval;
+    FTimerHandle MonitoringTimerHandle;
 
     UPROPERTY()
-    FTimerHandle ValidationTimerHandle;
+    bool bIsContinuousMonitoringActive;
 
-    // Performance tracking
-    UPROPERTY()
-    float LastValidationTime;
-
-    UPROPERTY()
-    int32 TotalValidationRuns;
-
-    UPROPERTY()
-    int32 SuccessfulValidationRuns;
-
-    // System monitoring
-    void StartAutoValidation();
-    void StopAutoValidation();
-    void OnAutoValidationTimer();
-
-    // Critical system names
-    static const TArray<FString> CoreSystemNames;
+    // Core system class names for validation
+    TArray<FString> CoreSystemClasses;
+    
+    // System dependency mapping
+    TMap<FString, TArray<FString>> SystemDependencies;
 };
