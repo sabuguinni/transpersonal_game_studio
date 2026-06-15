@@ -1,39 +1,60 @@
 #include "Anim_PrimitiveHumanAnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/AnimSequence.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
 UAnim_PrimitiveHumanAnimInstance::UAnim_PrimitiveHumanAnimInstance()
 {
     // Initialize default values
     CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentCombatState = EAnim_CombatState::Unarmed;
-    CurrentSurvivalAction = EAnim_SurvivalAction::None;
+    CurrentActionState = EAnim_ActionState::None;
+    bIsPerformingGesture = false;
+    CurrentGestureName = NAME_None;
     
-    // Initialize blend values
-    IdleToWalkBlend = 0.0f;
-    WalkToRunBlend = 0.0f;
-    CombatBlend = 0.0f;
-    SurvivalActionBlend = 0.0f;
+    // Initialize movement data
+    MovementData = FAnim_MovementData();
     
-    // Initialize survival stats
-    FatigueLevel = 0.0f;
-    HealthPercentage = 1.0f;
-    FearLevel = 0.0f;
-    bIsInjured = false;
+    // Initialize IK data
+    LeftFootIKOffset = FVector::ZeroVector;
+    RightFootIKOffset = FVector::ZeroVector;
+    LeftFootIKAlpha = 0.0f;
+    RightFootIKAlpha = 0.0f;
     
-    // IK settings
-    IKTraceDistance = 50.0f;
-    IKInterpSpeed = 15.0f;
+    // Smoothing parameters
+    DirectionSmoothingSpeed = 10.0f;
+    LeanSmoothingSpeed = 5.0f;
+    LastUpdateTime = 0.0f;
+    LastVelocity = FVector::ZeroVector;
     
-    // Blend speeds
-    MovementBlendSpeed = 5.0f;
-    CombatBlendSpeed = 8.0f;
-    SurvivalBlendSpeed = 3.0f;
+    // Initialize tribal gestures with default data
+    TribalGestures.Empty();
+    
+    // Add default tribal gestures
+    FAnim_TribalGestureData HuntingGesture;
+    HuntingGesture.GestureName = FName("Hunting_Point");
+    HuntingGesture.Duration = 2.5f;
+    HuntingGesture.bIsLooping = false;
+    HuntingGesture.Priority = 1.0f;
+    TribalGestures.Add(HuntingGesture);
+    
+    FAnim_TribalGestureData GreetingGesture;
+    GreetingGesture.GestureName = FName("Tribal_Greeting");
+    GreetingGesture.Duration = 3.0f;
+    GreetingGesture.bIsLooping = false;
+    GreetingGesture.Priority = 0.8f;
+    TribalGestures.Add(GreetingGesture);
+    
+    FAnim_TribalGestureData CraftingGesture;
+    CraftingGesture.GestureName = FName("Crafting_Motion");
+    CraftingGesture.Duration = 4.0f;
+    CraftingGesture.bIsLooping = true;
+    CraftingGesture.Priority = 0.6f;
+    TribalGestures.Add(CraftingGesture);
 }
 
 void UAnim_PrimitiveHumanAnimInstance::NativeInitializeAnimation()
@@ -44,336 +65,285 @@ void UAnim_PrimitiveHumanAnimInstance::NativeInitializeAnimation()
     OwningCharacter = Cast<ACharacter>(GetOwningActor());
     if (OwningCharacter)
     {
-        CharacterMovement = OwningCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("Primitive Human Animation Instance initialized for: %s"), 
-               *OwningCharacter->GetName());
+        MovementComponent = OwningCharacter->GetCharacterMovement();
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveHumanAnimInstance: Initialized for character %s"), *OwningCharacter->GetName());
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to get owning character in animation instance"));
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveHumanAnimInstance: Failed to get owning character"));
+    }
+    
+    // Initialize timing
+    if (UWorld* World = GetWorld())
+    {
+        LastUpdateTime = World->GetTimeSeconds();
     }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::NativeUpdateAnimation(float DeltaTime)
+void UAnim_PrimitiveHumanAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
-    Super::NativeUpdateAnimation(DeltaTime);
+    Super::NativeUpdateAnimation(DeltaTimeX);
     
-    if (!OwningCharacter || !CharacterMovement)
+    if (!OwningCharacter || !MovementComponent)
     {
         return;
     }
     
-    // Update all animation systems
-    UpdateMovementData(DeltaTime);
-    UpdateSurvivalStats();
-    UpdateFootIK(DeltaTime);
-    UpdateBlendValues(DeltaTime);
-    UpdateStateTransitions();
-}
-
-void UAnim_PrimitiveHumanAnimInstance::UpdateMovementData(float DeltaTime)
-{
-    if (!CharacterMovement)
-    {
-        return;
-    }
-    
-    // Get movement velocity
-    MovementData.Velocity = CharacterMovement->Velocity;
-    MovementData.Speed = MovementData.Velocity.Size();
-    
-    // Calculate movement direction relative to character forward
-    if (MovementData.Speed > 1.0f)
-    {
-        FVector ForwardVector = OwningCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal();
-        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwningCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
-        {
-            MovementData.Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        MovementData.Direction = 0.0f;
-    }
-    
-    // Update air state
-    MovementData.bIsInAir = CharacterMovement->IsFalling();
-    MovementData.bIsCrouching = CharacterMovement->IsCrouching();
-    
-    // Calculate ground distance for landing prediction
-    if (MovementData.bIsInAir)
-    {
-        FVector StartLocation = OwningCharacter->GetActorLocation();
-        FVector EndLocation = StartLocation - FVector(0, 0, 1000.0f);
-        
-        FHitResult HitResult;
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(OwningCharacter);
-        
-        if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, 
-                                                ECC_WorldStatic, QueryParams))
-        {
-            MovementData.GroundDistance = HitResult.Distance;
-        }
-        else
-        {
-            MovementData.GroundDistance = 1000.0f;
-        }
-    }
-    else
-    {
-        MovementData.GroundDistance = 0.0f;
-    }
+    // Update movement data
+    UpdateMovementData();
     
     // Update movement state
-    CurrentMovementState = DetermineMovementState();
-}
-
-EAnim_MovementState UAnim_PrimitiveHumanAnimInstance::DetermineMovementState()
-{
-    if (MovementData.bIsInAir)
-    {
-        if (MovementData.Velocity.Z > 0)
-        {
-            return EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
+    UpdateMovementState();
     
-    if (MovementData.bIsCrouching)
-    {
-        return EAnim_MovementState::Crouching;
-    }
+    // Update direction and lean
+    CalculateDirection();
+    UpdateLeanAmount();
     
-    if (MovementData.Speed < 1.0f)
+    // Cache current time
+    if (UWorld* World = GetWorld())
     {
-        return EAnim_MovementState::Idle;
-    }
-    else if (MovementData.Speed < 300.0f)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else
-    {
-        return EAnim_MovementState::Running;
+        LastUpdateTime = World->GetTimeSeconds();
     }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::UpdateFootIK(float DeltaTime)
+void UAnim_PrimitiveHumanAnimInstance::UpdateMovementData()
 {
-    if (!OwningCharacter || MovementData.bIsInAir)
+    if (!MovementComponent)
     {
-        // Gradually disable IK when in air
-        IKFootData.IKAlpha = FMath::FInterpTo(IKFootData.IKAlpha, 0.0f, DeltaTime, IKInterpSpeed);
         return;
     }
     
-    // Enable IK when on ground
-    IKFootData.IKAlpha = FMath::FInterpTo(IKFootData.IKAlpha, 1.0f, DeltaTime, IKInterpSpeed);
+    // Get current velocity and calculate speed
+    MovementData.Velocity = MovementComponent->Velocity;
+    MovementData.Speed = MovementData.Velocity.Size2D();
+    MovementData.bIsMoving = MovementData.Speed > 3.0f;
     
-    // Get foot bone locations (approximate)
-    FVector CharacterLocation = OwningCharacter->GetActorLocation();
-    FVector LeftFootLocation = CharacterLocation + OwningCharacter->GetActorRightVector() * -15.0f;
-    FVector RightFootLocation = CharacterLocation + OwningCharacter->GetActorRightVector() * 15.0f;
+    // Calculate acceleration
+    if (UWorld* World = GetWorld())
+    {
+        float CurrentTime = World->GetTimeSeconds();
+        float TimeDelta = CurrentTime - LastUpdateTime;
+        
+        if (TimeDelta > 0.0f)
+        {
+            MovementData.Acceleration = (MovementData.Velocity - LastVelocity) / TimeDelta;
+        }
+        
+        LastVelocity = MovementData.Velocity;
+    }
     
-    // Calculate foot offsets and rotations
-    CalculateFootOffset(LeftFootLocation, IKFootData.LeftFootOffset, IKFootData.LeftFootRotation, true);
-    CalculateFootOffset(RightFootLocation, IKFootData.RightFootOffset, IKFootData.RightFootRotation, false);
-    
-    // Calculate pelvis offset (average of foot offsets)
-    float TargetPelvisOffset = (IKFootData.LeftFootOffset.Z + IKFootData.RightFootOffset.Z) * 0.5f;
-    IKFootData.PelvisOffset = FMath::FInterpTo(IKFootData.PelvisOffset, TargetPelvisOffset, DeltaTime, IKInterpSpeed);
-    
-    // Adjust foot offsets relative to pelvis
-    IKFootData.LeftFootOffset.Z -= IKFootData.PelvisOffset;
-    IKFootData.RightFootOffset.Z -= IKFootData.PelvisOffset;
+    // Update movement flags
+    MovementData.bIsInAir = MovementComponent->IsFalling();
+    MovementData.bIsCrouching = MovementComponent->IsCrouching();
 }
 
-void UAnim_PrimitiveHumanAnimInstance::CalculateFootOffset(FVector FootLocation, FVector& OutOffset, FRotator& OutRotation, bool bIsLeftFoot)
+void UAnim_PrimitiveHumanAnimInstance::UpdateMovementState()
 {
-    FVector TraceStart = FootLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = FootLocation - FVector(0, 0, IKTraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwningCharacter);
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    if (!MovementComponent)
     {
-        // Calculate offset
-        float OffsetZ = HitResult.ImpactPoint.Z - FootLocation.Z;
-        OutOffset = FVector(0, 0, OffsetZ);
-        
-        // Calculate rotation based on surface normal
-        FVector SurfaceNormal = HitResult.ImpactNormal;
-        FVector ForwardVector = OwningCharacter->GetActorForwardVector();
-        FVector RightVector = FVector::CrossProduct(SurfaceNormal, ForwardVector).GetSafeNormal();
-        ForwardVector = FVector::CrossProduct(RightVector, SurfaceNormal).GetSafeNormal();
-        
-        OutRotation = UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, SurfaceNormal);
-        
-        // Convert to relative rotation
-        FRotator CharacterRotation = OwningCharacter->GetActorRotation();
-        OutRotation = UKismetMathLibrary::NormalizedDeltaRotator(OutRotation, CharacterRotation);
+        return;
+    }
+    
+    EAnim_MovementState NewState = CurrentMovementState;
+    
+    // Determine new state based on movement component
+    if (MovementData.bIsInAir)
+    {
+        if (MovementData.Velocity.Z > 0.0f)
+        {
+            NewState = EAnim_MovementState::Jumping;
+        }
+        else
+        {
+            NewState = EAnim_MovementState::Falling;
+        }
+    }
+    else if (MovementData.bIsCrouching)
+    {
+        NewState = EAnim_MovementState::Crouching;
+    }
+    else if (MovementData.Speed > 300.0f) // Running threshold
+    {
+        NewState = EAnim_MovementState::Running;
+    }
+    else if (MovementData.Speed > 3.0f) // Walking threshold
+    {
+        NewState = EAnim_MovementState::Walking;
     }
     else
     {
-        OutOffset = FVector::ZeroVector;
-        OutRotation = FRotator::ZeroRotator;
-    }
-}
-
-FVector UAnim_PrimitiveHumanAnimInstance::TraceForGround(FVector FootLocation, float TraceDistance)
-{
-    FVector TraceStart = FootLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = FootLocation - FVector(0, 0, TraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwningCharacter);
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
-    {
-        return HitResult.ImpactPoint;
+        NewState = EAnim_MovementState::Idle;
     }
     
-    return FootLocation;
-}
-
-void UAnim_PrimitiveHumanAnimInstance::UpdateBlendValues(float DeltaTime)
-{
-    // Update movement blends
-    float TargetIdleToWalk = (CurrentMovementState == EAnim_MovementState::Walking) ? 1.0f : 0.0f;
-    IdleToWalkBlend = FMath::FInterpTo(IdleToWalkBlend, TargetIdleToWalk, DeltaTime, MovementBlendSpeed);
-    
-    float TargetWalkToRun = (CurrentMovementState == EAnim_MovementState::Running) ? 1.0f : 0.0f;
-    WalkToRunBlend = FMath::FInterpTo(WalkToRunBlend, TargetWalkToRun, DeltaTime, MovementBlendSpeed);
-    
-    // Update combat blend
-    float TargetCombatBlend = (CurrentCombatState != EAnim_CombatState::Unarmed) ? 1.0f : 0.0f;
-    CombatBlend = FMath::FInterpTo(CombatBlend, TargetCombatBlend, DeltaTime, CombatBlendSpeed);
-    
-    // Update survival action blend
-    float TargetSurvivalBlend = (CurrentSurvivalAction != EAnim_SurvivalAction::None) ? 1.0f : 0.0f;
-    SurvivalActionBlend = FMath::FInterpTo(SurvivalActionBlend, TargetSurvivalBlend, DeltaTime, SurvivalBlendSpeed);
-}
-
-void UAnim_PrimitiveHumanAnimInstance::UpdateStateTransitions()
-{
-    // Handle automatic state transitions based on conditions
-    
-    // Exit survival actions if moving fast
-    if (CurrentSurvivalAction != EAnim_SurvivalAction::None && MovementData.Speed > 100.0f)
-    {
-        SetSurvivalAction(EAnim_SurvivalAction::None);
-    }
-    
-    // Auto-exit combat state if no threat nearby (simplified logic)
-    if (CurrentCombatState != EAnim_CombatState::Unarmed && FearLevel < 0.1f)
-    {
-        // Could add timer here for more realistic combat exit
-    }
-}
-
-void UAnim_PrimitiveHumanAnimInstance::UpdateSurvivalStats()
-{
-    // This would integrate with the survival system from other agents
-    // For now, use placeholder values that could be set by external systems
-    
-    // Fatigue affects animation speed
-    float MovementIntensity = MovementData.Speed / 600.0f; // Normalize to 0-1
-    FatigueLevel = FMath::Clamp(FatigueLevel + MovementIntensity * 0.001f, 0.0f, 1.0f);
-    
-    // Health affects posture
-    if (HealthPercentage < 0.3f)
-    {
-        bIsInjured = true;
-    }
-    else if (HealthPercentage > 0.7f)
-    {
-        bIsInjured = false;
-    }
-}
-
-float UAnim_PrimitiveHumanAnimInstance::GetAnimationSpeedModifier() const
-{
-    float SpeedMod = 1.0f;
-    
-    // Reduce speed when fatigued
-    SpeedMod *= FMath::Lerp(1.0f, 0.6f, FatigueLevel);
-    
-    // Reduce speed when injured
-    if (bIsInjured)
-    {
-        SpeedMod *= 0.8f;
-    }
-    
-    // Reduce speed when afraid
-    SpeedMod *= FMath::Lerp(1.0f, 1.2f, FearLevel); // Fear can make you move faster
-    
-    return FMath::Clamp(SpeedMod, 0.3f, 1.5f);
-}
-
-void UAnim_PrimitiveHumanAnimInstance::SetMovementState(EAnim_MovementState NewState)
-{
-    if (CurrentMovementState != NewState)
+    // Update state if changed
+    if (NewState != CurrentMovementState)
     {
         CurrentMovementState = NewState;
-        UE_LOG(LogTemp, Log, TEXT("Movement state changed to: %d"), (int32)NewState);
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveHuman: Movement state changed to %d"), (int32)CurrentMovementState);
     }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::SetCombatState(EAnim_CombatState NewState)
+void UAnim_PrimitiveHumanAnimInstance::CalculateDirection()
 {
-    if (CurrentCombatState != NewState)
+    if (!OwningCharacter || MovementData.Speed < 3.0f)
     {
-        CurrentCombatState = NewState;
-        UE_LOG(LogTemp, Log, TEXT("Combat state changed to: %d"), (int32)NewState);
+        MovementData.Direction = 0.0f;
+        return;
     }
-}
-
-void UAnim_PrimitiveHumanAnimInstance::SetSurvivalAction(EAnim_SurvivalAction NewAction)
-{
-    if (CurrentSurvivalAction != NewAction)
+    
+    // Get forward vector and velocity direction
+    FVector ForwardVector = OwningCharacter->GetActorForwardVector();
+    FVector VelocityDirection = MovementData.Velocity.GetSafeNormal2D();
+    
+    // Calculate angle between forward and velocity
+    float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
+    float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection).Z;
+    
+    float TargetDirection = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+    
+    // Smooth the direction change
+    if (UWorld* World = GetWorld())
     {
-        CurrentSurvivalAction = NewAction;
-        UE_LOG(LogTemp, Log, TEXT("Survival action changed to: %d"), (int32)NewAction);
+        float DeltaTime = World->GetDeltaSeconds();
+        MovementData.Direction = FMath::FInterpTo(MovementData.Direction, TargetDirection, DeltaTime, DirectionSmoothingSpeed);
     }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::TriggerAttackAnimation()
+void UAnim_PrimitiveHumanAnimInstance::UpdateLeanAmount()
 {
-    // This would trigger a montage or state machine transition
-    UE_LOG(LogTemp, Log, TEXT("Attack animation triggered"));
+    if (!OwningCharacter)
+    {
+        MovementData.LeanAmount = 0.0f;
+        return;
+    }
     
-    // Set temporary combat state
-    SetCombatState(EAnim_CombatState::Attacking);
+    // Calculate lean based on acceleration and turning
+    float AccelerationMagnitude = MovementData.Acceleration.Size2D();
+    float TargetLean = FMath::Clamp(AccelerationMagnitude / 1000.0f, -1.0f, 1.0f);
     
-    // Could use a timer to reset state after animation completes
+    // Apply direction influence
+    if (FMath::Abs(MovementData.Direction) > 45.0f)
+    {
+        TargetLean *= FMath::Sign(MovementData.Direction);
+    }
+    
+    // Smooth the lean
+    if (UWorld* World = GetWorld())
+    {
+        float DeltaTime = World->GetDeltaSeconds();
+        MovementData.LeanAmount = FMath::FInterpTo(MovementData.LeanAmount, TargetLean, DeltaTime, LeanSmoothingSpeed);
+    }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::TriggerBlockAnimation()
+void UAnim_PrimitiveHumanAnimInstance::PlayTribalGesture(FName GestureName)
 {
-    UE_LOG(LogTemp, Log, TEXT("Block animation triggered"));
-    SetCombatState(EAnim_CombatState::Blocking);
+    if (bIsPerformingGesture)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveHuman: Cannot play gesture %s - already performing %s"), *GestureName.ToString(), *CurrentGestureName.ToString());
+        return;
+    }
+    
+    // Find the gesture data
+    FAnim_TribalGestureData* GestureData = TribalGestures.FindByPredicate([GestureName](const FAnim_TribalGestureData& Gesture)
+    {
+        return Gesture.GestureName == GestureName;
+    });
+    
+    if (!GestureData)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveHuman: Gesture %s not found"), *GestureName.ToString());
+        return;
+    }
+    
+    if (!GestureData->GestureMontage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveHuman: Gesture %s has no montage assigned"), *GestureName.ToString());
+        return;
+    }
+    
+    // Play the montage
+    float MontageDuration = Montage_Play(GestureData->GestureMontage, 1.0f);
+    if (MontageDuration > 0.0f)
+    {
+        bIsPerformingGesture = true;
+        CurrentGestureName = GestureName;
+        
+        // Bind to montage end event
+        FOnMontageEnded EndDelegate;
+        EndDelegate.BindUObject(this, &UAnim_PrimitiveHumanAnimInstance::OnGestureMontageEnded);
+        Montage_SetEndDelegate(EndDelegate, GestureData->GestureMontage);
+        
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveHuman: Playing gesture %s (duration: %f)"), *GestureName.ToString(), MontageDuration);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveHuman: Failed to play gesture %s"), *GestureName.ToString());
+    }
 }
 
-void UAnim_PrimitiveHumanAnimInstance::TriggerDodgeAnimation()
+void UAnim_PrimitiveHumanAnimInstance::StopCurrentGesture()
 {
-    UE_LOG(LogTemp, Log, TEXT("Dodge animation triggered"));
-    SetCombatState(EAnim_CombatState::Dodging);
+    if (!bIsPerformingGesture)
+    {
+        return;
+    }
+    
+    // Stop current montage
+    Montage_Stop(0.2f);
+    
+    bIsPerformingGesture = false;
+    CurrentGestureName = NAME_None;
+    
+    UE_LOG(LogTemp, Log, TEXT("PrimitiveHuman: Stopped current gesture"));
 }
 
-void UAnim_PrimitiveHumanAnimInstance::SmoothBlendValue(float& CurrentValue, float TargetValue, float BlendSpeed, float DeltaTime)
+void UAnim_PrimitiveHumanAnimInstance::SetActionState(EAnim_ActionState NewActionState)
 {
-    CurrentValue = FMath::FInterpTo(CurrentValue, TargetValue, DeltaTime, BlendSpeed);
+    if (CurrentActionState != NewActionState)
+    {
+        CurrentActionState = NewActionState;
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveHuman: Action state changed to %d"), (int32)CurrentActionState);
+        
+        // Auto-play appropriate gestures for certain actions
+        switch (NewActionState)
+        {
+            case EAnim_ActionState::Crafting:
+                PlayTribalGesture(FName("Crafting_Motion"));
+                break;
+            case EAnim_ActionState::Hunting:
+                PlayTribalGesture(FName("Hunting_Point"));
+                break;
+            case EAnim_ActionState::Socializing:
+                PlayTribalGesture(FName("Tribal_Greeting"));
+                break;
+            default:
+                // Stop gesture for other states
+                if (bIsPerformingGesture)
+                {
+                    StopCurrentGesture();
+                }
+                break;
+        }
+    }
+}
+
+void UAnim_PrimitiveHumanAnimInstance::UpdateFootIK(const FVector& LeftOffset, const FVector& RightOffset, float LeftAlpha, float RightAlpha)
+{
+    LeftFootIKOffset = LeftOffset;
+    RightFootIKOffset = RightOffset;
+    LeftFootIKAlpha = FMath::Clamp(LeftAlpha, 0.0f, 1.0f);
+    RightFootIKAlpha = FMath::Clamp(RightAlpha, 0.0f, 1.0f);
+}
+
+void UAnim_PrimitiveHumanAnimInstance::OnGestureMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+    if (bIsPerformingGesture)
+    {
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveHuman: Gesture %s ended (interrupted: %s)"), 
+               *CurrentGestureName.ToString(), 
+               bInterrupted ? TEXT("true") : TEXT("false"));
+        
+        bIsPerformingGesture = false;
+        CurrentGestureName = NAME_None;
+    }
 }
