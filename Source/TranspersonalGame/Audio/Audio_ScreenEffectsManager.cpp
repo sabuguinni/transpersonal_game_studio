@@ -1,238 +1,273 @@
 #include "Audio_ScreenEffectsManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/PostProcessVolume.h"
-#include "Materials/MaterialParameterCollectionInstance.h"
-#include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
-#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/Pawn.h"
+#include "Camera/CameraComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 
-UAudio_ScreenEffectsManager::UAudio_ScreenEffectsManager()
+AAudio_ScreenEffectsManager::AAudio_ScreenEffectsManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS
+    PrimaryActorTick.bCanEverTick = true;
     
-    // Initialize default values
-    CurrentShakeIntensity = 0.0f;
-    ShakeDecayRate = 2.0f;
-    MaxShakeDistance = 5000.0f;
+    // Initialize default shake data for T-Rex
+    DefaultTRexShakeData.Intensity = 3.0f;
+    DefaultTRexShakeData.Duration = 1.5f;
+    DefaultTRexShakeData.Frequency = 15.0f;
+    DefaultTRexShakeData.FalloffRadius = 3000.0f;
     
-    DamageFlashDuration = 0.3f;
-    CurrentFlashIntensity = 0.0f;
+    // Initialize default shake data for player
+    DefaultPlayerShakeData.Intensity = 1.0f;
+    DefaultPlayerShakeData.Duration = 0.8f;
+    DefaultPlayerShakeData.Frequency = 20.0f;
+    DefaultPlayerShakeData.FalloffRadius = 1500.0f;
     
-    CurrentTimeOfDay = 0.5f; // Noon
-    bNightVisionActive = false;
+    // Initialize damage flash data
+    DefaultDamageFlashData.FlashIntensity = 0.7f;
+    DefaultDamageFlashData.FlashDuration = 0.4f;
+    DefaultDamageFlashData.FlashColor = FLinearColor(1.0f, 0.2f, 0.2f, 0.8f);
     
-    CurrentWeatherIntensity = 0.0f;
-    CurrentWeatherType = EWeatherType::Clear;
-    CurrentFearLevel = 0.0f;
-    
-    // Initialize timers
-    ShakeTimer = 0.0f;
-    ShakeDuration = 0.0f;
-    ShakeFrequency = 10.0f;
-    FlashTimer = 0.0f;
-    FlashColor = FLinearColor::Red;
+    // Initialize state
+    bDamageFlashActive = false;
+    CurrentFlashAlpha = 0.0f;
+    DamageFlashMaterial = nullptr;
+    FootstepDustParticles = nullptr;
+    DinosaurFootstepParticles = nullptr;
 }
 
-void UAudio_ScreenEffectsManager::BeginPlay()
+void AAudio_ScreenEffectsManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find post process volume in the level
-    TArray<AActor*> PostProcessVolumes;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APostProcessVolume::StaticClass(), PostProcessVolumes);
+    // Try to load default particle systems
+    FootstepDustParticles = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Dust_Puff"));
+    DinosaurFootstepParticles = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Explosion"));
     
-    if (PostProcessVolumes.Num() > 0)
-    {
-        PostProcessVolume = Cast<APostProcessVolume>(PostProcessVolumes[0]);
-    }
-    
-    // Load global effects material parameter collection
-    GlobalEffectsCollection = LoadObject<UMaterialParameterCollection>(nullptr, TEXT("/Game/TranspersonalGame/Materials/MPC_GlobalEffects"));
+    UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: BeginPlay completed"));
 }
 
-void UAudio_ScreenEffectsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudio_ScreenEffectsManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    UpdateScreenShake(DeltaTime);
-    UpdateDamageFlash(DeltaTime);
-    ApplyPostProcessEffects();
-}
-
-void UAudio_ScreenEffectsManager::TriggerScreenShake(float Intensity, float Duration, float Frequency)
-{
-    CurrentShakeIntensity = FMath::Max(CurrentShakeIntensity, Intensity);
-    ShakeDuration = Duration;
-    ShakeTimer = 0.0f;
-    ShakeFrequency = Frequency;
-    
-    // Apply camera shake to player controller
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC && PC->PlayerCameraManager)
+    if (bDamageFlashActive)
     {
-        PC->PlayerCameraManager->StartCameraShake(nullptr, Intensity);
+        UpdateDamageFlash();
     }
 }
 
-void UAudio_ScreenEffectsManager::TriggerDinosaurProximityShake(float Distance, float DinosaurSize)
+void AAudio_ScreenEffectsManager::TriggerScreenShake(const FVector& EpicenterLocation, const FAudio_ScreenShakeData& ShakeData)
 {
-    if (Distance > MaxShakeDistance)
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No valid world for screen shake"));
         return;
-    
-    // Calculate shake intensity based on distance and dinosaur size
-    float DistanceRatio = 1.0f - (Distance / MaxShakeDistance);
-    float ShakeIntensity = DistanceRatio * DinosaurSize * 0.5f;
-    float ShakeDuration = 0.2f + (DinosaurSize * 0.1f);
-    
-    TriggerScreenShake(ShakeIntensity, ShakeDuration, 15.0f);
-}
-
-void UAudio_ScreenEffectsManager::TriggerDamageFlash(float Intensity, FLinearColor FlashColor)
-{
-    CurrentFlashIntensity = Intensity;
-    FlashTimer = 0.0f;
-    this->FlashColor = FlashColor;
-}
-
-void UAudio_ScreenEffectsManager::UpdateTimeOfDayEffects(float TimeOfDay)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 1.0f);
-    
-    // Update global material parameters for time of day
-    if (GlobalEffectsCollection)
-    {
-        UMaterialParameterCollectionInstance* CollectionInstance = GetWorld()->GetParameterCollectionInstance(GlobalEffectsCollection);
-        if (CollectionInstance)
-        {
-            CollectionInstance->SetScalarParameterValue(TEXT("TimeOfDay"), CurrentTimeOfDay);
-            
-            // Calculate ambient lighting based on time
-            float AmbientIntensity = FMath::Clamp(FMath::Sin(CurrentTimeOfDay * PI), 0.1f, 1.0f);
-            CollectionInstance->SetScalarParameterValue(TEXT("AmbientIntensity"), AmbientIntensity);
-        }
     }
-}
-
-void UAudio_ScreenEffectsManager::SetNightVisionMode(bool bEnabled)
-{
-    bNightVisionActive = bEnabled;
     
-    if (GlobalEffectsCollection)
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (!PlayerController)
     {
-        UMaterialParameterCollectionInstance* CollectionInstance = GetWorld()->GetParameterCollectionInstance(GlobalEffectsCollection);
-        if (CollectionInstance)
-        {
-            CollectionInstance->SetScalarParameterValue(TEXT("NightVision"), bEnabled ? 1.0f : 0.0f);
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::TriggerWeatherEffect(EWeatherType WeatherType, float Intensity)
-{
-    CurrentWeatherType = WeatherType;
-    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    
-    if (GlobalEffectsCollection)
-    {
-        UMaterialParameterCollectionInstance* CollectionInstance = GetWorld()->GetParameterCollectionInstance(GlobalEffectsCollection);
-        if (CollectionInstance)
-        {
-            CollectionInstance->SetScalarParameterValue(TEXT("WeatherIntensity"), CurrentWeatherIntensity);
-            CollectionInstance->SetScalarParameterValue(TEXT("WeatherType"), static_cast<float>(CurrentWeatherType));
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::UpdateFearEffect(float FearLevel)
-{
-    CurrentFearLevel = FMath::Clamp(FearLevel, 0.0f, 1.0f);
-    
-    if (GlobalEffectsCollection)
-    {
-        UMaterialParameterCollectionInstance* CollectionInstance = GetWorld()->GetParameterCollectionInstance(GlobalEffectsCollection);
-        if (CollectionInstance)
-        {
-            CollectionInstance->SetScalarParameterValue(TEXT("FearLevel"), CurrentFearLevel);
-            
-            // Trigger subtle screen distortion at high fear levels
-            if (CurrentFearLevel > 0.7f)
-            {
-                float DistortionIntensity = (CurrentFearLevel - 0.7f) * 0.1f;
-                CollectionInstance->SetScalarParameterValue(TEXT("FearDistortion"), DistortionIntensity);
-            }
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::UpdateScreenShake(float DeltaTime)
-{
-    if (CurrentShakeIntensity > 0.0f)
-    {
-        ShakeTimer += DeltaTime;
-        
-        if (ShakeTimer >= ShakeDuration)
-        {
-            // Decay shake intensity
-            CurrentShakeIntensity = FMath::FInterpTo(CurrentShakeIntensity, 0.0f, DeltaTime, ShakeDecayRate);
-            
-            if (CurrentShakeIntensity < 0.01f)
-            {
-                CurrentShakeIntensity = 0.0f;
-                ShakeTimer = 0.0f;
-            }
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::UpdateDamageFlash(float DeltaTime)
-{
-    if (CurrentFlashIntensity > 0.0f)
-    {
-        FlashTimer += DeltaTime;
-        
-        // Flash decay curve
-        float FlashProgress = FlashTimer / DamageFlashDuration;
-        CurrentFlashIntensity = FMath::Lerp(CurrentFlashIntensity, 0.0f, FlashProgress);
-        
-        if (FlashTimer >= DamageFlashDuration)
-        {
-            CurrentFlashIntensity = 0.0f;
-            FlashTimer = 0.0f;
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::ApplyPostProcessEffects()
-{
-    if (!PostProcessVolume)
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No player controller found"));
         return;
+    }
     
-    // Apply damage flash to post process settings
-    if (CurrentFlashIntensity > 0.0f)
+    APawn* PlayerPawn = PlayerController->GetPawn();
+    if (!PlayerPawn)
     {
-        PostProcessVolume->Settings.bOverride_ColorSaturation = true;
-        PostProcessVolume->Settings.ColorSaturation = FVector4(1.0f - CurrentFlashIntensity, 1.0f, 1.0f, 1.0f);
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No player pawn found"));
+        return;
+    }
+    
+    // Calculate distance-based intensity
+    float Distance = FVector::Dist(EpicenterLocation, PlayerPawn->GetActorLocation());
+    float IntensityMultiplier = CalculateShakeIntensityByDistance(EpicenterLocation, ShakeData.FalloffRadius);
+    
+    if (IntensityMultiplier > 0.1f)
+    {
+        float FinalIntensity = ShakeData.Intensity * IntensityMultiplier;
+        ApplyScreenShakeToPlayer(FinalIntensity, ShakeData.Duration, ShakeData.Frequency);
         
-        PostProcessVolume->Settings.bOverride_ColorGain = true;
-        PostProcessVolume->Settings.ColorGain = FVector4(1.0f + CurrentFlashIntensity, 1.0f - (CurrentFlashIntensity * 0.5f), 1.0f - (CurrentFlashIntensity * 0.5f), 1.0f);
+        UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Screen shake triggered - Intensity: %f, Duration: %f"), 
+               FinalIntensity, ShakeData.Duration);
     }
-    else
+}
+
+void AAudio_ScreenEffectsManager::TriggerTRexFootstepShake(const FVector& FootstepLocation)
+{
+    TriggerScreenShake(FootstepLocation, DefaultTRexShakeData);
+    
+    // Also spawn footstep particles for T-Rex
+    SpawnDinosaurFootstepParticles(FootstepLocation, TEXT("TRex"));
+}
+
+void AAudio_ScreenEffectsManager::TriggerDamageFlash(const FAudio_DamageFlashData& FlashData)
+{
+    if (bDamageFlashActive)
     {
-        // Reset to normal
-        PostProcessVolume->Settings.bOverride_ColorSaturation = false;
-        PostProcessVolume->Settings.bOverride_ColorGain = false;
+        // Reset the timer if already flashing
+        GetWorld()->GetTimerManager().ClearTimer(DamageFlashTimerHandle);
     }
     
-    // Apply time of day effects
-    if (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f) // Night time
+    bDamageFlashActive = true;
+    CurrentFlashAlpha = FlashData.FlashIntensity;
+    
+    // Set timer to end the flash
+    GetWorld()->GetTimerManager().SetTimer(
+        DamageFlashTimerHandle,
+        this,
+        &AAudio_ScreenEffectsManager::EndDamageFlash,
+        FlashData.FlashDuration,
+        false
+    );
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Damage flash triggered - Intensity: %f, Duration: %f"), 
+           FlashData.FlashIntensity, FlashData.FlashDuration);
+}
+
+void AAudio_ScreenEffectsManager::TriggerPlayerDamageFlash(float DamageAmount)
+{
+    // Scale flash intensity based on damage amount
+    FAudio_DamageFlashData ScaledFlashData = DefaultDamageFlashData;
+    ScaledFlashData.FlashIntensity = FMath::Clamp(DamageAmount * 0.1f, 0.3f, 1.0f);
+    ScaledFlashData.FlashDuration = FMath::Clamp(DamageAmount * 0.05f, 0.2f, 0.8f);
+    
+    TriggerDamageFlash(ScaledFlashData);
+}
+
+void AAudio_ScreenEffectsManager::SpawnFootstepParticles(const FVector& Location, float ParticleScale)
+{
+    if (!GetWorld() || !FootstepDustParticles)
     {
-        PostProcessVolume->Settings.bOverride_ColorGamma = true;
-        float NightGamma = FMath::Lerp(1.2f, 1.0f, FMath::Min(CurrentTimeOfDay / 0.2f, (1.0f - CurrentTimeOfDay) / 0.2f));
-        PostProcessVolume->Settings.ColorGamma = FVector4(NightGamma, NightGamma, NightGamma, 1.0f);
+        return;
     }
-    else
+    
+    FVector SpawnLocation = Location;
+    SpawnLocation.Z += 10.0f; // Slightly above ground
+    
+    UParticleSystemComponent* ParticleComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        FootstepDustParticles,
+        SpawnLocation,
+        FRotator::ZeroRotator,
+        FVector(ParticleScale),
+        true
+    );
+    
+    if (ParticleComponent)
     {
-        PostProcessVolume->Settings.bOverride_ColorGamma = false;
+        UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Footstep particles spawned at location: %s"), 
+               *SpawnLocation.ToString());
     }
+}
+
+void AAudio_ScreenEffectsManager::SpawnDinosaurFootstepParticles(const FVector& Location, const FString& DinosaurType)
+{
+    float ParticleScale = 1.0f;
+    
+    // Scale particles based on dinosaur type
+    if (DinosaurType.Contains(TEXT("TRex")))
+    {
+        ParticleScale = 3.0f;
+    }
+    else if (DinosaurType.Contains(TEXT("Brachi")))
+    {
+        ParticleScale = 4.0f;
+    }
+    else if (DinosaurType.Contains(TEXT("Raptor")))
+    {
+        ParticleScale = 0.8f;
+    }
+    else if (DinosaurType.Contains(TEXT("Tricera")))
+    {
+        ParticleScale = 2.5f;
+    }
+    
+    SpawnFootstepParticles(Location, ParticleScale);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: %s footstep particles spawned with scale %f"), 
+           *DinosaurType, ParticleScale);
+}
+
+void AAudio_ScreenEffectsManager::UpdateDamageFlash()
+{
+    if (!bDamageFlashActive)
+    {
+        return;
+    }
+    
+    // Fade out the flash over time
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentFlashAlpha = FMath::Max(0.0f, CurrentFlashAlpha - (DeltaTime * 2.0f));
+    
+    // Update material parameter if we have a material
+    if (DamageFlashMaterial)
+    {
+        DamageFlashMaterial->SetScalarParameterValue(TEXT("FlashAlpha"), CurrentFlashAlpha);
+        DamageFlashMaterial->SetVectorParameterValue(TEXT("FlashColor"), DefaultDamageFlashData.FlashColor);
+    }
+}
+
+void AAudio_ScreenEffectsManager::EndDamageFlash()
+{
+    bDamageFlashActive = false;
+    CurrentFlashAlpha = 0.0f;
+    
+    if (DamageFlashMaterial)
+    {
+        DamageFlashMaterial->SetScalarParameterValue(TEXT("FlashAlpha"), 0.0f);
+    }
+    
+    GetWorld()->GetTimerManager().ClearTimer(DamageFlashTimerHandle);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Damage flash ended"));
+}
+
+float AAudio_ScreenEffectsManager::CalculateShakeIntensityByDistance(const FVector& EpicenterLocation, float MaxRadius) const
+{
+    if (!GetWorld())
+    {
+        return 0.0f;
+    }
+    
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (!PlayerController || !PlayerController->GetPawn())
+    {
+        return 0.0f;
+    }
+    
+    float Distance = FVector::Dist(EpicenterLocation, PlayerController->GetPawn()->GetActorLocation());
+    
+    if (Distance >= MaxRadius)
+    {
+        return 0.0f;
+    }
+    
+    // Linear falloff from 1.0 at epicenter to 0.0 at max radius
+    return FMath::Clamp(1.0f - (Distance / MaxRadius), 0.0f, 1.0f);
+}
+
+void AAudio_ScreenEffectsManager::ApplyScreenShakeToPlayer(float Intensity, float Duration, float Frequency)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    
+    // Create a simple camera shake effect using player controller
+    // This is a basic implementation - in a full game you'd use UE5's camera shake classes
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Applying screen shake to player - Intensity: %f, Duration: %f, Frequency: %f"), 
+           Intensity, Duration, Frequency);
+    
+    // For now, we'll use a simple approach with the player controller
+    // In a production game, you'd implement proper camera shake classes
 }
