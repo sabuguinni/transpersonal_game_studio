@@ -1,355 +1,262 @@
 #include "Eng_TechnicalArchitect.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Engine/World.h"
+
+UEng_TechnicalArchitect::UEng_TechnicalArchitect()
+{
+    bArchitectureValidated = false;
+    LastValidationTime = 0.0f;
+    PerformanceTargets = FEng_PerformanceTargets();
+}
 
 void UEng_TechnicalArchitect::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Initializing engine architecture management"));
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Initializing architectural framework"));
     
-    InitializeCoreArchitecture();
-    DefineArchitecturalLayers();
-    DefineInterfaceStandards();
+    // Register core modules with proper dependencies
+    RegisterModule(TEXT("CoreEngine"), EEng_ArchitecturalLayer::Core, 100, TArray<FString>());
+    RegisterModule(TEXT("PhysicsSystem"), EEng_ArchitecturalLayer::Core, 90, {TEXT("CoreEngine")});
+    RegisterModule(TEXT("WorldGeneration"), EEng_ArchitecturalLayer::World, 80, {TEXT("PhysicsSystem")});
+    RegisterModule(TEXT("CharacterSystem"), EEng_ArchitecturalLayer::Character, 70, {TEXT("WorldGeneration")});
+    RegisterModule(TEXT("AIBehavior"), EEng_ArchitecturalLayer::AI, 60, {TEXT("CharacterSystem")});
+    RegisterModule(TEXT("AudioSystem"), EEng_ArchitecturalLayer::Audio, 50, {TEXT("WorldGeneration")});
+    RegisterModule(TEXT("VFXSystem"), EEng_ArchitecturalLayer::VFX, 40, {TEXT("WorldGeneration")});
+    RegisterModule(TEXT("UISystem"), EEng_ArchitecturalLayer::UI, 30, {TEXT("CharacterSystem")});
     
-    // Set default performance targets
-    TargetFrameRate = 60.0f;
-    MaxActorCount = 8000;
-    MaxMemoryUsage = 4096.0f; // 4GB
+    // Validate architecture integrity
+    ValidateModuleDependencies();
     
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Architecture management initialized"));
+    // Set performance targets for prehistoric survival game
+    SetPerformanceTarget(60.0f, 8000, 4096.0f);
+    
+    bArchitectureValidated = true;
+    LastValidationTime = FPlatformTime::Seconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Architecture framework initialized with %d modules"), RegisteredModules.Num());
 }
 
 void UEng_TechnicalArchitect::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Shutting down architecture management"));
-    
-    ArchitecturalLayers.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Shutting down architectural framework"));
     RegisteredModules.Empty();
-    ArchitectureViolations.Empty();
-    
     Super::Deinitialize();
 }
 
-void UEng_TechnicalArchitect::DefineArchitecturalLayers()
+void UEng_TechnicalArchitect::RegisterModule(const FString& ModuleName, EEng_ArchitecturalLayer Layer, int32 Priority, const TArray<FString>& Dependencies)
 {
-    ArchitecturalLayers.Empty();
+    FEng_ModuleInfo NewModule;
+    NewModule.ModuleName = ModuleName;
+    NewModule.Layer = Layer;
+    NewModule.Priority = Priority;
+    NewModule.Dependencies = Dependencies;
+    NewModule.bIsInitialized = false;
+    NewModule.InitializationTime = 0.0f;
     
-    // Core Engine Layer (Priority 1000)
-    FEng_ArchitecturalLayer CoreLayer;
-    CoreLayer.LayerName = TEXT("Core");
-    CoreLayer.Priority = 1000;
-    CoreLayer.Dependencies = TArray<FString>();
-    CoreLayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(CoreLayer);
+    RegisteredModules.Add(NewModule);
     
-    // Physics & Collision Layer (Priority 900)
-    FEng_ArchitecturalLayer PhysicsLayer;
-    PhysicsLayer.LayerName = TEXT("Physics");
-    PhysicsLayer.Priority = 900;
-    PhysicsLayer.Dependencies = {TEXT("Core")};
-    PhysicsLayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(PhysicsLayer);
-    
-    // World Generation Layer (Priority 800)
-    FEng_ArchitecturalLayer WorldLayer;
-    WorldLayer.LayerName = TEXT("World");
-    WorldLayer.Priority = 800;
-    WorldLayer.Dependencies = {TEXT("Core"), TEXT("Physics")};
-    WorldLayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(WorldLayer);
-    
-    // Character & Animation Layer (Priority 700)
-    FEng_ArchitecturalLayer CharacterLayer;
-    CharacterLayer.LayerName = TEXT("Character");
-    CharacterLayer.Priority = 700;
-    CharacterLayer.Dependencies = {TEXT("Core"), TEXT("Physics")};
-    CharacterLayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(CharacterLayer);
-    
-    // AI & Behavior Layer (Priority 600)
-    FEng_ArchitecturalLayer AILayer;
-    AILayer.LayerName = TEXT("AI");
-    AILayer.Priority = 600;
-    AILayer.Dependencies = {TEXT("Core"), TEXT("Character"), TEXT("World")};
-    AILayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(AILayer);
-    
-    // Audio & VFX Layer (Priority 500)
-    FEng_ArchitecturalLayer AudioVFXLayer;
-    AudioVFXLayer.LayerName = TEXT("AudioVFX");
-    AudioVFXLayer.Priority = 500;
-    AudioVFXLayer.Dependencies = {TEXT("Core"), TEXT("World")};
-    AudioVFXLayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(AudioVFXLayer);
-    
-    // UI & Interface Layer (Priority 400)
-    FEng_ArchitecturalLayer UILayer;
-    UILayer.LayerName = TEXT("UI");
-    UILayer.Priority = 400;
-    UILayer.Dependencies = {TEXT("Core"), TEXT("Character")};
-    UILayer.bIsInitialized = false;
-    ArchitecturalLayers.Add(UILayer);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Defined %d architectural layers"), ArchitecturalLayers.Num());
+    UE_LOG(LogTemp, Log, TEXT("Technical Architect: Registered module '%s' at layer %d with priority %d"), 
+           *ModuleName, (int32)Layer, Priority);
 }
 
-bool UEng_TechnicalArchitect::RegisterModule(const FString& ModuleName, const FString& Layer, const TArray<FString>& Dependencies)
+bool UEng_TechnicalArchitect::ValidateModuleDependencies()
 {
-    // Check if layer exists
-    bool bLayerExists = false;
-    for (const FEng_ArchitecturalLayer& ArchLayer : ArchitecturalLayers)
+    TArray<FString> CircularDeps = GetCircularDependencies();
+    
+    if (CircularDeps.Num() > 0)
     {
-        if (ArchLayer.LayerName == Layer)
+        UE_LOG(LogTemp, Error, TEXT("Technical Architect: Circular dependencies detected: %s"), 
+               *FString::Join(CircularDeps, TEXT(" -> ")));
+        return false;
+    }
+    
+    // Check for missing dependencies
+    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    {
+        for (const FString& Dependency : Module.Dependencies)
         {
-            bLayerExists = true;
+            if (!FindModule(Dependency))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Technical Architect: Module '%s' depends on missing module '%s'"), 
+                       *Module.ModuleName, *Dependency);
+                return false;
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Module dependency validation passed"));
+    return true;
+}
+
+void UEng_TechnicalArchitect::InitializeModulesInOrder()
+{
+    SortModulesByPriority();
+    
+    for (FEng_ModuleInfo& Module : RegisteredModules)
+    {
+        if (!Module.bIsInitialized && CheckDependenciesInitialized(Module))
+        {
+            InitializeModule(Module);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Module initialization sequence completed"));
+}
+
+bool UEng_TechnicalArchitect::IsModuleInitialized(const FString& ModuleName)
+{
+    FEng_ModuleInfo* Module = FindModule(ModuleName);
+    return Module ? Module->bIsInitialized : false;
+}
+
+FEng_PerformanceTargets UEng_TechnicalArchitect::GetPerformanceTargets() const
+{
+    return PerformanceTargets;
+}
+
+bool UEng_TechnicalArchitect::ValidatePerformance()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    // Check actor count
+    int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
+    if (ActorCount > PerformanceTargets.MaxActors)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Actor count %d exceeds target %d"), 
+               ActorCount, (int32)PerformanceTargets.MaxActors);
+        return false;
+    }
+    
+    // Check FPS (simplified check)
+    float CurrentFPS = 1.0f / World->GetDeltaSeconds();
+    if (CurrentFPS < PerformanceTargets.TargetFPS * 0.9f) // 10% tolerance
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Technical Architect: FPS %.1f below target %.1f"), 
+               CurrentFPS, PerformanceTargets.TargetFPS);
+        return false;
+    }
+    
+    return true;
+}
+
+TArray<FString> UEng_TechnicalArchitect::GetCircularDependencies()
+{
+    TArray<FString> CircularDeps;
+    
+    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    {
+        TArray<FString> VisitedModules;
+        if (HasCircularDependency(Module.ModuleName, VisitedModules))
+        {
+            CircularDeps.Append(VisitedModules);
             break;
         }
     }
     
-    if (!bLayerExists)
+    return CircularDeps;
+}
+
+void UEng_TechnicalArchitect::SetPerformanceTarget(float FPS, int32 MaxActors, float MaxMemoryMB)
+{
+    PerformanceTargets.TargetFPS = FPS;
+    PerformanceTargets.MaxActors = MaxActors;
+    PerformanceTargets.MaxMemoryMB = MaxMemoryMB;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Performance targets set - FPS: %.1f, Actors: %d, Memory: %.1fMB"), 
+           FPS, MaxActors, MaxMemoryMB);
+}
+
+TArray<FEng_ModuleInfo> UEng_TechnicalArchitect::GetModulesByLayer(EEng_ArchitecturalLayer Layer)
+{
+    TArray<FEng_ModuleInfo> LayerModules;
+    
+    for (const FEng_ModuleInfo& Module : RegisteredModules)
     {
-        UE_LOG(LogTemp, Error, TEXT("Technical Architect: Cannot register module %s - layer %s does not exist"), *ModuleName, *Layer);
+        if (Module.Layer == Layer)
+        {
+            LayerModules.Add(Module);
+        }
+    }
+    
+    return LayerModules;
+}
+
+void UEng_TechnicalArchitect::SortModulesByPriority()
+{
+    RegisteredModules.Sort([](const FEng_ModuleInfo& A, const FEng_ModuleInfo& B)
+    {
+        return A.Priority > B.Priority; // Higher priority first
+    });
+}
+
+bool UEng_TechnicalArchitect::HasCircularDependency(const FString& ModuleName, TArray<FString>& VisitedModules)
+{
+    if (VisitedModules.Contains(ModuleName))
+    {
+        VisitedModules.Add(ModuleName); // Complete the cycle
+        return true;
+    }
+    
+    VisitedModules.Add(ModuleName);
+    
+    FEng_ModuleInfo* Module = FindModule(ModuleName);
+    if (!Module)
+    {
         return false;
     }
     
-    // Check if module already registered
-    for (const FEng_ModuleDefinition& Module : RegisteredModules)
+    for (const FString& Dependency : Module->Dependencies)
     {
-        if (Module.ModuleName == ModuleName)
+        if (HasCircularDependency(Dependency, VisitedModules))
         {
-            UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Module %s already registered, updating"), *ModuleName);
             return true;
         }
     }
     
-    // Register new module
-    FEng_ModuleDefinition NewModule;
-    NewModule.ModuleName = ModuleName;
-    NewModule.LayerAssignment = Layer;
-    NewModule.RequiredModules = Dependencies;
-    NewModule.bIsCompiled = true; // Assume compiled if registering
-    NewModule.PerformanceWeight = 1.0f;
+    VisitedModules.RemoveAt(VisitedModules.Num() - 1);
+    return false;
+}
+
+FEng_ModuleInfo* UEng_TechnicalArchitect::FindModule(const FString& ModuleName)
+{
+    for (FEng_ModuleInfo& Module : RegisteredModules)
+    {
+        if (Module.ModuleName == ModuleName)
+        {
+            return &Module;
+        }
+    }
+    return nullptr;
+}
+
+void UEng_TechnicalArchitect::InitializeModule(FEng_ModuleInfo& Module)
+{
+    float StartTime = FPlatformTime::Seconds();
     
-    RegisteredModules.Add(NewModule);
+    // Module-specific initialization logic would go here
+    // For now, we just mark it as initialized
+    Module.bIsInitialized = true;
+    Module.InitializationTime = FPlatformTime::Seconds() - StartTime;
     
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Registered module %s in layer %s"), *ModuleName, *Layer);
+    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Initialized module '%s' in %.3f seconds"), 
+           *Module.ModuleName, Module.InitializationTime);
+}
+
+bool UEng_TechnicalArchitect::CheckDependenciesInitialized(const FEng_ModuleInfo& Module)
+{
+    for (const FString& Dependency : Module.Dependencies)
+    {
+        if (!IsModuleInitialized(Dependency))
+        {
+            return false;
+        }
+    }
     return true;
-}
-
-bool UEng_TechnicalArchitect::ValidateArchitecture()
-{
-    ArchitectureViolations.Empty();
-    
-    ValidateModuleDependencies();
-    
-    if (!CheckCircularDependencies())
-    {
-        ArchitectureViolations.Add(TEXT("Circular dependencies detected in module graph"));
-    }
-    
-    // Check performance compliance
-    if (!CheckPerformanceCompliance())
-    {
-        ArchitectureViolations.Add(TEXT("Performance targets exceeded"));
-    }
-    
-    bool bIsValid = ArchitectureViolations.Num() == 0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Architecture validation %s - %d violations found"), 
-           bIsValid ? TEXT("PASSED") : TEXT("FAILED"), ArchitectureViolations.Num());
-    
-    return bIsValid;
-}
-
-TArray<FString> UEng_TechnicalArchitect::GetInitializationOrder()
-{
-    TArray<FString> InitOrder;
-    
-    // Sort layers by priority (highest first)
-    TArray<FEng_ArchitecturalLayer> SortedLayers = ArchitecturalLayers;
-    SortedLayers.Sort([](const FEng_ArchitecturalLayer& A, const FEng_ArchitecturalLayer& B) {
-        return A.Priority > B.Priority;
-    });
-    
-    // Add modules in layer priority order
-    for (const FEng_ArchitecturalLayer& Layer : SortedLayers)
-    {
-        for (const FEng_ModuleDefinition& Module : RegisteredModules)
-        {
-            if (Module.LayerAssignment == Layer.LayerName)
-            {
-                InitOrder.Add(Module.ModuleName);
-            }
-        }
-    }
-    
-    return InitOrder;
-}
-
-void UEng_TechnicalArchitect::SetPerformanceTargets(float TargetFPS, int32 MaxActors, float MaxMemoryMB)
-{
-    TargetFrameRate = TargetFPS;
-    MaxActorCount = MaxActors;
-    MaxMemoryUsage = MaxMemoryMB;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Performance targets set - FPS: %.1f, Actors: %d, Memory: %.1fMB"), 
-           TargetFPS, MaxActors, MaxMemoryMB);
-}
-
-bool UEng_TechnicalArchitect::CheckPerformanceCompliance()
-{
-    // Get current world
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return true; // No world to check
-    }
-    
-    // Check actor count
-    int32 CurrentActorCount = World->GetActorCount();
-    if (CurrentActorCount > MaxActorCount)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Actor count exceeded - Current: %d, Max: %d"), 
-               CurrentActorCount, MaxActorCount);
-        return false;
-    }
-    
-    // Check frame rate (simplified - would need frame time tracking in real implementation)
-    float CurrentFPS = 1.0f / World->GetDeltaSeconds();
-    if (CurrentFPS < TargetFrameRate * 0.9f) // 10% tolerance
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Frame rate below target - Current: %.1f, Target: %.1f"), 
-               CurrentFPS, TargetFrameRate);
-        return false;
-    }
-    
-    return true;
-}
-
-void UEng_TechnicalArchitect::DefineInterfaceStandards()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Defining interface standards"));
-    
-    // Register standard interface patterns
-    RegisterModule(TEXT("IWorldGenerator"), TEXT("World"), {TEXT("Core")});
-    RegisterModule(TEXT("ICharacterController"), TEXT("Character"), {TEXT("Core", TEXT("Physics")});
-    RegisterModule(TEXT("IAIBehavior"), TEXT("AI"), {TEXT("Core", TEXT("Character")});
-    RegisterModule(TEXT("IAudioManager"), TEXT("AudioVFX"), {TEXT("Core")});
-    RegisterModule(TEXT("IVFXManager"), TEXT("AudioVFX"), {TEXT("Core", TEXT("World")});
-    RegisterModule(TEXT("IUIManager"), TEXT("UI"), {TEXT("Core")});
-}
-
-bool UEng_TechnicalArchitect::ValidateModuleInterfaces()
-{
-    // Check that all registered modules have proper interface definitions
-    int32 ValidInterfaces = 0;
-    
-    for (const FEng_ModuleDefinition& Module : RegisteredModules)
-    {
-        if (Module.ModuleName.StartsWith(TEXT("I")) && Module.bIsCompiled)
-        {
-            ValidInterfaces++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Validated %d module interfaces"), ValidInterfaces);
-    return ValidInterfaces > 0;
-}
-
-void UEng_TechnicalArchitect::EnforceCodingStandards()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Enforcing coding standards"));
-    
-    // Standards enforcement would check:
-    // - Naming conventions (U*, A*, F*, E* prefixes)
-    // - UPROPERTY/UFUNCTION usage
-    // - Include order and dependencies
-    // - Performance guidelines
-}
-
-TArray<FString> UEng_TechnicalArchitect::GetArchitectureViolations()
-{
-    return ArchitectureViolations;
-}
-
-void UEng_TechnicalArchitect::InitializeCoreArchitecture()
-{
-    // Register core engine modules
-    RegisterModule(TEXT("TranspersonalGame"), TEXT("Core"), {});
-    RegisterModule(TEXT("Engine"), TEXT("Core"), {});
-    RegisterModule(TEXT("CoreUObject"), TEXT("Core"), {});
-    RegisterModule(TEXT("PhysicsCore"), TEXT("Physics"), {TEXT("Core")});
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Core architecture initialized"));
-}
-
-void UEng_TechnicalArchitect::ValidateModuleDependencies()
-{
-    for (const FEng_ModuleDefinition& Module : RegisteredModules)
-    {
-        for (const FString& Dependency : Module.RequiredModules)
-        {
-            bool bDependencyFound = false;
-            for (const FEng_ModuleDefinition& DepModule : RegisteredModules)
-            {
-                if (DepModule.ModuleName == Dependency)
-                {
-                    bDependencyFound = true;
-                    break;
-                }
-            }
-            
-            if (!bDependencyFound)
-            {
-                FString Violation = FString::Printf(TEXT("Module %s depends on missing module %s"), 
-                                                  *Module.ModuleName, *Dependency);
-                ArchitectureViolations.Add(Violation);
-            }
-        }
-    }
-}
-
-bool UEng_TechnicalArchitect::CheckCircularDependencies()
-{
-    // Simplified circular dependency check
-    // In a full implementation, this would use graph algorithms
-    
-    for (const FEng_ModuleDefinition& ModuleA : RegisteredModules)
-    {
-        for (const FString& DependencyA : ModuleA.RequiredModules)
-        {
-            // Find the dependency module
-            for (const FEng_ModuleDefinition& ModuleB : RegisteredModules)
-            {
-                if (ModuleB.ModuleName == DependencyA)
-                {
-                    // Check if ModuleB depends on ModuleA (direct circular dependency)
-                    if (ModuleB.RequiredModules.Contains(ModuleA.ModuleName))
-                    {
-                        UE_LOG(LogTemp, Error, TEXT("Technical Architect: Circular dependency detected between %s and %s"), 
-                               *ModuleA.ModuleName, *ModuleB.ModuleName);
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-    
-    return true;
-}
-
-void UEng_TechnicalArchitect::GenerateInitializationSequence()
-{
-    // Generate optimal initialization sequence based on dependencies and priorities
-    TArray<FString> InitSequence = GetInitializationOrder();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architect: Generated initialization sequence with %d modules"), InitSequence.Num());
-    
-    for (int32 i = 0; i < InitSequence.Num(); i++)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Init Order %d: %s"), i + 1, *InitSequence[i]);
-    }
 }
