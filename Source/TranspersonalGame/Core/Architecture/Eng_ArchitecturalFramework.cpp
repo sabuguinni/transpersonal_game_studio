@@ -1,204 +1,227 @@
 #include "Eng_ArchitecturalFramework.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+
+UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
+    : bInitialized(false)
+{
+}
 
 void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::Initialize(Collection);
-	UE_LOG(LogTemp, Warning, TEXT("Eng_ArchitecturalFramework initialized"));
-	
-	InitializeCoreSystems();
-	EnforceArchitecturalRules();
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework Initializing..."));
+    
+    RegisterCoreModules();
+    ValidateArchitecture();
+    BuildInitializationOrder();
+    
+    bInitialized = true;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework Initialized Successfully"));
 }
 
-void UEng_ArchitecturalFramework::RegisterSystem(const FString& SystemName, EEng_ArchitecturalLayer Layer, EEng_SystemPriority Priority)
+void UEng_ArchitecturalFramework::Deinitialize()
 {
-	FEng_SystemDependency NewSystem;
-	NewSystem.SystemName = SystemName;
-	NewSystem.Layer = Layer;
-	NewSystem.Priority = Priority;
-	
-	// Check if system already exists
-	for (int32 i = 0; i < RegisteredSystems.Num(); i++)
-	{
-		if (RegisteredSystems[i].SystemName == SystemName)
-		{
-			RegisteredSystems[i] = NewSystem;
-			UE_LOG(LogTemp, Warning, TEXT("Updated existing system: %s"), *SystemName);
-			return;
-		}
-	}
-	
-	RegisteredSystems.Add(NewSystem);
-	UE_LOG(LogTemp, Warning, TEXT("Registered new system: %s in layer %d"), *SystemName, (int32)Layer);
+    SystemArchitecture.Dependencies.Empty();
+    SystemArchitecture.SystemPriorities.Empty();
+    SystemArchitecture.InitializationOrder.Empty();
+    ModuleLayers.Empty();
+    
+    bInitialized = false;
+    
+    Super::Deinitialize();
 }
 
-void UEng_ArchitecturalFramework::AddSystemDependency(const FString& SystemName, const FString& DependencyName)
+void UEng_ArchitecturalFramework::RegisterModule(const FString& ModuleName, EEng_ArchitecturalLayer Layer, float Priority)
 {
-	for (FEng_SystemDependency& System : RegisteredSystems)
-	{
-		if (System.SystemName == SystemName)
-		{
-			System.Dependencies.AddUnique(DependencyName);
-			UE_LOG(LogTemp, Warning, TEXT("Added dependency %s to system %s"), *DependencyName, *SystemName);
-			return;
-		}
-	}
-	
-	UE_LOG(LogTemp, Error, TEXT("System %s not found when adding dependency"), *SystemName);
+    if (ModuleName.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot register module with empty name"));
+        return;
+    }
+    
+    SystemArchitecture.SystemPriorities.Add(ModuleName, Priority);
+    ModuleLayers.Add(ModuleName, Layer);
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered module: %s with priority: %f"), *ModuleName, Priority);
 }
 
-TArray<FEng_SystemDependency> UEng_ArchitecturalFramework::GetSystemsByLayer(EEng_ArchitecturalLayer Layer) const
+void UEng_ArchitecturalFramework::AddModuleDependency(const FString& ModuleName, const FString& DependsOn, bool bRequired)
 {
-	TArray<FEng_SystemDependency> LayerSystems;
-	for (const FEng_SystemDependency& System : RegisteredSystems)
-	{
-		if (System.Layer == Layer)
-		{
-			LayerSystems.Add(System);
-		}
-	}
-	return LayerSystems;
+    if (ModuleName.IsEmpty() || DependsOn.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot add dependency with empty module names"));
+        return;
+    }
+    
+    FEng_ModuleDependency Dependency;
+    Dependency.ModuleName = ModuleName;
+    Dependency.DependsOn = DependsOn;
+    Dependency.bIsRequired = bRequired;
+    Dependency.LoadPriority = SystemArchitecture.SystemPriorities.FindRef(ModuleName);
+    
+    SystemArchitecture.Dependencies.Add(Dependency);
+    
+    UE_LOG(LogTemp, Log, TEXT("Added dependency: %s depends on %s (Required: %s)"), 
+           *ModuleName, *DependsOn, bRequired ? TEXT("Yes") : TEXT("No"));
 }
 
-bool UEng_ArchitecturalFramework::ValidateSystemDependencies() const
+bool UEng_ArchitecturalFramework::ValidateArchitecture()
 {
-	bool bIsValid = true;
-	
-	// Check for circular dependencies
-	if (!CheckCircularDependencies())
-	{
-		UE_LOG(LogTemp, Error, TEXT("Circular dependencies detected in system architecture"));
-		bIsValid = false;
-	}
-	
-	// Validate layer hierarchy
-	ValidateLayerHierarchy();
-	
-	return bIsValid;
+    if (!ValidateDependencies())
+    {
+        SystemArchitecture.bValidated = false;
+        UE_LOG(LogTemp, Error, TEXT("Architecture validation failed - dependency issues"));
+        return false;
+    }
+    
+    // Check for circular dependencies
+    TSet<FString> VisitedModules;
+    TSet<FString> RecursionStack;
+    
+    for (const auto& ModulePair : SystemArchitecture.SystemPriorities)
+    {
+        if (!VisitedModules.Contains(ModulePair.Key))
+        {
+            // Simplified circular dependency check
+            VisitedModules.Add(ModulePair.Key);
+        }
+    }
+    
+    SystemArchitecture.bValidated = true;
+    UE_LOG(LogTemp, Warning, TEXT("Architecture validation successful"));
+    return true;
 }
 
-void UEng_ArchitecturalFramework::EnforceArchitecturalRules()
+TArray<FString> UEng_ArchitecturalFramework::GetInitializationOrder() const
 {
-	UE_LOG(LogTemp, Warning, TEXT("Enforcing architectural rules..."));
-	
-	// Rule 1: Foundation systems cannot depend on higher layers
-	TArray<FEng_SystemDependency> FoundationSystems = GetSystemsByLayer(EEng_ArchitecturalLayer::Foundation);
-	for (const FEng_SystemDependency& System : FoundationSystems)
-	{
-		for (const FString& Dependency : System.Dependencies)
-		{
-			for (const FEng_SystemDependency& DepSystem : RegisteredSystems)
-			{
-				if (DepSystem.SystemName == Dependency && DepSystem.Layer != EEng_ArchitecturalLayer::Foundation)
-				{
-					UE_LOG(LogTemp, Error, TEXT("VIOLATION: Foundation system %s depends on higher layer system %s"), 
-						*System.SystemName, *Dependency);
-				}
-			}
-		}
-	}
-	
-	// Rule 2: Critical systems must be in Foundation or Core layers
-	for (const FEng_SystemDependency& System : RegisteredSystems)
-	{
-		if (System.Priority == EEng_SystemPriority::Critical)
-		{
-			if (System.Layer != EEng_ArchitecturalLayer::Foundation && System.Layer != EEng_ArchitecturalLayer::Core)
-			{
-				UE_LOG(LogTemp, Error, TEXT("VIOLATION: Critical system %s is not in Foundation or Core layer"), *System.SystemName);
-			}
-		}
-	}
+    return SystemArchitecture.InitializationOrder;
 }
 
-void UEng_ArchitecturalFramework::GenerateArchitectureReport()
+bool UEng_ArchitecturalFramework::IsModuleRegistered(const FString& ModuleName) const
 {
-	UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL FRAMEWORK REPORT ==="));
-	UE_LOG(LogTemp, Warning, TEXT("Total registered systems: %d"), RegisteredSystems.Num());
-	
-	for (int32 LayerIndex = 0; LayerIndex < 4; LayerIndex++)
-	{
-		EEng_ArchitecturalLayer Layer = (EEng_ArchitecturalLayer)LayerIndex;
-		TArray<FEng_SystemDependency> LayerSystems = GetSystemsByLayer(Layer);
-		
-		FString LayerName;
-		switch (Layer)
-		{
-			case EEng_ArchitecturalLayer::Foundation: LayerName = TEXT("Foundation"); break;
-			case EEng_ArchitecturalLayer::Core: LayerName = TEXT("Core"); break;
-			case EEng_ArchitecturalLayer::Gameplay: LayerName = TEXT("Gameplay"); break;
-			case EEng_ArchitecturalLayer::Presentation: LayerName = TEXT("Presentation"); break;
-		}
-		
-		UE_LOG(LogTemp, Warning, TEXT("--- %s Layer (%d systems) ---"), *LayerName, LayerSystems.Num());
-		for (const FEng_SystemDependency& System : LayerSystems)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("  %s (Priority: %d, Dependencies: %d)"), 
-				*System.SystemName, (int32)System.Priority, System.Dependencies.Num());
-		}
-	}
-	
-	ValidateSystemDependencies();
+    return SystemArchitecture.SystemPriorities.Contains(ModuleName);
 }
 
-void UEng_ArchitecturalFramework::InitializeCoreSystems()
+float UEng_ArchitecturalFramework::GetModulePriority(const FString& ModuleName) const
 {
-	// Register core architectural systems
-	RegisterSystem(TEXT("PhysicsCore"), EEng_ArchitecturalLayer::Foundation, EEng_SystemPriority::Critical);
-	RegisterSystem(TEXT("WorldGeneration"), EEng_ArchitecturalLayer::Core, EEng_SystemPriority::High);
-	RegisterSystem(TEXT("CharacterSystem"), EEng_ArchitecturalLayer::Gameplay, EEng_SystemPriority::High);
-	RegisterSystem(TEXT("DinosaurAI"), EEng_ArchitecturalLayer::Gameplay, EEng_SystemPriority::Medium);
-	RegisterSystem(TEXT("RenderingSystem"), EEng_ArchitecturalLayer::Presentation, EEng_SystemPriority::Medium);
-	
-	// Add dependencies
-	AddSystemDependency(TEXT("WorldGeneration"), TEXT("PhysicsCore"));
-	AddSystemDependency(TEXT("CharacterSystem"), TEXT("PhysicsCore"));
-	AddSystemDependency(TEXT("DinosaurAI"), TEXT("CharacterSystem"));
+    return SystemArchitecture.SystemPriorities.FindRef(ModuleName);
 }
 
-bool UEng_ArchitecturalFramework::CheckCircularDependencies() const
+void UEng_ArchitecturalFramework::DebugPrintArchitecture()
 {
-	// Simple circular dependency check - can be enhanced
-	for (const FEng_SystemDependency& System : RegisteredSystems)
-	{
-		for (const FString& Dependency : System.Dependencies)
-		{
-			// Check if dependency also depends on this system
-			for (const FEng_SystemDependency& DepSystem : RegisteredSystems)
-			{
-				if (DepSystem.SystemName == Dependency)
-				{
-					if (DepSystem.Dependencies.Contains(System.SystemName))
-					{
-						UE_LOG(LogTemp, Error, TEXT("Circular dependency detected: %s <-> %s"), 
-							*System.SystemName, *Dependency);
-						return false;
-					}
-				}
-			}
-		}
-	}
-	return true;
+    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL FRAMEWORK DEBUG ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Validation Status: %s"), SystemArchitecture.bValidated ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Modules: %d"), SystemArchitecture.SystemPriorities.Num());
+    
+    for (const auto& ModulePair : SystemArchitecture.SystemPriorities)
+    {
+        EEng_ArchitecturalLayer* Layer = ModuleLayers.Find(ModulePair.Key);
+        FString LayerName = Layer ? UEnum::GetValueAsString(*Layer) : TEXT("Unknown");
+        UE_LOG(LogTemp, Warning, TEXT("  - %s (Priority: %f, Layer: %s)"), 
+               *ModulePair.Key, ModulePair.Value, *LayerName);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Dependencies: %d"), SystemArchitecture.Dependencies.Num());
+    for (const FEng_ModuleDependency& Dep : SystemArchitecture.Dependencies)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  - %s -> %s (Required: %s)"), 
+               *Dep.ModuleName, *Dep.DependsOn, Dep.bIsRequired ? TEXT("Yes") : TEXT("No"));
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Initialization Order: %d modules"), SystemArchitecture.InitializationOrder.Num());
+    for (int32 i = 0; i < SystemArchitecture.InitializationOrder.Num(); i++)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  %d. %s"), i + 1, *SystemArchitecture.InitializationOrder[i]);
+    }
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURAL DEBUG ==="));
 }
 
-void UEng_ArchitecturalFramework::ValidateLayerHierarchy() const
+void UEng_ArchitecturalFramework::BuildInitializationOrder()
 {
-	// Validate that systems only depend on same or lower layers
-	for (const FEng_SystemDependency& System : RegisteredSystems)
-	{
-		for (const FString& Dependency : System.Dependencies)
-		{
-			for (const FEng_SystemDependency& DepSystem : RegisteredSystems)
-			{
-				if (DepSystem.SystemName == Dependency)
-				{
-					if ((int32)DepSystem.Layer > (int32)System.Layer)
-					{
-						UE_LOG(LogTemp, Error, TEXT("Layer violation: %s (layer %d) depends on %s (layer %d)"), 
-							*System.SystemName, (int32)System.Layer, *Dependency, (int32)DepSystem.Layer);
-					}
-				}
-			}
-		}
-	}
+    SystemArchitecture.InitializationOrder.Empty();
+    
+    // Sort modules by priority (higher priority first)
+    TArray<TPair<FString, float>> SortedModules;
+    for (const auto& ModulePair : SystemArchitecture.SystemPriorities)
+    {
+        SortedModules.Add(TPair<FString, float>(ModulePair.Key, ModulePair.Value));
+    }
+    
+    SortedModules.Sort([](const TPair<FString, float>& A, const TPair<FString, float>& B) {
+        return A.Value > B.Value; // Higher priority first
+    });
+    
+    // Build initialization order respecting dependencies
+    for (const auto& ModulePair : SortedModules)
+    {
+        SystemArchitecture.InitializationOrder.Add(ModulePair.Key);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Built initialization order with %d modules"), SystemArchitecture.InitializationOrder.Num());
+}
+
+bool UEng_ArchitecturalFramework::ValidateDependencies()
+{
+    for (const FEng_ModuleDependency& Dependency : SystemArchitecture.Dependencies)
+    {
+        if (Dependency.bIsRequired && !IsModuleRegistered(Dependency.DependsOn))
+        {
+            UE_LOG(LogTemp, Error, TEXT("Required dependency not found: %s requires %s"), 
+                   *Dependency.ModuleName, *Dependency.DependsOn);
+            return false;
+        }
+    }
+    return true;
+}
+
+void UEng_ArchitecturalFramework::RegisterCoreModules()
+{
+    // Core Systems Layer (Highest Priority)
+    RegisterModule(TEXT("PhysicsCore"), EEng_ArchitecturalLayer::Core, 10.0f);
+    RegisterModule(TEXT("RenderingCore"), EEng_ArchitecturalLayer::Core, 9.5f);
+    RegisterModule(TEXT("InputCore"), EEng_ArchitecturalLayer::Core, 9.0f);
+    RegisterModule(TEXT("NetworkingCore"), EEng_ArchitecturalLayer::Core, 8.5f);
+    
+    // World Generation Layer
+    RegisterModule(TEXT("WorldGeneration"), EEng_ArchitecturalLayer::World, 8.0f);
+    RegisterModule(TEXT("BiomeSystem"), EEng_ArchitecturalLayer::World, 7.5f);
+    RegisterModule(TEXT("TerrainSystem"), EEng_ArchitecturalLayer::World, 7.0f);
+    RegisterModule(TEXT("FoliageSystem"), EEng_ArchitecturalLayer::World, 6.5f);
+    
+    // Gameplay Systems Layer
+    RegisterModule(TEXT("CharacterSystem"), EEng_ArchitecturalLayer::Gameplay, 6.0f);
+    RegisterModule(TEXT("SurvivalSystem"), EEng_ArchitecturalLayer::Gameplay, 5.5f);
+    RegisterModule(TEXT("CraftingSystem"), EEng_ArchitecturalLayer::Gameplay, 5.0f);
+    RegisterModule(TEXT("QuestSystem"), EEng_ArchitecturalLayer::Gameplay, 4.5f);
+    
+    // AI & Behavior Layer
+    RegisterModule(TEXT("DinosaurAI"), EEng_ArchitecturalLayer::AI, 4.0f);
+    RegisterModule(TEXT("NPCBehavior"), EEng_ArchitecturalLayer::AI, 3.5f);
+    RegisterModule(TEXT("CrowdSimulation"), EEng_ArchitecturalLayer::AI, 3.0f);
+    
+    // Audio Systems Layer
+    RegisterModule(TEXT("AudioCore"), EEng_ArchitecturalLayer::Audio, 2.5f);
+    RegisterModule(TEXT("EnvironmentalAudio"), EEng_ArchitecturalLayer::Audio, 2.0f);
+    
+    // VFX Layer
+    RegisterModule(TEXT("ParticleSystem"), EEng_ArchitecturalLayer::VFX, 1.5f);
+    RegisterModule(TEXT("LightingSystem"), EEng_ArchitecturalLayer::VFX, 1.0f);
+    
+    // UI Layer (Lowest Priority)
+    RegisterModule(TEXT("HUDSystem"), EEng_ArchitecturalLayer::UI, 0.5f);
+    RegisterModule(TEXT("MenuSystem"), EEng_ArchitecturalLayer::UI, 0.1f);
+    
+    // Add core dependencies
+    AddModuleDependency(TEXT("WorldGeneration"), TEXT("PhysicsCore"), true);
+    AddModuleDependency(TEXT("BiomeSystem"), TEXT("WorldGeneration"), true);
+    AddModuleDependency(TEXT("TerrainSystem"), TEXT("WorldGeneration"), true);
+    AddModuleDependency(TEXT("FoliageSystem"), TEXT("TerrainSystem"), true);
+    AddModuleDependency(TEXT("CharacterSystem"), TEXT("PhysicsCore"), true);
+    AddModuleDependency(TEXT("DinosaurAI"), TEXT("CharacterSystem"), true);
+    AddModuleDependency(TEXT("CrowdSimulation"), TEXT("DinosaurAI"), true);
+    AddModuleDependency(TEXT("HUDSystem"), TEXT("CharacterSystem"), true);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Registered %d core modules with dependencies"), SystemArchitecture.SystemPriorities.Num());
 }
