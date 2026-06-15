@@ -2,83 +2,72 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
 #include "SharedTypes.h"
 #include "Crowd_MassSimulationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
-{
-    High    UMETA(DisplayName = "High Detail"),
-    Medium  UMETA(DisplayName = "Medium Detail"), 
-    Low     UMETA(DisplayName = "Low Detail"),
-    Culled  UMETA(DisplayName = "Culled")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_BehaviorMode : uint8
-{
-    Wandering   UMETA(DisplayName = "Wandering"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Trading     UMETA(DisplayName = "Trading"),
-    Resting     UMETA(DisplayName = "Resting")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_SimulationZone
+struct TRANSPERSONALGAME_API FCrowd_AgentData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FVector Center = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Radius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    int32 MaxCrowdMembers = 50;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowd_AgentType AgentType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    ECrowd_BehaviorMode DefaultBehavior = ECrowd_BehaviorMode::Wandering;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Health;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float ActivityLevel = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Stamina;
 
-    FCrowd_SimulationZone()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 GroupID;
+
+    FCrowd_AgentData()
     {
-        Center = FVector::ZeroVector;
-        Radius = 1000.0f;
-        MaxCrowdMembers = 50;
-        DefaultBehavior = ECrowd_BehaviorMode::Wandering;
-        ActivityLevel = 1.0f;
+        Location = FVector::ZeroVector;
+        Velocity = FVector::ZeroVector;
+        AgentType = ECrowd_AgentType::Hunter;
+        Health = 100.0f;
+        Stamina = 100.0f;
+        GroupID = -1;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PathfindingNode
+struct TRANSPERSONALGAME_API FCrowd_LODSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HighDetailDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<int32> ConnectedNodes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MediumDetailDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float TrafficWeight = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LowDetailDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    ECrowd_BehaviorMode PreferredBehavior = ECrowd_BehaviorMode::Wandering;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxHighDetailAgents;
 
-    FCrowd_PathfindingNode()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxMediumDetailAgents;
+
+    FCrowd_LODSettings()
     {
-        Location = FVector::ZeroVector;
-        ConnectedNodes.Empty();
-        TrafficWeight = 1.0f;
-        PreferredBehavior = ECrowd_BehaviorMode::Wandering;
+        HighDetailDistance = 500.0f;
+        MediumDetailDistance = 1500.0f;
+        LowDetailDistance = 3000.0f;
+        MaxHighDetailAgents = 50;
+        MaxMediumDetailAgents = 200;
     }
 };
 
@@ -94,114 +83,55 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    // Mass Entity Integration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    int32 MaxSimulatedEntities = 10000;
+    TArray<FCrowd_AgentData> ActiveAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    float SimulationRadius = 15000.0f;
+    FCrowd_LODSettings LODSettings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
-    bool bEnableMassEntitySystem = true;
+    int32 MaxActiveAgents;
 
-    // LOD System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float HighLODDistance = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float UpdateFrequency;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float MediumLODDistance = 4000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Simulation")
+    float CullingDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float LowLODDistance = 8000.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Simulation")
+    int32 CurrentAgentCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System")
-    float CullDistance = 12000.0f;
-
-    // Simulation Zones
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation Zones")
-    TArray<FCrowd_SimulationZone> SimulationZones;
-
-    // Pathfinding Network
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FCrowd_PathfindingNode> PathfindingNodes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathUpdateInterval = 2.0f;
-
-    // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxUpdatesPerFrame = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceThrottleThreshold = 16.67f; // 60 FPS target
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnablePerformanceThrottling = true;
-
-private:
-    // Internal state
-    float LastPathUpdateTime = 0.0f;
-    int32 CurrentUpdateIndex = 0;
-    TArray<AActor*> ManagedCrowdActors;
-    TMap<AActor*, ECrowd_LODLevel> ActorLODLevels;
-    TMap<AActor*, ECrowd_BehaviorMode> ActorBehaviorModes;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Simulation")
+    float LastUpdateTime;
 
 public:
-    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void InitializeMassEntitySystem();
+    void SpawnAgentGroup(FVector Location, ECrowd_AgentType AgentType, int32 Count);
 
     UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
-    void SpawnCrowdInZone(const FCrowd_SimulationZone& Zone, int32 Count);
+    void UpdateAgentLOD(FCrowd_AgentData& Agent, float DistanceToPlayer);
 
-    UFUNCTION(BlueprintCallable, Category = "LOD System")
-    void UpdateLODLevels(const FVector& ViewerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
+    void ProcessAgentMovement(FCrowd_AgentData& Agent, float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "LOD System")
-    ECrowd_LODLevel CalculateLODLevel(float Distance) const;
+    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
+    void CullDistantAgents();
 
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void UpdatePathfindingNetwork();
+    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
+    TArray<FCrowd_AgentData> GetNearbyAgents(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    TArray<int32> FindPath(int32 StartNodeIndex, int32 EndNodeIndex);
+    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
+    void SetMaxActiveAgents(int32 NewMax);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetCrowdBehavior(AActor* CrowdActor, ECrowd_BehaviorMode NewBehavior);
+    UFUNCTION(BlueprintCallable, Category = "Mass Simulation")
+    int32 GetActiveAgentCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdateCrowdBehaviors(float DeltaTime);
-
-    // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
+private:
+    void InitializeSimulation();
+    void UpdateSimulation(float DeltaTime);
     void OptimizePerformance();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool ShouldThrottleUpdates() const;
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    int32 GetTotalManagedActors() const { return ManagedCrowdActors.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    int32 GetActorsInLODLevel(ECrowd_LODLevel LODLevel) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    FCrowd_SimulationZone* FindZoneAtLocation(const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugDrawSimulationInfo();
-
-    // Editor Functions
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void SetupDefaultZones();
-
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void GeneratePathfindingNetwork();
-
-    UFUNCTION(CallInEditor, Category = "Editor")
-    void TestCrowdSpawning();
+    
+    FVector GetPlayerLocation() const;
+    bool ShouldUpdateAgent(const FCrowd_AgentData& Agent, float DeltaTime) const;
+    void ApplyFlockingBehavior(FCrowd_AgentData& Agent, const TArray<FCrowd_AgentData>& NearbyAgents);
 };
