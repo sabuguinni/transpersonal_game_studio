@@ -3,11 +3,19 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
 #include "../SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EArch_StructureType : uint8
+{
+    StoneCircle     UMETA(DisplayName = "Stone Circle"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    AncientRuin     UMETA(DisplayName = "Ancient Ruin"),
+    NaturalArch     UMETA(DisplayName = "Natural Arch")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FArch_StructureData
@@ -15,46 +23,32 @@ struct TRANSPERSONALGAME_API FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName;
+    EArch_StructureType StructureType = EArch_StructureType::StoneCircle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EBiomeType BiomeType;
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
+    FRotator Rotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
+    FVector Scale = FVector::OneVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float WeatheringLevel;
+    float WeatheringLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuin;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    TArray<FString> InteriorObjects;
+    EBiomeType AssociatedBiome = EBiomeType::Forest;
 
     FArch_StructureData()
     {
-        StructureName = TEXT("Unknown");
-        BiomeType = EBiomeType::Savanna;
+        StructureType = EArch_StructureType::StoneCircle;
         Location = FVector::ZeroVector;
         Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
         WeatheringLevel = 0.5f;
-        bIsRuin = false;
+        AssociatedBiome = EBiomeType::Forest;
     }
-};
-
-UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
-{
-    Dwelling,
-    Storage,
-    Workshop,
-    Ceremonial,
-    Defensive,
-    Ruin
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -71,62 +65,52 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* MainStructureMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    TArray<FArch_StructureData> ManagedStructures;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
-    FArch_StructureData StructureData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    int32 MaxStructuresPerBiome = 10;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Config")
-    EArch_StructureType StructureType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Management")
+    float MinDistanceBetweenStructures = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TArray<UMaterialInterface*> WeatheredMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weathering")
+    float WeatheringRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<UStaticMesh*> InteriorProps;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<AActor*> SpawnedInteriorActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weathering")
+    bool bEnableWeatheringSystem = true;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void InitializeStructure(const FArch_StructureData& InStructureData, EArch_StructureType InType);
+    bool SpawnStructure(EArch_StructureType StructureType, FVector Location, EBiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ApplyWeathering(float WeatheringAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void PopulateInterior();
-
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void ClearInterior();
+    void RemoveStructure(int32 StructureIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ConvertToRuin(float DestructionLevel);
+    TArray<FArch_StructureData> GetStructuresInBiome(EBiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    FArch_StructureData GetStructureData() const { return StructureData; }
+    void ApplyWeathering(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Management", CallInEditor = true)
+    void GenerateStructuresForAllBiomes();
 
     UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureType(EArch_StructureType NewType);
+    bool IsLocationValidForStructure(FVector Location, EArch_StructureType StructureType);
 
-    UFUNCTION(BlueprintCallable, Category = "Material Management")
-    void UpdateMaterialsForBiome(EBiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateStructurePlacement() const;
+    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    FVector GetRandomLocationInBiome(EBiomeType BiomeType);
 
 private:
-    void SpawnInteriorProp(UStaticMesh* PropMesh, const FVector& RelativeLocation, const FRotator& RelativeRotation);
-    void ApplyBiomeSpecificWeathering();
-    void UpdateStructureAppearance();
+    void CreateStoneCircle(FVector CenterLocation, EBiomeType BiomeType);
+    void CreateCaveEntrance(FVector Location, EBiomeType BiomeType);
+    void CreateRockFormation(FVector Location, EBiomeType BiomeType);
+    void CreateAncientRuin(FVector Location, EBiomeType BiomeType);
+    void CreateNaturalArch(FVector Location, EBiomeType BiomeType);
 
-    UPROPERTY()
-    float CurrentWeatheringLevel;
-
-    UPROPERTY()
-    bool bInteriorPopulated;
+    AActor* SpawnStructureActor(FVector Location, FRotator Rotation, FVector Scale, const FString& Label);
+    void ApplyWeatheringToActor(AActor* StructureActor, float WeatheringLevel);
 };
