@@ -1,38 +1,64 @@
 #include "Eng_PerformanceManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Kismet/GameplayStatics.h"
 
 void UEng_PerformanceManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Initialized"));
-    
-    // Start metrics collection
+
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Initialized with target %d"), (int32)TargetPerformance);
+
+    // Set up performance monitoring timer
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().SetTimer(MetricsUpdateTimer, 
-            FTimerDelegate::CreateUObject(this, &UEng_PerformanceManager::UpdateMetrics),
-            PerformanceCheckInterval, true);
+        World->GetTimerManager().SetTimer(PerformanceTimerHandle, this, 
+            &UEng_PerformanceManager::UpdatePerformanceMetrics, 1.0f, true);
     }
-    
-    CurrentPerformanceLevel = EEng_PerformanceLevel::Medium;
-    CurrentMetrics = FEng_PerformanceMetrics();
+
+    ApplyPerformanceSettings();
 }
 
 void UEng_PerformanceManager::Deinitialize()
 {
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(MetricsUpdateTimer);
+        World->GetTimerManager().ClearTimer(PerformanceTimerHandle);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Deinitialized"));
+
     Super::Deinitialize();
+}
+
+void UEng_PerformanceManager::SetPerformanceTarget(EEng_PerformanceTarget NewTarget)
+{
+    TargetPerformance = NewTarget;
+    
+    // Adjust limits based on target
+    switch (NewTarget)
+    {
+        case EEng_PerformanceTarget::PC_60FPS:
+            MaxActors = 8000;
+            MaxDinosaurs = 150;
+            MaxMemoryMB = 4096.0f;
+            break;
+        case EEng_PerformanceTarget::Console_30FPS:
+            MaxActors = 5000;
+            MaxDinosaurs = 100;
+            MaxMemoryMB = 2048.0f;
+            break;
+        case EEng_PerformanceTarget::Mobile_30FPS:
+            MaxActors = 2000;
+            MaxDinosaurs = 50;
+            MaxMemoryMB = 1024.0f;
+            break;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Target set to %d - MaxActors: %d, MaxDinosaurs: %d"), 
+           (int32)NewTarget, MaxActors, MaxDinosaurs);
+
+    ApplyPerformanceSettings();
 }
 
 FEng_PerformanceMetrics UEng_PerformanceManager::GetCurrentMetrics() const
@@ -40,132 +66,139 @@ FEng_PerformanceMetrics UEng_PerformanceManager::GetCurrentMetrics() const
     return CurrentMetrics;
 }
 
-void UEng_PerformanceManager::SetPerformanceLevel(EEng_PerformanceLevel Level)
+bool UEng_PerformanceManager::IsPerformanceWithinTarget() const
 {
-    CurrentPerformanceLevel = Level;
-    ApplyPerformanceOptimizations();
+    float TargetFPS = (TargetPerformance == EEng_PerformanceTarget::PC_60FPS) ? 60.0f : 30.0f;
     
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Set level to %d"), (int32)Level);
+    return CurrentMetrics.CurrentFPS >= (TargetFPS * 0.9f) &&
+           CurrentMetrics.ActorCount <= MaxActors &&
+           CurrentMetrics.DinosaurCount <= MaxDinosaurs &&
+           CurrentMetrics.MemoryUsageMB <= MaxMemoryMB;
 }
 
-bool UEng_PerformanceManager::IsPerformanceCritical() const
-{
-    return CurrentMetrics.bIsPerformanceCritical;
-}
-
-void UEng_PerformanceManager::OptimizeLevel()
+void UEng_PerformanceManager::EnforceActorLimits()
 {
     UWorld* World = GetWorld();
     if (!World) return;
-    
-    // Count actors and apply optimizations
+
+    // Get all actors
     TArray<AActor*> AllActors;
     UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 ActorCount = AllActors.Num();
-    
-    // Auto-adjust performance level based on actor count
-    if (ActorCount > 5000)
+
+    CurrentMetrics.ActorCount = AllActors.Num();
+
+    // Count dinosaurs (actors with "dino" in their name)
+    int32 DinoCount = 0;
+    TArray<AActor*> DinosaurActors;
+    for (AActor* Actor : AllActors)
     {
-        SetPerformanceLevel(EEng_PerformanceLevel::Low);
+        if (Actor && Actor->GetName().Contains(TEXT("dino"), ESearchCase::IgnoreCase))
+        {
+            DinoCount++;
+            DinosaurActors.Add(Actor);
+        }
     }
-    else if (ActorCount > 2000)
+    CurrentMetrics.DinosaurCount = DinoCount;
+
+    // Enforce limits
+    if (CurrentMetrics.ActorCount > MaxActors)
     {
-        SetPerformanceLevel(EEng_PerformanceLevel::Medium);
+        int32 ActorsToRemove = CurrentMetrics.ActorCount - MaxActors;
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Removing %d actors to enforce limit"), ActorsToRemove);
+        
+        // Remove non-essential actors first
+        int32 Removed = 0;
+        for (AActor* Actor : AllActors)
+        {
+            if (Removed >= ActorsToRemove) break;
+            
+            if (Actor && !Actor->GetName().Contains(TEXT("PlayerStart")) &&
+                !Actor->GetName().Contains(TEXT("Light")) &&
+                !Actor->GetName().Contains(TEXT("Sky")))
+            {
+                Actor->Destroy();
+                Removed++;
+            }
+        }
     }
-    else
+
+    if (CurrentMetrics.DinosaurCount > MaxDinosaurs)
     {
-        SetPerformanceLevel(EEng_PerformanceLevel::High);
+        int32 DinosToRemove = CurrentMetrics.DinosaurCount - MaxDinosaurs;
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Removing %d dinosaurs to enforce limit"), DinosToRemove);
+        
+        for (int32 i = 0; i < DinosToRemove && i < DinosaurActors.Num(); i++)
+        {
+            if (DinosaurActors[i])
+            {
+                DinosaurActors[i]->Destroy();
+            }
+        }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Optimized level with %d actors"), ActorCount);
 }
 
-void UEng_PerformanceManager::RunPerformanceTest()
+void UEng_PerformanceManager::OptimizeForTarget()
 {
-    UpdateMetrics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE TEST ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Frame Rate: %.2f FPS"), CurrentMetrics.FrameRate);
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Actor Count: %d"), CurrentMetrics.ActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2f MB"), CurrentMetrics.MemoryUsageMB);
-    UE_LOG(LogTemp, Warning, TEXT("Performance Critical: %s"), 
-           CurrentMetrics.bIsPerformanceCritical ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Performance Level: %d"), (int32)CurrentPerformanceLevel);
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Optimizing for target %d"), (int32)TargetPerformance);
+
+    // Apply console variables based on target
+    switch (TargetPerformance)
+    {
+        case EEng_PerformanceTarget::PC_60FPS:
+            // High quality settings
+            GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 1.0"));
+            GEngine->Exec(GetWorld(), TEXT("foliage.LODDistanceScale 1.0"));
+            GEngine->Exec(GetWorld(), TEXT("r.DefaultFeature.AntiAliasing 2"));
+            break;
+            
+        case EEng_PerformanceTarget::Console_30FPS:
+            // Medium quality settings
+            GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.8"));
+            GEngine->Exec(GetWorld(), TEXT("foliage.LODDistanceScale 0.7"));
+            GEngine->Exec(GetWorld(), TEXT("r.DefaultFeature.AntiAliasing 1"));
+            break;
+            
+        case EEng_PerformanceTarget::Mobile_30FPS:
+            // Low quality settings
+            GEngine->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.5"));
+            GEngine->Exec(GetWorld(), TEXT("foliage.LODDistanceScale 0.4"));
+            GEngine->Exec(GetWorld(), TEXT("r.DefaultFeature.AntiAliasing 0"));
+            break;
+    }
+
+    EnforceActorLimits();
 }
 
-void UEng_PerformanceManager::UpdateMetrics()
+void UEng_PerformanceManager::UpdatePerformanceMetrics()
 {
-    // Update frame timing
-    float CurrentTime = FPlatformTime::Seconds();
-    if (LastFrameTime > 0.0f)
-    {
-        CurrentMetrics.FrameTime = (CurrentTime - LastFrameTime) * 1000.0f; // Convert to ms
-        CurrentMetrics.FrameRate = 1.0f / (CurrentTime - LastFrameTime);
-    }
-    LastFrameTime = CurrentTime;
-    
-    // Update actor count
     if (UWorld* World = GetWorld())
     {
+        // Get FPS
+        CurrentMetrics.CurrentFPS = 1.0f / World->GetDeltaSeconds();
+        CurrentMetrics.FrameTime = World->GetDeltaSeconds() * 1000.0f; // Convert to ms
+
+        // Get actor counts
         TArray<AActor*> AllActors;
         UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
         CurrentMetrics.ActorCount = AllActors.Num();
-    }
-    
-    // Estimate memory usage (simplified)
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Update draw calls (simplified estimation)
-    CurrentMetrics.DrawCalls = FMath::Max(1, CurrentMetrics.ActorCount / 10);
-    
-    CheckPerformanceThresholds();
-}
 
-void UEng_PerformanceManager::CheckPerformanceThresholds()
-{
-    // Check if performance is critical
-    bool bWasCritical = CurrentMetrics.bIsPerformanceCritical;
-    
-    CurrentMetrics.bIsPerformanceCritical = 
-        (CurrentMetrics.FrameTime > CriticalFrameTimeThreshold) ||
-        (CurrentMetrics.ActorCount > 8000) ||
-        (CurrentMetrics.MemoryUsageMB > 4096.0f);
-    
-    // If performance became critical, auto-optimize
-    if (CurrentMetrics.bIsPerformanceCritical && !bWasCritical)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance critical - auto-optimizing"));
-        OptimizeLevel();
+        // Count dinosaurs
+        int32 DinoCount = 0;
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && Actor->GetName().Contains(TEXT("dino"), ESearchCase::IgnoreCase))
+            {
+                DinoCount++;
+            }
+        }
+        CurrentMetrics.DinosaurCount = DinoCount;
+
+        // Estimate memory usage (simplified)
+        CurrentMetrics.MemoryUsageMB = (CurrentMetrics.ActorCount * 0.5f) + (CurrentMetrics.DinosaurCount * 2.0f);
     }
 }
 
-void UEng_PerformanceManager::ApplyPerformanceOptimizations()
+void UEng_PerformanceManager::ApplyPerformanceSettings()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Apply console commands based on performance level
-    switch (CurrentPerformanceLevel)
-    {
-        case EEng_PerformanceLevel::Low:
-            GEngine->Exec(World, TEXT("r.ViewDistanceScale 0.5"));
-            GEngine->Exec(World, TEXT("r.ShadowQuality 1"));
-            GEngine->Exec(World, TEXT("r.PostProcessQuality 1"));
-            break;
-            
-        case EEng_PerformanceLevel::Medium:
-            GEngine->Exec(World, TEXT("r.ViewDistanceScale 0.75"));
-            GEngine->Exec(World, TEXT("r.ShadowQuality 2"));
-            GEngine->Exec(World, TEXT("r.PostProcessQuality 2"));
-            break;
-            
-        case EEng_PerformanceLevel::High:
-            GEngine->Exec(World, TEXT("r.ViewDistanceScale 1.0"));
-            GEngine->Exec(World, TEXT("r.ShadowQuality 3"));
-            GEngine->Exec(World, TEXT("r.PostProcessQuality 3"));
-            break;
-    }
+    OptimizeForTarget();
 }
