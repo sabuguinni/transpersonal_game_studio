@@ -1,125 +1,124 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/HitResult.h"
-#include "CollisionQueryParams.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Core_CollisionManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ECore_CollisionType : uint8
 {
-    Character UMETA(DisplayName = "Character"),
-    Environment UMETA(DisplayName = "Environment"),
-    Dinosaur UMETA(DisplayName = "Dinosaur"),
-    Projectile UMETA(DisplayName = "Projectile"),
-    Interactive UMETA(DisplayName = "Interactive"),
-    Trigger UMETA(DisplayName = "Trigger")
+    None            UMETA(DisplayName = "None"),
+    Terrain         UMETA(DisplayName = "Terrain"),
+    Character       UMETA(DisplayName = "Character"),
+    Dinosaur        UMETA(DisplayName = "Dinosaur"),
+    Vegetation      UMETA(DisplayName = "Vegetation"),
+    Structure       UMETA(DisplayName = "Structure"),
+    Projectile      UMETA(DisplayName = "Projectile"),
+    Water           UMETA(DisplayName = "Water"),
+    Lava            UMETA(DisplayName = "Lava")
 };
 
 USTRUCT(BlueprintType)
-struct FCore_CollisionData
+struct TRANSPERSONALGAME_API FCore_CollisionData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    ECore_CollisionType CollisionType = ECore_CollisionType::Environment;
+    ECore_CollisionType CollisionType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    float ImpactForce = 0.0f;
+    float Mass;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FVector ImpactLocation = FVector::ZeroVector;
+    float Friction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FVector ImpactNormal = FVector::ZeroVector;
+    float Restitution;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    AActor* HitActor = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    float Timestamp = 0.0f;
+    bool bCanBeDestroyed;
 
     FCore_CollisionData()
     {
-        CollisionType = ECore_CollisionType::Environment;
-        ImpactForce = 0.0f;
-        ImpactLocation = FVector::ZeroVector;
-        ImpactNormal = FVector::ZeroVector;
-        HitActor = nullptr;
-        Timestamp = 0.0f;
+        CollisionType = ECore_CollisionType::None;
+        Mass = 1.0f;
+        Friction = 0.7f;
+        Restitution = 0.3f;
+        bCanBeDestroyed = false;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCore_OnCollisionEvent, const FCore_CollisionData&, CollisionData, AActor*, OtherActor);
-
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_CollisionManager : public UActorComponent
+/**
+ * Core Collision Manager - Handles all collision detection and response in the prehistoric world
+ * Manages terrain interaction, character-dinosaur collisions, and environmental physics
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_CollisionManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCore_CollisionManager();
 
+    // Subsystem Interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Collision Registration
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void RegisterCollisionObject(UPrimitiveComponent* Component, const FCore_CollisionData& CollisionData);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void UnregisterCollisionObject(UPrimitiveComponent* Component);
+
+    // Collision Queries
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    bool LineTraceForTerrain(const FVector& Start, const FVector& End, FHitResult& OutHit);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    bool SphereTraceForDinosaurs(const FVector& Center, float Radius, TArray<FHitResult>& OutHits);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    bool CheckGroundStability(const FVector& Location, float& OutStabilityFactor);
+
+    // Physics Material Management
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void ApplyTerrainPhysics(UPrimitiveComponent* Component, ECore_CollisionType TerrainType);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void SetCollisionResponseForDinosaur(UPrimitiveComponent* Component, bool bIsLargeDinosaur);
+
+    // Impact Events
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void HandleImpactEvent(const FHitResult& Hit, float ImpactForce);
+
+    UFUNCTION(BlueprintCallable, Category = "Collision")
+    void ProcessDestructibleCollision(UPrimitiveComponent* Component, const FVector& ImpactPoint, float Force);
+
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Registered collision objects
+    UPROPERTY()
+    TMap<UPrimitiveComponent*, FCore_CollisionData> CollisionRegistry;
 
-public:
-    UPROPERTY(BlueprintAssignable, Category = "Collision Events")
-    FCore_OnCollisionEvent OnCollisionDetected;
+    // Physics materials for different terrain types
+    UPROPERTY(EditAnywhere, Category = "Physics Materials")
+    TMap<ECore_CollisionType, class UPhysicalMaterial*> TerrainMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    ECore_CollisionType MyCollisionType = ECore_CollisionType::Character;
+    // Collision channels
+    UPROPERTY(EditAnywhere, Category = "Collision Channels")
+    TEnumAsByte<ECollisionChannel> TerrainChannel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    bool bEnableCollisionLogging = true;
+    UPROPERTY(EditAnywhere, Category = "Collision Channels")
+    TEnumAsByte<ECollisionChannel> DinosaurChannel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    float MinImpactForceThreshold = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
-    float CollisionCooldown = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxCollisionHistory = 50;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Debug")
-    TArray<FCore_CollisionData> CollisionHistory;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Debug")
-    int32 TotalCollisions = 0;
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void RegisterCollision(const FHitResult& HitResult, float ImpactForce);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void SetCollisionType(ECore_CollisionType NewType);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    bool IsCollisionTypeCompatible(ECore_CollisionType OtherType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void EnableCollisionTracking(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void GetRecentCollisions(TArray<FCore_CollisionData>& OutCollisions, int32 Count = 10);
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void ClearCollisionHistory();
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    float CalculateImpactForce(const FVector& Velocity, float Mass = 1.0f) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    bool ShouldIgnoreCollision(AActor* OtherActor) const;
+    UPROPERTY(EditAnywhere, Category = "Collision Channels")
+    TEnumAsByte<ECollisionChannel> CharacterChannel;
 
 private:
-    float LastCollisionTime = 0.0f;
-    TSet<AActor*> IgnoredActors;
-    
-    void ProcessCollisionData(const FCore_CollisionData& CollisionData);
-    void UpdateCollisionHistory(const FCore_CollisionData& NewCollision);
-    bool IsWithinCooldown() const;
+    void InitializePhysicsMaterials();
+    void SetupCollisionChannels();
+    float CalculateImpactDamage(const FHitResult& Hit, float Force);
 };
