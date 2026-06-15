@@ -1,31 +1,35 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/TriggerVolume.h"
-#include "../SharedTypes.h"
+#include "Sound/SoundWave.h"
+#include "Kismet/GameplayStatics.h"
 #include "Audio_AdaptiveMusicSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_MusicState : uint8
 {
-    Silence,
-    Exploration,
-    Tribal,
+    Calm,
+    Tension,
     Combat,
-    Danger,
-    Victory
+    Exploration,
+    Storytelling,
+    Night,
+    Day
 };
 
 UENUM(BlueprintType)
-enum class EAudio_IntensityLevel : uint8
+enum class EAudio_BiomeType : uint8
 {
-    Calm,
-    Tense,
-    Intense,
-    Extreme
+    Forest,
+    Plains,
+    Mountains,
+    Swamp,
+    Desert,
+    River
 };
 
 USTRUCT(BlueprintType)
@@ -34,154 +38,192 @@ struct TRANSPERSONALGAME_API FAudio_MusicTrack
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    TSoftObjectPtr<USoundCue> SoundCue;
+    TSoftObjectPtr<USoundWave> SoundWave;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    FString TrackName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
     EAudio_MusicState MusicState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    EAudio_IntensityLevel IntensityLevel;
+    EAudio_BiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    float FadeInTime;
+    float Volume = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    float FadeOutTime;
+    bool bIsLooping = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    bool bShouldLoop;
+    float FadeInTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float FadeOutTime = 2.0f;
 
     FAudio_MusicTrack()
     {
-        MusicState = EAudio_MusicState::Silence;
-        IntensityLevel = EAudio_IntensityLevel::Calm;
+        TrackName = TEXT("DefaultTrack");
+        MusicState = EAudio_MusicState::Calm;
+        BiomeType = EAudio_BiomeType::Forest;
+        Volume = 0.7f;
+        bIsLooping = true;
         FadeInTime = 2.0f;
-        FadeOutTime = 1.5f;
-        bShouldLoop = true;
+        FadeOutTime = 2.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_TribalZoneSettings
+struct TRANSPERSONALGAME_API FAudio_StorytellingAudioData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    FString TribeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString AudioURL;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    TSoftObjectPtr<USoundCue> TribalMusic;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    float Duration = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    float RelationshipModifier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    bool bIsNarration = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    FVector ZoneCenter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    float ZoneRadius;
-
-    FAudio_TribalZoneSettings()
+    FAudio_StorytellingAudioData()
     {
-        TribeName = TEXT("Unknown Tribe");
-        RelationshipModifier = 0.0f;
-        ZoneCenter = FVector::ZeroVector;
-        ZoneRadius = 1000.0f;
+        AudioURL = TEXT("");
+        CharacterName = TEXT("Narrator");
+        Duration = 10.0f;
+        bIsNarration = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AdaptiveMusicSystem : public AActor
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_AdaptiveMusicSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_AdaptiveMusicSystem();
+    UAudio_AdaptiveMusicSystem();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    // Music State Management
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void SetMusicState(EAudio_MusicState NewState);
 
-    // Core audio components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* MusicAudioComponent;
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void SetBiomeType(EAudio_BiomeType NewBiome);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* AmbientAudioComponent;
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void PlayStorytellingAudio(const FAudio_StorytellingAudioData& AudioData);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* TribalAudioComponent;
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void StopStorytellingAudio();
 
-    // Music system configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music System")
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void SetMasterVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void FadeToTrack(const FAudio_MusicTrack& NewTrack, float FadeTime = 2.0f);
+
+    // Tension System
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void IncreaseTension(float Amount = 0.1f);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void DecreaseTension(float Amount = 0.1f);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void ResetTension();
+
+    // Day/Night Cycle Integration
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void OnDayNightTransition(bool bIsNight);
+
+    // Dinosaur Proximity System
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void OnDinosaurProximity(float Distance, bool bIsPredator);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void OnDinosaurLeft();
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Adaptive Music")
+    EAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
+
+    UFUNCTION(BlueprintPure, Category = "Adaptive Music")
+    float GetTensionLevel() const { return TensionLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Adaptive Music")
+    bool IsStorytellingActive() const { return bIsStorytellingActive; }
+
+protected:
+    // Core Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music Tracks")
     TArray<FAudio_MusicTrack> MusicTracks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Components")
+    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAudioComponent> MusicAudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Components")
+    UPROPERTY(meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAudioComponent> StorytellingAudioComponent;
+
+    // State Variables
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
     EAudio_MusicState CurrentMusicState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music System")
-    EAudio_IntensityLevel CurrentIntensity;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    EAudio_BiomeType CurrentBiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music System")
-    float MasterMusicVolume;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    float TensionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music System")
-    float MasterAmbientVolume;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    bool bIsStorytellingActive;
 
-    // Tribal territory system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Audio")
-    TArray<FAudio_TribalZoneSettings> TribalZones;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    bool bIsNightTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Tribal Audio")
-    FString CurrentTribalTerritory;
+    // Audio Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MasterVolume;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Tribal Audio")
-    float CurrentTribalRelationship;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MusicVolume;
 
-    // Adaptive music functions
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void TransitionToMusicState(EAudio_MusicState NewState, EAudio_IntensityLevel NewIntensity = EAudio_IntensityLevel::Calm);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float StorytellingVolume;
 
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void SetMusicIntensity(EAudio_IntensityLevel NewIntensity);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float TensionThreshold;
 
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void PlayTribalMusic(const FString& TribeName, float RelationshipLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float DinosaurProximityThreshold;
 
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void StopAllMusic(float FadeOutTime = 2.0f);
+    // Timers and Transitions
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Transitions")
+    float CurrentFadeTime;
 
-    // Environmental audio
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void UpdateTribalTerritory(const FString& TribeName, float RelationshipLevel);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Transitions")
+    bool bIsFading;
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void PlayEnvironmentalStory(const FString& LocationName);
-
-    // Combat audio triggers
-    UFUNCTION(BlueprintCallable, Category = "Combat Audio")
-    void OnDinosaurEncounter(const FString& DinosaurType, float ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat Audio")
-    void OnCombatStart();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat Audio")
-    void OnCombatEnd(bool bPlayerVictory);
+    FTimerHandle StorytellingTimerHandle;
+    FTimerHandle TensionDecayTimerHandle;
 
 private:
-    // Internal music management
-    FAudio_MusicTrack* FindMusicTrack(EAudio_MusicState State, EAudio_IntensityLevel Intensity);
-    void CrossfadeToTrack(const FAudio_MusicTrack& NewTrack);
-    void UpdateTribalAudioBasedOnRelationship(float RelationshipLevel);
-    
-    // Transition timing
-    float TransitionTimer;
-    bool bIsTransitioning;
-    EAudio_MusicState TargetMusicState;
-    EAudio_IntensityLevel TargetIntensity;
+    // Internal Methods
+    void UpdateMusicBasedOnState();
+    FAudio_MusicTrack* FindBestTrackForCurrentState();
+    void StartFadeTransition(const FAudio_MusicTrack& NewTrack, float FadeTime);
+    void OnStorytellingFinished();
+    void DecayTensionOverTime();
+    void InitializeAudioComponents();
+    void LoadDefaultMusicTracks();
 };
