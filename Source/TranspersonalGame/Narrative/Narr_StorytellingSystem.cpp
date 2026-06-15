@@ -1,207 +1,241 @@
 #include "Narr_StorytellingSystem.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Components/SceneComponent.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "TranspersonalCharacter.h"
+#include "Engine/Engine.h"
 
-UNarr_StorytellingSystem::UNarr_StorytellingSystem()
+ANarr_StorytellingSystem::ANarr_StorytellingSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    bIsPlayingStory = false;
-    StoryPlaybackTimer = 0.0f;
-    ContextualTriggerDistance = 2000.0f;
-    PlayerReference = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+
+    // Initialize default values
+    PlayerDetectionRadius = 1000.0f;
+    StoryTriggerCooldown = 30.0f;
+    LastStoryTime = -1000.0f;
+    PlayerCharacter = nullptr;
 }
 
-void UNarr_StorytellingSystem::BeginPlay()
+void ANarr_StorytellingSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find player reference
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerReference = PC->GetPawn();
-        }
-    }
+    // Initialize story database with default stories
+    InitializeStoryDatabase();
     
-    // Initialize default stories
-    InitializeDefaultStories();
+    // Find player character
+    PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    
+    if (PlayerCharacter)
+    {
+        UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Found player character"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("StorytellingSystem: Player character not found"));
+    }
 }
 
-void UNarr_StorytellingSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ANarr_StorytellingSystem::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Update story playback timer
-    if (bIsPlayingStory)
+    // Check for player proximity to trigger contextual stories
+    CheckPlayerProximity();
+}
+
+void ANarr_StorytellingSystem::InitializeStoryDatabase()
+{
+    StoryDatabase.Empty();
+    
+    // Warning stories
+    FNarr_StoryData WarningStory;
+    WarningStory.StoryID = TEXT("Warning_Predator");
+    WarningStory.StoryType = ENarr_StoryType::Warning;
+    WarningStory.DialogueText = TEXT("The winds carry whispers of danger, wanderer. The great predator stalks these hunting grounds.");
+    WarningStory.TriggerRadius = 800.0f;
+    WarningStory.bPlayOnce = false;
+    StoryDatabase.Add(WarningStory);
+    
+    // Wisdom stories
+    FNarr_StoryData WisdomStory;
+    WisdomStory.StoryID = TEXT("Wisdom_Ancient");
+    WisdomStory.StoryType = ENarr_StoryType::Wisdom;
+    WisdomStory.DialogueText = TEXT("The bones of the earth speak of ancient hunts. Listen to the wind, survivor.");
+    WisdomStory.TriggerRadius = 600.0f;
+    WisdomStory.bPlayOnce = true;
+    StoryDatabase.Add(WisdomStory);
+    
+    // Aftermath stories
+    FNarr_StoryData AftermathStory;
+    AftermathStory.StoryID = TEXT("Aftermath_Battle");
+    AftermathStory.StoryType = ENarr_StoryType::Aftermath;
+    AftermathStory.DialogueText = TEXT("The river runs red with the blood of the fallen. Seek shelter in the high caves.");
+    AftermathStory.TriggerRadius = 700.0f;
+    AftermathStory.bPlayOnce = false;
+    StoryDatabase.Add(AftermathStory);
+    
+    // Migration stories
+    FNarr_StoryData MigrationStory;
+    MigrationStory.StoryID = TEXT("Migration_Herds");
+    MigrationStory.StoryType = ENarr_StoryType::Migration;
+    MigrationStory.DialogueText = TEXT("The thunder of hooves shakes the ground. The great migration begins.");
+    MigrationStory.TriggerRadius = 1000.0f;
+    MigrationStory.bPlayOnce = false;
+    StoryDatabase.Add(MigrationStory);
+    
+    UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Initialized %d stories"), StoryDatabase.Num());
+}
+
+void ANarr_StorytellingSystem::CheckPlayerProximity()
+{
+    if (!PlayerCharacter || !CanTriggerStory())
     {
-        StoryPlaybackTimer += DeltaTime;
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
+    FVector MyLocation = GetActorLocation();
+    float Distance = FVector::Dist(PlayerLocation, MyLocation);
+    
+    if (Distance <= PlayerDetectionRadius)
+    {
+        // Determine story type based on context
+        ENarr_StoryType ContextualType = ENarr_StoryType::Lore;
         
-        if (StoryPlaybackTimer >= CurrentStory.StoryDuration)
+        // Simple context detection based on player state
+        if (PlayerCharacter->GetHealthPercentage() < 0.3f)
         {
-            OnStoryComplete();
+            ContextualType = ENarr_StoryType::Warning;
         }
-    }
-    
-    // Check for contextual story triggers
-    if (PlayerReference)
-    {
-        CheckContextualTriggers(PlayerReference->GetActorLocation());
-    }
-}
-
-void UNarr_StorytellingSystem::StartStory(const FNarr_StoryData& Story)
-{
-    if (bIsPlayingStory)
-    {
-        StopCurrentStory();
-    }
-    
-    CurrentStory = Story;
-    bIsPlayingStory = true;
-    StoryPlaybackTimer = 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Starting Story: %s"), *Story.StoryTitle);
-    UE_LOG(LogTemp, Warning, TEXT("Story Text: %s"), *Story.StoryText);
-    
-    // TODO: Play audio asset when audio system is integrated
-    // For now, just log the story content
-}
-
-void UNarr_StorytellingSystem::StopCurrentStory()
-{
-    if (bIsPlayingStory)
-    {
-        bIsPlayingStory = false;
-        StoryPlaybackTimer = 0.0f;
-        UE_LOG(LogTemp, Warning, TEXT("Story stopped: %s"), *CurrentStory.StoryTitle);
-    }
-}
-
-bool UNarr_StorytellingSystem::IsStoryPlaying() const
-{
-    return bIsPlayingStory;
-}
-
-FNarr_StoryData UNarr_StorytellingSystem::GetRandomStoryByType(ENarr_StoryType StoryType)
-{
-    TArray<FNarr_StoryData> FilteredStories;
-    
-    for (const FNarr_StoryData& Story : AvailableStories)
-    {
-        if (Story.StoryType == StoryType)
+        else if (Distance < 300.0f)
         {
-            FilteredStories.Add(Story);
+            ContextualType = ENarr_StoryType::Wisdom;
         }
+        
+        TriggerStoryByLocation(PlayerLocation, ContextualType);
     }
-    
-    if (FilteredStories.Num() > 0)
-    {
-        int32 RandomIndex = FMath::RandRange(0, FilteredStories.Num() - 1);
-        return FilteredStories[RandomIndex];
-    }
-    
-    return FNarr_StoryData(); // Return empty story if none found
 }
 
-void UNarr_StorytellingSystem::AddStoryToLibrary(const FNarr_StoryData& NewStory)
+void ANarr_StorytellingSystem::TriggerStoryByLocation(FVector Location, ENarr_StoryType StoryType)
 {
-    AvailableStories.Add(NewStory);
-    UE_LOG(LogTemp, Log, TEXT("Added story to library: %s"), *NewStory.StoryTitle);
-}
-
-void UNarr_StorytellingSystem::TriggerContextualStory(FVector PlayerLocation)
-{
-    if (bIsPlayingStory) return; // Don't interrupt current story
-    
-    for (const FNarr_StoryData& Story : AvailableStories)
+    if (!CanTriggerStory())
     {
-        if (Story.bIsContextual)
+        return;
+    }
+    
+    FNarr_StoryData StoryToPlay = GetRandomStoryByType(StoryType);
+    
+    if (!StoryToPlay.StoryID.IsEmpty())
+    {
+        PlayStoryAudio(StoryToPlay);
+        LastStoryTime = GetWorld()->GetTimeSeconds();
+        
+        // Mark as triggered if play once
+        if (StoryToPlay.bPlayOnce)
         {
-            float Distance = FVector::Dist(PlayerLocation, Story.TriggerLocation);
-            if (Distance <= Story.TriggerRadius)
+            FNarr_StoryData* FoundStory = FindStoryByID(StoryToPlay.StoryID);
+            if (FoundStory)
             {
-                StartStory(Story);
-                break; // Only trigger one story at a time
+                FoundStory->bHasBeenTriggered = true;
             }
         }
+        
+        OnStoryTriggered(StoryToPlay);
+        UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Triggered story %s"), *StoryToPlay.StoryID);
     }
 }
 
-void UNarr_StorytellingSystem::InitializeDefaultStories()
+void ANarr_StorytellingSystem::TriggerStoryByID(const FString& StoryID)
 {
-    // Tribal Elder Stories
-    FNarr_StoryData ElderStory1;
-    ElderStory1.StoryTitle = TEXT("The Ancient Fire");
-    ElderStory1.StoryText = TEXT("The ancient fire burns bright tonight, young hunter. Listen well to the words of your ancestors - the great beasts of this land hold secrets that only the brave may discover.");
-    ElderStory1.StoryType = ENarr_StoryType::Tribal_Legend;
-    ElderStory1.NarratorType = ENarr_NarratorType::Tribal_Elder;
-    ElderStory1.StoryDuration = 12.0f;
-    ElderStory1.bIsContextual = true;
-    ElderStory1.TriggerLocation = FVector(0, 0, 100); // Near campfire
-    ElderStory1.TriggerRadius = 1500.0f;
-    AddStoryToLibrary(ElderStory1);
+    FNarr_StoryData* FoundStory = FindStoryByID(StoryID);
     
-    // Scout Warning Stories
-    FNarr_StoryData ScoutWarning;
-    ScoutWarning.StoryTitle = TEXT("Shadow of Death");
-    ScoutWarning.StoryText = TEXT("The shadow of death approaches from the north. Three suns have passed since the great predator claimed its last victim. Prepare your spear, for the hunt begins at dawn.");
-    ScoutWarning.StoryType = ENarr_StoryType::Warning_Story;
-    ScoutWarning.NarratorType = ENarr_NarratorType::Scout_Warrior;
-    ScoutWarning.StoryDuration = 12.0f;
-    ScoutWarning.bIsContextual = true;
-    ScoutWarning.TriggerLocation = FVector(5000, 0, 100); // North territory
-    ScoutWarning.TriggerRadius = 2000.0f;
-    AddStoryToLibrary(ScoutWarning);
-    
-    // Tracker Report Stories
-    FNarr_StoryData TrackerReport;
-    TrackerReport.StoryTitle = TEXT("River Speaks");
-    TrackerReport.StoryText = TEXT("The river speaks of strange movements upstream. The gentle giants flee toward the eastern cliffs, their heavy footsteps shaking the earth beneath our feet.");
-    TrackerReport.StoryType = ENarr_StoryType::Beast_Knowledge;
-    TrackerReport.NarratorType = ENarr_NarratorType::Tracker_Guide;
-    TrackerReport.StoryDuration = 11.0f;
-    TrackerReport.bIsContextual = true;
-    TrackerReport.TriggerLocation = FVector(0, 5000, 50); // Near river
-    TrackerReport.TriggerRadius = 1800.0f;
-    AddStoryToLibrary(TrackerReport);
-    
-    // Hunter Territory Stories
-    FNarr_StoryData HunterTerritory;
-    HunterTerritory.StoryTitle = TEXT("Blood and Bone");
-    HunterTerritory.StoryText = TEXT("Blood and bone mark this territory now. The pack hunters have claimed these caves as their own. Only the strongest will emerge from their domain alive.");
-    HunterTerritory.StoryType = ENarr_StoryType::Territory_Lore;
-    HunterTerritory.NarratorType = ENarr_NarratorType::Hunter_Veteran;
-    HunterTerritory.StoryDuration = 11.0f;
-    HunterTerritory.bIsContextual = true;
-    HunterTerritory.TriggerLocation = FVector(-3000, -3000, 200); // Cave area
-    HunterTerritory.TriggerRadius = 2500.0f;
-    AddStoryToLibrary(HunterTerritory);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default stories"), AvailableStories.Num());
-}
-
-void UNarr_StorytellingSystem::OnStoryComplete()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Story completed: %s"), *CurrentStory.StoryTitle);
-    bIsPlayingStory = false;
-    StoryPlaybackTimer = 0.0f;
-}
-
-void UNarr_StorytellingSystem::CheckContextualTriggers(FVector PlayerLocation)
-{
-    if (bIsPlayingStory) return; // Don't check triggers while story is playing
-    
-    // Check every 2 seconds to avoid performance issues
-    static float TriggerCheckTimer = 0.0f;
-    TriggerCheckTimer += GetWorld()->GetDeltaSeconds();
-    
-    if (TriggerCheckTimer >= 2.0f)
+    if (FoundStory && (!FoundStory->bPlayOnce || !FoundStory->bHasBeenTriggered))
     {
-        TriggerCheckTimer = 0.0f;
-        TriggerContextualStory(PlayerLocation);
+        PlayStoryAudio(*FoundStory);
+        LastStoryTime = GetWorld()->GetTimeSeconds();
+        
+        if (FoundStory->bPlayOnce)
+        {
+            FoundStory->bHasBeenTriggered = true;
+        }
+        
+        OnStoryTriggered(*FoundStory);
+        UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Triggered story by ID %s"), *StoryID);
     }
+}
+
+void ANarr_StorytellingSystem::AddStoryToDatabase(const FNarr_StoryData& NewStory)
+{
+    StoryDatabase.Add(NewStory);
+    UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Added story %s to database"), *NewStory.StoryID);
+}
+
+bool ANarr_StorytellingSystem::CanTriggerStory() const
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - LastStoryTime) >= StoryTriggerCooldown;
+}
+
+FNarr_StoryData ANarr_StorytellingSystem::GetRandomStoryByType(ENarr_StoryType StoryType)
+{
+    TArray<FNarr_StoryData> MatchingStories;
+    
+    for (const FNarr_StoryData& Story : StoryDatabase)
+    {
+        if (Story.StoryType == StoryType && (!Story.bPlayOnce || !Story.bHasBeenTriggered))
+        {
+            MatchingStories.Add(Story);
+        }
+    }
+    
+    if (MatchingStories.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, MatchingStories.Num() - 1);
+        return MatchingStories[RandomIndex];
+    }
+    
+    return FNarr_StoryData();
+}
+
+void ANarr_StorytellingSystem::PlayStoryAudio(const FNarr_StoryData& StoryData)
+{
+    if (AudioComponent && StoryData.AudioClip)
+    {
+        AudioComponent->SetSound(StoryData.AudioClip);
+        AudioComponent->Play();
+        UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Playing audio for story %s"), *StoryData.StoryID);
+    }
+    else
+    {
+        // Display text if no audio
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+                FString::Printf(TEXT("Narrator: %s"), *StoryData.DialogueText));
+        }
+        UE_LOG(LogTemp, Log, TEXT("StorytellingSystem: Displaying text for story %s"), *StoryData.StoryID);
+    }
+}
+
+FNarr_StoryData* ANarr_StorytellingSystem::FindStoryByID(const FString& StoryID)
+{
+    for (FNarr_StoryData& Story : StoryDatabase)
+    {
+        if (Story.StoryID == StoryID)
+        {
+            return &Story;
+        }
+    }
+    return nullptr;
 }
