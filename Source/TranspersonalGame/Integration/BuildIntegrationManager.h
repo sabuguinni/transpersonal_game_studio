@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
@@ -15,53 +14,65 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
     FString ModuleName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bIsCompiled;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
     bool bIsLoaded;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
     int32 ClassCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float LoadTime;
+    TArray<FString> CompilationErrors;
 
     FBuild_ModuleStatus()
     {
         ModuleName = TEXT("");
+        bIsCompiled = false;
         bIsLoaded = false;
         ClassCount = 0;
-        LoadTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
 {
     GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
     int32 TotalActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 CustomActors;
+    int32 DinosaurCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float BuildTime;
+    int32 PropCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bBuildSuccess;
+    float FrameRate;
 
-    FBuild_IntegrationReport()
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bIsPerformanceHealthy;
+
+    FBuild_SystemHealth()
     {
         TotalActors = 0;
-        CustomActors = 0;
-        BuildTime = 0.0f;
-        bBuildSuccess = false;
+        DinosaurCount = 0;
+        PropCount = 0;
+        FrameRate = 0.0f;
+        MemoryUsageMB = 0.0f;
+        bIsPerformanceHealthy = true;
     }
 };
 
-UCLASS(BlueprintType)
+/**
+ * Integration & Build Manager - Orchestrates compilation, validation, and system health monitoring
+ * Ensures all agent outputs integrate correctly into a playable build
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -69,50 +80,65 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
+    // Subsystem Interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Build Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GenerateIntegrationReport();
+    void ValidateAllModules();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleIntegrity();
+    FBuild_ModuleStatus GetModuleStatus(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RunIntegrationTests();
+    TArray<FBuild_ModuleStatus> GetAllModuleStatuses();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckActorCaps();
+    FBuild_SystemHealth GetSystemHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void EnforceActorLimits();
+    void EnforceActorCaps();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetLoadedModules();
+    void ValidateGameplayReadiness();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCrossSystemCompatibility();
+    bool IsMinimumViablePrototypeReady();
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void StartPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void StopPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void LogBuildReport();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FBuild_IntegrationReport LastReport;
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float LastValidationTime;
+    FBuild_SystemHealth CurrentSystemHealth;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bIntegrationValid;
+    bool bIsMonitoringPerformance;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 MaxDinosaurs;
+    float LastFrameRateCheck;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 MaxTotalActors;
+    int32 MaxAllowedActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 MaxAllowedDinosaurs;
 
 private:
-    void ValidateModuleStatus(const FString& ModuleName, FBuild_ModuleStatus& OutStatus);
-    void CheckActorIntegrity();
-    void ValidateSystemDependencies();
-    bool TestCrossSystemInteraction();
+    void CheckModuleCompilation();
+    void UpdateSystemHealth();
+    void ValidateActorCounts();
+    void CheckPerformanceMetrics();
+    bool ValidateMinimumGameplayElements();
 };
