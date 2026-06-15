@@ -1,10 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SplineComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "SharedTypes.h"
 #include "World_RiverSystemGenerator.generated.h"
@@ -15,10 +15,10 @@ struct TRANSPERSONALGAME_API FWorld_RiverSegment
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Segment")
-    FVector StartPoint;
+    FVector StartLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Segment")
-    FVector EndPoint;
+    FVector EndLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Segment")
     float Width;
@@ -30,16 +30,16 @@ struct TRANSPERSONALGAME_API FWorld_RiverSegment
     float FlowSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Segment")
-    bool bIsMainChannel;
+    EBiomeType BiomeType;
 
     FWorld_RiverSegment()
     {
-        StartPoint = FVector::ZeroVector;
-        EndPoint = FVector::ZeroVector;
+        StartLocation = FVector::ZeroVector;
+        EndLocation = FVector::ZeroVector;
         Width = 500.0f;
         Depth = 100.0f;
-        FlowSpeed = 200.0f;
-        bIsMainChannel = true;
+        FlowSpeed = 1.0f;
+        BiomeType = EBiomeType::Temperate;
     }
 };
 
@@ -53,9 +53,6 @@ struct TRANSPERSONALGAME_API FWorld_RiverNetwork
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
     TArray<FWorld_RiverSegment> Tributaries;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
-    TArray<FVector> LakePositions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
     FVector SourceLocation;
@@ -74,93 +71,86 @@ struct TRANSPERSONALGAME_API FWorld_RiverNetwork
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorld_RiverSystemGenerator : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AWorld_RiverSystemGenerator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorld_RiverSystemGenerator();
+    AWorld_RiverSystemGenerator();
 
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USplineComponent* RiverSpline;
 
-    // River Generation Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
-    int32 MaxRiverSegments;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
-    float MinRiverWidth;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* RiverMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
-    float MaxRiverWidth;
+    FWorld_RiverNetwork RiverNetwork;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
+    int32 MaxTributaries;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
+    float MinSegmentLength;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
+    float MaxSegmentLength;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
     float RiverMeandering;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
-    int32 TributaryCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Generation")
-    float LakeProbability;
-
-    // Water Materials
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* RiverWaterMaterial;
+    float ErosionStrength;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* LakeWaterMaterial;
+    UMaterialInterface* WaterMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    UMaterialInterface* RiverbankMaterial;
+    UMaterialInterface* RiverbedMaterial;
 
-    // Generated Network
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Generated Data")
-    FWorld_RiverNetwork GeneratedNetwork;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    UStaticMesh* RiverSegmentMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Generated Data")
-    TArray<AActor*> SpawnedRiverActors;
-
-    // Blueprint-Callable Functions
+public:
     UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void GenerateRiverNetwork(FVector StartLocation, FVector EndLocation);
+    void GenerateRiverSystem(FVector StartPoint, FVector EndPoint, int32 Segments);
 
     UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void GenerateTributaries(const FWorld_RiverSegment& MainSegment);
+    void AddTributary(FVector BranchPoint, FVector EndPoint, float BranchWidth);
 
     UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void SpawnRiverMeshes();
+    void ApplyErosionToTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void SpawnLakes();
+    void SpawnRiverVegetation();
 
     UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void SpawnRiverbanks();
-
-    UFUNCTION(BlueprintCallable, Category = "River Generation")
-    void ClearGeneratedRivers();
-
-    UFUNCTION(BlueprintCallable, Category = "River Generation")
-    FVector CalculateRiverFlow(const FVector& CurrentPoint, const FVector& TargetPoint);
-
-    UFUNCTION(BlueprintCallable, Category = "River Generation")
-    bool IsValidRiverLocation(const FVector& Location);
+    void CreateRiverSounds();
 
     UFUNCTION(BlueprintCallable, Category = "River Generation", CallInEditor = true)
-    void GenerateTestRiver();
+    void RegenerateRiver();
+
+    UFUNCTION(BlueprintCallable, Category = "River Generation")
+    FWorld_RiverSegment GetNearestRiverSegment(FVector Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "River Generation")
+    bool IsLocationNearWater(FVector Location, float MaxDistance) const;
+
+    UFUNCTION(BlueprintCallable, Category = "River Generation")
+    float GetWaterDepthAtLocation(FVector Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "River Generation")
+    FVector GetFlowDirectionAtLocation(FVector Location) const;
 
 private:
-    // Internal generation functions
-    FWorld_RiverSegment CreateRiverSegment(const FVector& Start, const FVector& End, float Width, bool bMainChannel);
-    void ApplyRiverMeandering(FWorld_RiverSegment& Segment);
-    AActor* SpawnRiverSegmentMesh(const FWorld_RiverSegment& Segment);
-    AActor* SpawnLakeAtLocation(const FVector& Location, float Radius);
-    void GenerateRiverbankGeometry(const FWorld_RiverSegment& Segment);
-    float CalculateTerrainElevation(const FVector& Location);
-    FVector GetDownhillDirection(const FVector& Location);
+    void GenerateSplinePoints();
+    void CreateRiverMesh();
+    void ApplyMaterials();
+    FVector CalculateMeanderingOffset(FVector BasePoint, float MeanderAmount);
+    void SpawnRiverRocks();
+    void SpawnAquaticLife();
 };
-
-#include "World_RiverSystemGenerator.generated.h"
