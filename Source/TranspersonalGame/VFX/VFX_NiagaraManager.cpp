@@ -1,303 +1,201 @@
 #include "VFX_NiagaraManager.h"
-#include "Components/SphereComponent.h"
-#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Engine/Engine.h"
 
 AVFX_NiagaraManager::AVFX_NiagaraManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Create trigger sphere component
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    RootComponent = TriggerSphere;
-    TriggerSphere->SetSphereRadius(TriggerRadius);
-    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
-    // Create primary VFX component
-    PrimaryVFXComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PrimaryVFX"));
-    PrimaryVFXComponent->SetupAttachment(RootComponent);
-    PrimaryVFXComponent->SetAutoActivate(false);
+    MaxEffectDistance = 5000.0f;
+    MaxActiveEffects = 50;
 
-    // Initialize default settings
-    TriggerRadius = 500.0f;
-    EffectCooldown = 1.0f;
-    bPlayerTriggered = true;
-    bDinosaurTriggered = true;
-    CurrentEffectType = EVFX_EffectType::FootstepDust;
-    LastTriggerTime = 0.0f;
+    LoadDefaultEffects();
 }
 
 void AVFX_NiagaraManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    if (TriggerSphere)
-    {
-        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AVFX_NiagaraManager::OnTriggerBeginOverlap);
-        TriggerSphere->SetSphereRadius(TriggerRadius);
-    }
-
-    // Initialize effect data
-    InitializeEffectData();
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX Niagara Manager initialized with %d effect types"), ImpactEffects.Num());
 }
 
-void AVFX_NiagaraManager::Tick(float DeltaTime)
+void AVFX_NiagaraManager::LoadDefaultEffects()
 {
-    Super::Tick(DeltaTime);
-
-    // Update effect systems if needed
-    if (PrimaryVFXComponent && PrimaryVFXComponent->IsActive())
-    {
-        // Handle any per-frame VFX updates here
-    }
+    // Initialize default Niagara systems for each impact type
+    // These would be loaded from content browser paths in a real implementation
+    
+    // For now, we set up the mapping structure
+    ImpactEffects.Empty();
+    
+    // Note: In production, these would load actual Niagara system assets
+    // ImpactEffects.Add(EVFX_ImpactType::FootstepLight, LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_FootstepLight")));
+    // ImpactEffects.Add(EVFX_ImpactType::FootstepHeavy, LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_FootstepHeavy")));
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX default effects structure initialized"));
 }
 
-void AVFX_NiagaraManager::TriggerEffect(EVFX_EffectType EffectType, FVector Location, float Intensity)
+void AVFX_NiagaraManager::PlayImpactEffect(const FVFX_ImpactData& ImpactData)
 {
-    if (!CanTriggerEffect())
+    if (!IsLocationValid(ImpactData.ImpactLocation))
     {
         return;
     }
 
-    // Find effect data
-    FVFX_EffectData* EffectData = nullptr;
-    for (FVFX_EffectData& Effect : AvailableEffects)
+    if (ActiveEffects.Num() >= MaxActiveEffects)
     {
-        if (Effect.EffectType == EffectType)
+        CleanupFinishedEffects();
+        
+        if (ActiveEffects.Num() >= MaxActiveEffects)
         {
-            EffectData = &Effect;
-            break;
+            UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Max active effects reached, skipping new effect"));
+            return;
         }
     }
 
-    if (!EffectData)
+    UNiagaraSystem** FoundEffect = ImpactEffects.Find(ImpactData.ImpactType);
+    if (FoundEffect && *FoundEffect)
     {
-        return;
+        FRotator EffectRotation = FRotationMatrix::MakeFromZ(ImpactData.ImpactNormal).Rotator();
+        UNiagaraComponent* NewEffect = CreateEffectComponent(*FoundEffect, ImpactData.ImpactLocation, EffectRotation);
+        
+        if (NewEffect)
+        {
+            // Set effect parameters based on impact data
+            NewEffect->SetFloatParameter(TEXT("Intensity"), ImpactData.ImpactIntensity);
+            NewEffect->SetFloatParameter(TEXT("Duration"), ImpactData.EffectDuration);
+            
+            ActiveEffects.Add(NewEffect);
+            
+            UE_LOG(LogTemp, Log, TEXT("VFX Impact effect played at location: %s"), *ImpactData.ImpactLocation.ToString());
+        }
     }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager: No effect found for impact type"));
+    }
+}
 
-    // Get Niagara system
-    UNiagaraSystem* NiagaraSystem = GetNiagaraSystemForEffect(EffectType);
+void AVFX_NiagaraManager::PlayFootstepEffect(FVector Location, bool bIsHeavyFootstep)
+{
+    FVFX_ImpactData FootstepData;
+    FootstepData.ImpactType = bIsHeavyFootstep ? EVFX_ImpactType::FootstepHeavy : EVFX_ImpactType::FootstepLight;
+    FootstepData.ImpactLocation = Location;
+    FootstepData.ImpactNormal = FVector::UpVector;
+    FootstepData.ImpactIntensity = bIsHeavyFootstep ? 2.0f : 1.0f;
+    FootstepData.EffectDuration = bIsHeavyFootstep ? 3.0f : 1.5f;
+    
+    PlayImpactEffect(FootstepData);
+}
+
+void AVFX_NiagaraManager::PlayBloodEffect(FVector Location, FVector Direction, float Intensity)
+{
+    FVFX_ImpactData BloodData;
+    BloodData.ImpactType = EVFX_ImpactType::BloodSplatter;
+    BloodData.ImpactLocation = Location;
+    BloodData.ImpactNormal = Direction.GetSafeNormal();
+    BloodData.ImpactIntensity = Intensity;
+    BloodData.EffectDuration = 4.0f;
+    
+    PlayImpactEffect(BloodData);
+}
+
+void AVFX_NiagaraManager::PlayFireEffect(FVector Location, float Duration)
+{
+    FVFX_ImpactData FireData;
+    FireData.ImpactType = EVFX_ImpactType::FireSparks;
+    FireData.ImpactLocation = Location;
+    FireData.ImpactNormal = FVector::UpVector;
+    FireData.ImpactIntensity = 1.5f;
+    FireData.EffectDuration = Duration;
+    
+    PlayImpactEffect(FireData);
+}
+
+void AVFX_NiagaraManager::PlayWaterSplashEffect(FVector Location, float Intensity)
+{
+    FVFX_ImpactData WaterData;
+    WaterData.ImpactType = EVFX_ImpactType::WaterSplash;
+    WaterData.ImpactLocation = Location;
+    WaterData.ImpactNormal = FVector::UpVector;
+    WaterData.ImpactIntensity = Intensity;
+    WaterData.EffectDuration = 2.5f;
+    
+    PlayImpactEffect(WaterData);
+}
+
+void AVFX_NiagaraManager::CleanupFinishedEffects()
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
+    {
+        UNiagaraComponent* Effect = ActiveEffects[i];
+        if (!Effect || !Effect->IsActive() || Effect->IsBeingDestroyed())
+        {
+            if (Effect && !Effect->IsBeingDestroyed())
+            {
+                Effect->DestroyComponent();
+            }
+            ActiveEffects.RemoveAt(i);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX cleanup complete. Active effects: %d"), ActiveEffects.Num());
+}
+
+void AVFX_NiagaraManager::StopAllEffects()
+{
+    for (UNiagaraComponent* Effect : ActiveEffects)
+    {
+        if (Effect && !Effect->IsBeingDestroyed())
+        {
+            Effect->Deactivate();
+            Effect->DestroyComponent();
+        }
+    }
+    
+    ActiveEffects.Empty();
+    UE_LOG(LogTemp, Log, TEXT("All VFX effects stopped and cleared"));
+}
+
+UNiagaraComponent* AVFX_NiagaraManager::CreateEffectComponent(UNiagaraSystem* NiagaraSystem, const FVector& Location, const FRotator& Rotation)
+{
     if (!NiagaraSystem)
     {
-        return;
+        return nullptr;
     }
 
-    // Spawn effect at location
-    UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+    UNiagaraComponent* NewComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
         GetWorld(),
         NiagaraSystem,
         Location,
-        FRotator::ZeroRotator,
-        FVector(Intensity * EffectData->IntensityScale),
+        Rotation,
+        FVector::OneVector,
         true,
         true,
         ENCPoolMethod::None,
         true
     );
 
-    if (SpawnedEffect)
-    {
-        // Set effect parameters based on type
-        switch (EffectType)
-        {
-        case EVFX_EffectType::FootstepDust:
-            SpawnedEffect->SetFloatParameter(TEXT("DustIntensity"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("ParticleCount"), 50.0f * Intensity);
-            break;
-        case EVFX_EffectType::BloodSplatter:
-            SpawnedEffect->SetFloatParameter(TEXT("BloodAmount"), Intensity);
-            SpawnedEffect->SetVectorParameter(TEXT("BloodColor"), FVector(0.8f, 0.1f, 0.1f));
-            break;
-        case EVFX_EffectType::CampfireFire:
-            SpawnedEffect->SetFloatParameter(TEXT("FlameHeight"), 100.0f * Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("EmberCount"), 30.0f * Intensity);
-            break;
-        case EVFX_EffectType::WaterSplash:
-            SpawnedEffect->SetFloatParameter(TEXT("SplashSize"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("DropletCount"), 40.0f * Intensity);
-            break;
-        case EVFX_EffectType::CraftingSparks:
-            SpawnedEffect->SetFloatParameter(TEXT("SparkIntensity"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("SparkCount"), 25.0f * Intensity);
-            break;
-        case EVFX_EffectType::EnvironmentalDust:
-            SpawnedEffect->SetFloatParameter(TEXT("WindStrength"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("DustDensity"), 0.5f * Intensity);
-            break;
-        case EVFX_EffectType::VolumetricGodRays:
-            SpawnedEffect->SetFloatParameter(TEXT("RayIntensity"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("VolumetricDensity"), 0.3f * Intensity);
-            break;
-        case EVFX_EffectType::WeatherRain:
-            SpawnedEffect->SetFloatParameter(TEXT("RainIntensity"), Intensity);
-            SpawnedEffect->SetFloatParameter(TEXT("DropCount"), 100.0f * Intensity);
-            break;
-        }
-
-        // Auto-destroy if configured
-        if (EffectData->bAutoDestroy && EffectData->Duration > 0.0f)
-        {
-            FTimerHandle DestroyTimer;
-            GetWorld()->GetTimerManager().SetTimer(DestroyTimer, [SpawnedEffect]()
-            {
-                if (IsValid(SpawnedEffect))
-                {
-                    SpawnedEffect->DestroyComponent();
-                }
-            }, EffectData->Duration, false);
-        }
-    }
-
-    // Update cooldown
-    LastTriggerTime = GetWorld()->GetTimeSeconds();
-
-    // Call Blueprint event
-    OnEffectTriggered(EffectType, Location);
+    return NewComponent;
 }
 
-void AVFX_NiagaraManager::SetEffectType(EVFX_EffectType NewEffectType)
+bool AVFX_NiagaraManager::IsLocationValid(const FVector& Location) const
 {
-    CurrentEffectType = NewEffectType;
-}
-
-void AVFX_NiagaraManager::StopAllEffects()
-{
-    if (PrimaryVFXComponent)
-    {
-        PrimaryVFXComponent->Deactivate();
-    }
-}
-
-bool AVFX_NiagaraManager::IsEffectActive() const
-{
-    return PrimaryVFXComponent && PrimaryVFXComponent->IsActive();
-}
-
-void AVFX_NiagaraManager::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!OtherActor || !CanTriggerEffect())
-    {
-        return;
-    }
-
-    bool bShouldTrigger = false;
-    float TriggerIntensity = 1.0f;
-
-    // Check if it's a player character
-    if (bPlayerTriggered && OtherActor->IsA<ACharacter>())
-    {
-        bShouldTrigger = true;
-        TriggerIntensity = 0.8f; // Player footsteps are lighter
-    }
-    // Check if it's a dinosaur (assuming dinosaur actors have "Dino" in their name)
-    else if (bDinosaurTriggered && OtherActor->GetName().Contains(TEXT("Dino")))
-    {
-        bShouldTrigger = true;
-        TriggerIntensity = 2.0f; // Dinosaur footsteps are heavier
-        
-        // Scale intensity based on dinosaur size (rough estimation)
-        if (OtherActor->GetName().Contains(TEXT("TRex")) || OtherActor->GetName().Contains(TEXT("Brachio")))
-        {
-            TriggerIntensity = 3.0f; // Large dinosaurs
-        }
-        else if (OtherActor->GetName().Contains(TEXT("Raptor")) || OtherActor->GetName().Contains(TEXT("Veloci")))
-        {
-            TriggerIntensity = 1.5f; // Medium dinosaurs
-        }
-    }
-
-    if (bShouldTrigger)
-    {
-        FVector TriggerLocation = OtherActor->GetActorLocation();
-        TriggerLocation.Z = GetActorLocation().Z; // Use VFX manager's Z level
-        TriggerEffect(CurrentEffectType, TriggerLocation, TriggerIntensity);
-    }
-}
-
-void AVFX_NiagaraManager::InitializeEffectData()
-{
-    AvailableEffects.Empty();
-
-    // Initialize default effect data
-    FVFX_EffectData FootstepEffect;
-    FootstepEffect.EffectType = EVFX_EffectType::FootstepDust;
-    FootstepEffect.IntensityScale = 1.0f;
-    FootstepEffect.Duration = 2.0f;
-    FootstepEffect.bAutoDestroy = true;
-    AvailableEffects.Add(FootstepEffect);
-
-    FVFX_EffectData BloodEffect;
-    BloodEffect.EffectType = EVFX_EffectType::BloodSplatter;
-    BloodEffect.IntensityScale = 1.5f;
-    BloodEffect.Duration = 5.0f;
-    BloodEffect.bAutoDestroy = true;
-    AvailableEffects.Add(BloodEffect);
-
-    FVFX_EffectData CampfireEffect;
-    CampfireEffect.EffectType = EVFX_EffectType::CampfireFire;
-    CampfireEffect.IntensityScale = 1.0f;
-    CampfireEffect.Duration = 0.0f; // Continuous
-    CampfireEffect.bAutoDestroy = false;
-    AvailableEffects.Add(CampfireEffect);
-
-    FVFX_EffectData WaterEffect;
-    WaterEffect.EffectType = EVFX_EffectType::WaterSplash;
-    WaterEffect.IntensityScale = 1.2f;
-    WaterEffect.Duration = 3.0f;
-    WaterEffect.bAutoDestroy = true;
-    AvailableEffects.Add(WaterEffect);
-
-    FVFX_EffectData CraftingEffect;
-    CraftingEffect.EffectType = EVFX_EffectType::CraftingSparks;
-    CraftingEffect.IntensityScale = 0.8f;
-    CraftingEffect.Duration = 1.5f;
-    CraftingEffect.bAutoDestroy = true;
-    AvailableEffects.Add(CraftingEffect);
-
-    FVFX_EffectData DustEffect;
-    DustEffect.EffectType = EVFX_EffectType::EnvironmentalDust;
-    DustEffect.IntensityScale = 0.6f;
-    DustEffect.Duration = 0.0f; // Continuous
-    DustEffect.bAutoDestroy = false;
-    AvailableEffects.Add(DustEffect);
-
-    FVFX_EffectData GodRayEffect;
-    GodRayEffect.EffectType = EVFX_EffectType::VolumetricGodRays;
-    GodRayEffect.IntensityScale = 1.0f;
-    GodRayEffect.Duration = 0.0f; // Continuous
-    GodRayEffect.bAutoDestroy = false;
-    AvailableEffects.Add(GodRayEffect);
-
-    FVFX_EffectData RainEffect;
-    RainEffect.EffectType = EVFX_EffectType::WeatherRain;
-    RainEffect.IntensityScale = 1.0f;
-    RainEffect.Duration = 0.0f; // Continuous
-    RainEffect.bAutoDestroy = false;
-    AvailableEffects.Add(RainEffect);
-}
-
-bool AVFX_NiagaraManager::CanTriggerEffect() const
-{
-    if (!GetWorld())
+    // Check if location is within reasonable bounds
+    if (Location.Z < -10000.0f || Location.Z > 10000.0f)
     {
         return false;
     }
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    return (CurrentTime - LastTriggerTime) >= EffectCooldown;
-}
-
-UNiagaraSystem* AVFX_NiagaraManager::GetNiagaraSystemForEffect(EVFX_EffectType EffectType) const
-{
-    // This would normally load from content browser paths
-    // For now, return nullptr and let the system handle gracefully
-    // In a real implementation, you would load specific Niagara systems for each effect type
-    return nullptr;
+    
+    // Check distance from manager
+    float Distance = FVector::Dist(GetActorLocation(), Location);
+    if (Distance > MaxEffectDistance)
+    {
+        return false;
+    }
+    
+    return true;
 }
