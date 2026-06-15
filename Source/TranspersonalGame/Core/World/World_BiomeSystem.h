@@ -1,22 +1,38 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "SharedTypes.h"
 #include "World_BiomeSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class EWorld_BiomeType : uint8
+{
+    Forest      UMETA(DisplayName = "Forest"),
+    Plains      UMETA(DisplayName = "Plains"), 
+    Desert      UMETA(DisplayName = "Desert"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Mountain    UMETA(DisplayName = "Mountain"),
+    River       UMETA(DisplayName = "River"),
+    Lake        UMETA(DisplayName = "Lake"),
+    Volcanic    UMETA(DisplayName = "Volcanic")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FWorld_BiomeData
+struct FWorld_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
+    EWorld_BiomeType BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeColor;
+    FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature;
@@ -25,68 +41,73 @@ struct TRANSPERSONALGAME_API FWorld_BiomeData
     float Humidity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation;
+    float Fertility;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+    TArray<FString> VegetationTypes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UMaterialInterface>> TerrainMaterials;
+    TArray<FString> AnimalTypes;
 
     FWorld_BiomeData()
     {
-        BiomeName = TEXT("Default");
-        BiomeColor = FLinearColor::White;
+        BiomeType = EWorld_BiomeType::Forest;
+        BiomeName = TEXT("Default Biome");
         Temperature = 20.0f;
-        Humidity = 0.5f;
-        Elevation = 0.0f;
+        Humidity = 50.0f;
+        Fertility = 50.0f;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorld_BiomeSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AWorld_BiomeSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorld_BiomeSystem();
+    AWorld_BiomeSystem();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    TArray<FWorld_BiomeData> BiomeDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    float BiomeTransitionDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    int32 MaxBiomeRegions;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FWorld_BiomeData GetBiomeAtLocation(const FVector& WorldLocation);
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomes();
+    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UpdateBiomeTransitions();
+    void GenerateBiomeRegions();
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<FString> GetAvailableBiomes() const;
+    void SpawnBiomeVegetation(EWorld_BiomeType BiomeType, const FVector& Location, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SetBiomeAtLocation(const FVector& WorldLocation, const FString& BiomeName);
+    float CalculateBiomeInfluence(const FVector& Location, EWorld_BiomeType BiomeType);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TMap<FString, FWorld_BiomeData> BiomeDatabase;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    void InitializeBiomeDatabase();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    float BiomeTransitionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    int32 BiomeResolution;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    bool bEnableBiomeTransitions;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    void CreateTestBiomeRegions();
 
 private:
-    void CreateDefaultBiomes();
-    FWorld_BiomeData BlendBiomes(const FWorld_BiomeData& BiomeA, const FWorld_BiomeData& BiomeB, float BlendFactor);
-    FString GetDominantBiome(const FVector& WorldLocation);
+    void SetupDefaultBiomes();
+    void CreateBiomeTransitions();
+    FVector GetRandomLocationInRadius(const FVector& Center, float Radius);
 };
