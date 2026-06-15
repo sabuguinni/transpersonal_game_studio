@@ -1,415 +1,264 @@
 #include "CombatAIManager.h"
-#include "EnemyAIController.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Pawn.h"
 
-UCombatAIManager::UCombatAIManager()
+ACombatAIManager::ACombatAIManager()
 {
-    SightRange = 1000.0f;
-    HearingRange = 800.0f;
-    CombatRange = 300.0f;
-    FlankingDistance = 400.0f;
-    PackCoordinationRadius = 1000.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.5f;
+    
+    CombatUpdateInterval = 0.5f;
+    MaxCombatDistance = 5000.0f;
+    LastCombatUpdate = 0.0f;
 }
 
-void UCombatAIManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACombatAIManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: System initialized"));
     
-    // Start pack behavior update timer
-    if (UWorld* World = GetWorld())
+    // Initialize combat zones
+    ProcessCombatZones();
+}
+
+void ACombatAIManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastCombatUpdate += DeltaTime;
+    if (LastCombatUpdate >= CombatUpdateInterval)
     {
-        World->GetTimerManager().SetTimer(
-            PackUpdateTimerHandle,
-            [this]() { UpdatePackBehaviors(0.1f); },
-            0.1f,
-            true
-        );
+        UpdateCombatStates();
+        HandlePackBehavior();
+        LastCombatUpdate = 0.0f;
     }
 }
 
-void UCombatAIManager::Deinitialize()
+void ACombatAIManager::RegisterCombatZone(ATriggerVolume* Zone, ECombat_ThreatLevel ThreatLevel)
 {
-    // Clear timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(PackUpdateTimerHandle);
-    }
+    if (!Zone) return;
     
-    // Clear all data
-    RegisteredControllers.Empty();
-    TacticalDataMap.Empty();
-    ActivePacks.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Deinitialized"));
-    
-    Super::Deinitialize();
+    CombatZones.Add(Zone, ThreatLevel);
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Registered combat zone %s with threat level %d"), 
+           *Zone->GetName(), (int32)ThreatLevel);
 }
 
-void UCombatAIManager::RegisterEnemyController(AEnemyAIController* Controller)
+void ACombatAIManager::UnregisterCombatZone(ATriggerVolume* Zone)
 {
-    if (!Controller)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Attempted to register null controller"));
-        return;
-    }
+    if (!Zone) return;
     
-    if (!RegisteredControllers.Contains(Controller))
+    CombatZones.Remove(Zone);
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Unregistered combat zone %s"), *Zone->GetName());
+}
+
+void ACombatAIManager::FormPack(const TArray<AActor*>& PackMembers, ECombat_Formation Formation)
+{
+    if (PackMembers.Num() < 2) return;
+    
+    for (AActor* Member : PackMembers)
     {
-        RegisteredControllers.Add(Controller);
+        if (!Member) continue;
         
-        // Initialize tactical data
-        FCombat_TacticalData TacticalData;
-        TacticalDataMap.Add(Controller, TacticalData);
+        FCombat_TacticalData& Data = CombatData.FindOrAdd(Member);
+        Data.Formation = Formation;
+        Data.PackSize = PackMembers.Num();
+        Data.ThreatLevel = ECombat_ThreatLevel::Hunting;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Formed pack of %d members in %d formation"), 
+           PackMembers.Num(), (int32)Formation);
+}
+
+void ACombatAIManager::DisbandPack(const TArray<AActor*>& PackMembers)
+{
+    for (AActor* Member : PackMembers)
+    {
+        if (!Member) continue;
         
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Registered controller %s"), 
-               Controller->GetPawn() ? *Controller->GetPawn()->GetName() : TEXT("Unknown"));
+        FCombat_TacticalData& Data = CombatData.FindOrAdd(Member);
+        Data.Formation = ECombat_Formation::None;
+        Data.PackSize = 1;
+        Data.ThreatLevel = ECombat_ThreatLevel::Passive;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Disbanded pack of %d members"), PackMembers.Num());
 }
 
-void UCombatAIManager::UnregisterEnemyController(AEnemyAIController* Controller)
+ECombat_ThreatLevel ACombatAIManager::AssessThreat(AActor* Target, AActor* Observer)
 {
-    if (!Controller)
-    {
-        return;
-    }
+    if (!Target || !Observer) return ECombat_ThreatLevel::Passive;
     
-    // Remove from any packs
-    DisbandPack(Controller);
+    float Distance = FVector::Dist(Target->GetActorLocation(), Observer->GetActorLocation());
     
-    // Remove from registered controllers
-    RegisteredControllers.Remove(Controller);
-    TacticalDataMap.Remove(Controller);
+    // Distance-based threat assessment
+    if (Distance < 500.0f)
+        return ECombat_ThreatLevel::Enraged;
+    else if (Distance < 1000.0f)
+        return ECombat_ThreatLevel::Aggressive;
+    else if (Distance < 2000.0f)
+        return ECombat_ThreatLevel::Cautious;
     
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Unregistered controller"));
+    return ECombat_ThreatLevel::Passive;
 }
 
-void UCombatAIManager::CreatePack(const TArray<AEnemyAIController*>& Members, AEnemyAIController* Leader)
+bool ACombatAIManager::ShouldEngageTarget(AActor* Predator, AActor* Target)
 {
-    if (Members.Num() < 2 || !Leader || !Members.Contains(Leader))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Invalid pack creation parameters"));
-        return;
-    }
+    if (!Predator || !Target) return false;
     
-    // Check if any members are already in packs
-    for (AEnemyAIController* Member : Members)
-    {
-        if (GetPackData(Member))
-        {
-            DisbandPack(Member);
-        }
-    }
+    FCombat_TacticalData* Data = CombatData.Find(Predator);
+    if (!Data) return false;
     
-    // Create new pack
-    FCombat_PackData NewPack;
-    NewPack.PackMembers = Members;
-    NewPack.PackLeader = Leader;
-    NewPack.PackState = ECombat_TacticalState::Patrol;
+    float Distance = FVector::Dist(Predator->GetActorLocation(), Target->GetActorLocation());
     
-    if (Leader->GetPawn())
-    {
-        NewPack.PackTargetLocation = Leader->GetPawn()->GetActorLocation();
-    }
-    
-    ActivePacks.Add(NewPack);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Created pack with %d members"), Members.Num());
+    // Engage if within aggression radius and threat level is high enough
+    return (Distance <= Data->AggressionRadius && 
+            Data->ThreatLevel >= ECombat_ThreatLevel::Aggressive);
 }
 
-void UCombatAIManager::DisbandPack(AEnemyAIController* PackMember)
+FVector ACombatAIManager::GetOptimalAttackPosition(AActor* Attacker, AActor* Target, ECombat_Formation Formation)
 {
-    for (int32 i = ActivePacks.Num() - 1; i >= 0; i--)
-    {
-        if (ActivePacks[i].PackMembers.Contains(PackMember))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Disbanded pack"));
-            ActivePacks.RemoveAt(i);
-            break;
-        }
-    }
-}
-
-FCombat_PackData* UCombatAIManager::GetPackData(AEnemyAIController* Controller)
-{
-    for (FCombat_PackData& Pack : ActivePacks)
-    {
-        if (Pack.PackMembers.Contains(Controller))
-        {
-            return &Pack;
-        }
-    }
-    return nullptr;
-}
-
-void UCombatAIManager::UpdateTacticalState(AEnemyAIController* Controller, ECombat_TacticalState NewState)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        Data->CurrentState = NewState;
-        
-        // Update pack state if this is a pack leader
-        if (FCombat_PackData* PackData = GetPackData(Controller))
-        {
-            if (PackData->PackLeader == Controller)
-            {
-                PackData->PackState = NewState;
-            }
-        }
-    }
-}
-
-void UCombatAIManager::SetThreatLevel(AEnemyAIController* Controller, ECombat_ThreatLevel ThreatLevel)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        Data->ThreatLevel = ThreatLevel;
-    }
-}
-
-void UCombatAIManager::ReportPlayerSighting(AEnemyAIController* Controller, const FVector& PlayerLocation)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        Data->LastKnownPlayerLocation = PlayerLocation;
-        Data->LastPlayerSightTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-        
-        // Alert nearby enemies
-        TArray<AEnemyAIController*> NearbyEnemies = GetNearbyEnemies(PlayerLocation, PackCoordinationRadius);
-        for (AEnemyAIController* NearbyEnemy : NearbyEnemies)
-        {
-            if (NearbyEnemy != Controller)
-            {
-                if (FCombat_TacticalData* NearbyData = TacticalDataMap.Find(NearbyEnemy))
-                {
-                    NearbyData->LastKnownPlayerLocation = PlayerLocation;
-                    NearbyData->LastPlayerSightTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-                }
-            }
-        }
-    }
-}
-
-void UCombatAIManager::InitiateCombat(AEnemyAIController* Controller, APawn* Target)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        Data->bIsInCombat = true;
-        Data->CombatStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-        Data->CurrentState = ECombat_TacticalState::Engage;
-        
-        if (Target)
-        {
-            Data->LastKnownPlayerLocation = Target->GetActorLocation();
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Combat initiated"));
-    }
-}
-
-void UCombatAIManager::EndCombat(AEnemyAIController* Controller)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        Data->bIsInCombat = false;
-        Data->CurrentState = ECombat_TacticalState::Patrol;
-        
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Combat ended"));
-    }
-}
-
-bool UCombatAIManager::IsInCombat(AEnemyAIController* Controller)
-{
-    if (FCombat_TacticalData* Data = TacticalDataMap.Find(Controller))
-    {
-        return Data->bIsInCombat;
-    }
-    return false;
-}
-
-TArray<AEnemyAIController*> UCombatAIManager::GetNearbyEnemies(const FVector& Location, float Radius)
-{
-    TArray<AEnemyAIController*> NearbyEnemies;
+    if (!Attacker || !Target) return FVector::ZeroVector;
     
-    for (AEnemyAIController* Controller : RegisteredControllers)
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector AttackerLocation = Attacker->GetActorLocation();
+    
+    switch (Formation)
     {
-        if (Controller && Controller->GetPawn())
-        {
-            float Distance = FVector::Dist(Controller->GetPawn()->GetActorLocation(), Location);
-            if (Distance <= Radius)
-            {
-                NearbyEnemies.Add(Controller);
-            }
-        }
-    }
-    
-    return NearbyEnemies;
-}
-
-FVector UCombatAIManager::GetOptimalFlankingPosition(const FVector& TargetLocation, const FVector& EnemyLocation)
-{
-    FVector Direction = (TargetLocation - EnemyLocation).GetSafeNormal();
-    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
-    
-    // Calculate flanking position to the right
-    FVector FlankingPosition = TargetLocation + (RightVector * FlankingDistance);
-    
-    return FlankingPosition;
-}
-
-bool UCombatAIManager::CanSeePlayer(AEnemyAIController* Controller)
-{
-    if (!Controller || !Controller->GetPawn())
-    {
-        return false;
-    }
-    
-    // Get player pawn
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return false;
-    }
-    
-    // Check distance
-    float Distance = FVector::Dist(Controller->GetPawn()->GetActorLocation(), PlayerPawn->GetActorLocation());
-    if (Distance > SightRange)
-    {
-        return false;
-    }
-    
-    // Line trace for line of sight
-    FHitResult HitResult;
-    FVector Start = Controller->GetPawn()->GetActorLocation();
-    FVector End = PlayerPawn->GetActorLocation();
-    
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility
-    );
-    
-    // If we hit the player or nothing, we can see them
-    return !bHit || HitResult.GetActor() == PlayerPawn;
-}
-
-void UCombatAIManager::UpdatePackBehaviors(float DeltaTime)
-{
-    // Clean up invalid controllers first
-    CleanupInvalidControllers();
-    
-    // Update each active pack
-    for (FCombat_PackData& Pack : ActivePacks)
-    {
-        if (ValidatePackIntegrity(Pack))
-        {
-            CoordinatePackHunting(Pack);
-        }
-    }
-}
-
-void UCombatAIManager::CoordinatePackHunting(FCombat_PackData& PackData)
-{
-    if (!PackData.PackLeader || !PackData.PackLeader->GetPawn())
-    {
-        return;
-    }
-    
-    // Get player location
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Check if pack should engage
-    float DistanceToPlayer = FVector::Dist(PackData.PackLeader->GetPawn()->GetActorLocation(), PlayerLocation);
-    
-    if (DistanceToPlayer <= CombatRange && PackData.PackState != ECombat_TacticalState::PackHunt)
-    {
-        PackData.PackState = ECombat_TacticalState::PackHunt;
-        PackData.PackTargetLocation = PlayerLocation;
-        
-        // Assign flanking positions
-        AssignFlankingPositions(PackData, PlayerLocation);
-    }
-}
-
-void UCombatAIManager::AssignFlankingPositions(FCombat_PackData& PackData, const FVector& TargetLocation)
-{
-    if (PackData.PackMembers.Num() < 2)
-    {
-        return;
-    }
-    
-    FVector LeaderLocation = PackData.PackLeader->GetPawn() ? 
-        PackData.PackLeader->GetPawn()->GetActorLocation() : FVector::ZeroVector;
-    
-    // Assign positions around the target
-    float AngleStep = 360.0f / PackData.PackMembers.Num();
-    
-    for (int32 i = 0; i < PackData.PackMembers.Num(); i++)
-    {
-        if (PackData.PackMembers[i] && PackData.PackMembers[i] != PackData.PackLeader)
-        {
-            float Angle = FMath::DegreesToRadians(AngleStep * i);
-            FVector Offset = FVector(
-                FMath::Cos(Angle) * FlankingDistance,
-                FMath::Sin(Angle) * FlankingDistance,
-                0.0f
-            );
+        case ECombat_Formation::Circle:
+            return CalculateFlankPosition(Target, Attacker, 800.0f);
             
-            FVector FlankingPos = TargetLocation + Offset;
+        case ECombat_Formation::Triangle:
+            return CalculateFlankPosition(Target, Attacker, 600.0f);
             
-            // Update tactical data for this member
-            if (FCombat_TacticalData* Data = TacticalDataMap.Find(PackData.PackMembers[i]))
+        case ECombat_Formation::Ambush:
+            return TargetLocation + FVector(FMath::RandRange(-1000, 1000), FMath::RandRange(-1000, 1000), 0);
+            
+        default:
+            return TargetLocation + (AttackerLocation - TargetLocation).GetSafeNormal() * 500.0f;
+    }
+}
+
+void ACombatAIManager::CoordinatePackAttack(const TArray<AActor*>& PackMembers, AActor* Target)
+{
+    if (!Target || PackMembers.Num() == 0) return;
+    
+    for (int32 i = 0; i < PackMembers.Num(); i++)
+    {
+        AActor* Member = PackMembers[i];
+        if (!Member) continue;
+        
+        FCombat_TacticalData* Data = CombatData.Find(Member);
+        if (!Data) continue;
+        
+        FVector AttackPosition = GetOptimalAttackPosition(Member, Target, Data->Formation);
+        
+        // Move to attack position (this would be handled by AI controller in full implementation)
+        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Pack member %s moving to attack position"), 
+               *Member->GetName());
+    }
+}
+
+void ACombatAIManager::UpdateCombatStates()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Update threat levels for all tracked actors
+    for (auto& CombatPair : CombatData)
+    {
+        AActor* Actor = CombatPair.Key;
+        FCombat_TacticalData& Data = CombatPair.Value;
+        
+        if (!Actor) continue;
+        
+        // Find nearby threats
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
+        
+        ECombat_ThreatLevel HighestThreat = ECombat_ThreatLevel::Passive;
+        
+        for (AActor* OtherActor : FoundActors)
+        {
+            if (OtherActor == Actor) continue;
+            
+            float Distance = FVector::Dist(Actor->GetActorLocation(), OtherActor->GetActorLocation());
+            if (Distance > MaxCombatDistance) continue;
+            
+            ECombat_ThreatLevel CurrentThreat = AssessThreat(OtherActor, Actor);
+            if (CurrentThreat > HighestThreat)
             {
-                Data->CurrentState = ECombat_TacticalState::Flank;
-                Data->LastKnownPlayerLocation = FlankingPos;
+                HighestThreat = CurrentThreat;
             }
         }
+        
+        Data.ThreatLevel = HighestThreat;
     }
 }
 
-bool UCombatAIManager::ValidatePackIntegrity(FCombat_PackData& PackData)
+void ACombatAIManager::ProcessCombatZones()
 {
-    // Remove invalid members
-    PackData.PackMembers.RemoveAll([](AEnemyAIController* Controller) {
-        return !IsValid(Controller) || !IsValid(Controller->GetPawn());
-    });
+    UWorld* World = GetWorld();
+    if (!World) return;
     
-    // Check if pack still has enough members
-    if (PackData.PackMembers.Num() < 2)
+    TArray<AActor*> TriggerVolumes;
+    UGameplayStatics::GetAllActorsOfClass(World, ATriggerVolume::StaticClass(), TriggerVolumes);
+    
+    for (AActor* Actor : TriggerVolumes)
     {
-        return false;
-    }
-    
-    // Validate leader
-    if (!IsValid(PackData.PackLeader) || !PackData.PackMembers.Contains(PackData.PackLeader))
-    {
-        // Assign new leader
-        PackData.PackLeader = PackData.PackMembers[0];
-    }
-    
-    return true;
-}
-
-void UCombatAIManager::CleanupInvalidControllers()
-{
-    RegisteredControllers.RemoveAll([this](AEnemyAIController* Controller) {
-        if (!IsValid(Controller))
+        ATriggerVolume* Volume = Cast<ATriggerVolume>(Actor);
+        if (!Volume) continue;
+        
+        FString VolumeName = Volume->GetName().ToLower();
+        if (VolumeName.Contains("combat"))
         {
-            TacticalDataMap.Remove(Controller);
-            return true;
+            RegisterCombatZone(Volume, ECombat_ThreatLevel::Aggressive);
         }
-        return false;
-    });
+    }
+}
+
+void ACombatAIManager::HandlePackBehavior()
+{
+    // Group nearby actors of the same type into packs
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), AllActors);
+    
+    // Simple pack formation for actors with "raptor" in their name
+    TArray<AActor*> Raptors;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor->GetName().ToLower().Contains("raptor"))
+        {
+            Raptors.Add(Actor);
+        }
+    }
+    
+    if (Raptors.Num() >= 3)
+    {
+        FormPack(Raptors, ECombat_Formation::Triangle);
+    }
+}
+
+FVector ACombatAIManager::CalculateFlankPosition(AActor* Target, AActor* Flanker, float Distance)
+{
+    if (!Target || !Flanker) return FVector::ZeroVector;
+    
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector FlankerLocation = Flanker->GetActorLocation();
+    
+    // Calculate perpendicular position for flanking
+    FVector Direction = (FlankerLocation - TargetLocation).GetSafeNormal();
+    FVector Perpendicular = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
+    
+    // Choose left or right flank randomly
+    float FlankSide = FMath::RandBool() ? 1.0f : -1.0f;
+    
+    return TargetLocation + (Perpendicular * FlankSide * Distance);
 }
