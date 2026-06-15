@@ -1,275 +1,240 @@
 #include "Anim_MotionMatchingComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSequence.h"
+#include "Engine/World.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UAnim_MotionMatchingComponent::UAnim_MotionMatchingComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS updates
     
-    // Initialize default settings
-    VelocityWeight = 1.0f;
-    DirectionWeight = 0.8f;
-    SpeedWeight = 1.2f;
-    BlendTime = 0.3f;
+    // Initialize motion matching weights
+    VelocityWeight = 0.6f;
+    DirectionWeight = 0.3f;
+    AccelerationWeight = 0.1f;
+    MinMatchThreshold = 0.7f;
     
-    CurrentBlendTime = 0.0f;
-    bIsBlending = false;
-    
+    // Initialize state
     OwnerCharacter = nullptr;
-    AnimInstance = nullptr;
+    MovementComponent = nullptr;
+    SkeletalMeshComponent = nullptr;
+    LastUpdateTime = 0.0f;
+    bIsInitialized = false;
 }
 
 void UAnim_MotionMatchingComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get character reference
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
-    {
-        USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
-        if (MeshComp)
-        {
-            AnimInstance = MeshComp->GetAnimInstance();
-        }
-    }
+    CacheComponentReferences();
+    CachedPoseCandidates = BuildPoseCandidates();
+    bIsInitialized = true;
     
-    // Initialize default database if empty
-    if (MotionDatabase.Num() == 0)
-    {
-        InitializeDefaultDatabase();
-    }
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching Component initialized with %d pose candidates"), CachedPoseCandidates.Num());
 }
 
 void UAnim_MotionMatchingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!OwnerCharacter || !AnimInstance)
-        return;
-    
-    // Update motion data
-    UpdateMotionData();
-    
-    // Find best matching clip
-    FAnim_MotionClip NewBestMatch = FindBestMatch();
-    
-    // Check if we need to blend to a new clip
-    if (NewBestMatch.AnimSequence != BestMatchClip.AnimSequence)
+    if (!bIsInitialized || !OwnerCharacter || !MovementComponent)
     {
-        BestMatchClip = NewBestMatch;
-        BlendToClip(BestMatchClip);
+        return;
     }
     
-    // Update blend state
-    if (bIsBlending)
+    // Update motion data every frame
+    UpdateMotionData();
+    
+    // Find best matching pose
+    FAnim_PoseCandidate BestPose = FindBestMatchingPose(CurrentMotionData);
+    
+    // Blend to new pose if it's significantly different
+    if (BestPose.MatchScore > MinMatchThreshold && BestPose.AnimSequence != CurrentPose.AnimSequence)
     {
-        CurrentBlendTime += DeltaTime;
-        if (CurrentBlendTime >= BlendTime)
-        {
-            bIsBlending = false;
-            CurrentBlendTime = 0.0f;
-        }
+        BlendToPose(BestPose);
+        CurrentPose = BestPose;
     }
 }
 
 void UAnim_MotionMatchingComponent::UpdateMotionData()
 {
-    if (!OwnerCharacter)
+    if (!MovementComponent || !OwnerCharacter)
+    {
         return;
+    }
     
-    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
-    if (!MovementComp)
-        return;
+    // Get current velocity and movement state
+    FVector CurrentVelocity = MovementComponent->Velocity;
+    CurrentMotionData.Velocity = CurrentVelocity;
+    CurrentMotionData.Speed = CurrentVelocity.Size();
+    CurrentMotionData.bIsMoving = CurrentMotionData.Speed > 10.0f;
+    CurrentMotionData.bIsFalling = MovementComponent->IsFalling();
+    CurrentMotionData.bIsJumping = MovementComponent->IsMovingOnGround() == false && CurrentVelocity.Z > 0.0f;
     
-    // Update velocity and speed
-    CurrentMotionData.Velocity = MovementComp->Velocity;
-    CurrentMotionData.Speed = CurrentMotionData.Velocity.Size();
-    
-    // Update direction relative to character forward
-    if (CurrentMotionData.Speed > 0.1f)
+    // Calculate movement direction relative to character forward
+    if (CurrentMotionData.bIsMoving)
     {
         FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNorm = CurrentMotionData.Velocity.GetSafeNormal();
-        CurrentMotionData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNorm)));
-        
-        // Check if moving right or left
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        if (FVector::DotProduct(RightVector, VelocityNorm) < 0.0f)
-        {
-            CurrentMotionData.Direction = -CurrentMotionData.Direction;
-        }
+        FVector NormalizedVelocity = CurrentVelocity.GetSafeNormal();
+        float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
+        CurrentMotionData.Direction = FMath::Acos(DotProduct) * (180.0f / PI);
     }
     else
     {
         CurrentMotionData.Direction = 0.0f;
     }
     
-    // Update movement states
-    CurrentMotionData.bIsMoving = CurrentMotionData.Speed > 5.0f;
-    CurrentMotionData.bIsFalling = MovementComp->IsFalling();
-    CurrentMotionData.bIsCrouching = OwnerCharacter->bIsCrouched;
+    // Calculate acceleration
+    static FVector PreviousVelocity = FVector::ZeroVector;
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    if (DeltaTime > 0.0f)
+    {
+        FVector AccelerationVector = (CurrentVelocity - PreviousVelocity) / DeltaTime;
+        CurrentMotionData.Acceleration = AccelerationVector.Size();
+    }
+    PreviousVelocity = CurrentVelocity;
 }
 
-FAnim_MotionClip UAnim_MotionMatchingComponent::FindBestMatch()
+FAnim_PoseCandidate UAnim_MotionMatchingComponent::FindBestMatchingPose(const FAnim_MotionData& CurrentMotion)
 {
-    if (MotionDatabase.Num() == 0)
-    {
-        return FAnim_MotionClip();
-    }
+    FAnim_PoseCandidate BestCandidate;
+    float BestScore = 0.0f;
     
-    FAnim_MotionClip BestClip;
-    float BestScore = -1.0f;
-    
-    for (const FAnim_MotionClip& Clip : MotionDatabase)
+    for (const FAnim_PoseCandidate& Candidate : CachedPoseCandidates)
     {
-        float Score = CalculateMotionScore(Clip);
+        float Score = CalculatePoseMatchScore(CurrentMotion, Candidate.PoseMotionData);
+        
         if (Score > BestScore)
         {
             BestScore = Score;
-            BestClip = Clip;
+            BestCandidate = Candidate;
+            BestCandidate.MatchScore = Score;
         }
     }
     
-    return BestClip;
+    return BestCandidate;
 }
 
-float UAnim_MotionMatchingComponent::CalculateMotionScore(const FAnim_MotionClip& Clip)
+float UAnim_MotionMatchingComponent::CalculatePoseMatchScore(const FAnim_MotionData& CurrentMotion, const FAnim_MotionData& PoseMotion)
 {
-    float Score = 0.0f;
+    float VelocityScore = 1.0f - FMath::Abs(CurrentMotion.Speed - PoseMotion.Speed) / 600.0f; // Max speed assumption
+    VelocityScore = FMath::Clamp(VelocityScore, 0.0f, 1.0f);
     
-    // Velocity matching
-    float VelocityDiff = FVector::Dist(CurrentMotionData.Velocity, Clip.MotionData.Velocity);
-    float VelocityScore = FMath::Exp(-VelocityDiff * 0.01f) * VelocityWeight;
-    Score += VelocityScore;
+    float DirectionScore = 1.0f - FMath::Abs(CurrentMotion.Direction - PoseMotion.Direction) / 180.0f;
+    DirectionScore = FMath::Clamp(DirectionScore, 0.0f, 1.0f);
     
-    // Speed matching
-    float SpeedDiff = FMath::Abs(CurrentMotionData.Speed - Clip.MotionData.Speed);
-    float SpeedScore = FMath::Exp(-SpeedDiff * 0.1f) * SpeedWeight;
-    Score += SpeedScore;
-    
-    // Direction matching
-    float DirectionDiff = FMath::Abs(CurrentMotionData.Direction - Clip.MotionData.Direction);
-    float DirectionScore = FMath::Exp(-DirectionDiff * 0.05f) * DirectionWeight;
-    Score += DirectionScore;
+    float AccelerationScore = 1.0f - FMath::Abs(CurrentMotion.Acceleration - PoseMotion.Acceleration) / 1000.0f; // Max accel assumption
+    AccelerationScore = FMath::Clamp(AccelerationScore, 0.0f, 1.0f);
     
     // State matching bonuses
-    if (CurrentMotionData.bIsMoving == Clip.MotionData.bIsMoving)
-        Score += 0.5f;
-    if (CurrentMotionData.bIsFalling == Clip.MotionData.bIsFalling)
-        Score += 0.8f;
-    if (CurrentMotionData.bIsCrouching == Clip.MotionData.bIsCrouching)
-        Score += 0.3f;
+    float StateBonus = 0.0f;
+    if (CurrentMotion.bIsMoving == PoseMotion.bIsMoving) StateBonus += 0.1f;
+    if (CurrentMotion.bIsFalling == PoseMotion.bIsFalling) StateBonus += 0.1f;
+    if (CurrentMotion.bIsJumping == PoseMotion.bIsJumping) StateBonus += 0.1f;
     
-    return Score;
+    // Weighted final score
+    float FinalScore = (VelocityScore * VelocityWeight) + 
+                      (DirectionScore * DirectionWeight) + 
+                      (AccelerationScore * AccelerationWeight) + 
+                      StateBonus;
+    
+    return FMath::Clamp(FinalScore, 0.0f, 1.0f);
 }
 
-void UAnim_MotionMatchingComponent::BlendToClip(const FAnim_MotionClip& TargetClip)
+void UAnim_MotionMatchingComponent::BlendToPose(const FAnim_PoseCandidate& TargetPose, float BlendTime)
 {
-    if (!AnimInstance || !TargetClip.AnimSequence)
-        return;
-    
-    // Store previous clip for blending
-    PreviousClip = BestMatchClip;
-    
-    // Start blend
-    bIsBlending = true;
-    CurrentBlendTime = 0.0f;
-    
-    // This would typically interface with the animation blueprint
-    // For now, we'll use a simple approach
-    if (TargetClip.AnimSequence)
+    if (!TargetPose.AnimSequence || !SkeletalMeshComponent)
     {
-        // Play the animation with the calculated play rate
-        float PlayRate = FMath::Clamp(TargetClip.PlayRate, 0.1f, 3.0f);
-        
-        // In a real implementation, this would blend through the AnimBP
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Blending to %s at rate %.2f"), 
-               *TargetClip.AnimSequence->GetName(), PlayRate);
+        return;
+    }
+    
+    // Play the animation sequence at the specified start time
+    SkeletalMeshComponent->GetAnimInstance()->Montage_Play(nullptr, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching: Blending to pose %s with score %f"), 
+           *TargetPose.AnimSequence->GetName(), TargetPose.MatchScore);
+}
+
+void UAnim_MotionMatchingComponent::CacheComponentReferences()
+{
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (OwnerCharacter)
+    {
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        SkeletalMeshComponent = OwnerCharacter->GetMesh();
     }
 }
 
-void UAnim_MotionMatchingComponent::AddMotionClip(UAnimSequence* Animation, const FAnim_MotionData& MotionData)
+TArray<FAnim_PoseCandidate> UAnim_MotionMatchingComponent::BuildPoseCandidates()
 {
-    if (!Animation)
-        return;
+    TArray<FAnim_PoseCandidate> Candidates;
     
-    FAnim_MotionClip NewClip;
-    NewClip.AnimSequence = Animation;
-    NewClip.MotionData = MotionData;
-    NewClip.BlendWeight = 1.0f;
-    NewClip.PlayRate = 1.0f;
+    // Build candidates from idle animations
+    for (UAnimSequence* IdleAnim : IdleAnimations)
+    {
+        if (IdleAnim)
+        {
+            FAnim_PoseCandidate Candidate;
+            Candidate.AnimSequence = IdleAnim;
+            Candidate.StartTime = 0.0f;
+            Candidate.PoseMotionData.Speed = 0.0f;
+            Candidate.PoseMotionData.bIsMoving = false;
+            Candidate.PoseMotionData.bIsFalling = false;
+            Candidate.PoseMotionData.bIsJumping = false;
+            Candidates.Add(Candidate);
+        }
+    }
     
-    MotionDatabase.Add(NewClip);
-}
-
-void UAnim_MotionMatchingComponent::ClearDatabase()
-{
-    MotionDatabase.Empty();
-}
-
-void UAnim_MotionMatchingComponent::InitializeDefaultDatabase()
-{
-    // Create default motion clips for basic locomotion
-    // These would normally be loaded from actual animation assets
+    // Build candidates from walk animations
+    for (UAnimSequence* WalkAnim : WalkAnimations)
+    {
+        if (WalkAnim)
+        {
+            FAnim_PoseCandidate Candidate;
+            Candidate.AnimSequence = WalkAnim;
+            Candidate.StartTime = 0.0f;
+            Candidate.PoseMotionData.Speed = 150.0f; // Typical walk speed
+            Candidate.PoseMotionData.bIsMoving = true;
+            Candidate.PoseMotionData.bIsFalling = false;
+            Candidate.PoseMotionData.bIsJumping = false;
+            Candidates.Add(Candidate);
+        }
+    }
     
-    // Idle clip
-    FAnim_MotionData IdleData;
-    IdleData.Speed = 0.0f;
-    IdleData.bIsMoving = false;
-    IdleData.bIsFalling = false;
-    IdleData.bIsCrouching = false;
+    // Build candidates from run animations
+    for (UAnimSequence* RunAnim : RunAnimations)
+    {
+        if (RunAnim)
+        {
+            FAnim_PoseCandidate Candidate;
+            Candidate.AnimSequence = RunAnim;
+            Candidate.StartTime = 0.0f;
+            Candidate.PoseMotionData.Speed = 400.0f; // Typical run speed
+            Candidate.PoseMotionData.bIsMoving = true;
+            Candidate.PoseMotionData.bIsFalling = false;
+            Candidate.PoseMotionData.bIsJumping = false;
+            Candidates.Add(Candidate);
+        }
+    }
     
-    FAnim_MotionClip IdleClip;
-    IdleClip.MotionData = IdleData;
-    IdleClip.BlendWeight = 1.0f;
-    IdleClip.PlayRate = 1.0f;
-    MotionDatabase.Add(IdleClip);
+    // Build candidates from jump animations
+    for (UAnimSequence* JumpAnim : JumpAnimations)
+    {
+        if (JumpAnim)
+        {
+            FAnim_PoseCandidate Candidate;
+            Candidate.AnimSequence = JumpAnim;
+            Candidate.StartTime = 0.0f;
+            Candidate.PoseMotionData.Speed = 200.0f; // Speed during jump
+            Candidate.PoseMotionData.bIsMoving = true;
+            Candidate.PoseMotionData.bIsFalling = false;
+            Candidate.PoseMotionData.bIsJumping = true;
+            Candidates.Add(Candidate);
+        }
+    }
     
-    // Walk forward clip
-    FAnim_MotionData WalkData;
-    WalkData.Speed = 150.0f;
-    WalkData.Direction = 0.0f;
-    WalkData.bIsMoving = true;
-    WalkData.bIsFalling = false;
-    WalkData.bIsCrouching = false;
-    
-    FAnim_MotionClip WalkClip;
-    WalkClip.MotionData = WalkData;
-    WalkClip.BlendWeight = 1.0f;
-    WalkClip.PlayRate = 1.0f;
-    MotionDatabase.Add(WalkClip);
-    
-    // Run forward clip
-    FAnim_MotionData RunData;
-    RunData.Speed = 400.0f;
-    RunData.Direction = 0.0f;
-    RunData.bIsMoving = true;
-    RunData.bIsFalling = false;
-    RunData.bIsCrouching = false;
-    
-    FAnim_MotionClip RunClip;
-    RunClip.MotionData = RunData;
-    RunClip.BlendWeight = 1.0f;
-    RunClip.PlayRate = 1.0f;
-    MotionDatabase.Add(RunClip);
-    
-    // Jump/Fall clip
-    FAnim_MotionData JumpData;
-    JumpData.Speed = 200.0f;
-    JumpData.bIsMoving = true;
-    JumpData.bIsFalling = true;
-    JumpData.bIsCrouching = false;
-    
-    FAnim_MotionClip JumpClip;
-    JumpClip.MotionData = JumpData;
-    JumpClip.BlendWeight = 1.0f;
-    JumpClip.PlayRate = 1.0f;
-    MotionDatabase.Add(JumpClip);
-    
-    UE_LOG(LogTemp, Log, TEXT("Motion Matching: Initialized default database with %d clips"), MotionDatabase.Num());
+    return Candidates;
 }
