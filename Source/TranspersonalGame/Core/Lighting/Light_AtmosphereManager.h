@@ -1,38 +1,59 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/SkyAtmosphereComponent.h"
+#include "GameFramework/Actor.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/DirectionalLight.h"
-#include "Engine/SkyAtmosphere.h"
+#include "Engine/SkyLight.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "GameFramework/Actor.h"
 #include "Light_AtmosphereManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ELight_TimeOfDay : uint8
+{
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Noon        UMETA(DisplayName = "Noon"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night")
+};
+
+UENUM(BlueprintType)
+enum class ELight_WeatherType : uint8
+{
+    Clear       UMETA(DisplayName = "Clear"),
+    Overcast    UMETA(DisplayName = "Overcast"),
+    Foggy       UMETA(DisplayName = "Foggy"),
+    Stormy      UMETA(DisplayName = "Stormy"),
+    Volcanic    UMETA(DisplayName = "Volcanic")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_TimeOfDay
+struct FLight_AtmosphereSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
-    float Hours = 12.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
-    float Minutes = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunTemperature = 5800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float SunIntensity = 8.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogDensity = 0.02f;
+    FLinearColor SunColor = FLinearColor(1.1f, 0.95f, 0.75f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
+    float Temperature = 4500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float FogDensity = 0.035f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor FogColor = FLinearColor(1.0f, 0.85f, 0.6f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float VolumetricScattering = 2.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -49,51 +70,57 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day-Night Cycle")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
+    float DayDuration = 1200.0f; // 20 minutes real time = 1 day
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
+    float CurrentTimeOfDay = 0.5f; // 0.0 = midnight, 0.5 = noon
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
     bool bEnableDayNightCycle = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day-Night Cycle")
-    float DayDurationMinutes = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    ELight_WeatherType CurrentWeather = ELight_WeatherType::Clear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current Time")
-    FLight_TimeOfDay CurrentTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WeatherTransitionSpeed = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    FLight_TimeOfDay DawnSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    FLight_TimeOfDay NoonSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    FLight_TimeOfDay DuskSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    FLight_TimeOfDay NightSettings;
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetTimeOfDay(float Hours, float Minutes);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void ApplyLightingSettings(const FLight_TimeOfDay& Settings);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetupCretaceousAtmosphere();
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void EnableLumenGlobalIllumination();
-
-private:
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting References")
     ADirectionalLight* SunLight;
 
-    UPROPERTY()
-    ASkyAtmosphere* SkyAtmosphere;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting References")
+    ASkyLight* SkyLight;
 
-    UPROPERTY()
-    AExponentialHeightFog* HeightFog;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting References")
+    AExponentialHeightFog* AtmosphericFog;
 
-    void FindOrCreateLightingActors();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere Settings")
+    TMap<ELight_TimeOfDay, FLight_AtmosphereSettings> TimeOfDaySettings;
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetTimeOfDay(float NewTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetWeather(ELight_WeatherType NewWeather);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void ApplyAtmosphereSettings(const FLight_AtmosphereSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    ELight_TimeOfDay GetCurrentTimeOfDayEnum() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void CreateCinematicLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void EnableVolumetricFog(bool bEnable);
+
+private:
     void UpdateSunPosition();
-    FLight_TimeOfDay InterpolateLightingSettings(float TimeOfDay);
-    float GetNormalizedTimeOfDay() const;
+    void UpdateAtmosphere();
+    void InitializeTimeOfDaySettings();
+    void FindLightingActors();
+    
+    float LastUpdateTime = 0.0f;
+    const float UpdateInterval = 0.1f; // Update every 0.1 seconds
 };
