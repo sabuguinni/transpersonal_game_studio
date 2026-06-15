@@ -1,153 +1,129 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "SharedTypes.h"
 #include "Narr_StorytellingSystem.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_StoryType : uint8
+{
+    DinosaurEncounter,
+    TribalWisdom,
+    HuntingStory,
+    SurvivalTip,
+    TerrainWarning,
+    WeatherLore
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryData
+struct FNarr_StoryData : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
     FString StoryTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString StoryText;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    FText StoryText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString AudioURL;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    ENarr_StoryType StoryType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    FString AudioAssetPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> RequiredItems;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    float StoryDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    int32 TribeReputationRequired;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Story")
+    TArray<FString> RequiredTags;
 
     FNarr_StoryData()
     {
-        StoryTitle = TEXT("");
-        StoryText = TEXT("");
-        AudioURL = TEXT("");
-        Duration = 0.0f;
-        TribeReputationRequired = 0;
+        StoryTitle = TEXT("Untitled Story");
+        StoryText = FText::FromString(TEXT("A tale of survival..."));
+        StoryType = ENarr_StoryType::TribalWisdom;
+        AudioAssetPath = TEXT("");
+        StoryDuration = 10.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_CampfireSession
+struct FNarr_StorytellingContext
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Campfire")
-    TArray<FNarr_StoryData> AvailableStories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    FVector PlayerLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Campfire")
-    int32 CurrentStoryIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    TArray<FString> NearbyDinosaurs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Campfire")
-    bool bIsActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float TimeOfDay;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Campfire")
-    float SessionStartTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    FString CurrentBiome;
 
-    FNarr_CampfireSession()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    bool bIsNearFire;
+
+    FNarr_StorytellingContext()
     {
-        CurrentStoryIndex = 0;
-        bIsActive = false;
-        SessionStartTime = 0.0f;
+        PlayerLocation = FVector::ZeroVector;
+        TimeOfDay = 12.0f;
+        CurrentBiome = TEXT("Forest");
+        bIsNearFire = false;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_StorytellingSystem : public AActor
+class TRANSPERSONALGAME_API UNarr_StorytellingSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ANarr_StorytellingSystem();
+    UNarr_StorytellingSystem();
+
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void TriggerContextualStory(const FNarr_StorytellingContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    FNarr_StoryData GetRandomStoryByType(ENarr_StoryType StoryType);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    TArray<FNarr_StoryData> GetStoriesForContext(const FNarr_StorytellingContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void PlayStoryAudio(const FNarr_StoryData& Story);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    bool IsStoryPlaying() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void StopCurrentStory();
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
+    class UDataTable* StoryDataTable;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Core storytelling components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* CampfireMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UParticleSystemComponent* FireEffect;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* AmbientAudio;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* InteractionRadius;
-
-    // Story data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
-    TArray<FNarr_StoryData> TribalStories;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
-    FNarr_CampfireSession CurrentSession;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
-    float StorytellingRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
-    int32 MaxParticipants;
-
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void StartStorytellingSession();
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void EndStorytellingSession();
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void PlayNextStory();
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    bool CanPlayerJoinSession(class APawn* Player);
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void AddPlayerToSession(class APawn* Player);
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void RemovePlayerFromSession(class APawn* Player);
-
-    // Story management
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void LoadTribalStories();
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    FNarr_StoryData GetRandomStory();
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    TArray<FNarr_StoryData> GetStoriesForReputation(int32 ReputationLevel);
-
-    // Audio integration
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void PlayStoryAudio(const FString& AudioURL);
-
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void StopCurrentAudio();
-
-private:
-    // Internal tracking
-    TArray<class APawn*> SessionParticipants;
-    float CurrentStoryStartTime;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
     bool bIsPlayingStory;
 
-    void InitializeStoryDatabase();
-    void UpdateSessionState();
-    bool IsPlayerInRange(class APawn* Player);
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    FNarr_StoryData CurrentStory;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float StoryStartTime;
+
+private:
+    void LoadStoryData();
+    bool DoesStoryMatchContext(const FNarr_StoryData& Story, const FNarr_StorytellingContext& Context);
+    void OnStoryFinished();
+
+    UPROPERTY()
+    TArray<FNarr_StoryData> CachedStories;
 };
