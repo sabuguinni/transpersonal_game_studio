@@ -2,48 +2,82 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/VolumetricCloudComponent.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Particles/ParticleSystemComponent.h"
-#include "SharedTypes.h"
+#include "Engine/TriggerBox.h"
 #include "EnvArt_AtmosphericManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EEnvArt_TimeOfDay : uint8
+{
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Midday      UMETA(DisplayName = "Midday"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night")
+};
+
+UENUM(BlueprintType)
+enum class EEnvArt_WeatherType : uint8
+{
+    Clear       UMETA(DisplayName = "Clear"),
+    Overcast    UMETA(DisplayName = "Overcast"),
+    Foggy       UMETA(DisplayName = "Foggy"),
+    Dusty       UMETA(DisplayName = "Dusty"),
+    Stormy      UMETA(DisplayName = "Stormy")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEnvArt_AtmosphericSettings
+struct TRANSPERSONALGAME_API FEnvArt_LightingPreset
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    FLinearColor SunColor = FLinearColor::White;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 3.5f;
+    float SunIntensity = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunElevation = -30.0f;
+    float SunTemperature = 6500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunAzimuth = 45.0f;
+    FRotator SunRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogDensity = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SkyColor = FLinearColor::Blue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogHeight = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SkyIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    float ParticleDensity = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor FogColor = FLinearColor::White;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particles")
-    float WindStrength = 1.0f;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_AudioZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString ZoneName = "Default_Zone";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FVector Scale = FVector::OneVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TArray<FString> AmbientSounds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float VolumeMultiplier = 1.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -57,66 +91,81 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
+    EEnvArt_TimeOfDay CurrentTimeOfDay = EEnvArt_TimeOfDay::Midday;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    EEnvArt_WeatherType CurrentWeather = EEnvArt_WeatherType::Clear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    TMap<EEnvArt_TimeOfDay, FEnvArt_LightingPreset> TimeOfDayPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Presets")
+    TMap<EEnvArt_WeatherType, FEnvArt_LightingPreset> WeatherPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zones")
+    TArray<FEnvArt_AudioZone> AudioZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float TransitionDuration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    bool bAutoTransition = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float DayDurationMinutes = 20.0f;
+
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric Settings")
-    FEnvArt_AtmosphericSettings AtmosphericSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
-    ADirectionalLight* SunLight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
-    AActor* VolumetricFogActor;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UParticleSystemComponent* AtmosphericParticles;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* AmbientAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    USoundCue* ForestAmbientSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    USoundCue* WindSound;
+    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
+    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetTimeOfDay(float TimeHours);
+    void SetWeather(EEnvArt_WeatherType NewWeather);
 
     UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetWeatherIntensity(float Intensity);
+    void TransitionToPreset(const FEnvArt_LightingPreset& TargetPreset);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetFogDensity(float Density);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void CreateAudioZone(const FEnvArt_AudioZone& ZoneData);
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SetWindStrength(float Strength);
+    UFUNCTION(BlueprintCallable, Category = "Audio Management")
+    void UpdateAudioZones();
 
     UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
     void ApplyGoldenHourLighting();
 
     UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void ApplyMidnightLighting();
+    void ApplyMysticalForestLighting();
 
     UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void CreateVolumetricFogZone(FVector Location, FVector Scale);
+    void ApplyVolcanicLighting();
 
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric Control")
-    void SpawnAtmosphericParticles(FVector Location, float Density);
+protected:
+    UFUNCTION(BlueprintImplementableEvent, Category = "Atmospheric Events")
+    void OnTimeOfDayChanged(EEnvArt_TimeOfDay NewTime);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Atmospheric Events")
+    void OnWeatherChanged(EEnvArt_WeatherType NewWeather);
 
 private:
-    UPROPERTY()
-    float CurrentTimeOfDay = 12.0f;
+    void InitializeLightingPresets();
+    void InitializeAudioZones();
+    void FindLightingComponents();
 
     UPROPERTY()
-    float CurrentWeatherIntensity = 0.5f;
+    class UDirectionalLightComponent* SunLightComponent;
 
-    void UpdateLightingBasedOnTime();
-    void UpdateFogBasedOnWeather();
-    void UpdateParticleEffects();
-    void UpdateAmbientAudio();
+    UPROPERTY()
+    class USkyLightComponent* SkyLightComponent;
+
+    UPROPERTY()
+    class UVolumetricCloudComponent* CloudComponent;
+
+    UPROPERTY()
+    TArray<class ATriggerBox*> SpawnedAudioTriggers;
+
+    float CurrentTransitionTime = 0.0f;
+    bool bIsTransitioning = false;
+    FEnvArt_LightingPreset StartPreset;
+    FEnvArt_LightingPreset TargetPreset;
 };
