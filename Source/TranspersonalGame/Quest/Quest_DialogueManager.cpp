@@ -1,257 +1,180 @@
 #include "Quest_DialogueManager.h"
+#include "Engine/DataTable.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "../TranspersonalCharacter.h"
+#include "Components/AudioComponent.h"
 
 UQuest_DialogueManager::UQuest_DialogueManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    CurrentDialogueID = -1;
     bDialogueActive = false;
-    DialogueRange = 300.0f;
-    CurrentNPC = nullptr;
-
-    // Initialize basic dialogue entries for prehistoric NPCs
-    FQuest_DialogueEntry WelcomeDialogue;
-    WelcomeDialogue.DialogueID = 1;
-    WelcomeDialogue.NPCName = TEXT("Tribal Elder");
-    WelcomeDialogue.DialogueText = TEXT("Welcome, young hunter. The great beasts roam these lands. Are you prepared to face them?");
-    WelcomeDialogue.bIsQuestDialogue = true;
-    WelcomeDialogue.AssociatedQuestID = TEXT("HUNT_FIRST_DINOSAUR");
-    
-    FQuest_DialogueOption Option1;
-    Option1.OptionText = TEXT("I am ready to hunt the great beasts!");
-    Option1.NextDialogueID = 2;
-    Option1.RewardExperience = 10;
-    
-    FQuest_DialogueOption Option2;
-    Option2.OptionText = TEXT("I need more preparation first.");
-    Option2.NextDialogueID = 3;
-    
-    WelcomeDialogue.PlayerOptions.Add(Option1);
-    WelcomeDialogue.PlayerOptions.Add(Option2);
-    DialogueDatabase.Add(WelcomeDialogue);
-
-    FQuest_DialogueEntry HuntDialogue;
-    HuntDialogue.DialogueID = 2;
-    HuntDialogue.NPCName = TEXT("Tribal Elder");
-    HuntDialogue.DialogueText = TEXT("Good! Take this stone spear. Hunt a Raptor and bring back its claw as proof of your skill.");
-    HuntDialogue.bIsQuestDialogue = true;
-    HuntDialogue.AssociatedQuestID = TEXT("HUNT_RAPTOR_CLAW");
-    
-    FQuest_DialogueOption HuntOption;
-    HuntOption.OptionText = TEXT("I will return with the claw.");
-    HuntOption.NextDialogueID = -1;
-    HuntOption.RewardExperience = 25;
-    
-    HuntDialogue.PlayerOptions.Add(HuntOption);
-    DialogueDatabase.Add(HuntDialogue);
-
-    FQuest_DialogueEntry PrepDialogue;
-    PrepDialogue.DialogueID = 3;
-    PrepDialogue.NPCName = TEXT("Tribal Elder");
-    PrepDialogue.DialogueText = TEXT("Wise choice. Gather 5 stones and 3 sticks first. Then return to me.");
-    PrepDialogue.bIsQuestDialogue = true;
-    PrepDialogue.AssociatedQuestID = TEXT("GATHER_BASIC_MATERIALS");
-    
-    FQuest_DialogueOption PrepOption;
-    PrepOption.OptionText = TEXT("I will gather the materials.");
-    PrepOption.NextDialogueID = -1;
-    PrepOption.RewardExperience = 15;
-    
-    PrepDialogue.PlayerOptions.Add(PrepOption);
-    DialogueDatabase.Add(PrepDialogue);
+    CurrentSpeaker = TEXT("");
+    CurrentLineIndex = 0;
+    CurrentPlayer = nullptr;
+    DialogueDataTable = nullptr;
 }
 
-void UQuest_DialogueManager::BeginPlay()
+void UQuest_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
+    LoadDialogueData();
 }
 
-bool UQuest_DialogueManager::StartDialogue(AActor* NPC, int32 StartingDialogueID)
+void UQuest_DialogueManager::LoadDialogueData()
 {
-    if (!NPC || bDialogueActive)
+    // Load dialogue data table from content
+    DialogueDataTable = LoadObject<UDataTable>(nullptr, TEXT("/Game/TranspersonalGame/Data/DT_NPCDialogue"));
+    
+    if (!DialogueDataTable)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DialogueManager: Failed to load dialogue data table"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: Dialogue data table loaded successfully"));
+    }
+}
+
+bool UQuest_DialogueManager::StartDialogue(const FString& NPCName, AActor* Player)
+{
+    if (!DialogueDataTable || !Player)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DialogueManager: Cannot start dialogue - missing data table or player"));
         return false;
     }
 
-    // Check if player is in range
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
+    if (bDialogueActive)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DialogueManager: Dialogue already active"));
         return false;
     }
 
-    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), NPC->GetActorLocation());
-    if (Distance > DialogueRange)
+    // Find NPC dialogue data
+    FQuest_NPCDialogue* DialogueData = DialogueDataTable->FindRow<FQuest_NPCDialogue>(FName(*NPCName), TEXT(""));
+    
+    if (!DialogueData)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Quest_DialogueManager: No dialogue data found for NPC: %s"), *NPCName);
         return false;
     }
 
-    FQuest_DialogueEntry* DialogueEntry = FindDialogueByID(StartingDialogueID);
-    if (!DialogueEntry)
-    {
-        return false;
-    }
-
-    CurrentNPC = NPC;
-    CurrentDialogueID = StartingDialogueID;
+    // Start dialogue
+    CurrentDialogue = *DialogueData;
+    CurrentSpeaker = NPCName;
+    CurrentPlayer = Player;
+    CurrentLineIndex = 0;
     bDialogueActive = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: Started dialogue with %s"), *NPCName);
+
+    // Play first dialogue line
+    if (CurrentDialogue.DialogueLines.Num() > 0)
+    {
+        PlayDialogueLine(CurrentDialogue.DialogueLines[0]);
+    }
 
     return true;
 }
 
 void UQuest_DialogueManager::EndDialogue()
 {
-    bDialogueActive = false;
-    CurrentDialogueID = -1;
-    CurrentNPC = nullptr;
-}
-
-bool UQuest_DialogueManager::SelectDialogueOption(int32 OptionIndex)
-{
     if (!bDialogueActive)
-    {
-        return false;
-    }
-
-    FQuest_DialogueEntry* CurrentEntry = FindDialogueByID(CurrentDialogueID);
-    if (!CurrentEntry || OptionIndex < 0 || OptionIndex >= CurrentEntry->PlayerOptions.Num())
-    {
-        return false;
-    }
-
-    const FQuest_DialogueOption& SelectedOption = CurrentEntry->PlayerOptions[OptionIndex];
-
-    // Check requirements
-    if (!CheckDialogueRequirements(SelectedOption))
-    {
-        return false;
-    }
-
-    // Process rewards
-    ProcessDialogueRewards(SelectedOption);
-
-    // Move to next dialogue or end
-    if (SelectedOption.NextDialogueID == -1)
-    {
-        EndDialogue();
-    }
-    else
-    {
-        CurrentDialogueID = SelectedOption.NextDialogueID;
-    }
-
-    return true;
-}
-
-FQuest_DialogueEntry UQuest_DialogueManager::GetCurrentDialogue() const
-{
-    if (!bDialogueActive)
-    {
-        return FQuest_DialogueEntry();
-    }
-
-    for (const FQuest_DialogueEntry& Entry : DialogueDatabase)
-    {
-        if (Entry.DialogueID == CurrentDialogueID)
-        {
-            return Entry;
-        }
-    }
-
-    return FQuest_DialogueEntry();
-}
-
-TArray<FQuest_DialogueOption> UQuest_DialogueManager::GetCurrentOptions() const
-{
-    FQuest_DialogueEntry CurrentEntry = GetCurrentDialogue();
-    return CurrentEntry.PlayerOptions;
-}
-
-void UQuest_DialogueManager::AddDialogueEntry(const FQuest_DialogueEntry& NewEntry)
-{
-    DialogueDatabase.Add(NewEntry);
-}
-
-void UQuest_DialogueManager::LoadDialoguesFromDataTable(UDataTable* DialogueTable)
-{
-    if (!DialogueTable)
     {
         return;
     }
 
-    DialogueDatabase.Empty();
-    
-    TArray<FQuest_DialogueEntry*> AllRows;
-    DialogueTable->GetAllRows<FQuest_DialogueEntry>(TEXT("LoadDialogues"), AllRows);
-    
-    for (FQuest_DialogueEntry* Row : AllRows)
+    bDialogueActive = false;
+    CurrentSpeaker = TEXT("");
+    CurrentPlayer = nullptr;
+    CurrentLineIndex = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: Dialogue ended"));
+}
+
+bool UQuest_DialogueManager::PlayDialogueLine(const FQuest_DialogueLine& DialogueLine)
+{
+    if (!bDialogueActive)
     {
-        if (Row)
-        {
-            DialogueDatabase.Add(*Row);
-        }
+        return false;
     }
-}
 
-bool UQuest_DialogueManager::CanPlayerAffordOption(const FQuest_DialogueOption& Option) const
-{
-    return CheckDialogueRequirements(Option);
-}
+    // Log dialogue text
+    UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: %s says: %s"), *CurrentSpeaker, *DialogueLine.DialogueText);
 
-FQuest_DialogueEntry* UQuest_DialogueManager::FindDialogueByID(int32 DialogueID)
-{
-    for (FQuest_DialogueEntry& Entry : DialogueDatabase)
+    // Play audio if available
+    if (!DialogueLine.AudioPath.IsEmpty() && CurrentPlayer)
     {
-        if (Entry.DialogueID == DialogueID)
+        UWorld* World = CurrentPlayer->GetWorld();
+        if (World)
         {
-            return &Entry;
-        }
-    }
-    return nullptr;
-}
-
-void UQuest_DialogueManager::ProcessDialogueRewards(const FQuest_DialogueOption& SelectedOption)
-{
-    if (SelectedOption.RewardExperience > 0)
-    {
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(PlayerPawn);
-            if (Player)
+            // Load and play audio
+            USoundBase* DialogueSound = LoadObject<USoundBase>(nullptr, *DialogueLine.AudioPath);
+            if (DialogueSound)
             {
-                // Add experience to player (assuming TranspersonalCharacter has experience system)
-                // Player->AddExperience(SelectedOption.RewardExperience);
+                UGameplayStatics::PlaySoundAtLocation(World, DialogueSound, CurrentPlayer->GetActorLocation());
             }
         }
     }
+
+    // Handle quest triggers
+    if (DialogueLine.DialogueType == EQuest_DialogueType::QuestGiver && !CurrentDialogue.QuestID.IsEmpty())
+    {
+        TriggerQuestEvent(CurrentDialogue.QuestID);
+    }
+
+    return true;
 }
 
-bool UQuest_DialogueManager::CheckDialogueRequirements(const FQuest_DialogueOption& Option) const
+TArray<FString> UQuest_DialogueManager::GetPlayerResponses(const FString& NPCName)
 {
-    if (!Option.bRequiresItem)
+    TArray<FString> Responses;
+
+    if (!bDialogueActive || CurrentLineIndex >= CurrentDialogue.DialogueLines.Num())
     {
-        return true;
+        return Responses;
     }
 
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
+    return CurrentDialogue.DialogueLines[CurrentLineIndex].PlayerResponses;
+}
+
+void UQuest_DialogueManager::SelectPlayerResponse(int32 ResponseIndex)
+{
+    if (!bDialogueActive)
     {
-        return false;
+        return;
     }
 
-    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(PlayerPawn);
-    if (!Player)
-    {
-        return false;
-    }
+    ProcessDialogueChoice(ResponseIndex);
 
-    // Check if player has required item in inventory
-    // This would need to be implemented based on the inventory system
-    // For now, return true as placeholder
-    return true;
+    // Move to next dialogue line
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= CurrentDialogue.DialogueLines.Num())
+    {
+        // End dialogue
+        EndDialogue();
+    }
+    else
+    {
+        // Play next line
+        PlayDialogueLine(CurrentDialogue.DialogueLines[CurrentLineIndex]);
+    }
+}
+
+void UQuest_DialogueManager::ProcessDialogueChoice(int32 ChoiceIndex)
+{
+    // Handle player choice consequences
+    UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: Player selected choice %d"), ChoiceIndex);
+
+    // This can trigger different quest branches, reputation changes, etc.
+    // Implementation depends on specific quest design requirements
+}
+
+void UQuest_DialogueManager::TriggerQuestEvent(const FString& QuestID)
+{
+    UE_LOG(LogTemp, Log, TEXT("Quest_DialogueManager: Triggering quest event for: %s"), *QuestID);
+
+    // Send quest event to quest manager
+    // This would integrate with the Quest_ObjectiveManager system
+    // For now, just log the event
 }
