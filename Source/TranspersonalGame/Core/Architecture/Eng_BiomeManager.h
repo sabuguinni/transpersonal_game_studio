@@ -1,18 +1,29 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "Components/StaticMeshComponent.h"
 #include "Eng_BiomeManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Mountain    UMETA(DisplayName = "Mountain"),
+    River       UMETA(DisplayName = "River")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeData
+struct FEng_BiomeConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Grassland;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Savanna;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f;
@@ -21,60 +32,49 @@ struct TRANSPERSONALGAME_API FEng_BiomeData
     float Humidity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 0.0f;
+    float VegetationDensity = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedVegetation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> AllowedDinosaurs;
-
-    FEng_BiomeData()
-    {
-        AllowedVegetation.Add("Grass");
-        AllowedVegetation.Add("Trees");
-        AllowedDinosaurs.Add("Triceratops");
-        AllowedDinosaurs.Add("Parasaurolophus");
-    }
+    TArray<FString> DinosaurSpecies;
 };
 
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEng_BiomeManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UEng_BiomeManager();
+    AEng_BiomeManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    TMap<EBiomeType, FEng_BiomeData> BiomeDatabase;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FEng_BiomeConfig> BiomeConfigs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
     float BiomeTransitionDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
-    int32 BiomeResolution = 512;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 MaxDinosaursPerBiome = 25;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeData GetBiomeData(EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Management")
+    FEng_BiomeConfig GetBiomeConfig(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomeSystem();
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateBiomeLayout();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<EBiomeType> GetAdjacentBiomes(const FVector& WorldLocation, float Radius = 2000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetBiomeInfluence(const FVector& WorldLocation, EBiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Management")
+    void SpawnDinosaursForBiome(EEng_BiomeType BiomeType, const FVector& BiomeCenter);
 
 private:
-    void SetupDefaultBiomes();
-    EBiomeType CalculateBiomeFromEnvironment(float Temperature, float Humidity, float Elevation);
+    void InitializeDefaultBiomes();
+    FVector GetBiomeCenterLocation(EEng_BiomeType BiomeType) const;
 };
