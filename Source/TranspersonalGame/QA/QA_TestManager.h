@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "QA_TestManager.generated.h"
 
@@ -16,81 +16,172 @@ enum class EQA_TestResult : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FQA_TestCase
+struct TRANSPERSONALGAME_API FQA_TestCase
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     FString TestName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    FString TestDescription;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     EQA_TestResult Result;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FString Description;
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
     float ExecutionTime;
 
     FQA_TestCase()
     {
         TestName = TEXT("");
+        TestDescription = TEXT("");
         Result = EQA_TestResult::Skipped;
-        Description = TEXT("");
+        ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQA_SystemValidation
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    int32 ActorCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    int32 ComponentCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    bool bIsSystemHealthy;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA")
+    TArray<FString> HealthIssues;
+
+    FQA_SystemValidation()
+    {
+        SystemName = TEXT("");
+        ActorCount = 0;
+        ComponentCount = 0;
+        bIsSystemHealthy = true;
+    }
+};
+
+/**
+ * QA Test Manager - Comprehensive testing and validation system
+ * Validates all game systems, performance metrics, and integration points
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_TestManager : public UActorComponent
+class TRANSPERSONALGAME_API UQA_TestManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UQA_TestManager();
 
-    UFUNCTION(BlueprintCallable, Category = "QA", CallInEditor)
+    // Core Testing Functions
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunSystemValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunPerformanceTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunIntegrationTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void RunStabilityTests();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void RunRegressionTests();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void ValidateActorCounts();
+    // Specific System Tests
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase ValidateVFXSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void ValidateGameplayElements();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase ValidateDinosaurSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "QA")
-    void GenerateQAReport();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase ValidateCharacterSystem();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_TestCase> TestResults;
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase ValidateLightingSystem();
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 MaxActorCount;
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase ValidateWorldGeneration();
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    int32 MaxDinosaurCount;
+    // Performance Validation
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckActorCount();
 
-    UPROPERTY(BlueprintReadWrite, Category = "QA")
-    float TargetFrameRate;
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckMemoryUsage();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckFrameRate();
+
+    // Integration Tests
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase TestPlayerSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase TestDinosaurAI();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase TestVFXTriggers();
+
+    // Regression Tests
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckDegenerateLabels();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckDuplicateActors();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_TestCase CheckEssentialActors();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    TArray<AActor*> GetActorsByLabel(const FString& LabelFilter);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FQA_SystemValidation AnalyzeSystem(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void GenerateTestReport();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    void LogTestResults();
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_TestCase> TestResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    TArray<FQA_SystemValidation> SystemValidations;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA Testing")
+    int32 MaxActorCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA Testing")
+    int32 MaxDinosaurCount;
+
+    UPROPERTY(BlueprintReadWrite, Category = "QA Testing")
+    float TargetFrameRate;
 
 private:
-    void AddTestResult(const FString& TestName, EQA_TestResult Result, const FString& Description, float ExecutionTime = 0.0f);
-    
-    bool ValidateClassLoading();
-    bool ValidateMapActors();
-    bool ValidatePlayerSetup();
-    bool ValidateLightingSetup();
-    bool ValidatePerformanceMetrics();
+    // Helper functions
+    FQA_TestCase CreateTestCase(const FString& Name, const FString& Description);
+    void AddTestResult(const FQA_TestCase& TestCase);
+    float MeasureExecutionTime(TFunction<void()> TestFunction);
+    bool IsActorHealthy(AActor* Actor);
+    void ValidateActorTransform(AActor* Actor, FQA_TestCase& TestCase);
 };
