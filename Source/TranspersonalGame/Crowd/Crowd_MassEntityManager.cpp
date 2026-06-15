@@ -1,352 +1,294 @@
 #include "Crowd_MassEntityManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
-#include "MassRepresentationFragments.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-UCrowd_MassEntityManager::UCrowd_MassEntityManager()
+ACrowd_MassEntityManager::ACrowd_MassEntityManager()
 {
-    MaxEntityCount = 50000;
-    CurrentBehavior = ECrowd_EntityBehavior::Wandering;
-    EntitySpeed = 300.0f;
-    EntityDetectionRadius = 500.0f;
-}
-
-void UCrowd_MassEntityManager::InitializeMassSystem(UWorld* World)
-{
-    if (!World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UCrowd_MassEntityManager: Invalid World"));
-        return;
-    }
-
-    CachedWorld = World;
-    MassSubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    PrimaryActorTick.bCanEverTick = true;
     
-    if (!MassSubsystem.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("UCrowd_MassEntityManager: Failed to get Mass Entity Subsystem"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("UCrowd_MassEntityManager: Mass system initialized successfully"));
+    MaxEntities = 1000;
+    UpdateFrequency = 0.1f;
+    bEnableLODSystem = true;
+    bEnablePathfinding = true;
+    LastUpdateTime = 0.0f;
+    
+    // Initialize LOD settings
+    LODSettings = FCrowd_LODSettings();
 }
 
-void UCrowd_MassEntityManager::SpawnEntityCluster(const FCrowd_EntitySpawnData& SpawnData)
+void ACrowd_MassEntityManager::BeginPlay()
 {
-    if (!MassSubsystem.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UCrowd_MassEntityManager: Mass subsystem not initialized"));
-        return;
-    }
+    Super::BeginPlay();
+    
+    InitializeMassSystem();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Mass Entity Manager initialized with max %d entities"), MaxEntities);
+}
 
-    if (SpawnedEntities.Num() + SpawnData.EntityCount > MaxEntityCount)
+void ACrowd_MassEntityManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    LastUpdateTime += DeltaTime;
+    
+    if (LastUpdateTime >= UpdateFrequency)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UCrowd_MassEntityManager: Entity count would exceed maximum (%d)"), MaxEntityCount);
-        return;
-    }
-
-    // Create entities in a cluster pattern
-    for (int32 i = 0; i < SpawnData.EntityCount; i++)
-    {
-        FMassEntityHandle EntityHandle = MassSubsystem->CreateEntity();
-        if (EntityHandle.IsValid())
+        if (bEnableLODSystem)
         {
-            // Calculate spawn position within radius
-            float Angle = (2.0f * PI * i) / SpawnData.EntityCount;
-            float Distance = FMath::RandRange(0.0f, SpawnData.SpawnRadius);
-            FVector SpawnLocation = SpawnData.Location + FVector(
-                Distance * FMath::Cos(Angle),
-                Distance * FMath::Sin(Angle),
-                0.0f
-            );
-
-            // Add basic fragments
-            FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-            
-            // Transform fragment
-            FTransformFragment TransformFragment;
-            TransformFragment.GetMutableTransform().SetLocation(SpawnLocation);
-            TransformFragment.GetMutableTransform().SetRotation(SpawnData.Rotation.Quaternion());
-            EntityManager.AddFragmentToEntity(EntityHandle, TransformFragment);
-
-            // Velocity fragment for movement
-            FMassVelocityFragment VelocityFragment;
-            VelocityFragment.Value = FVector::ZeroVector;
-            EntityManager.AddFragmentToEntity(EntityHandle, VelocityFragment);
-
-            SpawnedEntities.Add(EntityHandle);
+            UpdateLODSystem();
         }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("UCrowd_MassEntityManager: Spawned %d entities at %s"), 
-           SpawnData.EntityCount, *SpawnData.Location.ToString());
-}
-
-void UCrowd_MassEntityManager::UpdateEntityBehavior(ECrowd_EntityBehavior NewBehavior)
-{
-    CurrentBehavior = NewBehavior;
-    
-    if (!MassSubsystem.IsValid())
-    {
-        return;
-    }
-
-    FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-    
-    for (const FMassEntityHandle& EntityHandle : SpawnedEntities)
-    {
-        if (EntityHandle.IsValid())
-        {
-            // Update entity behavior based on new behavior type
-            FMassVelocityFragment* VelocityFragment = EntityManager.GetFragmentDataPtr<FMassVelocityFragment>(EntityHandle);
-            if (VelocityFragment)
-            {
-                switch (CurrentBehavior)
-                {
-                case ECrowd_EntityBehavior::Wandering:
-                    VelocityFragment->Value = FVector(
-                        FMath::RandRange(-EntitySpeed, EntitySpeed),
-                        FMath::RandRange(-EntitySpeed, EntitySpeed),
-                        0.0f
-                    );
-                    break;
-                case ECrowd_EntityBehavior::Fleeing:
-                    VelocityFragment->Value = FVector(EntitySpeed, 0.0f, 0.0f);
-                    break;
-                case ECrowd_EntityBehavior::Resting:
-                    VelocityFragment->Value = FVector::ZeroVector;
-                    break;
-                default:
-                    VelocityFragment->Value = FVector(
-                        FMath::RandRange(-EntitySpeed * 0.5f, EntitySpeed * 0.5f),
-                        FMath::RandRange(-EntitySpeed * 0.5f, EntitySpeed * 0.5f),
-                        0.0f
-                    );
-                    break;
-                }
-            }
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("UCrowd_MassEntityManager: Updated behavior to %d for %d entities"), 
-           (int32)CurrentBehavior, SpawnedEntities.Num());
-}
-
-void UCrowd_MassEntityManager::SetEntityCount(int32 NewCount)
-{
-    if (NewCount > MaxEntityCount)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UCrowd_MassEntityManager: Requested count exceeds maximum"));
-        return;
-    }
-
-    int32 CurrentCount = SpawnedEntities.Num();
-    
-    if (NewCount > CurrentCount)
-    {
-        // Spawn more entities
-        FCrowd_EntitySpawnData SpawnData;
-        SpawnData.EntityCount = NewCount - CurrentCount;
-        SpawnData.Location = FVector::ZeroVector;
-        SpawnData.SpawnRadius = 2000.0f;
-        SpawnEntityCluster(SpawnData);
-    }
-    else if (NewCount < CurrentCount)
-    {
-        // Remove excess entities
-        if (MassSubsystem.IsValid())
-        {
-            FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-            for (int32 i = CurrentCount - 1; i >= NewCount; i--)
-            {
-                if (SpawnedEntities.IsValidIndex(i) && SpawnedEntities[i].IsValid())
-                {
-                    EntityManager.DestroyEntity(SpawnedEntities[i]);
-                    SpawnedEntities.RemoveAt(i);
-                }
-            }
-        }
-    }
-}
-
-int32 UCrowd_MassEntityManager::GetActiveEntityCount() const
-{
-    return SpawnedEntities.Num();
-}
-
-void UCrowd_MassEntityManager::DestroyAllEntities()
-{
-    if (!MassSubsystem.IsValid())
-    {
-        return;
-    }
-
-    FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-    
-    for (const FMassEntityHandle& EntityHandle : SpawnedEntities)
-    {
-        if (EntityHandle.IsValid())
-        {
-            EntityManager.DestroyEntity(EntityHandle);
-        }
-    }
-    
-    SpawnedEntities.Empty();
-    UE_LOG(LogTemp, Log, TEXT("UCrowd_MassEntityManager: Destroyed all entities"));
-}
-
-void UCrowd_MassEntityManager::TestSpawnEntities()
-{
-    if (!CachedWorld.IsValid())
-    {
-        if (UWorld* World = GEngine->GetWorldFromContextObjectChecked(this))
-        {
-            InitializeMassSystem(World);
-        }
-    }
-
-    FCrowd_EntitySpawnData TestSpawnData;
-    TestSpawnData.Location = FVector(0.0f, 0.0f, 100.0f);
-    TestSpawnData.EntityCount = 500;
-    TestSpawnData.SpawnRadius = 1500.0f;
-    
-    SpawnEntityCluster(TestSpawnData);
-    UpdateEntityBehavior(ECrowd_EntityBehavior::Wandering);
-}
-
-void UCrowd_MassEntityManager::ProcessEntityMovement()
-{
-    if (!MassSubsystem.IsValid())
-    {
-        return;
-    }
-
-    FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-    
-    for (const FMassEntityHandle& EntityHandle : SpawnedEntities)
-    {
-        if (EntityHandle.IsValid())
-        {
-            FTransformFragment* TransformFragment = EntityManager.GetFragmentDataPtr<FTransformFragment>(EntityHandle);
-            FMassVelocityFragment* VelocityFragment = EntityManager.GetFragmentDataPtr<FMassVelocityFragment>(EntityHandle);
-            
-            if (TransformFragment && VelocityFragment)
-            {
-                FVector CurrentLocation = TransformFragment->GetTransform().GetLocation();
-                FVector NewLocation = CurrentLocation + (VelocityFragment->Value * GetWorld()->GetDeltaSeconds());
-                TransformFragment->GetMutableTransform().SetLocation(NewLocation);
-            }
-        }
-    }
-}
-
-void UCrowd_MassEntityManager::UpdateEntityLOD()
-{
-    // LOD system for performance optimization
-    if (!CachedWorld.IsValid())
-    {
-        return;
-    }
-
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(CachedWorld.Get(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    for (const FMassEntityHandle& EntityHandle : SpawnedEntities)
-    {
-        if (EntityHandle.IsValid() && MassSubsystem.IsValid())
-        {
-            FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-            FTransformFragment* TransformFragment = EntityManager.GetFragmentDataPtr<FTransformFragment>(EntityHandle);
-            
-            if (TransformFragment)
-            {
-                float Distance = FVector::Dist(PlayerLocation, TransformFragment->GetTransform().GetLocation());
-                
-                // Adjust update frequency based on distance
-                if (Distance > 5000.0f)
-                {
-                    // Very low LOD - minimal updates
-                    continue;
-                }
-                else if (Distance > 2000.0f)
-                {
-                    // Medium LOD - reduced updates
-                    if (FMath::RandRange(0, 3) != 0)
-                    {
-                        continue;
-                    }
-                }
-                // High LOD - full updates for close entities
-            }
-        }
-    }
-}
-
-void UCrowd_MassEntityManager::HandleEntityCollisions()
-{
-    if (!MassSubsystem.IsValid())
-    {
-        return;
-    }
-
-    FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
-    
-    // Simple collision avoidance between entities
-    for (int32 i = 0; i < SpawnedEntities.Num(); i++)
-    {
-        if (!SpawnedEntities[i].IsValid())
-        {
-            continue;
-        }
-
-        FTransformFragment* TransformA = EntityManager.GetFragmentDataPtr<FTransformFragment>(SpawnedEntities[i]);
-        FMassVelocityFragment* VelocityA = EntityManager.GetFragmentDataPtr<FMassVelocityFragment>(SpawnedEntities[i]);
         
-        if (!TransformA || !VelocityA)
+        // Update all entities
+        for (int32 i = 0; i < Entities.Num(); i++)
         {
-            continue;
+            UpdateEntityBehavior(i, LastUpdateTime);
+            ProcessEntityMovement(i, LastUpdateTime);
         }
-
-        FVector LocationA = TransformA->GetTransform().GetLocation();
         
-        for (int32 j = i + 1; j < SpawnedEntities.Num(); j++)
+        OptimizeEntityCount();
+        LastUpdateTime = 0.0f;
+    }
+}
+
+void ACrowd_MassEntityManager::SpawnEntity(FVector Location, ECrowd_BehaviorState InitialState)
+{
+    if (Entities.Num() >= MaxEntities)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn entity - max limit reached: %d"), MaxEntities);
+        return;
+    }
+    
+    FCrowd_EntityData NewEntity;
+    NewEntity.Position = Location;
+    NewEntity.Velocity = FVector::ZeroVector;
+    NewEntity.Speed = FMath::RandRange(80.0f, 120.0f);
+    NewEntity.BehaviorState = InitialState;
+    NewEntity.GroupID = FMath::RandRange(0, 10);
+    NewEntity.LODDistance = 0.0f;
+    
+    Entities.Add(NewEntity);
+    
+    UE_LOG(LogTemp, Log, TEXT("Spawned crowd entity at location: %s"), *Location.ToString());
+}
+
+void ACrowd_MassEntityManager::RemoveEntity(int32 EntityIndex)
+{
+    if (Entities.IsValidIndex(EntityIndex))
+    {
+        Entities.RemoveAt(EntityIndex);
+        
+        // Update LOD arrays
+        HighDetailEntities.Remove(EntityIndex);
+        MediumDetailEntities.Remove(EntityIndex);
+        LowDetailEntities.Remove(EntityIndex);
+    }
+}
+
+void ACrowd_MassEntityManager::UpdateEntityLOD(int32 EntityIndex, float DistanceToPlayer)
+{
+    if (!Entities.IsValidIndex(EntityIndex))
+        return;
+    
+    Entities[EntityIndex].LODDistance = DistanceToPlayer;
+    
+    // Remove from all LOD arrays first
+    HighDetailEntities.Remove(EntityIndex);
+    MediumDetailEntities.Remove(EntityIndex);
+    LowDetailEntities.Remove(EntityIndex);
+    
+    // Add to appropriate LOD array
+    if (DistanceToPlayer <= LODSettings.HighDetailDistance)
+    {
+        if (HighDetailEntities.Num() < LODSettings.MaxHighDetailEntities)
         {
-            if (!SpawnedEntities[j].IsValid())
-            {
-                continue;
-            }
-
-            FTransformFragment* TransformB = EntityManager.GetFragmentDataPtr<FTransformFragment>(SpawnedEntities[j]);
-            FMassVelocityFragment* VelocityB = EntityManager.GetFragmentDataPtr<FMassVelocityFragment>(SpawnedEntities[j]);
-            
-            if (!TransformB || !VelocityB)
-            {
-                continue;
-            }
-
-            FVector LocationB = TransformB->GetTransform().GetLocation();
-            float Distance = FVector::Dist(LocationA, LocationB);
-            
-            if (Distance < EntityDetectionRadius)
-            {
-                // Apply separation force
-                FVector SeparationVector = (LocationA - LocationB).GetSafeNormal();
-                float SeparationForce = (EntityDetectionRadius - Distance) / EntityDetectionRadius;
-                
-                VelocityA->Value += SeparationVector * SeparationForce * EntitySpeed * 0.1f;
-                VelocityB->Value -= SeparationVector * SeparationForce * EntitySpeed * 0.1f;
-            }
+            HighDetailEntities.Add(EntityIndex);
         }
     }
+    else if (DistanceToPlayer <= LODSettings.MediumDetailDistance)
+    {
+        if (MediumDetailEntities.Num() < LODSettings.MaxMediumDetailEntities)
+        {
+            MediumDetailEntities.Add(EntityIndex);
+        }
+    }
+    else if (DistanceToPlayer <= LODSettings.LowDetailDistance)
+    {
+        if (LowDetailEntities.Num() < LODSettings.MaxLowDetailEntities)
+        {
+            LowDetailEntities.Add(EntityIndex);
+        }
+    }
+}
+
+void ACrowd_MassEntityManager::UpdateEntityBehavior(int32 EntityIndex, float DeltaTime)
+{
+    if (!Entities.IsValidIndex(EntityIndex))
+        return;
+    
+    FCrowd_EntityData& Entity = Entities[EntityIndex];
+    
+    switch (Entity.BehaviorState)
+    {
+        case ECrowd_BehaviorState::Idle:
+            // Random chance to start wandering
+            if (FMath::RandRange(0.0f, 1.0f) < 0.1f * DeltaTime)
+            {
+                Entity.BehaviorState = ECrowd_BehaviorState::Wandering;
+                Entity.Velocity = FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
+            }
+            break;
+            
+        case ECrowd_BehaviorState::Wandering:
+            // Random chance to stop and idle
+            if (FMath::RandRange(0.0f, 1.0f) < 0.05f * DeltaTime)
+            {
+                Entity.BehaviorState = ECrowd_BehaviorState::Idle;
+                Entity.Velocity = FVector::ZeroVector;
+            }
+            break;
+            
+        case ECrowd_BehaviorState::Working:
+            // Work for a while then rest
+            if (FMath::RandRange(0.0f, 1.0f) < 0.02f * DeltaTime)
+            {
+                Entity.BehaviorState = ECrowd_BehaviorState::Idle;
+            }
+            break;
+            
+        case ECrowd_BehaviorState::Socializing:
+            // Social interaction duration
+            if (FMath::RandRange(0.0f, 1.0f) < 0.03f * DeltaTime)
+            {
+                Entity.BehaviorState = ECrowd_BehaviorState::Wandering;
+            }
+            break;
+    }
+}
+
+void ACrowd_MassEntityManager::ProcessEntityMovement(int32 EntityIndex, float DeltaTime)
+{
+    if (!Entities.IsValidIndex(EntityIndex))
+        return;
+    
+    FCrowd_EntityData& Entity = Entities[EntityIndex];
+    
+    if (Entity.BehaviorState == ECrowd_BehaviorState::Wandering)
+    {
+        FVector Movement = CalculateEntityMovement(Entity, DeltaTime);
+        Entity.Position += Movement;
+        
+        // Keep entities within reasonable bounds
+        Entity.Position.X = FMath::Clamp(Entity.Position.X, -10000.0f, 10000.0f);
+        Entity.Position.Y = FMath::Clamp(Entity.Position.Y, -10000.0f, 10000.0f);
+        Entity.Position.Z = FMath::Max(Entity.Position.Z, 100.0f);
+    }
+}
+
+int32 ACrowd_MassEntityManager::GetActiveEntityCount() const
+{
+    return Entities.Num();
+}
+
+TArray<FCrowd_EntityData> ACrowd_MassEntityManager::GetEntitiesInRadius(FVector Center, float Radius) const
+{
+    TArray<FCrowd_EntityData> EntitiesInRadius;
+    
+    for (const FCrowd_EntityData& Entity : Entities)
+    {
+        float Distance = FVector::Dist(Entity.Position, Center);
+        if (Distance <= Radius)
+        {
+            EntitiesInRadius.Add(Entity);
+        }
+    }
+    
+    return EntitiesInRadius;
+}
+
+void ACrowd_MassEntityManager::InitializeMassSystem()
+{
+    // Clear existing entities
+    Entities.Empty();
+    HighDetailEntities.Empty();
+    MediumDetailEntities.Empty();
+    LowDetailEntities.Empty();
+    
+    // Spawn initial entities in various locations
+    TArray<FVector> SpawnLocations = {
+        FVector(2800, -1800, 150),  // Gathering area
+        FVector(3200, -2200, 150),  // Crafting area
+        FVector(2900, -2100, 150),  // Food preparation
+        FVector(3100, -1900, 150),  // Tool making
+        FVector(3000, -1700, 150),  // Lookout point
+        FVector(1000, 1000, 150),   // Random area 1
+        FVector(-1000, 2000, 150),  // Random area 2
+        FVector(5000, 0, 150)       // Random area 3
+    };
+    
+    for (int32 i = 0; i < FMath::Min(50, MaxEntities); i++)
+    {
+        FVector SpawnLoc = SpawnLocations[i % SpawnLocations.Num()];
+        SpawnLoc += FVector(FMath::RandRange(-200.0f, 200.0f), FMath::RandRange(-200.0f, 200.0f), 0.0f);
+        
+        ECrowd_BehaviorState InitialState = static_cast<ECrowd_BehaviorState>(FMath::RandRange(0, 3));
+        SpawnEntity(SpawnLoc, InitialState);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Mass Entity System initialized with %d entities"), Entities.Num());
+}
+
+void ACrowd_MassEntityManager::UpdateLODSystem()
+{
+    // Get player location for distance calculations
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!Player)
+        return;
+    
+    FVector PlayerLocation = Player->GetActorLocation();
+    
+    // Update LOD for all entities
+    for (int32 i = 0; i < Entities.Num(); i++)
+    {
+        float Distance = FVector::Dist(Entities[i].Position, PlayerLocation);
+        UpdateEntityLOD(i, Distance);
+    }
+}
+
+void ACrowd_MassEntityManager::OptimizeEntityCount()
+{
+    // Remove excess entities if we're over the limit
+    while (Entities.Num() > MaxEntities)
+    {
+        // Remove the entity with highest LOD distance (furthest from player)
+        int32 FurthestIndex = 0;
+        float MaxDistance = 0.0f;
+        
+        for (int32 i = 0; i < Entities.Num(); i++)
+        {
+            if (Entities[i].LODDistance > MaxDistance)
+            {
+                MaxDistance = Entities[i].LODDistance;
+                FurthestIndex = i;
+            }
+        }
+        
+        RemoveEntity(FurthestIndex);
+    }
+}
+
+FVector ACrowd_MassEntityManager::CalculateEntityMovement(const FCrowd_EntityData& Entity, float DeltaTime)
+{
+    FVector Movement = Entity.Velocity * Entity.Speed * DeltaTime;
+    
+    // Add some randomness to movement
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-50.0f, 50.0f),
+        FMath::RandRange(-50.0f, 50.0f),
+        0.0f
+    ) * DeltaTime;
+    
+    return Movement + RandomOffset;
 }
