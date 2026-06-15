@@ -1,367 +1,304 @@
 #include "Dir_ProductionManager.h"
 #include "Engine/Engine.h"
-#include "Misc/DateTime.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
 
-UDir_ProductionManager::UDir_ProductionManager()
+void UDir_ProductionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    InitializeAgentNames();
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Manager initialized - coordinating 19 AI agents"));
+    
+    InitializeAgents();
     CurrentMetrics = FDir_ProductionMetrics();
+    CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Prototype;
+    
+    // Start with Milestone 1: Walk Around prototype
+    UpdateProductionMetrics();
 }
 
-void UDir_ProductionManager::InitializeAgentNames()
-{
-    AgentNames = {
-        TEXT("Studio_Director"),
-        TEXT("Engine_Architect"),
-        TEXT("Core_Systems_Programmer"),
-        TEXT("Performance_Optimizer"),
-        TEXT("Procedural_World_Generator"),
-        TEXT("Environment_Artist"),
-        TEXT("Architecture_Interior_Agent"),
-        TEXT("Lighting_Atmosphere_Agent"),
-        TEXT("Character_Artist_Agent"),
-        TEXT("Animation_Agent"),
-        TEXT("NPC_Behavior_Agent"),
-        TEXT("Combat_Enemy_AI_Agent"),
-        TEXT("Crowd_Traffic_Simulation"),
-        TEXT("Quest_Mission_Designer"),
-        TEXT("Narrative_Dialogue_Agent"),
-        TEXT("Audio_Agent"),
-        TEXT("VFX_Agent"),
-        TEXT("QA_Testing_Agent"),
-        TEXT("Integration_Build_Agent")
-    };
-}
-
-void UDir_ProductionManager::InitializeAgentPipeline()
+void UDir_ProductionManager::Deinitialize()
 {
     AgentTasks.Empty();
+    Super::Deinitialize();
+}
+
+void UDir_ProductionManager::InitializeAgents()
+{
+    // Register all 19 AI agents with their specializations
+    RegisterAgent(1, TEXT("Studio Director"));
+    RegisterAgent(2, TEXT("Engine Architect"));
+    RegisterAgent(3, TEXT("Core Systems Programmer"));
+    RegisterAgent(4, TEXT("Performance Optimizer"));
+    RegisterAgent(5, TEXT("Procedural World Generator"));
+    RegisterAgent(6, TEXT("Environment Artist"));
+    RegisterAgent(7, TEXT("Architecture & Interior Agent"));
+    RegisterAgent(8, TEXT("Lighting & Atmosphere Agent"));
+    RegisterAgent(9, TEXT("Character Artist Agent"));
+    RegisterAgent(10, TEXT("Animation Agent"));
+    RegisterAgent(11, TEXT("NPC Behavior Agent"));
+    RegisterAgent(12, TEXT("Combat & Enemy AI Agent"));
+    RegisterAgent(13, TEXT("Crowd & Traffic Simulation"));
+    RegisterAgent(14, TEXT("Quest & Mission Designer"));
+    RegisterAgent(15, TEXT("Narrative & Dialogue Agent"));
+    RegisterAgent(16, TEXT("Audio Agent"));
+    RegisterAgent(17, TEXT("VFX Agent"));
+    RegisterAgent(18, TEXT("QA & Testing Agent"));
+    RegisterAgent(19, TEXT("Integration & Build Agent"));
+}
+
+void UDir_ProductionManager::RegisterAgent(int32 AgentID, const FString& AgentName)
+{
+    FDir_AgentTask NewTask;
+    NewTask.AgentID = AgentID;
+    NewTask.AgentName = AgentName;
+    NewTask.CurrentTask = TEXT("Initializing...");
+    NewTask.Status = EDir_AgentStatus::Idle;
+    NewTask.CompletionPercentage = 0.0f;
+    NewTask.LastUpdate = FDateTime::Now();
     
-    // Initialize all agents with default idle tasks
-    for (const FString& AgentName : AgentNames)
-    {
-        FDir_AgentTask NewTask;
-        NewTask.AgentName = AgentName;
-        NewTask.TaskDescription = TEXT("Awaiting assignment");
-        NewTask.Status = EDir_AgentStatus::Idle;
-        NewTask.Priority = 1.0f;
-        NewTask.StartTime = FDateTime::Now();
-        NewTask.EstimatedCompletion = FDateTime::Now() + FTimespan::FromHours(1);
-        
-        AgentTasks.Add(NewTask);
-    }
-
-    // Set up initial dependencies based on production pipeline
-    AddTaskDependency(TEXT("Core_Systems_Programmer"), TEXT("Engine_Architect"));
-    AddTaskDependency(TEXT("Performance_Optimizer"), TEXT("Core_Systems_Programmer"));
-    AddTaskDependency(TEXT("Environment_Artist"), TEXT("Procedural_World_Generator"));
-    AddTaskDependency(TEXT("Architecture_Interior_Agent"), TEXT("Environment_Artist"));
-    AddTaskDependency(TEXT("Lighting_Atmosphere_Agent"), TEXT("Architecture_Interior_Agent"));
-    AddTaskDependency(TEXT("Animation_Agent"), TEXT("Character_Artist_Agent"));
-    AddTaskDependency(TEXT("NPC_Behavior_Agent"), TEXT("Animation_Agent"));
-    AddTaskDependency(TEXT("Combat_Enemy_AI_Agent"), TEXT("NPC_Behavior_Agent"));
-    AddTaskDependency(TEXT("Crowd_Traffic_Simulation"), TEXT("Combat_Enemy_AI_Agent"));
-    AddTaskDependency(TEXT("Quest_Mission_Designer"), TEXT("Narrative_Dialogue_Agent"));
-    AddTaskDependency(TEXT("Audio_Agent"), TEXT("Quest_Mission_Designer"));
-    AddTaskDependency(TEXT("VFX_Agent"), TEXT("Audio_Agent"));
-    AddTaskDependency(TEXT("QA_Testing_Agent"), TEXT("VFX_Agent"));
-    AddTaskDependency(TEXT("Integration_Build_Agent"), TEXT("QA_Testing_Agent"));
-
-    // Set up production milestones
-    SetMilestone(TEXT("Core_Architecture_Complete"), {TEXT("Engine_Architect"), TEXT("Core_Systems_Programmer")});
-    SetMilestone(TEXT("World_Foundation_Ready"), {TEXT("Procedural_World_Generator"), TEXT("Environment_Artist"), TEXT("Performance_Optimizer")});
-    SetMilestone(TEXT("Character_Systems_Online"), {TEXT("Character_Artist_Agent"), TEXT("Animation_Agent"), TEXT("NPC_Behavior_Agent")});
-    SetMilestone(TEXT("Gameplay_Core_Complete"), {TEXT("Combat_Enemy_AI_Agent"), TEXT("Quest_Mission_Designer"), TEXT("Narrative_Dialogue_Agent")});
-    SetMilestone(TEXT("Polish_Phase_Ready"), {TEXT("Audio_Agent"), TEXT("VFX_Agent"), TEXT("Lighting_Atmosphere_Agent")});
-    SetMilestone(TEXT("Release_Candidate"), {TEXT("QA_Testing_Agent"), TEXT("Integration_Build_Agent")});
-
-    CurrentMetrics.TotalAgents = AgentNames.Num();
-    CurrentMetrics.CurrentPhase = EDir_ProductionPhase::PreProduction;
-
-    UE_LOG(LogTemp, Warning, TEXT("Production pipeline initialized with %d agents"), AgentNames.Num());
-}
-
-void UDir_ProductionManager::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
-{
-    FDir_AgentTask* Task = FindAgentTask(AgentName);
-    if (Task)
-    {
-        Task->TaskDescription = TaskDescription;
-        Task->Priority = Priority;
-        Task->Status = EDir_AgentStatus::Working;
-        Task->StartTime = FDateTime::Now();
-        Task->EstimatedCompletion = FDateTime::Now() + FTimespan::FromHours(FMath::RandRange(1, 4));
-        
-        UE_LOG(LogTemp, Log, TEXT("Assigned task to %s: %s (Priority: %.1f)"), *AgentName, *TaskDescription, Priority);
-    }
-}
-
-void UDir_ProductionManager::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
-{
-    FDir_AgentTask* Task = FindAgentTask(AgentName);
-    if (Task)
-    {
-        Task->Status = NewStatus;
-        
-        if (NewStatus == EDir_AgentStatus::Completed)
-        {
-            CurrentMetrics.CompletedTasks++;
-        }
-        else if (NewStatus == EDir_AgentStatus::Blocked)
-        {
-            CurrentMetrics.BlockedTasks++;
-        }
-    }
-}
-
-bool UDir_ProductionManager::CanAgentStartTask(const FString& AgentName) const
-{
-    // Check if dependencies are met
-    if (!AreDependenciesMet(AgentName))
-    {
-        return false;
-    }
-
-    // Check if agent is not already working or blocked
-    const FDir_AgentTask* Task = FindAgentTask(AgentName);
-    if (Task)
-    {
-        return Task->Status == EDir_AgentStatus::Idle || Task->Status == EDir_AgentStatus::Completed;
-    }
-
-    return false;
-}
-
-TArray<FString> UDir_ProductionManager::GetBlockedAgents() const
-{
-    TArray<FString> BlockedAgents;
+    AgentTasks.Add(AgentID, NewTask);
     
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.Status == EDir_AgentStatus::Blocked)
-        {
-            BlockedAgents.Add(Task.AgentName);
-        }
-    }
-    
-    return BlockedAgents;
+    UE_LOG(LogTemp, Log, TEXT("Registered Agent #%d: %s"), AgentID, *AgentName);
 }
 
-void UDir_ProductionManager::AdvanceProductionPhase()
+void UDir_ProductionManager::UpdateAgentTask(int32 AgentID, const FString& TaskDescription, EDir_AgentStatus Status, float Completion)
 {
-    // Check milestones to determine phase advancement
-    if (IsMilestoneComplete(TEXT("Core_Architecture_Complete")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::PreProduction)
+    if (FDir_AgentTask* Task = AgentTasks.Find(AgentID))
     {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::CoreSystems;
+        Task->CurrentTask = TaskDescription;
+        Task->Status = Status;
+        Task->CompletionPercentage = FMath::Clamp(Completion, 0.0f, 100.0f);
+        Task->LastUpdate = FDateTime::Now();
+        
+        UE_LOG(LogTemp, Log, TEXT("Agent #%d (%s): %s [%.1f%%]"), 
+               AgentID, *Task->AgentName, *TaskDescription, Completion);
     }
-    else if (IsMilestoneComplete(TEXT("World_Foundation_Ready")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::CoreSystems)
+}
+
+void UDir_ProductionManager::IncrementAgentFiles(int32 AgentID, int32 FileCount)
+{
+    if (FDir_AgentTask* Task = AgentTasks.Find(AgentID))
     {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::WorldBuilding;
+        Task->FilesCreated += FileCount;
+        Task->LastUpdate = FDateTime::Now();
     }
-    else if (IsMilestoneComplete(TEXT("Character_Systems_Online")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::WorldBuilding)
+}
+
+void UDir_ProductionManager::IncrementAgentCommands(int32 AgentID, int32 CommandCount)
+{
+    if (FDir_AgentTask* Task = AgentTasks.Find(AgentID))
     {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::CharacterDevelopment;
+        Task->UE5CommandsExecuted += CommandCount;
+        Task->LastUpdate = FDateTime::Now();
     }
-    else if (IsMilestoneComplete(TEXT("Gameplay_Core_Complete")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::CharacterDevelopment)
+}
+
+TArray<FDir_AgentTask> UDir_ProductionManager::GetAllAgentTasks() const
+{
+    TArray<FDir_AgentTask> Tasks;
+    for (const auto& Pair : AgentTasks)
     {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::GameplayImplementation;
+        Tasks.Add(Pair.Value);
     }
-    else if (IsMilestoneComplete(TEXT("Polish_Phase_Ready")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::GameplayImplementation)
+    return Tasks;
+}
+
+FDir_AgentTask UDir_ProductionManager::GetAgentTask(int32 AgentID) const
+{
+    if (const FDir_AgentTask* Task = AgentTasks.Find(AgentID))
     {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Polish;
+        return *Task;
     }
-    else if (IsMilestoneComplete(TEXT("Release_Candidate")) && CurrentMetrics.CurrentPhase == EDir_ProductionPhase::Polish)
-    {
-        CurrentMetrics.CurrentPhase = EDir_ProductionPhase::Testing;
-    }
+    return FDir_AgentTask();
+}
+
+void UDir_ProductionManager::UpdateProductionMetrics()
+{
+    CurrentMetrics.TotalActors = CountActorsInLevel();
+    CurrentMetrics.DinosaurCount = CountDinosaursInLevel();
+    CurrentMetrics.LastBuild = FDateTime::Now();
+    
+    CalculateOverallProgress();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Metrics - Actors: %d, Dinosaurs: %d, Progress: %.1f%%"),
+           CurrentMetrics.TotalActors, CurrentMetrics.DinosaurCount, CurrentMetrics.OverallProgress);
 }
 
 FDir_ProductionMetrics UDir_ProductionManager::GetProductionMetrics() const
 {
-    FDir_ProductionMetrics Metrics = CurrentMetrics;
-    
-    // Update real-time metrics
-    Metrics.ActiveAgents = 0;
-    Metrics.CompletedTasks = 0;
-    Metrics.BlockedTasks = 0;
-    
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        if (Task.Status == EDir_AgentStatus::Working)
-        {
-            Metrics.ActiveAgents++;
-        }
-        else if (Task.Status == EDir_AgentStatus::Completed)
-        {
-            Metrics.CompletedTasks++;
-        }
-        else if (Task.Status == EDir_AgentStatus::Blocked)
-        {
-            Metrics.BlockedTasks++;
-        }
-    }
-    
-    Metrics.OverallProgress = CalculateOverallProgress();
-    
-    return Metrics;
+    return CurrentMetrics;
 }
 
-float UDir_ProductionManager::CalculateOverallProgress() const
+void UDir_ProductionManager::SetProductionPhase(EDir_ProductionPhase NewPhase)
 {
-    if (AgentTasks.Num() == 0)
-    {
-        return 0.0f;
-    }
+    CurrentMetrics.CurrentPhase = NewPhase;
     
-    int32 CompletedCount = 0;
-    for (const FDir_AgentTask& Task : AgentTasks)
+    FString PhaseNames[] = {
+        TEXT("PreProduction"), TEXT("Prototype"), TEXT("VerticalSlice"), 
+        TEXT("Alpha"), TEXT("Beta"), TEXT("Gold")
+    };
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Phase changed to: %s"), 
+           *PhaseNames[static_cast<int32>(NewPhase)]);
+}
+
+bool UDir_ProductionManager::CheckMilestone1Complete() const
+{
+    // Milestone 1: Walk Around
+    // - Character can move with WASD
+    // - Landscape with terrain
+    // - 3-5 dinosaur meshes placed
+    // - Basic lighting
+    
+    bool HasCharacter = false;
+    bool HasTerrain = false;
+    bool HasDinosaurs = CurrentMetrics.DinosaurCount >= 3;
+    bool HasLighting = false;
+    
+    if (UWorld* World = GetWorld())
     {
-        if (Task.Status == EDir_AgentStatus::Completed)
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            CompletedCount++;
+            AActor* Actor = *ActorItr;
+            FString ActorName = Actor->GetName().ToLower();
+            
+            if (ActorName.Contains(TEXT("character")) || ActorName.Contains(TEXT("pawn")))
+            {
+                HasCharacter = true;
+            }
+            else if (ActorName.Contains(TEXT("landscape")) || ActorName.Contains(TEXT("terrain")))
+            {
+                HasTerrain = true;
+            }
+            else if (ActorName.Contains(TEXT("directionallight")) || ActorName.Contains(TEXT("skylight")))
+            {
+                HasLighting = true;
+            }
         }
     }
     
-    return (float)CompletedCount / (float)AgentTasks.Num() * 100.0f;
+    return HasCharacter && HasTerrain && HasDinosaurs && HasLighting;
 }
 
-void UDir_ProductionManager::AddTaskDependency(const FString& AgentName, const FString& DependentAgent)
+bool UDir_ProductionManager::CheckMilestone2Complete() const
 {
-    if (!TaskDependencies.Contains(AgentName))
-    {
-        TaskDependencies.Add(AgentName, TArray<FString>());
-    }
+    // Milestone 2: Basic Survival
+    // - Health/hunger/thirst systems
+    // - Basic crafting
+    // - Day/night cycle
     
-    TaskDependencies[AgentName].AddUnique(DependentAgent);
+    return CurrentMetrics.CompletedSystems >= 5;
 }
 
-bool UDir_ProductionManager::AreDependenciesMet(const FString& AgentName) const
+bool UDir_ProductionManager::CheckMilestone3Complete() const
 {
-    if (!TaskDependencies.Contains(AgentName))
-    {
-        return true; // No dependencies
-    }
+    // Milestone 3: Dinosaur Interaction
+    // - Dinosaur AI behaviors
+    // - Combat system
+    // - Taming mechanics
     
-    const TArray<FString>& Dependencies = TaskDependencies[AgentName];
-    
-    for (const FString& Dependency : Dependencies)
-    {
-        const FDir_AgentTask* DependentTask = FindAgentTask(Dependency);
-        if (!DependentTask || DependentTask->Status != EDir_AgentStatus::Completed)
-        {
-            return false;
-        }
-    }
-    
-    return true;
+    return CurrentMetrics.CompletedSystems >= 10 && CurrentMetrics.DinosaurCount >= 10;
 }
 
-void UDir_ProductionManager::SetMilestone(const FString& MilestoneName, const TArray<FString>& RequiredAgents)
+void UDir_ProductionManager::LogPerformanceMetrics()
 {
-    ProductionMilestones.Add(MilestoneName, RequiredAgents);
+    FString Report = FString::Printf(
+        TEXT("=== PRODUCTION PERFORMANCE REPORT ===\n")
+        TEXT("Total Actors: %d / 8000 limit\n")
+        TEXT("Dinosaurs: %d / 150 limit\n")
+        TEXT("Active Agents: %d / 19\n")
+        TEXT("Overall Progress: %.1f%%\n")
+        TEXT("Current Phase: %d\n"),
+        CurrentMetrics.TotalActors, CurrentMetrics.DinosaurCount,
+        AgentTasks.Num(), CurrentMetrics.OverallProgress,
+        static_cast<int32>(CurrentMetrics.CurrentPhase)
+    );
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *Report);
 }
 
-bool UDir_ProductionManager::IsMilestoneComplete(const FString& MilestoneName) const
+bool UDir_ProductionManager::IsWithinActorLimits() const
 {
-    if (!ProductionMilestones.Contains(MilestoneName))
-    {
-        return false;
-    }
-    
-    const TArray<FString>& RequiredAgents = ProductionMilestones[MilestoneName];
-    
-    for (const FString& AgentName : RequiredAgents)
-    {
-        const FDir_AgentTask* Task = FindAgentTask(AgentName);
-        if (!Task || Task->Status != EDir_AgentStatus::Completed)
-        {
-            return false;
-        }
-    }
-    
-    return true;
+    return CurrentMetrics.TotalActors <= 8000 && CurrentMetrics.DinosaurCount <= 150;
 }
 
-void UDir_ProductionManager::LogProductionStatus()
+void UDir_ProductionManager::EnforceActorLimits()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATUS ==="));
-    
-    FDir_ProductionMetrics Metrics = GetProductionMetrics();
-    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), Metrics.OverallProgress);
-    UE_LOG(LogTemp, Warning, TEXT("Active Agents: %d/%d"), Metrics.ActiveAgents, Metrics.TotalAgents);
-    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), Metrics.CompletedTasks);
-    UE_LOG(LogTemp, Warning, TEXT("Blocked Tasks: %d"), Metrics.BlockedTasks);
-    
-    FString PhaseString;
-    switch (Metrics.CurrentPhase)
+    if (!IsWithinActorLimits())
     {
-        case EDir_ProductionPhase::PreProduction: PhaseString = TEXT("Pre-Production"); break;
-        case EDir_ProductionPhase::CoreSystems: PhaseString = TEXT("Core Systems"); break;
-        case EDir_ProductionPhase::WorldBuilding: PhaseString = TEXT("World Building"); break;
-        case EDir_ProductionPhase::CharacterDevelopment: PhaseString = TEXT("Character Development"); break;
-        case EDir_ProductionPhase::GameplayImplementation: PhaseString = TEXT("Gameplay Implementation"); break;
-        case EDir_ProductionPhase::Polish: PhaseString = TEXT("Polish"); break;
-        case EDir_ProductionPhase::Testing: PhaseString = TEXT("Testing"); break;
-    }
-    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %s"), *PhaseString);
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== AGENT DETAILS ==="));
-    for (const FDir_AgentTask& Task : AgentTasks)
-    {
-        FString StatusString;
-        switch (Task.Status)
-        {
-            case EDir_AgentStatus::Idle: StatusString = TEXT("Idle"); break;
-            case EDir_AgentStatus::Working: StatusString = TEXT("Working"); break;
-            case EDir_AgentStatus::Completed: StatusString = TEXT("Completed"); break;
-            case EDir_AgentStatus::Blocked: StatusString = TEXT("Blocked"); break;
-            case EDir_AgentStatus::Error: StatusString = TEXT("Error"); break;
-        }
+        UE_LOG(LogTemp, Error, TEXT("Actor limits exceeded! Actors: %d, Dinosaurs: %d"), 
+               CurrentMetrics.TotalActors, CurrentMetrics.DinosaurCount);
         
-        UE_LOG(LogTemp, Warning, TEXT("%s: %s [%s] (Priority: %.1f)"), 
-               *Task.AgentName, *Task.TaskDescription, *StatusString, Task.Priority);
+        // This would trigger the CAP enforcement script
+        // Implementation delegated to UE5 Python commands
     }
 }
 
-void UDir_ProductionManager::ResetAllAgentTasks()
+void UDir_ProductionManager::CalculateOverallProgress()
 {
-    for (FDir_AgentTask& Task : AgentTasks)
-    {
-        Task.Status = EDir_AgentStatus::Idle;
-        Task.TaskDescription = TEXT("Awaiting assignment");
-        Task.StartTime = FDateTime::Now();
-        Task.EstimatedCompletion = FDateTime::Now();
-    }
+    float TotalProgress = 0.0f;
+    int32 ActiveAgents = 0;
     
-    CurrentMetrics.CompletedTasks = 0;
-    CurrentMetrics.BlockedTasks = 0;
-    CurrentMetrics.ActiveAgents = 0;
-    CurrentMetrics.OverallProgress = 0.0f;
-    CurrentMetrics.CurrentPhase = EDir_ProductionPhase::PreProduction;
-    
-    UE_LOG(LogTemp, Warning, TEXT("All agent tasks reset to idle state"));
-}
-
-FDir_AgentTask* UDir_ProductionManager::FindAgentTask(const FString& AgentName)
-{
-    for (FDir_AgentTask& Task : AgentTasks)
+    for (const auto& Pair : AgentTasks)
     {
-        if (Task.AgentName == AgentName)
+        const FDir_AgentTask& Task = Pair.Value;
+        if (Task.Status != EDir_AgentStatus::Idle)
         {
-            return &Task;
+            TotalProgress += Task.CompletionPercentage;
+            ActiveAgents++;
         }
     }
-    return nullptr;
-}
-
-const FDir_AgentTask* UDir_ProductionManager::FindAgentTask(const FString& AgentName) const
-{
-    for (const FDir_AgentTask& Task : AgentTasks)
+    
+    CurrentMetrics.OverallProgress = ActiveAgents > 0 ? TotalProgress / ActiveAgents : 0.0f;
+    CurrentMetrics.CompletedSystems = 0;
+    
+    // Count completed systems based on agent completion
+    for (const auto& Pair : AgentTasks)
     {
-        if (Task.AgentName == AgentName)
+        if (Pair.Value.CompletionPercentage >= 90.0f)
         {
-            return &Task;
+            CurrentMetrics.CompletedSystems++;
         }
     }
-    return nullptr;
+}
+
+int32 UDir_ProductionManager::CountActorsInLevel() const
+{
+    int32 Count = 0;
+    if (UWorld* World = GetWorld())
+    {
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+int32 UDir_ProductionManager::CountDinosaursInLevel() const
+{
+    int32 Count = 0;
+    if (UWorld* World = GetWorld())
+    {
+        TArray<FString> DinoLabels = {
+            TEXT("trex"), TEXT("veloci"), TEXT("tricera"), TEXT("brachi"),
+            TEXT("ankylo"), TEXT("parasauro"), TEXT("pachy"), TEXT("proto"), TEXT("tsinta")
+        };
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            FString ActorLabel = ActorItr->GetActorLabel().ToLower();
+            for (const FString& DinoLabel : DinoLabels)
+            {
+                if (ActorLabel.Contains(DinoLabel))
+                {
+                    Count++;
+                    break;
+                }
+            }
+        }
+    }
+    return Count;
 }
