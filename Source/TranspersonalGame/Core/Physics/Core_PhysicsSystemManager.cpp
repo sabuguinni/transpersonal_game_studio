@@ -1,606 +1,636 @@
 #include "Core_PhysicsSystemManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
+#include "Engine/Engine.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
 
 UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
 {
-    GlobalGravityScale = 1.0f;
-    MaxPhysicsSimulationDistance = 5000.0f;
-    bEnablePhysicsOptimization = true;
-    MaxActivePhysicsActors = 500;
-}
-
-void UCore_PhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core Physics System Manager Initialized"));
-    
-    // Set up physics update timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(PhysicsUpdateTimer, 
-            FTimerDelegate::CreateUObject(this, &UCore_PhysicsSystemManager::UpdatePhysicsActors, 0.016f), 
-            0.016f, true); // 60 FPS update
-            
-        World->GetTimerManager().SetTimer(PhysicsCleanupTimer,
-            FTimerDelegate::CreateUObject(this, &UCore_PhysicsSystemManager::CleanupInactivePhysicsActors),
-            5.0f, true); // Cleanup every 5 seconds
-    }
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
     // Initialize default physics settings
-    SetGlobalPhysicsSettings(-980.0f, 0.01f, 0.0f);
+    PhysicsSettings = FCore_PhysicsSettings();
+    ActivePhysicsObjects = 0;
+    PhysicsUpdateTime = 0.0f;
+    bPhysicsSystemInitialized = false;
+    LastOptimizationTime = 0.0f;
+    PhysicsFrameCounter = 0;
 }
 
-void UCore_PhysicsSystemManager::Deinitialize()
+void UCore_PhysicsSystemManager::BeginPlay()
 {
-    // Clear timers
+    Super::BeginPlay();
+    
+    InitializePhysicsSystem();
+    
+    // Set up optimization timer
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(PhysicsUpdateTimer);
-        World->GetTimerManager().ClearTimer(PhysicsCleanupTimer);
+        World->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &UCore_PhysicsSystemManager::OptimizePhysicsPerformance,
+            5.0f, // Every 5 seconds
+            true
+        );
     }
-    
-    // Clear registered actors
-    RegisteredPhysicsActors.Empty();
-    ActivePhysicsActors.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Core Physics System Manager Deinitialized"));
-    
-    Super::Deinitialize();
 }
 
-void UCore_PhysicsSystemManager::RegisterPhysicsActor(AActor* Actor, ECore_PhysicsType PhysicsType)
+void UCore_PhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!Actor)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (!bPhysicsSystemInitialized)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot register null physics actor"));
         return;
     }
     
-    RegisteredPhysicsActors.Add(Actor, PhysicsType);
+    float StartTime = FPlatformTime::Seconds();
     
-    if (!ActivePhysicsActors.Contains(Actor))
+    // Process pending registrations/unregistrations
+    for (AActor* Actor : PendingRegistration)
     {
-        ActivePhysicsActors.Add(Actor);
+        if (IsValid(Actor))
+        {
+            FCore_PhysicsObjectData NewData;
+            NewData.PhysicsActor = Actor;
+            NewData.LastUpdateTime = GetWorld()->GetTimeSeconds();
+            
+            if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+            {
+                NewData.Mass = PhysComp->GetMass();
+                NewData.bIsSimulating = PhysComp->IsSimulatingPhysics();
+                NewData.Velocity = PhysComp->GetPhysicsLinearVelocity();
+                NewData.AngularVelocity = PhysComp->GetPhysicsAngularVelocityInRadians();
+            }
+            
+            RegisteredObjects.Add(NewData);
+        }
+    }
+    PendingRegistration.Empty();
+    
+    for (AActor* Actor : PendingUnregistration)
+    {
+        RegisteredObjects.RemoveAll([Actor](const FCore_PhysicsObjectData& Data)
+        {
+            return Data.PhysicsActor == Actor;
+        });
+    }
+    PendingUnregistration.Empty();
+    
+    // Update physics object data
+    UpdatePhysicsObjectData(DeltaTime);
+    
+    // Clean up invalid objects periodically
+    PhysicsFrameCounter++;
+    if (PhysicsFrameCounter % 300 == 0) // Every 5 seconds at 60fps
+    {
+        CleanupInvalidObjects();
     }
     
-    // Configure physics based on type
-    if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
+    PhysicsUpdateTime = FPlatformTime::Seconds() - StartTime;
+}
+
+void UCore_PhysicsSystemManager::InitializePhysicsSystem()
+{
+    if (bPhysicsSystemInitialized)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Initializing physics system"));
+    
+    // Apply global physics settings
+    if (UWorld* World = GetWorld())
+    {
+        if (UPhysicsSettings* Settings = UPhysicsSettings::Get())
+        {
+            // Update global physics settings
+            Settings->DefaultGravityZ = -980.0f * PhysicsSettings.GlobalGravityScale;
+            Settings->bSubstepping = PhysicsSettings.bEnableAsyncPhysics;
+            Settings->MaxSubstepDeltaTime = PhysicsSettings.PhysicsTimeStep;
+            Settings->MaxSubsteps = static_cast<int32>(PhysicsSettings.MaxPhysicsSubsteps);
+        }
+    }
+    
+    ValidatePhysicsSettings();
+    bPhysicsSystemInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Physics system initialized successfully"));
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings)
+{
+    PhysicsSettings = NewSettings;
+    
+    if (UPhysicsSettings* Settings = UPhysicsSettings::Get())
+    {
+        Settings->DefaultGravityZ = -980.0f * PhysicsSettings.GlobalGravityScale;
+        Settings->bSubstepping = PhysicsSettings.bEnableAsyncPhysics;
+        Settings->MaxSubstepDeltaTime = PhysicsSettings.PhysicsTimeStep;
+        Settings->MaxSubsteps = static_cast<int32>(PhysicsSettings.MaxPhysicsSubsteps);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Physics settings updated"));
+}
+
+void UCore_PhysicsSystemManager::RegisterPhysicsObject(AActor* Actor, ECore_PhysicsType PhysicsType)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    // Check if already registered
+    bool bAlreadyRegistered = RegisteredObjects.ContainsByPredicate([Actor](const FCore_PhysicsObjectData& Data)
+    {
+        return Data.PhysicsActor == Actor;
+    });
+    
+    if (bAlreadyRegistered)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Actor %s already registered"), *Actor->GetName());
+        return;
+    }
+    
+    PendingRegistration.AddUnique(Actor);
+    
+    // Configure physics component based on type
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
     {
         switch (PhysicsType)
         {
             case ECore_PhysicsType::Static:
-                PrimComp->SetMobility(EComponentMobility::Static);
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                break;
-                
-            case ECore_PhysicsType::Dynamic:
-                PrimComp->SetMobility(EComponentMobility::Movable);
-                PrimComp->SetSimulatePhysics(true);
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                PhysComp->SetMobility(EComponentMobility::Static);
+                PhysComp->SetSimulatePhysics(false);
                 break;
                 
             case ECore_PhysicsType::Kinematic:
-                PrimComp->SetMobility(EComponentMobility::Movable);
-                PrimComp->SetSimulatePhysics(false);
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                PhysComp->SetMobility(EComponentMobility::Movable);
+                PhysComp->SetSimulatePhysics(false);
+                break;
+                
+            case ECore_PhysicsType::Dynamic:
+                PhysComp->SetMobility(EComponentMobility::Movable);
+                PhysComp->SetSimulatePhysics(true);
+                PhysComp->SetLinearDamping(PhysicsSettings.DefaultLinearDamping);
+                PhysComp->SetAngularDamping(PhysicsSettings.DefaultAngularDamping);
                 break;
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Registered physics actor: %s with type: %d"), 
-           *Actor->GetName(), (int32)PhysicsType);
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System: Registered actor %s with physics type %d"), 
+           *Actor->GetName(), static_cast<int32>(PhysicsType));
 }
 
-void UCore_PhysicsSystemManager::UnregisterPhysicsActor(AActor* Actor)
+void UCore_PhysicsSystemManager::UnregisterPhysicsObject(AActor* Actor)
 {
-    if (!Actor)
+    if (!IsValid(Actor))
     {
         return;
     }
     
-    RegisteredPhysicsActors.Remove(Actor);
-    ActivePhysicsActors.Remove(Actor);
-    
-    UE_LOG(LogTemp, Log, TEXT("Unregistered physics actor: %s"), *Actor->GetName());
+    PendingUnregistration.AddUnique(Actor);
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System: Unregistered actor %s"), *Actor->GetName());
 }
 
-void UCore_PhysicsSystemManager::SetGlobalPhysicsSettings(float Gravity, float LinearDamping, float AngularDamping)
+void UCore_PhysicsSystemManager::SetGlobalGravity(float NewGravityScale)
 {
-    GlobalGravityScale = Gravity / -980.0f; // Normalize to UE5 gravity scale
+    PhysicsSettings.GlobalGravityScale = NewGravityScale;
     
-    if (UWorld* World = GetWorld())
+    if (UPhysicsSettings* Settings = UPhysicsSettings::Get())
     {
-        // Apply global physics settings
-        if (AWorldSettings* WorldSettings = World->GetWorldSettings())
-        {
-            WorldSettings->GlobalGravityZ = Gravity;
-        }
+        Settings->DefaultGravityZ = -980.0f * NewGravityScale;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Set global physics: Gravity=%.2f, LinearDamp=%.3f, AngularDamp=%.3f"), 
-           Gravity, LinearDamping, AngularDamping);
+    UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Global gravity set to %f"), NewGravityScale);
 }
 
-void UCore_PhysicsSystemManager::ApplyImpactForce(AActor* TargetActor, FVector ImpactLocation, FVector ForceDirection, float ForceMagnitude)
+void UCore_PhysicsSystemManager::EnablePhysicsSimulation(AActor* Actor, bool bEnable)
 {
-    if (!TargetActor)
+    if (!IsValid(Actor))
     {
         return;
     }
     
-    if (UPrimitiveComponent* PrimComp = TargetActor->GetRootComponent()->Cast<UPrimitiveComponent>())
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
     {
-        if (PrimComp->IsSimulatingPhysics())
-        {
-            FVector NormalizedForce = ForceDirection.GetSafeNormal() * ForceMagnitude;
-            PrimComp->AddImpulseAtLocation(NormalizedForce, ImpactLocation);
-            
-            // Calculate impact damage
-            float ImpactVelocity = ForceMagnitude / FMath::Max(PrimComp->GetMass(), 1.0f);
-            float Damage = CalculateImpactDamage(ImpactVelocity, PrimComp->GetMass(), ECore_PhysicsType::Dynamic);
-            
-            // Broadcast impact event
-            OnPhysicsImpact.Broadcast(TargetActor, ImpactLocation, ForceMagnitude);
-            
-            UE_LOG(LogTemp, Log, TEXT("Applied impact force %.2f to %s at location %s"), 
-                   ForceMagnitude, *TargetActor->GetName(), *ImpactLocation.ToString());
-        }
-    }
-}
-
-void UCore_PhysicsSystemManager::ApplyRadialForce(FVector Origin, float Radius, float Strength, bool bVelChange)
-{
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> ActorsInRadius;
-        UKismetSystemLibrary::SphereOverlapActors(World, Origin, Radius, TArray<TEnumAsByte<EObjectTypeQuery>>(), 
-                                                  AActor::StaticClass(), TArray<AActor*>(), ActorsInRadius);
+        PhysComp->SetSimulatePhysics(bEnable);
         
-        for (AActor* Actor : ActorsInRadius)
+        // Update registered object data
+        for (FCore_PhysicsObjectData& Data : RegisteredObjects)
         {
-            if (RegisteredPhysicsActors.Contains(Actor))
+            if (Data.PhysicsActor == Actor)
             {
-                if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
-                {
-                    if (PrimComp->IsSimulatingPhysics())
-                    {
-                        FVector ForceDirection = (Actor->GetActorLocation() - Origin).GetSafeNormal();
-                        float Distance = FVector::Dist(Actor->GetActorLocation(), Origin);
-                        float ForceMagnitude = Strength * (1.0f - (Distance / Radius));
-                        
-                        if (bVelChange)
-                        {
-                            PrimComp->AddImpulse(ForceDirection * ForceMagnitude, NAME_None, true);
-                        }
-                        else
-                        {
-                            PrimComp->AddForce(ForceDirection * ForceMagnitude);
-                        }
-                    }
-                }
+                Data.bIsSimulating = bEnable;
+                break;
             }
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Applied radial force: Origin=%s, Radius=%.2f, Strength=%.2f, Affected=%d"), 
-               *Origin.ToString(), Radius, Strength, ActorsInRadius.Num());
     }
 }
 
-void UCore_PhysicsSystemManager::ApplyExplosionForce(FVector ExplosionOrigin, float InnerRadius, float OuterRadius, float Strength, bool bLinearFalloff)
+void UCore_PhysicsSystemManager::ApplyImpulse(AActor* Actor, const FVector& Impulse, const FVector& Location)
 {
-    if (UWorld* World = GetWorld())
+    if (!IsValid(Actor))
     {
-        TArray<AActor*> ActorsInRange;
-        UKismetSystemLibrary::SphereOverlapActors(World, ExplosionOrigin, OuterRadius, TArray<TEnumAsByte<EObjectTypeQuery>>(), 
-                                                  AActor::StaticClass(), TArray<AActor*>(), ActorsInRange);
-        
-        for (AActor* Actor : ActorsInRange)
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        if (Location.IsZero())
         {
-            if (RegisteredPhysicsActors.Contains(Actor))
+            PhysComp->AddImpulse(Impulse);
+        }
+        else
+        {
+            PhysComp->AddImpulseAtLocation(Impulse, Location);
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::ApplyForce(AActor* Actor, const FVector& Force)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->AddForce(Force);
+    }
+}
+
+void UCore_PhysicsSystemManager::SetObjectMass(AActor* Actor, float NewMass)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->SetMassOverrideInKg(NAME_None, NewMass, true);
+        
+        // Update registered object data
+        for (FCore_PhysicsObjectData& Data : RegisteredObjects)
+        {
+            if (Data.PhysicsActor == Actor)
             {
-                if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
-                {
-                    if (PrimComp->IsSimulatingPhysics())
-                    {
-                        FVector ForceDirection = (Actor->GetActorLocation() - ExplosionOrigin).GetSafeNormal();
-                        float Distance = FVector::Dist(Actor->GetActorLocation(), ExplosionOrigin);
-                        
-                        float ForceMagnitude = 0.0f;
-                        if (Distance <= InnerRadius)
-                        {
-                            ForceMagnitude = Strength;
-                        }
-                        else if (Distance <= OuterRadius)
-                        {
-                            float Alpha = (Distance - InnerRadius) / (OuterRadius - InnerRadius);
-                            ForceMagnitude = bLinearFalloff ? 
-                                Strength * (1.0f - Alpha) : 
-                                Strength * FMath::Pow(1.0f - Alpha, 2.0f);
-                        }
-                        
-                        PrimComp->AddImpulse(ForceDirection * ForceMagnitude, NAME_None, true);
-                    }
-                }
+                Data.Mass = NewMass;
+                break;
             }
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Applied explosion force: Origin=%s, InnerR=%.2f, OuterR=%.2f, Strength=%.2f"), 
-               *ExplosionOrigin.ToString(), InnerRadius, OuterRadius, Strength);
     }
 }
 
-bool UCore_PhysicsSystemManager::LineTracePhysics(FVector Start, FVector End, FHitResult& HitResult, bool bTraceComplex)
+void UCore_PhysicsSystemManager::SetLinearDamping(AActor* Actor, float Damping)
 {
-    if (UWorld* World = GetWorld())
+    if (!IsValid(Actor))
     {
-        FCollisionQueryParams QueryParams;
-        QueryParams.bTraceComplex = bTraceComplex;
-        QueryParams.bReturnPhysicalMaterial = true;
-        
-        bool bHit = World->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams);
-        
-        if (bHit && HitResult.GetActor())
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->SetLinearDamping(Damping);
+    }
+}
+
+void UCore_PhysicsSystemManager::SetAngularDamping(AActor* Actor, float Damping)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->SetAngularDamping(Damping);
+    }
+}
+
+void UCore_PhysicsSystemManager::FreezeObject(AActor* Actor, bool bFreezePosition, bool bFreezeRotation)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        if (bFreezePosition)
         {
-            UE_LOG(LogTemp, VeryVerbose, TEXT("Physics line trace hit: %s at %s"), 
-                   *HitResult.GetActor()->GetName(), *HitResult.Location.ToString());
+            PhysComp->SetConstraintMode(EDOFMode::SixDOF);
         }
         
-        return bHit;
+        if (bFreezeRotation)
+        {
+            PhysComp->SetConstraintMode(EDOFMode::SixDOF);
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::WakeUpObject(AActor* Actor)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->WakeAllRigidBodies();
+    }
+}
+
+void UCore_PhysicsSystemManager::PutObjectToSleep(AActor* Actor)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        PhysComp->PutAllRigidBodiesToSleep();
+    }
+}
+
+bool UCore_PhysicsSystemManager::IsObjectSimulating(AActor* Actor) const
+{
+    if (!IsValid(Actor))
+    {
+        return false;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        return PhysComp->IsSimulatingPhysics();
     }
     
     return false;
 }
 
-TArray<FHitResult> UCore_PhysicsSystemManager::SphereTracePhysics(FVector Center, float Radius, TArray<AActor*> IgnoreActors)
+FVector UCore_PhysicsSystemManager::GetObjectVelocity(AActor* Actor) const
 {
-    TArray<FHitResult> HitResults;
-    
-    if (UWorld* World = GetWorld())
+    if (!IsValid(Actor))
     {
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActors(IgnoreActors);
-        QueryParams.bReturnPhysicalMaterial = true;
-        
-        World->SweepMultiByChannel(HitResults, Center, Center + FVector(0, 0, 1), FQuat::Identity, 
-                                   ECC_WorldStatic, FCollisionShape::MakeSphere(Radius), QueryParams);
+        return FVector::ZeroVector;
     }
     
-    return HitResults;
-}
-
-float UCore_PhysicsSystemManager::CalculateImpactDamage(float ImpactVelocity, float ActorMass, ECore_PhysicsType PhysicsType)
-{
-    // Base damage calculation: velocity * mass * type modifier
-    float BaseDamage = ImpactVelocity * FMath::Sqrt(ActorMass) * 0.1f;
-    
-    // Apply physics type modifiers
-    float TypeModifier = 1.0f;
-    switch (PhysicsType)
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
     {
-        case ECore_PhysicsType::Static:
-            TypeModifier = 0.5f; // Static objects deal less impact damage
-            break;
-        case ECore_PhysicsType::Dynamic:
-            TypeModifier = 1.0f; // Full damage
-            break;
-        case ECore_PhysicsType::Kinematic:
-            TypeModifier = 0.8f; // Slightly reduced damage
-            break;
+        return PhysComp->GetPhysicsLinearVelocity();
     }
     
-    float FinalDamage = BaseDamage * TypeModifier;
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Calculated impact damage: Velocity=%.2f, Mass=%.2f, Type=%d, Damage=%.2f"), 
-           ImpactVelocity, ActorMass, (int32)PhysicsType, FinalDamage);
-    
-    return FinalDamage;
+    return FVector::ZeroVector;
 }
 
-void UCore_PhysicsSystemManager::SimulateRockfall(FVector Origin, int32 RockCount, float SpreadRadius)
+float UCore_PhysicsSystemManager::GetObjectMass(AActor* Actor) const
 {
-    if (UWorld* World = GetWorld())
+    if (!IsValid(Actor))
     {
-        for (int32 i = 0; i < RockCount; ++i)
+        return 0.0f;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
+        return PhysComp->GetMass();
+    }
+    
+    return 0.0f;
+}
+
+int32 UCore_PhysicsSystemManager::GetActivePhysicsObjectCount() const
+{
+    return ActivePhysicsObjects;
+}
+
+TArray<AActor*> UCore_PhysicsSystemManager::GetPhysicsObjects() const
+{
+    TArray<AActor*> Result;
+    for (const FCore_PhysicsObjectData& Data : RegisteredObjects)
+    {
+        if (IsValid(Data.PhysicsActor))
         {
-            // Generate random position within spread radius
-            FVector RandomOffset = FVector(
-                FMath::RandRange(-SpreadRadius, SpreadRadius),
-                FMath::RandRange(-SpreadRadius, SpreadRadius),
-                FMath::RandRange(100.0f, 500.0f)
-            );
-            
-            FVector SpawnLocation = Origin + RandomOffset;
-            
-            // Spawn a basic rock actor (this would be replaced with actual rock assets)
-            if (AActor* RockActor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator))
-            {
-                // Add static mesh component for the rock
-                UStaticMeshComponent* MeshComp = RockActor->CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RockMesh"));
-                RockActor->SetRootComponent(MeshComp);
-                
-                // Register as dynamic physics actor
-                RegisterPhysicsActor(RockActor, ECore_PhysicsType::Dynamic);
-                
-                // Apply initial downward velocity
-                if (UPrimitiveComponent* PrimComp = RockActor->GetRootComponent()->Cast<UPrimitiveComponent>())
-                {
-                    PrimComp->SetSimulatePhysics(true);
-                    PrimComp->AddImpulse(FVector(0, 0, -1000.0f) + FVector(FMath::RandRange(-200, 200), FMath::RandRange(-200, 200), 0));
-                }
-            }
+            Result.Add(Data.PhysicsActor);
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Simulated rockfall: Origin=%s, Count=%d, Spread=%.2f"), 
-               *Origin.ToString(), RockCount, SpreadRadius);
     }
+    return Result;
 }
 
-void UCore_PhysicsSystemManager::SimulateTreeFall(AActor* TreeActor, FVector ImpactDirection, float ImpactForce)
+void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
 {
-    if (!TreeActor)
+    if (!bPhysicsSystemInitialized)
     {
         return;
     }
     
-    // Apply force to make tree fall in impact direction
-    if (UPrimitiveComponent* PrimComp = TreeActor->GetRootComponent()->Cast<UPrimitiveComponent>())
-    {
-        // Switch to dynamic physics
-        RegisterPhysicsActor(TreeActor, ECore_PhysicsType::Dynamic);
-        
-        // Apply force at the top of the tree for realistic falling motion
-        FVector TreeTop = TreeActor->GetActorLocation() + FVector(0, 0, 1000.0f);
-        PrimComp->AddImpulseAtLocation(ImpactDirection.GetSafeNormal() * ImpactForce, TreeTop);
-        
-        // Broadcast break event
-        OnPhysicsBreak.Broadcast(TreeActor, TreeActor->GetActorLocation());
-        
-        UE_LOG(LogTemp, Log, TEXT("Simulated tree fall: %s, Direction=%s, Force=%.2f"), 
-               *TreeActor->GetName(), *ImpactDirection.ToString(), ImpactForce);
-    }
-}
-
-void UCore_PhysicsSystemManager::CreateDebrisField(FVector Origin, float Radius, int32 DebrisCount)
-{
-    if (UWorld* World = GetWorld())
-    {
-        for (int32 i = 0; i < DebrisCount; ++i)
-        {
-            // Random position within radius
-            float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-            float Distance = FMath::RandRange(0.0f, Radius);
-            FVector DebrisLocation = Origin + FVector(
-                FMath::Cos(Angle) * Distance,
-                FMath::Sin(Angle) * Distance,
-                FMath::RandRange(10.0f, 100.0f)
-            );
-            
-            // Spawn debris actor
-            if (AActor* DebrisActor = World->SpawnActor<AActor>(AActor::StaticClass(), DebrisLocation, FRotator::ZeroRotator))
-            {
-                UStaticMeshComponent* MeshComp = DebrisActor->CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebrisMesh"));
-                DebrisActor->SetRootComponent(MeshComp);
-                
-                RegisterPhysicsActor(DebrisActor, ECore_PhysicsType::Dynamic);
-                
-                // Apply random impulse
-                if (UPrimitiveComponent* PrimComp = DebrisActor->GetRootComponent()->Cast<UPrimitiveComponent>())
-                {
-                    PrimComp->SetSimulatePhysics(true);
-                    FVector RandomImpulse = FVector(
-                        FMath::RandRange(-500, 500),
-                        FMath::RandRange(-500, 500),
-                        FMath::RandRange(200, 800)
-                    );
-                    PrimComp->AddImpulse(RandomImpulse);
-                }
-            }
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Created debris field: Origin=%s, Radius=%.2f, Count=%d"), 
-               *Origin.ToString(), Radius, DebrisCount);
-    }
-}
-
-void UCore_PhysicsSystemManager::SetActorPhysicsMaterial(AActor* Actor, ECore_SurfaceType SurfaceType)
-{
-    if (!Actor)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Skip if optimization was run recently
+    if (CurrentTime - LastOptimizationTime < 5.0f)
     {
         return;
     }
     
-    if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
-    {
-        // This would set physics material based on surface type
-        // In a real implementation, you'd load the appropriate physics material asset
-        UE_LOG(LogTemp, Log, TEXT("Set physics material for %s to surface type %d"), 
-               *Actor->GetName(), (int32)SurfaceType);
-    }
-}
-
-ECore_SurfaceType UCore_PhysicsSystemManager::GetSurfaceTypeFromHit(const FHitResult& HitResult)
-{
-    // Default to stone if no specific surface detected
-    ECore_SurfaceType SurfaceType = ECore_SurfaceType::Stone;
+    int32 SimulatingObjects = 0;
+    int32 SleepingObjects = 0;
     
-    if (HitResult.PhysMaterial.IsValid())
+    for (const FCore_PhysicsObjectData& Data : RegisteredObjects)
     {
-        // In a real implementation, you'd check the physics material properties
-        // and map them to your custom surface types
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Detected surface type from hit result"));
-    }
-    
-    return SurfaceType;
-}
-
-void UCore_PhysicsSystemManager::OptimizePhysicsForPerformance(float MaxPhysicsDistance)
-{
-    MaxPhysicsSimulationDistance = MaxPhysicsDistance;
-    
-    if (UWorld* World = GetWorld())
-    {
-        // Get player location for distance calculations
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
+        if (IsValid(Data.PhysicsActor))
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            
-            // Disable physics for distant actors
-            for (auto& ActorPair : RegisteredPhysicsActors)
+            if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Data.PhysicsActor))
             {
-                AActor* Actor = ActorPair.Key;
-                if (Actor && IsValid(Actor))
+                if (PhysComp->IsSimulatingPhysics())
                 {
-                    float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
+                    SimulatingObjects++;
                     
-                    if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
+                    // Put slow-moving objects to sleep
+                    FVector Velocity = PhysComp->GetPhysicsLinearVelocity();
+                    if (Velocity.SizeSquared() < 1.0f) // Very slow movement
                     {
-                        if (Distance > MaxPhysicsDistance)
-                        {
-                            // Disable physics simulation for distant objects
-                            if (PrimComp->IsSimulatingPhysics())
-                            {
-                                PrimComp->SetSimulatePhysics(false);
-                            }
-                        }
-                        else
-                        {
-                            // Re-enable physics for close objects
-                            if (ActorPair.Value == ECore_PhysicsType::Dynamic && !PrimComp->IsSimulatingPhysics())
-                            {
-                                PrimComp->SetSimulatePhysics(true);
-                            }
-                        }
+                        PhysComp->PutAllRigidBodiesToSleep();
+                        SleepingObjects++;
                     }
                 }
             }
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Optimized physics for performance: MaxDistance=%.2f"), MaxPhysicsDistance);
+    ActivePhysicsObjects = SimulatingObjects;
+    LastOptimizationTime = CurrentTime;
+    
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System: Optimization complete - %d simulating, %d sleeping"), 
+           SimulatingObjects, SleepingObjects);
 }
 
 void UCore_PhysicsSystemManager::SetPhysicsLOD(AActor* Actor, int32 LODLevel)
 {
-    if (!Actor)
+    if (!IsValid(Actor))
     {
         return;
     }
     
-    if (UPrimitiveComponent* PrimComp = Actor->GetRootComponent()->Cast<UPrimitiveComponent>())
+    ApplyPhysicsLOD(Actor, LODLevel);
+}
+
+void UCore_PhysicsSystemManager::EnablePhysicsMultithreading(bool bEnable)
+{
+    PhysicsSettings.bEnableAsyncPhysics = bEnable;
+    
+    if (UPhysicsSettings* Settings = UPhysicsSettings::Get())
     {
-        // Adjust collision complexity based on LOD level
+        Settings->bSubstepping = bEnable;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core Physics System: Physics multithreading %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UCore_PhysicsSystemManager::DebugDrawPhysicsObjects()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    for (const FCore_PhysicsObjectData& Data : RegisteredObjects)
+    {
+        if (IsValid(Data.PhysicsActor))
+        {
+            FVector Location = Data.PhysicsActor->GetActorLocation();
+            FColor Color = Data.bIsSimulating ? FColor::Green : FColor::Red;
+            
+            DrawDebugSphere(GetWorld(), Location, 50.0f, 12, Color, false, 1.0f);
+            
+            // Draw velocity vector
+            if (Data.bIsSimulating && !Data.Velocity.IsZero())
+            {
+                DrawDebugDirectionalArrow(GetWorld(), Location, Location + Data.Velocity, 100.0f, FColor::Blue, false, 1.0f);
+            }
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::LogPhysicsSystemStats()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Core Physics System Stats ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Objects: %d"), RegisteredObjects.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Active Physics Objects: %d"), ActivePhysicsObjects);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Update Time: %f ms"), PhysicsUpdateTime * 1000.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Global Gravity Scale: %f"), PhysicsSettings.GlobalGravityScale);
+    UE_LOG(LogTemp, Warning, TEXT("Physics Initialized: %s"), bPhysicsSystemInitialized ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("====================================="));
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsObjectData(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    for (FCore_PhysicsObjectData& Data : RegisteredObjects)
+    {
+        if (IsValid(Data.PhysicsActor))
+        {
+            if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Data.PhysicsActor))
+            {
+                Data.bIsSimulating = PhysComp->IsSimulatingPhysics();
+                Data.Velocity = PhysComp->GetPhysicsLinearVelocity();
+                Data.AngularVelocity = PhysComp->GetPhysicsAngularVelocityInRadians();
+                Data.Mass = PhysComp->GetMass();
+                Data.LastUpdateTime = CurrentTime;
+            }
+        }
+    }
+}
+
+void UCore_PhysicsSystemManager::CleanupInvalidObjects()
+{
+    RegisteredObjects.RemoveAll([](const FCore_PhysicsObjectData& Data)
+    {
+        return !IsValid(Data.PhysicsActor);
+    });
+    
+    UE_LOG(LogTemp, Log, TEXT("Core Physics System: Cleaned up invalid objects, %d remaining"), RegisteredObjects.Num());
+}
+
+UPrimitiveComponent* UCore_PhysicsSystemManager::GetPhysicsComponent(AActor* Actor) const
+{
+    if (!IsValid(Actor))
+    {
+        return nullptr;
+    }
+    
+    // Try static mesh component first
+    if (UStaticMeshComponent* StaticMeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
+    {
+        return StaticMeshComp;
+    }
+    
+    // Try skeletal mesh component
+    if (USkeletalMeshComponent* SkeletalMeshComp = Actor->FindComponentByClass<USkeletalMeshComponent>())
+    {
+        return SkeletalMeshComp;
+    }
+    
+    // Try any primitive component
+    if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+    {
+        return PrimComp;
+    }
+    
+    return nullptr;
+}
+
+void UCore_PhysicsSystemManager::ApplyPhysicsLOD(AActor* Actor, int32 LODLevel)
+{
+    if (!IsValid(Actor))
+    {
+        return;
+    }
+    
+    if (UPrimitiveComponent* PhysComp = GetPhysicsComponent(Actor))
+    {
         switch (LODLevel)
         {
             case 0: // High detail
-                PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
+                PhysComp->SetSimulatePhysics(true);
+                PhysComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
                 break;
+                
             case 1: // Medium detail
-                PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
-                PrimComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+                PhysComp->SetSimulatePhysics(true);
+                PhysComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
                 break;
+                
             case 2: // Low detail
-                PrimComp->SetCollisionResponseToAllChannels(ECR_Ignore);
-                PrimComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+                PhysComp->SetSimulatePhysics(false);
+                PhysComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                break;
+                
+            case 3: // No physics
+                PhysComp->SetSimulatePhysics(false);
+                PhysComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
                 break;
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Set physics LOD for %s to level %d"), *Actor->GetName(), LODLevel);
 }
 
-void UCore_PhysicsSystemManager::DebugDrawPhysicsInfo(bool bEnabled, float Duration)
+void UCore_PhysicsSystemManager::ValidatePhysicsSettings()
 {
-    if (!bEnabled || !GetWorld())
-    {
-        return;
-    }
-    
-    // Draw debug info for all registered physics actors
-    for (auto& ActorPair : RegisteredPhysicsActors)
-    {
-        AActor* Actor = ActorPair.Key;
-        ECore_PhysicsType PhysicsType = ActorPair.Value;
-        
-        if (Actor && IsValid(Actor))
-        {
-            FVector ActorLocation = Actor->GetActorLocation();
-            FColor DebugColor = FColor::White;
-            
-            switch (PhysicsType)
-            {
-                case ECore_PhysicsType::Static:
-                    DebugColor = FColor::Red;
-                    break;
-                case ECore_PhysicsType::Dynamic:
-                    DebugColor = FColor::Green;
-                    break;
-                case ECore_PhysicsType::Kinematic:
-                    DebugColor = FColor::Blue;
-                    break;
-            }
-            
-            DrawDebugSphere(GetWorld(), ActorLocation, 50.0f, 8, DebugColor, false, Duration);
-            DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 100), 
-                           FString::Printf(TEXT("%s (%d)"), *Actor->GetName(), (int32)PhysicsType), 
-                           nullptr, DebugColor, Duration);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Debug draw physics info: Enabled=%s, Duration=%.2f, Actors=%d"), 
-           bEnabled ? TEXT("true") : TEXT("false"), Duration, RegisteredPhysicsActors.Num());
-}
-
-void UCore_PhysicsSystemManager::UpdatePhysicsActors(float DeltaTime)
-{
-    // Performance optimization - limit active physics actors
-    if (bEnablePhysicsOptimization && ActivePhysicsActors.Num() > MaxActivePhysicsActors)
-    {
-        OptimizePhysicsForPerformance(MaxPhysicsSimulationDistance);
-    }
-    
-    // Process physics events
-    ProcessPhysicsEvents();
-}
-
-void UCore_PhysicsSystemManager::ProcessPhysicsEvents()
-{
-    // This would process collision events, impact events, etc.
-    // In a real implementation, you'd handle physics event callbacks here
-}
-
-void UCore_PhysicsSystemManager::CleanupInactivePhysicsActors()
-{
-    // Remove invalid actors from tracking
-    TArray<AActor*> ActorsToRemove;
-    
-    for (auto& ActorPair : RegisteredPhysicsActors)
-    {
-        if (!IsValid(ActorPair.Key))
-        {
-            ActorsToRemove.Add(ActorPair.Key);
-        }
-    }
-    
-    for (AActor* Actor : ActorsToRemove)
-    {
-        UnregisterPhysicsActor(Actor);
-    }
-    
-    // Clean up active actors list
-    ActivePhysicsActors.RemoveAll([](AActor* Actor) { return !IsValid(Actor); });
-    
-    if (ActorsToRemove.Num() > 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Cleaned up %d inactive physics actors"), ActorsToRemove.Num());
-    }
+    // Clamp values to safe ranges
+    PhysicsSettings.GlobalGravityScale = FMath::Clamp(PhysicsSettings.GlobalGravityScale, 0.1f, 5.0f);
+    PhysicsSettings.DefaultLinearDamping = FMath::Clamp(PhysicsSettings.DefaultLinearDamping, 0.0f, 10.0f);
+    PhysicsSettings.DefaultAngularDamping = FMath::Clamp(PhysicsSettings.DefaultAngularDamping, 0.0f, 10.0f);
+    PhysicsSettings.MaxPhysicsSubsteps = FMath::Clamp(PhysicsSettings.MaxPhysicsSubsteps, 1.0f, 20.0f);
+    PhysicsSettings.PhysicsTimeStep = FMath::Clamp(PhysicsSettings.PhysicsTimeStep, 0.008333f, 0.033333f);
+    PhysicsSettings.CollisionTolerance = FMath::Clamp(PhysicsSettings.CollisionTolerance, 0.01f, 1.0f);
+    PhysicsSettings.MaxPhysicsObjects = FMath::Clamp(PhysicsSettings.MaxPhysicsObjects, 100, 50000);
 }
