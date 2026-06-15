@@ -1,339 +1,431 @@
 #include "Audio_AdaptiveMusicSystem.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
 #include "Kismet/GameplayStatics.h"
 
-AAudio_AdaptiveMusicSystem::AAudio_AdaptiveMusicSystem()
+UAudio_AdaptiveMusicSystem::UAudio_AdaptiveMusicSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.5f; // Update every 0.5 seconds
+
+    // Initialize state
+    CurrentMusicState = EAudio_MusicState::Calm;
+    CurrentBiomeType = EAudio_BiomeType::Forest;
+    TensionLevel = 0.0f;
+    bIsStorytellingActive = false;
+    bIsNightTime = false;
+    bIsFading = false;
+    CurrentFadeTime = 0.0f;
+
+    // Audio settings
+    MasterVolume = 1.0f;
+    MusicVolume = 0.7f;
+    StorytellingVolume = 0.9f;
+    TensionThreshold = 0.5f;
+    DinosaurProximityThreshold = 1000.0f;
 
     // Create audio components
     MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
-    RootComponent = MusicAudioComponent;
-    MusicAudioComponent->bAutoActivate = false;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-
-    TribalAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("TribalAudioComponent"));
-    TribalAudioComponent->SetupAttachment(RootComponent);
-    TribalAudioComponent->bAutoActivate = false;
-
-    // Initialize default values
-    CurrentMusicState = EAudio_MusicState::Silence;
-    CurrentIntensity = EAudio_IntensityLevel::Calm;
-    MasterMusicVolume = 0.7f;
-    MasterAmbientVolume = 0.5f;
-    CurrentTribalTerritory = TEXT("Neutral");
-    CurrentTribalRelationship = 0.0f;
-
-    TransitionTimer = 0.0f;
-    bIsTransitioning = false;
-    TargetMusicState = EAudio_MusicState::Silence;
-    TargetIntensity = EAudio_IntensityLevel::Calm;
-
-    // Setup default tribal zones
-    FAudio_TribalZoneSettings StormwatcherZone;
-    StormwatcherZone.TribeName = TEXT("Stormwatcher Clan");
-    StormwatcherZone.ZoneCenter = FVector(-2000, -2000, 100);
-    StormwatcherZone.ZoneRadius = 1500.0f;
-    StormwatcherZone.RelationshipModifier = 25.0f;
-
-    FAudio_TribalZoneSettings BonecrusherZone;
-    BonecrusherZone.TribeName = TEXT("Bonecrusher Pack");
-    BonecrusherZone.ZoneCenter = FVector(2000, 2000, 300);
-    BonecrusherZone.ZoneRadius = 1200.0f;
-    BonecrusherZone.RelationshipModifier = -15.0f;
-
-    FAudio_TribalZoneSettings GathererZone;
-    GathererZone.TribeName = TEXT("Gatherer Circle");
-    GathererZone.ZoneCenter = FVector(0, -3000, 50);
-    GathererZone.ZoneRadius = 1800.0f;
-    GathererZone.RelationshipModifier = 10.0f;
-
-    TribalZones.Add(StormwatcherZone);
-    TribalZones.Add(BonecrusherZone);
-    TribalZones.Add(GathererZone);
+    StorytellingAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("StorytellingAudioComponent"));
 }
 
-void AAudio_AdaptiveMusicSystem::BeginPlay()
+void UAudio_AdaptiveMusicSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Set initial volumes
-    MusicAudioComponent->SetVolumeMultiplier(MasterMusicVolume);
-    AmbientAudioComponent->SetVolumeMultiplier(MasterAmbientVolume);
-    TribalAudioComponent->SetVolumeMultiplier(MasterAmbientVolume * 0.8f);
-
-    // Start with exploration music
-    TransitionToMusicState(EAudio_MusicState::Exploration, EAudio_IntensityLevel::Calm);
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicSystem initialized with %d tribal zones"), TribalZones.Num());
+    
+    InitializeAudioComponents();
+    LoadDefaultMusicTracks();
+    
+    // Start with calm forest music
+    SetMusicState(EAudio_MusicState::Calm);
+    SetBiomeType(EAudio_BiomeType::Forest);
+    
+    // Setup tension decay timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            TensionDecayTimerHandle,
+            this,
+            &UAudio_AdaptiveMusicSystem::DecayTensionOverTime,
+            5.0f, // Every 5 seconds
+            true
+        );
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Initialized with %d music tracks"), MusicTracks.Num());
 }
 
-void AAudio_AdaptiveMusicSystem::Tick(float DeltaTime)
+void UAudio_AdaptiveMusicSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-
-    // Handle music transitions
-    if (bIsTransitioning)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Handle fade transitions
+    if (bIsFading && MusicAudioComponent)
     {
-        TransitionTimer += DeltaTime;
+        CurrentFadeTime += DeltaTime;
+        // Fade logic would be implemented here with more complex audio mixing
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::SetMusicState(EAudio_MusicState NewState)
+{
+    if (CurrentMusicState != NewState)
+    {
+        EAudio_MusicState PreviousState = CurrentMusicState;
+        CurrentMusicState = NewState;
         
-        // Check if we should complete the transition
-        if (TransitionTimer >= 3.0f) // 3 second transition time
-        {
-            bIsTransitioning = false;
-            TransitionTimer = 0.0f;
-            CurrentMusicState = TargetMusicState;
-            CurrentIntensity = TargetIntensity;
-        }
-    }
-
-    // Check player location for tribal territory updates
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Music state changed from %d to %d"), 
+               (int32)PreviousState, (int32)NewState);
         
-        for (const FAudio_TribalZoneSettings& Zone : TribalZones)
+        UpdateMusicBasedOnState();
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::SetBiomeType(EAudio_BiomeType NewBiome)
+{
+    if (CurrentBiomeType != NewBiome)
+    {
+        EAudio_BiomeType PreviousBiome = CurrentBiomeType;
+        CurrentBiomeType = NewBiome;
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Biome changed from %d to %d"), 
+               (int32)PreviousBiome, (int32)NewBiome);
+        
+        UpdateMusicBasedOnState();
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::PlayStorytellingAudio(const FAudio_StorytellingAudioData& AudioData)
+{
+    if (!StorytellingAudioComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicSystem: StorytellingAudioComponent is null"));
+        return;
+    }
+    
+    // Stop any current storytelling
+    StopStorytellingAudio();
+    
+    bIsStorytellingActive = true;
+    
+    // Lower music volume during storytelling
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * 0.3f);
+    }
+    
+    // Note: In a full implementation, we would load the audio from the URL
+    // For now, we simulate the storytelling duration
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Playing storytelling audio for %s (Duration: %.1fs)"), 
+           *AudioData.CharacterName, AudioData.Duration);
+    
+    // Set timer to finish storytelling
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            StorytellingTimerHandle,
+            this,
+            &UAudio_AdaptiveMusicSystem::OnStorytellingFinished,
+            AudioData.Duration,
+            false
+        );
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::StopStorytellingAudio()
+{
+    if (bIsStorytellingActive)
+    {
+        bIsStorytellingActive = false;
+        
+        if (StorytellingAudioComponent && StorytellingAudioComponent->IsPlaying())
         {
-            float DistanceToZone = FVector::Dist(PlayerLocation, Zone.ZoneCenter);
-            
-            if (DistanceToZone <= Zone.ZoneRadius)
-            {
-                if (CurrentTribalTerritory != Zone.TribeName)
-                {
-                    UpdateTribalTerritory(Zone.TribeName, Zone.RelationshipModifier);
-                }
-                break;
-            }
+            StorytellingAudioComponent->Stop();
+        }
+        
+        // Restore music volume
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+        }
+        
+        // Clear timer
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(StorytellingTimerHandle);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Storytelling audio stopped"));
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::SetMasterVolume(float Volume)
+{
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+    }
+    
+    if (StorytellingAudioComponent)
+    {
+        StorytellingAudioComponent->SetVolumeMultiplier(StorytellingVolume * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Master volume set to %.2f"), MasterVolume);
+}
+
+void UAudio_AdaptiveMusicSystem::FadeToTrack(const FAudio_MusicTrack& NewTrack, float FadeTime)
+{
+    if (!MusicAudioComponent)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Fading to track '%s' over %.1f seconds"), 
+           *NewTrack.TrackName, FadeTime);
+    
+    StartFadeTransition(NewTrack, FadeTime);
+}
+
+void UAudio_AdaptiveMusicSystem::IncreaseTension(float Amount)
+{
+    TensionLevel = FMath::Clamp(TensionLevel + Amount, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension increased to %.2f"), TensionLevel);
+    
+    // Check if we need to transition to tension/combat music
+    if (TensionLevel >= TensionThreshold)
+    {
+        if (CurrentMusicState == EAudio_MusicState::Calm || CurrentMusicState == EAudio_MusicState::Exploration)
+        {
+            SetMusicState(EAudio_MusicState::Tension);
         }
     }
 }
 
-void AAudio_AdaptiveMusicSystem::TransitionToMusicState(EAudio_MusicState NewState, EAudio_IntensityLevel NewIntensity)
+void UAudio_AdaptiveMusicSystem::DecreaseTension(float Amount)
 {
-    if (NewState == CurrentMusicState && NewIntensity == CurrentIntensity && !bIsTransitioning)
+    TensionLevel = FMath::Clamp(TensionLevel - Amount, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension decreased to %.2f"), TensionLevel);
+    
+    // Check if we can return to calm music
+    if (TensionLevel < TensionThreshold * 0.5f)
     {
-        return; // Already in this state
-    }
-
-    TargetMusicState = NewState;
-    TargetIntensity = NewIntensity;
-    bIsTransitioning = true;
-    TransitionTimer = 0.0f;
-
-    // Find and play the appropriate track
-    FAudio_MusicTrack* NewTrack = FindMusicTrack(NewState, NewIntensity);
-    if (NewTrack)
-    {
-        CrossfadeToTrack(*NewTrack);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Transitioning to music state: %d, intensity: %d"), 
-           (int32)NewState, (int32)NewIntensity);
-}
-
-void AAudio_AdaptiveMusicSystem::SetMusicIntensity(EAudio_IntensityLevel NewIntensity)
-{
-    TransitionToMusicState(CurrentMusicState, NewIntensity);
-}
-
-void AAudio_AdaptiveMusicSystem::PlayTribalMusic(const FString& TribeName, float RelationshipLevel)
-{
-    // Find the tribal zone
-    for (const FAudio_TribalZoneSettings& Zone : TribalZones)
-    {
-        if (Zone.TribeName == TribeName)
+        if (CurrentMusicState == EAudio_MusicState::Tension)
         {
-            if (Zone.TribalMusic.IsValid())
-            {
-                USoundCue* TribalSoundCue = Zone.TribalMusic.LoadSynchronous();
-                if (TribalSoundCue)
-                {
-                    TribalAudioComponent->SetSound(TribalSoundCue);
-                    
-                    // Adjust volume based on relationship
-                    float VolumeMultiplier = FMath::Clamp((RelationshipLevel + 100.0f) / 200.0f, 0.1f, 1.0f);
-                    TribalAudioComponent->SetVolumeMultiplier(MasterAmbientVolume * VolumeMultiplier);
-                    
-                    TribalAudioComponent->Play();
-                }
-            }
-            break;
+            SetMusicState(EAudio_MusicState::Calm);
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Playing tribal music for %s with relationship %f"), 
-           *TribeName, RelationshipLevel);
 }
 
-void AAudio_AdaptiveMusicSystem::StopAllMusic(float FadeOutTime)
+void UAudio_AdaptiveMusicSystem::ResetTension()
 {
-    MusicAudioComponent->FadeOut(FadeOutTime, 0.0f);
-    TribalAudioComponent->FadeOut(FadeOutTime, 0.0f);
+    TensionLevel = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension reset to 0"));
     
-    CurrentMusicState = EAudio_MusicState::Silence;
-    bIsTransitioning = false;
-
-    UE_LOG(LogTemp, Log, TEXT("Stopping all music with fade out time: %f"), FadeOutTime);
+    if (CurrentMusicState == EAudio_MusicState::Tension || CurrentMusicState == EAudio_MusicState::Combat)
+    {
+        SetMusicState(EAudio_MusicState::Calm);
+    }
 }
 
-void AAudio_AdaptiveMusicSystem::UpdateTribalTerritory(const FString& TribeName, float RelationshipLevel)
+void UAudio_AdaptiveMusicSystem::OnDayNightTransition(bool bIsNight)
 {
-    CurrentTribalTerritory = TribeName;
-    CurrentTribalRelationship = RelationshipLevel;
-
-    // Update ambient audio based on territory
-    for (const FAudio_TribalZoneSettings& Zone : TribalZones)
-    {
-        if (Zone.TribeName == TribeName)
-        {
-            if (Zone.AmbientSound.IsValid())
-            {
-                USoundCue* AmbientSoundCue = Zone.AmbientSound.LoadSynchronous();
-                if (AmbientSoundCue)
-                {
-                    AmbientAudioComponent->SetSound(AmbientSoundCue);
-                    AmbientAudioComponent->Play();
-                }
-            }
-            break;
-        }
-    }
-
-    // Transition to tribal music state
-    TransitionToMusicState(EAudio_MusicState::Tribal, EAudio_IntensityLevel::Calm);
+    bIsNightTime = bIsNight;
     
-    // Update tribal audio based on relationship
-    UpdateTribalAudioBasedOnRelationship(RelationshipLevel);
-
-    UE_LOG(LogTemp, Warning, TEXT("Entered %s territory with relationship level %f"), 
-           *TribeName, RelationshipLevel);
-}
-
-void AAudio_AdaptiveMusicSystem::PlayEnvironmentalStory(const FString& LocationName)
-{
-    // This would trigger location-specific audio cues
-    // For now, log the event
-    UE_LOG(LogTemp, Log, TEXT("Playing environmental story audio for location: %s"), *LocationName);
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Day/Night transition - IsNight: %s"), 
+           bIsNight ? TEXT("true") : TEXT("false"));
     
-    // Could trigger specific sound effects or ambient changes based on location
-    if (LocationName.Contains(TEXT("Cave")))
+    // Transition to appropriate music
+    if (bIsNight)
     {
-        // Play cave reverb and dripping sounds
-        SetMusicIntensity(EAudio_IntensityLevel::Tense);
-    }
-    else if (LocationName.Contains(TEXT("BoneYard")))
-    {
-        // Play ominous wind and bone rattling
-        SetMusicIntensity(EAudio_IntensityLevel::Intense);
-    }
-    else if (LocationName.Contains(TEXT("SacredGrove")))
-    {
-        // Play mystical forest sounds
-        TransitionToMusicState(EAudio_MusicState::Tribal, EAudio_IntensityLevel::Calm);
-    }
-}
-
-void AAudio_AdaptiveMusicSystem::OnDinosaurEncounter(const FString& DinosaurType, float ThreatLevel)
-{
-    EAudio_IntensityLevel NewIntensity = EAudio_IntensityLevel::Calm;
-    
-    if (ThreatLevel >= 0.8f)
-    {
-        NewIntensity = EAudio_IntensityLevel::Extreme;
-    }
-    else if (ThreatLevel >= 0.6f)
-    {
-        NewIntensity = EAudio_IntensityLevel::Intense;
-    }
-    else if (ThreatLevel >= 0.3f)
-    {
-        NewIntensity = EAudio_IntensityLevel::Tense;
-    }
-
-    TransitionToMusicState(EAudio_MusicState::Danger, NewIntensity);
-
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur encounter: %s with threat level %f"), 
-           *DinosaurType, ThreatLevel);
-}
-
-void AAudio_AdaptiveMusicSystem::OnCombatStart()
-{
-    TransitionToMusicState(EAudio_MusicState::Combat, EAudio_IntensityLevel::Intense);
-    UE_LOG(LogTemp, Warning, TEXT("Combat started - switching to combat music"));
-}
-
-void AAudio_AdaptiveMusicSystem::OnCombatEnd(bool bPlayerVictory)
-{
-    if (bPlayerVictory)
-    {
-        TransitionToMusicState(EAudio_MusicState::Victory, EAudio_IntensityLevel::Calm);
+        SetMusicState(EAudio_MusicState::Night);
     }
     else
     {
-        TransitionToMusicState(EAudio_MusicState::Exploration, EAudio_IntensityLevel::Tense);
+        SetMusicState(EAudio_MusicState::Day);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Combat ended - player victory: %s"), 
-           bPlayerVictory ? TEXT("true") : TEXT("false"));
 }
 
-FAudio_MusicTrack* AAudio_AdaptiveMusicSystem::FindMusicTrack(EAudio_MusicState State, EAudio_IntensityLevel Intensity)
+void UAudio_AdaptiveMusicSystem::OnDinosaurProximity(float Distance, bool bIsPredator)
 {
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Dinosaur proximity - Distance: %.1f, IsPredator: %s"), 
+           Distance, bIsPredator ? TEXT("true") : TEXT("false"));
+    
+    if (Distance < DinosaurProximityThreshold)
+    {
+        if (bIsPredator)
+        {
+            // Immediate tension increase for predators
+            IncreaseTension(0.3f);
+            
+            if (Distance < DinosaurProximityThreshold * 0.5f)
+            {
+                SetMusicState(EAudio_MusicState::Combat);
+            }
+            else
+            {
+                SetMusicState(EAudio_MusicState::Tension);
+            }
+        }
+        else
+        {
+            // Gentle tension increase for herbivores
+            IncreaseTension(0.1f);
+        }
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::OnDinosaurLeft()
+{
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Dinosaur left area"));
+    
+    // Gradual tension decrease
+    DecreaseTension(0.2f);
+}
+
+void UAudio_AdaptiveMusicSystem::UpdateMusicBasedOnState()
+{
+    FAudio_MusicTrack* BestTrack = FindBestTrackForCurrentState();
+    
+    if (BestTrack)
+    {
+        FadeToTrack(*BestTrack, BestTrack->FadeInTime);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicSystem: No suitable track found for current state"));
+    }
+}
+
+FAudio_MusicTrack* UAudio_AdaptiveMusicSystem::FindBestTrackForCurrentState()
+{
+    // Find tracks that match current state and biome
     for (FAudio_MusicTrack& Track : MusicTracks)
     {
-        if (Track.MusicState == State && Track.IntensityLevel == Intensity)
+        if (Track.MusicState == CurrentMusicState && Track.BiomeType == CurrentBiomeType)
         {
             return &Track;
         }
     }
     
-    // Fallback to any track with the same state
+    // Fallback: find tracks that match just the state
     for (FAudio_MusicTrack& Track : MusicTracks)
     {
-        if (Track.MusicState == State)
+        if (Track.MusicState == CurrentMusicState)
         {
             return &Track;
         }
+    }
+    
+    // Last resort: return first track if any exist
+    if (MusicTracks.Num() > 0)
+    {
+        return &MusicTracks[0];
     }
     
     return nullptr;
 }
 
-void AAudio_AdaptiveMusicSystem::CrossfadeToTrack(const FAudio_MusicTrack& NewTrack)
+void UAudio_AdaptiveMusicSystem::StartFadeTransition(const FAudio_MusicTrack& NewTrack, float FadeTime)
 {
-    if (NewTrack.SoundCue.IsValid())
+    bIsFading = true;
+    CurrentFadeTime = 0.0f;
+    
+    // In a full implementation, this would handle complex audio crossfading
+    // For now, we simulate the transition
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Starting fade transition to '%s'"), *NewTrack.TrackName);
+    
+    if (MusicAudioComponent)
     {
-        USoundCue* SoundCue = NewTrack.SoundCue.LoadSynchronous();
-        if (SoundCue)
-        {
-            // Fade out current track
-            if (MusicAudioComponent->IsPlaying())
-            {
-                MusicAudioComponent->FadeOut(NewTrack.FadeOutTime, 0.0f);
-            }
-
-            // Set new track and fade in
-            MusicAudioComponent->SetSound(SoundCue);
-            MusicAudioComponent->FadeIn(NewTrack.FadeInTime, MasterMusicVolume);
-        }
+        MusicAudioComponent->SetVolumeMultiplier(NewTrack.Volume * MasterVolume);
+    }
+    
+    // Reset fade state after transition
+    if (UWorld* World = GetWorld())
+    {
+        FTimerHandle FadeTimerHandle;
+        World->GetTimerManager().SetTimer(
+            FadeTimerHandle,
+            [this]() { bIsFading = false; },
+            FadeTime,
+            false
+        );
     }
 }
 
-void AAudio_AdaptiveMusicSystem::UpdateTribalAudioBasedOnRelationship(float RelationshipLevel)
+void UAudio_AdaptiveMusicSystem::OnStorytellingFinished()
 {
-    // Adjust tribal audio volume and pitch based on relationship
-    float VolumeMultiplier = FMath::Clamp((RelationshipLevel + 100.0f) / 200.0f, 0.2f, 1.0f);
-    float PitchMultiplier = FMath::Clamp(1.0f + (RelationshipLevel / 200.0f), 0.8f, 1.2f);
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Storytelling finished"));
+    StopStorytellingAudio();
+}
 
-    TribalAudioComponent->SetVolumeMultiplier(MasterAmbientVolume * VolumeMultiplier);
-    TribalAudioComponent->SetPitchMultiplier(PitchMultiplier);
+void UAudio_AdaptiveMusicSystem::DecayTensionOverTime()
+{
+    if (TensionLevel > 0.0f)
+    {
+        DecreaseTension(0.05f); // Slowly decay tension over time
+    }
+}
 
-    UE_LOG(LogTemp, Log, TEXT("Updated tribal audio - Volume: %f, Pitch: %f"), 
-           VolumeMultiplier, PitchMultiplier);
+void UAudio_AdaptiveMusicSystem::InitializeAudioComponents()
+{
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->bAutoActivate = true;
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+    }
+    
+    if (StorytellingAudioComponent)
+    {
+        StorytellingAudioComponent->bAutoActivate = false;
+        StorytellingAudioComponent->SetVolumeMultiplier(StorytellingVolume * MasterVolume);
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::LoadDefaultMusicTracks()
+{
+    // Create default music tracks for different states and biomes
+    FAudio_MusicTrack CalmForestTrack;
+    CalmForestTrack.TrackName = TEXT("Calm Forest Ambience");
+    CalmForestTrack.MusicState = EAudio_MusicState::Calm;
+    CalmForestTrack.BiomeType = EAudio_BiomeType::Forest;
+    CalmForestTrack.Volume = 0.6f;
+    MusicTracks.Add(CalmForestTrack);
+    
+    FAudio_MusicTrack TensionTrack;
+    TensionTrack.TrackName = TEXT("Prehistoric Tension");
+    TensionTrack.MusicState = EAudio_MusicState::Tension;
+    TensionTrack.BiomeType = EAudio_BiomeType::Forest;
+    TensionTrack.Volume = 0.8f;
+    MusicTracks.Add(TensionTrack);
+    
+    FAudio_MusicTrack CombatTrack;
+    CombatTrack.TrackName = TEXT("Dinosaur Combat");
+    CombatTrack.MusicState = EAudio_MusicState::Combat;
+    CombatTrack.BiomeType = EAudio_BiomeType::Forest;
+    CombatTrack.Volume = 0.9f;
+    MusicTracks.Add(CombatTrack);
+    
+    FAudio_MusicTrack NightTrack;
+    NightTrack.TrackName = TEXT("Prehistoric Night");
+    NightTrack.MusicState = EAudio_MusicState::Night;
+    NightTrack.BiomeType = EAudio_BiomeType::Forest;
+    NightTrack.Volume = 0.5f;
+    MusicTracks.Add(NightTrack);
+    
+    FAudio_MusicTrack StorytellingTrack;
+    StorytellingTrack.TrackName = TEXT("Tribal Storytelling");
+    StorytellingTrack.MusicState = EAudio_MusicState::Storytelling;
+    StorytellingTrack.BiomeType = EAudio_BiomeType::Forest;
+    StorytellingTrack.Volume = 0.4f;
+    MusicTracks.Add(StorytellingTrack);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Loaded %d default music tracks"), MusicTracks.Num());
 }
