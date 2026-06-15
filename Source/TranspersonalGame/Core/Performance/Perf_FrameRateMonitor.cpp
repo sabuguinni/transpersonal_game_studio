@@ -1,186 +1,160 @@
 #include "Perf_FrameRateMonitor.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
-#include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 
 void UPerf_FrameRateMonitor::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    bIsMonitoring = false;
-    CurrentPerformanceLevel = EPerf_PerformanceLevel::Optimal;
-    FrameTimeHistory.Reserve(60); // Store last 60 frame times
-    TotalFrameTime = 0.0f;
-    FrameCount = 0;
-    MonitoringStartTime = 0.0f;
+    // Initialize frame rate monitoring
+    FrameSamples.Reserve(MaxSamples);
+    ResetStatistics();
     
-    UE_LOG(LogTemp, Log, TEXT("FrameRateMonitor initialized"));
+    // Set up tick delegate
+    TickDelegate = FTickerDelegate::CreateUObject(this, &UPerf_FrameRateMonitor::Tick);
+    TickDelegateHandle = FTSTicker::GetCoreTicker().AddTicker(TickDelegate, SampleInterval);
+    
+    bInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance Frame Rate Monitor Initialized - Target FPS: %.1f"), TargetFrameRate);
 }
 
 void UPerf_FrameRateMonitor::Deinitialize()
 {
-    StopMonitoring();
+    if (TickDelegateHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(TickDelegateHandle);
+    }
+    
+    bInitialized = false;
     Super::Deinitialize();
-}
-
-void UPerf_FrameRateMonitor::StartMonitoring()
-{
-    if (bIsMonitoring)
-    {
-        return;
-    }
-
-    bIsMonitoring = true;
-    MonitoringStartTime = FPlatformTime::Seconds();
-    ResetStatistics();
-
-    // Start timer to update frame data every 0.1 seconds
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            MonitoringTimerHandle,
-            this,
-            &UPerf_FrameRateMonitor::UpdateFrameData,
-            0.1f,
-            true
-        );
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("FrameRateMonitor started"));
-}
-
-void UPerf_FrameRateMonitor::StopMonitoring()
-{
-    if (!bIsMonitoring)
-    {
-        return;
-    }
-
-    bIsMonitoring = false;
-
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(MonitoringTimerHandle);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("FrameRateMonitor stopped"));
-}
-
-void UPerf_FrameRateMonitor::UpdateFrameData()
-{
-    if (!bIsMonitoring)
-    {
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Get current delta time
-    float DeltaTime = World->GetDeltaSeconds();
-    CurrentFrameData.DeltaTime = DeltaTime;
-
-    // Calculate frame rate
-    if (DeltaTime > 0.0f)
-    {
-        CurrentFrameData.FrameRate = 1.0f / DeltaTime;
-    }
-    else
-    {
-        CurrentFrameData.FrameRate = 60.0f; // Default fallback
-    }
-
-    // Update frame time history
-    FrameTimeHistory.Add(DeltaTime);
-    TotalFrameTime += DeltaTime;
-    FrameCount++;
-
-    // Keep only last 60 frames
-    if (FrameTimeHistory.Num() > 60)
-    {
-        float OldestFrameTime = FrameTimeHistory[0];
-        FrameTimeHistory.RemoveAt(0);
-        TotalFrameTime -= OldestFrameTime;
-    }
-
-    // Calculate average frame time
-    if (FrameTimeHistory.Num() > 0)
-    {
-        CurrentFrameData.AverageFrameTime = TotalFrameTime / FrameTimeHistory.Num();
-    }
-
-    // Count actors in world
-    CurrentFrameData.TotalActors = World->GetCurrentLevel()->Actors.Num();
-
-    // Count visible actors (simplified - counts all non-hidden actors)
-    int32 VisibleCount = 0;
-    for (AActor* Actor : World->GetCurrentLevel()->Actors)
-    {
-        if (Actor && !Actor->IsHidden())
-        {
-            VisibleCount++;
-        }
-    }
-    CurrentFrameData.VisibleActors = VisibleCount;
-
-    // Update performance level
-    CalculatePerformanceLevel();
-}
-
-void UPerf_FrameRateMonitor::CalculatePerformanceLevel()
-{
-    float AvgFPS = GetAverageFrameRate();
-
-    if (AvgFPS >= 60.0f)
-    {
-        CurrentPerformanceLevel = EPerf_PerformanceLevel::Optimal;
-    }
-    else if (AvgFPS >= 45.0f)
-    {
-        CurrentPerformanceLevel = EPerf_PerformanceLevel::Good;
-    }
-    else if (AvgFPS >= 30.0f)
-    {
-        CurrentPerformanceLevel = EPerf_PerformanceLevel::Acceptable;
-    }
-    else if (AvgFPS >= 15.0f)
-    {
-        CurrentPerformanceLevel = EPerf_PerformanceLevel::Poor;
-    }
-    else
-    {
-        CurrentPerformanceLevel = EPerf_PerformanceLevel::Critical;
-    }
 }
 
 FPerf_FrameData UPerf_FrameRateMonitor::GetCurrentFrameData() const
 {
-    return CurrentFrameData;
-}
-
-EPerf_PerformanceLevel UPerf_FrameRateMonitor::GetCurrentPerformanceLevel() const
-{
-    return CurrentPerformanceLevel;
-}
-
-float UPerf_FrameRateMonitor::GetAverageFrameRate() const
-{
-    if (CurrentFrameData.AverageFrameTime > 0.0f)
+    FPerf_FrameData FrameData;
+    
+    if (GEngine && GEngine->GetGameViewport())
     {
-        return 1.0f / CurrentFrameData.AverageFrameTime;
+        // Get current frame rate
+        FrameData.FrameRate = CalculateCurrentFrameRate();
+        FrameData.FrameTime = 1.0f / FMath::Max(FrameData.FrameRate, 0.001f);
+        
+        // Get rendering stats (approximated)
+        FrameData.GameThreadTime = GGameThreadTime;
+        FrameData.RenderThreadTime = GRenderThreadTime;
+        FrameData.GPUTime = GGPUFrameTime;
+        
+        // Get draw call stats (estimated based on frame rate)
+        if (FrameData.FrameRate > 0)
+        {
+            FrameData.DrawCalls = FMath::RoundToInt(1000.0f * (60.0f / FMath::Max(FrameData.FrameRate, 1.0f)));
+            FrameData.Triangles = FrameData.DrawCalls * 100; // Rough estimate
+        }
     }
-    return 60.0f; // Default fallback
+    
+    return FrameData;
 }
 
 void UPerf_FrameRateMonitor::ResetStatistics()
 {
-    FrameTimeHistory.Empty();
-    TotalFrameTime = 0.0f;
-    FrameCount = 0;
-    CurrentFrameData = FPerf_FrameData();
-    CurrentPerformanceLevel = EPerf_PerformanceLevel::Optimal;
+    FrameSamples.Empty();
+    AverageFrameRate = 0.0f;
+    MinFrameRate = 0.0f;
+    MaxFrameRate = 0.0f;
+    LastSampleTime = 0.0f;
+}
+
+bool UPerf_FrameRateMonitor::Tick(float DeltaTime)
+{
+    if (!bInitialized)
+    {
+        return true;
+    }
+    
+    float CurrentTime = FPlatformTime::Seconds();
+    if (CurrentTime - LastSampleTime >= SampleInterval)
+    {
+        float CurrentFrameRate = CalculateCurrentFrameRate();
+        AddFrameSample(CurrentFrameRate);
+        UpdateFrameStatistics();
+        CheckPerformanceAlerts();
+        
+        LastSampleTime = CurrentTime;
+    }
+    
+    return true; // Continue ticking
+}
+
+void UPerf_FrameRateMonitor::UpdateFrameStatistics()
+{
+    if (FrameSamples.Num() == 0)
+    {
+        return;
+    }
+    
+    // Calculate average
+    float Sum = 0.0f;
+    MinFrameRate = FrameSamples[0];
+    MaxFrameRate = FrameSamples[0];
+    
+    for (float Sample : FrameSamples)
+    {
+        Sum += Sample;
+        MinFrameRate = FMath::Min(MinFrameRate, Sample);
+        MaxFrameRate = FMath::Max(MaxFrameRate, Sample);
+    }
+    
+    AverageFrameRate = Sum / FrameSamples.Num();
+}
+
+void UPerf_FrameRateMonitor::CheckPerformanceAlerts()
+{
+    if (!bPerformanceAlertsEnabled)
+    {
+        return;
+    }
+    
+    float CurrentFPS = CalculateCurrentFrameRate();
+    float AlertThreshold = TargetFrameRate * PerformanceAlertThreshold;
+    
+    if (CurrentFPS < AlertThreshold)
+    {
+        OnPerformanceAlert.Broadcast(CurrentFPS);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Performance Alert: FPS dropped to %.1f (Target: %.1f, Threshold: %.1f)"), 
+               CurrentFPS, TargetFrameRate, AlertThreshold);
+    }
+}
+
+void UPerf_FrameRateMonitor::AddFrameSample(float FrameRate)
+{
+    FrameSamples.Add(FrameRate);
+    
+    // Remove old samples if we exceed the maximum
+    if (FrameSamples.Num() > MaxSamples)
+    {
+        FrameSamples.RemoveAt(0);
+    }
+}
+
+float UPerf_FrameRateMonitor::CalculateCurrentFrameRate() const
+{
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        UWorld* World = GEngine->GetGameViewport()->GetWorld();
+        if (World)
+        {
+            float DeltaTime = World->GetDeltaSeconds();
+            if (DeltaTime > 0.0f)
+            {
+                return 1.0f / DeltaTime;
+            }
+        }
+    }
+    
+    // Fallback to engine stats
+    return FMath::Clamp(1.0f / FApp::GetDeltaTime(), 1.0f, 200.0f);
 }
