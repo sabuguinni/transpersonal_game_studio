@@ -1,474 +1,431 @@
 #include "NPCBehaviorTreeManager.h"
-#include "Engine/Engine.h"
+#include "AIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
-#include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionStimuliSourceComponent.h"
-#include "Math/UnrealMathUtility.h"
+#include "GameFramework/Pawn.h"
 
-UNPCBehaviorTreeManager::UNPCBehaviorTreeManager()
+UNPC_BehaviorTreeManager::UNPC_BehaviorTreeManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 times per second
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-    // Initialize default values
+    // Initialize defaults
+    MaxMemories = 50;
+    MemoryDecayRate = 0.1f;
+    SocialUpdateInterval = 2.0f;
+    CurrentRoutineIndex = 0;
+    RoutineStartTime = 0.0f;
     CurrentBehaviorState = ENPC_BehaviorState::Idle;
-    SocialRole = ENPC_SocialRole::Gatherer;
-    
-    Energy = 100.0f;
-    Hunger = 0.0f;
-    Fear = 0.0f;
-    Alertness = 50.0f;
-    
-    MaxShortTermMemories = 20;
-    MaxLongTermMemories = 100;
-    
-    SocialRadius = 1500.0f;
-    CommunicationCooldown = 0.0f;
-    DailyRoutineTimer = 0.0f;
-    
-    HomeLocation = FVector::ZeroVector;
-    WorkLocation = FVector::ZeroVector;
+    PreviousBehaviorState = ENPC_BehaviorState::Idle;
+
+    // Component references will be set in BeginPlay
+    BehaviorTreeComponent = nullptr;
+    BlackboardComponent = nullptr;
+    DefaultBehaviorTree = nullptr;
+    CurrentBehaviorTree = nullptr;
 }
 
-void UNPCBehaviorTreeManager::BeginPlay()
+void UNPC_BehaviorTreeManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize home location to current position
-    if (AActor* Owner = GetOwner())
+
+    // Get AI Controller and components
+    AAIController* AIController = GetOwnerAIController();
+    if (AIController)
     {
-        HomeLocation = Owner->GetActorLocation();
-        WorkLocation = HomeLocation + FVector(FMath::RandRange(-2000.0f, 2000.0f), FMath::RandRange(-2000.0f, 2000.0f), 0.0f);
-    }
-    
-    // Setup initial patrol points
-    PatrolPoints.Empty();
-    for (int32 i = 0; i < 4; i++)
-    {
-        FVector PatrolPoint = HomeLocation + FVector(
-            FMath::RandRange(-1000.0f, 1000.0f),
-            FMath::RandRange(-1000.0f, 1000.0f),
-            0.0f
-        );
-        PatrolPoints.Add(PatrolPoint);
-    }
-    
-    // Initialize blackboard if we have an AI controller
-    if (AActor* Owner = GetOwner())
-    {
-        if (APawn* PawnOwner = Cast<APawn>(Owner))
+        BehaviorTreeComponent = AIController->GetBehaviorTreeComponent();
+        BlackboardComponent = AIController->GetBlackboardComponent();
+
+        // Initialize behavior tree if we have a default one
+        if (DefaultBehaviorTree)
         {
-            if (AAIController* AIController = Cast<AAIController>(PawnOwner->GetController()))
-            {
-                NPCBlackboard = AIController->GetBlackboardComponent();
-                if (NPCBlackboard && DefaultBehaviorTree)
-                {
-                    AIController->RunBehaviorTree(DefaultBehaviorTree);
-                }
-            }
+            InitializeBehaviorTree(DefaultBehaviorTree);
         }
     }
+
+    // Set up timers
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(MemoryCleanupTimer, this, &UNPC_BehaviorTreeManager::CleanupExpiredMemories, 30.0f, true);
+        World->GetTimerManager().SetTimer(SocialUpdateTimer, [this]() { UpdateSocialSystem(SocialUpdateInterval); }, SocialUpdateInterval, true);
+    }
+
+    // Initialize routine start time
+    RoutineStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 }
 
-void UNPCBehaviorTreeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPC_BehaviorTreeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    UpdateNeeds(DeltaTime);
-    ProcessSocialInteractions(DeltaTime);
-    ProcessMemoryDecay(DeltaTime);
-    
-    // Update daily routine timer
-    DailyRoutineTimer += DeltaTime;
-    if (DailyRoutineTimer >= 86400.0f) // 24 hours in seconds
+
+    UpdateMemorySystem(DeltaTime);
+    UpdateRoutineSystem(DeltaTime);
+}
+
+void UNPC_BehaviorTreeManager::InitializeBehaviorTree(UBehaviorTree* NewBehaviorTree)
+{
+    if (!NewBehaviorTree)
     {
-        DailyRoutineTimer = 0.0f;
+        return;
     }
+
+    CurrentBehaviorTree = NewBehaviorTree;
     
-    // Execute daily routine based on time
-    float TimeOfDay = FMath::Fmod(DailyRoutineTimer / 86400.0f, 1.0f);
-    ExecuteDailyRoutine(TimeOfDay);
-    
-    // Update communication cooldown
-    if (CommunicationCooldown > 0.0f)
+    AAIController* AIController = GetOwnerAIController();
+    if (AIController && BehaviorTreeComponent)
     {
-        CommunicationCooldown -= DeltaTime;
+        BehaviorTreeComponent->StartTree(*NewBehaviorTree);
     }
 }
 
-void UNPCBehaviorTreeManager::SetBehaviorState(ENPC_BehaviorState NewState)
+void UNPC_BehaviorTreeManager::SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree, bool bForceRestart)
 {
-    if (CurrentBehaviorState != NewState)
+    if (!NewBehaviorTree || NewBehaviorTree == CurrentBehaviorTree)
     {
-        CurrentBehaviorState = NewState;
-        
-        // Update blackboard
-        if (NPCBlackboard)
+        return;
+    }
+
+    if (BehaviorTreeComponent)
+    {
+        if (bForceRestart)
         {
-            NPCBlackboard->SetValueAsEnum(TEXT("BehaviorState"), (uint8)NewState);
+            BehaviorTreeComponent->StopTree();
         }
         
-        // Add memory entry for state change
-        AddMemoryEntry(
-            GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector,
-            GetOwner(),
-            0.5f,
-            FString::Printf(TEXT("State changed to %d"), (int32)NewState)
-        );
+        CurrentBehaviorTree = NewBehaviorTree;
+        BehaviorTreeComponent->StartTree(*NewBehaviorTree);
     }
 }
 
-void UNPCBehaviorTreeManager::SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree)
+void UNPC_BehaviorTreeManager::PauseBehaviorTree()
 {
-    if (NewBehaviorTree && GetOwner())
+    if (BehaviorTreeComponent)
     {
-        if (APawn* PawnOwner = Cast<APawn>(GetOwner()))
-        {
-            if (AAIController* AIController = Cast<AAIController>(PawnOwner->GetController()))
-            {
-                AIController->RunBehaviorTree(NewBehaviorTree);
-            }
-        }
+        BehaviorTreeComponent->PauseLogic(TEXT("NPCBehaviorManager"));
     }
 }
 
-void UNPCBehaviorTreeManager::AddMemoryEntry(FVector Location, AActor* Actor, float Importance, const FString& Description)
+void UNPC_BehaviorTreeManager::ResumeBehaviorTree()
+{
+    if (BehaviorTreeComponent)
+    {
+        BehaviorTreeComponent->ResumeLogic(TEXT("NPCBehaviorManager"));
+    }
+}
+
+void UNPC_BehaviorTreeManager::AddMemory(FVector Location, ENPC_MemoryType MemoryType, float Intensity)
 {
     FNPC_MemoryEntry NewMemory;
     NewMemory.Location = Location;
-    NewMemory.RelatedActor = Actor;
-    NewMemory.Importance = Importance;
-    NewMemory.TimeStamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    NewMemory.EventDescription = Description;
-    
-    // Add to short-term memory
-    ShortTermMemory.Add(NewMemory);
-    
-    // If importance is high enough, also add to long-term memory
-    if (Importance >= 0.7f)
+    NewMemory.MemoryType = MemoryType;
+    NewMemory.Intensity = Intensity;
+    NewMemory.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    Memories.Add(NewMemory);
+
+    // Remove oldest memories if we exceed the limit
+    if (Memories.Num() > MaxMemories)
     {
-        LongTermMemory.Add(NewMemory);
+        Memories.RemoveAt(0);
     }
-    
-    ManageMemoryCapacity();
 }
 
-void UNPCBehaviorTreeManager::ProcessMemoryDecay(float DeltaTime)
+TArray<FNPC_MemoryEntry> UNPC_BehaviorTreeManager::GetMemoriesInRadius(FVector Center, float Radius)
 {
+    TArray<FNPC_MemoryEntry> NearbyMemories;
+    
+    for (const FNPC_MemoryEntry& Memory : Memories)
+    {
+        float Distance = FVector::Dist(Memory.Location, Center);
+        if (Distance <= Radius)
+        {
+            NearbyMemories.Add(Memory);
+        }
+    }
+
+    return NearbyMemories;
+}
+
+FNPC_MemoryEntry UNPC_BehaviorTreeManager::GetStrongestMemory(ENPC_MemoryType MemoryType)
+{
+    FNPC_MemoryEntry StrongestMemory;
+    float HighestIntensity = 0.0f;
+
+    for (const FNPC_MemoryEntry& Memory : Memories)
+    {
+        if (Memory.MemoryType == MemoryType && Memory.Intensity > HighestIntensity)
+        {
+            StrongestMemory = Memory;
+            HighestIntensity = Memory.Intensity;
+        }
+    }
+
+    return StrongestMemory;
+}
+
+void UNPC_BehaviorTreeManager::ClearOldMemories(float MaxAge)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    Memories.RemoveAll([CurrentTime, MaxAge](const FNPC_MemoryEntry& Memory)
+    {
+        return (CurrentTime - Memory.Timestamp) > MaxAge;
+    });
+}
+
+void UNPC_BehaviorTreeManager::UpdateRelationship(APawn* TargetPawn, float DeltaValue, ENPC_RelationType NewRelationType)
+{
+    if (!TargetPawn)
+    {
+        return;
+    }
+
+    // Find existing relationship
+    FNPC_SocialRelation* ExistingRelation = SocialRelations.FindByPredicate([TargetPawn](const FNPC_SocialRelation& Relation)
+    {
+        return Relation.TargetPawn.Get() == TargetPawn;
+    });
+
+    if (ExistingRelation)
+    {
+        ExistingRelation->RelationshipValue += DeltaValue;
+        ExistingRelation->RelationType = NewRelationType;
+        ExistingRelation->LastInteractionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    }
+    else
+    {
+        // Create new relationship
+        FNPC_SocialRelation NewRelation;
+        NewRelation.TargetPawn = TargetPawn;
+        NewRelation.RelationshipValue = DeltaValue;
+        NewRelation.RelationType = NewRelationType;
+        NewRelation.LastInteractionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+        
+        SocialRelations.Add(NewRelation);
+    }
+}
+
+FNPC_SocialRelation UNPC_BehaviorTreeManager::GetRelationship(APawn* TargetPawn)
+{
+    if (!TargetPawn)
+    {
+        return FNPC_SocialRelation();
+    }
+
+    const FNPC_SocialRelation* FoundRelation = SocialRelations.FindByPredicate([TargetPawn](const FNPC_SocialRelation& Relation)
+    {
+        return Relation.TargetPawn.Get() == TargetPawn;
+    });
+
+    return FoundRelation ? *FoundRelation : FNPC_SocialRelation();
+}
+
+TArray<FNPC_SocialRelation> UNPC_BehaviorTreeManager::GetAllRelationships()
+{
+    // Clean up null references
+    SocialRelations.RemoveAll([](const FNPC_SocialRelation& Relation)
+    {
+        return !Relation.TargetPawn.IsValid();
+    });
+
+    return SocialRelations;
+}
+
+void UNPC_BehaviorTreeManager::ProcessSocialInteraction(APawn* TargetPawn, ENPC_InteractionType InteractionType)
+{
+    if (!TargetPawn)
+    {
+        return;
+    }
+
+    float RelationshipDelta = 0.0f;
+    ENPC_RelationType NewRelationType = ENPC_RelationType::Neutral;
+
+    switch (InteractionType)
+    {
+        case ENPC_InteractionType::Friendly:
+            RelationshipDelta = 0.1f;
+            NewRelationType = ENPC_RelationType::Friendly;
+            break;
+        case ENPC_InteractionType::Hostile:
+            RelationshipDelta = -0.2f;
+            NewRelationType = ENPC_RelationType::Hostile;
+            break;
+        case ENPC_InteractionType::Trade:
+            RelationshipDelta = 0.05f;
+            NewRelationType = ENPC_RelationType::Neutral;
+            break;
+        case ENPC_InteractionType::Help:
+            RelationshipDelta = 0.15f;
+            NewRelationType = ENPC_RelationType::Friendly;
+            break;
+        default:
+            break;
+    }
+
+    UpdateRelationship(TargetPawn, RelationshipDelta, NewRelationType);
+}
+
+void UNPC_BehaviorTreeManager::SetDailyRoutine(const TArray<FNPC_RoutineTask>& NewRoutine)
+{
+    DailyRoutine = NewRoutine;
+    CurrentRoutineIndex = 0;
+    RoutineStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+}
+
+FNPC_RoutineTask UNPC_BehaviorTreeManager::GetCurrentRoutineTask()
+{
+    if (DailyRoutine.IsValidIndex(CurrentRoutineIndex))
+    {
+        return DailyRoutine[CurrentRoutineIndex];
+    }
+    
+    return FNPC_RoutineTask();
+}
+
+void UNPC_BehaviorTreeManager::AdvanceToNextRoutineTask()
+{
+    if (DailyRoutine.Num() > 0)
+    {
+        CurrentRoutineIndex = (CurrentRoutineIndex + 1) % DailyRoutine.Num();
+        RoutineStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    }
+}
+
+void UNPC_BehaviorTreeManager::SetBlackboardValue(FName KeyName, float Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsFloat(KeyName, Value);
+    }
+}
+
+void UNPC_BehaviorTreeManager::SetBlackboardVector(FName KeyName, FVector Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsVector(KeyName, Value);
+    }
+}
+
+void UNPC_BehaviorTreeManager::SetBlackboardObject(FName KeyName, UObject* Value)
+{
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsObject(KeyName, Value);
+    }
+}
+
+float UNPC_BehaviorTreeManager::GetBlackboardValue(FName KeyName)
+{
+    if (BlackboardComponent)
+    {
+        return BlackboardComponent->GetValueAsFloat(KeyName);
+    }
+    
+    return 0.0f;
+}
+
+void UNPC_BehaviorTreeManager::SetNPCState(ENPC_BehaviorState NewState)
+{
+    if (CurrentBehaviorState != NewState)
+    {
+        PreviousBehaviorState = CurrentBehaviorState;
+        CurrentBehaviorState = NewState;
+
+        // Update blackboard with new state
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
+        }
+    }
+}
+
+void UNPC_BehaviorTreeManager::UpdateMemorySystem(float DeltaTime)
+{
+    DecayMemoryIntensity(DeltaTime);
+}
+
+void UNPC_BehaviorTreeManager::UpdateSocialSystem(float DeltaTime)
+{
+    // Clean up invalid relationships
+    SocialRelations.RemoveAll([](const FNPC_SocialRelation& Relation)
+    {
+        return !Relation.TargetPawn.IsValid();
+    });
+
+    // Decay relationships over time
     float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    // Decay short-term memories (remove after 300 seconds)
-    for (int32 i = ShortTermMemory.Num() - 1; i >= 0; i--)
+    for (FNPC_SocialRelation& Relation : SocialRelations)
     {
-        if (CurrentTime - ShortTermMemory[i].TimeStamp > 300.0f)
+        float TimeSinceInteraction = CurrentTime - Relation.LastInteractionTime;
+        if (TimeSinceInteraction > 60.0f) // 1 minute
         {
-            ShortTermMemory.RemoveAt(i);
-        }
-    }
-    
-    // Decay long-term memories (reduce importance over time)
-    for (FNPC_MemoryEntry& Memory : LongTermMemory)
-    {
-        float TimeSinceEvent = CurrentTime - Memory.TimeStamp;
-        float DecayRate = 0.0001f; // Very slow decay for long-term memories
-        Memory.Importance = FMath::Max(0.0f, Memory.Importance - (DecayRate * TimeSinceEvent));
-    }
-    
-    // Remove long-term memories with very low importance
-    for (int32 i = LongTermMemory.Num() - 1; i >= 0; i--)
-    {
-        if (LongTermMemory[i].Importance < 0.1f)
-        {
-            LongTermMemory.RemoveAt(i);
-        }
-    }
-}
-
-void UNPCBehaviorTreeManager::UpdateSocialRelationship(AActor* TargetActor, float RelationshipChange, float TrustChange, float FearChange)
-{
-    if (!TargetActor) return;
-    
-    // Find existing relationship or create new one
-    FNPC_SocialRelationship* ExistingRelationship = nullptr;
-    for (FNPC_SocialRelationship& Relationship : SocialRelationships)
-    {
-        if (Relationship.TargetActor == TargetActor)
-        {
-            ExistingRelationship = &Relationship;
-            break;
-        }
-    }
-    
-    if (!ExistingRelationship)
-    {
-        FNPC_SocialRelationship NewRelationship;
-        NewRelationship.TargetActor = TargetActor;
-        SocialRelationships.Add(NewRelationship);
-        ExistingRelationship = &SocialRelationships.Last();
-    }
-    
-    // Update relationship values
-    ExistingRelationship->RelationshipValue = FMath::Clamp(ExistingRelationship->RelationshipValue + RelationshipChange, -100.0f, 100.0f);
-    ExistingRelationship->Trust = FMath::Clamp(ExistingRelationship->Trust + TrustChange, 0.0f, 100.0f);
-    ExistingRelationship->Fear = FMath::Clamp(ExistingRelationship->Fear + FearChange, 0.0f, 100.0f);
-    ExistingRelationship->LastInteractionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Add memory entry for social interaction
-    AddMemoryEntry(
-        TargetActor->GetActorLocation(),
-        TargetActor,
-        FMath::Abs(RelationshipChange) * 0.1f,
-        FString::Printf(TEXT("Social interaction with %s"), *TargetActor->GetName())
-    );
-}
-
-FNPC_SocialRelationship UNPCBehaviorTreeManager::GetSocialRelationship(AActor* TargetActor)
-{
-    for (const FNPC_SocialRelationship& Relationship : SocialRelationships)
-    {
-        if (Relationship.TargetActor == TargetActor)
-        {
-            return Relationship;
-        }
-    }
-    
-    // Return default relationship if not found
-    FNPC_SocialRelationship DefaultRelationship;
-    DefaultRelationship.TargetActor = TargetActor;
-    return DefaultRelationship;
-}
-
-void UNPCBehaviorTreeManager::ExecuteDailyRoutine(float TimeOfDay)
-{
-    ENPC_BehaviorState NewState = CurrentBehaviorState;
-    
-    // Simple daily routine based on time of day
-    if (TimeOfDay >= 0.0f && TimeOfDay < 0.25f) // Night (0-6 AM)
-    {
-        NewState = ENPC_BehaviorState::Sleeping;
-    }
-    else if (TimeOfDay >= 0.25f && TimeOfDay < 0.5f) // Morning (6 AM - 12 PM)
-    {
-        switch (SocialRole)
-        {
-            case ENPC_SocialRole::Hunter:
-                NewState = ENPC_BehaviorState::Hunting;
-                break;
-            case ENPC_SocialRole::Gatherer:
-                NewState = ENPC_BehaviorState::Gathering;
-                break;
-            case ENPC_SocialRole::Guard:
-                NewState = ENPC_BehaviorState::Patrolling;
-                break;
-            default:
-                NewState = ENPC_BehaviorState::Working;
-                break;
-        }
-    }
-    else if (TimeOfDay >= 0.5f && TimeOfDay < 0.75f) // Afternoon (12 PM - 6 PM)
-    {
-        NewState = ENPC_BehaviorState::Socializing;
-    }
-    else // Evening (6 PM - 12 AM)
-    {
-        NewState = ENPC_BehaviorState::Idle;
-    }
-    
-    // Override routine if fear is high
-    if (Fear > 70.0f)
-    {
-        NewState = ENPC_BehaviorState::Fleeing;
-    }
-    
-    SetBehaviorState(NewState);
-}
-
-void UNPCBehaviorTreeManager::OnPerceptionUpdated(AActor* Actor, float Stimulus)
-{
-    if (!Actor) return;
-    
-    // Increase alertness based on stimulus
-    Alertness = FMath::Clamp(Alertness + Stimulus * 0.1f, 0.0f, 100.0f);
-    
-    // Add memory entry for perceived actor
-    AddMemoryEntry(
-        Actor->GetActorLocation(),
-        Actor,
-        Stimulus * 0.01f,
-        FString::Printf(TEXT("Perceived %s"), *Actor->GetName())
-    );
-    
-    // Update blackboard with perceived actor
-    if (NPCBlackboard)
-    {
-        NPCBlackboard->SetValueAsObject(TEXT("PerceivedActor"), Actor);
-        NPCBlackboard->SetValueAsVector(TEXT("PerceivedLocation"), Actor->GetActorLocation());
-    }
-}
-
-void UNPCBehaviorTreeManager::SendSocialSignal(const FString& Message, float Range)
-{
-    if (CommunicationCooldown > 0.0f) return;
-    
-    if (!GetOwner()) return;
-    
-    // Find nearby NPCs to send signal to
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
-    {
-        if (Actor != GetOwner() && IsInSocialRange(Actor))
-        {
-            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
-            if (Distance <= Range)
+            float DecayAmount = DeltaTime * 0.01f; // Slow decay
+            if (Relation.RelationshipValue > 0.0f)
             {
-                // Try to find NPC behavior component on target
-                if (UNPCBehaviorTreeManager* TargetNPC = Actor->FindComponentByClass<UNPCBehaviorTreeManager>())
-                {
-                    TargetNPC->ReceiveSocialSignal(GetOwner(), Message);
-                }
+                Relation.RelationshipValue = FMath::Max(0.0f, Relation.RelationshipValue - DecayAmount);
             }
-        }
-    }
-    
-    CommunicationCooldown = 2.0f; // 2 second cooldown
-}
-
-void UNPCBehaviorTreeManager::ReceiveSocialSignal(AActor* Sender, const FString& Message)
-{
-    if (!Sender) return;
-    
-    // Process the social signal
-    AddMemoryEntry(
-        Sender->GetActorLocation(),
-        Sender,
-        0.3f,
-        FString::Printf(TEXT("Received signal: %s"), *Message)
-    );
-    
-    // Update social relationship
-    UpdateSocialRelationship(Sender, 1.0f, 0.5f, 0.0f);
-    
-    // Update blackboard with signal information
-    if (NPCBlackboard)
-    {
-        NPCBlackboard->SetValueAsString(TEXT("LastSocialMessage"), Message);
-        NPCBlackboard->SetValueAsObject(TEXT("LastSocialSender"), Sender);
-    }
-}
-
-void UNPCBehaviorTreeManager::UpdateNeeds(float DeltaTime)
-{
-    // Gradually increase hunger
-    Hunger = FMath::Clamp(Hunger + (DeltaTime * 0.5f), 0.0f, 100.0f);
-    
-    // Gradually decrease energy
-    Energy = FMath::Clamp(Energy - (DeltaTime * 0.3f), 0.0f, 100.0f);
-    
-    // Gradually decrease fear if no threats
-    Fear = FMath::Clamp(Fear - (DeltaTime * 2.0f), 0.0f, 100.0f);
-    
-    // Gradually normalize alertness
-    float TargetAlertness = 50.0f;
-    Alertness = FMath::FInterpTo(Alertness, TargetAlertness, DeltaTime, 1.0f);
-    
-    // Update blackboard with current needs
-    if (NPCBlackboard)
-    {
-        NPCBlackboard->SetValueAsFloat(TEXT("Energy"), Energy);
-        NPCBlackboard->SetValueAsFloat(TEXT("Hunger"), Hunger);
-        NPCBlackboard->SetValueAsFloat(TEXT("Fear"), Fear);
-        NPCBlackboard->SetValueAsFloat(TEXT("Alertness"), Alertness);
-    }
-}
-
-void UNPCBehaviorTreeManager::ProcessSocialInteractions(float DeltaTime)
-{
-    if (!GetOwner()) return;
-    
-    // Find nearby NPCs for social interactions
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
-    
-    for (AActor* Actor : FoundActors)
-    {
-        if (Actor != GetOwner() && IsInSocialRange(Actor))
-        {
-            // Check if this is an NPC we can interact with
-            if (UNPCBehaviorTreeManager* OtherNPC = Actor->FindComponentByClass<UNPCBehaviorTreeManager>())
+            else if (Relation.RelationshipValue < 0.0f)
             {
-                // Simple social interaction based on proximity
-                float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
-                if (Distance < 500.0f) // Very close proximity
-                {
-                    // Positive social interaction
-                    UpdateSocialRelationship(Actor, 0.1f * DeltaTime, 0.05f * DeltaTime, 0.0f);
-                }
+                Relation.RelationshipValue = FMath::Min(0.0f, Relation.RelationshipValue + DecayAmount);
             }
         }
     }
 }
 
-void UNPCBehaviorTreeManager::ManageMemoryCapacity()
+void UNPC_BehaviorTreeManager::UpdateRoutineSystem(float DeltaTime)
 {
-    // Remove oldest short-term memories if over capacity
-    while (ShortTermMemory.Num() > MaxShortTermMemories)
+    if (DailyRoutine.Num() == 0)
     {
-        ShortTermMemory.RemoveAt(0);
+        return;
     }
-    
-    // Remove least important long-term memories if over capacity
-    while (LongTermMemory.Num() > MaxLongTermMemories)
+
+    FNPC_RoutineTask CurrentTask = GetCurrentRoutineTask();
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    float TaskDuration = CurrentTime - RoutineStartTime;
+
+    // Check if current task should be completed
+    if (TaskDuration >= CurrentTask.Duration)
     {
-        int32 LeastImportantIndex = 0;
-        float LowestImportance = LongTermMemory[0].Importance;
-        
-        for (int32 i = 1; i < LongTermMemory.Num(); i++)
-        {
-            if (LongTermMemory[i].Importance < LowestImportance)
-            {
-                LowestImportance = LongTermMemory[i].Importance;
-                LeastImportantIndex = i;
-            }
-        }
-        
-        LongTermMemory.RemoveAt(LeastImportantIndex);
+        AdvanceToNextRoutineTask();
+    }
+
+    // Update blackboard with current routine information
+    if (BlackboardComponent)
+    {
+        BlackboardComponent->SetValueAsVector(TEXT("RoutineLocation"), CurrentTask.Location);
+        BlackboardComponent->SetValueAsEnum(TEXT("RoutineActivity"), static_cast<uint8>(CurrentTask.Activity));
     }
 }
 
-AActor* UNPCBehaviorTreeManager::FindNearestActorOfType(TSubclassOf<AActor> ActorClass, float MaxDistance)
+void UNPC_BehaviorTreeManager::CleanupExpiredMemories()
 {
-    if (!GetOwner() || !ActorClass) return nullptr;
-    
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ActorClass, FoundActors);
-    
-    AActor* NearestActor = nullptr;
-    float NearestDistance = MaxDistance;
-    
-    for (AActor* Actor : FoundActors)
-    {
-        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestActor = Actor;
-        }
-    }
-    
-    return NearestActor;
+    ClearOldMemories(300.0f); // Clear memories older than 5 minutes
 }
 
-bool UNPCBehaviorTreeManager::IsInSocialRange(AActor* TargetActor)
+void UNPC_BehaviorTreeManager::DecayMemoryIntensity(float DeltaTime)
 {
-    if (!GetOwner() || !TargetActor) return false;
+    for (FNPC_MemoryEntry& Memory : Memories)
+    {
+        Memory.Intensity = FMath::Max(0.1f, Memory.Intensity - (MemoryDecayRate * DeltaTime));
+    }
+}
+
+AAIController* UNPC_BehaviorTreeManager::GetOwnerAIController()
+{
+    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+    {
+        return Cast<AAIController>(OwnerPawn->GetController());
+    }
     
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), TargetActor->GetActorLocation());
-    return Distance <= SocialRadius;
+    return nullptr;
 }
