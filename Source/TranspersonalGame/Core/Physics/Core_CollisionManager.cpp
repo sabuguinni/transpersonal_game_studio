@@ -1,212 +1,284 @@
 #include "Core_CollisionManager.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/PrimitiveComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 UCore_CollisionManager::UCore_CollisionManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
-    
-    MyCollisionType = ECore_CollisionType::Character;
-    bEnableCollisionLogging = true;
-    MinImpactForceThreshold = 100.0f;
-    CollisionCooldown = 0.1f;
-    MaxCollisionHistory = 50;
-    TotalCollisions = 0;
-    LastCollisionTime = 0.0f;
+    // Set default collision channels
+    TerrainChannel = ECC_WorldStatic;
+    DinosaurChannel = ECC_Pawn;
+    CharacterChannel = ECC_Pawn;
 }
 
-void UCore_CollisionManager::BeginPlay()
+void UCore_CollisionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Initialize collision history
-    CollisionHistory.Reserve(MaxCollisionHistory);
+    UE_LOG(LogTemp, Warning, TEXT("Core_CollisionManager: Initializing collision system"));
     
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Initialized for collision type %d"), (int32)MyCollisionType);
+    InitializePhysicsMaterials();
+    SetupCollisionChannels();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Core_CollisionManager: Collision system ready"));
 }
 
-void UCore_CollisionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCore_CollisionManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    CollisionRegistry.Empty();
+    TerrainMaterials.Empty();
     
-    // Clean up old collision data if needed
-    if (CollisionHistory.Num() > MaxCollisionHistory)
+    UE_LOG(LogTemp, Warning, TEXT("Core_CollisionManager: Collision system shutdown"));
+    
+    Super::Deinitialize();
+}
+
+void UCore_CollisionManager::RegisterCollisionObject(UPrimitiveComponent* Component, const FCore_CollisionData& CollisionData)
+{
+    if (!Component)
     {
-        int32 ExcessCount = CollisionHistory.Num() - MaxCollisionHistory;
-        CollisionHistory.RemoveAt(0, ExcessCount);
-    }
-}
-
-void UCore_CollisionManager::RegisterCollision(const FHitResult& HitResult, float ImpactForce)
-{
-    if (IsWithinCooldown() || ImpactForce < MinImpactForceThreshold)
-    {
+        UE_LOG(LogTemp, Error, TEXT("Core_CollisionManager: Cannot register null component"));
         return;
     }
-    
-    if (ShouldIgnoreCollision(HitResult.GetActor()))
-    {
-        return;
-    }
-    
-    // Create collision data
-    FCore_CollisionData CollisionData;
-    CollisionData.CollisionType = MyCollisionType;
-    CollisionData.ImpactForce = ImpactForce;
-    CollisionData.ImpactLocation = HitResult.ImpactPoint;
-    CollisionData.ImpactNormal = HitResult.ImpactNormal;
-    CollisionData.HitActor = HitResult.GetActor();
-    CollisionData.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    ProcessCollisionData(CollisionData);
-    
-    // Update cooldown
-    LastCollisionTime = CollisionData.Timestamp;
-    TotalCollisions++;
-    
-    // Broadcast event
-    OnCollisionDetected.Broadcast(CollisionData, HitResult.GetActor());
-    
-    if (bEnableCollisionLogging)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision registered - Force: %f, Actor: %s"), 
-               ImpactForce, 
-               HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("None"));
-    }
-}
 
-void UCore_CollisionManager::SetCollisionType(ECore_CollisionType NewType)
-{
-    MyCollisionType = NewType;
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision type changed to %d"), (int32)NewType);
-}
-
-bool UCore_CollisionManager::IsCollisionTypeCompatible(ECore_CollisionType OtherType) const
-{
-    // Define collision compatibility rules
-    switch (MyCollisionType)
-    {
-        case ECore_CollisionType::Character:
-            return OtherType != ECore_CollisionType::Character; // Characters don't collide with each other
-            
-        case ECore_CollisionType::Dinosaur:
-            return OtherType == ECore_CollisionType::Character || 
-                   OtherType == ECore_CollisionType::Environment ||
-                   OtherType == ECore_CollisionType::Projectile;
-            
-        case ECore_CollisionType::Projectile:
-            return OtherType != ECore_CollisionType::Projectile; // Projectiles don't collide with each other
-            
-        case ECore_CollisionType::Trigger:
-            return true; // Triggers can collide with everything
-            
-        default:
-            return true;
-    }
-}
-
-void UCore_CollisionManager::EnableCollisionTracking(bool bEnable)
-{
-    bEnableCollisionLogging = bEnable;
+    CollisionRegistry.Add(Component, CollisionData);
     
-    if (!bEnable)
-    {
-        ClearCollisionHistory();
-    }
-}
-
-void UCore_CollisionManager::GetRecentCollisions(TArray<FCore_CollisionData>& OutCollisions, int32 Count)
-{
-    OutCollisions.Empty();
-    
-    int32 StartIndex = FMath::Max(0, CollisionHistory.Num() - Count);
-    for (int32 i = StartIndex; i < CollisionHistory.Num(); i++)
-    {
-        OutCollisions.Add(CollisionHistory[i]);
-    }
-}
-
-void UCore_CollisionManager::ClearCollisionHistory()
-{
-    CollisionHistory.Empty();
-    TotalCollisions = 0;
-    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision history cleared"));
-}
-
-float UCore_CollisionManager::CalculateImpactForce(const FVector& Velocity, float Mass) const
-{
-    // F = ma, where a is derived from velocity change
-    float Speed = Velocity.Size();
-    return Speed * Mass * 0.1f; // Simplified calculation
-}
-
-bool UCore_CollisionManager::ShouldIgnoreCollision(AActor* OtherActor) const
-{
-    if (!OtherActor)
-    {
-        return true;
-    }
-    
-    // Check if actor is in ignore list
-    if (IgnoredActors.Contains(OtherActor))
-    {
-        return true;
-    }
-    
-    // Ignore self-collision
-    if (OtherActor == GetOwner())
-    {
-        return true;
-    }
-    
-    return false;
-}
-
-void UCore_CollisionManager::ProcessCollisionData(const FCore_CollisionData& CollisionData)
-{
-    UpdateCollisionHistory(CollisionData);
-    
-    // Apply collision-specific logic based on type
+    // Apply collision settings based on type
     switch (CollisionData.CollisionType)
     {
-        case ECore_CollisionType::Character:
-            // Handle character collision effects
+        case ECore_CollisionType::Terrain:
+            Component->SetCollisionObjectType(TerrainChannel);
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             break;
             
         case ECore_CollisionType::Dinosaur:
-            // Handle dinosaur collision effects
+            Component->SetCollisionObjectType(DinosaurChannel);
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            Component->SetMassOverrideInKg(NAME_None, CollisionData.Mass, true);
             break;
             
-        case ECore_CollisionType::Projectile:
-            // Handle projectile collision effects
+        case ECore_CollisionType::Character:
+            Component->SetCollisionObjectType(CharacterChannel);
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             break;
             
         default:
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
             break;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Registered collision object of type %d"), (int32)CollisionData.CollisionType);
 }
 
-void UCore_CollisionManager::UpdateCollisionHistory(const FCore_CollisionData& NewCollision)
+void UCore_CollisionManager::UnregisterCollisionObject(UPrimitiveComponent* Component)
 {
-    CollisionHistory.Add(NewCollision);
-    
-    // Maintain size limit
-    while (CollisionHistory.Num() > MaxCollisionHistory)
+    if (Component && CollisionRegistry.Contains(Component))
     {
-        CollisionHistory.RemoveAt(0);
+        CollisionRegistry.Remove(Component);
+        UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Unregistered collision object"));
     }
 }
 
-bool UCore_CollisionManager::IsWithinCooldown() const
+bool UCore_CollisionManager::LineTraceForTerrain(const FVector& Start, const FVector& End, FHitResult& OutHit)
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return false;
     }
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    QueryParams.bReturnPhysicalMaterial = true;
+
+    bool bHit = World->LineTraceSingleByChannel(
+        OutHit,
+        Start,
+        End,
+        TerrainChannel,
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_CollisionManager: Terrain hit at %s"), *OutHit.Location.ToString());
+    }
+
+    return bHit;
+}
+
+bool UCore_CollisionManager::SphereTraceForDinosaurs(const FVector& Center, float Radius, TArray<FHitResult>& OutHits)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = false;
+
+    bool bHit = World->SweepMultiByChannel(
+        OutHits,
+        Center,
+        Center,
+        FQuat::Identity,
+        DinosaurChannel,
+        FCollisionShape::MakeSphere(Radius),
+        QueryParams
+    );
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_CollisionManager: Sphere trace found %d dinosaurs"), OutHits.Num());
+
+    return bHit;
+}
+
+bool UCore_CollisionManager::CheckGroundStability(const FVector& Location, float& OutStabilityFactor)
+{
+    FHitResult Hit;
+    FVector TraceStart = Location + FVector(0, 0, 50);
+    FVector TraceEnd = Location - FVector(0, 0, 200);
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    return (CurrentTime - LastCollisionTime) < CollisionCooldown;
+    if (LineTraceForTerrain(TraceStart, TraceEnd, Hit))
+    {
+        // Calculate stability based on surface normal
+        FVector UpVector = FVector::UpVector;
+        float DotProduct = FVector::DotProduct(Hit.Normal, UpVector);
+        
+        // Stability ranges from 0 (vertical cliff) to 1 (flat ground)
+        OutStabilityFactor = FMath::Clamp(DotProduct, 0.0f, 1.0f);
+        
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_CollisionManager: Ground stability at %s is %f"), *Location.ToString(), OutStabilityFactor);
+        
+        return true;
+    }
+    
+    OutStabilityFactor = 0.0f;
+    return false;
+}
+
+void UCore_CollisionManager::ApplyTerrainPhysics(UPrimitiveComponent* Component, ECore_CollisionType TerrainType)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    UPhysicalMaterial** FoundMaterial = TerrainMaterials.Find(TerrainType);
+    if (FoundMaterial && *FoundMaterial)
+    {
+        Component->SetPhysMaterialOverride(*FoundMaterial);
+        UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Applied terrain physics for type %d"), (int32)TerrainType);
+    }
+}
+
+void UCore_CollisionManager::SetCollisionResponseForDinosaur(UPrimitiveComponent* Component, bool bIsLargeDinosaur)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    if (bIsLargeDinosaur)
+    {
+        // Large dinosaurs can push through vegetation but are blocked by terrain
+        Component->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+        Component->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+        Component->SetMassOverrideInKg(NAME_None, 5000.0f, true);
+    }
+    else
+    {
+        // Small dinosaurs are blocked by most objects
+        Component->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+        Component->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+        Component->SetMassOverrideInKg(NAME_None, 500.0f, true);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Set collision response for %s dinosaur"), bIsLargeDinosaur ? TEXT("large") : TEXT("small"));
+}
+
+void UCore_CollisionManager::HandleImpactEvent(const FHitResult& Hit, float ImpactForce)
+{
+    if (!Hit.GetComponent())
+    {
+        return;
+    }
+
+    float Damage = CalculateImpactDamage(Hit, ImpactForce);
+    
+    // Check if object can be destroyed
+    FCore_CollisionData* CollisionData = CollisionRegistry.Find(Hit.GetComponent());
+    if (CollisionData && CollisionData->bCanBeDestroyed && Damage > 50.0f)
+    {
+        ProcessDestructibleCollision(Hit.GetComponent(), Hit.Location, ImpactForce);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Impact event - Force: %f, Damage: %f"), ImpactForce, Damage);
+}
+
+void UCore_CollisionManager::ProcessDestructibleCollision(UPrimitiveComponent* Component, const FVector& ImpactPoint, float Force)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    AActor* Owner = Component->GetOwner();
+    if (Owner)
+    {
+        // Create destruction effect (placeholder for now)
+        UE_LOG(LogTemp, Warning, TEXT("Core_CollisionManager: Destroying object %s at impact point %s"), *Owner->GetName(), *ImpactPoint.ToString());
+        
+        // In a full implementation, this would trigger particle effects, sound, and debris
+        Owner->Destroy();
+    }
+}
+
+void UCore_CollisionManager::InitializePhysicsMaterials()
+{
+    // Create physics materials for different terrain types
+    UPhysicalMaterial* GrassMaterial = NewObject<UPhysicalMaterial>();
+    GrassMaterial->Friction = 0.8f;
+    GrassMaterial->Restitution = 0.1f;
+    GrassMaterial->Density = 1000.0f;
+    TerrainMaterials.Add(ECore_CollisionType::Terrain, GrassMaterial);
+    
+    UPhysicalMaterial* WaterMaterial = NewObject<UPhysicalMaterial>();
+    WaterMaterial->Friction = 0.1f;
+    WaterMaterial->Restitution = 0.0f;
+    WaterMaterial->Density = 1000.0f;
+    TerrainMaterials.Add(ECore_CollisionType::Water, WaterMaterial);
+    
+    UPhysicalMaterial* LavaMaterial = NewObject<UPhysicalMaterial>();
+    LavaMaterial->Friction = 0.3f;
+    LavaMaterial->Restitution = 0.0f;
+    LavaMaterial->Density = 2000.0f;
+    TerrainMaterials.Add(ECore_CollisionType::Lava, LavaMaterial);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Initialized %d physics materials"), TerrainMaterials.Num());
+}
+
+void UCore_CollisionManager::SetupCollisionChannels()
+{
+    // Collision channels are set up in the project settings
+    // This function can be extended to programmatically configure collision responses
+    UE_LOG(LogTemp, Log, TEXT("Core_CollisionManager: Collision channels configured"));
+}
+
+float UCore_CollisionManager::CalculateImpactDamage(const FHitResult& Hit, float Force)
+{
+    // Simple damage calculation based on impact force and material properties
+    float BaseDamage = Force * 0.1f;
+    
+    FCore_CollisionData* CollisionData = CollisionRegistry.Find(Hit.GetComponent());
+    if (CollisionData)
+    {
+        // Modify damage based on material properties
+        BaseDamage *= (2.0f - CollisionData->Restitution);
+    }
+    
+    return FMath::Clamp(BaseDamage, 0.0f, 1000.0f);
 }
