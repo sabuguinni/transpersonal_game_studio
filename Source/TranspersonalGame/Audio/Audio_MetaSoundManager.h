@@ -2,59 +2,71 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 #include "MetasoundSource.h"
-#include "Sound/SoundCue.h"
+#include "Engine/TriggerVolume.h"
+#include "SharedTypes.h"
 #include "Audio_MetaSoundManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_AmbienceType : uint8
 {
-    Forest UMETA(DisplayName = "Forest"),
-    Valley UMETA(DisplayName = "Valley"),
-    River UMETA(DisplayName = "River"),
-    Cave UMETA(DisplayName = "Cave"),
-    Plains UMETA(DisplayName = "Plains")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_IntensityLevel : uint8
-{
-    Calm UMETA(DisplayName = "Calm"),
-    Tense UMETA(DisplayName = "Tense"),
-    Danger UMETA(DisplayName = "Danger"),
-    Combat UMETA(DisplayName = "Combat")
+    Forest = 0,
+    Danger,
+    Campfire,
+    TribalDrums,
+    Wind,
+    Footsteps,
+    Narrative
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_AmbienceSettings
+struct TRANSPERSONALGAME_API FAudio_AmbienceZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     EAudio_AmbienceType AmbienceType = EAudio_AmbienceType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
-    float Volume = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
-    float FadeInTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float Radius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
-    float FadeOutTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float Volume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambience")
-    bool bLooping = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bIsActive = true;
 
-    FAudio_AmbienceSettings()
-    {
-        AmbienceType = EAudio_AmbienceType::Forest;
-        Volume = 0.5f;
-        FadeInTime = 2.0f;
-        FadeOutTime = 2.0f;
-        bLooping = true;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    TSoftObjectPtr<USoundBase> AudioAsset;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_NarrativeTrigger
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    FString TriggerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    FVector TriggerLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    TSoftObjectPtr<USoundBase> NarrativeAudio;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    float TriggerRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    bool bHasTriggered = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    bool bCanRepeat = false;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -67,72 +79,60 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* AmbienceAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* MusicAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* SFXAudioComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    FAudio_AmbienceSettings CurrentAmbienceSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EAudio_AmbienceType, class USoundBase*> AmbienceSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EAudio_IntensityLevel, class USoundBase*> MusicTracks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    class UMetaSoundSource* DynamicAmbienceMetaSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaSound")
-    class UMetaSoundSource* AdaptiveMusicMetaSound;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void SetAmbienceType(EAudio_AmbienceType NewAmbienceType);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio System")
+    class USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void SetMusicIntensity(EAudio_IntensityLevel NewIntensity);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zones")
+    TArray<FAudio_AmbienceZone> AmbienceZones;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void PlaySFX(class USoundBase* SFXSound, float Volume = 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
+    TArray<FAudio_NarrativeTrigger> NarrativeTriggers;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void FadeToAmbience(EAudio_AmbienceType NewAmbienceType, float FadeTime = 2.0f);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    TArray<class UAudioComponent*> AudioComponents;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void StopAllAudio();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MasterVolume = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void SetMasterVolume(float Volume);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float AmbienceVolume = 0.7f;
 
-    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
-    void UpdateMetaSoundParameter(const FString& ParameterName, float Value);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float NarrativeVolume = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "MetaSound Control")
-    void TriggerMetaSoundEvent(const FString& EventName);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float FootstepVolume = 0.8f;
 
-protected:
-    UFUNCTION()
-    void OnAmbienceFadeComplete();
+public:
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void InitializeAudioZones();
 
-    UFUNCTION()
-    void OnMusicFadeComplete();
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdatePlayerProximity(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void TriggerNarrativeAudio(const FString& TriggerName);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetAmbienceVolume(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetNarrativeVolume(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayFootstepAudio(const FVector& Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void CreateAmbienceZone(EAudio_AmbienceType Type, const FVector& Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RemoveAmbienceZone(int32 ZoneIndex);
 
 private:
-    float CurrentMasterVolume = 1.0f;
-    EAudio_IntensityLevel CurrentMusicIntensity = EAudio_IntensityLevel::Calm;
-    bool bIsFadingAmbience = false;
-    bool bIsFadingMusic = false;
-
-    void InitializeAudioComponents();
-    void LoadDefaultAudioAssets();
-    void UpdateDynamicParameters();
+    void UpdateAmbienceAudio(float DeltaTime);
+    void CheckNarrativeTriggers(const FVector& PlayerLocation);
+    UAudioComponent* CreateAudioComponent();
+    float CalculateDistanceAttenuation(const FVector& SourceLocation, const FVector& ListenerLocation, float MaxDistance);
 };
