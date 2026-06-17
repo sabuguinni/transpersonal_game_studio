@@ -1,0 +1,205 @@
+# TIME-OF-DAY LIGHTING SYSTEM - BLUEPRINT SPECIFICATION
+# Agent #8 - Lighting & Atmosphere Agent
+# Cycle: PROD_CYCLE_AUTO_20260617_001
+
+## SYSTEM OVERVIEW
+
+Dynamic day/night cycle for prehistoric survival game with realistic atmospheric transitions.
+Designed for Blueprint implementation (no C++ required per global directive).
+
+## CORE PARAMETERS
+
+### Time Progression
+- **Day Length**: 24 real minutes = 1 game day (60x time compression)
+- **Time of Day**: Float 0.0-24.0 (0=midnight, 6=dawn, 12=noon, 18=dusk, 24=midnight)
+- **Time Speed Multiplier**: 60.0 (adjustable for testing/gameplay)
+
+### Key Lighting Moments
+1. **Dawn** (5:00-7:00): Warm orange/pink horizon, low intensity
+2. **Morning** (7:00-10:00): Rising sun, increasing intensity, golden tint
+3. **Noon** (10:00-14:00): Peak intensity, neutral white light, minimal shadows
+4. **Afternoon** (14:00-17:00): Descending sun, warming color temperature
+5. **Dusk** (17:00-19:00): Deep orange/red horizon, long shadows, dramatic lighting
+6. **Twilight** (19:00-21:00): Fading light, purple/blue sky, stars appearing
+7. **Night** (21:00-5:00): Moonlight only, cool blue tint, low visibility
+
+## DIRECTIONAL LIGHT (SUN) ANIMATION
+
+### Rotation Curve (Blueprint Timeline)
+```
+Time | Pitch | Yaw | Roll
+-----|-------|-----|-----
+0:00 | -45°  | 0°  | 0°   (Moon below horizon)
+6:00 | -10°  | 90° | 0°   (Sunrise - east)
+12:00| 70°   | 180°| 0°   (Noon - overhead)
+18:00| -10°  | 270°| 0°   (Sunset - west)
+24:00| -45°  | 0°  | 0°   (Moon below horizon)
+```
+
+### Intensity Curve (Lux)
+```
+Time | Intensity | Notes
+-----|-----------|------
+0:00 | 0.05 lux  | Moonlight only
+6:00 | 2.0 lux   | Dawn glow
+8:00 | 6.5 lux   | Morning light
+12:00| 10.0 lux  | Peak sunlight
+16:00| 7.0 lux   | Afternoon
+18:00| 2.5 lux   | Sunset glow
+20:00| 0.1 lux   | Twilight fade
+22:00| 0.05 lux  | Night
+```
+
+### Color Temperature Curve (Kelvin)
+```
+Time | Temp   | Color Description
+-----|--------|------------------
+0:00 | 4500K  | Cool moonlight (blue-white)
+6:00 | 2800K  | Warm sunrise (orange)
+8:00 | 3500K  | Morning golden hour
+12:00| 5500K  | Neutral daylight (white)
+16:00| 4200K  | Afternoon warmth
+18:00| 2600K  | Deep sunset (red-orange)
+20:00| 3800K  | Twilight purple-blue
+22:00| 4500K  | Night blue
+```
+
+## SKY ATMOSPHERE PARAMETERS
+
+### Rayleigh Scattering (Sky Color)
+- **Dawn/Dusk**: Scattering Intensity 0.8 (enhanced orange/red)
+- **Day**: Scattering Intensity 0.5 (neutral blue sky)
+- **Night**: Scattering Intensity 0.2 (dark blue-black)
+
+### Mie Scattering (Haze)
+- **Dawn/Dusk**: Mie Intensity 4.5 (heavy atmospheric haze)
+- **Day**: Mie Intensity 2.0 (moderate haze)
+- **Night**: Mie Intensity 0.5 (minimal haze)
+
+### Sun Disk Intensity
+- **Dawn/Dusk**: 15.0 (dramatic sun disk)
+- **Day**: 25.0 (bright sun)
+- **Night**: 0.0 (sun below horizon)
+
+## VOLUMETRIC FOG MODULATION
+
+### Fog Density by Time
+```
+Time | Fog Density | Rationale
+-----|-------------|----------
+0:00 | 0.035       | Night mist accumulation
+6:00 | 0.045       | Dense morning fog
+10:00| 0.020       | Fog burns off
+14:00| 0.015       | Minimal daytime haze
+18:00| 0.030       | Evening fog forming
+22:00| 0.040       | Night fog thickening
+```
+
+### Fog Color Tint
+- **Dawn**: RGB(1.0, 0.85, 0.65) - Warm orange mist
+- **Day**: RGB(0.95, 0.95, 0.92) - Neutral white haze
+- **Dusk**: RGB(1.0, 0.75, 0.55) - Deep orange fog
+- **Night**: RGB(0.65, 0.70, 0.85) - Cool blue mist
+
+## SKYLIGHT (AMBIENT) MODULATION
+
+### Intensity Curve
+```
+Time | Intensity | Source
+-----|-----------|-------
+0:00 | 0.3       | Starlight + moon reflection
+6:00 | 1.2       | Dawn ambient
+12:00| 2.0       | Peak ambient (sky dome)
+18:00| 1.0       | Dusk ambient
+22:00| 0.4       | Night ambient
+```
+
+### Color Temperature
+- Follows directional light temperature with -500K offset (cooler ambient)
+
+## BLUEPRINT IMPLEMENTATION GUIDE
+
+### Required Actors
+1. **BP_TimeOfDayManager** (Blueprint Actor)
+   - Tick enabled
+   - References: DirectionalLight, SkyAtmosphere, SkyLight, ExponentialHeightFog
+   - Variables: CurrentTime (float), TimeSpeed (float), bPaused (bool)
+
+2. **Event Graph Logic**
+   ```
+   Event Tick
+   ├─ If NOT Paused
+   │  ├─ CurrentTime += DeltaTime * TimeSpeed / 3600.0
+   │  ├─ If CurrentTime > 24.0: CurrentTime -= 24.0
+   │  └─ Call UpdateLighting(CurrentTime)
+   └─ UpdateLighting Function
+      ├─ Set Directional Light Rotation (curve lookup)
+      ├─ Set Directional Light Intensity (curve lookup)
+      ├─ Set Directional Light Temperature (curve lookup)
+      ├─ Set Sky Atmosphere Parameters (curve lookup)
+      ├─ Set Volumetric Fog Density (curve lookup)
+      ├─ Set Volumetric Fog Color (curve lookup)
+      └─ Set Skylight Intensity (curve lookup)
+   ```
+
+### Curve Assets Required
+- **Curve_SunRotationPitch** (Float Curve, 0-24 hours)
+- **Curve_SunRotationYaw** (Float Curve, 0-24 hours)
+- **Curve_SunIntensity** (Float Curve, 0-24 hours)
+- **Curve_SunTemperature** (Float Curve, 0-24 hours)
+- **Curve_FogDensity** (Float Curve, 0-24 hours)
+- **Curve_SkylightIntensity** (Float Curve, 0-24 hours)
+
+### Exposed Parameters (Blueprint Editable)
+- **Time Speed Multiplier** (default 60.0, range 1.0-1000.0)
+- **Starting Time** (default 8.0 = 8:00 AM)
+- **Enable Day/Night Cycle** (bool, default true)
+- **Override Time** (float, for testing specific lighting conditions)
+
+## PERFORMANCE OPTIMIZATION
+
+### Update Frequency
+- Lighting parameters update every tick (smooth transitions)
+- Curve lookups cached per frame (no redundant calculations)
+- Sky atmosphere updates limited to 0.1-second intervals (imperceptible)
+
+### LOD Considerations
+- Volumetric fog distance scales with time of day (reduced at night)
+- Shadow cascade distances increase during golden hour (long shadows)
+- Skylight recapture interval: 5 minutes game time (performance vs quality)
+
+## GAMEPLAY INTEGRATION
+
+### Survival Mechanics
+- **Temperature**: Colder at night (affects player stamina)
+- **Visibility**: Reduced at dawn/dusk/night (predator advantage)
+- **NPC Behavior**: Diurnal/nocturnal species activity cycles
+- **Quest Triggers**: Time-specific events (e.g., "Meet at dawn")
+
+### Cinematic Moments
+- **Golden Hour Quests**: Dramatic lighting for key story beats
+- **Night Stealth**: Low visibility enables infiltration gameplay
+- **Storm Integration**: Time-of-day + weather system combination
+
+## ARTISTIC INTENT
+
+The time-of-day system serves:
+1. **Realism**: Authentic prehistoric atmosphere with scientifically plausible lighting
+2. **Gameplay Variety**: Different challenges/opportunities at different times
+3. **Emotional Pacing**: Dawn = hope, noon = clarity, dusk = danger, night = fear
+4. **Visual Spectacle**: Golden hour and twilight as signature cinematic moments
+
+## TECHNICAL NOTES
+
+- All parameters tuned for UE5.5 Lumen global illumination
+- Color temperatures based on real-world solar radiation data
+- Fog density values calibrated for 60fps performance target
+- Blueprint-only implementation (no C++ per global directive)
+- Compatible with existing volumetric fog system from previous cycle
+
+## NEXT STEPS FOR IMPLEMENTATION
+
+1. **Character Artist Agent (#9)**: Ensure character materials respond to dynamic lighting (subsurface scattering, rim lighting)
+2. **Animation Agent (#10)**: Sync NPC behavior trees with time-of-day (sleep cycles, hunting patterns)
+3. **VFX Agent (#17)**: Create time-specific particle effects (fireflies at dusk, dust motes in morning light)
+4. **Audio Agent (#16)**: Implement time-based ambient soundscapes (dawn chorus, night insects)
