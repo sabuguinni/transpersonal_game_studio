@@ -1,0 +1,221 @@
+{
+  "audio_system": "TranspersonalGame_AudioManifest",
+  "version": "cycle_012",
+  "generated": "2026-06-17",
+  "agent": "#16 Audio Agent",
+  "description": "Complete audio asset manifest for the prehistoric survival game. All voice lines, ambient zones, and SFX catalogue.",
+
+  "voice_lines": [
+    {
+      "id": "VL_001",
+      "character": "Scout_TRexWarning",
+      "url": "tts/1781722645708_Scout_TRexWarning.mp3",
+      "duration": "~10s",
+      "trigger": "T-Rex detected within 300m radius",
+      "text": "The T-Rex is close. Stay low, stay still — it hunts by movement. If you run, you are dead.",
+      "category": "danger_warning"
+    },
+    {
+      "id": "VL_002",
+      "character": "Narrator_SurvivalTips",
+      "url": "tts/1781722657577_Narrator_SurvivalTips.mp3",
+      "duration": "~12s",
+      "trigger": "Player dehydration threshold reached",
+      "text": "Three days without water and the body begins to fail. Find a river. Find a stream. Find anything.",
+      "category": "survival_tutorial"
+    },
+    {
+      "id": "VL_003",
+      "character": "CampElder_FireWarning",
+      "url": "tts/1781718070855_CampElder_FireWarning.mp3",
+      "duration": "~13s",
+      "trigger": "Player approaches camp at night",
+      "text": "Fire. Keep the fire alive. The raptors will not cross fire...",
+      "category": "npc_dialogue"
+    },
+    {
+      "id": "VL_004",
+      "character": "Tracker_BrachioHerd",
+      "url": "tts/1781718085587_Tracker_BrachioHerd.mp3",
+      "duration": "~14s",
+      "trigger": "Brachiosaurus herd spotted",
+      "text": "That sound — low, like distant thunder. The brachio herd is moving.",
+      "category": "world_observation"
+    },
+    {
+      "id": "VL_005",
+      "character": "Kael_NPC",
+      "url": "tts/1781713663667_Kael_NPC.mp3",
+      "duration": "~10s",
+      "trigger": "First T-Rex encounter",
+      "text": "A young T-Rex is more dangerous than an old one. The old ones know what they can kill. The young ones are still learning — and they will try anything.",
+      "category": "npc_dialogue"
+    },
+    {
+      "id": "VL_006",
+      "character": "Kael_NPC_Line2",
+      "url": "tts/1781713677234_Kael_NPC.mp3",
+      "duration": "~11s",
+      "trigger": "Player crafts first weapon",
+      "text": "Good. A weapon means you stopped being prey. Now you are something else entirely.",
+      "category": "npc_dialogue"
+    },
+    {
+      "id": "VL_007",
+      "character": "Narrator_ValleyHistory",
+      "url": "tts/1781727140975_Tracker_StormWarning.mp3",
+      "duration": "~19s",
+      "trigger": "Storm weather event begins",
+      "text": "Rain is coming. I can smell it — wet stone, cold wind from the north. When the storm hits, the predators go still. Use the storm. Move during the rain — your scent disappears, your footsteps vanish.",
+      "category": "weather_event"
+    },
+    {
+      "id": "VL_008",
+      "character": "Narrator_CacheDiscovery",
+      "url": "tts/1781727154903_Narrator_CacheDiscovery.mp3",
+      "duration": "~20s",
+      "trigger": "Player discovers hidden supply cache",
+      "text": "You found the cache. Good. Whoever left it knew what they were doing — dried meat, wrapped in bark, hidden under the flat stone near the river bend.",
+      "category": "discovery_event"
+    }
+  ],
+
+  "ambient_zones": [
+    {
+      "id": "AZ_001",
+      "label": "AudioZone_River_001",
+      "location": {"x": 800, "y": -1200, "z": 50},
+      "radius": 600,
+      "sounds": ["water_flowing_river", "frogs_distant", "insects_water"],
+      "music_layer": "calm_water_percussion",
+      "blend_time": 3.0
+    },
+    {
+      "id": "AZ_002",
+      "label": "AudioZone_Forest_001",
+      "location": {"x": -900, "y": 600, "z": 50},
+      "radius": 800,
+      "sounds": ["wind_through_leaves", "birds_prehistoric", "branch_creak"],
+      "music_layer": "tense_forest_strings",
+      "blend_time": 4.0
+    },
+    {
+      "id": "AZ_003",
+      "label": "AudioZone_Savanna_001",
+      "location": {"x": 1500, "y": 800, "z": 50},
+      "radius": 1200,
+      "sounds": ["wind_open_plain", "distant_herbivore_calls", "grass_rustle"],
+      "music_layer": "open_world_percussion",
+      "blend_time": 5.0
+    },
+    {
+      "id": "AZ_004",
+      "label": "AudioZone_Cave_001",
+      "location": {"x": -400, "y": -800, "z": 50},
+      "radius": 400,
+      "sounds": ["cave_drip", "echo_reverb_deep", "bat_flutter_distant"],
+      "music_layer": "cave_tension_minimal",
+      "blend_time": 2.0
+    }
+  ],
+
+  "sfx_catalogue": {
+    "player_actions": [
+      {"id": "SFX_CRAFT_STONE", "desc": "Stone tool crafting — flint scraping", "freesound_query": "flint stone scraping"},
+      {"id": "SFX_FOOTSTEP_DIRT", "desc": "Player footstep on dirt/mud", "freesound_query": "footstep dirt outdoor"},
+      {"id": "SFX_FOOTSTEP_ROCK", "desc": "Player footstep on stone", "freesound_query": "footstep stone rock"},
+      {"id": "SFX_DRINK_WATER", "desc": "Player drinking from river", "freesound_query": "drinking water gulping"},
+      {"id": "SFX_EAT_MEAT", "desc": "Player eating raw/cooked meat", "freesound_query": "eating chewing meat"},
+      {"id": "SFX_FIRE_IGNITE", "desc": "Starting fire with friction sticks", "freesound_query": "fire starting friction wood"},
+      {"id": "SFX_FIRE_CRACKLE", "desc": "Campfire burning loop", "freesound_query": "campfire crackling loop"},
+      {"id": "SFX_WEAPON_THROW", "desc": "Spear thrown through air", "freesound_query": "spear whoosh throw"},
+      {"id": "SFX_WEAPON_HIT", "desc": "Spear/rock impact on flesh", "freesound_query": "impact flesh thud"},
+      {"id": "SFX_PLAYER_HURT", "desc": "Player pain grunt", "freesound_query": "human pain grunt impact"}
+    ],
+    "dinosaur_sounds": [
+      {"id": "SFX_TREX_ROAR", "desc": "T-Rex full roar — territorial", "freesound_query": "dinosaur roar deep loud"},
+      {"id": "SFX_TREX_FOOTSTEP", "desc": "T-Rex heavy footstep ground shake", "freesound_query": "heavy footstep ground thud impact"},
+      {"id": "SFX_TREX_BREATH", "desc": "T-Rex breathing close proximity", "freesound_query": "large animal breathing heavy"},
+      {"id": "SFX_RAPTOR_CALL", "desc": "Raptor pack communication chirp", "freesound_query": "raptor bird call screech"},
+      {"id": "SFX_RAPTOR_SPRINT", "desc": "Raptor running fast on ground", "freesound_query": "fast animal running claws"},
+      {"id": "SFX_BRACHIO_CALL", "desc": "Brachiosaurus low rumble call", "freesound_query": "low rumble animal call distant"},
+      {"id": "SFX_BRACHIO_STEP", "desc": "Brachiosaurus massive footstep", "freesound_query": "massive footstep earthquake rumble"}
+    ],
+    "environment": [
+      {"id": "SFX_STORM_THUNDER", "desc": "Thunder crack during storm", "freesound_query": "thunder crack close lightning"},
+      {"id": "SFX_STORM_RAIN", "desc": "Heavy rain on leaves/ground", "freesound_query": "heavy rain forest leaves"},
+      {"id": "SFX_WIND_STRONG", "desc": "Strong wind gusts open area", "freesound_query": "strong wind gust outdoor"},
+      {"id": "SFX_RIVER_FLOW", "desc": "River flowing medium speed", "freesound_query": "river flowing water stream"},
+      {"id": "SFX_VOLCANO_RUMBLE", "desc": "Distant volcanic activity", "freesound_query": "volcano rumble distant low frequency"},
+      {"id": "SFX_EARTHQUAKE", "desc": "Ground tremor event", "freesound_query": "earthquake rumble ground shake"}
+    ]
+  },
+
+  "music_system": {
+    "type": "adaptive_layered",
+    "engine": "MetaSounds_UE5",
+    "layers": [
+      {
+        "id": "ML_BASE",
+        "name": "Base Heartbeat",
+        "desc": "Constant low-frequency pulse — player always hears this at very low volume",
+        "instruments": ["bone_drum_low", "stone_percussion"],
+        "tempo_bpm": 60,
+        "dynamic_range": "always_present"
+      },
+      {
+        "id": "ML_CALM",
+        "name": "Calm Exploration",
+        "desc": "Peaceful exploration — no predators nearby, daytime, safe zone",
+        "instruments": ["wood_flute", "light_percussion", "wind_texture"],
+        "tempo_bpm": 72,
+        "trigger": "no_predators_300m AND daytime"
+      },
+      {
+        "id": "ML_TENSION",
+        "name": "Predator Nearby",
+        "desc": "Predator detected 150-300m — tension builds",
+        "instruments": ["low_string_drone", "irregular_percussion", "breath_texture"],
+        "tempo_bpm": 85,
+        "trigger": "predator_150_300m"
+      },
+      {
+        "id": "ML_DANGER",
+        "name": "Immediate Danger",
+        "desc": "Predator within 150m or actively chasing",
+        "instruments": ["rapid_bone_drums", "dissonant_strings", "high_percussion"],
+        "tempo_bpm": 120,
+        "trigger": "predator_under_150m OR being_chased"
+      },
+      {
+        "id": "ML_NIGHT",
+        "name": "Night Layer",
+        "desc": "Added at night — increases tension baseline",
+        "instruments": ["insect_texture", "owl_calls", "low_wind"],
+        "tempo_bpm": 65,
+        "trigger": "nighttime"
+      },
+      {
+        "id": "ML_STORM",
+        "name": "Storm Layer",
+        "desc": "Active during storm weather event",
+        "instruments": ["thunder_percussion", "rain_texture", "wind_howl"],
+        "tempo_bpm": 90,
+        "trigger": "storm_active"
+      }
+    ],
+    "transition_rules": {
+      "calm_to_tension": {"blend_time": 4.0, "crossfade": true},
+      "tension_to_danger": {"blend_time": 1.5, "crossfade": false, "stinger": "SFX_DANGER_STING"},
+      "danger_to_calm": {"blend_time": 8.0, "crossfade": true, "delay": 5.0},
+      "day_to_night": {"blend_time": 10.0, "crossfade": true}
+    }
+  },
+
+  "implementation_notes": {
+    "ue5_integration": "Use MetaSounds for all procedural audio. Blueprint event dispatchers trigger zone transitions.",
+    "voice_trigger_system": "Voice lines triggered via Blueprint interface on quest/event actors in MinPlayableMap.",
+    "audio_zones": "4 AudioZone marker actors placed in MinPlayableMap at cycle_012. Extend with AmbientSound actors pointing to MetaSound assets.",
+    "priority_next": "Implement AmbientSound actors with actual MetaSound assets for river/forest/savanna zones. Add screen-space audio occlusion for cave zone."
+  }
+}
