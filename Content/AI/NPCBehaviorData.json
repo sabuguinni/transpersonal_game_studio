@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "agent": "NPC_Behavior_Agent_11",
+  "cycle": "PROD_CYCLE_AUTO_20260617_011",
+  "npc_behaviors": {
+    "TRex": {
+      "states": ["Idle", "Patrol", "Alert", "Chase", "Attack", "Retreat"],
+      "patrol_radius": 5000,
+      "detection_range": 3000,
+      "attack_range": 300,
+      "chase_speed": 1200,
+      "patrol_speed": 400,
+      "memory_duration_seconds": 30,
+      "behavior_zones": ["BehaviorZone_TRex_Territory_001", "BehaviorZone_TRex_Patrol_001"],
+      "transitions": {
+        "Idle_to_Patrol": "timer > 10s",
+        "Patrol_to_Alert": "player_distance < 3000",
+        "Alert_to_Chase": "player_distance < 2000 AND line_of_sight",
+        "Chase_to_Attack": "player_distance < 300",
+        "Attack_to_Chase": "attack_cooldown > 2s",
+        "Chase_to_Patrol": "lost_target > 30s"
+      }
+    },
+    "Raptor": {
+      "states": ["Idle", "Patrol", "Stalk", "PackCall", "Chase", "Attack", "Retreat"],
+      "patrol_radius": 2000,
+      "detection_range": 1500,
+      "attack_range": 200,
+      "chase_speed": 1600,
+      "patrol_speed": 600,
+      "pack_size": 3,
+      "memory_duration_seconds": 60,
+      "behavior_zones": ["BehaviorZone_Raptor_Ambush_001", "Zone_RaptorHunt_001"],
+      "transitions": {
+        "Idle_to_Patrol": "timer > 5s",
+        "Patrol_to_Stalk": "player_distance < 1500 AND NOT line_of_sight",
+        "Stalk_to_PackCall": "player_distance < 800",
+        "PackCall_to_Chase": "pack_assembled OR timer > 5s",
+        "Chase_to_Attack": "player_distance < 200",
+        "Attack_to_Chase": "attack_cooldown > 1s",
+        "Chase_to_Patrol": "lost_target > 60s"
+      }
+    },
+    "Brachiosaurus": {
+      "states": ["Graze", "Wander", "Alert", "Flee", "Herd_Call"],
+      "patrol_radius": 3000,
+      "detection_range": 2000,
+      "flee_speed": 800,
+      "wander_speed": 200,
+      "memory_duration_seconds": 15,
+      "behavior_zones": ["BehaviorZone_Herd_Grazing_001", "BehaviorZone_Herd_Grazing_002"],
+      "transitions": {
+        "Graze_to_Wander": "timer > 30s",
+        "Wander_to_Graze": "timer > 20s",
+        "Graze_to_Alert": "player_distance < 2000",
+        "Alert_to_Flee": "player_distance < 800 OR threat_detected",
+        "Alert_to_Graze": "no_threat > 15s",
+        "Flee_to_Herd_Call": "separated_from_herd"
+      }
+    }
+  },
+  "global_rules": {
+    "max_active_ai_agents": 50,
+    "lod_distances": {
+      "full_ai": 5000,
+      "simplified_ai": 10000,
+      "dormant": 20000
+    },
+    "day_night_modifiers": {
+      "night_detection_multiplier": 0.6,
+      "night_speed_multiplier": 0.8,
+      "dawn_aggression_multiplier": 1.2
+    }
+  }
+}
