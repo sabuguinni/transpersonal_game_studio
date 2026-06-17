@@ -1,0 +1,35 @@
+CAIRN LANDMARK - CONCEPT ART DESCRIPTION
+========================================
+
+ASSET TYPE: Environmental Landmark
+BIOME: Savanna
+LOCATION: X=45000, Y=52000, Z=150
+
+VISUAL DESCRIPTION:
+- Stacked stone structure (5 rocks vertically arranged)
+- Each stone 80-120cm diameter, weathered and moss-covered
+- Natural offset stacking for stability and organic appearance
+- Total height: ~6 meters
+- Serves as navigation landmark and territorial marker
+
+MATERIAL PROPERTIES:
+- Weathered sandstone with erosion patterns
+- Patches of green/brown moss on north-facing surfaces
+- Lichen growth in crevices
+- Sun-bleached appearance on top surfaces
+
+GAMEPLAY FUNCTION:
+- Navigation waypoint for player orientation
+- Potential quest marker location
+- Environmental storytelling (ancient human presence)
+- Climbing challenge opportunity
+
+LIGHTING NOTES:
+- Golden hour: long shadow cast eastward
+- Midday: strong top-down illumination highlights texture
+- Dusk: silhouette against orange sky
+
+CREATED: PROD_CYCLE_AUTO_20260617_003
+AGENT: Architecture & Interior Agent #07
+STATUS: Implemented in MinPlayableMap using basic geometry
+NEXT STEP: Replace with high-detail 3D asset when available
