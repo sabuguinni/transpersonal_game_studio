@@ -1,0 +1,223 @@
+{
+  "version": "1.1",
+  "agent": "Crowd_Traffic_Simulation_Agent_13",
+  "cycle": "PROD_CYCLE_AUTO_20260617_011",
+  "description": "Complete crowd simulation specification for prehistoric survival game. Defines herd panic mechanics, raptor pack assembly, fear propagation, LOD boundaries, and migration corridors.",
+
+  "lod_system": {
+    "description": "Mass AI LOD chain — 3 tiers based on distance from player",
+    "tiers": {
+      "full_ai": {
+        "range_units": "0-5000",
+        "behavior": "Full behavior tree execution, pathfinding, perception, social reactions",
+        "update_rate_hz": 30,
+        "markers": ["Crowd_LOD_Full_N_001", "Crowd_LOD_Full_S_001", "Crowd_LOD_Full_E_001", "Crowd_LOD_Full_W_001"]
+      },
+      "simplified": {
+        "range_units": "5000-10000",
+        "behavior": "Simplified movement only, no perception, no social reactions, basic animation",
+        "update_rate_hz": 10,
+        "markers": ["Crowd_LOD_Simplified_N_001", "Crowd_LOD_Simplified_S_001", "Crowd_LOD_Simplified_E_001", "Crowd_LOD_Simplified_W_001"]
+      },
+      "dormant": {
+        "range_units": ">20000",
+        "behavior": "Frozen in place, no tick, no animation, invisible to player",
+        "update_rate_hz": 0
+      }
+    }
+  },
+
+  "herd_panic_system": {
+    "description": "When Brachiosaurus enters flee state, all herbivores within 2000u scatter",
+    "trigger": {
+      "source": "Brachio_StompZone_001",
+      "trigger_radius_units": 2000,
+      "trigger_condition": "Brachio health < 40% OR player within 800u of Brachio"
+    },
+    "scatter_zones": [
+      {
+        "label": "Crowd_HerdScatter_North_001",
+        "location": [800, -2800, 180],
+        "direction": "north",
+        "capacity_agents": 12,
+        "scatter_speed_multiplier": 2.5
+      },
+      {
+        "label": "Crowd_HerdScatter_East_001",
+        "location": [2200, -1200, 180],
+        "direction": "east",
+        "capacity_agents": 10,
+        "scatter_speed_multiplier": 2.5
+      },
+      {
+        "label": "Crowd_HerdScatter_West_001",
+        "location": [-600, -1200, 180],
+        "direction": "west",
+        "capacity_agents": 8,
+        "scatter_speed_multiplier": 2.5
+      },
+      {
+        "label": "Crowd_HerdScatter_South_001",
+        "location": [800, 400, 180],
+        "direction": "south",
+        "capacity_agents": 10,
+        "scatter_speed_multiplier": 2.5
+      }
+    ],
+    "recovery_time_seconds": 45,
+    "audio_cue": "herd_stampede_rumble",
+    "camera_shake": "light_rumble_3s"
+  },
+
+  "raptor_pack_system": {
+    "description": "PACK_CALL mechanic — alpha raptor calls pack within 1500u to converge on target",
+    "pack_call_radius_units": 1500,
+    "assembly_points": [
+      {
+        "label": "Crowd_RaptorPack_AssemblyAlpha_001",
+        "location": [-1000, 1500, 220],
+        "role": "alpha_position",
+        "behavior": "Alpha holds position, coordinates flankers"
+      },
+      {
+        "label": "Crowd_RaptorPack_FlankLeft_001",
+        "location": [-1400, 2200, 220],
+        "role": "left_flanker",
+        "behavior": "Circles left to cut off escape route"
+      },
+      {
+        "label": "Crowd_RaptorPack_FlankRight_001",
+        "location": [-600, 2200, 220],
+        "role": "right_flanker",
+        "behavior": "Circles right to cut off escape route"
+      },
+      {
+        "label": "Crowd_RaptorPack_Ambush_001",
+        "location": [-1000, 2800, 220],
+        "role": "ambush_position",
+        "behavior": "Waits ahead of predicted player escape path"
+      }
+    ],
+    "pack_tactics": {
+      "FLANK": "Left + Right flankers move simultaneously when alpha charges",
+      "SURROUND": "All 4 positions occupied before any raptor attacks",
+      "PACK_CALL": "Alpha vocalizes, all raptors within 1500u converge within 8s"
+    },
+    "pack_size_min": 2,
+    "pack_size_max": 5,
+    "coordination_delay_seconds": 1.5
+  },
+
+  "fear_propagation_system": {
+    "description": "Player fear tier (from damage system) propagates outward, influencing herbivore crowd behavior",
+    "fear_tiers": {
+      "tier_0_calm": {
+        "player_fear_range": "0-30",
+        "crowd_behavior": "Normal grazing, migration, social interactions",
+        "herbivore_alert_radius_units": 0,
+        "marker_color": "none"
+      },
+      "tier_1_alert": {
+        "player_fear_range": "30-60",
+        "crowd_behavior": "Herbivores within 1500u raise heads, stop grazing, watch player",
+        "herbivore_alert_radius_units": 1500,
+        "markers": ["Crowd_FearRing_Tier1_030_001", "Crowd_FearRing_Tier1_030_002"],
+        "marker_color": "purple"
+      },
+      "tier_2_flee": {
+        "player_fear_range": "60-80",
+        "crowd_behavior": "Herbivores within 2800u begin moving away from player at walk speed",
+        "herbivore_alert_radius_units": 2800,
+        "markers": ["Crowd_FearRing_Tier2_060_001", "Crowd_FearRing_Tier2_060_002"],
+        "marker_color": "magenta"
+      },
+      "tier_3_panic": {
+        "player_fear_range": "80-100",
+        "crowd_behavior": "ALL herbivores within 4000u scatter at full sprint, triggering herd panic cascade",
+        "herbivore_alert_radius_units": 4000,
+        "triggers_herd_panic": true,
+        "markers": ["Crowd_FearRing_Tier3_080_001", "Crowd_FearRing_Tier3_080_002"],
+        "marker_color": "red_pink"
+      }
+    },
+    "fear_source": "TranspersonalCharacter.FearLevel (from CombatAIData.json damage_system)"
+  },
+
+  "migration_corridor": {
+    "description": "Herbivore migration path SW to NE — seasonal movement of large herds",
+    "direction": "SW_to_NE",
+    "nodes": [
+      {"label": "Crowd_Migration_Node_001", "location": [-3000, -3000, 160], "density": "high", "species": ["Triceratops", "Parasaurolophus"]},
+      {"label": "Crowd_Migration_Node_002", "location": [-1500, -1500, 160], "density": "medium", "species": ["Triceratops", "Parasaurolophus", "Gallimimus"]},
+      {"label": "Crowd_Migration_Node_003", "location": [0, 0, 160], "density": "high", "species": ["Triceratops", "Parasaurolophus", "Gallimimus", "Ankylosaur"]},
+      {"label": "Crowd_Migration_Node_004", "location": [1500, 1500, 160], "density": "medium", "species": ["Parasaurolophus", "Gallimimus"]},
+      {"label": "Crowd_Migration_Node_005", "location": [3000, 3000, 160], "density": "low", "species": ["Gallimimus"]}
+    ],
+    "migration_speed_units_per_second": 120,
+    "migration_cycle_hours_ingame": 72,
+    "herd_size_range": [8, 35],
+    "avoids_predator_zones": ["CombatAI_TRex_AttackRange_001", "CombatAI_Raptor_AttackRange_001"]
+  },
+
+  "crowd_agent_types": {
+    "Gallimimus": {
+      "role": "prey_fast",
+      "max_agents": 40,
+      "speed_units_per_second": 280,
+      "panic_threshold_fear": 20,
+      "social_group_size": [5, 15],
+      "lod_tier": "full_ai_within_5000"
+    },
+    "Parasaurolophus": {
+      "role": "prey_medium",
+      "max_agents": 25,
+      "speed_units_per_second": 180,
+      "panic_threshold_fear": 35,
+      "social_group_size": [3, 10],
+      "lod_tier": "full_ai_within_5000",
+      "vocalizes_on_panic": true,
+      "vocalization_radius_units": 2000
+    },
+    "Triceratops": {
+      "role": "prey_large_defensive",
+      "max_agents": 12,
+      "speed_units_per_second": 140,
+      "panic_threshold_fear": 50,
+      "social_group_size": [2, 6],
+      "defensive_formation": "circle_calves_center",
+      "lod_tier": "full_ai_within_5000"
+    },
+    "Pteranodon": {
+      "role": "aerial_scavenger",
+      "max_agents": 8,
+      "speed_units_per_second": 320,
+      "altitude_range_units": [500, 2000],
+      "attracted_to_corpses": true,
+      "lod_tier": "simplified_within_10000"
+    }
+  },
+
+  "performance_budget": {
+    "max_simultaneous_agents": 150,
+    "max_full_ai_agents": 50,
+    "max_simplified_agents": 100,
+    "target_fps_impact": "<3ms per frame at 150 agents",
+    "mass_ai_processor": "MassMovementProcessor + MassStateTreeProcessor",
+    "culling_strategy": "distance_based + frustum_culling"
+  },
+
+  "integration_refs": {
+    "combat_ai_data": "Content/AI/CombatAIData.json",
+    "npc_behavior_data": "Content/AI/NPCBehaviorData.json",
+    "combat_zones_in_map": [
+      "CombatAI_TRex_AttackRange_001",
+      "CombatAI_Raptor_AttackRange_001",
+      "CombatAI_Raptor_AttackRange_002",
+      "CombatAI_Raptor_AttackRange_003",
+      "CombatAI_Brachio_StompZone_001"
+    ],
+    "player_character": "TranspersonalCharacter",
+    "fear_property": "FearLevel",
+    "map": "/Game/Maps/MinPlayableMap"
+  }
+}
