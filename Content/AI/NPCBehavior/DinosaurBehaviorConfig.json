@@ -1,0 +1,291 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_003",
+  "agent": "NPC Behavior Agent #11",
+  "description": "Dinosaur NPC behavior configuration for MinPlayableMap. Defines patrol routes, aggression radii, state machine transitions, and memory parameters for T-Rex, Raptor pack, and Brachiosaurus.",
+
+  "species": {
+    "TRex": {
+      "behavior_profile": "apex_ambush_predator",
+      "patrol_waypoints": [
+        { "id": "NPC_WP_TRex_001", "x": 1000, "y": 0,    "z": 80 },
+        { "id": "NPC_WP_TRex_002", "x": 2000, "y": 800,  "z": 80 },
+        { "id": "NPC_WP_TRex_003", "x": 2800, "y": -200, "z": 80 },
+        { "id": "NPC_WP_TRex_004", "x": 1500, "y": -1000,"z": 80 }
+      ],
+      "behavior_zones": {
+        "ambush_zone":  { "label": "NPC_TRex_AmbushZone_001", "radius": 600 },
+        "patrol_zone":  { "label": "NPC_TRex_PatrolZone_001", "radius": 1200 }
+      },
+      "state_machine": {
+        "IDLE": {
+          "description": "Standing motionless near water source, head scanning",
+          "duration_min_s": 30,
+          "duration_max_s": 120,
+          "transition_to_PATROL": "timer_expired",
+          "transition_to_ALERT": "player_within_3000_units",
+          "animation_hint": "Anim_TRex_Idle_Scan"
+        },
+        "PATROL": {
+          "description": "Slow deliberate walk between waypoints",
+          "move_speed_cm_s": 300,
+          "waypoint_wait_s": 5,
+          "transition_to_IDLE": "at_ambush_zone",
+          "transition_to_ALERT": "player_within_3000_units",
+          "animation_hint": "Anim_TRex_Walk"
+        },
+        "ALERT": {
+          "description": "Head raised, body oriented toward player, low rumble vocalisation",
+          "duration_s": 4,
+          "transition_to_CHASE": "player_still_visible",
+          "transition_to_PATROL": "player_lost",
+          "animation_hint": "Anim_TRex_Alert"
+        },
+        "CHASE": {
+          "description": "Full sprint toward last known player position",
+          "move_speed_cm_s": 900,
+          "give_up_distance_cm": 5000,
+          "transition_to_ATTACK": "player_within_300_units",
+          "transition_to_SEARCH": "player_lost",
+          "animation_hint": "Anim_TRex_Run"
+        },
+        "ATTACK": {
+          "description": "Bite attack — one hit is lethal to unarmoured player",
+          "attack_damage": 150,
+          "attack_cooldown_s": 2.5,
+          "attack_range_cm": 350,
+          "transition_to_CHASE": "player_out_of_range",
+          "animation_hint": "Anim_TRex_Bite"
+        },
+        "SEARCH": {
+          "description": "Investigates last known player position, sniffs ground",
+          "duration_s": 20,
+          "search_radius_cm": 800,
+          "transition_to_PATROL": "timer_expired",
+          "transition_to_CHASE": "player_rediscovered",
+          "animation_hint": "Anim_TRex_Sniff"
+        }
+      },
+      "memory": {
+        "player_last_seen_retention_s": 45,
+        "scent_trail_duration_s": 120,
+        "remembers_player_location": true,
+        "pack_communication": false
+      },
+      "senses": {
+        "vision_range_cm": 3000,
+        "vision_cone_degrees": 120,
+        "hearing_range_cm": 2000,
+        "smell_range_cm": 1500,
+        "detects_movement_priority": true,
+        "detects_sound_footsteps": true
+      },
+      "audio_cues": {
+        "idle_ambient": "SFX_TRex_Breathe_Loop",
+        "alert": "SFX_TRex_Rumble",
+        "chase": "SFX_TRex_Roar",
+        "attack": "SFX_TRex_Bite",
+        "narrator_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781755915359_DinoNarrator_TRex.mp3"
+      }
+    },
+
+    "Raptor": {
+      "behavior_profile": "pack_hunter_flanker",
+      "pack_size": 3,
+      "patrol_waypoints": [
+        { "id": "NPC_WP_Raptor_001", "x": -600,  "y": 1200, "z": 80 },
+        { "id": "NPC_WP_Raptor_002", "x": -900,  "y": 1800, "z": 80 },
+        { "id": "NPC_WP_Raptor_003", "x": -1400, "y": 2200, "z": 80 },
+        { "id": "NPC_WP_Raptor_004", "x": -1800, "y": 1600, "z": 80 },
+        { "id": "NPC_WP_Raptor_005", "x": -1300, "y": 1000, "z": 80 },
+        { "id": "NPC_WP_Raptor_006", "x": -700,  "y": 800,  "z": 80 }
+      ],
+      "behavior_zones": {
+        "pack_zone":  { "label": "NPC_Raptor_PackZone_001",  "radius": 500 },
+        "flank_zone": { "label": "NPC_Raptor_FlankZone_001", "radius": 400 }
+      },
+      "state_machine": {
+        "IDLE": {
+          "description": "Pack resting, occasional head movements, low chatter",
+          "duration_min_s": 15,
+          "duration_max_s": 60,
+          "transition_to_PATROL": "timer_expired",
+          "transition_to_ALERT": "player_within_1500_units",
+          "animation_hint": "Anim_Raptor_Idle"
+        },
+        "PATROL": {
+          "description": "Pack moves in loose formation along waypoints",
+          "move_speed_cm_s": 450,
+          "formation": "loose_triangle",
+          "transition_to_ALERT": "player_within_1500_units",
+          "animation_hint": "Anim_Raptor_Walk"
+        },
+        "ALERT": {
+          "description": "Pack freezes, alpha orients toward player, pack spreads to flanking positions",
+          "duration_s": 2,
+          "pack_spread_radius_cm": 600,
+          "transition_to_COORDINATE": "always",
+          "animation_hint": "Anim_Raptor_Alert"
+        },
+        "COORDINATE": {
+          "description": "Alpha holds position, flankers circle to cut off escape routes",
+          "duration_s": 5,
+          "flanker_arc_degrees": 180,
+          "transition_to_CHASE": "flankers_in_position",
+          "animation_hint": "Anim_Raptor_Stalk"
+        },
+        "CHASE": {
+          "description": "Coordinated sprint — flankers converge from multiple angles",
+          "move_speed_cm_s": 800,
+          "give_up_distance_cm": 3000,
+          "transition_to_ATTACK": "player_within_200_units",
+          "transition_to_SEARCH": "player_lost",
+          "animation_hint": "Anim_Raptor_Sprint"
+        },
+        "ATTACK": {
+          "description": "Jump-slash attack, pack members alternate to prevent player escape",
+          "attack_damage": 45,
+          "attack_cooldown_s": 1.2,
+          "attack_range_cm": 220,
+          "pack_stagger_attacks": true,
+          "transition_to_CHASE": "player_out_of_range",
+          "animation_hint": "Anim_Raptor_Slash"
+        },
+        "SEARCH": {
+          "description": "Pack splits to search area, uses scent memory",
+          "duration_s": 30,
+          "search_pattern": "grid_sweep",
+          "transition_to_PATROL": "timer_expired",
+          "transition_to_CHASE": "player_rediscovered"
+        }
+      },
+      "memory": {
+        "player_last_seen_retention_s": 90,
+        "scent_trail_duration_s": 180,
+        "remembers_player_location": true,
+        "pack_communication": true,
+        "shared_memory_radius_cm": 2000,
+        "note": "If one raptor sees player, all pack members within 2000cm are alerted immediately"
+      },
+      "senses": {
+        "vision_range_cm": 1500,
+        "vision_cone_degrees": 160,
+        "hearing_range_cm": 1200,
+        "smell_range_cm": 800,
+        "detects_movement_priority": true,
+        "detects_sound_footsteps": true
+      },
+      "audio_cues": {
+        "idle_ambient": "SFX_Raptor_Chatter_Loop",
+        "alert": "SFX_Raptor_Screech",
+        "coordinate": "SFX_Raptor_Bark",
+        "chase": "SFX_Raptor_Screech_Chase",
+        "attack": "SFX_Raptor_Slash",
+        "narrator_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781755917768_DinoNarrator_Raptor.mp3"
+      }
+    },
+
+    "Brachiosaurus": {
+      "behavior_profile": "passive_megaherbivore",
+      "patrol_waypoints": [
+        { "id": "NPC_WP_Brachio_001", "x": 200,  "y": -1600, "z": 80 },
+        { "id": "NPC_WP_Brachio_002", "x": 600,  "y": -2000, "z": 80 },
+        { "id": "NPC_WP_Brachio_003", "x": 900,  "y": -1400, "z": 80 }
+      ],
+      "behavior_zones": {
+        "graze_zone": { "label": "NPC_Brachio_GrazeZone_001", "radius": 800 }
+      },
+      "state_machine": {
+        "GRAZE": {
+          "description": "Slow movement, head sweeping low vegetation, occasional tail swish",
+          "move_speed_cm_s": 80,
+          "graze_duration_min_s": 60,
+          "graze_duration_max_s": 300,
+          "transition_to_MOVE": "timer_expired",
+          "transition_to_FLEE": "predator_within_2000_units",
+          "animation_hint": "Anim_Brachio_Graze"
+        },
+        "MOVE": {
+          "description": "Slow walk to next grazing waypoint",
+          "move_speed_cm_s": 120,
+          "transition_to_GRAZE": "at_waypoint",
+          "animation_hint": "Anim_Brachio_Walk"
+        },
+        "ALERT": {
+          "description": "Head raised high, scanning, low rumble warning call",
+          "duration_s": 8,
+          "transition_to_FLEE": "threat_confirmed",
+          "transition_to_GRAZE": "threat_gone",
+          "animation_hint": "Anim_Brachio_Alert"
+        },
+        "FLEE": {
+          "description": "Surprisingly fast retreat, can trample player if in path",
+          "move_speed_cm_s": 400,
+          "trample_damage": 200,
+          "trample_radius_cm": 300,
+          "give_up_distance_cm": 4000,
+          "transition_to_GRAZE": "safe_distance_reached",
+          "animation_hint": "Anim_Brachio_Run"
+        }
+      },
+      "memory": {
+        "player_last_seen_retention_s": 20,
+        "threat_memory_s": 60,
+        "pack_communication": false
+      },
+      "senses": {
+        "vision_range_cm": 2500,
+        "vision_cone_degrees": 200,
+        "hearing_range_cm": 1800,
+        "smell_range_cm": 600,
+        "detects_movement_priority": false
+      }
+    }
+  },
+
+  "global_behavior_rules": {
+    "day_night_modifiers": {
+      "night": {
+        "TRex_aggression_multiplier": 1.5,
+        "Raptor_vision_range_multiplier": 0.7,
+        "Raptor_hearing_range_multiplier": 1.4,
+        "Brachio_flee_threshold_multiplier": 0.6
+      },
+      "rain": {
+        "all_scent_range_multiplier": 0.3,
+        "all_hearing_range_multiplier": 0.5,
+        "player_detection_difficulty_multiplier": 1.8
+      }
+    },
+    "player_fear_system": {
+      "fear_increases_when": ["TRex_in_ALERT_state", "Raptor_in_COORDINATE_state", "within_500cm_of_any_predator"],
+      "fear_decreases_when": ["predator_in_IDLE_state", "distance_from_predator_gt_3000cm", "player_in_shelter"],
+      "high_fear_effects": ["stamina_drain_x2", "hand_shake_anim", "heartbeat_sfx_audible"]
+    },
+    "ecosystem_interactions": {
+      "TRex_chases_Brachio": true,
+      "Raptor_avoids_TRex": true,
+      "Brachio_flight_alerts_Raptor": true,
+      "player_can_use_Brachio_stampede_as_distraction": true
+    },
+    "navmesh_requirements": {
+      "TRex_agent_radius": 200,
+      "TRex_agent_height": 600,
+      "Raptor_agent_radius": 60,
+      "Raptor_agent_height": 180,
+      "Brachio_agent_radius": 300,
+      "Brachio_agent_height": 1200
+    }
+  },
+
+  "waypoint_map_labels": {
+    "TRex_patrol": ["NPC_WP_TRex_001", "NPC_WP_TRex_002", "NPC_WP_TRex_003", "NPC_WP_TRex_004"],
+    "Raptor_patrol": ["NPC_WP_Raptor_001", "NPC_WP_Raptor_002", "NPC_WP_Raptor_003", "NPC_WP_Raptor_004", "NPC_WP_Raptor_005", "NPC_WP_Raptor_006"],
+    "Brachio_graze": ["NPC_WP_Brachio_001", "NPC_WP_Brachio_002", "NPC_WP_Brachio_003"]
+  },
+
+  "tts_narrator_lines": {
+    "TRex": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781755915359_DinoNarrator_TRex.mp3",
+    "Raptor": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781755917768_DinoNarrator_Raptor.mp3"
+  }
+}
