@@ -1,0 +1,314 @@
+{
+  "vfx_cycle": "PROD_CYCLE_AUTO_20260618_005",
+  "agent": "VFX_Agent_17",
+  "timestamp": "2026-06-18T00:05:00Z",
+  "game_context": "Prehistoric survival game — all VFX are physically plausible in a real prehistoric world",
+
+  "vfx_systems": {
+
+    "kill_site": {
+      "location": [2200, 1500, 100],
+      "audio_zone_ref": "AudioZone_KillSite_001",
+      "actors_spawned": [
+        {
+          "label": "VFX_KillSite_DustMotes_001",
+          "type": "StaticMeshActor",
+          "description": "Ambient dust mote particles floating in still air above kill site",
+          "niagara_target": "NS_Ambient_DustMotes",
+          "spawn_rate": 8,
+          "lifetime": 4.0,
+          "velocity": [0, 0, 15],
+          "size_range": [2, 8],
+          "color": "rgba(180,160,120,0.4)"
+        },
+        {
+          "label": "VFX_KillSite_BoneScatter_001",
+          "type": "StaticMeshActor",
+          "description": "Scattered bone debris on ground — static mesh placeholder for Niagara mesh emitter",
+          "niagara_target": "NS_Debris_BoneScatter",
+          "mesh_count": 12,
+          "radius": 300
+        },
+        {
+          "label": "VFX_KillSite_FlySwarm_001",
+          "type": "StaticMeshActor",
+          "description": "Fly/insect swarm above carcass — small dark particles in tight cluster",
+          "niagara_target": "NS_Insect_FlySwarm",
+          "spawn_rate": 40,
+          "swarm_radius": 80,
+          "swarm_height": 50,
+          "behavior": "chaotic_orbit"
+        },
+        {
+          "label": "VFX_Light_KillSite_001",
+          "type": "PointLight",
+          "intensity": 800,
+          "color": "rgba(230,204,153,1.0)",
+          "attenuation_radius": 400,
+          "description": "Pale golden ambient light — harsh midday sun over kill site"
+        }
+      ]
+    },
+
+    "river_crossing": {
+      "location": [-1800, 2800, 80],
+      "audio_zone_ref": "AudioZone_RiverCross_001",
+      "actors_spawned": [
+        {
+          "label": "VFX_River_Splash_001",
+          "type": "StaticMeshActor",
+          "description": "Water splash burst on player entry — triggered by overlap volume",
+          "niagara_target": "NS_Water_Splash",
+          "trigger": "player_overlap",
+          "burst_count": 60,
+          "velocity_range": [200, 600],
+          "gravity_scale": 1.2,
+          "color": "rgba(100,180,220,0.8)"
+        },
+        {
+          "label": "VFX_River_FoamWake_001",
+          "type": "StaticMeshActor",
+          "description": "Foam wake trail behind moving player in water",
+          "niagara_target": "NS_Water_FoamWake",
+          "spawn_rate": 20,
+          "lifetime": 2.5,
+          "follows_player": true
+        },
+        {
+          "label": "VFX_River_Ripple_001",
+          "type": "StaticMeshActor",
+          "description": "Expanding ripple rings on water surface",
+          "niagara_target": "NS_Water_Ripple",
+          "ring_expand_rate": 150,
+          "ring_lifetime": 1.8,
+          "max_rings": 4
+        }
+      ]
+    },
+
+    "forest_night": {
+      "location": [0, -2000, 100],
+      "audio_zone_ref": "AudioZone_ForestNight_001",
+      "actors_spawned": [
+        {
+          "label": "VFX_Forest_Firefly_001",
+          "description": "Bioluminescent firefly — soft yellow-green glow, erratic flight path",
+          "niagara_target": "NS_Insect_Firefly",
+          "active_hours": "20:00-05:00",
+          "glow_color": "rgba(180,255,100,0.9)",
+          "glow_radius": 30,
+          "flight_speed": 40,
+          "flight_pattern": "sine_wave_3d"
+        },
+        {
+          "label": "VFX_Forest_Firefly_002",
+          "description": "Firefly cluster node 2",
+          "active_hours": "20:00-05:00"
+        },
+        {
+          "label": "VFX_Forest_Firefly_003",
+          "description": "Firefly cluster node 3",
+          "active_hours": "20:00-05:00"
+        },
+        {
+          "label": "VFX_Forest_Firefly_004",
+          "description": "Firefly cluster node 4",
+          "active_hours": "20:00-05:00"
+        },
+        {
+          "label": "VFX_Forest_Firefly_005",
+          "description": "Firefly cluster node 5",
+          "active_hours": "20:00-05:00"
+        }
+      ],
+      "predator_response": {
+        "trigger": "predator_within_800cm",
+        "action": "all_fireflies_extinguish",
+        "fade_time": 2.0,
+        "description": "Fireflies go dark when predator approaches — silence-as-danger visual equivalent"
+      }
+    },
+
+    "campfire": {
+      "location": [0, 0, 100],
+      "description": "Player base camp — central VFX hub",
+      "actors_spawned": [
+        {
+          "label": "VFX_Campfire_Flame_001",
+          "type": "StaticMeshActor",
+          "description": "Core flame cone — placeholder for Niagara flame emitter",
+          "niagara_target": "NS_Fire_Campfire",
+          "flame_height": 80,
+          "flame_width": 40,
+          "flicker_rate": 12,
+          "color_inner": "rgba(255,255,200,1.0)",
+          "color_outer": "rgba(255,80,10,0.6)"
+        },
+        {
+          "label": "VFX_Campfire_Embers_001",
+          "type": "StaticMeshActor",
+          "description": "Rising ember particles — float upward and cool to dark",
+          "niagara_target": "NS_Fire_Embers",
+          "spawn_rate": 15,
+          "lifetime": 3.0,
+          "velocity_up": 120,
+          "velocity_spread": 30,
+          "color_start": "rgba(255,200,50,1.0)",
+          "color_end": "rgba(80,20,5,0.0)"
+        },
+        {
+          "label": "VFX_Campfire_Smoke_001",
+          "type": "StaticMeshActor",
+          "description": "Volumetric smoke column rising from fire",
+          "niagara_target": "NS_Fire_Smoke",
+          "spawn_rate": 4,
+          "lifetime": 8.0,
+          "velocity_up": 60,
+          "size_start": 30,
+          "size_end": 200,
+          "color": "rgba(60,55,50,0.3)"
+        },
+        {
+          "label": "VFX_Light_Campfire_001",
+          "type": "PointLight",
+          "intensity": 3000,
+          "color": "rgba(255,115,25,1.0)",
+          "attenuation_radius": 600,
+          "flicker": true,
+          "flicker_frequency": 8,
+          "flicker_amplitude": 0.3,
+          "description": "Warm orange campfire light with flicker — illuminates 6m radius"
+        }
+      ]
+    },
+
+    "dinosaur_footstep_dust": {
+      "description": "Ground impact dust clouds triggered by dinosaur footstep events",
+      "actors_spawned": [
+        {"label": "VFX_Dino_FootstepDust_001", "description": "TRex footstep zone marker 1"},
+        {"label": "VFX_Dino_FootstepDust_002", "description": "TRex footstep zone marker 2"},
+        {"label": "VFX_Dino_FootstepDust_003", "description": "TRex footstep zone marker 3"}
+      ],
+      "niagara_target": "NS_Dino_FootstepDust",
+      "trigger": "footstep_bone_event",
+      "burst_count": 25,
+      "burst_radius": 80,
+      "velocity_range": [50, 200],
+      "lifetime": 1.5,
+      "color": "rgba(160,140,100,0.7)",
+      "screen_shake": {
+        "amplitude": 2.5,
+        "frequency": 8,
+        "duration": 0.4,
+        "falloff_distance": 1500
+      }
+    }
+  },
+
+  "niagara_systems_spec": {
+    "NS_Fire_Campfire": {
+      "emitter_type": "CPU_Sprite",
+      "spawn_rate": 60,
+      "lifetime": [0.3, 0.8],
+      "initial_velocity": {"x": [-20,20], "y": [-20,20], "z": [80,160]},
+      "drag": 0.3,
+      "size": [{"time":0,"value":30}, {"time":0.5,"value":50}, {"time":1,"value":5}],
+      "color": [{"time":0,"value":"rgba(255,255,200,1)"}, {"time":0.4,"value":"rgba(255,120,20,0.8)"}, {"time":1,"value":"rgba(80,20,5,0)"}],
+      "renderer": "Sprite",
+      "blend_mode": "Additive"
+    },
+    "NS_Dino_FootstepDust": {
+      "emitter_type": "CPU_Sprite",
+      "spawn_mode": "Burst",
+      "burst_count": 25,
+      "lifetime": [0.8, 1.8],
+      "initial_velocity": {"radial": [50,200], "z": [20,80]},
+      "gravity": -98,
+      "size": [{"time":0,"value":20}, {"time":0.3,"value":80}, {"time":1,"value":200}],
+      "color": [{"time":0,"value":"rgba(160,140,100,0.8)"}, {"time":1,"value":"rgba(160,140,100,0)"}],
+      "renderer": "Sprite",
+      "blend_mode": "Translucent"
+    },
+    "NS_Water_Splash": {
+      "emitter_type": "CPU_Sprite",
+      "spawn_mode": "Burst",
+      "burst_count": 60,
+      "lifetime": [0.5, 1.2],
+      "initial_velocity": {"radial": [200,600], "z": [100,400]},
+      "gravity": -980,
+      "size": [{"time":0,"value":8}, {"time":1,"value":3}],
+      "color": [{"time":0,"value":"rgba(100,180,220,0.9)"}, {"time":1,"value":"rgba(100,180,220,0)"}],
+      "renderer": "Sprite",
+      "blend_mode": "Translucent"
+    },
+    "NS_Insect_Firefly": {
+      "emitter_type": "CPU_Sprite",
+      "spawn_rate": 1,
+      "lifetime": [8, 15],
+      "movement": "sine_wave_3d",
+      "movement_speed": 40,
+      "glow_intensity": 2.0,
+      "size": 6,
+      "color": "rgba(180,255,100,1.0)",
+      "renderer": "Sprite",
+      "blend_mode": "Additive"
+    }
+  },
+
+  "screen_effects_spec": {
+    "damage_flash": {
+      "type": "PostProcess_VignetteRed",
+      "alpha": 0.6,
+      "fade_in": 0.05,
+      "fade_out": 0.3,
+      "trigger": "any_damage_event"
+    },
+    "trex_footstep_shake": {
+      "amplitude": 2.5,
+      "frequency": 8,
+      "duration": 0.4,
+      "falloff_distance": 1500
+    },
+    "raptor_attack_shake": {
+      "amplitude": 1.0,
+      "frequency": 15,
+      "duration": 0.2,
+      "falloff_distance": 500
+    }
+  },
+
+  "handoff_to_qa_agent_18": {
+    "vfx_actors_spawned": 16,
+    "point_lights_spawned": 2,
+    "map_saved": true,
+    "verify_labels": [
+      "VFX_KillSite_DustMotes_001",
+      "VFX_KillSite_BoneScatter_001",
+      "VFX_KillSite_FlySwarm_001",
+      "VFX_Light_KillSite_001",
+      "VFX_River_Splash_001",
+      "VFX_River_FoamWake_001",
+      "VFX_River_Ripple_001",
+      "VFX_Forest_Firefly_001",
+      "VFX_Forest_Firefly_002",
+      "VFX_Forest_Firefly_003",
+      "VFX_Forest_Firefly_004",
+      "VFX_Forest_Firefly_005",
+      "VFX_Campfire_Flame_001",
+      "VFX_Campfire_Embers_001",
+      "VFX_Campfire_Smoke_001",
+      "VFX_Light_Campfire_001",
+      "VFX_Dino_FootstepDust_001",
+      "VFX_Dino_FootstepDust_002",
+      "VFX_Dino_FootstepDust_003"
+    ],
+    "qa_checks": [
+      "All VFX actors present in MinPlayableMap",
+      "VFX_Light_Campfire_001 emits warm orange light at origin",
+      "VFX_Light_KillSite_001 emits pale gold light at (2200,1500)",
+      "No duplicate VFX labels",
+      "MAP_SAVED confirmed",
+      "No spiritual/mystical VFX — all physically plausible"
+    ]
+  }
+}
