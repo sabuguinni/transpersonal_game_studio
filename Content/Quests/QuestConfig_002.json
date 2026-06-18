@@ -1,0 +1,216 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "Quest & Mission Designer #14",
+  "quests": [
+    {
+      "id": "QUEST_WATER_HOLE_001",
+      "title": "Survive the Water Hole",
+      "description": "The water hole at dusk is the most dangerous place in the valley. Every predator knows the prey must drink.",
+      "trigger_actor": "QuestTrigger_WaterHole_001",
+      "trigger_location": {"x": 800, "y": 3200, "z": 100},
+      "voice_narration": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751841219_QuestNarrator_WaterHole.mp3",
+      "objectives": [
+        {
+          "id": "OBJ_APPROACH",
+          "description": "Approach the water hole without alerting predators",
+          "marker_actor": "QuestObj_Water_Approach_001",
+          "location": {"x": 400, "y": 2800, "z": 100},
+          "mechanic": "stealth_approach",
+          "success_condition": "reach_marker_undetected"
+        },
+        {
+          "id": "OBJ_OBSERVE",
+          "description": "Observe the water hole for 30 seconds at dusk",
+          "marker_actor": "QuestObj_Water_Observe_001",
+          "location": {"x": 800, "y": 3200, "z": 100},
+          "mechanic": "timed_observation",
+          "duration_seconds": 30,
+          "crowd_reference": "WaterNode_Center_001",
+          "success_condition": "survive_observation_period"
+        },
+        {
+          "id": "OBJ_ESCAPE",
+          "description": "Escape before the T-Rex arrives",
+          "marker_actor": "QuestObj_Water_Escape_001",
+          "location": {"x": 200, "y": 3600, "z": 100},
+          "mechanic": "timed_escape",
+          "time_limit_seconds": 45,
+          "threat_actor": "TRex_Savana_001",
+          "success_condition": "reach_escape_marker"
+        }
+      ],
+      "rewards": {
+        "knowledge": "water_source_mapped",
+        "survival_bonus": {"thirst_reduction": 50},
+        "unlock": "QUEST_MIGRATION_001"
+      },
+      "fail_conditions": ["player_killed", "player_detected_before_observe"],
+      "emotional_arc": "tension → relief → urgency"
+    },
+    {
+      "id": "QUEST_MIGRATION_001",
+      "title": "Follow the Prey",
+      "description": "A herd of prey animals moves south along an ancient corridor. Follow them — they know where food and water are.",
+      "trigger_actor": "QuestTrigger_MigrationStart_001",
+      "trigger_location": {"x": 4500, "y": -1800, "z": 100},
+      "prerequisites": ["QUEST_WATER_HOLE_001"],
+      "objectives": [
+        {
+          "id": "OBJ_FIND_HERD",
+          "description": "Locate the migrating herd at the eastern plains",
+          "marker_actor": "QuestObj_Migration_WP1_001",
+          "location": {"x": 4500, "y": -1800, "z": 100},
+          "crowd_reference": "MigrationWP_Prey_001",
+          "mechanic": "exploration",
+          "success_condition": "reach_marker"
+        },
+        {
+          "id": "OBJ_FOLLOW_MIDPOINT",
+          "description": "Stay within 500 units of the herd through the valley",
+          "marker_actor": "QuestObj_Migration_WP2_001",
+          "location": {"x": 2800, "y": -200, "z": 100},
+          "crowd_reference": "MigrationWP_Prey_002",
+          "mechanic": "escort_follow",
+          "max_distance_from_herd": 500,
+          "success_condition": "maintain_proximity"
+        },
+        {
+          "id": "OBJ_REACH_WATER",
+          "description": "Arrive at the water source with the herd",
+          "marker_actor": "QuestObj_Migration_WP3_001",
+          "location": {"x": 800, "y": 3200, "z": 100},
+          "crowd_reference": "WaterNode_Center_001",
+          "mechanic": "destination",
+          "success_condition": "reach_marker_with_herd_alive"
+        }
+      ],
+      "rewards": {
+        "knowledge": "migration_route_mapped",
+        "survival_bonus": {"hunger_reduction": 40, "thirst_reduction": 30},
+        "unlock": "QUEST_RAPTOR_CLEARING_001"
+      },
+      "fail_conditions": ["player_killed", "herd_scattered_by_player", "player_too_far_from_herd"],
+      "emotional_arc": "curiosity → wonder → belonging"
+    },
+    {
+      "id": "QUEST_RAPTOR_CLEARING_001",
+      "title": "The Empty Clearing",
+      "description": "A clearing that should be full of prey animals is completely silent. Something drove them away. Investigate — carefully.",
+      "trigger_actor": "QuestTrigger_RaptorClearing_001",
+      "trigger_location": {"x": -3200, "y": 2100, "z": 100},
+      "voice_narration": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751844003_QuestNarrator_RaptorClearing.mp3",
+      "prerequisites": ["QUEST_MIGRATION_001"],
+      "objectives": [
+        {
+          "id": "OBJ_ENTER_CLEARING",
+          "description": "Enter the silent clearing from the treeline",
+          "marker_actor": "QuestObj_Raptor_Enter_001",
+          "location": {"x": -2800, "y": 1800, "z": 100},
+          "mechanic": "stealth_approach",
+          "success_condition": "reach_marker"
+        },
+        {
+          "id": "OBJ_FIND_EVIDENCE",
+          "description": "Examine the raptor tracks and kill site",
+          "marker_actor": "QuestObj_Raptor_Examine_001",
+          "location": {"x": -3200, "y": 2100, "z": 100},
+          "crowd_reference": "ScatterPrey_Raptor_001",
+          "mechanic": "investigation",
+          "interaction_type": "examine",
+          "success_condition": "interact_with_evidence"
+        },
+        {
+          "id": "OBJ_ESCAPE_RAPTORS",
+          "description": "Escape before the raptor pack returns",
+          "marker_actor": "QuestObj_Raptor_Escape_001",
+          "location": {"x": -2400, "y": 2600, "z": 100},
+          "mechanic": "timed_escape",
+          "time_limit_seconds": 60,
+          "threat_actors": ["Raptor_Pack_001", "Raptor_Pack_002", "Raptor_Pack_003"],
+          "success_condition": "reach_escape_marker"
+        }
+      ],
+      "rewards": {
+        "knowledge": "raptor_territory_mapped",
+        "survival_bonus": {"fear_reduction": 20},
+        "crafting_unlock": "sharpened_spear",
+        "unlock": "QUEST_BRACHIO_HERD_001"
+      },
+      "fail_conditions": ["player_killed", "player_detected_before_examine"],
+      "emotional_arc": "dread → discovery → panic"
+    },
+    {
+      "id": "QUEST_BRACHIO_HERD_001",
+      "title": "Giants of the Valley",
+      "description": "A Brachiosaurus herd grazes in the western lowlands. They are not predators — but disturbing them could be fatal. Observe without being noticed.",
+      "trigger_actor": "QuestTrigger_HerdObserve_001",
+      "trigger_location": {"x": -1200, "y": -3500, "z": 100},
+      "prerequisites": ["QUEST_RAPTOR_CLEARING_001"],
+      "objectives": [
+        {
+          "id": "OBJ_APPROACH_HERD",
+          "description": "Get within 300 units of the herd without startling them",
+          "mechanic": "stealth_approach",
+          "crowd_reference": "Brachio_Herd_001",
+          "max_approach_speed": 150,
+          "success_condition": "within_300u_undetected"
+        },
+        {
+          "id": "OBJ_OBSERVE_HERD",
+          "description": "Observe the herd for 60 seconds without moving",
+          "mechanic": "timed_stillness",
+          "duration_seconds": 60,
+          "crowd_references": ["Brachio_Herd_001", "Brachio_Herd_002", "Brachio_Herd_003"],
+          "success_condition": "remain_still_60s"
+        },
+        {
+          "id": "OBJ_RETREAT_SAFELY",
+          "description": "Retreat from the herd without triggering a stampede",
+          "mechanic": "stealth_retreat",
+          "success_condition": "exit_300u_radius_undetected"
+        }
+      ],
+      "rewards": {
+        "knowledge": "brachio_behavior_learned",
+        "survival_bonus": {"stamina_max_increase": 10},
+        "crafting_unlock": "bone_tool_advanced"
+      },
+      "fail_conditions": ["player_killed", "stampede_triggered"],
+      "emotional_arc": "awe → patience → respect"
+    }
+  ],
+  "quest_chain": {
+    "name": "Valley of Survival",
+    "sequence": [
+      "QUEST_WATER_HOLE_001",
+      "QUEST_MIGRATION_001",
+      "QUEST_RAPTOR_CLEARING_001",
+      "QUEST_BRACHIO_HERD_001"
+    ],
+    "description": "Four quests that teach the player to read the valley ecosystem — water, migration, predators, megafauna.",
+    "completion_reward": "full_valley_map_unlocked"
+  },
+  "actor_references": {
+    "crowd_infrastructure_agent13": [
+      "WaterNode_Center_001", "MigrationWP_Prey_001", "MigrationWP_Prey_002",
+      "MigrationWP_Prey_003", "MigrationWP_Prey_004",
+      "ScatterPrey_Raptor_001", "ScatterPrey_Raptor_002",
+      "Brachio_Herd_001", "Brachio_Herd_002", "Brachio_Herd_003",
+      "Brachio_Herd_004", "Brachio_Herd_005"
+    ],
+    "quest_triggers_this_cycle": [
+      "QuestTrigger_WaterHole_001", "QuestTrigger_HerdObserve_001",
+      "QuestTrigger_RaptorClearing_001", "QuestTrigger_MigrationStart_001"
+    ],
+    "quest_objectives_this_cycle": [
+      "QuestObj_Water_Approach_001", "QuestObj_Water_Observe_001", "QuestObj_Water_Escape_001",
+      "QuestObj_Migration_WP1_001", "QuestObj_Migration_WP2_001", "QuestObj_Migration_WP3_001",
+      "QuestObj_Raptor_Enter_001", "QuestObj_Raptor_Examine_001", "QuestObj_Raptor_Escape_001"
+    ]
+  },
+  "voice_assets": {
+    "QuestNarrator_WaterHole": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751841219_QuestNarrator_WaterHole.mp3",
+    "QuestNarrator_RaptorClearing": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751844003_QuestNarrator_RaptorClearing.mp3"
+  }
+}
