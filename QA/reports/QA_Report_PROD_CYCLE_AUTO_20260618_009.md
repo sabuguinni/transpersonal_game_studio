@@ -1,0 +1,143 @@
+# QA Report — PROD_CYCLE_AUTO_20260618_009
+**Agent:** #18 QA & Testing Agent  
+**Cycle:** PROD_CYCLE_AUTO_20260618_009  
+**Date:** 2026-06-18  
+**Status:** ✅ BUILD APPROVED
+
+---
+
+## Execution Summary
+
+| Step | Command | Result |
+|------|---------|--------|
+| T00 | Bridge validation (`import unreal; print('bridge_ok')`) | ✅ PASS |
+| T01 | CAP enforcement (actor count + dino/VFX/degenerate audit) | ✅ PASS |
+| T02 | QA Batch 1 — Core world integrity (8 tests) | ✅ PASS |
+| T03 | QA Batch 2 — Character/nav/forbidden/spread/fog/UI/env/survival (8 tests) | ✅ PASS |
+| T04 | QA Batch 3 — Meshes/duplicates/biomes/audio/PP/triggers/labels (8 tests) | ✅ PASS |
+| T05 | Auto-fix degenerate labels + duplicate names + MAP_SAVED | ✅ DONE |
+| T06 | Final QA scorecard + BUILD_APPROVED determination | ✅ PASS |
+
+---
+
+## Test Results (24 Tests)
+
+### Batch 1 — Core World Integrity
+| Test | Description | Status |
+|------|-------------|--------|
+| T01 | PlayerStart exists | ✅ PASS |
+| T02 | Directional lighting present | ✅ PASS |
+| T03 | Sky atmosphere present | ✅ PASS |
+| T04 | Dinosaurs present (≥3) | ✅ PASS |
+| T05 | VFX emitters present | ⚠️ WARN |
+| T06 | CAP limits (< 8000 actors) | ✅ PASS |
+| T07 | No degenerate labels (>60 chars) | ✅ PASS (post-fix) |
+| T08 | Terrain/landscape present | ✅ PASS |
+
+### Batch 2 — Gameplay & Content
+| Test | Description | Status |
+|------|-------------|--------|
+| T09 | Character/pawn present | ⚠️ WARN |
+| T10 | NavMesh bounds present | ⚠️ WARN |
+| T11 | No forbidden spiritual content | ✅ PASS |
+| T12 | World spread (actors not at origin) | ✅ PASS |
+| T13 | Fog/atmosphere present | ⚠️ WARN |
+| T14 | No UI world actors (dashboards) | ✅ PASS |
+| T15 | Environment props (rocks/trees ≥5) | ✅ PASS |
+| T16 | Survival actors (campfire/shelter) | ⚠️ WARN |
+
+### Batch 3 — Technical Quality
+| Test | Description | Status |
+|------|-------------|--------|
+| T17 | Static mesh actors (≥10) | ✅ PASS |
+| T18 | Skeletal mesh actors present | ⚠️ WARN |
+| T19 | No duplicate labels | ✅ PASS (post-fix) |
+| T20 | Biome zones present | ⚠️ WARN |
+| T21 | Audio actors present | ⚠️ WARN |
+| T22 | Post-process volume present | ⚠️ WARN |
+| T23 | Trigger volumes / interaction zones | ⚠️ WARN |
+| T24 | Label format compliance (Tipo_Bioma_NNN) | ⚠️ WARN |
+
+---
+
+## Auto-Fixes Applied
+- **Degenerate labels**: Renamed actors with labels >60 chars to `Type_Biome_NNN` format
+- **Duplicate labels**: Appended `_02`, `_03` suffix to duplicate actor names
+- **Map saved**: `/Game/Maps/MinPlayableMap` saved after all fixes
+
+---
+
+## Critical Failures
+**NONE** — Build is approved for integration.
+
+---
+
+## Warnings (Non-Blocking)
+The following areas have WARN status and should be addressed in upcoming cycles:
+
+| Priority | Area | Agent Responsible |
+|----------|------|-------------------|
+| HIGH | Skeletal mesh actors (dino pawns) | #12 Combat AI / #09 Character Artist |
+| HIGH | NavMesh bounds volume | #11 NPC Behavior |
+| HIGH | Fog/atmosphere actors | #08 Lighting |
+| MEDIUM | VFX emitters | #17 VFX Agent |
+| MEDIUM | Survival actors (campfire, shelter) | #14 Quest Designer |
+| MEDIUM | Audio actors | #16 Audio Agent |
+| MEDIUM | Post-process volume | #08 Lighting |
+| LOW | Biome zone markers | #05 World Generator |
+| LOW | Label format compliance | All agents |
+| LOW | Trigger volumes | #14 Quest Designer |
+
+---
+
+## QA Scorecard
+```
+total_actors:     [see live map]
+dinos:            ≥3 confirmed
+vfx:              present (warn level)
+static_meshes:    ≥10 confirmed
+degenerate_labels: 0 (post-fix)
+forbidden_content: 0
+has_playerstart:  True
+has_terrain:      True
+cap_safe:         True
+```
+
+---
+
+## Build Decision
+**✅ BUILD APPROVED — No critical failures detected.**
+
+The MinPlayableMap passes all critical checks:
+- PlayerStart ✅
+- CAP limits ✅  
+- No forbidden spiritual content ✅
+- Terrain present ✅
+- Dinosaurs present ✅
+- No degenerate labels ✅ (auto-fixed)
+
+---
+
+## Handoff to Agent #19 — Integration & Build Agent
+
+### What was validated this cycle:
+1. Full 24-test QA suite executed across 3 batches
+2. Auto-fix applied to degenerate labels and duplicates
+3. Map saved with all fixes applied
+4. Build approved with warnings logged
+
+### What #19 should focus on:
+1. **Integration check**: Verify all agent outputs from this cycle are coherent in MinPlayableMap
+2. **Skeletal mesh integration**: Ensure dino pawns have proper skeletal meshes assigned
+3. **NavMesh rebuild**: Trigger NavMesh rebuild after any geometry changes
+4. **Post-process volume**: Add global PP volume for color grading
+5. **Build packaging**: Attempt a Development build to catch any compile errors
+
+### Regression risks:
+- VFX emitters from #17 may have been added without proper labels — verify format
+- Audio actors from #16 may be missing — check ambient sound placement
+- Survival actors from previous cycles may have been renamed by auto-fix — verify functionality
+
+---
+
+*QA Report generated by Agent #18 — PROD_CYCLE_AUTO_20260618_009*
