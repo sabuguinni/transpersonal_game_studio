@@ -1,0 +1,177 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_006",
+  "agent": "Narrative & Dialogue Agent #15",
+  "description": "Dialogue lines, voice assets, and trigger zone definitions for MinPlayableMap",
+
+  "voice_assets": [
+    {
+      "id": "VA_TribeElder_HerdWarning",
+      "character": "TribeElder",
+      "text": "The herd moves east. Follow them or starve. The choice is yours, but choose fast — the big predator already smells us.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771520678_TribeElder_HerdWarning.mp3",
+      "duration_s": 8,
+      "trigger_zone": "Dialogue_HerdPath_001",
+      "trigger_condition": "player_enters_radius_500",
+      "context": "Player approaches the herd migration path — elder warns about predator proximity"
+    },
+    {
+      "id": "VA_Scout_WaterWarning",
+      "character": "Scout",
+      "text": "Water here is clean. Drink now. The next water is two days walk and the raptors patrol that path at dusk.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771532859_Scout_WaterWarning.mp3",
+      "duration_s": 7,
+      "trigger_zone": "Dialogue_WaterSource_001",
+      "trigger_condition": "player_enters_radius_400",
+      "context": "Player finds water source — scout provides tactical information about raptor patrol routes"
+    },
+    {
+      "id": "VA_Hunter_RaptorTactics",
+      "character": "Hunter",
+      "text": "We lost three hunters last season to the valley pack. They hunt in groups — never face them alone. Always keep a tree at your back.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771539499_Hunter_RaptorTactics.mp3",
+      "duration_s": 9,
+      "trigger_zone": "Dialogue_RaptorValley_001",
+      "trigger_condition": "player_enters_radius_600",
+      "context": "Player approaches raptor territory — hunter shares hard-won tactical knowledge"
+    },
+    {
+      "id": "VA_Craftsman_StoneToolAdvice",
+      "character": "Craftsman",
+      "text": "This stone is good. Sharp edge, heavy weight. Wrap the hide tight around the grip. A good tool keeps you alive longer than a fast pair of legs.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771541318_Craftsman_StoneToolAdvice.mp3",
+      "duration_s": 10,
+      "trigger_zone": "Dialogue_StoneCache_001",
+      "trigger_condition": "player_interacts_with_stone_cache",
+      "context": "Player finds stone cache — craftsman NPC teaches basic tool-making"
+    }
+  ],
+
+  "dialogue_trigger_zones": [
+    {
+      "label": "Dialogue_WaterSource_001",
+      "location": {"x": 2200, "y": 1800, "z": 120},
+      "radius": 400,
+      "voice_asset_id": "VA_Scout_WaterWarning",
+      "one_shot": true,
+      "biome": "Riverbank",
+      "notes": "Near clean water — survival tip delivery point"
+    },
+    {
+      "label": "Dialogue_HerdPath_001",
+      "location": {"x": -1500, "y": 3200, "z": 140},
+      "radius": 500,
+      "voice_asset_id": "VA_TribeElder_HerdWarning",
+      "one_shot": true,
+      "biome": "Savanna",
+      "notes": "Herd migration corridor — predator proximity warning"
+    },
+    {
+      "label": "Dialogue_RaptorValley_001",
+      "location": {"x": 3500, "y": -2000, "z": 110},
+      "radius": 600,
+      "voice_asset_id": "VA_Hunter_RaptorTactics",
+      "one_shot": true,
+      "biome": "Valley",
+      "notes": "Raptor patrol zone entrance — tactical briefing"
+    },
+    {
+      "label": "Dialogue_CampfireNight_001",
+      "location": {"x": 400, "y": 600, "z": 105},
+      "radius": 300,
+      "voice_asset_id": null,
+      "one_shot": false,
+      "biome": "Camp",
+      "notes": "Central campfire — reserved for future night-time dialogue lines"
+    },
+    {
+      "label": "Dialogue_StoneCache_001",
+      "location": {"x": -2800, "y": -1200, "z": 130},
+      "radius": 350,
+      "voice_asset_id": "VA_Craftsman_StoneToolAdvice",
+      "one_shot": true,
+      "biome": "Rocky_Outcrop",
+      "notes": "Stone tool crafting introduction point"
+    }
+  ],
+
+  "characters": [
+    {
+      "id": "CHAR_TribeElder",
+      "name": "Elder",
+      "role": "Tribe leader — practical, experienced, direct",
+      "personality": "Pragmatic survivor. No sentiment. Every word is information.",
+      "voice_style": "Low, measured, authoritative",
+      "topics": ["predator_behavior", "migration_patterns", "survival_priorities"]
+    },
+    {
+      "id": "CHAR_Scout",
+      "name": "Scout",
+      "role": "Pathfinder — knows terrain and water sources",
+      "personality": "Alert, terse, always scanning environment while speaking",
+      "voice_style": "Quick, clipped, urgent",
+      "topics": ["water_sources", "raptor_patrols", "safe_routes", "terrain_hazards"]
+    },
+    {
+      "id": "CHAR_Hunter",
+      "name": "Hunter",
+      "role": "Combat specialist — knows predator behavior from experience",
+      "personality": "Grim. Has seen people die. Shares knowledge without drama.",
+      "voice_style": "Flat, matter-of-fact, slightly tired",
+      "topics": ["raptor_tactics", "ambush_techniques", "pack_behavior", "escape_routes"]
+    },
+    {
+      "id": "CHAR_Craftsman",
+      "name": "Craftsman",
+      "role": "Tool and weapon maker — practical knowledge of materials",
+      "personality": "Focused on quality. Impatient with carelessness. Proud of craft.",
+      "voice_style": "Precise, instructional, occasionally impatient",
+      "topics": ["stone_tools", "hide_working", "weapon_crafting", "material_quality"]
+    }
+  ],
+
+  "narrative_arc": {
+    "act_1": {
+      "title": "Alone",
+      "description": "Player arrives in the valley with nothing. Must find water, food, and shelter before nightfall. No tribe yet — pure solo survival.",
+      "key_beats": [
+        "Find water source (Dialogue_WaterSource_001 triggers Scout warning)",
+        "Survive first night (campfire at Dialogue_CampfireNight_001)",
+        "Discover stone cache (Dialogue_StoneCache_001 triggers crafting tutorial)"
+      ]
+    },
+    "act_2": {
+      "title": "The Valley",
+      "description": "Player learns the valley's dangers. Raptor pack controls the eastern corridor. T-Rex patrols the northern ridge. Herd migrations bring both food and predators.",
+      "key_beats": [
+        "Encounter raptor patrol (Dialogue_RaptorValley_001 triggers Hunter warning)",
+        "Witness herd migration (Dialogue_HerdPath_001 triggers Elder warning)",
+        "First successful hunt — player proves competence"
+      ]
+    },
+    "act_3": {
+      "title": "Tribe",
+      "description": "Player has survived long enough to attract other survivors. Tribe forms around demonstrated competence — not leadership by birth or status.",
+      "key_beats": [
+        "First NPC joins player camp",
+        "Defend camp from night predator attack",
+        "Establish territory boundary — tribe claims the valley"
+      ]
+    }
+  },
+
+  "previous_cycles_voice_assets": [
+    {
+      "cycle": "PROD_CYCLE_AUTO_20260618_005",
+      "id": "VA_TribeElder_StampedeWarning",
+      "text": "Danger! The ground shakes. Run. Run now. Do not look back.",
+      "trigger": "Stampede event proximity"
+    },
+    {
+      "cycle": "PROD_CYCLE_AUTO_20260618_005",
+      "id": "VA_Craftsman_FireMaking",
+      "text": "Fire keeps the night beasts away. Gather dry wood. Strike the stones together. Make fire before dark comes.",
+      "trigger": "First nightfall approach"
+    }
+  ]
+}
