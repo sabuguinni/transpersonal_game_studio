@@ -1,0 +1,179 @@
+{
+  "audio_cycle": "PROD_CYCLE_AUTO_20260618_005",
+  "agent": "Audio Agent #16",
+  "build_on": "Cycle 004 audio zones + Narrative Agent #15 NPC anchors",
+
+  "voice_lines": [
+    {
+      "id": "SCOUT_WARN_02",
+      "character": "Scout_Kael",
+      "npc_actor": "NPC_Scout_Kael_001",
+      "audio_zone_actor": "AudioVoice_Scout_Kael_001",
+      "location": [-600, 900, 100],
+      "trigger_radius_cm": 400,
+      "supabase_url": "tts/1781767024372_Scout_Kael.mp3",
+      "duration_estimate": "~10s",
+      "text": "Danger. Something large is moving through the eastern tree line. Listen — the birds have gone silent. When the birds go silent, you run.",
+      "playback_mode": "proximity_once",
+      "ambient_duck_db": -12,
+      "duck_fade_in_s": 0.3,
+      "duck_fade_out_s": 0.5
+    },
+    {
+      "id": "ELDER_WARN_01",
+      "character": "Elder_Tracker",
+      "npc_actor": "NPC_Elder_Tracker_001",
+      "audio_zone_actor": "AudioVoice_Elder_Tracker_001",
+      "location": [800, -400, 100],
+      "trigger_radius_cm": 500,
+      "supabase_url": "tts/1781767030625_Elder_Tracker.mp3",
+      "duration_estimate": "~11s",
+      "text": "The bones here are old — picked clean. Three kills in one place means this is a feeding ground. Do not camp here. Do not light fire here. Move before dark.",
+      "playback_mode": "proximity_once",
+      "ambient_duck_db": -12,
+      "duck_fade_in_s": 0.3,
+      "duck_fade_out_s": 0.5
+    }
+  ],
+
+  "ambient_soundscapes": [
+    {
+      "id": "SOUNDSCAPE_KILL_SITE",
+      "actor": "AudioZone_KillSite_001",
+      "location": [2200, 1500, 100],
+      "trigger_radius_cm": 800,
+      "layers": [
+        {
+          "type": "wind",
+          "description": "Low hollow wind, intermittent gusts",
+          "volume_db": -18,
+          "loop": true
+        },
+        {
+          "type": "bone_creak",
+          "description": "Dry bone settling, occasional crack",
+          "volume_db": -24,
+          "loop": false,
+          "interval_s": [8, 20]
+        },
+        {
+          "type": "predator_presence",
+          "description": "Sub-bass rumble, barely audible, 40-80Hz",
+          "volume_db": -30,
+          "loop": true,
+          "note": "Player should feel unease without consciously hearing a sound — Walter Murch principle"
+        }
+      ],
+      "freesound_references": []
+    },
+    {
+      "id": "SOUNDSCAPE_RIVER_CROSSING",
+      "actor": "AudioZone_RiverCross_001",
+      "location": [-1800, 2800, 80],
+      "trigger_radius_cm": 1200,
+      "layers": [
+        {
+          "type": "river_flow",
+          "description": "Fast flowing water, constant",
+          "freesound_id": 808370,
+          "freesound_name": "Flowing River",
+          "preview_url": "https://cdn.freesound.org/previews/808/808370_16786392-hq.mp3",
+          "volume_db": -6,
+          "loop": true
+        },
+        {
+          "type": "river_close",
+          "description": "Close stream with birds, Australian magpies",
+          "freesound_id": 336266,
+          "freesound_name": "Flowing stream close and fast, birds nearby.wav",
+          "preview_url": "https://cdn.freesound.org/previews/336/336266_5658680-hq.mp3",
+          "volume_db": -12,
+          "loop": true
+        },
+        {
+          "type": "stream_loop",
+          "description": "Loopable fast stream with birds background",
+          "freesound_id": 685372,
+          "freesound_name": "Stream Loop.wav",
+          "preview_url": "https://cdn.freesound.org/previews/685/685372_12172648-hq.mp3",
+          "volume_db": -15,
+          "loop": true
+        }
+      ]
+    },
+    {
+      "id": "SOUNDSCAPE_FOREST_NIGHT",
+      "actor": "AudioZone_ForestNight_001",
+      "location": [0, -2000, 100],
+      "trigger_radius_cm": 2000,
+      "layers": [
+        {
+          "type": "insects_crickets",
+          "description": "Dense insect chorus, night ambience",
+          "volume_db": -10,
+          "loop": true,
+          "note": "Cuts abruptly when large predator enters zone — silence = danger signal"
+        },
+        {
+          "type": "distant_bird_calls",
+          "description": "Occasional bird calls, sporadic",
+          "volume_db": -20,
+          "loop": false,
+          "interval_s": [15, 45]
+        }
+      ]
+    },
+    {
+      "id": "SOUNDSCAPE_SAVANNA_WIND",
+      "actor": "AudioZone_SavannaWind_001",
+      "location": [3000, 0, 100],
+      "trigger_radius_cm": 3000,
+      "layers": [
+        {
+          "type": "open_wind",
+          "description": "Dry savanna wind, grass rustling",
+          "volume_db": -8,
+          "loop": true
+        },
+        {
+          "type": "distant_thunder",
+          "description": "Far thunder rolls, dry season",
+          "volume_db": -25,
+          "loop": false,
+          "interval_s": [60, 180]
+        }
+      ]
+    }
+  ],
+
+  "audio_design_principles": {
+    "silence_as_danger": "Insect/bird audio cuts when apex predator within 500m — player learns silence = threat",
+    "sub_bass_presence": "T-Rex footsteps add 40-60Hz sub-bass felt before heard — 80m radius",
+    "ambient_ducking": "All ambient layers duck -12dB during voice playback, restore over 0.5s after",
+    "distance_attenuation": "Voice lines: max 600cm, ambient: max 3000cm, sub-bass: max 8000cm"
+  },
+
+  "ue5_actors_spawned": [
+    "AudioVoice_Elder_Tracker_001",
+    "AudioVoice_Scout_Kael_001",
+    "AudioZone_KillSite_001",
+    "AudioZone_RiverCross_001",
+    "AudioZone_ForestNight_001",
+    "AudioZone_SavannaWind_001"
+  ],
+
+  "handoff_to_vfx_agent_17": {
+    "sync_points": [
+      "AudioZone_KillSite_001 → VFX: dust particles + bone scatter on player approach",
+      "AudioZone_RiverCross_001 → VFX: water splash particles when player enters river",
+      "AudioZone_ForestNight_001 → VFX: firefly particles at night, fog density increase",
+      "AudioZone_SavannaWind_001 → VFX: grass particle wind direction matches audio wind layer",
+      "AudioVoice_Elder_Tracker_001 → VFX: subtle dust mote particles during NPC speech"
+    ],
+    "screen_shake_spec": {
+      "trex_footstep": "Amplitude 2.5, Frequency 8Hz, Duration 0.4s — trigger at 1500cm from T-Rex",
+      "raptor_impact": "Amplitude 1.0, Frequency 15Hz, Duration 0.2s — trigger on raptor attack hit",
+      "damage_flash": "Red vignette overlay, alpha 0.6, fade 0.3s — trigger on any damage event"
+    }
+  }
+}
