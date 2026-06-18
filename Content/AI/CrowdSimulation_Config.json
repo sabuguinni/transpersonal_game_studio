@@ -1,0 +1,143 @@
+{
+  "crowd_simulation_config_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_006",
+  "agent": "#13 Crowd & Traffic Simulation",
+
+  "integration_with_agent_12": {
+    "source": "CombatAI_Config.json",
+    "combat_zones_consumed": [
+      "CombatZone_TRex_Chase (3000u radius) → CrowdFlee trigger",
+      "CombatTrigger_Raptor_Ambush (1500u radius) → CrowdScatter trigger",
+      "FireDeterrent_Camp_001/002/003 (800u radius) → CrowdSafety cluster",
+      "TRexPatrol_Waypoint_A/B/C/D → CrowdExclude boundary",
+      "CombatMod_Night/Day → CrowdDensity day/night shift"
+    ]
+  },
+
+  "crowd_flee_system": {
+    "description": "Crowd agents flee when T-Rex enters CHASE state",
+    "trigger_radius_unreal_units": 3000,
+    "flee_speed_multiplier": 2.5,
+    "flee_direction": "away_from_trex_position",
+    "actors": [
+      "CrowdFlee_TRex_North",
+      "CrowdFlee_TRex_South",
+      "CrowdFlee_TRex_East"
+    ],
+    "light_color": "red-orange (1.0, 0.2, 0.0)",
+    "light_radius": 3000
+  },
+
+  "crowd_scatter_system": {
+    "description": "Crowd agents scatter when Raptor AMBUSH or FLANK triggers activate",
+    "trigger_radius_unreal_units": 1500,
+    "scatter_pattern": "radial_burst",
+    "scatter_speed_multiplier": 3.0,
+    "actors": [
+      "CrowdScatter_Raptor_Ambush_W",
+      "CrowdScatter_Raptor_Ambush_E",
+      "CrowdScatter_Raptor_Flank_L",
+      "CrowdScatter_Raptor_Flank_R"
+    ],
+    "light_color": "amber (1.0, 0.6, 0.0)",
+    "light_radius": 1500
+  },
+
+  "fire_safety_cluster": {
+    "description": "At night, crowd agents move toward fire sources for safety — fire deters predators",
+    "cluster_radius_unreal_units": 800,
+    "night_attraction_weight": 0.85,
+    "day_attraction_weight": 0.1,
+    "actors": [
+      "CrowdSafety_Fire_Camp_001",
+      "CrowdSafety_Fire_Camp_002",
+      "CrowdSafety_Fire_Camp_003"
+    ],
+    "light_color": "warm campfire (1.0, 0.5, 0.1)",
+    "light_radius": 800
+  },
+
+  "trex_patrol_exclusion": {
+    "description": "No crowd agents idle within T-Rex patrol loop — defines hard exclusion boundary",
+    "exclusion_boundary_actors": [
+      "CrowdExclude_TRexZone_N",
+      "CrowdExclude_TRexZone_S",
+      "CrowdExclude_TRexZone_W",
+      "CrowdExclude_TRexZone_E"
+    ],
+    "patrol_circuit_reference": "TRexPatrol_Waypoint_A/B/C/D (from Agent #12)",
+    "crowd_pathfinding_rule": "route_around_exclusion_zone",
+    "light_color": "deep red (0.8, 0.0, 0.0)"
+  },
+
+  "day_night_density_system": {
+    "description": "Crowd density shifts with time of day — night reduces active agents, increases shelter-seeking",
+    "day_density_multiplier": 1.0,
+    "night_density_multiplier": 0.35,
+    "night_movement_speed_multiplier": 1.8,
+    "shelter_seek_weight_night": 0.9,
+    "actors": [
+      "CrowdDensity_Day_Peak",
+      "CrowdDensity_Night_Low",
+      "CrowdShelter_Night_A",
+      "CrowdShelter_Night_B"
+    ],
+    "day_light_color": "yellow (1.0, 0.95, 0.5)",
+    "night_light_color": "blue (0.2, 0.3, 1.0)"
+  },
+
+  "stampede_system": {
+    "description": "Brachiosaurus stampede triggered by loud noise within 500u — pushes crowd agents out of path with physics impulse",
+    "trigger_noise_radius_unreal_units": 500,
+    "stampede_speed": 1800,
+    "crowd_impulse_force": 2500,
+    "impulse_radius_unreal_units": 2000,
+    "path_actors": [
+      "StampedePath_Start",
+      "StampedePath_Mid_A",
+      "StampedePath_Mid_B",
+      "StampedePath_End",
+      "StampedeImpulse_Zone"
+    ],
+    "light_color": "brown (0.6, 0.3, 0.0)"
+  },
+
+  "crowd_density_caps": {
+    "max_simultaneous_agents": 50000,
+    "lod_near_full_detail": 200,
+    "lod_mid_simplified": 2000,
+    "lod_far_impostor": 50000,
+    "active_agents_cap_per_zone": 500
+  },
+
+  "mass_ai_integration": {
+    "entity_config": "Mass Entity with CrowdSimulationProcessor",
+    "processors": [
+      "CrowdFleeProcessor — reacts to combat zone state changes",
+      "CrowdScatterProcessor — radial burst on raptor ambush",
+      "CrowdShelterProcessor — night-time fire attraction",
+      "CrowdStampedeProcessor — physics impulse from Brachio path",
+      "CrowdPathfindingProcessor — routes around T-Rex exclusion zone"
+    ],
+    "lod_chain": "Full (0-200u) → Simplified (200-2000u) → Impostor (2000u+)"
+  },
+
+  "handoff_to_agent_14": {
+    "quest_triggers_available": [
+      "CrowdFlee_TRex_North/South/East — can trigger 'Survive T-Rex Attack' quest objective",
+      "CrowdScatter_Raptor_Ambush_W/E — can trigger 'Raptor Pack Ambush' quest event",
+      "StampedePath_Start → End — can trigger 'Survive the Stampede' quest sequence",
+      "CrowdSafety_Fire_Camp_001/002/003 — can trigger 'Build a Fire' quest objective (safety mechanic)"
+    ],
+    "narrative_hooks": [
+      "Crowd fleeing T-Rex creates urgency — player must react within 8 seconds",
+      "Fire safety clusters show player that fire = protection — teaches crafting motivation",
+      "Stampede path creates linear 'run for your life' sequence — cinematic moment",
+      "Night density reduction creates tension — fewer allies visible, more isolated feeling"
+    ]
+  },
+
+  "map_saved": true,
+  "map_path": "/Game/Maps/MinPlayableMap",
+  "total_crowd_actors_this_cycle": 16
+}
