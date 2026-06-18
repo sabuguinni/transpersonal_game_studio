@@ -1,0 +1,108 @@
+# Audio System — Agent #16 Production Cycle 004
+
+## Overview
+This cycle delivers: screen shake audio zones, day/night audio cue markers, damage feedback audio, and 2 narration voice lines for survival gameplay.
+
+---
+
+## Voice Lines Generated
+
+### 1. Narrator_Danger — Danger Alert
+- **URL**: `https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781762661121_Narrator_Danger.mp3`
+- **Text**: "The ground shakes. Something massive is moving through the forest. Run. Now."
+- **Use**: Triggered when TRex enters 800u proximity of player. Plays once per encounter.
+- **Duration**: ~6s
+
+### 2. Narrator_Survival — Crafting Hint
+- **URL**: `https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781762674178_Narrator_Survival.mp3`
+- **Text**: "Craft your tools before the sun sets. Stone against stone, edge against edge. A sharp blade means the difference between eating tonight and becoming something else's meal."
+- **Use**: First-time crafting tutorial hint. Plays when player picks up first stone.
+- **Duration**: ~12s
+
+---
+
+## Audio Zone Actors (UE5 Point Lights as Zone Markers)
+
+| Actor Label | Location | Color | Audio Purpose |
+|-------------|----------|-------|---------------|
+| AudioZone_TRexRumble_001 | (1500, 800, 120) | 🔴 Red-Orange | TRex proximity — deep rumble + screen shake trigger |
+| AudioZone_RaptorAlert_001 | (-800, 1200, 100) | 🟠 Amber | Raptor pack — high-pitch clicking + alert stinger |
+| AudioZone_Campfire_001 | (200, 300, 80) | 🟡 Warm Yellow | Campfire crackling + safe/calm music layer |
+| AudioZone_River_001 | (-400, -900, 60) | 🔵 Blue | River water flow + bird ambience |
+| AudioZone_Night_001 | (900, -600, 90) | 🟣 Dark Blue | Night — cricket chorus + distant calls |
+
+---
+
+## Day/Night Audio Cue Markers
+
+| Actor Label | Location | Phase | Audio Design |
+|-------------|----------|-------|--------------|
+| AudioCue_Dawn_001 | (0, 0, 200) | Dawn | Bird chorus fade-in + distant dino calls |
+| AudioCue_Midday_001 | (600, 600, 200) | Midday | Peak ambience, insect hum, heat shimmer |
+| AudioCue_Dusk_001 | (-600, 600, 200) | Dusk | Tension build, predator activity rise |
+| AudioCue_Midnight_001 | (-600, -600, 200) | Midnight | Near silence + sudden danger stingers |
+| AudioCue_DamageFlash_001 | (1400, 700, 150) | Combat | Damage flash — red screen + impact audio |
+
+---
+
+## Freesound References (Campfire — API returned results)
+
+| ID | Name | Duration | Tags | Preview |
+|----|------|----------|------|---------|
+| 157187 | Campfire Crackle 3 | 2.0s | burning, campfire, crackling | [Preview](https://cdn.freesound.org/previews/157/157187_2840005-hq.mp3) |
+| 790790 | Crackling Dry Pine Needles | 62.0s | ASMR, campfire, fire, nature | [Preview](https://cdn.freesound.org/previews/790/790790_16993478-hq.mp3) |
+| 394952 | Crackling Campfire (lake) | 1805s | burn, campfire, field-recording | [Preview](https://cdn.freesound.org/previews/394/394952_7037-hq.mp3) |
+
+**Recommended**: ID 394952 for long-loop campfire ambience (30min field recording, ideal for looping).
+
+---
+
+## Audio Design Principles Applied
+
+### Screen Shake (TRex Zone)
+- Trigger radius: 800 units from `AudioZone_TRexRumble_001`
+- Shake intensity: scales with distance (inverse square)
+- Audio: sub-bass rumble (40-80Hz) + ground impact transients
+- Frequency: every 3-5 seconds (simulating footstep cadence)
+
+### Damage Flash Audio
+- Triggered by `AudioCue_DamageFlash_001` zone
+- Visual: red screen overlay (0.3s flash)
+- Audio: sharp impact + pain grunt (100ms attack, 500ms decay)
+- Cooldown: 1.5s between triggers
+
+### Day/Night Adaptive Music
+- Dawn (06:00-08:00): Soft percussion, bird calls, hopeful tone
+- Midday (10:00-14:00): Full ambience, insect chorus, neutral tension
+- Dusk (17:00-20:00): Rising tension, predator theme layer fades in
+- Midnight (22:00-04:00): Minimal music, danger stingers on proximity
+
+### Campfire Safe Zone
+- Within 300 units of `AudioZone_Campfire_001`: music shifts to calm layer
+- Crackling fire loop (Freesound ID 394952)
+- Predator music layer fades out (2s crossfade)
+
+---
+
+## Previous Cycles Reference
+
+| Cycle | Voice Lines | Audio Zones | Notes |
+|-------|-------------|-------------|-------|
+| 001 | 0 | 5 (basic) | Initial zone setup |
+| 002 | 0 | 4 (NarrDialogue anchors) | Freesound down |
+| 003 | 0 | 4 (advanced zones) | Freesound 502/503 |
+| 004 | 2 | 10 (zones + day/night) | Full audio framework |
+
+---
+
+## Next Cycle Priorities (for Agent #17 VFX)
+
+1. **Footstep dust particles** — spawn Niagara emitters at AudioZone_TRexRumble_001 for ground impact VFX
+2. **Campfire VFX** — fire + smoke Niagara system at AudioZone_Campfire_001 location (200, 300, 80)
+3. **Damage flash VFX** — red screen overlay material at AudioCue_DamageFlash_001 (1400, 700, 150)
+4. **Day/night sky transitions** — coordinate with AudioCue_Dawn/Dusk markers for visual sky changes
+
+---
+
+*Generated by Audio Agent #16 — PROD_CYCLE_AUTO_20260618_004*
+*Map saved: /Game/Maps/MinPlayableMap*
