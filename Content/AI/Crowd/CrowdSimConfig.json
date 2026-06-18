@@ -1,0 +1,137 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "Crowd & Traffic Simulation #13",
+
+  "crowd_zones": {
+    "brachio_herd_grazing": {
+      "center": [-1200, -3500, 100],
+      "radius": 1200,
+      "agent_count": 5,
+      "agents": [
+        { "label": "Brachio_Herd_001", "pos": [-1200, -3500, 100], "role": "dominant_adult", "facing_deg": 0 },
+        { "label": "Brachio_Herd_002", "pos": [-1600, -3200, 100], "role": "adult_flank_nw", "facing_deg": 72 },
+        { "label": "Brachio_Herd_003", "pos": [-800,  -3800, 100], "role": "adult_flank_se", "facing_deg": 144 },
+        { "label": "Brachio_Herd_004", "pos": [-1400, -3900, 100], "role": "juvenile",        "facing_deg": 216 },
+        { "label": "Brachio_Herd_005", "pos": [-900,  -3100, 100], "role": "sentinel",        "facing_deg": 288 }
+      ],
+      "behavior": "passive_grazing",
+      "threat_response": "herd_stampede_toward_water",
+      "stampede_trigger_radius": 800,
+      "notes": "Primary crowd candidate. Herd stays loose cluster. Sentinel (Herd_005) faces north toward T-Rex patrol zone."
+    },
+
+    "prey_migration_corridor": {
+      "description": "Small herbivores flee T-Rex patrol zone toward water source",
+      "trex_zone": [4500, -1800],
+      "water_destination": [800, 3200],
+      "waypoints": [
+        { "label": "MigrationWP_Prey_001", "pos": [3500, -1200, 100], "note": "exit T-Rex danger radius" },
+        { "label": "MigrationWP_Prey_002", "pos": [2800,  200,  100], "note": "midpoint open plain crossing" },
+        { "label": "MigrationWP_Prey_003", "pos": [1800,  1400, 100], "note": "approach water zone" },
+        { "label": "MigrationWP_Prey_004", "pos": [800,   3200, 80],  "note": "water source arrival" }
+      ],
+      "migration_speed_cms": 180,
+      "panic_speed_cms": 600,
+      "trigger": "T-Rex enters 1200u radius of any prey agent"
+    },
+
+    "raptor_avoidance_zone": {
+      "raptor_pack_center": [-3200, 2100],
+      "safe_distance_units": 1800,
+      "scatter_positions": [
+        { "label": "ScatterPrey_Raptor_001", "pos": [-1400, 2100, 100], "note": "east — watching from distance" },
+        { "label": "ScatterPrey_Raptor_002", "pos": [-3200,  300, 100], "note": "north — fled uphill" },
+        { "label": "ScatterPrey_Raptor_003", "pos": [-5000, 2100, 100], "note": "west — maximum distance" },
+        { "label": "ScatterPrey_Raptor_004", "pos": [-3200, 3900, 100], "note": "south — near water approach" }
+      ],
+      "behavior": "frozen_alert_then_flee",
+      "notes": "Prey animals maintain >1800u from raptor pack. If raptor moves, prey scatter radially outward."
+    },
+
+    "water_source_convergence": {
+      "center": [800, 3200, 80],
+      "description": "Highest-tension multi-species convergence. All species need water. Predators ambush here.",
+      "nodes": [
+        { "label": "WaterNode_Center_001",    "pos": [800,  3200, 80], "role": "primary_drink_point" },
+        { "label": "WaterNode_Herbivore_001", "pos": [400,  3000, 80], "role": "herbivore_approach_safe_side" },
+        { "label": "WaterNode_East_001",      "pos": [1200, 3400, 80], "role": "secondary_drink_point" },
+        { "label": "WaterNode_Bank_001",      "pos": [600,  3600, 80], "role": "muddy_bank_tracks_visible" },
+        { "label": "WaterNode_Watch_001",     "pos": [1000, 2800, 80], "role": "elevated_watch_position" }
+      ],
+      "peak_activity": ["dawn_06:00", "dusk_18:30"],
+      "species_priority": ["herbivores_first", "raptors_ambush_edge", "trex_dominates_center"],
+      "tension_level": "maximum",
+      "notes": "Water source is the single most important crowd node. Every species converges here. Player observing this zone will see emergent crowd behavior."
+    }
+  },
+
+  "lod_system": {
+    "description": "Crowd simulation fidelity tiers by distance from player",
+    "lod0": {
+      "radius_units": 500,
+      "fidelity": "full_simulation",
+      "agents_per_frame": "all",
+      "animation": "full_skeletal",
+      "pathfinding": "navmesh_per_frame",
+      "marker": "LOD_Boundary_Near_500"
+    },
+    "lod1": {
+      "radius_units": 2000,
+      "fidelity": "reduced_simulation",
+      "agents_per_frame": "every_3_frames",
+      "animation": "simplified_blend",
+      "pathfinding": "navmesh_every_5_frames",
+      "marker": "LOD_Boundary_Mid_2000"
+    },
+    "lod2": {
+      "radius_units": 5000,
+      "fidelity": "billboard_only",
+      "agents_per_frame": "position_update_only",
+      "animation": "billboard_sprite",
+      "pathfinding": "waypoint_lerp",
+      "marker": "LOD_Boundary_Far_5000"
+    },
+    "beyond_lod2": {
+      "behavior": "suspended",
+      "notes": "Agents beyond 5000u are suspended. State preserved, resume when player approaches."
+    }
+  },
+
+  "crowd_budget": {
+    "max_full_sim_agents": 50,
+    "max_reduced_sim_agents": 200,
+    "max_billboard_agents": 500,
+    "current_placed_agents": 17,
+    "cap_limit": 8000,
+    "notes": "Current placement is infrastructure markers only. Full Mass AI integration requires Blueprint crowd manager."
+  },
+
+  "ecosystem_dynamics": {
+    "predator_prey_radius": {
+      "trex_clear_radius": 1200,
+      "raptor_clear_radius": 800,
+      "brachio_herd_buffer": 600
+    },
+    "water_source_schedule": {
+      "dawn": "herbivores_dominant",
+      "midday": "empty_heat_avoidance",
+      "dusk": "all_species_peak_tension",
+      "night": "predators_only"
+    },
+    "stampede_conditions": [
+      "T-Rex enters herd radius",
+      "Player runs through herd",
+      "Raptor pack splits and flanks",
+      "Loud noise within 400u"
+    ]
+  },
+
+  "references": {
+    "combat_ai_config": "Content/AI/Combat/CombatAIConfig.json",
+    "brachio_grazing_zone": "BehaviorZone_BrachioGrazing_001",
+    "water_source_trigger": "CombatTrigger_WaterSource_001",
+    "trex_patrol_waypoints": ["TRexWP_001", "TRexWP_002", "TRexWP_003", "TRexWP_004", "TRexWP_005"],
+    "raptor_pack_trigger": "CombatTrigger_Raptor_001"
+  }
+}
