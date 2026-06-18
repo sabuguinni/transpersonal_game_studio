@@ -1,0 +1,110 @@
+{
+  "dialogue_tree_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_011",
+  "npc_id": "NPC_Elder",
+  "npc_label": "NPC_Elder_DialogueTrigger",
+  "npc_location": {"x": -200, "y": 400, "z": 60},
+  "voice_lines": {
+    "QUEST_001_TRIGGER": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Elder.mp3",
+      "text": "Gather two rocks and a stick. Bring them to the crafting stone. You will make your first axe. Without it, you cannot hunt. Without hunting, you cannot survive.",
+      "triggers_quest": "QUEST_001_FIRST_HUNT",
+      "condition": "quest_001_not_started"
+    },
+    "QUEST_002_TRIGGER": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810681316_QuestNPC_Elder.mp3",
+      "text": "You found the eastern ridge. Look at these tracks — deep, wide apart. The creature that made these is heavy. Heavier than anything I have seen. We do not follow it. Not yet. First, we need fire. Fire keeps them away at night. Without fire, we are just meat.",
+      "triggers_quest": "QUEST_002_CAMPFIRE",
+      "condition": "quest_001_complete"
+    },
+    "QUEST_005_UNLOCK": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810702981_QuestNPC_Elder.mp3",
+      "text": "The pack hunts at dusk. Five of them — maybe six. They split apart, come from different sides. One makes noise to draw your attention. The others come from behind. I have seen it twice. Both times, someone died. If you hear one raptor, look for the others first.",
+      "triggers_quest": "QUEST_005_PACK_HUNT",
+      "condition": "quest_004_complete"
+    }
+  },
+  "dialogue_nodes": [
+    {
+      "node_id": "ROOT",
+      "speaker": "NPC_Elder",
+      "text": "You are still alive. Good.",
+      "responses": [
+        {"text": "What should I do first?", "next_node": "ADVICE_CRAFT", "condition": "quest_001_not_started"},
+        {"text": "I found the tracks.", "next_node": "TRACKS_RESPONSE", "condition": "quest_001_complete AND quest_002_not_started"},
+        {"text": "The camp is ready.", "next_node": "CAMP_COMPLETE", "condition": "quest_004_complete"},
+        {"text": "Nothing. Just checking.", "next_node": "DISMISS"}
+      ]
+    },
+    {
+      "node_id": "ADVICE_CRAFT",
+      "speaker": "NPC_Elder",
+      "text": "Gather two rocks and a stick. Bring them to the crafting stone. You will make your first axe. Without it, you cannot hunt.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Elder.mp3",
+      "action": "trigger_quest:QUEST_001_FIRST_HUNT",
+      "responses": [
+        {"text": "Where do I find rocks?", "next_node": "ROCKS_HINT"},
+        {"text": "I understand.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "ROCKS_HINT",
+      "speaker": "NPC_Elder",
+      "text": "Near the water. Always near the water. The river smooths them. Look for flat ones — they hold an edge better.",
+      "responses": [
+        {"text": "I will go now.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "TRACKS_RESPONSE",
+      "speaker": "NPC_Elder",
+      "text": "Those tracks are from the big one. It has been here before — twice in the last moon. It does not come near fire. Build the campfire before dark.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810681316_QuestNPC_Elder.mp3",
+      "action": "trigger_quest:QUEST_002_CAMPFIRE",
+      "responses": [
+        {"text": "How big is the fire?", "next_node": "FIRE_SIZE"},
+        {"text": "I will build it now.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "FIRE_SIZE",
+      "speaker": "NPC_Elder",
+      "text": "Big enough to see from the ridge. Small fires go out. Small fires do not scare anything. Make it big.",
+      "responses": [
+        {"text": "Understood.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "CAMP_COMPLETE",
+      "speaker": "NPC_Elder",
+      "text": "The raptors will test us. They always do. They are smart — smarter than you think. But they are also afraid of what they do not understand. Use that.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810702981_QuestNPC_Elder.mp3",
+      "action": "trigger_quest:QUEST_005_PACK_HUNT",
+      "responses": [
+        {"text": "How do we fight them?", "next_node": "RAPTOR_TACTICS"},
+        {"text": "I am ready.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "RAPTOR_TACTICS",
+      "speaker": "NPC_Elder",
+      "text": "Do not fight them in the open. Use the rocks, the trees. Make them come to you one at a time. A raptor alone is manageable. A raptor with its pack is death.",
+      "responses": [
+        {"text": "I understand.", "next_node": "END"}
+      ]
+    },
+    {
+      "node_id": "DISMISS",
+      "speaker": "NPC_Elder",
+      "text": "Then go. Do not waste daylight.",
+      "responses": []
+    },
+    {
+      "node_id": "END",
+      "speaker": null,
+      "text": null,
+      "action": "close_dialogue",
+      "responses": []
+    }
+  ]
+}
