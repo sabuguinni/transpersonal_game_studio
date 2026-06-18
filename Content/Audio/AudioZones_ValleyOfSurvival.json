@@ -1,0 +1,240 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "Audio Agent #16",
+  "description": "Audio zone definitions for all 4 Valley of Survival quests. Each zone has ambient loop metadata, voice asset URLs, attenuation radius, and speaker label colors matching Agent #15 dialogue system notes.",
+
+  "voice_assets": {
+    "Narrator_WaterHole": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781752063121_Narrator_WaterHole.mp3",
+      "duration": "~9s",
+      "text": "The water hole is close. Listen — insects, frogs, the sound of life. Where there is water, there is danger. Move carefully.",
+      "speaker": "Narrator",
+      "label_color": "#C8A96E",
+      "trigger": "NarrDialogue_WaterHole_Intro"
+    },
+    "Elder_RaptorWarning": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781752075105_Elder_RaptorWarning.mp3",
+      "duration": "~8s",
+      "text": "The raptors hunt in packs. If you see one, there are three more you cannot see. Your only advantage is fire. Use it.",
+      "speaker": "Elder",
+      "label_color": "#E8D5A3",
+      "trigger": "NarrDialogue_RaptorClearing_Intro"
+    },
+    "Narrator_ValleyOfSurvival": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751935826_Narrator_ValleyOfSurvival.mp3",
+      "duration": "~15s",
+      "trigger": "NarrDialogue_WaterHole_Intro",
+      "speaker": "Narrator",
+      "label_color": "#C8A96E"
+    },
+    "NPC_Elder_MigrationAdvice": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751949463_NPC_Elder_MigrationAdvice.mp3",
+      "duration": "~14s",
+      "trigger": "NarrDialogue_Migration_Intro",
+      "speaker": "Elder",
+      "label_color": "#E8D5A3"
+    },
+    "NPC_Elder_QuestCompletion": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751956833_NPC_Elder_QuestCompletion.mp3",
+      "duration": "~12s",
+      "trigger": "NarrDialogue_BrachioHerd_Observe",
+      "speaker": "Elder",
+      "label_color": "#E8D5A3"
+    },
+    "NPC_Scout_SurvivalTip": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751958918_NPC_Scout_SurvivalTip.mp3",
+      "duration": "~12s",
+      "trigger": "NarrDialogue_RaptorClearing_Mid_Examine",
+      "speaker": "Scout",
+      "label_color": "#A8C8E8"
+    },
+    "Elder_SilenceBefore": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781741546677_Elder_Kael_SilenceBefore.mp3",
+      "duration": "~14s",
+      "trigger": "NarrDialogue_RaptorClearing_Escape",
+      "speaker": "Elder",
+      "label_color": "#E8D5A3"
+    },
+    "Elder_SilenceWarning": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781732619618_Elder_SilenceWarning.mp3",
+      "duration": "~17s",
+      "trigger": "NarrDialogue_WaterHole_Mid",
+      "speaker": "Elder",
+      "label_color": "#E8D5A3"
+    }
+  },
+
+  "audio_zones": [
+    {
+      "label": "AudioZone_WaterHole_Ambient",
+      "quest": "WaterHole",
+      "location": { "x": -800, "y": 1200, "z": 100 },
+      "attenuation_radius_cm": 200000,
+      "ambient_loop": {
+        "description": "Insects, frogs, slow water movement, distant bird calls",
+        "freesound_reference": {
+          "id": 854668,
+          "name": "crickets birds heathland ambient",
+          "preview_url": "https://cdn.freesound.org/previews/854/854668_1648170-hq.mp3",
+          "duration_s": 540,
+          "tags": ["ambient", "birds", "insects", "field-recording"]
+        },
+        "ue5_implementation": "MetaSound asset: MS_WaterHole_Ambient — layered: insects (high), frogs (mid), water trickle (low), random bird stab every 8-15s",
+        "volume_db": -6,
+        "loop": true,
+        "fade_in_s": 3.0,
+        "fade_out_s": 2.0
+      },
+      "voice_triggers": ["Narrator_WaterHole", "Narrator_ValleyOfSurvival", "Elder_SilenceWarning"],
+      "danger_sting": {
+        "trigger": "predator_within_500m",
+        "sound": "insects_stop_abrupt",
+        "description": "Sudden insect silence — player cue that danger is near"
+      }
+    },
+    {
+      "label": "AudioZone_Migration_Ambient",
+      "quest": "Migration",
+      "location": { "x": 2000, "y": -500, "z": 100 },
+      "attenuation_radius_cm": 300000,
+      "ambient_loop": {
+        "description": "Open plains wind, distant herd rumble (sub-bass 40-80Hz), occasional bird scatter",
+        "freesound_reference": {
+          "id": 848132,
+          "name": "spring sand-dunes heathland ambient",
+          "preview_url": "https://cdn.freesound.org/previews/848/848132_1648170-hq.mp3",
+          "duration_s": 240,
+          "tags": ["ambient", "birds", "wind", "field-recording"]
+        },
+        "ue5_implementation": "MetaSound asset: MS_Migration_Ambient — layered: wind (continuous), sub-bass herd rumble (looping), bird scatter (random stab 20-40s)",
+        "volume_db": -8,
+        "loop": true,
+        "fade_in_s": 5.0,
+        "fade_out_s": 4.0
+      },
+      "voice_triggers": ["NPC_Elder_MigrationAdvice"],
+      "danger_sting": {
+        "trigger": "herd_stampede",
+        "sound": "sub_bass_swell_to_thunder",
+        "description": "Sub-bass builds to full thunder as herd approaches"
+      }
+    },
+    {
+      "label": "AudioZone_RaptorClearing_Ambient",
+      "quest": "RaptorClearing",
+      "location": { "x": -1500, "y": -800, "z": 100 },
+      "attenuation_radius_cm": 150000,
+      "ambient_loop": {
+        "description": "Near-silence — sparse wind, no insects (they fled), occasional twig snap, distant raptor vocalization",
+        "freesound_reference": {
+          "id": 848143,
+          "name": "spring breezy heathland ambient",
+          "preview_url": "https://cdn.freesound.org/previews/848/848143_1648170-hq.mp3",
+          "duration_s": 60,
+          "tags": ["ambient", "wind", "field-recording"]
+        },
+        "ue5_implementation": "MetaSound asset: MS_RaptorClearing_Ambient — minimal: wind (very low), random twig snap (every 30-60s), raptor distant call (every 45-90s)",
+        "volume_db": -12,
+        "loop": true,
+        "fade_in_s": 2.0,
+        "fade_out_s": 1.0,
+        "design_note": "The silence IS the sound design here. Absence of insects = danger signal. Walter Murch principle: what is NOT there is more powerful."
+      },
+      "voice_triggers": ["Elder_RaptorWarning", "NPC_Scout_SurvivalTip", "Elder_SilenceBefore"],
+      "danger_sting": {
+        "trigger": "raptor_spotted",
+        "sound": "heartbeat_low_then_silence",
+        "description": "Single low heartbeat, then absolute silence before raptor attack"
+      }
+    },
+    {
+      "label": "AudioZone_BrachioHerd_Ambient",
+      "quest": "BrachioHerd",
+      "location": { "x": 3000, "y": 2500, "z": 100 },
+      "attenuation_radius_cm": 250000,
+      "ambient_loop": {
+        "description": "Deep sub-bass ground vibration (footsteps), bird scatter in canopy, low Brachio vocalizations (infrasound-like 20-40Hz), distant tree cracking",
+        "freesound_reference": {
+          "id": 717390,
+          "name": "Big World Wonderworld ambient loop",
+          "preview_url": "https://cdn.freesound.org/previews/717/717390_14248671-hq.mp3",
+          "duration_s": 14.77,
+          "tags": ["ambient", "animals", "forest", "discovery"]
+        },
+        "ue5_implementation": "MetaSound asset: MS_BrachioHerd_Ambient — layered: sub-bass pulse (synced to Brachio step cycle ~3s), bird scatter (random), low vocal rumble (every 20-30s), tree crack (every 60-90s)",
+        "volume_db": -4,
+        "loop": true,
+        "fade_in_s": 8.0,
+        "fade_out_s": 6.0,
+        "design_note": "Player should FEEL the Brachiosaurus before they see it. Sub-bass at 30-40Hz creates physical sensation of scale."
+      },
+      "voice_triggers": ["NPC_Elder_QuestCompletion"],
+      "danger_sting": {
+        "trigger": "herd_disturbed",
+        "sound": "panic_scatter_bird_explosion_plus_rumble",
+        "description": "All birds scatter simultaneously + ground rumble intensifies — herd is moving"
+      }
+    }
+  ],
+
+  "global_audio_design": {
+    "music_system": "Adaptive — no music during exploration (ambient only). Music enters only on quest completion or combat.",
+    "combat_music": "Percussion-only: bone drums, stone percussion, no melodic instruments. Tempo increases with danger proximity.",
+    "quest_completion_sting": "3-note motif: low bone drum + mid wood percussion + high stone tap. Duration 2.5s. Plays once on quest complete.",
+    "day_night_audio_shift": {
+      "dawn": "Bird calls increase, insect fade, wind rises",
+      "midday": "Peak insect volume, heat shimmer sound (high freq hiss), reduced bird activity",
+      "dusk": "Insect transition (day to night species), predator activity sounds increase",
+      "night": "Night insects, owl calls, distant predator vocalizations, fire crackle (if player has fire)"
+    },
+    "walter_murch_principle": "The sound that does not exist is often more powerful than the sound that does. Silence = danger. Sudden silence = immediate threat.",
+    "rdr2_principle": "Music the player never consciously notices but that changes what they feel is the peak of interactive composition."
+  },
+
+  "freesound_catalog": [
+    {
+      "id": 854668,
+      "name": "crickets birds heathland ambient",
+      "preview_url": "https://cdn.freesound.org/previews/854/854668_1648170-hq.mp3",
+      "duration_s": 540,
+      "assigned_to": "AudioZone_WaterHole_Ambient",
+      "usage": "Primary ambient loop — insects + birds layer"
+    },
+    {
+      "id": 848132,
+      "name": "spring sand-dunes heathland ambient",
+      "preview_url": "https://cdn.freesound.org/previews/848/848132_1648170-hq.mp3",
+      "duration_s": 240,
+      "assigned_to": "AudioZone_Migration_Ambient",
+      "usage": "Wind + open plains layer"
+    },
+    {
+      "id": 848143,
+      "name": "spring breezy heathland ambient",
+      "preview_url": "https://cdn.freesound.org/previews/848/848143_1648170-hq.mp3",
+      "duration_s": 60,
+      "assigned_to": "AudioZone_RaptorClearing_Ambient",
+      "usage": "Minimal wind — silence design reference"
+    },
+    {
+      "id": 717390,
+      "name": "Big World Wonderworld ambient loop",
+      "preview_url": "https://cdn.freesound.org/previews/717/717390_14248671-hq.mp3",
+      "duration_s": 14.77,
+      "assigned_to": "AudioZone_BrachioHerd_Ambient",
+      "usage": "Discovery/awe layer for Brachio encounter"
+    }
+  ],
+
+  "ue5_actors_spawned": [
+    "AudioZone_WaterHole_Ambient",
+    "AudioZone_Migration_Ambient",
+    "AudioZone_RaptorClearing_Ambient",
+    "AudioZone_BrachioHerd_Ambient"
+  ],
+
+  "total_voice_assets": 8,
+  "total_audio_zones": 4,
+  "map_saved": true
+}
