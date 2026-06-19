@@ -1,223 +1,159 @@
 #include "NPCMemoryComponent.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
 
 UNPCMemoryComponent::UNPCMemoryComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    
-    // Default memory settings
-    MaxMemoryDuration = 300.0f; // 5 minutes
-    MaxMemoryEntries = 50;
-    MemoryDecayRate = 0.1f;
+    PrimaryComponentTick.TickInterval = 0.5f; // tick every 0.5s — memory decay is not frame-critical
 }
 
 void UNPCMemoryComponent::BeginPlay()
 {
     Super::BeginPlay();
+    Memories.Reserve(MaxMemories);
 }
 
 void UNPCMemoryComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Decay memories over time
-    DecayMemories(DeltaTime);
-    
-    // Clean up old memories periodically
-    static float CleanupTimer = 0.0f;
-    CleanupTimer += DeltaTime;
-    if (CleanupTimer >= 10.0f) // Clean up every 10 seconds
-    {
-        ClearOldMemories();
-        CleanupTimer = 0.0f;
-    }
-}
 
-void UNPCMemoryComponent::AddMemoryEntry(AActor* Actor, FVector Location, float ThreatLevel, bool bIsFriendly)
-{
-    if (!Actor)
+    DecayMemories(DeltaTime * 2.f); // 0.5s tick * 2 = 1s equivalent decay
+    PruneExpiredMemories();
+
+    // Recompute overall threat level as weighted average
+    if (Memories.IsEmpty())
     {
+        CurrentThreatLevel = 0.f;
         return;
     }
 
-    // Check if we already have a memory of this actor
-    FNPC_MemoryEntry* ExistingEntry = GetMemoryEntry(Actor);
-    if (ExistingEntry)
+    float TotalWeight = 0.f;
+    for (const FNPC_MemoryRecord& Mem : Memories)
     {
-        // Update existing entry
-        ExistingEntry->LastKnownLocation = Location;
-        ExistingEntry->ThreatLevel = ThreatLevel;
-        ExistingEntry->LastSeenTime = GetWorld()->GetTimeSeconds();
-        ExistingEntry->bIsFriendly = bIsFriendly;
-        return;
+        TotalWeight += Mem.ThreatWeight;
+    }
+    CurrentThreatLevel = FMath::Clamp(TotalWeight / static_cast<float>(Memories.Num()), 0.f, 1.f);
+}
+
+void UNPCMemoryComponent::RecordEvent(ENPC_MemoryEventType EventType, FVector Location, FName SourceTag, float ThreatWeight)
+{
+    // Try to merge with an existing nearby memory of the same type
+    for (FNPC_MemoryRecord& Existing : Memories)
+    {
+        if (Existing.EventType == EventType &&
+            FVector::Dist(Existing.EventLocation, Location) < MergeRadius)
+        {
+            // Reinforce — boost weight, update location toward new event
+            Existing.ThreatWeight  = FMath::Min(1.f, Existing.ThreatWeight + ThreatWeight * 0.5f);
+            Existing.EventLocation = FMath::Lerp(Existing.EventLocation, Location, 0.3f);
+            Existing.RecordedAtTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+            Existing.SourceTag     = SourceTag;
+            return;
+        }
     }
 
-    // Create new memory entry
-    FNPC_MemoryEntry NewEntry;
-    NewEntry.Actor = Actor;
-    NewEntry.LastKnownLocation = Location;
-    NewEntry.ThreatLevel = ThreatLevel;
-    NewEntry.LastSeenTime = GetWorld()->GetTimeSeconds();
-    NewEntry.bIsFriendly = bIsFriendly;
-
-    MemoryEntries.Add(NewEntry);
-
-    // Remove oldest entries if we exceed max capacity
-    while (MemoryEntries.Num() > MaxMemoryEntries)
+    // Evict the weakest memory if at capacity
+    if (Memories.Num() >= MaxMemories)
     {
-        // Find oldest entry
-        int32 OldestIndex = 0;
-        float OldestTime = MemoryEntries[0].LastSeenTime;
-        
-        for (int32 i = 1; i < MemoryEntries.Num(); i++)
+        int32 WeakestIdx = 0;
+        float WeakestWeight = Memories[0].ThreatWeight;
+        for (int32 i = 1; i < Memories.Num(); ++i)
         {
-            if (MemoryEntries[i].LastSeenTime < OldestTime)
+            if (Memories[i].ThreatWeight < WeakestWeight)
             {
-                OldestTime = MemoryEntries[i].LastSeenTime;
-                OldestIndex = i;
+                WeakestWeight = Memories[i].ThreatWeight;
+                WeakestIdx    = i;
             }
         }
-        
-        MemoryEntries.RemoveAt(OldestIndex);
+        Memories.RemoveAt(WeakestIdx);
     }
+
+    // Add new memory
+    FNPC_MemoryRecord NewRecord;
+    NewRecord.EventType      = EventType;
+    NewRecord.EventLocation  = Location;
+    NewRecord.RecordedAtTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+    NewRecord.ThreatWeight   = FMath::Clamp(ThreatWeight, 0.f, 1.f);
+    NewRecord.SourceTag      = SourceTag;
+    Memories.Add(NewRecord);
 }
 
-void UNPCMemoryComponent::UpdateMemoryEntry(AActor* Actor, FVector NewLocation, float NewThreatLevel)
+FVector UNPCMemoryComponent::GetMostThreateningLocation() const
 {
-    FNPC_MemoryEntry* Entry = GetMemoryEntry(Actor);
-    if (Entry)
-    {
-        Entry->LastKnownLocation = NewLocation;
-        Entry->ThreatLevel = NewThreatLevel;
-        Entry->LastSeenTime = GetWorld()->GetTimeSeconds();
-    }
-}
+    if (Memories.IsEmpty()) return FVector::ZeroVector;
 
-void UNPCMemoryComponent::RemoveMemoryEntry(AActor* Actor)
-{
-    for (int32 i = MemoryEntries.Num() - 1; i >= 0; i--)
+    const FNPC_MemoryRecord* Best = nullptr;
+    for (const FNPC_MemoryRecord& Mem : Memories)
     {
-        if (MemoryEntries[i].Actor == Actor)
+        if (!Best || Mem.ThreatWeight > Best->ThreatWeight)
         {
-            MemoryEntries.RemoveAt(i);
-            break;
+            Best = &Mem;
         }
     }
+    return Best ? Best->EventLocation : FVector::ZeroVector;
 }
 
-FNPC_MemoryEntry* UNPCMemoryComponent::GetMemoryEntry(AActor* Actor)
+FVector UNPCMemoryComponent::GetSafestKnownLocation() const
 {
-    for (FNPC_MemoryEntry& Entry : MemoryEntries)
+    // Safe zone memories are explicitly tagged; otherwise return lowest-threat location
+    for (const FNPC_MemoryRecord& Mem : Memories)
     {
-        if (Entry.Actor == Actor)
+        if (Mem.EventType == ENPC_MemoryEventType::SafeZoneFound)
         {
-            return &Entry;
+            return Mem.EventLocation;
         }
     }
-    return nullptr;
+
+    if (Memories.IsEmpty()) return FVector::ZeroVector;
+
+    const FNPC_MemoryRecord* Safest = nullptr;
+    for (const FNPC_MemoryRecord& Mem : Memories)
+    {
+        if (!Safest || Mem.ThreatWeight < Safest->ThreatWeight)
+        {
+            Safest = &Mem;
+        }
+    }
+    return Safest ? Safest->EventLocation : FVector::ZeroVector;
 }
 
-TArray<FNPC_MemoryEntry> UNPCMemoryComponent::GetMemoriesByType(ENPC_MemoryType MemoryType)
+bool UNPCMemoryComponent::HasActiveMemoryOf(ENPC_MemoryEventType EventType, float Threshold) const
 {
-    TArray<FNPC_MemoryEntry> FilteredMemories;
-    
-    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    for (const FNPC_MemoryRecord& Mem : Memories)
     {
-        switch (MemoryType)
+        if (Mem.EventType == EventType && Mem.ThreatWeight >= Threshold)
         {
-        case ENPC_MemoryType::Threat:
-            if (Entry.ThreatLevel > 0.5f && !Entry.bIsFriendly)
-            {
-                FilteredMemories.Add(Entry);
-            }
-            break;
-        case ENPC_MemoryType::Ally:
-            if (Entry.bIsFriendly)
-            {
-                FilteredMemories.Add(Entry);
-            }
-            break;
-        default:
-            FilteredMemories.Add(Entry);
-            break;
+            return true;
         }
     }
-    
-    return FilteredMemories;
+    return false;
 }
 
-TArray<FNPC_MemoryEntry> UNPCMemoryComponent::GetNearbyMemories(FVector Location, float Radius)
+void UNPCMemoryComponent::ClearAllMemories()
 {
-    TArray<FNPC_MemoryEntry> NearbyMemories;
-    
-    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
-    {
-        float Distance = FVector::Dist(Entry.LastKnownLocation, Location);
-        if (Distance <= Radius)
-        {
-            NearbyMemories.Add(Entry);
-        }
-    }
-    
-    return NearbyMemories;
+    Memories.Empty();
+    CurrentThreatLevel = 0.f;
 }
 
-AActor* UNPCMemoryComponent::GetHighestThreatInMemory()
-{
-    AActor* HighestThreat = nullptr;
-    float HighestThreatLevel = 0.0f;
-    
-    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
-    {
-        if (Entry.ThreatLevel > HighestThreatLevel && !Entry.bIsFriendly)
-        {
-            HighestThreatLevel = Entry.ThreatLevel;
-            HighestThreat = Entry.Actor;
-        }
-    }
-    
-    return HighestThreat;
-}
-
-void UNPCMemoryComponent::ClearOldMemories()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    for (int32 i = MemoryEntries.Num() - 1; i >= 0; i--)
-    {
-        float MemoryAge = CurrentTime - MemoryEntries[i].LastSeenTime;
-        if (MemoryAge > MaxMemoryDuration)
-        {
-            MemoryEntries.RemoveAt(i);
-        }
-    }
-}
+// ── Private helpers ────────────────────────────────────────────────────────────
 
 void UNPCMemoryComponent::DecayMemories(float DeltaTime)
 {
-    for (FNPC_MemoryEntry& Entry : MemoryEntries)
+    if (MemoryDecayDuration <= 0.f) return;
+
+    const float DecayRate = 1.f / MemoryDecayDuration;
+    for (FNPC_MemoryRecord& Mem : Memories)
     {
-        // Decay threat level over time
-        if (Entry.ThreatLevel > 0.0f)
-        {
-            Entry.ThreatLevel = FMath::Max(0.0f, Entry.ThreatLevel - (MemoryDecayRate * DeltaTime));
-        }
+        Mem.ThreatWeight = FMath::Max(0.f, Mem.ThreatWeight - DecayRate * DeltaTime);
     }
 }
 
-bool UNPCMemoryComponent::HasMemoryOf(AActor* Actor)
+void UNPCMemoryComponent::PruneExpiredMemories()
 {
-    return GetMemoryEntry(Actor) != nullptr;
-}
-
-float UNPCMemoryComponent::GetThreatLevelOf(AActor* Actor)
-{
-    FNPC_MemoryEntry* Entry = GetMemoryEntry(Actor);
-    return Entry ? Entry->ThreatLevel : 0.0f;
+    // Remove memories whose weight has fully decayed
+    Memories.RemoveAll([](const FNPC_MemoryRecord& Mem)
+    {
+        return Mem.ThreatWeight <= 0.f;
+    });
 }
