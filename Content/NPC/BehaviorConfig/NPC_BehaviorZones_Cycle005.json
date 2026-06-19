@@ -1,0 +1,80 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "NPC Behavior Agent #11",
+  "description": "NPC and dinosaur behavior zone configuration for MinPlayableMap",
+  "zones": {
+    "trex_patrol": {
+      "waypoints": [
+        { "label": "BTWaypoint_TRex_001", "location": [0, 0, 100], "light_color": "red" },
+        { "label": "BTWaypoint_TRex_002", "location": [1500, 500, 100], "light_color": "red" },
+        { "label": "BTWaypoint_TRex_003", "location": [2000, -800, 100], "light_color": "red" },
+        { "label": "BTWaypoint_TRex_004", "location": [500, -2000, 100], "light_color": "red" },
+        { "label": "BTWaypoint_TRex_005", "location": [-1000, -1500, 100], "light_color": "red" },
+        { "label": "BTWaypoint_TRex_006", "location": [-1500, 500, 100], "light_color": "red" }
+      ],
+      "behavior": {
+        "patrol_radius": 5000,
+        "chase_radius": 3000,
+        "attack_radius": 300,
+        "patrol_speed": 300,
+        "chase_speed": 900,
+        "aggression": "high"
+      }
+    },
+    "raptor_pack": {
+      "waypoints": [
+        { "label": "BTWaypoint_Raptor_001", "location": [-2000, 1500, 100], "light_color": "green" },
+        { "label": "BTWaypoint_Raptor_002", "location": [-1500, 2200, 100], "light_color": "green" },
+        { "label": "BTWaypoint_Raptor_003", "location": [-800, 2000, 100], "light_color": "green" },
+        { "label": "BTWaypoint_Raptor_004", "location": [-1200, 1200, 100], "light_color": "green" }
+      ],
+      "behavior": {
+        "pack_size": 3,
+        "patrol_radius": 2000,
+        "chase_radius": 2500,
+        "attack_radius": 200,
+        "patrol_speed": 400,
+        "chase_speed": 1100,
+        "pack_coordination": true,
+        "flanking_enabled": true,
+        "aggression": "medium"
+      }
+    },
+    "tribal_npc_camp": {
+      "markers": [
+        { "label": "NPC_Tribal_Camp_Center",  "location": [3000, 3000, 100], "role": "camp_anchor", "light_color": "orange" },
+        { "label": "NPC_Tribal_Guard_N",      "location": [3000, 3600, 100], "role": "guard",       "light_color": "orange" },
+        { "label": "NPC_Tribal_Guard_S",      "location": [3000, 2400, 100], "role": "guard",       "light_color": "orange" },
+        { "label": "NPC_Tribal_Gatherer_001", "location": [2500, 3200, 100], "role": "gatherer",    "light_color": "orange" },
+        { "label": "NPC_Tribal_Gatherer_002", "location": [3500, 2800, 100], "role": "gatherer",    "light_color": "orange" }
+      ],
+      "behavior": {
+        "daily_routine": ["sleep", "gather_food", "craft", "patrol", "rest"],
+        "alert_radius": 1500,
+        "flee_on_dino_sight": true,
+        "player_reaction": "cautious_approach",
+        "dialogue_trigger_radius": 400
+      }
+    }
+  },
+  "voice_lines": {
+    "TribalElder": {
+      "text": "Stay low. The raptors hunt in packs — if one sees you, they all see you. Move only when they are feeding.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781848875048_TribalElder.mp3",
+      "trigger": "player_enters_raptor_zone",
+      "duration_s": 7
+    },
+    "TribalHunter": {
+      "text": "The great beast marks its territory with scent and sound. When the ground shakes — run. When it roars — freeze. Never look it in the eye.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781848876937_TribalHunter.mp3",
+      "trigger": "player_enters_trex_zone",
+      "duration_s": 10
+    }
+  },
+  "cumulative_bt_actors": {
+    "cycle_002": "BT state zones (5 actors — Idle/Alert/Chase/Attack/Flee)",
+    "cycle_003": "BT anchor zones (7 actors — Brachio/Raptor/TRex/NPC anchors)",
+    "cycle_004": "TRex patrol waypoints (6 actors — BTWaypoint_TRex_001 through _006)",
+    "cycle_005": "Raptor waypoints (4) + Tribal NPC markers (5) = 9 new actors"
+  }
+}
