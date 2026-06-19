@@ -1,0 +1,100 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "Crowd & Traffic Simulation #13",
+  "timestamp": "2026-06-19",
+
+  "tribal_camp": {
+    "center": {"x": 0, "y": 0, "z": 0},
+    "npc_count": 12,
+    "roles": {
+      "Hunter":    {"count": 3, "color": "yellow", "radius": 600, "behavior": "patrol_perimeter"},
+      "Gatherer":  {"count": 3, "color": "green",  "radius": 400, "behavior": "forage_nearby"},
+      "Elder":     {"count": 1, "color": "white",  "radius": 200, "behavior": "idle_camp_center"},
+      "Child":     {"count": 2, "color": "cyan",   "radius": 150, "behavior": "play_random"},
+      "Guard":     {"count": 2, "color": "orange", "radius": 800, "behavior": "watch_perimeter"},
+      "Craftsman": {"count": 1, "color": "blue",   "radius": 300, "behavior": "idle_craft_area"}
+    },
+    "actors_spawned": [
+      "NPC_Hunter_01", "NPC_Hunter_02", "NPC_Hunter_03",
+      "NPC_Gatherer_04", "NPC_Gatherer_05", "NPC_Gatherer_06",
+      "NPC_Elder_07",
+      "NPC_Child_08", "NPC_Child_09",
+      "NPC_Guard_10", "NPC_Guard_11",
+      "NPC_Craftsman_12"
+    ]
+  },
+
+  "scatter_system": {
+    "trigger": "TRex_alert_zone_1500u",
+    "panic_origin": "Crowd_Panic_Center",
+    "scatter_waypoints": [
+      {"label": "Crowd_Scatter_North_01", "pos": [0, 2000, 100],    "destination": "North forest cover"},
+      {"label": "Crowd_Scatter_North_02", "pos": [500, 1800, 100],  "destination": "NE ridge escape"},
+      {"label": "Crowd_Scatter_South_01", "pos": [0, -2000, 100],   "destination": "South river crossing"},
+      {"label": "Crowd_Scatter_East_01",  "pos": [2000, 0, 100],    "destination": "East dense trees"},
+      {"label": "Crowd_Scatter_West_01",  "pos": [-2000, 0, 100],   "destination": "West cave entrance"},
+      {"label": "Crowd_Flow_River_Bank",  "pos": [1200, -1500, 100],"destination": "River bank flow"},
+      {"label": "Crowd_Flow_Treeline",    "pos": [-800, 1600, 100], "destination": "Treeline cover flow"}
+    ],
+    "raptor_panic": {
+      "trigger": "CombatZone_Raptor_Ambush",
+      "behavior": "scatter_radial_360",
+      "speed_multiplier": 1.8,
+      "duration_seconds": 15
+    }
+  },
+
+  "lod_system": {
+    "description": "3-tier LOD for Mass Entity crowd performance",
+    "lod0": {
+      "radius_units": 500,
+      "behavior": "full_simulation",
+      "agents_per_zone": 15,
+      "update_rate_hz": 30,
+      "markers": ["CrowdLOD0_N", "CrowdLOD0_S", "CrowdLOD0_E", "CrowdLOD0_W"]
+    },
+    "lod1": {
+      "radius_units": 2000,
+      "behavior": "simplified_pathfinding",
+      "agents_per_zone": 50,
+      "update_rate_hz": 10,
+      "markers": ["CrowdLOD1_N", "CrowdLOD1_S", "CrowdLOD1_E", "CrowdLOD1_W"]
+    },
+    "lod2": {
+      "radius_units": 5000,
+      "behavior": "static_billboard",
+      "agents_per_zone": 200,
+      "update_rate_hz": 2,
+      "markers": ["CrowdLOD2_N", "CrowdLOD2_S", "CrowdLOD2_E", "CrowdLOD2_W"]
+    }
+  },
+
+  "integration": {
+    "combat_ai_hooks": {
+      "trex_alert_zone": "CombatZone_TRex_Alert_N",
+      "raptor_ambush_zone": "CombatZone_Raptor_Ambush",
+      "escape_routes": ["Combat_EscapeRoute_Cave", "Combat_EscapeRoute_River", "Combat_EscapeRoute_Trees"]
+    },
+    "npc_behavior_hooks": {
+      "tribal_camp_center": "NPC_Tribal_Camp_Center",
+      "patrol_radius": 800,
+      "daily_routine": ["forage_morning", "craft_midday", "guard_evening", "sleep_night"]
+    }
+  },
+
+  "cumulative_crowd_actors": {
+    "cycle_002": {"count": 5, "type": "BT state zones"},
+    "cycle_003": {"count": 7, "type": "Brachio herd migration"},
+    "cycle_004": {"count": 8, "type": "Prey animal scatter zones"},
+    "cycle_005": {"count": 32, "type": "Tribal NPCs + scatter waypoints + LOD zones"},
+    "total": 52
+  },
+
+  "performance_targets": {
+    "max_simultaneous_agents": 50000,
+    "target_fps_pc": 60,
+    "target_fps_console": 30,
+    "lod_transition_distance_units": [500, 2000, 5000],
+    "culling_distance_units": 8000
+  }
+}
