@@ -1,232 +1,208 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
 #include "BiomeManager.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Math/UnrealMathUtility.h"
-
-ABiomeManager* ABiomeManager::CachedInstance = nullptr;
-
-// ─── ABiomeManager ────────────────────────────────────────────────────────────
 
 ABiomeManager::ABiomeManager()
 {
     PrimaryActorTick.bCanEverTick = false;
-    InitializeDefaultBiomes();
+    bAutoInitializeOnBeginPlay = true;
+    BlendRadius = 500.0f;
 }
 
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    CachedInstance = this;
-}
-
-void ABiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
+    if (bAutoInitializeOnBeginPlay && BiomeZones.Num() == 0)
+    {
+        InitializeDefaultBiomes();
+    }
 }
 
 void ABiomeManager::InitializeDefaultBiomes()
 {
-    // Jungle — hot, wet, dense
-    FEng_BiomeData Jungle;
-    Jungle.BiomeType        = EEng_BiomeType::Jungle;
-    Jungle.Temperature      = 32.0f;
-    Jungle.Humidity         = 0.9f;
-    Jungle.FoliageDensity   = 0.95f;
-    Jungle.DinosaurSpawnWeight = 1.5f;
-    Jungle.FogColor         = FLinearColor(0.3f, 0.5f, 0.2f, 1.0f);
-    Jungle.FogDensity       = 0.04f;
-    BiomeTable.Add(EEng_BiomeType::Jungle, Jungle);
+    BiomeZones.Empty();
 
-    // Savanna — hot, dry, open
-    FEng_BiomeData Savanna;
-    Savanna.BiomeType       = EEng_BiomeType::Savanna;
-    Savanna.Temperature     = 35.0f;
-    Savanna.Humidity        = 0.2f;
-    Savanna.FoliageDensity  = 0.2f;
-    Savanna.DinosaurSpawnWeight = 2.0f;
-    Savanna.FogColor        = FLinearColor(0.8f, 0.7f, 0.4f, 1.0f);
-    Savanna.FogDensity      = 0.01f;
-    BiomeTable.Add(EEng_BiomeType::Savanna, Savanna);
+    // Forest — northwest, dense, humid, moderate danger
+    FWorld_BiomeZone Forest;
+    Forest.Center = FVector(-3000.0f, -3000.0f, 0.0f);
+    Forest.Radius = 3500.0f;
+    Forest.BiomeData.BiomeType = EWorld_BiomeType::Forest;
+    Forest.BiomeData.BiomeName = TEXT("Ancient Forest");
+    Forest.BiomeData.FogDensity = 0.04f;
+    Forest.BiomeData.FogHeightFalloff = 0.15f;
+    Forest.BiomeData.FogInscatteringColor = FLinearColor(0.3f, 0.5f, 0.3f, 1.0f);
+    Forest.BiomeData.AmbientTemperature = 18.0f;
+    Forest.BiomeData.HumidityFactor = 0.85f;
+    Forest.BiomeData.DangerLevel = 0.6f;
+    BiomeZones.Add(Forest);
 
-    // Swamp — warm, very wet
-    FEng_BiomeData Swamp;
-    Swamp.BiomeType         = EEng_BiomeType::Swamp;
-    Swamp.Temperature       = 25.0f;
-    Swamp.Humidity          = 0.95f;
-    Swamp.FoliageDensity    = 0.7f;
-    Swamp.DinosaurSpawnWeight = 1.2f;
-    Swamp.FogColor          = FLinearColor(0.2f, 0.3f, 0.15f, 1.0f);
-    Swamp.FogDensity        = 0.06f;
-    BiomeTable.Add(EEng_BiomeType::Swamp, Swamp);
+    // Plains — northeast, open, dry, lower danger
+    FWorld_BiomeZone Plains;
+    Plains.Center = FVector(3000.0f, -3000.0f, 0.0f);
+    Plains.Radius = 3500.0f;
+    Plains.BiomeData.BiomeType = EWorld_BiomeType::Plains;
+    Plains.BiomeData.BiomeName = TEXT("Open Plains");
+    Plains.BiomeData.FogDensity = 0.01f;
+    Plains.BiomeData.FogHeightFalloff = 0.3f;
+    Plains.BiomeData.FogInscatteringColor = FLinearColor(0.8f, 0.75f, 0.5f, 1.0f);
+    Plains.BiomeData.AmbientTemperature = 28.0f;
+    Plains.BiomeData.HumidityFactor = 0.25f;
+    Plains.BiomeData.DangerLevel = 0.4f;
+    BiomeZones.Add(Plains);
 
-    // Volcanic — extreme heat, sparse
-    FEng_BiomeData Volcanic;
-    Volcanic.BiomeType      = EEng_BiomeType::Volcanic;
-    Volcanic.Temperature    = 55.0f;
-    Volcanic.Humidity       = 0.05f;
-    Volcanic.FoliageDensity = 0.05f;
-    Volcanic.DinosaurSpawnWeight = 0.5f;
-    Volcanic.FogColor       = FLinearColor(0.6f, 0.2f, 0.1f, 1.0f);
-    Volcanic.FogDensity     = 0.08f;
-    BiomeTable.Add(EEng_BiomeType::Volcanic, Volcanic);
+    // Rocky Highlands — southwest, cold, dry, high danger
+    FWorld_BiomeZone Rocky;
+    Rocky.Center = FVector(-3000.0f, 3000.0f, 0.0f);
+    Rocky.Radius = 3000.0f;
+    Rocky.BiomeData.BiomeType = EWorld_BiomeType::Rocky;
+    Rocky.BiomeData.BiomeName = TEXT("Rocky Highlands");
+    Rocky.BiomeData.FogDensity = 0.015f;
+    Rocky.BiomeData.FogHeightFalloff = 0.25f;
+    Rocky.BiomeData.FogInscatteringColor = FLinearColor(0.6f, 0.6f, 0.65f, 1.0f);
+    Rocky.BiomeData.AmbientTemperature = 10.0f;
+    Rocky.BiomeData.HumidityFactor = 0.2f;
+    Rocky.BiomeData.DangerLevel = 0.75f;
+    BiomeZones.Add(Rocky);
 
-    // Coastal — moderate, humid
-    FEng_BiomeData Coastal;
-    Coastal.BiomeType       = EEng_BiomeType::Coastal;
-    Coastal.Temperature     = 22.0f;
-    Coastal.Humidity        = 0.7f;
-    Coastal.FoliageDensity  = 0.4f;
-    Coastal.DinosaurSpawnWeight = 1.0f;
-    Coastal.FogColor        = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
-    Coastal.FogDensity      = 0.03f;
-    BiomeTable.Add(EEng_BiomeType::Coastal, Coastal);
+    // Swamp — southeast, very humid, warm, high danger
+    FWorld_BiomeZone Swamp;
+    Swamp.Center = FVector(3000.0f, 3000.0f, 0.0f);
+    Swamp.Radius = 3000.0f;
+    Swamp.BiomeData.BiomeType = EWorld_BiomeType::Swamp;
+    Swamp.BiomeData.BiomeName = TEXT("Primordial Swamp");
+    Swamp.BiomeData.FogDensity = 0.07f;
+    Swamp.BiomeData.FogHeightFalloff = 0.1f;
+    Swamp.BiomeData.FogInscatteringColor = FLinearColor(0.2f, 0.35f, 0.2f, 1.0f);
+    Swamp.BiomeData.AmbientTemperature = 32.0f;
+    Swamp.BiomeData.HumidityFactor = 0.95f;
+    Swamp.BiomeData.DangerLevel = 0.8f;
+    BiomeZones.Add(Swamp);
 
-    // Forest — temperate, moderate
-    FEng_BiomeData Forest;
-    Forest.BiomeType        = EEng_BiomeType::Forest;
-    Forest.Temperature      = 18.0f;
-    Forest.Humidity         = 0.6f;
-    Forest.FoliageDensity   = 0.8f;
-    Forest.DinosaurSpawnWeight = 1.3f;
-    Forest.FogColor         = FLinearColor(0.4f, 0.5f, 0.3f, 1.0f);
-    Forest.FogDensity       = 0.025f;
-    BiomeTable.Add(EEng_BiomeType::Forest, Forest);
+    // Volcanic — center, extreme heat, very high danger
+    FWorld_BiomeZone Volcanic;
+    Volcanic.Center = FVector(0.0f, 0.0f, 0.0f);
+    Volcanic.Radius = 2500.0f;
+    Volcanic.BiomeData.BiomeType = EWorld_BiomeType::Volcanic;
+    Volcanic.BiomeData.BiomeName = TEXT("Volcanic Crater");
+    Volcanic.BiomeData.FogDensity = 0.05f;
+    Volcanic.BiomeData.FogHeightFalloff = 0.2f;
+    Volcanic.BiomeData.FogInscatteringColor = FLinearColor(0.7f, 0.3f, 0.1f, 1.0f);
+    Volcanic.BiomeData.AmbientTemperature = 55.0f;
+    Volcanic.BiomeData.HumidityFactor = 0.1f;
+    Volcanic.BiomeData.DangerLevel = 1.0f;
+    BiomeZones.Add(Volcanic);
 
-    // Grassland — open, moderate
-    FEng_BiomeData Grassland;
-    Grassland.BiomeType     = EEng_BiomeType::Grassland;
-    Grassland.Temperature   = 20.0f;
-    Grassland.Humidity      = 0.45f;
-    Grassland.FoliageDensity = 0.3f;
-    Grassland.DinosaurSpawnWeight = 1.8f;
-    Grassland.FogColor      = FLinearColor(0.6f, 0.7f, 0.5f, 1.0f);
-    Grassland.FogDensity    = 0.015f;
-    BiomeTable.Add(EEng_BiomeType::Grassland, Grassland);
-
-    // Desert — extreme heat, arid
-    FEng_BiomeData Desert;
-    Desert.BiomeType        = EEng_BiomeType::Desert;
-    Desert.Temperature      = 45.0f;
-    Desert.Humidity         = 0.05f;
-    Desert.FoliageDensity   = 0.05f;
-    Desert.DinosaurSpawnWeight = 0.6f;
-    Desert.FogColor         = FLinearColor(0.9f, 0.8f, 0.5f, 1.0f);
-    Desert.FogDensity       = 0.005f;
-    BiomeTable.Add(EEng_BiomeType::Desert, Desert);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized %d default biome zones"), BiomeZones.Num());
 }
 
-EEng_BiomeType ABiomeManager::SampleBiomeFromNoise(float X, float Y) const
+void ABiomeManager::RegisterBiomeZone(const FWorld_BiomeZone& Zone)
 {
-    // Simple deterministic biome sampling using sine-based pseudo-noise
-    // Real implementation would use FPerlinNoise or a noise texture
-    float NX = X * BiomeNoiseScale + BiomeSeed * 0.001f;
-    float NY = Y * BiomeNoiseScale + BiomeSeed * 0.002f;
-
-    float NoiseA = FMath::Sin(NX * 3.7f + NY * 2.1f) * 0.5f + 0.5f;
-    float NoiseB = FMath::Sin(NX * 1.3f - NY * 4.5f) * 0.5f + 0.5f;
-
-    // Map 2D noise to biome index
-    int32 BiomeIndex = FMath::FloorToInt((NoiseA * 0.6f + NoiseB * 0.4f) * 8.0f);
-    BiomeIndex = FMath::Clamp(BiomeIndex, 0, 7);
-
-    static const EEng_BiomeType BiomeOrder[] = {
-        EEng_BiomeType::Grassland,
-        EEng_BiomeType::Forest,
-        EEng_BiomeType::Jungle,
-        EEng_BiomeType::Swamp,
-        EEng_BiomeType::Coastal,
-        EEng_BiomeType::Savanna,
-        EEng_BiomeType::Desert,
-        EEng_BiomeType::Volcanic,
-    };
-
-    return BiomeOrder[BiomeIndex];
+    BiomeZones.Add(Zone);
 }
 
-EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+FWorld_BiomeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
 {
-    return SampleBiomeFromNoise(WorldLocation.X, WorldLocation.Y);
-}
-
-FEng_BiomeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    if (const FEng_BiomeData* Data = BiomeTable.Find(BiomeType))
+    if (BiomeZones.Num() == 0)
     {
-        return *Data;
+        FWorld_BiomeData Default;
+        Default.BiomeType = EWorld_BiomeType::Unknown;
+        Default.BiomeName = TEXT("Wilderness");
+        return Default;
     }
-    // Return default grassland if not found
-    return FEng_BiomeData();
+    return BlendBiomeData(WorldLocation);
 }
 
-bool ABiomeManager::IsLocationInBiome(const FVector& WorldLocation, EEng_BiomeType BiomeType) const
+EWorld_BiomeType ABiomeManager::GetBiomeTypeAtLocation(const FVector& WorldLocation) const
 {
-    return GetBiomeAtLocation(WorldLocation) == BiomeType;
+    return GetBiomeDataAtLocation(WorldLocation).BiomeType;
 }
 
-void ABiomeManager::RegisterBiome(EEng_BiomeType BiomeType, const FEng_BiomeData& BiomeData)
+float ABiomeManager::GetFogDensityAtLocation(const FVector& WorldLocation) const
 {
-    BiomeTable.Add(BiomeType, BiomeData);
+    return GetBiomeDataAtLocation(WorldLocation).FogDensity;
 }
 
-void ABiomeManager::SetBiomeNoiseScale(float Scale)
+float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-    BiomeNoiseScale = FMath::Max(0.00001f, Scale);
+    return GetBiomeDataAtLocation(WorldLocation).AmbientTemperature;
 }
 
-ABiomeManager* ABiomeManager::GetInstance(UObject* WorldContextObject)
+float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
 {
-    if (CachedInstance)
+    return GetBiomeDataAtLocation(WorldLocation).DangerLevel;
+}
+
+float ABiomeManager::ComputeWeight(const FVector& Location, const FWorld_BiomeZone& Zone) const
+{
+    const float Dist = FVector::Dist2D(Location, Zone.Center);
+    if (Dist >= Zone.Radius + BlendRadius) return 0.0f;
+    if (Dist <= Zone.Radius - BlendRadius) return 1.0f;
+
+    // Smooth blend in the transition band
+    const float BlendStart = Zone.Radius - BlendRadius;
+    const float BlendEnd   = Zone.Radius + BlendRadius;
+    const float Alpha = 1.0f - FMath::Clamp((Dist - BlendStart) / (BlendEnd - BlendStart), 0.0f, 1.0f);
+    return FMath::SmoothStep(0.0f, 1.0f, Alpha);
+}
+
+FWorld_BiomeData ABiomeManager::BlendBiomeData(const FVector& WorldLocation) const
+{
+    // Gather weighted contributions from all zones
+    float TotalWeight = 0.0f;
+    float FogDensity = 0.0f;
+    float FogHeightFalloff = 0.0f;
+    FLinearColor FogColor = FLinearColor::Black;
+    float Temperature = 0.0f;
+    float Humidity = 0.0f;
+    float Danger = 0.0f;
+
+    // Find dominant biome for type/name
+    float MaxWeight = 0.0f;
+    int32 DominantIdx = 0;
+
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
     {
-        return CachedInstance;
-    }
+        const float W = ComputeWeight(WorldLocation, BiomeZones[i]);
+        if (W <= 0.0f) continue;
 
-    if (UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
-    {
-        TArray<AActor*> Found;
-        UGameplayStatics::GetAllActorsOfClass(World, ABiomeManager::StaticClass(), Found);
-        if (Found.Num() > 0)
+        TotalWeight += W;
+        FogDensity      += W * BiomeZones[i].BiomeData.FogDensity;
+        FogHeightFalloff += W * BiomeZones[i].BiomeData.FogHeightFalloff;
+        FogColor        += BiomeZones[i].BiomeData.FogInscatteringColor * W;
+        Temperature     += W * BiomeZones[i].BiomeData.AmbientTemperature;
+        Humidity        += W * BiomeZones[i].BiomeData.HumidityFactor;
+        Danger          += W * BiomeZones[i].BiomeData.DangerLevel;
+
+        if (W > MaxWeight)
         {
-            CachedInstance = Cast<ABiomeManager>(Found[0]);
+            MaxWeight = W;
+            DominantIdx = i;
         }
     }
 
-    return CachedInstance;
-}
-
-// ─── UBiomeQueryComponent ─────────────────────────────────────────────────────
-
-UBiomeQueryComponent::UBiomeQueryComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-}
-
-EEng_BiomeType UBiomeQueryComponent::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    ABiomeManager* Manager = ABiomeManager::GetInstance(GetOwner());
-    if (Manager)
+    FWorld_BiomeData Result;
+    if (TotalWeight <= 0.0f)
     {
-        return Manager->GetBiomeAtLocation(WorldLocation);
+        // Outside all zones — return default wilderness
+        Result.BiomeType = EWorld_BiomeType::Unknown;
+        Result.BiomeName = TEXT("Wilderness");
+        Result.FogDensity = 0.02f;
+        Result.AmbientTemperature = 20.0f;
+        Result.DangerLevel = 0.3f;
+        return Result;
     }
-    return EEng_BiomeType::Grassland;
-}
 
-FEng_BiomeData UBiomeQueryComponent::GetBiomeDataAtLocation(const FVector& WorldLocation) const
-{
-    ABiomeManager* Manager = ABiomeManager::GetInstance(GetOwner());
-    if (Manager)
-    {
-        return Manager->GetBiomeDataAtLocation(WorldLocation);
-    }
-    return FEng_BiomeData();
-}
+    const float InvTotal = 1.0f / TotalWeight;
+    Result.FogDensity          = FogDensity * InvTotal;
+    Result.FogHeightFalloff    = FogHeightFalloff * InvTotal;
+    Result.FogInscatteringColor = FogColor * InvTotal;
+    Result.AmbientTemperature  = Temperature * InvTotal;
+    Result.HumidityFactor      = Humidity * InvTotal;
+    Result.DangerLevel         = Danger * InvTotal;
 
-float UBiomeQueryComponent::GetTemperatureAtLocation(const FVector& WorldLocation) const
-{
-    return GetBiomeDataAtLocation(WorldLocation).Temperature;
-}
+    // Dominant biome determines type and name
+    Result.BiomeType = BiomeZones[DominantIdx].BiomeData.BiomeType;
+    Result.BiomeName = BiomeZones[DominantIdx].BiomeData.BiomeName;
 
-float UBiomeQueryComponent::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    return GetBiomeDataAtLocation(WorldLocation).Humidity;
+    return Result;
 }
