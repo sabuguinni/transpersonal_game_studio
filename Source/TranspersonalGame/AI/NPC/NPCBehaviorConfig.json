@@ -1,0 +1,137 @@
+{
+  "npc_behavior_system": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260619_006",
+    "agent": "NPC Behavior Agent #11",
+    "description": "NPC Behavior Tree configuration for prehistoric survival game. All zones reference PointLight anchor actors in MinPlayableMap.",
+
+    "behavior_zones": {
+      "herbivore_zones": [
+        {
+          "label": "BTZone_Herbivore_001",
+          "location": {"x": -3000, "y": 1500, "z": 200},
+          "radius": 2500,
+          "species": ["Brachiosaurus", "Stegosaurus"],
+          "behaviors": ["graze", "wander", "flee_predator"],
+          "flee_trigger_radius": 1800,
+          "wander_speed": 120
+        },
+        {
+          "label": "BTZone_Herbivore_002",
+          "location": {"x": -4500, "y": -800, "z": 180},
+          "radius": 2000,
+          "species": ["Stegosaurus", "Triceratops"],
+          "behaviors": ["graze", "wander", "defend_herd"],
+          "flee_trigger_radius": 1500,
+          "wander_speed": 100
+        },
+        {
+          "label": "BTZone_Herbivore_003",
+          "location": {"x": 2000, "y": 4000, "z": 150},
+          "radius": 3000,
+          "species": ["Brachiosaurus"],
+          "behaviors": ["graze", "idle", "wander"],
+          "flee_trigger_radius": 2200,
+          "wander_speed": 80
+        }
+      ],
+      "predator_zones": [
+        {
+          "label": "BTZone_Predator_001",
+          "location": {"x": 3500, "y": -2000, "z": 220},
+          "radius": 4000,
+          "species": ["TRex"],
+          "behaviors": ["patrol", "hunt", "roar", "chase"],
+          "detection_radius": 3000,
+          "chase_radius": 2500,
+          "attack_radius": 300,
+          "patrol_speed": 200,
+          "chase_speed": 550
+        },
+        {
+          "label": "BTZone_Predator_002",
+          "location": {"x": -1000, "y": -4500, "z": 190},
+          "radius": 3500,
+          "species": ["Raptor"],
+          "behaviors": ["pack_patrol", "flank", "ambush", "chase"],
+          "pack_size": 3,
+          "detection_radius": 2000,
+          "chase_radius": 2800,
+          "attack_radius": 200,
+          "patrol_speed": 300,
+          "chase_speed": 700
+        }
+      ],
+      "camp_zones": [
+        {
+          "label": "BTZone_Camp_001",
+          "location": {"x": 500, "y": 800, "z": 100},
+          "radius": 800,
+          "npc_types": ["TribalElder", "Scout", "Gatherer"],
+          "behaviors": ["idle_camp", "craft", "patrol_perimeter", "react_to_player"],
+          "dialogue_lines": {
+            "TribalElder": {
+              "greeting": "Stay low. The T-Rex hunts by sound — it cannot see you if you do not move.",
+              "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853421191_TribalElder.mp3"
+            },
+            "Scout": {
+              "warning": "The raptors move in packs. Kill one and the others will scatter. But they will return — and they will remember you.",
+              "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853424849_ScoutNPC.mp3"
+            }
+          }
+        }
+      ]
+    },
+
+    "behavior_tree_rules": {
+      "TRex": {
+        "priority_order": ["attack_if_in_range", "chase_if_detected", "patrol_zone", "idle_roar"],
+        "memory_duration_seconds": 30,
+        "loses_interest_after_seconds": 15,
+        "can_break_through_obstacles": true,
+        "fear_player_weapons": false
+      },
+      "Raptor": {
+        "priority_order": ["pack_flank", "attack_if_in_range", "chase_if_detected", "patrol_zone", "idle"],
+        "pack_coordination": true,
+        "memory_duration_seconds": 45,
+        "loses_interest_after_seconds": 20,
+        "can_break_through_obstacles": false,
+        "fear_fire": true
+      },
+      "Brachiosaurus": {
+        "priority_order": ["flee_if_threatened", "defend_if_cornered", "graze", "wander", "idle"],
+        "memory_duration_seconds": 10,
+        "loses_interest_after_seconds": 5,
+        "herd_alert_radius": 1500
+      },
+      "TribalElder": {
+        "priority_order": ["react_to_danger", "dialogue_if_player_near", "craft", "idle_camp"],
+        "dialogue_trigger_radius": 400,
+        "daily_routine": ["morning_fire", "midday_craft", "evening_story", "night_sleep"]
+      },
+      "Scout": {
+        "priority_order": ["alert_camp_if_dino_spotted", "patrol_perimeter", "dialogue_if_player_near", "idle"],
+        "patrol_radius": 1200,
+        "dino_detection_radius": 2500,
+        "dialogue_trigger_radius": 350
+      }
+    },
+
+    "waypoints": {
+      "TRex_patrol": [
+        "BTWaypoint_TRex_001", "BTWaypoint_TRex_002", "BTWaypoint_TRex_003",
+        "BTWaypoint_TRex_004", "BTWaypoint_TRex_005", "BTWaypoint_TRex_006"
+      ],
+      "Raptor_patrol": [
+        "BTWaypoint_Raptor_001", "BTWaypoint_Raptor_002",
+        "BTWaypoint_Raptor_003", "BTWaypoint_Raptor_004"
+      ]
+    },
+
+    "voice_assets": {
+      "TribalElder_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853421191_TribalElder.mp3",
+      "Scout_raptor_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853424849_ScoutNPC.mp3"
+    }
+  }
+}
