@@ -1,0 +1,186 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "#14 Quest & Mission Designer",
+  "timestamp": "2026-06-19",
+  "cumulative_quests": 5,
+
+  "voice_assets": {
+    "NPC_Elder_QuestGiver": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849207881_NPC_Elder_QuestGiver.mp3",
+    "NPC_Hunter_PanicAlert": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849209711_NPC_Hunter_PanicAlert.mp3"
+  },
+
+  "quests": [
+    {
+      "id": "Q001",
+      "title": "The Migration",
+      "cycle_deployed": "PROD_CYCLE_AUTO_20260619_003",
+      "type": "exploration",
+      "giver": "NPC_Elder_07",
+      "trigger": "QuestTrigger_Migration_Start",
+      "objectives": [
+        "Follow the Brachiosaurus herd migration path",
+        "Reach the eastern river crossing",
+        "Return to camp with location data"
+      ],
+      "actors": ["QuestTrigger_Migration_Start", "QuestWaypoint_Migration_01-05", "QuestEnd_Migration"],
+      "reward": "Tribe trust +20, new territory unlocked"
+    },
+    {
+      "id": "Q002",
+      "title": "Observe the Herd at Dawn",
+      "cycle_deployed": "PROD_CYCLE_AUTO_20260619_004",
+      "type": "scouting",
+      "giver": "NPC_Hunter_01",
+      "trigger": "QuestManager_ObserveHerd",
+      "objectives": [
+        "Reach the observation ridge before dawn",
+        "Observe the Brachiosaurus herd without alerting them",
+        "Count herd members and identify weak individuals",
+        "Return to Hunter NPC with report"
+      ],
+      "actors": ["QuestManager_ObserveHerd", "QuestObj_ReachRidge", "QuestObj_ObserveHerd", "QuestObj_HerdCount", "QuestReturn_ObserveHerd"],
+      "reward": "Hunting knowledge +1, spear crafting recipe unlocked"
+    },
+    {
+      "id": "Q003",
+      "title": "Prove Your Worth to the Tribe",
+      "cycle_deployed": "PROD_CYCLE_AUTO_20260619_005",
+      "type": "hunt",
+      "giver": "NPC_Elder_07",
+      "trigger": "QuestManager_ProveWorth",
+      "objectives": [
+        "Talk to the Elder at camp",
+        "Hunt a prey animal in the savanna (east 1500u)",
+        "Return to camp with proof of the kill"
+      ],
+      "actors": [
+        "QuestManager_ProveWorth",
+        "QuestObj1_TalkElder",
+        "QuestObj2_HuntZone_Savanna",
+        "QuestTarget_PreyAnimal_001",
+        "QuestTarget_PreyAnimal_002",
+        "QuestObj3_ReturnCamp",
+        "QuestReward_ProveWorth"
+      ],
+      "hunt_zone": {
+        "center": [1500, 200, 100],
+        "radius": 600,
+        "prey_targets": 2,
+        "species": "small_raptor_or_herbivore"
+      },
+      "reward": "Tribe membership unlocked, access to crafting recipes from NPC_Craftsman_12",
+      "emotional_arc": "Outsider → Accepted member. Player must demonstrate competence before tribe trusts them with resources.",
+      "design_note": "First kill quest — teaches hunting mechanics. Prey animals are weaker than T-Rex but still dangerous. Player must use stealth or ambush from high ground."
+    },
+    {
+      "id": "Q004",
+      "title": "Defend the Camp",
+      "cycle_deployed": "PROD_CYCLE_AUTO_20260619_005",
+      "type": "defense",
+      "giver": "NPC_Guard_10",
+      "trigger": "QuestManager_DefendCamp",
+      "trigger_condition": "T-Rex crosses 800u guard perimeter (NPC_Guard_10/11 patrol zone)",
+      "objectives": [
+        "Alert the tribe — reach camp center",
+        "Lead gatherers to treeline safety zone",
+        "Distract T-Rex away from camp (draw to zone 1200,-800)"
+      ],
+      "actors": [
+        "QuestManager_DefendCamp",
+        "QuestObj1_AlertTribe",
+        "QuestObj2_LeadToTreeline",
+        "QuestObj3_DistractTRex_Zone",
+        "QuestSafeZone_Treeline"
+      ],
+      "crowd_integration": {
+        "panic_trigger": "Crowd_Panic_Center",
+        "scatter_waypoints": ["Crowd_Scatter_North", "Crowd_Scatter_West", "Crowd_Flow_Treeline"],
+        "npcs_to_protect": ["NPC_Gatherer_04", "NPC_Gatherer_05", "NPC_Gatherer_06", "NPC_Child_08", "NPC_Child_09"],
+        "npcs_who_fight": ["NPC_Hunter_01", "NPC_Hunter_02", "NPC_Hunter_03", "NPC_Guard_10", "NPC_Guard_11"]
+      },
+      "reward": "Tribe survival rating +30, Elder respect unlocked, access to Q003 if not completed",
+      "emotional_arc": "Panic → Decisive action → Relief. Player must prioritize: save the vulnerable first, then confront the threat.",
+      "design_note": "Time-pressure quest. NPCs scatter via Agent #13 crowd system. Player must physically move to each objective zone. Failure = tribe casualties, permanent NPC loss."
+    },
+    {
+      "id": "Q005",
+      "title": "The Gathering",
+      "cycle_deployed": "PROD_CYCLE_AUTO_20260619_005",
+      "type": "resource_collection",
+      "giver": "NPC_Gatherer_04",
+      "trigger": "QuestManager_Gathering",
+      "objectives": [
+        "Gather berries from the eastern grove (500,-400)",
+        "Find flint stones near the rocky outcrops (-600,-500)",
+        "Fill water container at the river (300,800)",
+        "Return all resources to Gatherer NPC"
+      ],
+      "actors": [
+        "QuestManager_Gathering",
+        "QuestObj_GatherBerries",
+        "QuestObj_GatherFlint",
+        "QuestObj_GatherWater",
+        "QuestDelivery_Gathering"
+      ],
+      "resource_requirements": {
+        "berries": 5,
+        "flint": 3,
+        "water_units": 2
+      },
+      "hazards": {
+        "berry_zone": "Raptor patrol nearby — stealth recommended",
+        "flint_zone": "Rocky terrain — ankle injury risk",
+        "water_zone": "Crocodilian ambush possible at river bank"
+      },
+      "reward": "Food supply +50, crafting materials unlocked, NPC_Craftsman_12 recipe tier 2",
+      "emotional_arc": "Mundane task → Discovery of danger → Resourcefulness. Even gathering has survival stakes.",
+      "design_note": "Tutorial for resource gathering mechanics. Teaches players that every zone has environmental hazards. Links to crafting system (Agent #14 CraftingSystem)."
+    }
+  ],
+
+  "quest_hub": {
+    "location": "Tribal Camp, center (0,0,0)",
+    "primary_giver": "NPC_Elder_07",
+    "quest_board_actors": ["QuestManager_ProveWorth", "QuestManager_DefendCamp", "QuestManager_Gathering"],
+    "lod_zone": "CrowdLOD0 (500u radius) — all NPC interactions happen here"
+  },
+
+  "cumulative_quest_actors": {
+    "cycle_003": ["QuestTrigger_Migration_Start", "QuestWaypoint_Migration_01-05", "QuestEnd_Migration"],
+    "cycle_004": ["QuestManager_ObserveHerd", "QuestObj_ReachRidge", "QuestObj_ObserveHerd", "QuestObj_HerdCount", "QuestReturn_ObserveHerd"],
+    "cycle_005": [
+      "QuestManager_ProveWorth", "QuestObj1_TalkElder", "QuestObj2_HuntZone_Savanna",
+      "QuestTarget_PreyAnimal_001", "QuestTarget_PreyAnimal_002", "QuestObj3_ReturnCamp",
+      "QuestReward_ProveWorth", "QuestManager_DefendCamp", "QuestObj1_AlertTribe",
+      "QuestObj2_LeadToTreeline", "QuestObj3_DistractTRex_Zone", "QuestSafeZone_Treeline",
+      "QuestManager_Gathering", "QuestObj_GatherBerries", "QuestObj_GatherFlint",
+      "QuestObj_GatherWater", "QuestDelivery_Gathering"
+    ],
+    "total_quest_actors": 27
+  },
+
+  "narrative_handoff": {
+    "to_agent": "#15 Narrative & Dialogue Agent",
+    "quest_givers_needing_dialogue": [
+      {
+        "npc": "NPC_Elder_07",
+        "quests": ["Q003 Prove Your Worth", "Q004 Defend the Camp"],
+        "voice_sample": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849207881_NPC_Elder_QuestGiver.mp3",
+        "personality": "Wise, measured, tests before trusting. Speaks in short declarative sentences. No mysticism — practical survival wisdom."
+      },
+      {
+        "npc": "NPC_Hunter_01",
+        "quests": ["Q002 Observe the Herd"],
+        "voice_sample": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849209711_NPC_Hunter_PanicAlert.mp3",
+        "personality": "Direct, urgent, action-focused. Shouts during danger. Respects skill over status."
+      },
+      {
+        "npc": "NPC_Gatherer_04",
+        "quests": ["Q005 The Gathering"],
+        "personality": "Practical, knows the land, warns of hazards. Speaks quietly — doesn't want to attract predators."
+      }
+    ],
+    "dialogue_lines_needed": 15,
+    "tone": "Realistic prehistoric survival — no mysticism, no spiritual content. NPCs speak about food, danger, territory, and tribe survival."
+  }
+}
