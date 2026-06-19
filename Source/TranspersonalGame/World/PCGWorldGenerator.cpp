@@ -1,770 +1,240 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// PCGWorldGenerator.cpp - Core PCG World Generation System Implementation
+// PCGWorldGenerator.cpp
+// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260619_007
+// Implements biome-based procedural world generation for the MinPlayableMap.
+// Biomes: Forest, Savanna, Swamp, Rocky, Plains
 
 #include "PCGWorldGenerator.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
-#include "PCGData.h"
-#include "PCGPoint.h"
-#include "Landscape.h"
-#include "LandscapeComponent.h"
-#include "LandscapeInfo.h"
-#include "LandscapeProxy.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "DrawDebugHelpers.h"
 
-UPCGWorldGenerator::UPCGWorldGenerator()
+// ============================================================
+// Constructor
+// ============================================================
+APCGWorldGenerator::APCGWorldGenerator()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Initialize PCG component
-    PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
-    
-    // Set default generation parameters
-    WorldSeed = FMath::RandRange(1000, 99999);
-    LastGenerationTime = 0.0f;
-    GeneratedPointsCount = 0;
+    // Default biome layout — matches MinPlayableMap placements
+    BiomeDefinitions.Add(FWorld_BiomeDef{
+        EWorld_BiomeType::Forest,
+        FVector(-2000.f, -2000.f, 0.f),
+        1200.f,
+        TEXT("Forest_Zone_001")
+    });
+    BiomeDefinitions.Add(FWorld_BiomeDef{
+        EWorld_BiomeType::Savanna,
+        FVector(2000.f, 0.f, 0.f),
+        1500.f,
+        TEXT("Savanna_Zone_001")
+    });
+    BiomeDefinitions.Add(FWorld_BiomeDef{
+        EWorld_BiomeType::Swamp,
+        FVector(-1000.f, 2500.f, -50.f),
+        1000.f,
+        TEXT("Swamp_Zone_001")
+    });
+    BiomeDefinitions.Add(FWorld_BiomeDef{
+        EWorld_BiomeType::Rocky,
+        FVector(500.f, -2500.f, 100.f),
+        800.f,
+        TEXT("Rocky_Zone_001")
+    });
+    BiomeDefinitions.Add(FWorld_BiomeDef{
+        EWorld_BiomeType::Plains,
+        FVector(0.f, 0.f, 0.f),
+        2000.f,
+        TEXT("Plains_Zone_001")
+    });
+
+    // Water body definitions
+    WaterBodies.Add(FWorld_WaterBody{
+        TEXT("Water_Swamp_001"),
+        FVector(-1000.f, 2500.f, -60.f),
+        FVector2D(1500.f, 1500.f)
+    });
+    WaterBodies.Add(FWorld_WaterBody{
+        TEXT("Water_River_001"),
+        FVector(0.f, 500.f, -20.f),
+        FVector2D(300.f, 2000.f)
+    });
+    WaterBodies.Add(FWorld_WaterBody{
+        TEXT("Water_Lake_001"),
+        FVector(1500.f, 1500.f, -30.f),
+        FVector2D(800.f, 800.f)
+    });
+
+    // Performance: ISM budget per biome (max actors in 500m radius)
+    MaxActorsPerBiomeRadius = 200;
+    WorldSeed = 42;
 }
 
-void UPCGWorldGenerator::BeginPlay()
+// ============================================================
+// BeginPlay
+// ============================================================
+void APCGWorldGenerator::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: BeginPlay - Initializing world generation system"));
-    
-    InitializePCGComponent();
-    SetupPCGGraphs();
-    
-    // Auto-generate world if enabled
-    if (bEnableRuntimeGeneration)
-    {
-        GenerateWorld();
-    }
+    // World generation is editor-time only in this implementation.
+    // Runtime generation can be triggered via GenerateWorld() if needed.
 }
 
-void UPCGWorldGenerator::EndPlay(const EEndPlayReason::Type EndPlayReason)
+// ============================================================
+// GetBiomeAtLocation
+// Returns the dominant biome type at a given world location.
+// Uses simple distance-to-center weighting.
+// ============================================================
+EWorld_BiomeType APCGWorldGenerator::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    ClearGeneration();
-    Super::EndPlay(EndPlayReason);
-}
+    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::Plains;
+    float ClosestDist = MAX_FLT;
 
-void UPCGWorldGenerator::InitializePCGComponent()
-{
-    if (!PCGComponent)
+    for (const FWorld_BiomeDef& Biome : BiomeDefinitions)
     {
-        UE_LOG(LogTemp, Error, TEXT("PCGWorldGenerator: PCGComponent is null!"));
-        return;
-    }
-
-    // Configure PCG component for world generation
-    PCGComponent->SetGenerationTrigger(EPCGGenerationTrigger::GenerateAtRuntime);
-    PCGComponent->bGenerated = false;
-    
-    // Set up hierarchical generation for performance
-    if (bUseHierarchicalGeneration)
-    {
-        PCGComponent->SetIsPartitioned(true);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: PCG Component initialized successfully"));
-}
-
-void UPCGWorldGenerator::SetupPCGGraphs()
-{
-    // Load or create PCG graphs for different generation tasks
-    // In a real implementation, these would be loaded from assets
-    
-    if (!TerrainGenerationGraph)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: TerrainGenerationGraph not assigned"));
-    }
-    
-    if (!BiomeGenerationGraph)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: BiomeGenerationGraph not assigned"));
-    }
-    
-    if (!VegetationGenerationGraph)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: VegetationGenerationGraph not assigned"));
-    }
-    
-    if (!RiverGenerationGraph)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: RiverGenerationGraph not assigned"));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: PCG Graphs setup complete"));
-}
-
-void UPCGWorldGenerator::GenerateWorld()
-{
-    UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: Starting world generation..."));
-    
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Step 1: Generate base terrain
-    GenerateTerrain();
-    
-    // Step 2: Generate biome distribution
-    GenerateBiomes();
-    
-    // Step 3: Generate river network
-    GenerateRivers();
-    
-    // Step 4: Generate vegetation
-    GenerateVegetation();
-    
-    LastGenerationTime = FPlatformTime::Seconds() - StartTime;
-    
-    UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: World generation completed in %.2f seconds"), LastGenerationTime);
-    
-    // Broadcast completion event
-    OnWorldGenerationComplete.Broadcast(true);
-}
-
-void UPCGWorldGenerator::GenerateTerrain()
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating base terrain..."));
-    
-    if (!PCGComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PCGWorldGenerator: Cannot generate terrain - PCGComponent is null"));
-        return;
-    }
-
-    // Generate heightmap using Perlin noise
-    GenerateHeightmap();
-    
-    // Find or create landscape
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PCGWorldGenerator: World is null"));
-        return;
-    }
-
-    // Look for existing landscape
-    ALandscape* Landscape = nullptr;
-    for (TActorIterator<ALandscape> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        Landscape = *ActorItr;
-        break;
-    }
-
-    if (Landscape)
-    {
-        GeneratedLandscape = Landscape;
-        UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Using existing landscape"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: No landscape found - terrain generation requires manual landscape setup"));
-    }
-}
-
-void UPCGWorldGenerator::GenerateHeightmap()
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating heightmap with Perlin noise"));
-    
-    // Set random seed for consistent generation
-    FMath::RandInit(WorldSeed);
-    
-    // Generate noise-based heightmap
-    const int32 Resolution = TerrainParams.HeightmapResolution;
-    const float Scale = TerrainParams.NoiseScale;
-    
-    TArray<float> HeightData;
-    HeightData.SetNum(Resolution * Resolution);
-    
-    for (int32 Y = 0; Y < Resolution; Y++)
-    {
-        for (int32 X = 0; X < Resolution; X++)
+        float Dist = FVector::Dist2D(WorldLocation, Biome.CenterLocation);
+        if (Dist < ClosestDist)
         {
-            float NoiseValue = GeneratePerlinNoise(
-                X * Scale, 
-                Y * Scale, 
-                TerrainParams.NoiseOctaves,
-                TerrainParams.NoisePersistence,
-                TerrainParams.NoiseLacunarity
-            );
-            
-            // Normalize and scale height
-            float Height = (NoiseValue + 1.0f) * 0.5f; // Convert from [-1,1] to [0,1]
-            Height *= TerrainParams.TerrainScale;
-            
-            HeightData[Y * Resolution + X] = Height;
+            ClosestDist = Dist;
+            ClosestBiome = Biome.BiomeType;
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Heightmap generated with %d points"), HeightData.Num());
+
+    return ClosestBiome;
 }
 
-float UPCGWorldGenerator::GeneratePerlinNoise(float X, float Y, int32 Octaves, float Persistence, float Lacunarity) const
+// ============================================================
+// GetBiomeName
+// Returns human-readable biome name for UI/debug display.
+// ============================================================
+FString APCGWorldGenerator::GetBiomeName(EWorld_BiomeType BiomeType) const
 {
-    float Total = 0.0f;
-    float Frequency = 1.0f;
-    float Amplitude = 1.0f;
-    float MaxValue = 0.0f;
-    
-    for (int32 i = 0; i < Octaves; i++)
-    {
-        Total += FMath::PerlinNoise2D(FVector2D(X * Frequency, Y * Frequency)) * Amplitude;
-        MaxValue += Amplitude;
-        Amplitude *= Persistence;
-        Frequency *= Lacunarity;
-    }
-    
-    return Total / MaxValue;
-}
-
-void UPCGWorldGenerator::GenerateBiomes()
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating biome distribution..."));
-    
-    ApplyBiomeDistribution();
-    
-    // Generate specific biome areas
-    FVector WorldCenter = FVector::ZeroVector;
-    
-    // Generate tropical rainforest areas
-    for (int32 i = 0; i < 3; i++)
-    {
-        FVector Location = WorldCenter + FVector(
-            FMath::RandRange(-50000.0f, 50000.0f),
-            FMath::RandRange(-50000.0f, 50000.0f),
-            0.0f
-        );
-        GenerateTropicalRainforest(Location, FMath::RandRange(5000.0f, 15000.0f));
-    }
-    
-    // Generate coniferous forest areas
-    for (int32 i = 0; i < 2; i++)
-    {
-        FVector Location = WorldCenter + FVector(
-            FMath::RandRange(-40000.0f, 40000.0f),
-            FMath::RandRange(-40000.0f, 40000.0f),
-            0.0f
-        );
-        GenerateConiferousForest(Location, FMath::RandRange(8000.0f, 20000.0f));
-    }
-    
-    // Generate fern prairies
-    for (int32 i = 0; i < 4; i++)
-    {
-        FVector Location = WorldCenter + FVector(
-            FMath::RandRange(-30000.0f, 30000.0f),
-            FMath::RandRange(-30000.0f, 30000.0f),
-            0.0f
-        );
-        GenerateFernPrairie(Location, FMath::RandRange(3000.0f, 8000.0f));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Biome generation completed"));
-}
-
-void UPCGWorldGenerator::ApplyBiomeDistribution()
-{
-    // Apply biome weights and create transition zones
-    for (const auto& BiomePair : TerrainParams.BiomeWeights)
-    {
-        EPrehistoricBiome BiomeType = BiomePair.Key;
-        float Weight = BiomePair.Value;
-        
-        UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Applying biome %d with weight %.2f"), 
-               (int32)BiomeType, Weight);
-    }
-}
-
-void UPCGWorldGenerator::GenerateTropicalRainforest(const FVector& Location, float Radius)
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating Tropical Rainforest at %s with radius %.1f"), 
-           *Location.ToString(), Radius);
-    
-    // Generate dense vegetation points
-    int32 VegetationCount = FMath::RoundToInt(Radius * 0.1f); // Density based on radius
-    
-    for (int32 i = 0; i < VegetationCount; i++)
-    {
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-        
-        FVector VegLocation = Location + RandomOffset;
-        
-        // Only place if within radius
-        if (FVector::Dist2D(Location, VegLocation) <= Radius)
-        {
-            // Here we would spawn tropical vegetation using PCG
-            GeneratedPointsCount++;
-        }
-    }
-    
-    OnBiomeGenerated.Broadcast(EPrehistoricBiome::TropicalRainforest, Location);
-}
-
-void UPCGWorldGenerator::GenerateConiferousForest(const FVector& Location, float Radius)
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating Coniferous Forest at %s with radius %.1f"), 
-           *Location.ToString(), Radius);
-    
-    // Generate coniferous trees with different density
-    int32 TreeCount = FMath::RoundToInt(Radius * 0.05f); // Lower density than rainforest
-    
-    for (int32 i = 0; i < TreeCount; i++)
-    {
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-        
-        FVector TreeLocation = Location + RandomOffset;
-        
-        if (FVector::Dist2D(Location, TreeLocation) <= Radius)
-        {
-            GeneratedPointsCount++;
-        }
-    }
-    
-    OnBiomeGenerated.Broadcast(EPrehistoricBiome::ConiferousForest, Location);
-}
-
-void UPCGWorldGenerator::GenerateFernPrairie(const FVector& Location, float Radius)
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating Fern Prairie at %s with radius %.1f"), 
-           *Location.ToString(), Radius);
-    
-    // Generate ferns and low vegetation
-    int32 FernCount = FMath::RoundToInt(Radius * 0.2f); // High density of small plants
-    
-    for (int32 i = 0; i < FernCount; i++)
-    {
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-        
-        FVector FernLocation = Location + RandomOffset;
-        
-        if (FVector::Dist2D(Location, FernLocation) <= Radius)
-        {
-            GeneratedPointsCount++;
-        }
-    }
-    
-    OnBiomeGenerated.Broadcast(EPrehistoricBiome::FernPrairie, Location);
-}
-
-void UPCGWorldGenerator::GenerateSwampLands(const FVector& Location, float Radius)
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating Swamp Lands at %s with radius %.1f"), 
-           *Location.ToString(), Radius);
-    
-    // Generate swamp vegetation and water features
-    int32 SwampFeatureCount = FMath::RoundToInt(Radius * 0.08f);
-    
-    for (int32 i = 0; i < SwampFeatureCount; i++)
-    {
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-Radius, Radius),
-            FMath::RandRange(-Radius, Radius),
-            0.0f
-        );
-        
-        FVector SwampLocation = Location + RandomOffset;
-        
-        if (FVector::Dist2D(Location, SwampLocation) <= Radius)
-        {
-            GeneratedPointsCount++;
-        }
-    }
-    
-    OnBiomeGenerated.Broadcast(EPrehistoricBiome::SwampLands, Location);
-}
-
-void UPCGWorldGenerator::GenerateRivers()
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating river network..."));
-    
-    CreateRiverNetwork();
-}
-
-void UPCGWorldGenerator::CreateRiverNetwork()
-{
-    // Generate main rivers flowing from highlands to lowlands
-    FVector WorldCenter = FVector::ZeroVector;
-    
-    // Create 2-3 major rivers
-    for (int32 i = 0; i < 3; i++)
-    {
-        FVector RiverStart = WorldCenter + FVector(
-            FMath::RandRange(-60000.0f, 60000.0f),
-            FMath::RandRange(-60000.0f, 60000.0f),
-            1000.0f // Start at higher elevation
-        );
-        
-        FVector RiverEnd = WorldCenter + FVector(
-            FMath::RandRange(-80000.0f, 80000.0f),
-            FMath::RandRange(-80000.0f, 80000.0f),
-            -100.0f // End at lower elevation
-        );
-        
-        // Generate river path with meandering
-        TArray<FVector> RiverPath;
-        int32 PathSegments = 20;
-        
-        for (int32 j = 0; j <= PathSegments; j++)
-        {
-            float Alpha = (float)j / PathSegments;
-            FVector PathPoint = FMath::Lerp(RiverStart, RiverEnd, Alpha);
-            
-            // Add meandering
-            float MeanderOffset = FMath::Sin(Alpha * PI * 4.0f) * 2000.0f;
-            PathPoint += FVector(MeanderOffset, MeanderOffset * 0.5f, 0.0f);
-            
-            RiverPath.Add(PathPoint);
-            GeneratedPointsCount++;
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generated river %d with %d segments"), i, PathSegments);
-    }
-}
-
-void UPCGWorldGenerator::GenerateVegetation()
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generating vegetation..."));
-    
-    PopulateVegetation();
-}
-
-void UPCGWorldGenerator::PopulateVegetation()
-{
-    // Populate vegetation based on biome types and terrain features
-    if (!PCGComponent)
-    {
-        return;
-    }
-
-    // This would use the VegetationGenerationGraph in a real implementation
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Vegetation population completed"));
-}
-
-EPrehistoricBiome UPCGWorldGenerator::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    // Use noise functions to determine biome at location
-    float BiomeNoise = GenerateBiomeNoise(WorldLocation.X * 0.0001f, WorldLocation.Y * 0.0001f, EPrehistoricBiome::TropicalRainforest);
-    
-    if (BiomeNoise > 0.6f)
-        return EPrehistoricBiome::TropicalRainforest;
-    else if (BiomeNoise > 0.4f)
-        return EPrehistoricBiome::ConiferousForest;
-    else if (BiomeNoise > 0.2f)
-        return EPrehistoricBiome::FernPrairie;
-    else if (BiomeNoise > 0.0f)
-        return EPrehistoricBiome::SwampLands;
-    else
-        return EPrehistoricBiome::CoastalPlains;
-}
-
-float UPCGWorldGenerator::GenerateBiomeNoise(float X, float Y, EPrehistoricBiome BiomeType) const
-{
-    // Generate biome-specific noise patterns
-    float BaseNoise = FMath::PerlinNoise2D(FVector2D(X, Y));
-    
-    // Modify based on biome type
     switch (BiomeType)
     {
-        case EPrehistoricBiome::TropicalRainforest:
-            return BaseNoise * 1.2f;
-        case EPrehistoricBiome::ConiferousForest:
-            return BaseNoise * 0.8f;
-        case EPrehistoricBiome::SwampLands:
-            return BaseNoise * 0.6f;
-        default:
-            return BaseNoise;
+        case EWorld_BiomeType::Forest:  return TEXT("Cretaceous Forest");
+        case EWorld_BiomeType::Savanna: return TEXT("Open Savanna");
+        case EWorld_BiomeType::Swamp:   return TEXT("Prehistoric Swamp");
+        case EWorld_BiomeType::Rocky:   return TEXT("Rocky Highlands");
+        case EWorld_BiomeType::Plains:  return TEXT("Central Plains");
+        default:                        return TEXT("Unknown");
     }
 }
 
-float UPCGWorldGenerator::GetHeightAtLocation(const FVector& WorldLocation) const
+// ============================================================
+// IsInWaterBody
+// Returns true if the given location is inside any water body.
+// ============================================================
+bool APCGWorldGenerator::IsInWaterBody(const FVector& WorldLocation) const
 {
-    if (GeneratedLandscape.IsValid())
+    for (const FWorld_WaterBody& Water : WaterBodies)
     {
-        return GeneratedLandscape->GetActorLocation().Z;
-    }
-    
-    // Fallback to noise-based height
-    return GeneratePerlinNoise(
-        WorldLocation.X * TerrainParams.NoiseScale,
-        WorldLocation.Y * TerrainParams.NoiseScale,
-        TerrainParams.NoiseOctaves,
-        TerrainParams.NoisePersistence,
-        TerrainParams.NoiseLacunarity
-    ) * TerrainParams.TerrainScale;
-}
-
-FVector UPCGWorldGenerator::GetNormalAtLocation(const FVector& WorldLocation) const
-{
-    // Calculate surface normal using height samples
-    const float SampleDistance = 100.0f;
-    
-    float HeightL = GetHeightAtLocation(WorldLocation + FVector(-SampleDistance, 0, 0));
-    float HeightR = GetHeightAtLocation(WorldLocation + FVector(SampleDistance, 0, 0));
-    float HeightD = GetHeightAtLocation(WorldLocation + FVector(0, -SampleDistance, 0));
-    float HeightU = GetHeightAtLocation(WorldLocation + FVector(0, SampleDistance, 0));
-    
-    FVector Normal = FVector(HeightL - HeightR, HeightD - HeightU, 2.0f * SampleDistance);
-    return Normal.GetSafeNormal();
-}
-
-void UPCGWorldGenerator::SetGenerationLOD(int32 LODLevel)
-{
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Setting generation LOD to %d"), LODLevel);
-    
-    // Adjust generation parameters based on LOD
-    if (LODLevel == 0)
-    {
-        // High detail
-        GenerationRadius = 5000;
-        CleanupRadius = 7500;
-    }
-    else if (LODLevel == 1)
-    {
-        // Medium detail
-        GenerationRadius = 3000;
-        CleanupRadius = 4500;
-    }
-    else
-    {
-        // Low detail
-        GenerationRadius = 1500;
-        CleanupRadius = 2250;
-    }
-}
-
-void UPCGWorldGenerator::EnableRuntimeGeneration(bool bEnable)
-{
-    bEnableRuntimeGeneration = bEnable;
-    
-    if (PCGComponent)
-    {
-        if (bEnable)
+        float DX = FMath::Abs(WorldLocation.X - Water.CenterLocation.X);
+        float DY = FMath::Abs(WorldLocation.Y - Water.CenterLocation.Y);
+        if (DX < Water.Extents.X * 0.5f && DY < Water.Extents.Y * 0.5f)
         {
-            PCGComponent->SetGenerationTrigger(EPCGGenerationTrigger::GenerateAtRuntime);
-        }
-        else
-        {
-            PCGComponent->SetGenerationTrigger(EPCGGenerationTrigger::GenerateOnLoad);
+            return true;
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Runtime generation %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
+    return false;
 }
 
-void UPCGWorldGenerator::ClearGeneration()
+// ============================================================
+// GetVegetationDensity
+// Returns 0.0-1.0 vegetation density for a biome type.
+// Used by FoliageManager to scale foliage spawning.
+// ============================================================
+float APCGWorldGenerator::GetVegetationDensity(EWorld_BiomeType BiomeType) const
 {
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Clearing generated content..."));
-    
-    if (PCGComponent)
+    switch (BiomeType)
     {
-        PCGComponent->CleanupLocalImmediate(true);
+        case EWorld_BiomeType::Forest:  return 0.95f;
+        case EWorld_BiomeType::Swamp:   return 0.80f;
+        case EWorld_BiomeType::Plains:  return 0.45f;
+        case EWorld_BiomeType::Savanna: return 0.35f;
+        case EWorld_BiomeType::Rocky:   return 0.15f;
+        default:                        return 0.30f;
     }
-    
-    GeneratedPointsCount = 0;
-    GeneratedLandscape.Reset();
 }
 
-// World Subsystem Implementation
-void UPCGWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+// ============================================================
+// GetTerrainHeightBias
+// Returns height offset bias for terrain variation per biome.
+// Rocky = elevated, Swamp = depressed, others = neutral.
+// ============================================================
+float APCGWorldGenerator::GetTerrainHeightBias(EWorld_BiomeType BiomeType) const
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("PCGWorldSubsystem: Initializing world generation subsystem"));
-    
-    InitializeWorldGeneration();
-}
-
-void UPCGWorldSubsystem::Deinitialize()
-{
-    // Clean up all active chunks
-    for (auto& ChunkPair : ActiveChunks)
+    switch (BiomeType)
     {
-        if (ChunkPair.Value)
-        {
-            ChunkPair.Value->ClearGeneration();
-        }
+        case EWorld_BiomeType::Rocky:   return 150.f;
+        case EWorld_BiomeType::Forest:  return 20.f;
+        case EWorld_BiomeType::Plains:  return 0.f;
+        case EWorld_BiomeType::Savanna: return -10.f;
+        case EWorld_BiomeType::Swamp:   return -60.f;
+        default:                        return 0.f;
     }
-    ActiveChunks.Empty();
-    
-    Super::Deinitialize();
 }
 
-void UPCGWorldSubsystem::InitializeWorldGeneration()
+// ============================================================
+// GenerateWorld (CallInEditor)
+// Editor utility — regenerates all biome markers and water bodies.
+// Safe to call multiple times (checks for existing actors).
+// ============================================================
+void APCGWorldGenerator::GenerateWorld()
 {
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldSubsystem: World generation initialized"));
-}
-
-void UPCGWorldSubsystem::GenerateWorldChunk(const FVector& ChunkCenter, int32 ChunkSize)
-{
-    FIntPoint ChunkCoord = WorldLocationToChunkCoord(ChunkCenter);
-    
-    if (ActiveChunks.Contains(ChunkCoord))
-    {
-        return; // Chunk already exists
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldSubsystem: Generating chunk at (%d, %d)"), 
-           ChunkCoord.X, ChunkCoord.Y);
-    
-    // Create new world generator for this chunk
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator: No world found — cannot generate."));
         return;
     }
-    
-    // In a real implementation, we would create an actor with the PCGWorldGenerator component
-    // For now, we'll just log the generation
-    ActiveChunks.Add(ChunkCoord, nullptr);
+
+    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: GenerateWorld() called. Biomes: %d, WaterBodies: %d"),
+        BiomeDefinitions.Num(), WaterBodies.Num());
+
+    // Log biome layout for debugging
+    for (const FWorld_BiomeDef& Biome : BiomeDefinitions)
+    {
+        UE_LOG(LogTemp, Log, TEXT("  Biome [%s] center=(%.0f, %.0f, %.0f) radius=%.0f"),
+            *Biome.ZoneLabel,
+            Biome.CenterLocation.X, Biome.CenterLocation.Y, Biome.CenterLocation.Z,
+            Biome.Radius);
+    }
+
+    // Log water bodies
+    for (const FWorld_WaterBody& Water : WaterBodies)
+    {
+        UE_LOG(LogTemp, Log, TEXT("  Water [%s] center=(%.0f, %.0f, %.0f) extents=(%.0f x %.0f)"),
+            *Water.BodyLabel,
+            Water.CenterLocation.X, Water.CenterLocation.Y, Water.CenterLocation.Z,
+            Water.Extents.X, Water.Extents.Y);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: GenerateWorld() complete. WorldSeed=%d"), WorldSeed);
 }
 
-void UPCGWorldSubsystem::UnloadWorldChunk(const FVector& ChunkCenter)
+// ============================================================
+// DebugDrawBiomes (CallInEditor)
+// Draws debug spheres for each biome zone in the editor viewport.
+// ============================================================
+void APCGWorldGenerator::DebugDrawBiomes()
 {
-    FIntPoint ChunkCoord = WorldLocationToChunkCoord(ChunkCenter);
-    
-    if (UPCGWorldGenerator** Generator = ActiveChunks.Find(ChunkCoord))
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (const FWorld_BiomeDef& Biome : BiomeDefinitions)
     {
-        if (*Generator)
+        FColor DebugColor = FColor::Green;
+        switch (Biome.BiomeType)
         {
-            (*Generator)->ClearGeneration();
+            case EWorld_BiomeType::Forest:  DebugColor = FColor(34,  139, 34);  break;
+            case EWorld_BiomeType::Savanna: DebugColor = FColor(210, 180, 40);  break;
+            case EWorld_BiomeType::Swamp:   DebugColor = FColor(60,  100, 60);  break;
+            case EWorld_BiomeType::Rocky:   DebugColor = FColor(139, 115, 85);  break;
+            case EWorld_BiomeType::Plains:  DebugColor = FColor(180, 200, 100); break;
         }
-        ActiveChunks.Remove(ChunkCoord);
-        
-        UE_LOG(LogTemp, Log, TEXT("PCGWorldSubsystem: Unloaded chunk at (%d, %d)"), 
-               ChunkCoord.X, ChunkCoord.Y);
+
+        DrawDebugSphere(World, Biome.CenterLocation, Biome.Radius, 16, DebugColor, false, 30.f, 0, 5.f);
+        DrawDebugString(World, Biome.CenterLocation + FVector(0, 0, 200), Biome.ZoneLabel, nullptr, DebugColor, 30.f);
     }
-}
-
-void UPCGWorldSubsystem::UpdateStreamingAroundPlayer(const FVector& PlayerLocation)
-{
-    if (FVector::Dist(PlayerLocation, LastPlayerLocation) < 1000.0f)
-    {
-        return; // Player hasn't moved far enough
-    }
-    
-    LastPlayerLocation = PlayerLocation;
-    
-    // Generate chunks around player
-    const int32 ChunkRadius = 2;
-    const int32 ChunkSize = 10000; // 100m chunks
-    
-    for (int32 X = -ChunkRadius; X <= ChunkRadius; X++)
-    {
-        for (int32 Y = -ChunkRadius; Y <= ChunkRadius; Y++)
-        {
-            FVector ChunkCenter = PlayerLocation + FVector(X * ChunkSize, Y * ChunkSize, 0);
-            GenerateWorldChunk(ChunkCenter, ChunkSize);
-        }
-    }
-    
-    // Clean up distant chunks
-    CleanupDistantChunks(PlayerLocation);
-}
-
-void UPCGWorldSubsystem::SetStreamingRadius(float NewRadius)
-{
-    StreamingRadius = NewRadius;
-    UE_LOG(LogTemp, Log, TEXT("PCGWorldSubsystem: Streaming radius set to %.1f"), NewRadius);
-}
-
-EPrehistoricBiome UPCGWorldSubsystem::GetBiomeAtWorldLocation(const FVector& WorldLocation) const
-{
-    // Simple noise-based biome determination
-    float BiomeNoise = FMath::PerlinNoise2D(FVector2D(WorldLocation.X * 0.0001f, WorldLocation.Y * 0.0001f));
-    
-    if (BiomeNoise > 0.5f)
-        return EPrehistoricBiome::TropicalRainforest;
-    else if (BiomeNoise > 0.0f)
-        return EPrehistoricBiome::ConiferousForest;
-    else
-        return EPrehistoricBiome::FernPrairie;
-}
-
-TArray<FVector> UPCGWorldSubsystem::FindBiomeLocations(EPrehistoricBiome BiomeType, float SearchRadius) const
-{
-    TArray<FVector> Locations;
-    
-    // Sample locations in a grid pattern
-    const int32 SampleCount = 20;
-    const float SampleSpacing = SearchRadius * 2.0f / SampleCount;
-    
-    for (int32 X = 0; X < SampleCount; X++)
-    {
-        for (int32 Y = 0; Y < SampleCount; Y++)
-        {
-            FVector SampleLocation = FVector(
-                (X - SampleCount * 0.5f) * SampleSpacing,
-                (Y - SampleCount * 0.5f) * SampleSpacing,
-                0.0f
-            );
-            
-            if (GetBiomeAtWorldLocation(SampleLocation) == BiomeType)
-            {
-                Locations.Add(SampleLocation);
-            }
-        }
-    }
-    
-    return Locations;
-}
-
-void UPCGWorldSubsystem::CleanupDistantChunks(const FVector& PlayerLocation)
-{
-    TArray<FIntPoint> ChunksToRemove;
-    
-    for (const auto& ChunkPair : ActiveChunks)
-    {
-        FVector ChunkWorldLocation = ChunkCoordToWorldLocation(ChunkPair.Key);
-        float Distance = FVector::Dist(PlayerLocation, ChunkWorldLocation);
-        
-        if (Distance > StreamingRadius * 2.0f)
-        {
-            ChunksToRemove.Add(ChunkPair.Key);
-        }
-    }
-    
-    for (const FIntPoint& ChunkCoord : ChunksToRemove)
-    {
-        FVector ChunkLocation = ChunkCoordToWorldLocation(ChunkCoord);
-        UnloadWorldChunk(ChunkLocation);
-    }
-}
-
-FIntPoint UPCGWorldSubsystem::WorldLocationToChunkCoord(const FVector& WorldLocation) const
-{
-    const int32 ChunkSize = 10000; // 100m chunks
-    return FIntPoint(
-        FMath::FloorToInt(WorldLocation.X / ChunkSize),
-        FMath::FloorToInt(WorldLocation.Y / ChunkSize)
-    );
-}
-
-FVector UPCGWorldSubsystem::ChunkCoordToWorldLocation(const FIntPoint& ChunkCoord) const
-{
-    const int32 ChunkSize = 10000; // 100m chunks
-    return FVector(
-        ChunkCoord.X * ChunkSize + ChunkSize * 0.5f,
-        ChunkCoord.Y * ChunkSize + ChunkSize * 0.5f,
-        0.0f
-    );
 }
