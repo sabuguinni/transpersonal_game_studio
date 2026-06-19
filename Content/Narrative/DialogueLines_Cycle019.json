@@ -1,0 +1,49 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_002",
+  "agent": "Narrative & Dialogue Agent #15",
+  "dialogue_lines": [
+    {
+      "id": "DL_001",
+      "character": "TribalLeader",
+      "trigger": "DialogueTrigger_RiverCamp_001",
+      "text": "The river is rising. We must move the camp before nightfall or we lose everything. Follow me — I know a cave in the northern cliffs.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834748478_TribalLeader.mp3",
+      "duration": "~9s",
+      "context": "Player approaches river camp during flood event"
+    },
+    {
+      "id": "DL_002",
+      "character": "Scout_Narrator",
+      "trigger": "DialogueTrigger_HerdPath_001",
+      "text": "Winter is coming early this year. The mammoths have already moved south. If we do not follow the herds, we will starve before the first snow melts.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834763973_Scout_Narrator.mp3",
+      "duration": "~10s",
+      "context": "Player reaches the herd migration path — triggers seasonal survival quest"
+    },
+    {
+      "id": "DL_003",
+      "character": "Veteran_Hunter",
+      "trigger": "DialogueTrigger_NorthCliff_001",
+      "text": "I have seen what those claws can do to a man. We do not hunt the pack hunters alone. Not ever. You want to survive out here — you learn that rule first.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834771141_Veteran_Hunter.mp3",
+      "duration": "~11s",
+      "context": "Player encounters veteran hunter near raptor territory on north cliff"
+    },
+    {
+      "id": "DL_004",
+      "character": "Crafter_NPC",
+      "trigger": "DialogueTrigger_Quarry_001",
+      "text": "The bone tools are wearing down. We need flint from the quarry before we can make new spear tips. Without better weapons, the next hunt will fail.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834773049_Crafter_NPC.mp3",
+      "duration": "~10s",
+      "context": "Player reaches quarry — triggers crafting resource quest"
+    }
+  ],
+  "trigger_volumes": [
+    {"label": "DialogueTrigger_RiverCamp_001",  "location": [500, 800, 50]},
+    {"label": "DialogueTrigger_NorthCliff_001", "location": [-1200, 400, 180]},
+    {"label": "DialogueTrigger_Quarry_001",     "location": [1800, -600, 30]},
+    {"label": "DialogueTrigger_HerdPath_001",   "location": [-400, -1500, 20]}
+  ],
+  "notes": "All 4 TriggerBox volumes spawned in MinPlayableMap. Audio URLs ready for Audio Agent #16 integration."
+}
