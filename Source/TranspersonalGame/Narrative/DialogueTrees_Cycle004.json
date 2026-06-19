@@ -1,0 +1,159 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "Narrative_Dialogue_Agent_15",
+  "audio_assets": {
+    "Elder_Kael_Navigation": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844935631_Elder_Kael.mp3",
+    "Scout_Mira_WateringHole": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844939345_Scout_Mira.mp3",
+    "Elder_Kael_Lore_Valley": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844949735_Elder_Kael_Lore.mp3",
+    "Elder_Kael_Training": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844952742_Elder_Kael_Training.mp3"
+  },
+  "characters": {
+    "Elder_Kael": {
+      "actor_label": "NPC_Elder_Kael_001",
+      "dialogue_trigger": "DialogueTrigger_Elder_001",
+      "location": {"x": -200, "y": -200, "z": 80},
+      "description": "Eldest surviving member of the player's tribe. Practical, weathered, speaks only what is necessary. Has crossed the northern valley three times. Knows the migration routes, the danger zones, the seasonal patterns of every major predator in the region.",
+      "personality": "Pragmatic. No sentiment. Every word is survival information.",
+      "relationship_to_player": "Mentor — not by choice but by necessity. The tribe needs a capable hunter.",
+      "dialogue_tree": {
+        "first_encounter": {
+          "trigger": "Player enters DialogueTrigger_Elder_001 for first time",
+          "npc_line": "You are still alive. Good. Sit. I will tell you what you need to know about the north.",
+          "audio": "Elder_Kael_Navigation",
+          "player_responses": [
+            {
+              "id": "ask_north",
+              "text": "[Ask] What is in the north?",
+              "npc_reply": "Resources. A valley with a river that does not dry in the hot season. Shelter in the cliff face. The herd passes through twice a year — that is food for months. But the path is dangerous. Three days walk. You must learn it before the rains come.",
+              "unlocks_quest": "Q004_FollowHerdNorth"
+            },
+            {
+              "id": "ask_predators",
+              "text": "[Ask] What predators are on the path?",
+              "npc_reply": "The grey one — scarred flank, missing two claws on the left foot. Territorial. Stays near the river bend. Go around. Further north, pack hunters — smaller, faster. They work together. If you see one, there are four more you cannot see.",
+              "unlocks_knowledge": "predator_locations_north"
+            },
+            {
+              "id": "ask_tribe",
+              "text": "[Ask] Why can't the tribe move together?",
+              "npc_reply": "Too slow. Too loud. Children, the injured, the old. A group that size cannot move without being heard. You go first. Find the path. Mark the safe zones. Then we follow.",
+              "emotional_beat": "Player understands they are the scout — the expendable one who tests the route"
+            }
+          ]
+        },
+        "second_encounter": {
+          "trigger": "Player returns after completing Q002_ObserveHerd",
+          "npc_line": "You watched the herd. You did not disturb them. That is the first skill. Now the harder one — moving with them without being seen by what hunts them.",
+          "player_responses": [
+            {
+              "id": "ready_north",
+              "text": "[Ready] I am ready to go north.",
+              "npc_reply": "Cross the river at the shallow bend — where the stones break the surface. Not where the current runs fast. The large ones drink there at dusk. Move at dawn. At midday. Never at dusk. Never at night. If the ground shakes — stop. Do not run. Freeze.",
+              "audio": "Elder_Kael_Navigation",
+              "activates_quest": "Q004_FollowHerdNorth"
+            },
+            {
+              "id": "ask_lore",
+              "text": "[Ask] Have you been to the north valley before?",
+              "npc_reply": "Three times. The first time I was your age. The herd stretched from the river to the hills. Thousands of them. My father said: never forget this. This is why we survive — not because we are strong. Because we are small enough to hide and smart enough to follow.",
+              "audio": "Elder_Kael_Lore_Valley",
+              "unlocks_lore": "valley_history"
+            }
+          ]
+        },
+        "training_encounter": {
+          "trigger": "Player has died at least once",
+          "npc_line": "You came back. Most do not. Listen — the tribe needs a hunter, not a corpse.",
+          "audio": "Elder_Kael_Training",
+          "player_responses": [
+            {
+              "id": "ask_survive",
+              "text": "[Ask] How do I survive out there?",
+              "npc_reply": "Tracks in the mud. Broken branches. The way the birds go quiet before the predator arrives. Learn these signs. They will save your life more than any weapon. Watch the small animals — they always know before you do.",
+              "unlocks_knowledge": "environmental_reading_skill"
+            }
+          ]
+        }
+      }
+    },
+    "Scout_Mira": {
+      "actor_label": "NPC_Scout_Mira_001",
+      "dialogue_trigger": "DialogueTrigger_Scout_001",
+      "location": {"x": 800, "y": -400, "z": 80},
+      "description": "Young scout, early 20s. Fast, observant, slightly reckless. Has been scouting the eastern territory for two seasons. Knows the watering hole area better than anyone. Respects competence, distrusts caution.",
+      "personality": "Direct. Impatient. Trusts action over words.",
+      "relationship_to_player": "Peer — potential ally if player proves capable",
+      "dialogue_tree": {
+        "first_encounter": {
+          "trigger": "Player enters DialogueTrigger_Scout_001 for first time",
+          "npc_line": "You are heading east? The watering hole is that way. I was just there. The grey one is not there right now — but it will be by midday.",
+          "player_responses": [
+            {
+              "id": "ask_watering_hole",
+              "text": "[Ask] Is it safe to approach?",
+              "npc_reply": "Safe? No. Safer than dying of thirst? Yes. Go now, before the sun is high. Fill what you have and get out. Do not linger. The herd will come to drink around midday and where the herd goes, the hunters follow.",
+              "audio": "Scout_Mira_WateringHole",
+              "activates_quest": "Q005_SilentApproach"
+            },
+            {
+              "id": "ask_grey_one",
+              "text": "[Ask] The grey one — what is it?",
+              "npc_reply": "Big. Old. Scarred on the right flank from a fight with another one of its kind, years ago. Territorial around the eastern river. It has a pattern — hunts at dusk, rests in the shade of the cliff during midday heat. Learn its pattern and you can avoid it. Ignore the pattern and you will not get a second chance.",
+              "unlocks_knowledge": "trex_patrol_pattern"
+            },
+            {
+              "id": "offer_help",
+              "text": "[Offer] I can scout with you.",
+              "npc_reply": "Can you move quietly? Can you read tracks? Can you freeze when I signal and not ask why? If yes — come. If you need to talk through every decision, stay here.",
+              "unlocks_companion": "Scout_Mira_Companion_State"
+            }
+          ]
+        },
+        "after_q005_complete": {
+          "trigger": "Player completes Q005_SilentApproach",
+          "npc_line": "You got the water. And you came back. I did not expect that. You move quietly for someone who is still learning.",
+          "player_responses": [
+            {
+              "id": "accept_compliment",
+              "text": "[Nod] The grey one never saw me.",
+              "npc_reply": "It saw you. It chose not to chase. That is different. It means you were not worth the effort. Stay that way — small, quiet, not worth the effort. That is how you survive here.",
+              "emotional_beat": "Humbling moment — survival is about being beneath the predator's notice, not defeating it"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "lore_stones": {
+    "LoreStone_KillSite_001": {
+      "location": {"x": 1500, "y": 500, "z": 70},
+      "interaction_text": "Scattered bones. Large ones — a herbivore, judging by the size. The kill is old, weeks at least. Claw marks on the largest bones. Something big brought this down here. This is hunting ground.",
+      "lore_tag": "predator_territory_marker",
+      "unlocks_knowledge": "eastern_hunting_ground"
+    },
+    "LoreStone_RiverCrossing_001": {
+      "location": {"x": 300, "y": 3500, "z": 75},
+      "interaction_text": "Stones arranged in a line across the shallows. Someone placed these deliberately — a crossing marker. Old work. The tribe has used this route before.",
+      "lore_tag": "ancient_tribe_route",
+      "unlocks_knowledge": "safe_river_crossing",
+      "connects_to_quest": "Q004_FollowHerdNorth"
+    }
+  },
+  "narrative_goal": {
+    "NarrativeGoal_NorthCamp_001": {
+      "location": {"x": 300, "y": 7000, "z": 90},
+      "description": "The northern valley. A river that runs year-round. Cliff shelters on the eastern face. The migration herd passes through twice yearly. This is the destination — not a paradise, but a place where survival is possible with less constant danger.",
+      "arrival_narration": "You made it. The valley opens below you — wider than you imagined. The river catches the light. You can see the cliff face Elder Kael described. This is real. This is possible.",
+      "unlocks": ["NorthCamp_FastTravel", "Q006_EstablishCamp"],
+      "emotional_arc": "From desperate survival to the first glimpse of something better — not safety, but possibility"
+    }
+  },
+  "narrative_arc_summary": {
+    "act_1": "Desperate survival — player learns basic skills, meets Elder Kael and Scout Mira, understands the tribe's situation",
+    "act_2": "The migration — player follows the herd north, navigating predator territory, using environmental knowledge",
+    "act_3": "The north valley — player reaches the destination, begins establishing a permanent camp, transitions from lone survivor to tribe leader",
+    "core_theme": "Competence earns survival. Knowledge earns respect. The player rises not through power but through skill and observation.",
+    "tone": "Tense, pragmatic, grounded. Every dialogue line is survival information. Every lore beat reveals the world's danger and beauty without mysticism."
+  }
+}
