@@ -1,0 +1,286 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "Audio Agent #16",
+  "description": "Audio system configuration — ambient zones, dialogue audio, footstep surfaces, migration scoring",
+
+  "tts_voice_lines": {
+    "Elder_Kael_TRex_Warning": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781845074814_Elder_Kael_TRex_Warning.mp3",
+      "duration": "~13s",
+      "trigger": "player_first_trex_sight",
+      "spatial": false,
+      "npc_actor": "NPC_Elder_Kael_001",
+      "text": "Stay low. Stay quiet. The T-Rex hunts by sound and movement. If you run, it will chase you. If you freeze, it may pass. Your only chance is to be still — still as stone, still as the dead."
+    },
+    "Scout_Mira_RiverWarning": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781845077548_Scout_Mira_RiverWarning.mp3",
+      "duration": "~13s",
+      "trigger": "player_approaches_river_crossing",
+      "spatial": true,
+      "npc_actor": "NPC_Scout_Mira_001",
+      "spatial_location": [300, 3500, 75],
+      "text": "The river is rising. Three days of rain upstream — the crossing will be dangerous by nightfall. We move now, or we wait four days for the water to drop. The choice is yours, but choose fast."
+    },
+    "Elder_Kael_Navigation": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844935631_Elder_Kael.mp3",
+      "duration": "~23s",
+      "trigger": "dialogue_trigger_elder_001_enter",
+      "spatial": true,
+      "npc_actor": "NPC_Elder_Kael_001",
+      "spatial_location": [-200, -200, 80]
+    },
+    "Scout_Mira_WateringHole": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844939345_Scout_Mira.mp3",
+      "duration": "~18s",
+      "trigger": "dialogue_trigger_scout_001_enter",
+      "spatial": true,
+      "npc_actor": "NPC_Scout_Mira_001",
+      "spatial_location": [800, -400, 80]
+    },
+    "Elder_Kael_LoreValley": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844949735_Elder_Kael_Lore.mp3",
+      "duration": "~22s",
+      "trigger": "lore_stone_kill_site_interact",
+      "spatial": true,
+      "npc_actor": "LoreStone_KillSite_001",
+      "spatial_location": [1500, 500, 70]
+    },
+    "Elder_Kael_Training": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844952742_Elder_Kael_Training.mp3",
+      "duration": "~18s",
+      "trigger": "quest_Q004_training_start",
+      "spatial": false
+    }
+  },
+
+  "ambient_audio_zones": {
+    "AudioZone_KillSite_001": {
+      "ue5_actor": "AudioZone_KillSite_001",
+      "location": [1500, 500, 90],
+      "radius": 800,
+      "type": "danger",
+      "sounds": [
+        {
+          "description": "Distant predator low growl loop",
+          "freesound_query": "low growl predator distant loop",
+          "volume": 0.3,
+          "loop": true,
+          "spatial": true
+        },
+        {
+          "description": "Unsettled birds flushing",
+          "freesound_query": "birds flushing alarm call",
+          "volume": 0.5,
+          "loop": false,
+          "interval_min": 8,
+          "interval_max": 20
+        },
+        {
+          "description": "Wind through bones/dry grass",
+          "freesound_query": "wind dry grass rustle",
+          "volume": 0.4,
+          "loop": true
+        }
+      ],
+      "music_layer": {
+        "description": "Low tension drone — minor key, single sustained note",
+        "volume": 0.25,
+        "fade_in": 3.0,
+        "fade_out": 5.0
+      }
+    },
+    "AudioZone_RiverCrossing_001": {
+      "ue5_actor": "AudioZone_RiverCrossing_001",
+      "location": [300, 3500, 90],
+      "radius": 1000,
+      "type": "water_hazard",
+      "sounds": [
+        {
+          "description": "River flowing — moderate current",
+          "freesound_id": 579766,
+          "freesound_preview": "https://cdn.freesound.org/previews/579/579766_9435714-hq.mp3",
+          "note": "Use MuddyFootsteps2.WAV as footstep reference for mud/riverbank surface",
+          "volume": 0.7,
+          "loop": true,
+          "spatial": true
+        },
+        {
+          "description": "Water rushing over rocks",
+          "freesound_query": "river rapids water rushing rocks",
+          "volume": 0.5,
+          "loop": true
+        }
+      ],
+      "music_layer": {
+        "description": "Urgency pulse — faster rhythm, percussion-driven",
+        "volume": 0.3,
+        "fade_in": 2.0,
+        "fade_out": 4.0
+      }
+    },
+    "AudioZone_WateringHole_001": {
+      "ue5_actor": "AudioZone_WateringHole_001",
+      "location": [1200, -800, 80],
+      "radius": 700,
+      "type": "wildlife_gathering",
+      "sounds": [
+        {
+          "description": "Still water, insects, distant bird calls",
+          "freesound_query": "pond water insects birds ambient",
+          "volume": 0.6,
+          "loop": true
+        },
+        {
+          "description": "Large animal drinking/splashing",
+          "freesound_query": "large animal drinking water splashing",
+          "volume": 0.4,
+          "loop": false,
+          "interval_min": 15,
+          "interval_max": 40
+        }
+      ],
+      "music_layer": {
+        "description": "Calm observation — sparse, minimal, no percussion",
+        "volume": 0.2,
+        "fade_in": 4.0,
+        "fade_out": 6.0
+      }
+    },
+    "AudioZone_NorthCamp_001": {
+      "ue5_actor": "AudioZone_NorthCamp_001",
+      "location": [300, 7000, 100],
+      "radius": 500,
+      "type": "safe_destination",
+      "sounds": [
+        {
+          "description": "Fire crackling, distant voices, camp ambience",
+          "freesound_query": "campfire crackling fire wood burning",
+          "volume": 0.6,
+          "loop": true
+        },
+        {
+          "description": "Wind settling, calm night insects",
+          "freesound_query": "night insects crickets calm",
+          "volume": 0.4,
+          "loop": true
+        }
+      ],
+      "music_layer": {
+        "description": "Resolution theme — warm, major key, arrival motif",
+        "volume": 0.4,
+        "fade_in": 5.0,
+        "fade_out": 8.0
+      }
+    }
+  },
+
+  "footstep_surfaces": {
+    "description": "Surface-specific footstep audio variation system",
+    "surfaces": {
+      "mud_riverbank": {
+        "freesound_id": 840086,
+        "freesound_name": "Mud Footsteps",
+        "preview": "https://cdn.freesound.org/previews/840/840086_16786392-hq.mp3",
+        "trigger_zones": ["AudioZone_RiverCrossing_001"],
+        "volume": 0.8,
+        "pitch_variation": 0.1
+      },
+      "dry_dirt": {
+        "freesound_id": 370367,
+        "freesound_name": "Step On Dirt",
+        "preview": "https://cdn.freesound.org/previews/370/370367_6142149-hq.mp3",
+        "trigger_zones": ["AudioZone_KillSite_001", "default_savanna"],
+        "volume": 0.7,
+        "pitch_variation": 0.15
+      },
+      "wet_grass": {
+        "freesound_id": 403310,
+        "freesound_name": "Steps on a sump",
+        "preview": "https://cdn.freesound.org/previews/403/403310_7782492-hq.mp3",
+        "trigger_zones": ["AudioZone_WateringHole_001"],
+        "volume": 0.75,
+        "pitch_variation": 0.12
+      },
+      "peat_bog": {
+        "freesound_id": 579766,
+        "freesound_name": "MuddyFootsteps2",
+        "preview": "https://cdn.freesound.org/previews/579/579766_9435714-hq.mp3",
+        "trigger_zones": ["river_crossing_approach"],
+        "volume": 0.85,
+        "pitch_variation": 0.08
+      }
+    }
+  },
+
+  "migration_score": {
+    "description": "Adaptive music for Q004 migration sequence — tension builds as player moves north",
+    "quest_id": "Q004",
+    "waypoints": [
+      {
+        "y_position": 0,
+        "label": "tribe_camp",
+        "music_state": "calm_departure",
+        "tempo": "slow",
+        "key": "minor",
+        "instruments": ["bone_flute", "low_drum"]
+      },
+      {
+        "y_position": 1500,
+        "label": "open_savanna",
+        "music_state": "cautious_travel",
+        "tempo": "moderate",
+        "key": "minor",
+        "instruments": ["bone_flute", "low_drum", "tension_drone"]
+      },
+      {
+        "y_position": 3000,
+        "label": "river_approach",
+        "music_state": "urgency_rising",
+        "tempo": "faster",
+        "key": "minor",
+        "instruments": ["rapid_percussion", "tension_drone", "high_strings"]
+      },
+      {
+        "y_position": 4500,
+        "label": "post_river",
+        "music_state": "relief_brief",
+        "tempo": "moderate",
+        "key": "major",
+        "instruments": ["bone_flute", "soft_drum"]
+      },
+      {
+        "y_position": 5500,
+        "label": "danger_zone_north",
+        "music_state": "peak_tension",
+        "tempo": "fast",
+        "key": "minor",
+        "instruments": ["rapid_percussion", "tension_drone", "alarm_call_birds"]
+      },
+      {
+        "y_position": 7000,
+        "label": "north_camp_arrival",
+        "music_state": "resolution_arrival",
+        "tempo": "slow",
+        "key": "major",
+        "instruments": ["bone_flute", "warm_drum", "choir_breath"]
+      }
+    ],
+    "trex_proximity_override": {
+      "description": "When TRex within 1500 units — cut all music, play heartbeat + silence",
+      "music_volume": 0.0,
+      "heartbeat_volume": 0.6,
+      "heartbeat_bpm": 90,
+      "fade_time": 1.5
+    }
+  },
+
+  "ue5_audio_actors_placed": [
+    {"label": "AudioZone_KillSite_001",     "location": [1500, 500, 90],   "type": "danger"},
+    {"label": "AudioZone_RiverCrossing_001","location": [300, 3500, 90],   "type": "water_hazard"},
+    {"label": "AudioZone_WateringHole_001", "location": [1200, -800, 80],  "type": "wildlife"},
+    {"label": "AudioZone_NorthCamp_001",    "location": [300, 7000, 100],  "type": "safe_zone"},
+    {"label": "AudioTrigger_Elder_001",     "location": [-200, -200, 90],  "type": "dialogue"},
+    {"label": "AudioTrigger_Scout_001",     "location": [800, -400, 90],   "type": "dialogue"}
+  ]
+}
