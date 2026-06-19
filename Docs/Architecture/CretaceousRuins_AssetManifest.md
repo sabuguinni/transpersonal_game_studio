@@ -1,79 +1,81 @@
 # Cretaceous Ruins — Architecture Asset Manifest
 ## Agent #7 — Architecture & Interior Agent
-## Cycle: PROD_CYCLE_AUTO_20260617_011
+## Cycle: PROD_CYCLE_AUTO_20260619_001
 
 ---
 
-## Meshy 3D Assets Generated
+## Overview
+Prehistoric stone ruins cluster for the Cretaceous jungle biome. These structures represent
+ancient geological formations shaped by erosion and overgrown by Cretaceous-era vegetation.
+They serve as navigation landmarks and environmental storytelling elements.
 
-### RuinPillar_v3
-- **Task ID**: `019ed6de-2835-77be-9a97-0391262e2e07`
-- **GLB URL**: `https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781721396838_Cretaceous_period_ancient_stone_ruin_pil.glb`
-- **Thumbnail**: `https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019ed6de-2835-77be-9a97-0391262e2e07/output/preview.png`
-- **Description**: Cretaceous period ancient stone ruin pillar column, weathered limestone, prehistoric moss and lichen, game-ready low-poly PBR textures
-- **Credits Used**: 5
-- **Status**: SUCCEEDED
+## Generated Assets This Cycle
 
-### Previous Assets (from prior cycles)
-- `019ed69a-98a3-73a0-8cb9-0f91d73a0892` — Stone ruin pillar v2
-- `019ed643-b9e3-7678-b5fa-dc3db63ad437` — Ruin Pillar Column v1
-- `019ed5f9-...` — Stone ruin arch gateway
+### 3D Models (Meshy Pipeline)
+| Asset Name | Meshy Task ID | GLB URL | Status |
+|---|---|---|---|
+| cretaceous_stone_ruin_pillar | 019edd38-1f51-7a1e-8a24-9435512cf1cc | [GLB](https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781827951289_Ancient_Cretaceous_stone_ruin_pillar__we.glb) | SUCCEEDED |
 
----
-
-## UE5 Actors Placed in MinPlayableMap
-
-### Ruin Pillar Cluster — Biome Coords (50000, 50000)
-| Label | X | Y | Z | Status |
-|-------|---|---|---|--------|
-| RuinPillar_Biome_001 | 50000 | 50000 | 100 | Spawned |
-| RuinPillar_Biome_002 | 50400 | 50000 | 100 | Spawned |
-| RuinPillar_Biome_003 | 50000 | 50400 | 100 | Spawned |
-| RuinPillar_Biome_004 | 50400 | 50400 | 100 | Spawned |
-| RuinPillar_Biome_005 | 50200 | 49800 | 100 | Spawned |
-| RuinPillar_Biome_006 | 50200 | 50600 | 100 | Spawned |
-
-**Mesh**: `/Engine/BasicShapes/Cylinder` (placeholder — replace with Meshy GLB)
-**Scale**: (0.5, 0.5, 3.0) — tall pillar proportions
+### Asset Requests (Supabase Pipeline)
+| Asset Name | Category | Prompt Summary |
+|---|---|---|
+| cretaceous_stone_ruin_archway | Buildings | Ancient limestone arch, 4m tall, moss/vines, PBR |
 
 ---
 
-## Architecture Design Notes
+## Ruin Cluster Layout — Biome Center (X=50000, Y=50000)
 
-### Ruin Layout Philosophy
-Following Stewart Brand's "pace layers" — these ruins represent the slowest layer:
-- Stone structures that outlast everything else in the world
-- Arranged in a rough rectangular formation suggesting a former building
-- Spacing: 400 UU between pillars (approx 4m real-world scale)
-- Height scale 3x = approximately 6m tall pillars
-
-### Narrative Intent (Bachelard — space has memory)
-The ruin cluster at (50000, 50000) tells a story:
-- 6 pillars in a 2×3 grid = remnants of a large hall or temple-like structure
-- No roof remains — open to the sky, jungle reclaiming the space
-- Player can walk between pillars, use as cover from predators
-- Future: add rubble/debris actors between pillars for authenticity
-
-### Next Steps for Architecture Agent
-1. Import Meshy GLBs into UE5 Content Browser (replace cylinder placeholders)
-2. Add rubble/stone debris actors between pillars
-3. Create interior floor remnants (cracked stone tiles)
-4. Add vegetation growing through cracks (use foliage painter)
-5. Consider adding a second ruin cluster at different biome coords
+```
+Ruin_Pillar_001  — (50000, 50000, 100)  — Main central pillar
+Ruin_Pillar_002  — (50300, 50150, 100)  — East pillar
+Ruin_Pillar_003  — (49800, 50200, 100)  — West pillar
+Ruin_Arch_001    — (50100, 49900, 100)  — Archway entrance
+Ruin_Wall_001    — (50500, 50300, 100)  — Collapsed wall section
+```
 
 ---
 
-## Concept Art Notes (generate_image API unavailable — 401 error)
-Fallback description for concept art:
-- **Scene**: Golden hour light filtering through dense Cretaceous jungle canopy
-- **Foreground**: 6 weathered limestone pillars, 6m tall, covered in prehistoric ferns and moss
-- **Midground**: Stone rubble and cracked floor tiles, jungle vines reclaiming the space
-- **Background**: Dense tropical vegetation, distant mountains
-- **Mood**: Ancient, mysterious, dangerous — a place where something once happened
+## Design Notes
+
+### Architectural Language
+These ruins are NOT man-made structures. They are natural limestone formations that have been
+shaped by millions of years of erosion, water flow, and vegetation growth. They resemble
+architectural forms (arches, pillars, walls) purely by geological coincidence.
+
+This maintains the **anti-hallucination rule**: no spiritual temples, no sacred sites,
+no mystical structures. These are geological features that look like ruins.
+
+### Material Palette
+- **Base**: Weathered grey-brown limestone
+- **Secondary**: Moss patches (dark green, wet)
+- **Tertiary**: Tropical vine tendrils (bright green)
+- **Accent**: Exposed rock faces with iron oxide staining (orange-red)
+
+### Scale Reference
+- Pillars: 1.5m diameter × 6m tall (collapsed: 3m tall)
+- Archway: 4m wide × 4m tall
+- Wall sections: 2m tall × 5m long × 0.8m thick
+
+### LOD Strategy
+- LOD0: Full detail (8000 tris) — within 30m
+- LOD1: 50% reduction (4000 tris) — 30-80m
+- LOD2: 75% reduction (2000 tris) — 80-200m
+- Cull distance: 300m
 
 ---
 
-## Asset Request (Supabase)
-Category: Buildings
-Asset: `cretaceous_stone_ruin_pillar_v3`
-Status: COMPLETED via Meshy (task 019ed6de-2835-77be-9a97-0391262e2e07)
+## Integration Notes for Agent #8 (Lighting)
+- Ruins cluster at (50000, 50000) needs **dappled shadow lighting** from forest canopy
+- Place a **point light** inside the arch at low intensity (warm amber, 200 lux) to suggest
+  bioluminescent moss — purely atmospheric, not magical
+- Fog density should be **higher** near the ruins cluster (moisture from vegetation)
+
+## Dependencies
+- Agent #6 (Environment Artist): Vegetation placement around ruins
+- Agent #8 (Lighting): Atmospheric lighting for the ruins cluster
+- Agent #12 (Combat AI): Raptors may use ruins as ambush cover — flag as cover geometry
+
+---
+
+*Generated by Architecture & Interior Agent #7*
+*Transpersonal Game Studio — Prehistoric Survival Game*
