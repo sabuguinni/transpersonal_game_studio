@@ -1,0 +1,95 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "13 — Crowd & Traffic Simulation",
+  "crowd_systems": {
+    "herbivore_herds": {
+      "parasaurolophus_herd": {
+        "count": 5,
+        "labels": ["Parasaur_Herd_001","Parasaur_Herd_002","Parasaur_Herd_003","Parasaur_Herd_004","Parasaur_Herd_005"],
+        "behavior": "grazing",
+        "scatter_radius_cm": 150000,
+        "flee_speed_multiplier": 2.5,
+        "notes": "Congregate in open savanna, flee from TRex scatter zones"
+      },
+      "brachiosaurus_herd": {
+        "count": 5,
+        "labels": ["Brachio_Herd_001","Brachio_Herd_002","Brachio_Herd_003","Brachio_Herd_004","Brachio_Herd_005"],
+        "behavior": "slow_migration",
+        "notes": "Deployed in previous cycle — large body crowd agents"
+      }
+    },
+    "predator_detection": {
+      "scatter_zones": [
+        {"label": "ScatterZone_TRex_001", "location": [800, 600, 50], "radius_scale": 5.0, "trigger_class": "TriggerSphere"},
+        {"label": "ScatterZone_TRex_002", "location": [-900, 400, 50], "radius_scale": 5.0, "trigger_class": "TriggerSphere"},
+        {"label": "ScatterZone_Pack_001", "location": [200, -800, 50], "radius_scale": 5.0, "trigger_class": "TriggerSphere"}
+      ],
+      "behavior_on_trigger": "panic_scatter",
+      "scatter_pattern": "radial_flee",
+      "notes": "When predator enters zone, all herbivores within radius switch to flee behavior"
+    },
+    "watering_hole_system": {
+      "location": [-500, -500, 10],
+      "label": "WateringHole_Central_001",
+      "congregation_radius_cm": 60000,
+      "drinking_animals": 8,
+      "animal_labels_pattern": "SmallDino_WaterHole_NNN",
+      "behavior": "drinking_idle",
+      "time_of_day_peak": "dawn_dusk",
+      "notes": "Animals gather at dawn and dusk — peak congregation times"
+    },
+    "migration_system": {
+      "waypoints": [
+        {"label": "MigrationWP_North_001", "location": [0, 2000, 100]},
+        {"label": "MigrationWP_North_002", "location": [200, 1500, 100]},
+        {"label": "MigrationWP_North_003", "location": [-200, 1000, 100]},
+        {"label": "MigrationWP_South_001", "location": [0, -2000, 100]},
+        {"label": "MigrationWP_South_002", "location": [-300, -1500, 100]}
+      ],
+      "migration_direction": "seasonal_north_south",
+      "herd_spacing_cm": 30000,
+      "notes": "Seasonal migration routes — herds follow these paths during day cycle"
+    }
+  },
+  "crowd_behavior_states": {
+    "grazing": {
+      "description": "Default calm state — animals spread out eating vegetation",
+      "movement_speed": "slow",
+      "awareness_radius_cm": 80000
+    },
+    "drinking": {
+      "description": "Animals at watering hole — stationary, vulnerable",
+      "movement_speed": "none",
+      "awareness_radius_cm": 50000
+    },
+    "alert": {
+      "description": "Predator detected at range — animals stop and watch",
+      "movement_speed": "none",
+      "awareness_radius_cm": 120000
+    },
+    "panic_scatter": {
+      "description": "Predator within danger zone — full stampede",
+      "movement_speed": "sprint",
+      "awareness_radius_cm": 200000,
+      "scatter_pattern": "radial_away_from_threat"
+    },
+    "migration": {
+      "description": "Following seasonal migration path",
+      "movement_speed": "walk",
+      "awareness_radius_cm": 100000
+    }
+  },
+  "performance_targets": {
+    "max_simultaneous_agents": 50,
+    "lod_distances_cm": [1000, 3000, 8000],
+    "lod_behaviors": ["full_ai", "simplified_movement", "static_pose"],
+    "target_fps_impact": "less_than_5ms_per_frame"
+  },
+  "next_cycle_priorities": [
+    "Implement LOD switching for distant crowd agents",
+    "Add stampede physics — player can be knocked down by fleeing herd",
+    "Connect scatter zones to actual TRex actor positions (dynamic detection)",
+    "Add ambient crowd sounds — distant animal calls, footsteps"
+  ]
+}
