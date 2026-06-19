@@ -1,81 +1,80 @@
 // Copyright Transpersonal Game Studio. All Rights Reserved.
 
-#include "Core/GameFramework/TranspersonalCharacter.h"
-#include "Camera/CameraComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "TranspersonalCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "Core/Survival/SurvivalComponent.h"
+#include "Core/Physics/Core_RagdollSystem.h"
+#include "Core/Physics/Core_PhysicsSystemManager.h"
 
 DEFINE_LOG_CATEGORY(LogTranspersonalCharacter);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor
 // ─────────────────────────────────────────────────────────────────────────────
-
 ATranspersonalCharacter::ATranspersonalCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ── Capsule ──────────────────────────────────────────────────────────────
-    GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
+    // ── Camera Boom ──────────────────────────────────────────────────────────
+    CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
+    CameraBoom->SetupAttachment(RootComponent);
+    CameraBoom->TargetArmLength = 400.0f;
+    CameraBoom->bUsePawnControlRotation = true;
 
-    // ── Movement ─────────────────────────────────────────────────────────────
+    // ── Follow Camera ────────────────────────────────────────────────────────
+    FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
+    FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
+    FollowCamera->bUsePawnControlRotation = false;
+
+    // ── Survival Component ───────────────────────────────────────────────────
+    SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
+
+    // ── Physics Components ───────────────────────────────────────────────────
+    RagdollComponent = CreateDefaultSubobject<UCore_RagdollSystem>(TEXT("RagdollComponent"));
+    PhysicsManager   = CreateDefaultSubobject<UCore_PhysicsSystemManager>(TEXT("PhysicsManager"));
+
+    // ── Movement Defaults ────────────────────────────────────────────────────
     bUseControllerRotationPitch = false;
     bUseControllerRotationYaw   = false;
     bUseControllerRotationRoll  = false;
 
     GetCharacterMovement()->bOrientRotationToMovement = true;
     GetCharacterMovement()->RotationRate              = FRotator(0.0f, 500.0f, 0.0f);
-    GetCharacterMovement()->JumpZVelocity             = 700.f;
+    GetCharacterMovement()->JumpZVelocity             = 420.0f;
     GetCharacterMovement()->AirControl                = 0.35f;
-    GetCharacterMovement()->MaxWalkSpeed              = 500.f;
-    GetCharacterMovement()->MinAnalogWalkSpeed        = 20.f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
+    GetCharacterMovement()->MaxWalkSpeed              = 300.0f;
+    GetCharacterMovement()->MinAnalogWalkSpeed        = 20.0f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
 
-    // ── Camera Boom ───────────────────────────────────────────────────────────
-    CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
-    CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength         = 400.0f;
-    CameraBoom->bUsePawnControlRotation = true;
-
-    // ── Follow Camera ─────────────────────────────────────────────────────────
-    FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-    FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-    FollowCamera->bUsePawnControlRotation = false;
-
-    // ── Survival Component ────────────────────────────────────────────────────
-    SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
-
-    // ── Physics Components ────────────────────────────────────────────────────
-    RagdollComponent = CreateDefaultSubobject<UCore_RagdollSystem>(TEXT("RagdollComponent"));
-    PhysicsManager   = CreateDefaultSubobject<UCore_PhysicsSystemManager>(TEXT("PhysicsManager"));
-
-    // ── Default State ─────────────────────────────────────────────────────────
-    bIsHiding      = false;
-    bIsSneaking    = false;
-    bIsRunning     = false;
-    bIsRagdolled   = false;
+    // ── State Defaults ───────────────────────────────────────────────────────
+    bIsHiding       = false;
+    bIsSneaking     = false;
+    bIsRunning      = false;
+    bIsRagdolled    = false;
     bPhysicsEnabled = true;
-    CraftingLevel   = 1;
+
+    // ── Crafting Defaults ────────────────────────────────────────────────────
+    CraftingLevel      = 1;
     CraftingExperience = 0.0f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BeginPlay
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind Enhanced Input mapping context
+    // Add Enhanced Input Mapping Context
     if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
         if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
             if (DefaultMappingContext)
             {
@@ -84,24 +83,23 @@ void ATranspersonalCharacter::BeginPlay()
         }
     }
 
-    UE_LOG(LogTranspersonalCharacter, Log, TEXT("ATranspersonalCharacter::BeginPlay — SurvivalComp valid: %s"),
-           SurvivalComp ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("ATranspersonalCharacter::BeginPlay — SurvivalComp=%s"),
+        SurvivalComp ? TEXT("OK") : TEXT("NULL"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tick
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    UpdateMovementSpeed();
     UpdatePhysicsState(DeltaTime);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input Setup
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -145,25 +143,17 @@ void ATranspersonalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerI
 // ─────────────────────────────────────────────────────────────────────────────
 // Input Handlers
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::Move(const FInputActionValue& Value)
 {
     const FVector2D MovementVector = Value.Get<FVector2D>();
     if (Controller)
     {
         const FRotator Rotation    = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
+        const FRotator YawRotation(0.0f, Rotation.Yaw, 0.0f);
         const FVector  ForwardDir  = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         const FVector  RightDir    = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
         AddMovementInput(ForwardDir, MovementVector.Y);
         AddMovementInput(RightDir,   MovementVector.X);
-
-        // Drain stamina while running
-        if (bIsRunning && SurvivalComp)
-        {
-            SurvivalComp->ConsumeStamina(5.0f * GetWorld()->GetDeltaSeconds());
-        }
     }
 }
 
@@ -191,8 +181,12 @@ void ATranspersonalCharacter::StopSneaking()
 
 void ATranspersonalCharacter::StartRunning()
 {
-    bIsRunning = true;
-    UpdateMovementSpeed();
+    // Running costs stamina — check SurvivalComp
+    if (SurvivalComp && SurvivalComp->GetStamina() > 10.0f)
+    {
+        bIsRunning = true;
+        UpdateMovementSpeed();
+    }
 }
 
 void ATranspersonalCharacter::StopRunning()
@@ -204,29 +198,80 @@ void ATranspersonalCharacter::StopRunning()
 void ATranspersonalCharacter::Interact()
 {
     UE_LOG(LogTranspersonalCharacter, Log, TEXT("Interact triggered"));
+    // Interaction system — to be wired to InteractionComponent by Agent #11
 }
 
 void ATranspersonalCharacter::OpenCraftingMenu()
 {
-    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Crafting menu opened — level %d"), CraftingLevel);
+    UE_LOG(LogTranspersonalCharacter, Log, TEXT("Crafting menu opened — Level:%d"), CraftingLevel);
+    // UI wiring to be done by UI Agent
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Movement Speed
+// Movement Speed Update
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::UpdateMovementSpeed()
 {
-    float Speed = 500.f; // walk
-    if (bIsSneaking) Speed = 200.f;
-    if (bIsRunning)  Speed = 900.f;
-    GetCharacterMovement()->MaxWalkSpeed = Speed;
+    float TargetSpeed = 300.0f; // Walk
+
+    if (bIsSneaking)
+    {
+        TargetSpeed = 150.0f; // Sneak
+    }
+    else if (bIsRunning)
+    {
+        // Drain stamina while running
+        if (SurvivalComp)
+        {
+            SurvivalComp->ConsumeStamina(0.5f); // per tick — scaled by DeltaTime in SurvivalComp
+            if (SurvivalComp->GetStamina() <= 0.0f)
+            {
+                bIsRunning = false;
+                TargetSpeed = 300.0f;
+            }
+            else
+            {
+                TargetSpeed = 600.0f; // Sprint
+            }
+        }
+        else
+        {
+            TargetSpeed = 600.0f;
+        }
+    }
+
+    GetCharacterMovement()->MaxWalkSpeed = TargetSpeed;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Survival Delegates — thin wrappers to SurvivalComp
+// Physics State Update
 // ─────────────────────────────────────────────────────────────────────────────
+void ATranspersonalCharacter::UpdatePhysicsState(float DeltaTime)
+{
+    if (!bPhysicsEnabled) return;
+    // RagdollComponent drives its own tick — nothing to poll here
+}
 
+void ATranspersonalCharacter::HandleCollisionEvents()
+{
+    // Wired to OnComponentHit in future — placeholder for Agent #12 (Combat)
+}
+
+void ATranspersonalCharacter::ProcessRagdollTransition()
+{
+    if (bIsRagdolled)
+    {
+        EnableRagdoll();
+    }
+    else
+    {
+        DisableRagdoll();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Survival Delegates
+// ─────────────────────────────────────────────────────────────────────────────
 void ATranspersonalCharacter::ConsumeStamina(float Amount)
 {
     if (SurvivalComp) SurvivalComp->ConsumeStamina(Amount);
@@ -258,9 +303,8 @@ void ATranspersonalCharacter::RestoreThirst(float Amount)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Survival Getters — delegate to SurvivalComp
+// Survival Getters
 // ─────────────────────────────────────────────────────────────────────────────
-
 float ATranspersonalCharacter::GetHealthPercentage() const
 {
     return SurvivalComp ? SurvivalComp->GetHealthPercentage() : 1.0f;
@@ -287,12 +331,10 @@ float ATranspersonalCharacter::GetFearPercentage() const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Physics
+// Physics Functions
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATranspersonalCharacter::EnableRagdoll()
 {
-    if (bIsRagdolled) return;
     bIsRagdolled = true;
     GetMesh()->SetSimulatePhysics(true);
     GetCharacterMovement()->DisableMovement();
@@ -301,53 +343,31 @@ void ATranspersonalCharacter::EnableRagdoll()
 
 void ATranspersonalCharacter::DisableRagdoll()
 {
-    if (!bIsRagdolled) return;
     bIsRagdolled = false;
     GetMesh()->SetSimulatePhysics(false);
-    GetMesh()->AttachToComponent(GetCapsuleComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    GetMesh()->AttachToComponent(RootComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
     UE_LOG(LogTranspersonalCharacter, Log, TEXT("Ragdoll DISABLED"));
 }
 
 void ATranspersonalCharacter::ApplyImpact(const FVector& ImpactForce, const FVector& ImpactLocation)
 {
-    if (!bIsRagdolled)
+    if (GetMesh())
+    {
+        GetMesh()->AddImpulseAtLocation(ImpactForce, ImpactLocation);
+    }
+    // High-force impacts trigger ragdoll
+    if (ImpactForce.Size() > 5000.0f && !bIsRagdolled)
     {
         EnableRagdoll();
     }
-    GetMesh()->AddImpulseAtLocation(ImpactForce, ImpactLocation);
 }
 
 void ATranspersonalCharacter::SetPhysicsEnabled(bool bEnabled)
 {
     bPhysicsEnabled = bEnabled;
-    if (!bEnabled && bIsRagdolled)
+    if (RagdollComponent)
     {
-        DisableRagdoll();
+        RagdollComponent->SetComponentTickEnabled(bEnabled);
     }
-}
-
-void ATranspersonalCharacter::UpdatePhysicsState(float DeltaTime)
-{
-    // Auto-recover from ragdoll after 3s if still alive
-    if (bIsRagdolled && SurvivalComp && SurvivalComp->GetHealthPercentage() > 0.0f)
-    {
-        static float RagdollTimer = 0.0f;
-        RagdollTimer += DeltaTime;
-        if (RagdollTimer > 3.0f)
-        {
-            RagdollTimer = 0.0f;
-            DisableRagdoll();
-        }
-    }
-}
-
-void ATranspersonalCharacter::HandleCollisionEvents()
-{
-    // Handled via OnComponentHit delegates set up in Blueprint
-}
-
-void ATranspersonalCharacter::ProcessRagdollTransition()
-{
-    // Smooth blend between ragdoll and animation handled in AnimBP
 }
