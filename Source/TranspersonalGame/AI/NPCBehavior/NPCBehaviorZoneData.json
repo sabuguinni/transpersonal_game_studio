@@ -1,0 +1,93 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "NPC Behavior Agent #11",
+  "description": "NPC Behavior Zone layout for MinPlayableMap — all zones deployed as PointLight actors",
+  "zones": {
+    "TRex_Patrol_Circuit": {
+      "type": "patrol_loop",
+      "species": "TRex",
+      "behavior_state": "patrol",
+      "aggro_radius": 3000,
+      "attack_radius": 300,
+      "waypoints": [
+        { "label": "BTWaypoint_TRex_001", "location": [3000, 0, 100] },
+        { "label": "BTWaypoint_TRex_002", "location": [2000, 2500, 100] },
+        { "label": "BTWaypoint_TRex_003", "location": [-1000, 3500, 100] },
+        { "label": "BTWaypoint_TRex_004", "location": [-3000, 0, 100] },
+        { "label": "BTWaypoint_TRex_005", "location": [-2000, -2500, 100] },
+        { "label": "BTWaypoint_TRex_006", "location": [1000, -3000, 100] }
+      ],
+      "light_color": [1.0, 0.5, 0.1],
+      "notes": "T-Rex patrols large ellipse around savanna center. Aggro on player within 3000 units. Attack within 300 units."
+    },
+    "Raptor_PackAlpha_Ambush": {
+      "type": "pack_ambush",
+      "species": "Raptor",
+      "pack_size": 3,
+      "behavior_state": "forage_then_ambush",
+      "aggro_radius": 2000,
+      "attack_radius": 200,
+      "zones": [
+        { "label": "BTZone_Raptor_ForageA", "location": [1500, 4000, 100], "role": "forage_anchor" },
+        { "label": "BTZone_Raptor_AmushA",  "location": [1200, 3500, 100], "role": "ambush_trigger" },
+        { "label": "BTZone_Raptor_FlankL",  "location": [900,  3800, 100], "role": "flank_left" },
+        { "label": "BTZone_Raptor_FlankR",  "location": [1800, 3700, 100], "role": "flank_right" }
+      ],
+      "light_color": [1.0, 0.1, 0.1],
+      "notes": "Pack Alpha forages at forest edge. On player detection, Alpha charges front while Beta/Gamma flank left/right."
+    },
+    "Raptor_PackBeta_River": {
+      "type": "pack_ambush",
+      "species": "Raptor",
+      "pack_size": 2,
+      "behavior_state": "ambush_at_crossing",
+      "aggro_radius": 1500,
+      "attack_radius": 200,
+      "zones": [
+        { "label": "BTZone_Raptor_ForageB", "location": [-2000, 1500, 100], "role": "forage_anchor" },
+        { "label": "BTZone_Raptor_AmushB",  "location": [-1800, 1200, 100], "role": "ambush_trigger" },
+        { "label": "BTZone_Raptor_Retreat", "location": [-2500, 2000, 100], "role": "retreat_point" }
+      ],
+      "light_color": [1.0, 0.1, 0.1],
+      "notes": "Pack Beta waits at river crossing. Retreat point used when pack health drops below 30%."
+    },
+    "Brachiosaurus_Grazing_Herd": {
+      "type": "peaceful_grazing",
+      "species": "Brachiosaurus",
+      "herd_size": 3,
+      "behavior_state": "graze",
+      "aggro_radius": 500,
+      "attack_radius": 800,
+      "zones": [
+        { "label": "BTZone_Brachio_Graze1", "location": [4000, -1000, 100], "role": "graze_point" },
+        { "label": "BTZone_Brachio_Graze2", "location": [4500, 500,   100], "role": "graze_point" },
+        { "label": "BTZone_Brachio_Graze3", "location": [3500, 1500,  100], "role": "graze_point" },
+        { "label": "BTZone_Brachio_Water",  "location": [4200, -2000, 100], "role": "water_source" }
+      ],
+      "light_color": [0.1, 1.0, 0.2],
+      "notes": "Herd grazes peacefully. Passive unless player gets within 500 units. Stampede if startled — deals massive knockback damage."
+    }
+  },
+  "voice_lines": {
+    "SurvivorNarrator": {
+      "context": "raptor_encounter_tip",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844460468_SurvivorNarrator.mp3",
+      "text": "Stay low. The raptors hunt in packs — they will flank you from both sides. If you run, they will chase. If you freeze and crouch behind cover, they may lose your scent. Wait for them to separate before you move."
+    },
+    "ElderTribeswoman": {
+      "context": "trex_encounter_warning",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844462891_ElderTribeswoman.mp3",
+      "text": "The big one is territorial. Stay outside its patrol range and it will ignore you. Cross into its territory and it will not stop until one of you is dead. There is no outrunning a T-Rex. Find cover. Go underground. Or climb."
+    }
+  },
+  "behavior_tree_states": {
+    "TRex": ["Idle", "Patrol", "Investigate", "Chase", "Attack", "ReturnToPatrol"],
+    "Raptor": ["Forage", "Alert", "Coordinate", "FlankLeft", "FlankRight", "Attack", "Retreat"],
+    "Brachiosaurus": ["Graze", "Drink", "Rest", "Alert", "Stampede"]
+  },
+  "next_agent_handoff": {
+    "agent": "#12 Combat & Enemy AI Agent",
+    "priority": "Implement combat damage logic for T-Rex attack (300 damage/hit), Raptor claw (80 damage), Brachiosaurus stomp (200 damage AoE). Use BTWaypoint_TRex_* and BTZone_Raptor_* as anchor positions for AI controller spawning."
+  }
+}
