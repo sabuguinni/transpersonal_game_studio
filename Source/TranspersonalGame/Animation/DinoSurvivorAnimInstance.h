@@ -4,11 +4,6 @@
 #include "Animation/AnimInstance.h"
 #include "DinoSurvivorAnimInstance.generated.h"
 
-/**
- * Animation Instance for the Transpersonal Survivor (player character).
- * Drives idle/walk/run/jump/crouch states via blend spaces.
- * Foot IK is applied per-frame to adapt to uneven prehistoric terrain.
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivorAnimInstance : public UAnimInstance
 {
@@ -20,110 +15,64 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion ────────────────────────────────────────────────────────────
+    // Movement state
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    float Speed;
 
-    /** Ground speed (cm/s) — drives the walk/run blend space axis */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
-    float GroundSpeed;
-
-    /** Lateral direction offset (-180..180) — used for strafe blending */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     float Direction;
 
-    /** True while the character is airborne */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     bool bIsInAir;
 
-    /** True while the character is crouching */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     bool bIsCrouching;
 
-    /** True when the character is sprinting (speed > SprintThreshold) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     bool bIsSprinting;
 
-    /** True when the character is completely still */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
-    bool bIsIdle;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    float LeanAngle;
 
-    // ── Survival State ────────────────────────────────────────────────────────
+    // Survival state
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float StaminaNormalized;
 
-    /** Fear level 0-1 — affects animation urgency/trembling */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
-              meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
     float FearLevel;
 
-    /** Stamina 0-1 — affects run posture when low */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
-              meta = (AllowPrivateAccess = "true"))
-    float StaminaRatio;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    bool bIsExhausted;
 
-    /** Health 0-1 — triggers wounded limp below 0.3 */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
-              meta = (AllowPrivateAccess = "true"))
-    float HealthRatio;
+    // IK
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector LeftFootIKLocation;
 
-    /** True when health < 0.3 — activates wounded locomotion layer */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
-              meta = (AllowPrivateAccess = "true"))
-    bool bIsWounded;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector RightFootIKLocation;
 
-    // ── Foot IK ───────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    float IKAlpha;
 
-    /** World-space target for left foot IK */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK",
-              meta = (AllowPrivateAccess = "true"))
-    FVector LeftFootIKTarget;
+    // Aiming
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Aiming")
+    float AimPitch;
 
-    /** World-space target for right foot IK */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK",
-              meta = (AllowPrivateAccess = "true"))
-    FVector RightFootIKTarget;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Aiming")
+    float AimYaw;
 
-    /** Pelvis vertical offset to keep feet on ground */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK",
-              meta = (AllowPrivateAccess = "true"))
-    float PelvisOffset;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Aiming")
+    bool bIsAiming;
 
-    /** Alpha for foot IK blending (0=off, 1=full) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK",
-              meta = (AllowPrivateAccess = "true"))
-    float FootIKAlpha;
-
-    // ── Thresholds (configurable) ─────────────────────────────────────────────
-
-    /** Speed above which the character is considered sprinting */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
-    float SprintThreshold;
-
-    /** Speed below which the character is considered idle */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
-    float IdleThreshold;
-
-    /** Trace distance for foot IK ground detection */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
-    float FootIKTraceDistance;
-
-protected:
-    /** Cached owner pawn */
+private:
     UPROPERTY()
     class ACharacter* OwnerCharacter;
 
-    /** Update locomotion variables from movement component */
-    void UpdateLocomotionVariables();
-
-    /** Update survival state from character stats */
-    void UpdateSurvivalVariables();
-
-    /** Perform foot IK traces and compute pelvis offset */
+    void UpdateMovementState(float DeltaSeconds);
+    void UpdateSurvivalState();
     void UpdateFootIK();
+    void UpdateAimState();
 
-    /** Trace a single foot to the ground, returns hit world location */
-    FVector TraceFootToGround(const FName& FootSocketName, float& OutHitZ) const;
+    float SmoothSpeed;
+    float SmoothLean;
 };
