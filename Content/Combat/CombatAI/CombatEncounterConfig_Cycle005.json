@@ -1,0 +1,94 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "Combat_EnemyAI_Agent_12",
+  "combat_encounter_zones": {
+    "trex_combat": {
+      "attack_zones": [
+        {"label": "CombatZone_TRex_Attack_N",  "location": [1000, 2000, 150],  "radius": 300,  "color": "red",    "trigger": "attack"},
+        {"label": "CombatZone_TRex_Attack_S",  "location": [1000, -2000, 150], "radius": 300,  "color": "red",    "trigger": "attack"},
+        {"label": "CombatZone_TRex_Attack_E",  "location": [3000, 0, 150],     "radius": 300,  "color": "red",    "trigger": "attack"}
+      ],
+      "alert_zones": [
+        {"label": "CombatZone_TRex_Alert_N",   "location": [1000, 2000, 200],  "radius": 1500, "color": "orange", "trigger": "alert"},
+        {"label": "CombatZone_TRex_Alert_S",   "location": [1000, -2000, 200], "radius": 1500, "color": "orange", "trigger": "alert"}
+      ],
+      "chase_corridor": [
+        {"label": "Combat_TRex_Chase_Start",   "location": [500, 0, 200],      "radius": 800,  "color": "red",    "trigger": "chase_begin"},
+        {"label": "Combat_TRex_Chase_Mid",     "location": [1500, 0, 200],     "radius": 800,  "color": "red",    "trigger": "chase_active"},
+        {"label": "Combat_TRex_Chase_End",     "location": [2800, 0, 200],     "radius": 800,  "color": "red",    "trigger": "chase_end"}
+      ],
+      "behavior_params": {
+        "patrol_speed": 300,
+        "alert_speed": 500,
+        "chase_speed": 900,
+        "attack_radius": 300,
+        "alert_radius": 1500,
+        "sight_radius": 2500,
+        "hearing_radius": 1800,
+        "attack_damage": 85,
+        "attack_cooldown_sec": 2.5,
+        "stomp_aoe_radius": 400,
+        "stomp_damage": 40,
+        "roar_fear_radius": 3000,
+        "roar_fear_duration_sec": 5.0,
+        "states": ["Patrol", "Alert", "Chase", "Attack", "Roar", "Idle"]
+      }
+    },
+    "raptor_pack_combat": {
+      "ambush_formation": [
+        {"label": "Combat_Raptor_Ambush_Alpha",  "location": [200, 600, 100],   "radius": 250, "color": "cyan",  "role": "alpha_frontal"},
+        {"label": "Combat_Raptor_Ambush_Beta",   "location": [-400, 300, 100],  "radius": 250, "color": "cyan",  "role": "beta_left_flank"},
+        {"label": "Combat_Raptor_Ambush_Gamma",  "location": [-400, -300, 100], "radius": 250, "color": "cyan",  "role": "gamma_right_flank"}
+      ],
+      "flanking_zones": [
+        {"label": "CombatZone_Raptor_Flank_L",  "location": [-500, 800, 150],  "radius": 400, "color": "cyan",  "trigger": "flank_left"},
+        {"label": "CombatZone_Raptor_Flank_R",  "location": [-500, -800, 150], "radius": 400, "color": "cyan",  "trigger": "flank_right"},
+        {"label": "CombatZone_Raptor_Ambush",   "location": [-1500, 0, 150],   "radius": 400, "color": "cyan",  "trigger": "ambush_spring"}
+      ],
+      "behavior_params": {
+        "pack_size": 3,
+        "pack_coordination": true,
+        "flanking_enabled": true,
+        "alpha_role": "frontal_distraction",
+        "beta_role": "left_flank_strike",
+        "gamma_role": "right_flank_strike",
+        "patrol_speed": 400,
+        "chase_speed": 1100,
+        "attack_radius": 180,
+        "alert_radius": 800,
+        "sight_radius": 1200,
+        "hearing_radius": 600,
+        "attack_damage": 35,
+        "attack_cooldown_sec": 1.2,
+        "pack_scatter_threshold": 0.3,
+        "states": ["Patrol", "Stalk", "Flank", "Ambush", "Attack", "Retreat"]
+      }
+    }
+  },
+  "escape_routes": [
+    {"label": "Combat_EscapeRoute_Cave",   "location": [-800, 1200, 150],  "radius": 600, "type": "cave_entrance",  "safe": true},
+    {"label": "Combat_EscapeRoute_River",  "location": [-1200, 0, 150],    "radius": 600, "type": "river_crossing",  "safe": true},
+    {"label": "Combat_EscapeRoute_Trees",  "location": [0, -1500, 150],    "radius": 600, "type": "dense_forest",    "safe": true}
+  ],
+  "voice_lines": {
+    "combat_narrator_trex": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781848973851_CombatNarrator.mp3",
+    "combat_narrator_raptor": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781848975000_CombatNarrator.mp3",
+    "trigger_trex_alert": "player_enters_alert_zone",
+    "trigger_raptor_ambush": "player_enters_ambush_zone"
+  },
+  "cumulative_combat_actors": {
+    "cycle_002": ["BT_State_Idle", "BT_State_Alert", "BT_State_Chase", "BT_State_Attack", "BT_State_Flee"],
+    "cycle_003": ["BT_Anchor_Brachio", "BT_Anchor_Raptor", "BT_Anchor_TRex", "BT_Anchor_NPC"],
+    "cycle_004": ["BTWaypoint_TRex_001..006"],
+    "cycle_005_agent11": ["BTWaypoint_Raptor_001..004", "NPC_Tribal_Camp_Center", "NPC_Tribal_Guard_N", "NPC_Tribal_Guard_S", "NPC_Tribal_Gatherer_001", "NPC_Tribal_Gatherer_002"],
+    "cycle_005_agent12": [
+      "CombatZone_TRex_Attack_N", "CombatZone_TRex_Attack_S", "CombatZone_TRex_Attack_E",
+      "CombatZone_TRex_Alert_N", "CombatZone_TRex_Alert_S",
+      "CombatZone_Raptor_Flank_L", "CombatZone_Raptor_Flank_R", "CombatZone_Raptor_Ambush",
+      "Combat_Raptor_Ambush_Alpha", "Combat_Raptor_Ambush_Beta", "Combat_Raptor_Ambush_Gamma",
+      "Combat_TRex_Chase_Start", "Combat_TRex_Chase_Mid", "Combat_TRex_Chase_End",
+      "Combat_EscapeRoute_Cave", "Combat_EscapeRoute_River", "Combat_EscapeRoute_Trees"
+    ],
+    "total_combat_actors": 17
+  }
+}
