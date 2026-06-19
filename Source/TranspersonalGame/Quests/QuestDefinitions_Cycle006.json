@@ -1,0 +1,210 @@
+{
+  "quest_system": {
+    "version": "cycle_006",
+    "agent": "Quest_Mission_Designer_14",
+    "cycle": "PROD_CYCLE_AUTO_20260619_006",
+    "total_quests_defined": 5
+  },
+
+  "quests": [
+    {
+      "id": "QUEST_001",
+      "name": "The Migration",
+      "type": "exploration",
+      "status": "implemented_cycle_003",
+      "trigger_actor": "QuestTrigger_Migration_Start",
+      "objectives": [
+        "Follow the herd trail north",
+        "Observe the Brachiosaurus crossing",
+        "Return to camp before nightfall"
+      ],
+      "reward": "Unlock Zone A exploration",
+      "danger_level": "low"
+    },
+    {
+      "id": "QUEST_002",
+      "name": "Observe the Herd at Dawn",
+      "type": "exploration_stealth",
+      "status": "implemented_cycle_004",
+      "trigger_actor": "QuestTrigger_ObserveHerd_Start",
+      "objectives": [
+        "Reach observation point before sunrise",
+        "Stay within 500u of herd without startling them",
+        "Count herd members (minimum 3)"
+      ],
+      "reward": "Herd behavior knowledge — predict migration timing",
+      "danger_level": "low"
+    },
+    {
+      "id": "QUEST_003",
+      "name": "The Herd Moves",
+      "type": "escort_survival",
+      "status": "implemented_cycle_006",
+      "trigger_actor": "QuestTrigger_HerdMoves_Start",
+      "trigger_location": [1800, 2800, 200],
+      "objectives": [
+        {
+          "step": 1,
+          "description": "Approach the Brachiosaurus herd leader",
+          "actor": "QuestObj_HerdMoves_ApproachHerd",
+          "location": [2000, 3000, 200]
+        },
+        {
+          "step": 2,
+          "description": "Lead the herd along the migration corridor (3 waypoints)",
+          "actors": [
+            "QuestObj_HerdMoves_Waypoint_A",
+            "QuestObj_HerdMoves_Waypoint_B",
+            "QuestObj_HerdMoves_Waypoint_C"
+          ],
+          "mechanic": "Player makes noise/throws rocks to steer herd direction"
+        },
+        {
+          "step": 3,
+          "description": "Reach Zone B safe grazing area before T-Rex enters exclusion zone",
+          "actor": "QuestObj_HerdMoves_SafeZone",
+          "location": [-2800, 1500, 180],
+          "time_pressure": "T-Rex patrol cycle: 120 seconds"
+        }
+      ],
+      "danger_actor": "QuestDanger_TRex_Approach",
+      "danger_location": [3200, 3500, 200],
+      "failure_condition": "T-Rex reaches Brachio herd before player escorts them to Zone B",
+      "reward": "Tribe trust +2, unlock Zone B camp access",
+      "danger_level": "high",
+      "npc_voice": {
+        "character": "TribeElder_HerdMoves",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853846520_TribeElder_HerdMoves.mp3",
+        "line": "The herd is moving. I saw the great lizards walking west before dawn. If the thunder beast comes from the ridge, they will be trapped. You must go ahead — make noise, drive them to the river valley. We cannot lose the herd. Without them, we starve before the cold season."
+      }
+    },
+    {
+      "id": "QUEST_004",
+      "name": "Warn the Tribe",
+      "type": "survival_sprint",
+      "status": "implemented_cycle_006",
+      "trigger_actor": "QuestTrigger_WarnTribe_Start",
+      "trigger_location": [800, -800, 190],
+      "trigger_condition": "Raptors breach ExclusionBound_Raptor_N",
+      "objectives": [
+        {
+          "step": 1,
+          "description": "Detect Raptor breach at northern exclusion boundary",
+          "actor": "QuestTrigger_WarnTribe_Start",
+          "mechanic": "Player sees Raptors crossing orange exclusion light marker"
+        },
+        {
+          "step": 2,
+          "description": "Sprint to tribe camp before Raptors arrive",
+          "actor": "QuestObj_WarnTribe_ReachCamp",
+          "location": [500, -1200, 190],
+          "time_pressure": "Raptors travel at 2.5x player speed — player has ~45 seconds"
+        },
+        {
+          "step": 3,
+          "description": "Alert Tribe Elder",
+          "actor": "NPC_TribeElder_QuestGiver",
+          "location": [400, -1100, 190],
+          "mechanic": "Interact with NPC_TribeElder_QuestGiver to trigger camp scatter"
+        }
+      ],
+      "failure_condition": "Raptors reach camp before player warns tribe",
+      "reward": "Tribe trust +3, tribe scouts begin patrolling raptor boundary",
+      "danger_level": "critical",
+      "npc_voice": {
+        "character": "TribeScout_WarnTribe",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853849089_TribeScout_WarnTribe.mp3",
+        "line": "Run! The fanged ones — they crossed the stone boundary to the north. I counted three, maybe four. The camp is not safe. You must warn the others before they reach the sleeping ground. Go now. Do not stop."
+      }
+    },
+    {
+      "id": "QUEST_005",
+      "name": "First Blood",
+      "type": "crafting_hunt",
+      "status": "implemented_cycle_006",
+      "trigger_actor": "QuestTrigger_FirstBlood_Start",
+      "trigger_location": [-500, 500, 195],
+      "objectives": [
+        {
+          "step": 1,
+          "description": "Gather crafting materials: 2 rocks + 1 stick",
+          "mechanic": "Pick up resource actors (Rock_Pickup, Stick_Pickup) near craft station",
+          "required_items": ["Rock x2", "Stick x1"]
+        },
+        {
+          "step": 2,
+          "description": "Craft a Stone Axe at the craft station",
+          "actor": "QuestObj_FirstBlood_CraftStation",
+          "location": [-300, 600, 195],
+          "mechanic": "Press C near craft station to open crafting menu — select Stone Axe recipe"
+        },
+        {
+          "step": 3,
+          "description": "Hunt a small dinosaur in the hunt zone",
+          "actor": "QuestObj_FirstBlood_HuntZone",
+          "location": [-800, 200, 195],
+          "target": "Juvenile Raptor (1 hit kill with Stone Axe)",
+          "mechanic": "Stealth approach + single strike — or throw rock to distract first"
+        }
+      ],
+      "reward": "Stone Axe (permanent), meat resource, unlock crafting system",
+      "danger_level": "medium",
+      "design_note": "This quest teaches the full crafting loop: gather → craft → use. Emotional beat: player's first kill is a small, vulnerable creature — intentional moral weight."
+    }
+  ],
+
+  "quest_map_actors": {
+    "cycle_003": ["QuestTrigger_Migration_Start"],
+    "cycle_004": ["QuestTrigger_ObserveHerd_Start", "QuestObj_ObserveHerd_Position"],
+    "cycle_006": [
+      "QuestTrigger_HerdMoves_Start",
+      "QuestObj_HerdMoves_ApproachHerd",
+      "QuestObj_HerdMoves_Waypoint_A",
+      "QuestObj_HerdMoves_Waypoint_B",
+      "QuestObj_HerdMoves_Waypoint_C",
+      "QuestObj_HerdMoves_SafeZone",
+      "QuestDanger_TRex_Approach",
+      "QuestTrigger_WarnTribe_Start",
+      "QuestObj_WarnTribe_ReachCamp",
+      "NPC_TribeElder_QuestGiver",
+      "QuestTrigger_FirstBlood_Start",
+      "QuestObj_FirstBlood_HuntZone",
+      "QuestObj_FirstBlood_CraftStation"
+    ]
+  },
+
+  "voice_assets": {
+    "TribeElder_HerdMoves": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853846520_TribeElder_HerdMoves.mp3",
+    "TribeScout_WarnTribe": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853849089_TribeScout_WarnTribe.mp3"
+  },
+
+  "narrative_handoff": {
+    "to_agent": "Narrative_Dialogue_Agent_15",
+    "npc_requiring_full_dialogue": [
+      {
+        "actor": "NPC_TribeElder_QuestGiver",
+        "location": [400, -1100, 190],
+        "role": "Quest giver for Quests 3, 4, 5 — tribe elder who tracks predator movements and assigns survival tasks",
+        "personality": "Pragmatic, experienced, no-nonsense — survival is the only philosophy",
+        "quest_lines_needed": [
+          "Quest 3 intro: send player to escort herd",
+          "Quest 3 success: relief + practical reward",
+          "Quest 4 intro: alarm at raptor breach",
+          "Quest 4 success: gratitude + warning about future breaches",
+          "Quest 5 intro: teach player to craft first weapon",
+          "Quest 5 success: acknowledge player as hunter"
+        ]
+      },
+      {
+        "actor": "HumanNPC_Tribe_GrZ_C_001",
+        "role": "Tribe scout — first contact NPC, warns player about predator zones",
+        "personality": "Young, nervous, eager to prove worth to tribe"
+      }
+    ],
+    "lore_hooks": [
+      "Why does the tribe track the Brachio herd? — Brachio migration predicts seasonal changes",
+      "What happened to the previous tribe camp? — Destroyed by T-Rex territorial expansion",
+      "Why do Raptors keep pushing north? — Their southern territory was flooded"
+    ]
+  }
+}
