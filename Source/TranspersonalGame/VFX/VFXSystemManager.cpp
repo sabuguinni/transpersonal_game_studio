@@ -1,174 +1,139 @@
 #include "VFXSystemManager.h"
 #include "Engine/World.h"
-#include "NiagaraFunctionLibrary.h"
+#include "GameFramework/Actor.h"
+#include "Components/PointLightComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
 
-void UVFX_SystemManager::Initialize(FSubsystemCollectionBase& Collection)
+UVFX_SystemManager::UVFX_SystemManager()
 {
-    Super::Initialize(Collection);
-    InitializeEffectLibrary();
-    UE_LOG(LogTemp, Warning, TEXT("VFX System Manager Initialized"));
+    PrimaryComponentTick.bCanEverTick = true;
+    GlobalVFXQuality = 1.0f;
+    MaxActiveParticleSystems = 32;
+    bEnableLOD = true;
+    LOD_HighQualityDistance = 1500.0f;
+    LOD_MediumQualityDistance = 4000.0f;
+    ActiveParticleCount = 0;
 }
 
-void UVFX_SystemManager::Deinitialize()
+void UVFX_SystemManager::BeginPlay()
 {
-    EffectLibrary.Empty();
-    Super::Deinitialize();
+    Super::BeginPlay();
 }
 
-void UVFX_SystemManager::InitializeEffectLibrary()
+void UVFX_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // Initialize fire effect
-    FVFX_EffectData FireData;
-    FireData.Duration = 5.0f;
-    FireData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Fire, FireData);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Initialize dust effect
-    FVFX_EffectData DustData;
-    DustData.Duration = 2.0f;
-    DustData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Dust, DustData);
-
-    // Initialize blood effect
-    FVFX_EffectData BloodData;
-    BloodData.Duration = 3.0f;
-    BloodData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Blood, BloodData);
-
-    // Initialize water effect
-    FVFX_EffectData WaterData;
-    WaterData.Duration = 4.0f;
-    WaterData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Water, WaterData);
-
-    // Initialize impact effect
-    FVFX_EffectData ImpactData;
-    ImpactData.Duration = 1.5f;
-    ImpactData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Impact, ImpactData);
-
-    // Initialize footstep effect
-    FVFX_EffectData FootstepData;
-    FootstepData.Duration = 1.0f;
-    FootstepData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Footstep, FootstepData);
-
-    // Initialize breath effect
-    FVFX_EffectData BreathData;
-    BreathData.Duration = 2.0f;
-    BreathData.Scale = 1.0f;
-    EffectLibrary.Add(EVFX_EffectType::Breath, BreathData);
-}
-
-void UVFX_SystemManager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, float Scale)
-{
-    if (!EffectLibrary.Contains(EffectType))
+    // Cull distant particle systems for performance
+    if (bEnableLOD && GetOwner())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Effect type not found in library"));
-        return;
-    }
-
-    const FVFX_EffectData& EffectData = EffectLibrary[EffectType];
-    
-    if (EffectData.ParticleSystem)
-    {
-        SpawnNiagaraEffect(EffectData.ParticleSystem, Location, Rotation, Scale);
-    }
-
-    if (EffectData.Sound)
-    {
-        PlayEffectSound(EffectData.Sound, Location);
+        FVector PlayerLoc = GetOwner()->GetActorLocation();
+        for (AActor* Campfire : ActiveCampfires)
+        {
+            if (!Campfire) continue;
+            float Dist = FVector::Dist(PlayerLoc, Campfire->GetActorLocation());
+            // LOD: disable light beyond medium distance
+            UPointLightComponent* Light = Campfire->FindComponentByClass<UPointLightComponent>();
+            if (Light)
+            {
+                Light->SetVisibility(Dist < LOD_MediumQualityDistance);
+            }
+        }
     }
 }
 
-void UVFX_SystemManager::SpawnFootstepEffect(FVector Location, bool bIsLarge)
+void UVFX_SystemManager::SpawnCampfireEffect(const FVFX_CampfireData& CampfireData)
 {
-    float Scale = bIsLarge ? 2.0f : 1.0f;
-    SpawnEffect(EVFX_EffectType::Footstep, Location, FRotator::ZeroRotator, Scale);
-    
-    // Add dust for large footsteps
-    if (bIsLarge)
+    if (!GetWorld()) return;
+    if (ActiveParticleCount >= MaxActiveParticleSystems) return;
+
+    // Spawn a point light actor to represent campfire glow
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    // Use a basic actor as campfire anchor
+    AActor* CampfireActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), CampfireData.Location, FRotator::ZeroRotator, Params);
+    if (CampfireActor)
     {
-        FVector DustLocation = Location + FVector(0, 0, 10);
-        SpawnEffect(EVFX_EffectType::Dust, DustLocation, FRotator::ZeroRotator, Scale * 1.5f);
+        CampfireActor->SetActorLabel(FString::Printf(TEXT("VFX_Campfire_%d"), ActiveCampfires.Num() + 1));
+
+        UPointLightComponent* FireLight = NewObject<UPointLightComponent>(CampfireActor);
+        if (FireLight)
+        {
+            FireLight->RegisterComponent();
+            FireLight->AttachToComponent(CampfireActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+            FireLight->SetIntensity(CampfireData.Intensity);
+            FireLight->SetLightColor(CampfireData.FireColor);
+            FireLight->SetAttenuationRadius(CampfireData.AttenuationRadius);
+            FireLight->SetVisibility(CampfireData.bIsActive);
+        }
+
+        ActiveCampfires.Add(CampfireActor);
+        ActiveParticleCount++;
     }
 }
 
-void UVFX_SystemManager::SpawnImpactEffect(FVector Location, FVector Normal)
+void UVFX_SystemManager::SpawnFootstepDust(const FVFX_FootstepData& FootstepData)
 {
-    FRotator ImpactRotation = Normal.Rotation();
-    SpawnEffect(EVFX_EffectType::Impact, Location, ImpactRotation, 1.0f);
+    if (!GetWorld()) return;
+
+    // Footstep dust: spawn a brief point light flash at impact location
+    // In full implementation, this would trigger a Niagara NS_Dino_Footstep system
+    // For now, log the impact for debugging
+    UE_LOG(LogTemp, Log, TEXT("VFX_FootstepDust: Species=%s Loc=(%f,%f,%f) Force=%f"),
+        *FootstepData.DinosaurSpecies.ToString(),
+        FootstepData.ImpactLocation.X,
+        FootstepData.ImpactLocation.Y,
+        FootstepData.ImpactLocation.Z,
+        FootstepData.ImpactForce);
 }
 
-void UVFX_SystemManager::SpawnFireEffect(FVector Location, float Intensity)
+void UVFX_SystemManager::SetWeatherIntensity(float RainIntensity, float FogDensity, float WindStrength)
 {
-    float Scale = FMath::Clamp(Intensity, 0.5f, 3.0f);
-    SpawnEffect(EVFX_EffectType::Fire, Location, FRotator::ZeroRotator, Scale);
+    WeatherRainIntensity = FMath::Clamp(RainIntensity, 0.0f, 1.0f);
+    WeatherFogDensity = FMath::Clamp(FogDensity, 0.0f, 1.0f);
+    WeatherWindStrength = FMath::Clamp(WindStrength, 0.0f, 1.0f);
+
+    // Apply fog density to ExponentialHeightFog if present
+    if (GetWorld())
+    {
+        TArray<AActor*> FogActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FogActors);
+        for (AActor* FogActor : FogActors)
+        {
+            AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActor);
+            if (Fog)
+            {
+                UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
+                if (FogComp)
+                {
+                    FogComp->SetFogDensity(WeatherFogDensity * 0.05f);
+                    FogComp->SetFogInscatteringColor(FLinearColor(0.6f, 0.7f, 0.8f, 1.0f));
+                }
+            }
+        }
+    }
 }
 
-void UVFX_SystemManager::SpawnBloodEffect(FVector Location, FVector Direction)
+void UVFX_SystemManager::SpawnBloodImpact(FVector Location, FVector Direction, float Intensity)
 {
-    FRotator BloodRotation = Direction.Rotation();
-    SpawnEffect(EVFX_EffectType::Blood, Location, BloodRotation, 1.0f);
+    if (!GetWorld()) return;
+
+    // Blood impact: in full implementation triggers NS_Combat_BloodSplatter Niagara system
+    // Intensity drives particle count and spread radius
+    float ClampedIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("VFX_BloodImpact: Loc=(%f,%f,%f) Dir=(%f,%f,%f) Intensity=%f"),
+        Location.X, Location.Y, Location.Z,
+        Direction.X, Direction.Y, Direction.Z,
+        ClampedIntensity);
 }
 
-void UVFX_SystemManager::SpawnWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Radius)
+void UVFX_SystemManager::SpawnVolcanicAsh(FVector SourceLocation, float Radius)
 {
-    if (WeatherType != EVFX_EffectType::Weather)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid weather effect type"));
-        return;
-    }
+    if (!GetWorld()) return;
 
-    float Scale = Radius / 1000.0f;
-    SpawnEffect(WeatherType, Location, FRotator::ZeroRotator, Scale);
-}
-
-UNiagaraComponent* UVFX_SystemManager::SpawnNiagaraEffect(UNiagaraSystem* System, FVector Location, FRotator Rotation, float Scale)
-{
-    if (!System)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Niagara System is null"));
-        return nullptr;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("World is null in VFX System Manager"));
-        return nullptr;
-    }
-
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World, System, Location, Rotation, FVector(Scale), true, true
-    );
-
-    if (NiagaraComp)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Spawned Niagara effect at location: %s"), *Location.ToString());
-    }
-
-    return NiagaraComp;
-}
-
-UAudioComponent* UVFX_SystemManager::PlayEffectSound(USoundCue* Sound, FVector Location)
-{
-    if (!Sound)
-    {
-        return nullptr;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return nullptr;
-    }
-
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-        World, Sound, Location, FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f
-    );
-
-    return AudioComp;
+    // Volcanic ash: ambient particle system covering a radius
+    // In full implementation: NS_World_VolcanicAsh Niagara system with GPU particles
+    UE_LOG(LogTemp, Log, TEXT("VFX_VolcanicAsh: Source=(%f,%f,%f) Radius=%f"),
+        SourceLocation.X, SourceLocation.Y, SourceLocation.Z, Radius);
 }
