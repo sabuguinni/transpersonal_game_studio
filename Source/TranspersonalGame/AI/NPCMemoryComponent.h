@@ -2,51 +2,53 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "NPCMemoryComponent.generated.h"
 
+/** Types of danger events an NPC can remember */
+UENUM(BlueprintType)
+enum class ENPC_MemoryEventType : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    DinosaurSighted UMETA(DisplayName = "Dinosaur Sighted"),
+    PlayerSpotted   UMETA(DisplayName = "Player Spotted"),
+    AttackReceived  UMETA(DisplayName = "Attack Received"),
+    AllyKilled      UMETA(DisplayName = "Ally Killed"),
+    SafeZoneFound   UMETA(DisplayName = "Safe Zone Found"),
+};
+
+/** A single memory record stored by an NPC */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_MemoryEntry
+struct FNPC_MemoryRecord
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    AActor* Actor;
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    ENPC_MemoryEventType EventType = ENPC_MemoryEventType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FVector LastKnownLocation;
+    /** World location where the event occurred */
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    FVector EventLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float ThreatLevel;
+    /** Game time (seconds) when the event was recorded */
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    float RecordedAtTime = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float LastSeenTime;
+    /** 0-1 threat weight — decays over time */
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    float ThreatWeight = 1.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    bool bIsFriendly;
-
-    FNPC_MemoryEntry()
-    {
-        Actor = nullptr;
-        LastKnownLocation = FVector::ZeroVector;
-        ThreatLevel = 0.0f;
-        LastSeenTime = 0.0f;
-        bIsFriendly = false;
-    }
+    /** Tag of the actor that caused the event (e.g. "TRex", "Raptor") */
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    FName SourceTag = NAME_None;
 };
 
-UENUM(BlueprintType)
-enum class ENPC_MemoryType : uint8
-{
-    Threat      UMETA(DisplayName = "Threat"),
-    Ally        UMETA(DisplayName = "Ally"),
-    Resource    UMETA(DisplayName = "Resource"),
-    Location    UMETA(DisplayName = "Location"),
-    Event       UMETA(DisplayName = "Event")
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+/**
+ * UNPCMemoryComponent
+ * Gives any NPC pawn a persistent, decaying memory of danger events.
+ * Behavior Tree tasks query this component to decide patrol routes,
+ * flee directions, and alert states.
+ */
+UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent), DisplayName = "NPC Memory Component")
 class TRANSPERSONALGAME_API UNPCMemoryComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -54,57 +56,56 @@ class TRANSPERSONALGAME_API UNPCMemoryComponent : public UActorComponent
 public:
     UNPCMemoryComponent();
 
-protected:
-    virtual void BeginPlay() override;
+    // ── Configuration ────────────────────────────────────────────────────────
 
-public:
+    /** Maximum number of memories retained at once */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    int32 MaxMemories = 16;
+
+    /** Seconds until a memory's ThreatWeight decays to zero */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float MemoryDecayDuration = 120.f;
+
+    /** Radius within which two events at the same location are merged */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float MergeRadius = 300.f;
+
+    // ── Runtime state ────────────────────────────────────────────────────────
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
+    TArray<FNPC_MemoryRecord> Memories;
+
+    /** Overall threat level (0-1) derived from all active memories */
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
+    float CurrentThreatLevel = 0.f;
+
+    // ── Interface ────────────────────────────────────────────────────────────
+
+    /** Record a new danger event. Merges with nearby existing memory if within MergeRadius. */
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    void RecordEvent(ENPC_MemoryEventType EventType, FVector Location, FName SourceTag, float ThreatWeight = 1.f);
+
+    /** Returns the most threatening memory location, or ZeroVector if none. */
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    FVector GetMostThreateningLocation() const;
+
+    /** Returns the safest known location (lowest threat weight), or ZeroVector if none. */
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    FVector GetSafestKnownLocation() const;
+
+    /** True if any memory of this event type exists with ThreatWeight > Threshold. */
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    bool HasActiveMemoryOf(ENPC_MemoryEventType EventType, float Threshold = 0.1f) const;
+
+    /** Forget all memories (e.g. after returning to camp safely). */
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    void ClearAllMemories();
+
+    // ── UActorComponent overrides ─────────────────────────────────────────────
+    virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Memory storage
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    TArray<FNPC_MemoryEntry> MemoryEntries;
-
-    // Memory settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    float MaxMemoryDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    int32 MaxMemoryEntries;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
-    float MemoryDecayRate;
-
-    // Memory functions
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemoryEntry(AActor* Actor, FVector Location, float ThreatLevel, bool bIsFriendly);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void UpdateMemoryEntry(AActor* Actor, FVector NewLocation, float NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RemoveMemoryEntry(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FNPC_MemoryEntry* GetMemoryEntry(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    TArray<FNPC_MemoryEntry> GetMemoriesByType(ENPC_MemoryType MemoryType);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    TArray<FNPC_MemoryEntry> GetNearbyMemories(FVector Location, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    AActor* GetHighestThreatInMemory();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ClearOldMemories();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
+private:
     void DecayMemories(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    bool HasMemoryOf(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    float GetThreatLevelOf(AActor* Actor);
+    void PruneExpiredMemories();
 };
