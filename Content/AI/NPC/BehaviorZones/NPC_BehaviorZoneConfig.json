@@ -1,0 +1,141 @@
+{
+  "npc_behavior_zones": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260619_001",
+    "agent": "NPC Behavior Agent #11",
+    "description": "Behavior Tree zone configuration for MinPlayableMap. All zones deployed as PointLight markers.",
+
+    "trex_patrol_waypoints": [
+      { "label": "BTWaypoint_TRex_001", "location": [-3000, 1000, 150], "behavior": "patrol_idle", "wait_time_s": 8.0 },
+      { "label": "BTWaypoint_TRex_002", "location": [-1500, 3500, 150], "behavior": "patrol_scan", "wait_time_s": 5.0 },
+      { "label": "BTWaypoint_TRex_003", "location": [1000, 4000, 150],  "behavior": "patrol_idle", "wait_time_s": 10.0 },
+      { "label": "BTWaypoint_TRex_004", "location": [2500, 1500, 150],  "behavior": "patrol_scan", "wait_time_s": 6.0 }
+    ],
+
+    "trex_behavior_tree": {
+      "root": "Selector",
+      "children": [
+        {
+          "node": "Sequence_Attack",
+          "condition": "PlayerInRange <= 300",
+          "tasks": ["BTTask_TRex_Attack", "BTTask_TRex_Roar"]
+        },
+        {
+          "node": "Sequence_Chase",
+          "condition": "PlayerInRange <= 3000 AND PlayerVisible",
+          "tasks": ["BTTask_MoveTo_Player", "BTTask_TRex_Charge"]
+        },
+        {
+          "node": "Sequence_Investigate",
+          "condition": "SoundHeard OR SmellDetected",
+          "tasks": ["BTTask_MoveTo_Stimulus", "BTTask_TRex_Sniff"]
+        },
+        {
+          "node": "Sequence_Patrol",
+          "condition": "default",
+          "tasks": ["BTTask_MoveTo_NextWaypoint", "BTTask_Wait"]
+        }
+      ]
+    },
+
+    "raptor_ambush_zones": [
+      {
+        "label": "BTZone_Raptor_Ambush_001",
+        "location": [-500, 2000, 150],
+        "pack_size": 3,
+        "behavior": "ambush_wait",
+        "trigger_range": 1200,
+        "flank_pattern": "pincer"
+      },
+      {
+        "label": "BTZone_Raptor_Ambush_002",
+        "location": [800, -1500, 150],
+        "pack_size": 4,
+        "behavior": "ambush_patrol",
+        "trigger_range": 1000,
+        "flank_pattern": "surround"
+      }
+    ],
+
+    "raptor_behavior_tree": {
+      "root": "Selector",
+      "children": [
+        {
+          "node": "Sequence_PackAttack",
+          "condition": "PackReady AND PlayerInRange <= 800",
+          "tasks": ["BTTask_Signal_PackAttack", "BTTask_Raptor_Flank", "BTTask_Raptor_Leap"]
+        },
+        {
+          "node": "Sequence_Stalk",
+          "condition": "PlayerDetected AND PackSize >= 2",
+          "tasks": ["BTTask_Raptor_Stalk", "BTTask_Signal_Surround"]
+        },
+        {
+          "node": "Sequence_Flee",
+          "condition": "PackSize <= 1 AND PlayerAggressive",
+          "tasks": ["BTTask_Raptor_Flee", "BTTask_Raptor_CallForHelp"]
+        },
+        {
+          "node": "Sequence_Hunt",
+          "condition": "default",
+          "tasks": ["BTTask_MoveTo_HuntZone", "BTTask_Raptor_Scan"]
+        }
+      ]
+    },
+
+    "npc_daily_routines": {
+      "camp_zone": {
+        "label": "BTZone_Camp_Safe_001",
+        "location": [200, 300, 150],
+        "activities": [
+          { "time": "dawn",    "task": "BTTask_NPC_WakeUp",     "duration_s": 30 },
+          { "time": "morning", "task": "BTTask_NPC_GatherFood",  "duration_s": 120 },
+          { "time": "midday",  "task": "BTTask_NPC_Rest",        "duration_s": 60 },
+          { "time": "afternoon","task": "BTTask_NPC_Craft",      "duration_s": 90 },
+          { "time": "dusk",    "task": "BTTask_NPC_ReturnCamp",  "duration_s": 45 },
+          { "time": "night",   "task": "BTTask_NPC_Sleep",       "duration_s": 180 }
+        ]
+      },
+      "water_anchor": {
+        "label": "BTAnchor_Water_001",
+        "location": [-2000, -800, 150],
+        "visit_frequency": "twice_daily",
+        "danger_check": true,
+        "flee_trigger": "TRexInRange <= 4000"
+      },
+      "hunt_anchor": {
+        "label": "BTAnchor_Hunt_001",
+        "location": [3000, 2500, 150],
+        "visit_frequency": "once_daily",
+        "time_of_day": "morning",
+        "group_required": true,
+        "min_group_size": 2
+      }
+    },
+
+    "npc_memory_system": {
+      "description": "NPCs remember events and adjust behavior accordingly",
+      "memory_entries": [
+        { "event": "PlayerSeen",       "retention_s": 300, "effect": "AlertNearbyNPCs" },
+        { "event": "TRexHeard",        "retention_s": 600, "effect": "AvoidZone_600s" },
+        { "event": "RaptorAttack",     "retention_s": 900, "effect": "GroupUp_IncreaseVigilance" },
+        { "event": "SafeWaterFound",   "retention_s": -1,  "effect": "AddToKnownLocations" },
+        { "event": "PlayerHelped",     "retention_s": -1,  "effect": "TrustPlayer_Positive" },
+        { "event": "PlayerAggressive", "retention_s": 1800,"effect": "FleePlayer_AvoidContact" }
+      ]
+    },
+
+    "voice_lines": {
+      "SurvivorElder": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781829936773_SurvivorElder.mp3",
+        "trigger": "PlayerNearCamp_FirstTime",
+        "text": "Stay downwind. Always downwind. The T-Rex cannot see you if you don't move — but it will smell you from half a mile away if the wind shifts."
+      },
+      "ScoutNPC": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781829939192_ScoutNPC.mp3",
+        "trigger": "RaptorZoneEntered",
+        "text": "The raptors hunt at dusk. Three, sometimes four. They circle wide before they close in — you won't hear them until it's almost too late."
+      }
+    }
+  }
+}
