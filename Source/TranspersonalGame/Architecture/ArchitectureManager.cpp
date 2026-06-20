@@ -1,224 +1,115 @@
 #include "ArchitectureManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 
-AArchitectureManager::AArchitectureManager()
+AArch_ArchitectureManager::AArch_ArchitectureManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    MaxStructuresPerBiome = 15;
-    MinDistanceBetweenStructures = 5000.0f;
-
-    ManagedStructures.Empty();
+    PrimaryActorTick.bCanEverTick = false;
 }
 
-void AArchitectureManager::BeginPlay()
+void AArch_ArchitectureManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: System initialized"));
+    InitializeCretaceousStructures();
 }
 
-void AArchitectureManager::Tick(float DeltaTime)
+void AArch_ArchitectureManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 }
 
-void AArchitectureManager::SpawnStructureAtLocation(const FVector& Location, EArch_StructureType StructureType)
+void AArch_ArchitectureManager::RegisterStructure(FArch_StructureData StructureData)
 {
-    if (!IsValidStructureLocation(Location))
+    if (RegisteredStructures.Num() < MaxStructureCount)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Invalid location for structure"));
-        return;
-    }
-
-    UStaticMesh* StructureMesh = GetMeshForStructureType(StructureType);
-    if (!StructureMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: No mesh found for structure type"));
-        return;
-    }
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Owner = this;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    AActor* StructureActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
-    if (StructureActor)
-    {
-        UStaticMeshComponent* MeshComponent = NewObject<UStaticMeshComponent>(StructureActor);
-        MeshComponent->SetStaticMesh(StructureMesh);
-        MeshComponent->SetupAttachment(StructureActor->GetRootComponent());
-        StructureActor->AddInstanceComponent(MeshComponent);
-
-        FString StructureName = FString::Printf(TEXT("Structure_%d"), ManagedStructures.Num());
-        StructureActor->SetActorLabel(StructureName);
-
-        FArch_StructureData NewStructure;
-        NewStructure.StructureName = StructureName;
-        NewStructure.StructureType = StructureType;
-        NewStructure.Location = Location;
-        NewStructure.Rotation = FRotator::ZeroRotator;
-        NewStructure.StructuralIntegrity = 100.0f;
-        NewStructure.bIsRuin = false;
-
-        ManagedStructures.Add(NewStructure);
-
-        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Spawned structure %s at %s"), *StructureName, *Location.ToString());
+        RegisteredStructures.Add(StructureData);
     }
 }
 
-void AArchitectureManager::SpawnStructuresInBiome(EBiomeType BiomeType, int32 Count)
+TArray<FArch_StructureData> AArch_ArchitectureManager::GetStructuresInRadius(FVector Center, float Radius) const
 {
-    FVector BiomeCenter = GetBiomeCenter(BiomeType);
-    float BiomeRadius = 15000.0f;
-
-    for (int32 i = 0; i < Count; i++)
+    TArray<FArch_StructureData> Result;
+    for (const FArch_StructureData& Structure : RegisteredStructures)
     {
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-BiomeRadius, BiomeRadius),
-            FMath::RandRange(-BiomeRadius, BiomeRadius),
-            0.0f
-        );
-
-        FVector SpawnLocation = BiomeCenter + RandomOffset;
-        SpawnLocation.Z = 100.0f;
-
-        EArch_StructureType RandomType = static_cast<EArch_StructureType>(FMath::RandRange(0, 4));
-        SpawnStructureAtLocation(SpawnLocation, RandomType);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Spawned %d structures in biome"), Count);
-}
-
-void AArchitectureManager::DestroyStructure(const FString& StructureName)
-{
-    for (int32 i = ManagedStructures.Num() - 1; i >= 0; i--)
-    {
-        if (ManagedStructures[i].StructureName == StructureName)
-        {
-            ManagedStructures.RemoveAt(i);
-            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Destroyed structure %s"), *StructureName);
-            break;
-        }
-    }
-}
-
-TArray<FArch_StructureData> AArchitectureManager::GetStructuresInRadius(const FVector& Center, float Radius)
-{
-    TArray<FArch_StructureData> NearbyStructures;
-
-    for (const FArch_StructureData& Structure : ManagedStructures)
-    {
-        float Distance = FVector::Dist(Structure.Location, Center);
+        float Distance = FVector::Dist(Center, Structure.WorldLocation);
         if (Distance <= Radius)
         {
-            NearbyStructures.Add(Structure);
+            Result.Add(Structure);
         }
     }
-
-    return NearbyStructures;
+    return Result;
 }
 
-void AArchitectureManager::UpdateStructuralIntegrity(const FString& StructureName, float NewIntegrity)
+void AArch_ArchitectureManager::SpawnRuinPillarAtBiomeCoords()
 {
-    for (FArch_StructureData& Structure : ManagedStructures)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (Structure.StructureName == StructureName)
-        {
-            Structure.StructuralIntegrity = FMath::Clamp(NewIntegrity, 0.0f, 100.0f);
-            
-            if (Structure.StructuralIntegrity <= 0.0f)
-            {
-                ConvertToRuin(StructureName);
-            }
-            break;
-        }
+        return;
+    }
+
+    FVector SpawnLocation(BiomeX, BiomeY, BiomeZ);
+    FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+    AStaticMeshActor* PillarActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        SpawnLocation,
+        SpawnRotation,
+        SpawnParams
+    );
+
+    if (PillarActor)
+    {
+        PillarActor->SetActorLabel(TEXT("Arch_CretaceousRuinPillar_Biome"));
+        PillarActor->SetActorScale3D(FVector(0.5f, 0.5f, 3.0f));
+
+        // Register this structure
+        FArch_StructureData NewStructure;
+        NewStructure.StructureType = EArch_StructureType::RuinPillar;
+        NewStructure.DecayState = EArch_DecayState::Weathered;
+        NewStructure.WorldLocation = SpawnLocation;
+        NewStructure.HeightMeters = 3.0f;
+        NewStructure.bHasMossGrowth = true;
+        NewStructure.bHasPrehistoricFerns = true;
+        NewStructure.MeshyAssetURL = CretaceousRuinPillarURL;
+        RegisteredStructures.Add(NewStructure);
     }
 }
 
-void AArchitectureManager::ConvertToRuin(const FString& StructureName)
+void AArch_ArchitectureManager::InitializeCretaceousStructures()
 {
-    for (FArch_StructureData& Structure : ManagedStructures)
+    // Seed default Cretaceous structures around the biome center
+    const TArray<FVector> DefaultLocations = {
+        FVector(50000.0f, 50000.0f, 100.0f),
+        FVector(50500.0f, 50200.0f, 100.0f),
+        FVector(49800.0f, 50700.0f, 100.0f),
+        FVector(50300.0f, 49500.0f, 100.0f),
+        FVector(51000.0f, 50800.0f, 100.0f)
+    };
+
+    const TArray<EArch_StructureType> DefaultTypes = {
+        EArch_StructureType::RuinPillar,
+        EArch_StructureType::BoulderCluster,
+        EArch_StructureType::StoneWall,
+        EArch_StructureType::RockyOutcrop,
+        EArch_StructureType::RuinPillar
+    };
+
+    for (int32 i = 0; i < DefaultLocations.Num(); ++i)
     {
-        if (Structure.StructureName == StructureName)
-        {
-            Structure.bIsRuin = true;
-            Structure.StructuralIntegrity = 0.0f;
-            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Converted %s to ruin"), *StructureName);
-            break;
-        }
+        FArch_StructureData Structure;
+        Structure.StructureType = DefaultTypes[i];
+        Structure.DecayState = EArch_DecayState::Weathered;
+        Structure.WorldLocation = DefaultLocations[i];
+        Structure.HeightMeters = 3.0f;
+        Structure.bHasMossGrowth = true;
+        Structure.bHasPrehistoricFerns = true;
+        Structure.MeshyAssetURL = CretaceousRuinPillarURL;
+        RegisteredStructures.Add(Structure);
     }
-}
-
-void AArchitectureManager::GenerateArchitecturalElements()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Generating architectural elements across all biomes"));
-
-    // Generate structures in each biome
-    SpawnStructuresInBiome(EBiomeType::Savanna, 3);
-    SpawnStructuresInBiome(EBiomeType::Swamp, 2);
-    SpawnStructuresInBiome(EBiomeType::Forest, 4);
-    SpawnStructuresInBiome(EBiomeType::Desert, 2);
-    SpawnStructuresInBiome(EBiomeType::Mountain, 3);
-}
-
-void AArchitectureManager::ClearAllStructures()
-{
-    ManagedStructures.Empty();
-    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cleared all structures"));
-}
-
-void AArchitectureManager::OnStructureDestroyed(AActor* DestroyedActor)
-{
-    if (DestroyedActor)
-    {
-        FString ActorName = DestroyedActor->GetActorLabel();
-        DestroyStructure(ActorName);
-    }
-}
-
-FVector AArchitectureManager::GetBiomeCenter(EBiomeType BiomeType)
-{
-    switch (BiomeType)
-    {
-        case EBiomeType::Savanna:
-            return FVector(0.0f, 0.0f, 100.0f);
-        case EBiomeType::Swamp:
-            return FVector(-50000.0f, -45000.0f, 100.0f);
-        case EBiomeType::Forest:
-            return FVector(-45000.0f, 40000.0f, 100.0f);
-        case EBiomeType::Desert:
-            return FVector(55000.0f, 0.0f, 100.0f);
-        case EBiomeType::Mountain:
-            return FVector(40000.0f, 50000.0f, 100.0f);
-        default:
-            return FVector::ZeroVector;
-    }
-}
-
-bool AArchitectureManager::IsValidStructureLocation(const FVector& Location)
-{
-    for (const FArch_StructureData& ExistingStructure : ManagedStructures)
-    {
-        float Distance = FVector::Dist(ExistingStructure.Location, Location);
-        if (Distance < MinDistanceBetweenStructures)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-UStaticMesh* AArchitectureManager::GetMeshForStructureType(EArch_StructureType StructureType)
-{
-    // Return nullptr for now - meshes will be assigned via Blueprint or asset loading
-    return nullptr;
 }
