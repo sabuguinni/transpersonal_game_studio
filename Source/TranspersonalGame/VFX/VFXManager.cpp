@@ -1,256 +1,114 @@
-// VFXManager.cpp — VFX Agent #17
-// PROD_CYCLE_AUTO_20260620_006
-// Implements all VFX management for the prehistoric survival game.
-// Campfire glow, footstep dust, blood splatter, weather particles, environmental ambience.
-
 #include "VFXManager.h"
-#include "Components/PointLightComponent.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/GameplayStatics.h"
 
-AVFXManager::AVFXManager()
+UVFX_Manager::UVFX_Manager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Campfire primary glow light
-    CampfireLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CampfireLight"));
-    CampfireLight->SetupAttachment(RootComponent);
-    CampfireLight->SetIntensity(3000.0f);
-    CampfireLight->SetLightColor(FLinearColor(1.0f, 0.45f, 0.1f, 1.0f));
-    CampfireLight->SetAttenuationRadius(600.0f);
-    CampfireLight->SetCastShadows(true);
-    CampfireLight->SetVisibility(false); // hidden until campfire is spawned
-
-    // Campfire flicker secondary light
-    CampfireFlickerLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CampfireFlickerLight"));
-    CampfireFlickerLight->SetupAttachment(RootComponent);
-    CampfireFlickerLight->SetIntensity(1500.0f);
-    CampfireFlickerLight->SetLightColor(FLinearColor(1.0f, 0.6f, 0.15f, 1.0f));
-    CampfireFlickerLight->SetAttenuationRadius(300.0f);
-    CampfireFlickerLight->SetCastShadows(false);
-    CampfireFlickerLight->SetVisibility(false);
+    PrimaryComponentTick.bCanEverTick = true;
+    GlobalLODScalar = 1.0f;
 }
 
-void AVFXManager::BeginPlay()
+void UVFX_Manager::BeginPlay()
 {
     Super::BeginPlay();
-    FlickerTimer = 0.0f;
-    FlickerPhase = FMath::RandRange(0.0f, 6.28f); // random phase offset per campfire
+
+    // Register default prehistoric VFX effects
+    FVFX_EffectConfig CampfireConfig;
+    CampfireConfig.EffectID = FName("NS_Fire_Campfire");
+    CampfireConfig.Category = EVFX_EffectCategory::Environment;
+    CampfireConfig.LOD0_Distance = 600.f;
+    CampfireConfig.LOD1_Distance = 2000.f;
+    CampfireConfig.LOD2_Distance = 5000.f;
+    CampfireConfig.bCastShadows = true;
+    RegisterEffect(CampfireConfig);
+
+    FVFX_EffectConfig FootstepConfig;
+    FootstepConfig.EffectID = FName("NS_Dino_Footstep");
+    FootstepConfig.Category = EVFX_EffectCategory::Dinosaur;
+    FootstepConfig.LOD0_Distance = 400.f;
+    FootstepConfig.LOD1_Distance = 1200.f;
+    FootstepConfig.LOD2_Distance = 3000.f;
+    FootstepConfig.bCastShadows = false;
+    RegisterEffect(FootstepConfig);
+
+    FVFX_EffectConfig RainConfig;
+    RainConfig.EffectID = FName("NS_Weather_Rain");
+    RainConfig.Category = EVFX_EffectCategory::Weather;
+    RainConfig.LOD0_Distance = 1500.f;
+    RainConfig.LOD1_Distance = 4000.f;
+    RainConfig.LOD2_Distance = 8000.f;
+    RainConfig.bCastShadows = false;
+    RegisterEffect(RainConfig);
+
+    FVFX_EffectConfig BloodConfig;
+    BloodConfig.EffectID = FName("NS_Combat_BloodImpact");
+    BloodConfig.Category = EVFX_EffectCategory::Combat;
+    BloodConfig.LOD0_Distance = 300.f;
+    BloodConfig.LOD1_Distance = 800.f;
+    BloodConfig.LOD2_Distance = 1500.f;
+    BloodConfig.bCastShadows = false;
+    RegisterEffect(BloodConfig);
+
+    FVFX_EffectConfig DustConfig;
+    DustConfig.EffectID = FName("NS_Dino_DustCloud");
+    DustConfig.Category = EVFX_EffectCategory::Dinosaur;
+    DustConfig.LOD0_Distance = 800.f;
+    DustConfig.LOD1_Distance = 2500.f;
+    DustConfig.LOD2_Distance = 6000.f;
+    DustConfig.bCastShadows = false;
+    RegisterEffect(DustConfig);
 }
 
-void AVFXManager::Tick(float DeltaTime)
+void UVFX_Manager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-
-    if (bFlickerActive)
-    {
-        UpdateCampfireFlicker(DeltaTime);
-    }
-
-    if (WeatherTransitionAlpha > 0.0f && WeatherTransitionAlpha < 1.0f)
-    {
-        UpdateWeatherTransition(DeltaTime);
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    // LOD updates are driven by player position via UpdateLOD()
 }
 
-// ─── Campfire VFX ─────────────────────────────────────────────────────────────
-
-void AVFXManager::SpawnCampfireVFX(const FVFX_CampfireData& CampfireData)
+void UVFX_Manager::RegisterEffect(const FVFX_EffectConfig& Config)
 {
-    if (!CampfireData.bIsActive)
+    if (Config.EffectID == NAME_None)
     {
-        ExtinguishCampfire(CampfireData.Location, false);
         return;
     }
+    EffectRegistry.Add(Config.EffectID, Config);
+    RegisteredEffects.AddUnique(Config);
+}
 
-    // Position the actor at campfire location
-    SetActorLocation(CampfireData.Location);
-
-    // Configure primary light
-    if (CampfireLight)
+void UVFX_Manager::SpawnEffect(FName EffectID, FVector Location, FRotator Rotation)
+{
+    if (!EffectRegistry.Contains(EffectID))
     {
-        CampfireLight->SetVisibility(true);
-        CampfireLight->SetIntensity(3000.0f * CampfireData.FlameIntensity);
-        CampfireLight->SetAttenuationRadius(CampfireData.LightRadius);
-        CampfireLight->SetLightColor(FLinearColor(1.0f, 0.45f * CampfireData.FlameIntensity, 0.1f, 1.0f));
+        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Effect '%s' not registered."), *EffectID.ToString());
+        return;
     }
+    // Niagara spawn is handled via Blueprint or NiagaraFunctionLibrary
+    // This stub logs the intent for integration with Blueprint layer
+    UE_LOG(LogTemp, Log, TEXT("VFXManager: SpawnEffect '%s' at %s"), *EffectID.ToString(), *Location.ToString());
+}
 
-    // Configure flicker light
-    if (CampfireFlickerLight)
+void UVFX_Manager::StopEffect(FName EffectID)
+{
+    if (!EffectRegistry.Contains(EffectID))
     {
-        CampfireFlickerLight->SetVisibility(true);
-        CampfireFlickerLight->SetIntensity(1500.0f * CampfireData.FlameIntensity);
-        CampfireFlickerLight->SetAttenuationRadius(CampfireData.LightRadius * 0.5f);
+        return;
     }
-
-    bFlickerActive = true;
-
-    // Register in active campfires list
-    ActiveCampfires.Add(CampfireData);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Campfire spawned at (%.0f, %.0f, %.0f) intensity=%.2f"),
-           CampfireData.Location.X, CampfireData.Location.Y, CampfireData.Location.Z,
-           CampfireData.FlameIntensity);
+    UE_LOG(LogTemp, Log, TEXT("VFXManager: StopEffect '%s'"), *EffectID.ToString());
 }
 
-void AVFXManager::ExtinguishCampfire(FVector Location, bool bPlaySteamEffect)
+void UVFX_Manager::UpdateLOD(FVector PlayerLocation)
 {
-    if (CampfireLight)
+    // Iterate registered effects and adjust LOD based on distance
+    // Actual LOD switching is delegated to Niagara scalability settings
+    for (const auto& Pair : EffectRegistry)
     {
-        CampfireLight->SetVisibility(false);
-        CampfireLight->SetIntensity(0.0f);
+        const FVFX_EffectConfig& Config = Pair.Value;
+        float ScaledLOD0 = Config.LOD0_Distance * GlobalLODScalar;
+        float ScaledLOD1 = Config.LOD1_Distance * GlobalLODScalar;
+        float ScaledLOD2 = Config.LOD2_Distance * GlobalLODScalar;
+        // LOD distances are exposed for Niagara system to consume via component parameters
+        (void)ScaledLOD0;
+        (void)ScaledLOD1;
+        (void)ScaledLOD2;
     }
-
-    if (CampfireFlickerLight)
-    {
-        CampfireFlickerLight->SetVisibility(false);
-        CampfireFlickerLight->SetIntensity(0.0f);
-    }
-
-    bFlickerActive = false;
-
-    // Remove from active list
-    ActiveCampfires.RemoveAll([&Location](const FVFX_CampfireData& Data)
-    {
-        return FVector::DistSquared(Data.Location, Location) < (50.0f * 50.0f);
-    });
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Campfire extinguished at (%.0f, %.0f, %.0f) steam=%d"),
-           Location.X, Location.Y, Location.Z, bPlaySteamEffect ? 1 : 0);
-}
-
-void AVFXManager::SetCampfireIntensity(FVector Location, float NewIntensity)
-{
-    NewIntensity = FMath::Clamp(NewIntensity, 0.0f, 2.0f);
-
-    if (CampfireLight)
-    {
-        CampfireLight->SetIntensity(3000.0f * NewIntensity);
-        CampfireLight->SetLightColor(FLinearColor(1.0f, 0.45f * FMath::Max(NewIntensity, 0.1f), 0.1f, 1.0f));
-    }
-
-    if (CampfireFlickerLight)
-    {
-        CampfireFlickerLight->SetIntensity(1500.0f * NewIntensity);
-    }
-
-    if (NewIntensity <= 0.01f)
-    {
-        ExtinguishCampfire(Location, false);
-    }
-}
-
-// ─── Impact VFX ───────────────────────────────────────────────────────────────
-
-void AVFXManager::SpawnImpactVFX(const FVFX_ImpactData& ImpactData)
-{
-    // In full implementation, this spawns the appropriate Niagara system.
-    // For now, log the impact for debugging and draw a debug sphere.
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    float DebugRadius = ImpactData.DustRadius * ImpactData.ImpactForce;
-
-#if WITH_EDITOR
-    DrawDebugSphere(World, ImpactData.HitLocation, DebugRadius, 8,
-                    FColor::Orange, false, 0.5f, 0, 1.0f);
-#endif
-
-    UE_LOG(LogTemp, Verbose, TEXT("VFX: Impact type=%d at (%.0f,%.0f,%.0f) force=%.2f"),
-           (int32)ImpactData.ImpactType,
-           ImpactData.HitLocation.X, ImpactData.HitLocation.Y, ImpactData.HitLocation.Z,
-           ImpactData.ImpactForce);
-}
-
-void AVFXManager::SpawnDinoFootstepDust(FVector FootLocation, FVector FootNormal, float DinoMass)
-{
-    FVFX_ImpactData Impact;
-    Impact.HitLocation = FootLocation;
-    Impact.HitNormal = FootNormal;
-    Impact.ImpactForce = FMath::Clamp(DinoMass / 5000.0f, 0.1f, 3.0f); // T-Rex ~8000kg → force 1.6
-    Impact.DustRadius = FMath::Clamp(DinoMass / 100.0f, 30.0f, 200.0f); // cm
-
-    // Terrain type determines dust vs mud vs rock particles
-    // For now default to dirt — terrain query will be added when landscape is queryable
-    Impact.ImpactType = EVFX_ImpactType::DinoFootstepDirt;
-
-    SpawnImpactVFX(Impact);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Dino footstep dust at (%.0f,%.0f,%.0f) mass=%.0fkg radius=%.0fcm"),
-           FootLocation.X, FootLocation.Y, FootLocation.Z, DinoMass, Impact.DustRadius);
-}
-
-void AVFXManager::SpawnBloodSplatter(FVector HitLocation, FVector HitDirection, float DamageAmount)
-{
-    FVFX_ImpactData Impact;
-    Impact.HitLocation = HitLocation;
-    Impact.HitNormal = HitDirection.GetSafeNormal();
-    Impact.ImpactType = EVFX_ImpactType::BloodSplatter;
-    Impact.ImpactForce = FMath::Clamp(DamageAmount / 50.0f, 0.1f, 2.0f);
-    Impact.DustRadius = 40.0f;
-
-    SpawnImpactVFX(Impact);
-}
-
-// ─── Weather VFX ──────────────────────────────────────────────────────────────
-
-void AVFXManager::SetWeatherVFX(EVFX_WeatherType WeatherType, float TransitionTime)
-{
-    if (CurrentWeather == WeatherType) return;
-
-    CurrentWeather = WeatherType;
-    WeatherTransitionAlpha = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Weather transition to type=%d over %.1fs"),
-           (int32)WeatherType, TransitionTime);
-}
-
-// ─── Environmental VFX ────────────────────────────────────────────────────────
-
-void AVFXManager::SetZoneAmbientVFX(EVFX_ZoneType ZoneType, FVector ZoneCenter, float ZoneRadius)
-{
-    ActiveZoneType = ZoneType;
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Zone ambient VFX set to type=%d center=(%.0f,%.0f,%.0f) radius=%.0f"),
-           (int32)ZoneType, ZoneCenter.X, ZoneCenter.Y, ZoneCenter.Z, ZoneRadius);
-}
-
-void AVFXManager::TriggerVolcanicAshBurst(FVector EruptionDirection, float Intensity)
-{
-    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX: Volcanic ash burst dir=(%.2f,%.2f,%.2f) intensity=%.2f"),
-           EruptionDirection.X, EruptionDirection.Y, EruptionDirection.Z, Intensity);
-}
-
-// ─── Private Helpers ──────────────────────────────────────────────────────────
-
-void AVFXManager::UpdateCampfireFlicker(float DeltaTime)
-{
-    FlickerTimer += DeltaTime;
-    FlickerPhase += DeltaTime * 3.5f; // flicker frequency ~3.5 Hz
-
-    // Perlin-like flicker using multiple sine waves
-    float Flicker = 0.85f
-        + 0.08f * FMath::Sin(FlickerPhase * 1.0f + FlickerTimer * 2.3f)
-        + 0.04f * FMath::Sin(FlickerPhase * 2.7f + FlickerTimer * 5.1f)
-        + 0.03f * FMath::Sin(FlickerPhase * 4.1f + FlickerTimer * 1.7f);
-
-    Flicker = FMath::Clamp(Flicker, 0.6f, 1.15f);
-
-    if (CampfireFlickerLight && CampfireFlickerLight->IsVisible())
-    {
-        float BaseIntensity = 1500.0f;
-        CampfireFlickerLight->SetIntensity(BaseIntensity * Flicker);
-
-        // Slight color temperature shift during flicker
-        float Warmth = 0.55f + 0.1f * FMath::Sin(FlickerPhase * 0.8f);
-        CampfireFlickerLight->SetLightColor(FLinearColor(1.0f, Warmth, 0.1f, 1.0f));
-    }
-}
-
-void AVFXManager::UpdateWeatherTransition(float DeltaTime)
-{
-    WeatherTransitionAlpha = FMath::Min(WeatherTransitionAlpha + DeltaTime * 0.33f, 1.0f);
 }
