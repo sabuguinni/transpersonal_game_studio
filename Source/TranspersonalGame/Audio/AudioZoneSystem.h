@@ -1,36 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Sound/SoundBase.h"
+#include "GameFramework/Actor.h"
+#include "Components/AudioComponent.h"
 #include "AudioZoneSystem.generated.h"
 
-// ============================================================
-// Audio Zone System — Agent #16 Audio Agent
-// Adaptive ambient soundscape zones for MinPlayableMap
-// Zones: ForestDay, RiverAmbient, NightPredator, CampFire
-// ============================================================
-
+// === Audio Zone Types ===
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    ForestDay       UMETA(DisplayName = "Forest Day"),
-    ForestNight     UMETA(DisplayName = "Forest Night"),
-    RiverAmbient    UMETA(DisplayName = "River Ambient"),
-    NightPredator   UMETA(DisplayName = "Night Predator Zone"),
-    CampFireSafe    UMETA(DisplayName = "Camp Fire Safe Zone"),
-    CaveInterior    UMETA(DisplayName = "Cave Interior"),
-    OpenPlain       UMETA(DisplayName = "Open Plain"),
-};
-
-UENUM(BlueprintType)
-enum class EAudio_DangerLevel : uint8
-{
-    Safe        UMETA(DisplayName = "Safe"),
-    Caution     UMETA(DisplayName = "Caution"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Extreme     UMETA(DisplayName = "Extreme"),
+    River       UMETA(DisplayName = "River"),
+    Forest      UMETA(DisplayName = "Forest"),
+    OpenPlain   UMETA(DisplayName = "Open Plain"),
+    DangerZone  UMETA(DisplayName = "Danger Zone"),
+    Storm       UMETA(DisplayName = "Storm"),
+    Cave        UMETA(DisplayName = "Cave"),
+    Campfire    UMETA(DisplayName = "Campfire"),
 };
 
 USTRUCT(BlueprintType)
@@ -39,148 +24,102 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_DangerLevel DangerLevel = EAudio_DangerLevel::Safe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float BlendRadius = 500.0f;
+    float BlendRadius = 600.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
     float AmbientVolume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float MusicIntensity = 0.0f;
-
-    // Freesound IDs for reference (actual assets loaded via content browser)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString FreesoundInsectNightID = "523435";  // "Insects at Night High Frequency"
+    float MusicIntensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString FreesoundCricketsCloseID = "523438"; // "Crickets Close and Distant Night"
-
-    // TTS audio URLs for narrative lines triggered in this zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    TArray<FString> NarrativeAudioURLs;
+    bool bDangerMusic = false;
 };
 
-USTRUCT(BlueprintType)
-struct FAudio_FootstepConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    FString TerrainType = "Grass";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float VolumeMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float PitchVariance = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    bool bTriggersDustParticle = false;
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAudio_OnZoneChanged, EAudio_ZoneType, NewZone, EAudio_DangerLevel, DangerLevel);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FAudio_OnDangerLevelChanged, EAudio_DangerLevel, NewDangerLevel);
-
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent), DisplayName = "Audio Zone System")
-class TRANSPERSONALGAME_API UAudioZoneSystemComponent : public UActorComponent
+/**
+ * UAudio_ZoneComponent — attaches to any actor to define an audio zone.
+ * The AudioZoneManager queries these to blend ambient layers.
+ */
+UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UAudioZoneSystemComponent();
+    UAudio_ZoneComponent();
 
-    // === Zone Configuration ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
-    TArray<FAudio_ZoneConfig> ZoneConfigs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
-    float ZoneTransitionSpeed = 2.0f;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    float GetBlendWeightForPlayer(const FVector& PlayerLocation) const;
 
-    // === Current State ===
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
-    EAudio_ZoneType CurrentZone = EAudio_ZoneType::ForestDay;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
-    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    bool IsDangerZone() const { return ZoneConfig.bDangerMusic; }
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
-    float CurrentAmbientVolume = 1.0f;
+/**
+ * AAudio_ZoneActor — placeable actor that defines an audio zone in the world.
+ * Place in the level and configure ZoneConfig to control ambient audio blending.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
-    float CurrentMusicIntensity = 0.0f;
+public:
+    AAudio_ZoneActor();
 
-    // === Footstep Config ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footsteps")
-    TArray<FAudio_FootstepConfig> FootstepConfigs;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone",
+        meta = (AllowPrivateAccess = "true"))
+    UAudio_ZoneComponent* AudioZoneComponent;
 
-    // === Delegates ===
-    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
-    FAudio_OnZoneChanged OnZoneChanged;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
-    FAudio_OnDangerLevelChanged OnDangerLevelChanged;
-
-    // === TTS Audio URLs (from Agent #15 + #16 production) ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_ForestSilenceWarning = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916883891_QuestNarrator_ForestSilence.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_FireSurvival = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916914702_TribalElder_FireSurvival.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_FirstTools = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916736095_QuestNarrator_FirstTools.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_WaterFirst = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916749037_QuestNarrator_WaterFirst.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_DinoWarningBrachio = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916738386_TribalElder_DinoWarning.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Narrative")
-    FString URL_RaptorTactic = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916746449_TribalElder_RaptorTactic.mp3";
-
-    // === Functions ===
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    void SetActiveZone(EAudio_ZoneType NewZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    void SetDangerLevel(EAudio_DangerLevel NewDanger);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    EAudio_ZoneType GetCurrentZone() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    EAudio_DangerLevel GetCurrentDangerLevel() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
-    FAudio_FootstepConfig GetFootstepConfig(const FString& TerrainType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    void UpdateZoneFromPlayerLocation(FVector PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    float GetAmbientVolumeForZone(EAudio_ZoneType Zone) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    float GetMusicIntensityForZone(EAudio_ZoneType Zone) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Narrative")
-    FString GetNarrativeURLForZone(EAudio_ZoneType Zone) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Audio|Zone")
+    void PreviewZoneConfig();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void OnConstruction(const FTransform& Transform) override;
+};
+
+/**
+ * UAudio_ZoneManager — GameInstance subsystem that tracks all audio zones
+ * and drives adaptive music/ambient blending based on player proximity.
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UAudio_ZoneManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void RegisterZone(AAudio_ZoneActor* Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void UnregisterZone(AAudio_ZoneActor* Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    EAudio_ZoneType GetDominantZoneForPlayer(const FVector& PlayerLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    float GetDangerLevel(const FVector& PlayerLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    TArray<AAudio_ZoneActor*> GetAllZones() const { return RegisteredZones; }
 
 private:
-    void InitializeDefaultZoneConfigs();
-    void InitializeDefaultFootstepConfigs();
-    void BlendAudioParameters(float DeltaTime);
-
-    float TargetAmbientVolume = 1.0f;
-    float TargetMusicIntensity = 0.0f;
+    UPROPERTY()
+    TArray<AAudio_ZoneActor*> RegisteredZones;
 };
