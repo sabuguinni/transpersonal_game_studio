@@ -1,33 +1,36 @@
 // BiomeManager.h
-// Engine Architect #02 — P1 World Generation: Biome System
-// Cycle: PROD_CYCLE_AUTO_20260619_010
+// Engine Architect #02 — P1 World Generation
+// UGameInstanceSubsystem that classifies world locations into biome types
+// and exposes terrain parameters (foliage density, danger level, ground colour)
+// to all other systems via UFUNCTION calls.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// ENUMS — global scope (RULE 1)
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Biome type enum  (Eng_ prefix — unique across project)
+// ─────────────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EEng_BiomeType : uint8
 {
-    TropicalJungle  UMETA(DisplayName = "Tropical Jungle"),
-    Savanna         UMETA(DisplayName = "Savanna"),
-    TemperateForest UMETA(DisplayName = "Temperate Forest"),
-    Swamp           UMETA(DisplayName = "Swamp"),
-    Volcanic        UMETA(DisplayName = "Volcanic"),
-    Coastal         UMETA(DisplayName = "Coastal"),
-    Highland        UMETA(DisplayName = "Highland"),
-    Desert          UMETA(DisplayName = "Desert"),
+    CoastalWetlands     UMETA(DisplayName = "Coastal Wetlands"),
+    DenseJungle         UMETA(DisplayName = "Dense Jungle"),
+    OpenSavanna         UMETA(DisplayName = "Open Savanna"),
+    VolcanicHighlands   UMETA(DisplayName = "Volcanic Highlands"),
+    RiverDelta          UMETA(DisplayName = "River Delta"),
+    AridBadlands        UMETA(DisplayName = "Arid Badlands"),
+    TemperateForest     UMETA(DisplayName = "Temperate Forest"),
+    MountainPeaks       UMETA(DisplayName = "Mountain Peaks"),
 };
 
-// ============================================================
-// STRUCTS — global scope (RULE 1)
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-biome data record
+// ─────────────────────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FEng_BiomeDefinition
@@ -35,123 +38,109 @@ struct FEng_BiomeDefinition
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EEng_BiomeType BiomeID = EEng_BiomeType::TemperateForest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FName BiomeName = NAME_None;
+    EEng_BiomeType BiomeType = EEng_BiomeType::TemperateForest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FText DisplayName;
 
-    // Temperature range [0..1] — 0=arctic, 1=tropical
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MinTemperature = 0.0f;
+    // Climate range this biome occupies
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float MinTemperature = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MaxTemperature = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float MaxTemperature = 30.f;
 
-    // Moisture range [0..1] — 0=arid, 1=saturated
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MinMoisture = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float MinHumidity = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MaxMoisture = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float MaxHumidity = 1.f;
 
-    // Altitude range [0..1] — 0=sea level, 1=mountain peak
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MinAltitude = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float MinAltitude = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MaxAltitude = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float MaxAltitude = 1000.f;
 
-    // Gameplay properties
+    // Gameplay parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float FoliageDensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float WaterBodyChance = 0.2f;
+    float WaterCoverage = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DangerLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "1", ClampMax = "10"))
+    int32 DangerLevel = 3;
 
-    // Visual
+    // Visual hint for terrain material blending
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
-    FLinearColor GroundColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f);
+    FLinearColor GroundColor = FLinearColor(0.3f, 0.25f, 0.1f, 1.f);
 };
 
-// ============================================================
-// UCLASS
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// BiomeManager subsystem
+// ─────────────────────────────────────────────────────────────────────────────
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBiomeManager : public UWorldSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UBiomeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBiomeManager();
 
-    // USubsystem interface
+    // UGameInstanceSubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // ---- Query API ----
+    // ── Core queries (callable from Blueprint and C++) ──────────────────────
 
-    /** Returns the biome type at a given world location */
+    /** Returns the biome type at a given world location. */
     UFUNCTION(BlueprintCallable, Category = "Biome")
     EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns the full definition struct for a biome type */
+    /** Fills OutDefinition with the full data record for the given biome type. Returns false if not found. */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType BiomeType) const;
+    bool GetBiomeDefinition(EEng_BiomeType BiomeType, FEng_BiomeDefinition& OutDefinition) const;
 
-    /** Returns all registered biome types */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<EEng_BiomeType> GetAllBiomeTypes() const;
-
-    /** Returns danger level [0..1] for a biome */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetBiomeDangerLevel(EEng_BiomeType BiomeType) const;
-
-    /** Returns foliage density [0..1] at a world location */
+    /** Returns foliage density [0..1] at the given world location. */
     UFUNCTION(BlueprintCallable, Category = "Biome")
     float GetFoliageDensityAt(const FVector& WorldLocation) const;
 
-    /** Returns true if this location is likely a water body */
+    /** Returns danger level [1..10] at the given world location. */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool IsWaterBodyLocation(const FVector& WorldLocation) const;
+    int32 GetDangerLevelAt(const FVector& WorldLocation) const;
 
-    /** Returns the ground color for a biome (used by terrain material) */
+    /** Returns the ground colour hint for terrain material blending. */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FLinearColor GetBiomeGroundColor(EEng_BiomeType BiomeType) const;
+    FLinearColor GetGroundColorAt(const FVector& WorldLocation) const;
 
-    /** Debug string for a location — biome name + T/M/A values */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Debug")
-    FString GetBiomeDebugString(const FVector& WorldLocation) const;
+    /** Returns all registered biome types. */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<EEng_BiomeType> GetAllBiomeTypes() const;
 
-    // ---- Configuration ----
+    /** Clears the location cache (call after major world changes). */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void InvalidateCache();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float TemperatureScale = 1.0f;
+    // ── Data table (editable in editor) ─────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float MoistureScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float AltitudeScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Data")
+    TArray<FEng_BiomeDefinition> BiomeTable;
 
 private:
-    /** All registered biome definitions, keyed by type */
-    UPROPERTY()
-    TMap<EEng_BiomeType, FEng_BiomeDefinition> RegisteredBiomes;
+    // Climate sampling helpers
+    float SampleTemperature(const FVector& WorldLocation) const;
+    float SampleHumidity(const FVector& WorldLocation) const;
 
-    bool bBiomesInitialized = false;
+    // Classification
+    EEng_BiomeType ClassifyBiome(float Temperature, float Humidity, float Altitude) const;
 
-    void RegisterDefaultBiomes();
+    // Cache helpers
+    FIntPoint WorldLocationToCacheKey(const FVector& WorldLocation) const;
 
-    /** Sample temperature, moisture, altitude at a world location */
-    void SampleEnvironmentAt(const FVector& WorldLocation, float& OutTemperature, float& OutMoisture, float& OutAltitude) const;
+    // Mutable cache (const queries update it)
+    mutable TMap<FIntPoint, EEng_BiomeType> BiomeCache;
 
-    /** Classify biome from sampled values */
-    EEng_BiomeType ClassifyBiome(float Temperature, float Moisture, float Altitude) const;
+    bool bIsInitialized = false;
 };
