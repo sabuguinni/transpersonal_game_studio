@@ -1,377 +1,313 @@
 #include "TribalNPCController.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
 #include "NavigationSystem.h"
-#include "AIModule/Classes/BehaviorTree/BlackboardComponent.h"
+#include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 
 ATribalNPCController::ATribalNPCController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize default values
-    TribalRole = ENPC_TribalRole::Hunter;
-    CurrentBehaviorState = ENPC_BehaviorState::Idle;
-    PatrolRadius = 1500.0f;
-    WorkDuration = 30.0f;
-    SocialDistance = 500.0f;
-    
-    // Memory system defaults
-    MaxShortTermMemories = 10;
-    MaxLongTermMemories = 50;
-    
-    // Behavior timing
-    StateChangeTimer = 0.0f;
-    NextStateChangeTime = 15.0f;
-    
-    HomeLocation = FVector::ZeroVector;
-    CurrentTarget = FVector::ZeroVector;
+
+    // Perception component
+    AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
+    SetPerceptionComponent(*AIPerceptionComp);
+
+    // Sight config
+    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = SightRadius;
+    SightConfig->LoseSightRadius = LoseSightRadius;
+    SightConfig->PeripheralVisionAngleDegrees = 90.0f;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    AIPerceptionComp->ConfigureSense(*SightConfig);
+
+    // Hearing config
+    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = HearingRadius;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    AIPerceptionComp->ConfigureSense(*HearingConfig);
+
+    AIPerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    CurrentState = ENPC_TribalState::Idle;
+    FearLevel = 0.0f;
 }
 
 void ATribalNPCController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Set home location to current spawn location
-    if (GetPawn())
+
+    AIPerceptionComp->OnPerceptionUpdated.AddDynamic(this, &ATribalNPCController::OnPerceptionUpdated);
+
+    if (BehaviorTree && GetBlackboardComponent())
     {
-        HomeLocation = GetPawn()->GetActorLocation();
-        CurrentTarget = HomeLocation;
+        RunBehaviorTree(BehaviorTree);
+        UpdateBlackboard();
     }
-    
-    // Start with role-appropriate behavior
-    HandleRoleSpecificBehavior();
 }
 
 void ATribalNPCController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    UpdateBehaviorState(DeltaTime);
-    ExecuteCurrentBehavior();
-    ProcessMemories();
+
+    UpdateFear(DeltaTime);
+    ProcessMemoryDecay(DeltaTime);
+    DetermineStateFromPerception();
+    UpdateBlackboard();
 }
 
-void ATribalNPCController::SetTribalRole(ENPC_TribalRole NewRole)
+void ATribalNPCController::OnPossess(APawn* InPawn)
 {
-    TribalRole = NewRole;
-    HandleRoleSpecificBehavior();
-}
+    Super::OnPossess(InPawn);
 
-void ATribalNPCController::ChangeBehaviorState(ENPC_BehaviorState NewState)
-{
-    if (CurrentBehaviorState != NewState)
+    if (BehaviorTree)
     {
-        CurrentBehaviorState = NewState;
-        StateChangeTimer = 0.0f;
-        
-        // Add memory of state change
-        if (GetPawn())
-        {
-            AddMemoryEntry(GetPawn()->GetActorLocation(), 
-                          FString::Printf(TEXT("StateChange_%s"), 
-                          *UEnum::GetValueAsString(NewState)), 2.0f);
-        }
+        RunBehaviorTree(BehaviorTree);
     }
 }
 
-void ATribalNPCController::StartPatrolling()
+void ATribalNPCController::OnUnPossess()
 {
-    ChangeBehaviorState(ENPC_BehaviorState::Patrolling);
-    CurrentTarget = GetRandomPatrolPoint();
+    Super::OnUnPossess();
 }
 
-void ATribalNPCController::StartWorking()
+void ATribalNPCController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
-    ChangeBehaviorState(ENPC_BehaviorState::Working);
-    NextStateChangeTime = WorkDuration;
-}
-
-void ATribalNPCController::StartSocializing()
-{
-    ChangeBehaviorState(ENPC_BehaviorState::Socializing);
-    NextStateChangeTime = FMath::RandRange(10.0f, 25.0f);
-}
-
-void ATribalNPCController::AddMemoryEntry(FVector Location, FString EventType, float Importance)
-{
-    FNPC_MemoryEntry NewMemory;
-    NewMemory.Location = Location;
-    NewMemory.EventType = EventType;
-    NewMemory.Importance = Importance;
-    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
-    
-    // Add to short-term memory
-    ShortTermMemory.Add(NewMemory);
-    
-    // Limit short-term memory size
-    if (ShortTermMemory.Num() > MaxShortTermMemories)
+    for (AActor* Actor : UpdatedActors)
     {
-        // Move oldest important memories to long-term
-        for (int32 i = 0; i < ShortTermMemory.Num() - MaxShortTermMemories; i++)
+        if (!Actor) continue;
+
+        FActorPerceptionBlueprintInfo PerceptionInfo;
+        AIPerceptionComp->GetActorsPerception(Actor, PerceptionInfo);
+
+        bool bCurrentlySensed = false;
+        for (const FAIStimulus& Stimulus : PerceptionInfo.LastSensedStimuli)
         {
-            if (ShortTermMemory[i].Importance >= 3.0f)
+            if (Stimulus.WasSuccessfullySensed())
             {
-                LongTermMemory.Add(ShortTermMemory[i]);
+                bCurrentlySensed = true;
+                break;
             }
         }
-        
-        // Remove excess short-term memories
-        ShortTermMemory.RemoveAt(0, ShortTermMemory.Num() - MaxShortTermMemories);
-    }
-    
-    // Limit long-term memory size
-    if (LongTermMemory.Num() > MaxLongTermMemories)
-    {
-        LongTermMemory.RemoveAt(0, LongTermMemory.Num() - MaxLongTermMemories);
-    }
-}
 
-void ATribalNPCController::ProcessMemories()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Decay memory importance over time
-    for (FNPC_MemoryEntry& Memory : ShortTermMemory)
-    {
-        float TimeDiff = CurrentTime - Memory.Timestamp;
-        if (TimeDiff > 60.0f) // 1 minute decay
+        if (bCurrentlySensed)
         {
-            Memory.Importance *= 0.9f;
+            // Determine threat level from actor class name
+            FString ActorClass = Actor->GetClass()->GetName();
+            ENPC_ThreatLevel Level = ENPC_ThreatLevel::Low;
+
+            if (ActorClass.Contains(TEXT("TRex")) || ActorClass.Contains(TEXT("Rex")))
+            {
+                Level = ENPC_ThreatLevel::Critical;
+            }
+            else if (ActorClass.Contains(TEXT("Raptor")))
+            {
+                Level = ENPC_ThreatLevel::High;
+            }
+            else if (ActorClass.Contains(TEXT("Dino")) || ActorClass.Contains(TEXT("Dinosaur")))
+            {
+                Level = ENPC_ThreatLevel::Medium;
+            }
+
+            RegisterThreat(Actor, Level, Actor->GetActorLocation());
         }
     }
-    
-    // Remove very low importance memories
-    ShortTermMemory.RemoveAll([](const FNPC_MemoryEntry& Memory)
-    {
-        return Memory.Importance < 0.1f;
-    });
 }
 
-bool ATribalNPCController::HasMemoryOfLocation(FVector Location, float Radius)
+void ATribalNPCController::SetNPCState(ENPC_TribalState NewState)
 {
-    for (const FNPC_MemoryEntry& Memory : ShortTermMemory)
+    if (CurrentState == NewState) return;
+    CurrentState = NewState;
+    UpdateBlackboard();
+}
+
+void ATribalNPCController::RegisterThreat(AActor* ThreatActor, ENPC_ThreatLevel Level, const FVector& Location)
+{
+    // Check if this actor is already in memory
+    for (FNPC_MemoryEntry& Entry : MemoryEntries)
     {
-        if (FVector::Dist(Memory.Location, Location) <= Radius)
+        if (Entry.ThreatActorName == ThreatActor->GetName())
+        {
+            Entry.ThreatLocation = Location;
+            Entry.ThreatTime = GetWorld()->GetTimeSeconds();
+            Entry.ThreatLevel = Level;
+            return;
+        }
+    }
+
+    // Add new entry (respect max)
+    if (MemoryEntries.Num() >= MaxMemoryEntries)
+    {
+        MemoryEntries.RemoveAt(0);
+    }
+
+    FNPC_MemoryEntry NewEntry;
+    NewEntry.ThreatLocation = Location;
+    NewEntry.ThreatTime = GetWorld()->GetTimeSeconds();
+    NewEntry.ThreatLevel = Level;
+    NewEntry.ThreatActorName = ThreatActor->GetName();
+    MemoryEntries.Add(NewEntry);
+
+    // Spike fear based on threat level
+    float FearSpike = 0.0f;
+    switch (Level)
+    {
+        case ENPC_ThreatLevel::Low:      FearSpike = 0.1f; break;
+        case ENPC_ThreatLevel::Medium:   FearSpike = 0.25f; break;
+        case ENPC_ThreatLevel::High:     FearSpike = 0.5f; break;
+        case ENPC_ThreatLevel::Critical: FearSpike = 1.0f; break;
+        default: break;
+    }
+    FearLevel = FMath::Clamp(FearLevel + FearSpike, 0.0f, 1.0f);
+}
+
+void ATribalNPCController::ClearMemory()
+{
+    MemoryEntries.Empty();
+}
+
+bool ATribalNPCController::HasRecentThreat(float WithinSeconds) const
+{
+    float Now = GetWorld()->GetTimeSeconds();
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if ((Now - Entry.ThreatTime) <= WithinSeconds)
         {
             return true;
         }
     }
-    
-    for (const FNPC_MemoryEntry& Memory : LongTermMemory)
-    {
-        if (FVector::Dist(Memory.Location, Location) <= Radius)
-        {
-            return true;
-        }
-    }
-    
     return false;
 }
 
-FNPC_MemoryEntry ATribalNPCController::GetMostImportantMemory()
+FVector ATribalNPCController::GetLastKnownThreatLocation() const
 {
-    FNPC_MemoryEntry MostImportant;
-    float HighestImportance = 0.0f;
-    
-    for (const FNPC_MemoryEntry& Memory : ShortTermMemory)
+    if (MemoryEntries.Num() == 0) return FVector::ZeroVector;
+
+    float MostRecent = -1.0f;
+    FVector LastLocation = FVector::ZeroVector;
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
     {
-        if (Memory.Importance > HighestImportance)
+        if (Entry.ThreatTime > MostRecent)
         {
-            HighestImportance = Memory.Importance;
-            MostImportant = Memory;
+            MostRecent = Entry.ThreatTime;
+            LastLocation = Entry.ThreatLocation;
         }
     }
-    
-    return MostImportant;
+    return LastLocation;
 }
 
-float ATribalNPCController::GetDistanceToPlayer()
+void ATribalNPCController::UpdateFear(float DeltaTime)
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn && GetPawn())
+    if (!HasRecentThreat(5.0f))
     {
-        return FVector::Dist(GetPawn()->GetActorLocation(), PlayerPawn->GetActorLocation());
+        FearLevel = FMath::Clamp(FearLevel - FearDecayRate * DeltaTime, 0.0f, 1.0f);
     }
-    return -1.0f;
 }
 
-bool ATribalNPCController::IsPlayerNearby(float Radius)
+void ATribalNPCController::ProcessMemoryDecay(float DeltaTime)
 {
-    float Distance = GetDistanceToPlayer();
-    return Distance >= 0.0f && Distance <= Radius;
+    float Now = GetWorld()->GetTimeSeconds();
+    MemoryEntries.RemoveAll([&](const FNPC_MemoryEntry& Entry)
+    {
+        return (Now - Entry.ThreatTime) > MemoryDecayTime;
+    });
 }
 
-FVector ATribalNPCController::GetRandomPatrolPoint()
+void ATribalNPCController::UpdateBlackboard()
 {
-    FVector RandomDirection = FMath::VRand();
-    RandomDirection.Z = 0.0f; // Keep on ground level
-    RandomDirection.Normalize();
-    
-    float RandomDistance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
-    FVector PatrolPoint = HomeLocation + (RandomDirection * RandomDistance);
-    
-    // Try to find valid navigation point
-    UNavigationSystemV1* NavSystem = UNavigationSystemV1::GetCurrent(GetWorld());
-    if (NavSystem)
+    UBlackboardComponent* BB = GetBlackboardComponent();
+    if (!BB) return;
+
+    BB->SetValueAsEnum(BB_NPCState, (uint8)CurrentState);
+    BB->SetValueAsFloat(BB_FearLevel, FearLevel);
+
+    if (HasRecentThreat())
+    {
+        FVector ThreatLoc = GetLastKnownThreatLocation();
+        BB->SetValueAsVector(BB_ThreatActor, ThreatLoc);
+
+        if (FearLevel >= 0.5f)
+        {
+            FVector FleeTarget = FindFleeLocation(ThreatLoc);
+            BB->SetValueAsVector(BB_FleeTarget, FleeTarget);
+        }
+    }
+}
+
+void ATribalNPCController::DetermineStateFromPerception()
+{
+    if (FearLevel >= 0.8f)
+    {
+        SetNPCState(ENPC_TribalState::Flee);
+    }
+    else if (FearLevel >= 0.4f)
+    {
+        SetNPCState(ENPC_TribalState::Hide);
+    }
+    else if (FearLevel >= 0.1f)
+    {
+        SetNPCState(ENPC_TribalState::Alert);
+    }
+    else if (HasRecentThreat(60.0f))
+    {
+        SetNPCState(ENPC_TribalState::Patrol);
+    }
+    else
+    {
+        SetNPCState(ENPC_TribalState::Idle);
+    }
+}
+
+FVector ATribalNPCController::FindFleeLocation(const FVector& ThreatLocation) const
+{
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return FVector::ZeroVector;
+
+    FVector MyLocation = MyPawn->GetActorLocation();
+    FVector AwayDirection = (MyLocation - ThreatLocation).GetSafeNormal();
+    FVector FleeTarget = MyLocation + AwayDirection * 3000.0f;
+
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
     {
         FNavLocation NavLocation;
-        if (NavSystem->ProjectPointToNavigation(PatrolPoint, NavLocation, FVector(500.0f)))
+        if (NavSys->GetRandomPointInNavigableRadius(FleeTarget, 500.0f, NavLocation))
         {
             return NavLocation.Location;
         }
     }
-    
-    return PatrolPoint;
+    return FleeTarget;
 }
 
-void ATribalNPCController::UpdateBehaviorState(float DeltaTime)
+FVector ATribalNPCController::FindHideLocation(const FVector& ThreatLocation) const
 {
-    StateChangeTimer += DeltaTime;
-    
-    // Check for player proximity - affects behavior
-    if (IsPlayerNearby(800.0f))
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return FVector::ZeroVector;
+
+    FVector MyLocation = MyPawn->GetActorLocation();
+    FVector AwayDirection = (MyLocation - ThreatLocation).GetSafeNormal();
+    // Hide behind cover — offset perpendicular to threat direction
+    FVector Perp = FVector(-AwayDirection.Y, AwayDirection.X, 0.0f);
+    FVector HideTarget = MyLocation + AwayDirection * 800.0f + Perp * 400.0f;
+
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
     {
-        if (CurrentBehaviorState != ENPC_BehaviorState::Investigating && 
-            CurrentBehaviorState != ENPC_BehaviorState::Fleeing)
+        FNavLocation NavLocation;
+        if (NavSys->GetRandomPointInNavigableRadius(HideTarget, 300.0f, NavLocation))
         {
-            // React to player based on role
-            switch (TribalRole)
-            {
-                case ENPC_TribalRole::Scout:
-                    ChangeBehaviorState(ENPC_BehaviorState::Investigating);
-                    break;
-                case ENPC_TribalRole::Elder:
-                    ChangeBehaviorState(ENPC_BehaviorState::Socializing);
-                    break;
-                default:
-                    if (FMath::RandRange(0.0f, 1.0f) < 0.3f)
-                    {
-                        ChangeBehaviorState(ENPC_BehaviorState::Fleeing);
-                    }
-                    break;
-            }
-        }
-        
-        // Add player sighting to memory
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            AddMemoryEntry(PlayerPawn->GetActorLocation(), TEXT("PlayerSighting"), 4.0f);
+            return NavLocation.Location;
         }
     }
-    
-    // State change timing
-    if (StateChangeTimer >= NextStateChangeTime)
-    {
-        HandleRoleSpecificBehavior();
-        NextStateChangeTime = FMath::RandRange(15.0f, 45.0f);
-        StateChangeTimer = 0.0f;
-    }
-}
-
-void ATribalNPCController::ExecuteCurrentBehavior()
-{
-    if (!GetPawn()) return;
-    
-    switch (CurrentBehaviorState)
-    {
-        case ENPC_BehaviorState::Patrolling:
-            // Move towards current target
-            if (FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget) < 200.0f)
-            {
-                CurrentTarget = GetRandomPatrolPoint();
-            }
-            MoveToLocation(CurrentTarget);
-            break;
-            
-        case ENPC_BehaviorState::Working:
-            // Stay in place and "work"
-            StopMovement();
-            break;
-            
-        case ENPC_BehaviorState::Socializing:
-            // Move slowly around home area
-            if (FVector::Dist(GetPawn()->GetActorLocation(), HomeLocation) > SocialDistance)
-            {
-                MoveToLocation(HomeLocation);
-            }
-            break;
-            
-        case ENPC_BehaviorState::Fleeing:
-            // Move away from player
-            APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-            if (PlayerPawn)
-            {
-                FVector FleeDirection = GetPawn()->GetActorLocation() - PlayerPawn->GetActorLocation();
-                FleeDirection.Normalize();
-                FVector FleeTarget = GetPawn()->GetActorLocation() + (FleeDirection * 1000.0f);
-                MoveToLocation(FleeTarget);
-            }
-            break;
-            
-        case ENPC_BehaviorState::Investigating:
-            // Move towards player slowly
-            APawn* PlayerPawn2 = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-            if (PlayerPawn2)
-            {
-                FVector PlayerLocation = PlayerPawn2->GetActorLocation();
-                FVector SafeDistance = PlayerLocation + ((GetPawn()->GetActorLocation() - PlayerLocation).GetSafeNormal() * 400.0f);
-                MoveToLocation(SafeDistance);
-            }
-            break;
-            
-        default:
-            // Idle - stay near home
-            if (FVector::Dist(GetPawn()->GetActorLocation(), HomeLocation) > 300.0f)
-            {
-                MoveToLocation(HomeLocation);
-            }
-            break;
-    }
-}
-
-void ATribalNPCController::HandleRoleSpecificBehavior()
-{
-    switch (TribalRole)
-    {
-        case ENPC_TribalRole::Hunter:
-            if (FMath::RandRange(0.0f, 1.0f) < 0.6f)
-            {
-                StartPatrolling();
-            }
-            else
-            {
-                StartWorking(); // Preparing hunting tools
-            }
-            break;
-            
-        case ENPC_TribalRole::Gatherer:
-            if (FMath::RandRange(0.0f, 1.0f) < 0.7f)
-            {
-                StartWorking(); // Gathering resources
-            }
-            else
-            {
-                StartPatrolling(); // Looking for new gathering spots
-            }
-            break;
-            
-        case ENPC_TribalRole::Scout:
-            StartPatrolling(); // Scouts always patrol
-            PatrolRadius *= 1.5f; // Scouts have larger patrol radius
-            break;
-            
-        case ENPC_TribalRole::Elder:
-            if (FMath::RandRange(0.0f, 1.0f) < 0.8f)
-            {
-                StartSocializing(); // Elders mostly socialize
-            }
-            else
-            {
-                ChangeBehaviorState(ENPC_BehaviorState::Idle); // Rest
-            }
-            break;
-    }
+    return HideTarget;
 }
