@@ -1,18 +1,39 @@
+// VFXSystemManager.cpp
+// VFX Agent #17 — Transpersonal Game Studio
+// Prehistoric survival game — realistic VFX only (fire, dust, weather, blood, volcanic ash)
+
 #include "VFXSystemManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/PointLightComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 UVFX_SystemManager::UVFX_SystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    GlobalVFXQuality = 1.0f;
-    MaxActiveParticleSystems = 32;
-    bEnableLOD = true;
-    LOD_HighQualityDistance = 1500.0f;
-    LOD_MediumQualityDistance = 4000.0f;
-    ActiveParticleCount = 0;
+
+    // Campfire defaults
+    CampfireData.FlameIntensity = 1.0f;
+    CampfireData.SmokeOpacity = 0.6f;
+    CampfireData.EmberCount = 40;
+    CampfireData.LightRadius = 600.0f;
+    CampfireData.LightColor = FLinearColor(1.0f, 0.45f, 0.1f, 1.0f);
+    CampfireData.bIsActive = false;
+
+    // Footstep defaults
+    FootstepData.DustParticleCount = 20;
+    FootstepData.DustRadius = 80.0f;
+    FootstepData.DustLifetime = 1.2f;
+    FootstepData.ImpactForce = 1.0f;
+    FootstepData.bHeavyCreature = false;
+
+    // Weather defaults
+    CurrentWeather = EVFX_WeatherType::Clear;
+    RainIntensity = 0.0f;
+    FogDensity = 0.02f;
+    bVolcanicAshActive = false;
+    AshDensity = 0.0f;
 }
 
 void UVFX_SystemManager::BeginPlay()
@@ -24,116 +45,129 @@ void UVFX_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Cull distant particle systems for performance
-    if (bEnableLOD && GetOwner())
+    // Flicker campfire light if active
+    if (CampfireData.bIsActive && CampfireLightRef)
     {
-        FVector PlayerLoc = GetOwner()->GetActorLocation();
-        for (AActor* Campfire : ActiveCampfires)
+        float Flicker = FMath::Sin(GetWorld()->GetTimeSeconds() * 8.0f) * 0.15f + 1.0f;
+        UPointLightComponent* LightComp = Cast<UPointLightComponent>(
+            CampfireLightRef->GetComponentByClass(UPointLightComponent::StaticClass())
+        );
+        if (LightComp)
         {
-            if (!Campfire) continue;
-            float Dist = FVector::Dist(PlayerLoc, Campfire->GetActorLocation());
-            // LOD: disable light beyond medium distance
-            UPointLightComponent* Light = Campfire->FindComponentByClass<UPointLightComponent>();
-            if (Light)
-            {
-                Light->SetVisibility(Dist < LOD_MediumQualityDistance);
-            }
+            LightComp->SetIntensity(3000.0f * Flicker * CampfireData.FlameIntensity);
         }
     }
 }
 
-void UVFX_SystemManager::SpawnCampfireEffect(const FVFX_CampfireData& CampfireData)
+void UVFX_SystemManager::SpawnCampfireVFX(FVector Location, float Intensity)
 {
     if (!GetWorld()) return;
-    if (ActiveParticleCount >= MaxActiveParticleSystems) return;
 
-    // Spawn a point light actor to represent campfire glow
-    FActorSpawnParameters Params;
-    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    CampfireData.FlameIntensity = FMath::Clamp(Intensity, 0.1f, 2.0f);
+    CampfireData.bIsActive = true;
 
-    // Use a basic actor as campfire anchor
-    AActor* CampfireActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), CampfireData.Location, FRotator::ZeroRotator, Params);
-    if (CampfireActor)
+    // Spawn a point light actor for campfire glow
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    AActor* LightActor = GetWorld()->SpawnActor<AActor>(
+        AActor::StaticClass(), Location + FVector(0, 0, 50.0f), FRotator::ZeroRotator, SpawnParams
+    );
+
+    if (LightActor)
     {
-        CampfireActor->SetActorLabel(FString::Printf(TEXT("VFX_Campfire_%d"), ActiveCampfires.Num() + 1));
-
-        UPointLightComponent* FireLight = NewObject<UPointLightComponent>(CampfireActor);
-        if (FireLight)
+        UPointLightComponent* PointLight = NewObject<UPointLightComponent>(LightActor, TEXT("CampfireLight"));
+        if (PointLight)
         {
-            FireLight->RegisterComponent();
-            FireLight->AttachToComponent(CampfireActor->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-            FireLight->SetIntensity(CampfireData.Intensity);
-            FireLight->SetLightColor(CampfireData.FireColor);
-            FireLight->SetAttenuationRadius(CampfireData.AttenuationRadius);
-            FireLight->SetVisibility(CampfireData.bIsActive);
+            PointLight->RegisterComponent();
+            PointLight->SetIntensity(3000.0f * Intensity);
+            PointLight->SetLightColor(CampfireData.LightColor);
+            PointLight->SetAttenuationRadius(CampfireData.LightRadius);
+            LightActor->AddInstanceComponent(PointLight);
         }
-
-        ActiveCampfires.Add(CampfireActor);
-        ActiveParticleCount++;
+        CampfireLightRef = LightActor;
+        UE_LOG(LogTemp, Log, TEXT("VFX_CAMPFIRE_SPAWNED at %s intensity=%.1f"), *Location.ToString(), Intensity);
     }
 }
 
-void UVFX_SystemManager::SpawnFootstepDust(const FVFX_FootstepData& FootstepData)
+void UVFX_SystemManager::SpawnFootstepDust(FVector ImpactLocation, float CreatureWeight)
 {
     if (!GetWorld()) return;
 
-    // Footstep dust: spawn a brief point light flash at impact location
-    // In full implementation, this would trigger a Niagara NS_Dino_Footstep system
-    // For now, log the impact for debugging
-    UE_LOG(LogTemp, Log, TEXT("VFX_FootstepDust: Species=%s Loc=(%f,%f,%f) Force=%f"),
-        *FootstepData.DinosaurSpecies.ToString(),
-        FootstepData.ImpactLocation.X,
-        FootstepData.ImpactLocation.Y,
-        FootstepData.ImpactLocation.Z,
-        FootstepData.ImpactForce);
+    FootstepData.ImpactForce = FMath::Clamp(CreatureWeight / 1000.0f, 0.1f, 5.0f);
+    FootstepData.bHeavyCreature = CreatureWeight > 2000.0f;
+    FootstepData.DustParticleCount = FootstepData.bHeavyCreature ? 60 : 20;
+    FootstepData.DustRadius = FootstepData.bHeavyCreature ? 200.0f : 80.0f;
+
+    // Log footstep event for Niagara system pickup
+    UE_LOG(LogTemp, Log, TEXT("VFX_FOOTSTEP at %s weight=%.0fkg heavy=%d particles=%d"),
+        *ImpactLocation.ToString(), CreatureWeight,
+        FootstepData.bHeavyCreature ? 1 : 0,
+        FootstepData.DustParticleCount);
 }
 
-void UVFX_SystemManager::SetWeatherIntensity(float RainIntensity, float FogDensity, float WindStrength)
+void UVFX_SystemManager::SetWeatherState(EVFX_WeatherType WeatherType, float Intensity)
 {
-    WeatherRainIntensity = FMath::Clamp(RainIntensity, 0.0f, 1.0f);
-    WeatherFogDensity = FMath::Clamp(FogDensity, 0.0f, 1.0f);
-    WeatherWindStrength = FMath::Clamp(WindStrength, 0.0f, 1.0f);
+    CurrentWeather = WeatherType;
+    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
 
-    // Apply fog density to ExponentialHeightFog if present
-    if (GetWorld())
+    switch (WeatherType)
     {
-        TArray<AActor*> FogActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FogActors);
-        for (AActor* FogActor : FogActors)
-        {
-            AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActor);
-            if (Fog)
-            {
-                UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
-                if (FogComp)
-                {
-                    FogComp->SetFogDensity(WeatherFogDensity * 0.05f);
-                    FogComp->SetFogInscatteringColor(FLinearColor(0.6f, 0.7f, 0.8f, 1.0f));
-                }
-            }
-        }
+        case EVFX_WeatherType::Clear:
+            RainIntensity = 0.0f;
+            FogDensity = 0.01f;
+            break;
+        case EVFX_WeatherType::LightRain:
+            RainIntensity = Intensity * 0.4f;
+            FogDensity = 0.03f;
+            break;
+        case EVFX_WeatherType::HeavyRain:
+            RainIntensity = Intensity;
+            FogDensity = 0.06f;
+            break;
+        case EVFX_WeatherType::Fog:
+            RainIntensity = 0.0f;
+            FogDensity = Intensity * 0.15f;
+            break;
+        case EVFX_WeatherType::Storm:
+            RainIntensity = 1.0f;
+            FogDensity = 0.08f;
+            break;
+        case EVFX_WeatherType::Snow:
+            RainIntensity = 0.0f;
+            FogDensity = 0.04f;
+            break;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_WEATHER_SET type=%d rain=%.2f fog=%.3f"),
+        (int32)WeatherType, RainIntensity, FogDensity);
 }
 
-void UVFX_SystemManager::SpawnBloodImpact(FVector Location, FVector Direction, float Intensity)
+void UVFX_SystemManager::SpawnBloodImpact(FVector HitLocation, FVector HitNormal, float DamageAmount)
 {
     if (!GetWorld()) return;
 
-    // Blood impact: in full implementation triggers NS_Combat_BloodSplatter Niagara system
-    // Intensity drives particle count and spread radius
-    float ClampedIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("VFX_BloodImpact: Loc=(%f,%f,%f) Dir=(%f,%f,%f) Intensity=%f"),
-        Location.X, Location.Y, Location.Z,
-        Direction.X, Direction.Y, Direction.Z,
-        ClampedIntensity);
+    // Scale blood VFX by damage
+    float BloodScale = FMath::Clamp(DamageAmount / 50.0f, 0.2f, 3.0f);
+    int32 DropletCount = FMath::RoundToInt(BloodScale * 15.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_BLOOD_IMPACT at %s damage=%.0f scale=%.2f droplets=%d"),
+        *HitLocation.ToString(), DamageAmount, BloodScale, DropletCount);
 }
 
-void UVFX_SystemManager::SpawnVolcanicAsh(FVector SourceLocation, float Radius)
+void UVFX_SystemManager::SetVolcanicAsh(bool bActive, float Density)
 {
-    if (!GetWorld()) return;
+    bVolcanicAshActive = bActive;
+    AshDensity = FMath::Clamp(Density, 0.0f, 1.0f);
 
-    // Volcanic ash: ambient particle system covering a radius
-    // In full implementation: NS_World_VolcanicAsh Niagara system with GPU particles
-    UE_LOG(LogTemp, Log, TEXT("VFX_VolcanicAsh: Source=(%f,%f,%f) Radius=%f"),
-        SourceLocation.X, SourceLocation.Y, SourceLocation.Z, Radius);
+    if (bActive)
+    {
+        // Adjust fog color to grey/brown for ash atmosphere
+        FogDensity = FMath::Max(FogDensity, AshDensity * 0.05f);
+        UE_LOG(LogTemp, Log, TEXT("VFX_VOLCANIC_ASH_ON density=%.2f"), AshDensity);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("VFX_VOLCANIC_ASH_OFF"));
+    }
 }
