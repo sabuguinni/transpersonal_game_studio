@@ -3,109 +3,83 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Components/SphereComponent.h"
+#include "Sound/SoundBase.h"
 #include "AudioZoneManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Camp        UMETA(DisplayName = "Camp"),
-    Forest      UMETA(DisplayName = "Forest"),
-    DangerZone  UMETA(DisplayName = "Danger Zone"),
-    River       UMETA(DisplayName = "River"),
-    Cave        UMETA(DisplayName = "Cave"),
-    OpenPlain   UMETA(DisplayName = "Open Plain")
+    OpenPlains      UMETA(DisplayName = "Open Plains"),
+    DenseForest     UMETA(DisplayName = "Dense Forest"),
+    RiverBank       UMETA(DisplayName = "River Bank"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    CampSite        UMETA(DisplayName = "Camp Site"),
+    DangerZone      UMETA(DisplayName = "Danger Zone")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ZoneConfig
+struct FAudio_ZoneData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::OpenPlains;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float BlendRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float AmbientVolume = 1.0f;
+    float AmbientVolume = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float DangerIntensity = 0.0f;
+    float MusicIntensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bIsActive = true;
+    bool bDangerousZone = false;
 };
 
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public USphereComponent
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API AAudioZoneManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    USoundBase* AmbientSound = nullptr;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void ActivateZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void DeactivateZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    float GetBlendWeight(const FVector& ListenerLocation) const;
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_ZoneManager();
+    AAudioZoneManager();
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float UpdateInterval = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MasterVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bEnableDynamicMixing = true;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetZoneType(EAudio_ZoneType NewZoneType);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void RegisterZone(UAudio_ZoneComponent* Zone);
+    EAudio_ZoneType GetZoneType() const { return ZoneData.ZoneType; }
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UnregisterZone(UAudio_ZoneComponent* Zone);
+    void SetAmbientVolume(float Volume);
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_ZoneType GetDominantZoneForListener(const FVector& ListenerLocation) const;
+    float GetBlendRadius() const { return ZoneData.BlendRadius; }
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetDangerLevel() const;
+    void TriggerDangerAlert();
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetDangerLevel(float NewDangerLevel);
+    void ClearDangerAlert();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_ZoneData ZoneData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    USoundBase* AmbientSound = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    USoundBase* DangerStinger = nullptr;
 
 private:
     UPROPERTY()
-    TArray<UAudio_ZoneComponent*> RegisteredZones;
+    UAudioComponent* AmbientAudioComponent = nullptr;
 
-    UPROPERTY()
-    UAudioComponent* ActiveAmbientComponent = nullptr;
-
-    float CurrentDangerLevel = 0.0f;
-    float TimeSinceLastUpdate = 0.0f;
-
-    void UpdateAudioMix(const FVector& ListenerLocation);
+    bool bDangerActive = false;
+    float DangerCooldown = 0.0f;
 };
