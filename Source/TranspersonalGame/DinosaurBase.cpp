@@ -1,101 +1,119 @@
 // DinosaurBase.cpp
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260620_007
-// Base class for all dinosaur pawns in the prehistoric survival game.
-// All dinosaur types (TRex, Raptor, Brachiosaurus, etc.) inherit from this.
+// Core Systems Programmer — Agent #03
+// Abstract base implementation for all dinosaur species.
 
 #include "DinosaurBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Capsule defaults — overridden per species in child classes
-    GetCapsuleComponent()->InitCapsuleSize(80.0f, 120.0f);
-
-    // Movement defaults
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 360.0f, 0.0f);
-    GetCharacterMovement()->MaxWalkSpeed = 400.0f;
-    GetCharacterMovement()->JumpZVelocity = 0.0f;  // Dinosaurs don't jump by default
-    GetCharacterMovement()->GravityScale = 1.0f;
-
-    // Species defaults
-    MaxHealth = 500.0f;
-    CurrentHealth = 500.0f;
-    MoveSpeed = 400.0f;
-    AttackDamage = 50.0f;
+    // Default survival stats — overridden per species
+    MaxHealth       = 200.0f;
+    CurrentHealth   = MaxHealth;
+    MoveSpeed       = 400.0f;
+    AttackDamage    = 30.0f;
+    AttackRange     = 150.0f;
     DetectionRadius = 1500.0f;
-    AttackRadius = 200.0f;
-    bIsAggressive = false;
-    bIsPack = false;
-    SpeciesName = TEXT("Unknown");
-    DinoState = EDinoState::Idle;
+    bIsAggressive   = false;
+    bIsDead         = false;
+    DinosaurSpecies = EDinosaurSpecies::Unknown;
+    DietType        = EDietType::Omnivore;
+
+    // Movement
+    GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
+    GetCharacterMovement()->JumpZVelocity = 400.0f;
+    GetCharacterMovement()->AirControl = 0.2f;
+
+    // Capsule defaults
+    GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationYaw   = false;
+    bUseControllerRotationRoll  = false;
 }
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Apply species-specific movement speed
+    CurrentHealth = MaxHealth;
     GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // AI tick handled by BehaviorTree / AIController in child classes
 }
 
-float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-    AController* EventInstigator, AActor* DamageCauser)
+float ADinosaurBase::TakeDamageDino(float DamageAmount, AActor* DamageCauser)
 {
-    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    if (bIsDead) return 0.0f;
 
-    CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, MaxHealth);
+    CurrentHealth = FMath::Clamp(CurrentHealth - DamageAmount, 0.0f, MaxHealth);
 
     if (CurrentHealth <= 0.0f)
     {
+        bIsDead = true;
         OnDeath();
     }
-    else if (bIsAggressive && DinoState == EDinoState::Idle)
+    else if (!bIsAggressive && DamageAmount > 0.0f)
     {
-        // Provoked — switch to aggressive state
-        DinoState = EDinoState::Aggressive;
+        // Become aggressive when hit
+        SetAggressive(true);
     }
 
-    return ActualDamage;
+    return DamageAmount;
 }
 
-void ADinosaurBase::OnDeath()
+void ADinosaurBase::Attack_Implementation()
 {
-    DinoState = EDinoState::Dead;
+    // Base implementation — subclasses override for species-specific attacks
+    // Plays attack animation, applies damage to overlapping actors in AttackRange
+    if (bIsDead) return;
 
-    // Disable collision and movement
-    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    TArray<AActor*> OverlappingActors;
+    GetOverlappingActors(OverlappingActors);
+
+    for (AActor* Target : OverlappingActors)
+    {
+        if (Target && Target != this)
+        {
+            float Dist = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+            if (Dist <= AttackRange)
+            {
+                Target->TakeDamage(AttackDamage, FDamageEvent(), GetController(), this);
+            }
+        }
+    }
+}
+
+void ADinosaurBase::SetAggressive(bool bAggressive)
+{
+    bIsAggressive = bAggressive;
+    GetCharacterMovement()->MaxWalkSpeed = bAggressive ? MoveSpeed * 1.5f : MoveSpeed;
+}
+
+void ADinosaurBase::OnDeath_Implementation()
+{
+    // Base death — disable movement, collision, schedule destroy
     GetCharacterMovement()->DisableMovement();
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Broadcast death event for quest/loot systems
-    OnDinosaurDied.Broadcast(this);
-}
-
-bool ADinosaurBase::IsAlive() const
-{
-    return CurrentHealth > 0.0f && DinoState != EDinoState::Dead;
+    // Destroy after 10 seconds (allow death animation to play)
+    FTimerHandle DestroyTimer;
+    GetWorldTimerManager().SetTimer(DestroyTimer, [this]()
+    {
+        Destroy();
+    }, 10.0f, false);
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
     return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
-}
-
-void ADinosaurBase::SetDinoState(EDinoState NewState)
-{
-    if (DinoState != EDinoState::Dead)
-    {
-        DinoState = NewState;
-    }
 }
