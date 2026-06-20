@@ -1,150 +1,263 @@
 #include "AudioSystemManager.h"
-#include "Engine/World.h"
-#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
-void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
+
+UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
-    Super::Initialize(Collection);
-    
-    InitializeDefaultVolumes();
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager initialized"));
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UAudioSystemManager::Deinitialize()
+void UAudio_ZoneComponent::BeginPlay()
 {
-    StopAllSounds();
-    ActiveAudioComponents.Empty();
-    
-    Super::Deinitialize();
+    Super::BeginPlay();
 }
 
-void UAudioSystemManager::InitializeDefaultVolumes()
+void UAudio_ZoneComponent::SetThreatLevel(EAudio_ThreatLevel NewLevel)
 {
-    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 0.7f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Dinosaur, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Player, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Weather, 0.6f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.5f);
+    CurrentThreatLevel = NewLevel;
 }
 
-void UAudioSystemManager::PlaySound2D(const FAudio_SoundConfig& SoundConfig)
+EAudio_ThreatLevel UAudio_ZoneComponent::GetThreatLevel() const
 {
-    if (!SoundConfig.SoundCue.IsValid())
+    return CurrentThreatLevel;
+}
+
+float UAudio_ZoneComponent::GetBlendedVolume(float TimeOfDay) const
+{
+    float Base = ZoneConfig.BaseVolume;
+    bool bIsNight = (TimeOfDay < 0.25f || TimeOfDay > 0.75f);
+    if (bIsNight)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid sound cue in PlaySound2D"));
-        return;
+        Base *= ZoneConfig.NightVolumeMultiplier;
     }
 
+    // Threat level modifies volume
+    switch (CurrentThreatLevel)
+    {
+    case EAudio_ThreatLevel::Calm:
+        return Base;
+    case EAudio_ThreatLevel::Uneasy:
+        return Base * 0.7f;
+    case EAudio_ThreatLevel::Danger:
+        return Base * 0.4f;
+    case EAudio_ThreatLevel::Combat:
+        return Base * 0.2f;
+    default:
+        return Base;
+    }
+}
+
+// ============================================================
+// AAudio_AmbientZoneActor
+// ============================================================
+
+AAudio_AmbientZoneActor::AAudio_AmbientZoneActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.5f;  // Check every 0.5s for performance
+
+    AudioZoneComp = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("AudioZoneComp"));
+    AmbientAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComp"));
+
+    if (AmbientAudioComp)
+    {
+        AmbientAudioComp->SetupAttachment(GetRootComponent());
+        AmbientAudioComp->bAutoActivate = false;
+    }
+}
+
+void AAudio_AmbientZoneActor::BeginPlay()
+{
+    Super::BeginPlay();
+    bIsActive = false;
+}
+
+void AAudio_AmbientZoneActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    bool bInRange = IsPlayerInRange();
+    if (bInRange && !bIsActive)
+    {
+        ActivateZone();
+    }
+    else if (!bInRange && bIsActive)
+    {
+        DeactivateZone();
+    }
+}
+
+void AAudio_AmbientZoneActor::ActivateZone()
+{
+    bIsActive = true;
+    if (AmbientAudioComp && !AmbientAudioComp->IsPlaying())
+    {
+        AmbientAudioComp->Play();
+    }
+}
+
+void AAudio_AmbientZoneActor::DeactivateZone()
+{
+    bIsActive = false;
+    if (AmbientAudioComp && AmbientAudioComp->IsPlaying())
+    {
+        AmbientAudioComp->FadeOut(2.0f, 0.0f);
+    }
+}
+
+bool AAudio_AmbientZoneActor::IsPlayerInRange() const
+{
     UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
+    if (!World) return false;
 
-    float CategoryVolume = CategoryVolumes.FindRef(SoundConfig.Category);
-    float FinalVolume = SoundConfig.VolumeMultiplier * CategoryVolume * MasterVolume;
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return false;
 
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(
-        World,
-        SoundConfig.SoundCue.Get(),
-        FinalVolume,
-        SoundConfig.PitchMultiplier
-    );
-
-    if (AudioComp)
-    {
-        ActiveAudioComponents.Add(AudioComp);
-    }
-
-    CleanupFinishedComponents();
+    float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    return Distance <= ActivationRadius;
 }
 
-void UAudioSystemManager::PlaySound3D(const FAudio_SoundConfig& SoundConfig, FVector Location)
+// ============================================================
+// AAudio_SystemManager
+// ============================================================
+
+AAudio_SystemManager::AAudio_SystemManager()
 {
-    if (!SoundConfig.SoundCue.IsValid())
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 1.0f;  // Tick every second for performance
+}
+
+void AAudio_SystemManager::BeginPlay()
+{
+    Super::BeginPlay();
+    CurrentThreatBlend = 0.0f;
+    TargetThreatBlend = 0.0f;
+    RecentImpacts.Empty();
+}
+
+void AAudio_SystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    UpdateThreatBlend(DeltaTime);
+    AuditDinosaurProximity();
+}
+
+void AAudio_SystemManager::RegisterImpactEvent(const FAudio_ImpactEvent& Event)
+{
+    RecentImpacts.Add(Event);
+
+    // Keep only last 10 impacts
+    if (RecentImpacts.Num() > 10)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid sound cue in PlaySound3D"));
-        return;
+        RecentImpacts.RemoveAt(0);
     }
 
+    // Large impacts escalate threat level
+    if (Event.Magnitude >= 5.0f)
+    {
+        SetGlobalThreatLevel(EAudio_ThreatLevel::Danger);
+    }
+    else if (Event.Magnitude >= 2.0f && GlobalThreatLevel == EAudio_ThreatLevel::Calm)
+    {
+        SetGlobalThreatLevel(EAudio_ThreatLevel::Uneasy);
+    }
+}
+
+void AAudio_SystemManager::SetGlobalThreatLevel(EAudio_ThreatLevel NewLevel)
+{
+    GlobalThreatLevel = NewLevel;
+    switch (NewLevel)
+    {
+    case EAudio_ThreatLevel::Calm:    TargetThreatBlend = 0.0f; break;
+    case EAudio_ThreatLevel::Uneasy:  TargetThreatBlend = 0.33f; break;
+    case EAudio_ThreatLevel::Danger:  TargetThreatBlend = 0.66f; break;
+    case EAudio_ThreatLevel::Combat:  TargetThreatBlend = 1.0f; break;
+    default: TargetThreatBlend = 0.0f; break;
+    }
+}
+
+EAudio_ThreatLevel AAudio_SystemManager::GetGlobalThreatLevel() const
+{
+    return GlobalThreatLevel;
+}
+
+void AAudio_SystemManager::UpdateTimeOfDay(float NewTimeOfDay)
+{
+    TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 1.0f);
+}
+
+bool AAudio_SystemManager::IsNightTime() const
+{
+    return (TimeOfDay < 0.25f || TimeOfDay > 0.75f);
+}
+
+void AAudio_SystemManager::TriggerDinosaurProximityAlert(FVector DinosaurLocation, float DinosaurSize)
+{
     UWorld* World = GetWorld();
-    if (!World)
+    if (!World) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return;
+
+    float Distance = FVector::Dist(DinosaurLocation, PlayerPawn->GetActorLocation());
+
+    if (Distance <= DinosaurProximityRadius)
     {
-        return;
-    }
-
-    float CategoryVolume = CategoryVolumes.FindRef(SoundConfig.Category);
-    float FinalVolume = SoundConfig.VolumeMultiplier * CategoryVolume * MasterVolume;
-
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-        World,
-        SoundConfig.SoundCue.Get(),
-        Location,
-        FRotator::ZeroRotator,
-        FinalVolume,
-        SoundConfig.PitchMultiplier
-    );
-
-    if (AudioComp)
-    {
-        ActiveAudioComponents.Add(AudioComp);
-    }
-
-    CleanupFinishedComponents();
-}
-
-void UAudioSystemManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-}
-
-void UAudioSystemManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
-{
-    float ClampedVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    CategoryVolumes.Add(Category, ClampedVolume);
-}
-
-void UAudioSystemManager::StopAllSounds()
-{
-    for (UAudioComponent* AudioComp : ActiveAudioComponents)
-    {
-        if (IsValid(AudioComp))
+        // Large dinosaur (T-Rex scale) = immediate danger
+        if (DinosaurSize >= 3.0f)
         {
-            AudioComp->Stop();
+            SetGlobalThreatLevel(EAudio_ThreatLevel::Danger);
         }
-    }
-    
-    ActiveAudioComponents.Empty();
-}
-
-void UAudioSystemManager::StopSoundsOfCategory(EAudio_SoundCategory Category)
-{
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
-    {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (IsValid(AudioComp))
+        else if (DinosaurSize >= 1.5f && GlobalThreatLevel == EAudio_ThreatLevel::Calm)
         {
-            // Note: We'd need to store category info with each component for this to work fully
-            // For now, this is a placeholder implementation
-            AudioComp->Stop();
-            ActiveAudioComponents.RemoveAt(i);
+            SetGlobalThreatLevel(EAudio_ThreatLevel::Uneasy);
         }
     }
 }
 
-void UAudioSystemManager::CleanupFinishedComponents()
+void AAudio_SystemManager::UpdateThreatBlend(float DeltaTime)
 {
-    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    if (!FMath::IsNearlyEqual(CurrentThreatBlend, TargetThreatBlend, 0.01f))
     {
-        UAudioComponent* AudioComp = ActiveAudioComponents[i];
-        if (!IsValid(AudioComp) || !AudioComp->IsPlaying())
+        CurrentThreatBlend = FMath::FInterpTo(
+            CurrentThreatBlend, TargetThreatBlend, DeltaTime, ThreatTransitionSpeed
+        );
+    }
+}
+
+void AAudio_SystemManager::AuditDinosaurProximity()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return;
+
+    // Scan for actors tagged as dinosaurs
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsWithTag(World, FName("Dinosaur"), AllActors);
+
+    bool bDinoNearby = false;
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+        float Dist = FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
+        if (Dist <= DinosaurProximityRadius)
         {
-            ActiveAudioComponents.RemoveAt(i);
+            bDinoNearby = true;
+            break;
         }
+    }
+
+    // Auto-calm if no dinos nearby and not in combat
+    if (!bDinoNearby && GlobalThreatLevel == EAudio_ThreatLevel::Uneasy)
+    {
+        SetGlobalThreatLevel(EAudio_ThreatLevel::Calm);
     }
 }
