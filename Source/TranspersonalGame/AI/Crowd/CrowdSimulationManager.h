@@ -1,46 +1,70 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
 
 // ============================================================
-// Crowd & Traffic Simulation — Agent #13
-// Prehistoric herbivore herd simulation with predator avoidance
+// Enums — Crowd_ prefix to avoid collision with other agents
 // ============================================================
 
 UENUM(BlueprintType)
-enum class ECrowd_HerdState : uint8
+enum class ECrowd_AgentType : uint8
 {
-    Grazing     UMETA(DisplayName = "Grazing"),
-    Migrating   UMETA(DisplayName = "Migrating"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Drinking    UMETA(DisplayName = "Drinking"),
-    Resting     UMETA(DisplayName = "Resting"),
-    Scattered   UMETA(DisplayName = "Scattered")
+    Herbivore   UMETA(DisplayName = "Herbivore"),
+    Predator    UMETA(DisplayName = "Predator"),
+    Scavenger   UMETA(DisplayName = "Scavenger"),
 };
 
 UENUM(BlueprintType)
-enum class ECrowd_AgentSpecies : uint8
+enum class ECrowd_AgentBehavior : uint8
 {
+    Idle        UMETA(DisplayName = "Idle"),
+    Grazing     UMETA(DisplayName = "Grazing"),
+    Wandering   UMETA(DisplayName = "Wandering"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Resting     UMETA(DisplayName = "Resting"),
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_DinoSpecies : uint8
+{
+    Raptor          UMETA(DisplayName = "Raptor"),
+    TRex            UMETA(DisplayName = "T-Rex"),
     Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
     Triceratops     UMETA(DisplayName = "Triceratops"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Gallimimus      UMETA(DisplayName = "Gallimimus"),
-    Stegosaurus     UMETA(DisplayName = "Stegosaurus")
+    Pterodactyl     UMETA(DisplayName = "Pterodactyl"),
 };
 
-UENUM(BlueprintType)
-enum class ECrowd_ThreatLevel : uint8
+// ============================================================
+// Structs — Crowd_ prefix
+// ============================================================
+
+USTRUCT(BlueprintType)
+struct FCrowd_HerdZone
 {
-    Safe        UMETA(DisplayName = "Safe"),
-    Cautious    UMETA(DisplayName = "Cautious"),
-    Alarmed     UMETA(DisplayName = "Alarmed"),
-    Panic       UMETA(DisplayName = "Panic")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FName ZoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float Radius = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_DinoSpecies PreferredSpecies = ECrowd_DinoSpecies::Brachiosaurus;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 MaxOccupants = 8;
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_WaypointData
+struct FCrowd_PatrolNode
 {
     GENERATED_BODY()
 
@@ -48,155 +72,112 @@ struct FCrowd_WaypointData
     FVector Location = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float DensityWeight = 1.0f;
+    ECrowd_DinoSpecies OwnerSpecies = ECrowd_DinoSpecies::Raptor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    bool bIsDangerZone = false;
+    int32 NodeIndex = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float ThreatRadius = 500.0f;
+    float WaitTime = 2.0f;
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_HerdAgent
+struct FCrowd_AgentState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 AgentID = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_AgentType AgentType = ECrowd_AgentType::Herbivore;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentSpecies Species = ECrowd_AgentSpecies::Gallimimus;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_AgentBehavior CurrentBehavior = ECrowd_AgentBehavior::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector TargetWaypoint = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_HerdState State = ECrowd_HerdState::Grazing;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_ThreatLevel ThreatLevel = ECrowd_ThreatLevel::Safe;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    FVector FleeDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float MoveSpeed = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FleeSpeed = 600.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 HerdGroupID = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    float BehaviorTimer = 0.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FCrowd_PredatorThreat
-{
-    GENERATED_BODY()
+// ============================================================
+// CrowdSimulationManager — WorldSubsystem
+// ============================================================
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector ThreatLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float ThreatRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float ThreatIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FString PredatorLabel = TEXT("Unknown");
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACrowdSimulationManager();
+    UCrowdSimulationManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // ---- Configuration ----
+    // Herd zone management
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterHerdZone(const FCrowd_HerdZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    FCrowd_HerdZone GetNearestHerdZone(const FVector& WorldLocation) const;
+
+    // Patrol node management
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterPatrolNode(const FCrowd_PatrolNode& Node);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    TArray<FCrowd_PatrolNode> GetPatrolRouteForSpecies(ECrowd_DinoSpecies Species) const;
+
+    // Agent management
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetActiveAgentCount(ECrowd_AgentType AgentType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SpawnHerdAtZone(const FCrowd_HerdZone& Zone, int32 Count);
+
+    // Behavior triggers
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerFleeResponse(const FVector& ThreatLocation, float ThreatRadius);
+
+    // Tick update (called from GameMode or subsystem tick)
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UpdateCrowdTick(float DeltaTime);
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 MaxHerbivoreAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxAgents = 200;
+    int32 MaxPredatorAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float SimulationTickRate = 0.1f;
+    float HerdCohesionRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float PredatorDetectionRadius = 1500.0f;
+    float PredatorDetectionRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float FleeResponseDelay = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float HerdCohesionRadius = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float SeparationRadius = 80.0f;
-
-    // ---- Runtime State ----
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_HerdAgent> ActiveAgents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_WaypointData> MigrationWaypoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_PredatorThreat> ActiveThreats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    int32 CurrentAgentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    ECrowd_HerdState GlobalHerdState = ECrowd_HerdState::Grazing;
-
-    // ---- Blueprint-callable API ----
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterPredatorThreat(FVector ThreatLocation, float Radius, float Intensity, const FString& Label);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ClearPredatorThreat(const FString& Label);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void AddMigrationWaypoint(FVector Location, float DensityWeight, bool bIsDangerZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 SpawnHerdGroup(ECrowd_AgentSpecies Species, FVector SpawnCenter, int32 Count);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerMassFlee(FVector ThreatOrigin);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    float GetDensityAtLocation(FVector Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    bool IsLocationSafe(FVector Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 GetAgentCountInRadius(FVector Center, float Radius) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    ECrowd_ThreatLevel GetThreatLevelAtLocation(FVector Location) const;
+    bool bCrowdSystemActive;
 
 private:
-    void TickSimulation(float DeltaTime);
-    void UpdateAgentState(FCrowd_HerdAgent& Agent, float DeltaTime);
-    void ApplyFlockingBehavior(FCrowd_HerdAgent& Agent);
-    void SelectNextWaypoint(FCrowd_HerdAgent& Agent);
-    FVector ComputeFleeDirection(const FCrowd_HerdAgent& Agent) const;
-    FVector ComputeSeparationForce(const FCrowd_HerdAgent& Agent) const;
-    FVector ComputeCohesionForce(const FCrowd_HerdAgent& Agent) const;
-    float GetSpeciesMoveSpeed(ECrowd_AgentSpecies Species) const;
-    float GetSpeciesFleeSpeed(ECrowd_AgentSpecies Species) const;
+    UPROPERTY()
+    TArray<FCrowd_HerdZone> HerdZones;
 
-    float SimTickAccumulator = 0.0f;
-    int32 NextAgentID = 0;
-    int32 NextGroupID = 0;
+    UPROPERTY()
+    TArray<FCrowd_PatrolNode> PatrolNodes;
+
+    UPROPERTY()
+    TArray<FCrowd_AgentState> ActiveAgents;
+
+    void UpdateAgentBehavior(FCrowd_AgentState& Agent, float DeltaTime);
 };
