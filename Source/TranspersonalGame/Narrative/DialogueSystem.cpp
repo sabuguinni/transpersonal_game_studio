@@ -1,313 +1,284 @@
 #include "DialogueSystem.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Character.h"
 
-// ============================================================
-// Narrative & Dialogue Agent #15 — DialogueSystem.cpp
-// Cycle: PROD_CYCLE_AUTO_20260620_001
-// Full implementation — zero stubs
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// ANarr_DialogueNPC
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Voice line URLs generated this cycle (ElevenLabs via TTS tool):
-// QuestNarrator_FirstTools: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916736095_QuestNarrator_FirstTools.mp3
-// TribalElder_DinoWarning:  https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916738386_TribalElder_DinoWarning.mp3
-// TribalElder_RaptorTactic: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916746449_TribalElder_RaptorTactic.mp3
-// QuestNarrator_WaterFirst: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916749037_QuestNarrator_WaterFirst.mp3
-
-UDialogueSystemComponent::UDialogueSystemComponent()
+ANarr_DialogueNPC::ANarr_DialogueNPC()
+    : CurrentState(ENarr_DialogueState::Idle)
+    , bQuestAvailable(true)
+    , bQuestCompleted(false)
+    , CurrentLineIndex(0)
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    ActiveSequenceIndex = -1;
-    ActiveLineIndex = 0;
+    PrimaryActorTick.bCanEverTick = false;
+
+    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
+    RootComponent = MeshComponent;
+
+    InteractionRadius = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionRadius"));
+    InteractionRadius->SetupAttachment(RootComponent);
+    InteractionRadius->SetSphereRadius(300.0f);
+    InteractionRadius->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 }
 
-void UDialogueSystemComponent::BeginPlay()
+void ANarr_DialogueNPC::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultSequences();
+    InitializeDialogues();
+    InteractionRadius->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueNPC::OnPlayerEnterRange);
 }
 
-void UDialogueSystemComponent::InitializeDefaultSequences()
+void ANarr_DialogueNPC::InitializeDialogues()
 {
-    // --------------------------------------------------------
-    // SEQUENCE 1: Quest Start — "First Tools"
-    // Trigger: OnQuestStart
-    // --------------------------------------------------------
+    QuestDialogues.Empty();
+
+    // ── Hunt Quest ────────────────────────────────────────────────────────────
     {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("FirstTools_QuestStart");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnQuestStart;
-        Seq.bPlayOnce = true;
-        Seq.bHasPlayed = false;
+        FNarr_QuestDialogue HuntQuest;
+        HuntQuest.QuestID = TEXT("QUEST_HUNT_RAPTOR_PACK");
+        HuntQuest.QuestType = ENarr_QuestType::Hunt;
 
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::QuestNarrator;
-        Line1.LineText = FText::FromString(TEXT("Your first tools are ready. A stone axe, carved from the land itself. But do not celebrate yet — the night brings hunters far more dangerous than hunger. Move fast. Find shelter before the sun falls."));
-        Line1.DisplayDuration = 6.0f;
-        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916736095_QuestNarrator_FirstTools.mp3");
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
+        // Greeting
+        FNarr_DialogueLine Greet;
+        Greet.SpeakerName = TEXT("Elder");
+        Greet.LineText = TEXT("You are still alive. Good.");
+        Greet.TriggerState = ENarr_DialogueState::Greeting;
+        HuntQuest.Lines.Add(Greet);
 
-        RegisteredSequences.Add(Seq);
+        // Quest offer
+        FNarr_DialogueLine Offer;
+        Offer.SpeakerName = TEXT("Elder");
+        Offer.LineText = TEXT("The raptors took Kara. Three of them, moving fast through the eastern ridge. Hunt the pack leader — the big one with the scarred flank. Bring back proof.");
+        Offer.TriggerState = ENarr_DialogueState::QuestOffer;
+        HuntQuest.Lines.Add(Offer);
+
+        // Quest active reminder
+        FNarr_DialogueLine Active;
+        Active.SpeakerName = TEXT("Elder");
+        Active.LineText = TEXT("The scarred raptor. Eastern ridge. Do not come back empty-handed.");
+        Active.TriggerState = ENarr_DialogueState::QuestActive;
+        HuntQuest.Lines.Add(Active);
+
+        // Quest complete
+        FNarr_DialogueLine Done;
+        Done.SpeakerName = TEXT("Elder");
+        Done.LineText = TEXT("You did it. The tribe will remember this. Take these — you earned them.");
+        Done.TriggerState = ENarr_DialogueState::QuestDone;
+        HuntQuest.Lines.Add(Done);
+
+        QuestDialogues.Add(HuntQuest);
     }
 
-    // --------------------------------------------------------
-    // SEQUENCE 2: Water Quest — "Follow the River"
-    // Trigger: OnWaterFound
-    // --------------------------------------------------------
+    // ── Gather Quest ──────────────────────────────────────────────────────────
     {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("WaterQuest_RiverFound");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnWaterFound;
-        Seq.bPlayOnce = true;
-        Seq.bHasPlayed = false;
+        FNarr_QuestDialogue GatherQuest;
+        GatherQuest.QuestID = TEXT("QUEST_GATHER_TOOLS");
+        GatherQuest.QuestType = ENarr_QuestType::Gather;
 
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::QuestNarrator;
-        Line1.LineText = FText::FromString(TEXT("Water. You need water before anything else. A man without tools can still fight. A man without water is already dead. Follow the sound of the river — it will lead you to everything you need to survive."));
-        Line1.DisplayDuration = 6.0f;
-        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916749037_QuestNarrator_WaterFirst.mp3");
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
+        FNarr_DialogueLine Greet;
+        Greet.SpeakerName = TEXT("Scout");
+        Greet.LineText = TEXT("You look strong. I need a favour.");
+        Greet.TriggerState = ENarr_DialogueState::Greeting;
+        GatherQuest.Lines.Add(Greet);
 
-        RegisteredSequences.Add(Seq);
+        FNarr_DialogueLine Offer;
+        Offer.SpeakerName = TEXT("Scout");
+        Offer.LineText = TEXT("Three rocks, two branches. That is all I need to make a tool that will keep us alive through the cold season. The river bank to the north — that is where you will find the best flint.");
+        Offer.TriggerState = ENarr_DialogueState::QuestOffer;
+        GatherQuest.Lines.Add(Offer);
+
+        FNarr_DialogueLine Active;
+        Active.SpeakerName = TEXT("Scout");
+        Active.LineText = TEXT("North river bank. Three rocks, two branches. Go before the raptors return.");
+        Active.TriggerState = ENarr_DialogueState::QuestActive;
+        GatherQuest.Lines.Add(Active);
+
+        FNarr_DialogueLine Done;
+        Done.SpeakerName = TEXT("Scout");
+        Done.LineText = TEXT("Perfect. With this flint I can make a hand axe. Here — take a spear shaft. You will need it.");
+        Done.TriggerState = ENarr_DialogueState::QuestDone;
+        GatherQuest.Lines.Add(Done);
+
+        QuestDialogues.Add(GatherQuest);
     }
 
-    // --------------------------------------------------------
-    // SEQUENCE 3: Brachiosaurus Warning
-    // Trigger: OnDinoNearby
-    // --------------------------------------------------------
+    // ── Defend Quest ──────────────────────────────────────────────────────────
     {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("DinoWarning_Brachio");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnDinoNearby;
-        Seq.bPlayOnce = false; // Can repeat per encounter
-        Seq.bHasPlayed = false;
+        FNarr_QuestDialogue DefendQuest;
+        DefendQuest.QuestID = TEXT("QUEST_DEFEND_CAMP");
+        DefendQuest.QuestType = ENarr_QuestType::Defend;
 
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::TribalElder;
-        Line1.LineText = FText::FromString(TEXT("The large one moves slowly, but do not mistake that for safety. A Brachiosaurus that feels cornered will crush you without even noticing. Keep your distance. Watch. Learn their patterns before you act."));
-        Line1.DisplayDuration = 6.0f;
-        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916738386_TribalElder_DinoWarning.mp3");
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
+        FNarr_DialogueLine Greet;
+        Greet.SpeakerName = TEXT("Lookout");
+        Greet.LineText = TEXT("They are coming!");
+        Greet.TriggerState = ENarr_DialogueState::Greeting;
+        DefendQuest.Lines.Add(Greet);
 
-        RegisteredSequences.Add(Seq);
+        FNarr_DialogueLine Offer;
+        Offer.SpeakerName = TEXT("Lookout");
+        Offer.LineText = TEXT("A raptor pack is circling the camp perimeter. Drive them back before they reach the shelters. Use fire — they fear it.");
+        Offer.TriggerState = ENarr_DialogueState::QuestOffer;
+        DefendQuest.Lines.Add(Offer);
+
+        FNarr_DialogueLine Active;
+        Active.SpeakerName = TEXT("Lookout");
+        Active.LineText = TEXT("Keep them away from the shelters! Drive them back!");
+        Active.TriggerState = ENarr_DialogueState::QuestActive;
+        DefendQuest.Lines.Add(Active);
+
+        FNarr_DialogueLine Done;
+        Done.SpeakerName = TEXT("Lookout");
+        Done.LineText = TEXT("They fled. Good. The camp is safe — for now.");
+        Done.TriggerState = ENarr_DialogueState::QuestDone;
+        DefendQuest.Lines.Add(Done);
+
+        QuestDialogues.Add(DefendQuest);
     }
 
-    // --------------------------------------------------------
-    // SEQUENCE 4: Raptor Encounter Tactic
-    // Trigger: OnDinoNearby (Raptor-specific, handled by caller)
-    // --------------------------------------------------------
-    {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("DinoWarning_Raptor");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnDinoNearby;
-        Seq.bPlayOnce = false;
-        Seq.bHasPlayed = false;
-
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::TribalElder;
-        Line1.LineText = FText::FromString(TEXT("Three raptors. They never hunt alone. If you see one, the other two are already behind you. Drop what you are carrying and climb. They cannot follow you up the rocks."));
-        Line1.DisplayDuration = 5.0f;
-        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781916746449_TribalElder_RaptorTactic.mp3");
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
-
-        RegisteredSequences.Add(Seq);
-    }
-
-    // --------------------------------------------------------
-    // SEQUENCE 5: Nightfall Warning
-    // Trigger: OnNightfall
-    // --------------------------------------------------------
-    {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("Nightfall_Warning");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnNightfall;
-        Seq.bPlayOnce = true;
-        Seq.bHasPlayed = false;
-
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::QuestNarrator;
-        Line1.LineText = FText::FromString(TEXT("The sun is falling. The predators that sleep in the heat of day are waking now. You have minutes, not hours. Find high ground or a cave entrance. Do not be in the open when darkness comes."));
-        Line1.DisplayDuration = 6.0f;
-        Line1.AudioURL = TEXT(""); // No audio this cycle — Audio Agent #16 to wire
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
-
-        RegisteredSequences.Add(Seq);
-    }
-
-    // --------------------------------------------------------
-    // SEQUENCE 6: Player Damaged — survival bark
-    // Trigger: OnPlayerDamaged
-    // --------------------------------------------------------
-    {
-        FNarr_DialogueSequence Seq;
-        Seq.SequenceID = FName("PlayerDamaged_Bark");
-        Seq.TriggerType = ENarr_DialogueTriggerType::OnPlayerDamaged;
-        Seq.bPlayOnce = false;
-        Seq.bHasPlayed = false;
-
-        FNarr_DialogueLine Line1;
-        Line1.Speaker = ENarr_DialogueSpeaker::AmbientBark;
-        Line1.LineText = FText::FromString(TEXT("You are bleeding. Find water to clean the wound, or infection will finish what the predator started."));
-        Line1.DisplayDuration = 4.0f;
-        Line1.AudioURL = TEXT("");
-        Line1.bBlockPlayerInput = false;
-        Seq.Lines.Add(Line1);
-
-        RegisteredSequences.Add(Seq);
-    }
+    CurrentState = bQuestAvailable ? ENarr_DialogueState::QuestOffer : ENarr_DialogueState::Idle;
+    CurrentLineIndex = 0;
 }
 
-void UDialogueSystemComponent::TriggerDialogue(FName SequenceID)
+FNarr_DialogueLine ANarr_DialogueNPC::GetCurrentLine() const
 {
-    for (int32 i = 0; i < RegisteredSequences.Num(); ++i)
+    TArray<FNarr_DialogueLine> StateLines = GetLinesForState(CurrentState);
+    if (StateLines.IsValidIndex(CurrentLineIndex))
     {
-        FNarr_DialogueSequence& Seq = RegisteredSequences[i];
-        if (Seq.SequenceID == SequenceID)
+        return StateLines[CurrentLineIndex];
+    }
+    FNarr_DialogueLine Empty;
+    Empty.SpeakerName = NPCName;
+    Empty.LineText = TEXT("...");
+    return Empty;
+}
+
+void ANarr_DialogueNPC::AdvanceDialogue()
+{
+    TArray<FNarr_DialogueLine> StateLines = GetLinesForState(CurrentState);
+    CurrentLineIndex++;
+    if (CurrentLineIndex >= StateLines.Num())
+    {
+        CurrentLineIndex = 0;
+        // Advance state machine
+        if (CurrentState == ENarr_DialogueState::Greeting)
         {
-            if (Seq.bPlayOnce && Seq.bHasPlayed)
+            CurrentState = bQuestCompleted ? ENarr_DialogueState::QuestDone : ENarr_DialogueState::QuestOffer;
+        }
+        else if (CurrentState == ENarr_DialogueState::QuestOffer)
+        {
+            CurrentState = ENarr_DialogueState::QuestActive;
+        }
+    }
+}
+
+void ANarr_DialogueNPC::OnQuestCompleted(const FString& QuestID)
+{
+    for (const FNarr_QuestDialogue& QD : QuestDialogues)
+    {
+        if (QD.QuestID == QuestID)
+        {
+            bQuestCompleted = true;
+            CurrentState = ENarr_DialogueState::QuestDone;
+            CurrentLineIndex = 0;
+            break;
+        }
+    }
+}
+
+TArray<FNarr_DialogueLine> ANarr_DialogueNPC::GetLinesForState(ENarr_DialogueState State) const
+{
+    TArray<FNarr_DialogueLine> Result;
+    for (const FNarr_QuestDialogue& QD : QuestDialogues)
+    {
+        for (const FNarr_DialogueLine& Line : QD.Lines)
+        {
+            if (Line.TriggerState == State)
             {
-                return; // Already played, skip
+                Result.Add(Line);
             }
-            ActiveSequenceIndex = i;
-            ActiveLineIndex = 0;
-            Seq.bHasPlayed = true;
-            PlayLine(i, 0);
-            return;
         }
+    }
+    return Result;
+}
+
+void ANarr_DialogueNPC::OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    // Transition to greeting when player enters range
+    if (CurrentState == ENarr_DialogueState::Idle)
+    {
+        CurrentState = ENarr_DialogueState::Greeting;
+        CurrentLineIndex = 0;
+    }
+
+    FNarr_DialogueLine Line = GetCurrentLine();
+    UE_LOG(LogTemp, Log, TEXT("[Dialogue] %s: %s"), *Line.SpeakerName, *Line.LineText);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNarr_DialogueManager
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    RegisteredNPCs.Empty();
+    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Initialized — ready to register NPCs"));
+}
+
+void UNarr_DialogueManager::Deinitialize()
+{
+    RegisteredNPCs.Empty();
+    Super::Deinitialize();
+}
+
+void UNarr_DialogueManager::RegisterNPC(ANarr_DialogueNPC* NPC)
+{
+    if (NPC && !RegisteredNPCs.Contains(NPC))
+    {
+        RegisteredNPCs.Add(NPC);
+        UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Registered NPC: %s"), *NPC->NPCName);
     }
 }
 
-void UDialogueSystemComponent::TriggerByType(ENarr_DialogueTriggerType TriggerType)
+void UNarr_DialogueManager::UnregisterNPC(ANarr_DialogueNPC* NPC)
 {
-    for (int32 i = 0; i < RegisteredSequences.Num(); ++i)
+    RegisteredNPCs.Remove(NPC);
+}
+
+ANarr_DialogueNPC* UNarr_DialogueManager::FindNPCByName(const FString& Name) const
+{
+    for (ANarr_DialogueNPC* NPC : RegisteredNPCs)
     {
-        FNarr_DialogueSequence& Seq = RegisteredSequences[i];
-        if (Seq.TriggerType == TriggerType)
+        if (NPC && NPC->NPCName == Name)
         {
-            if (Seq.bPlayOnce && Seq.bHasPlayed)
-            {
-                continue;
-            }
-            // Play first matching unplayed sequence
-            ActiveSequenceIndex = i;
-            ActiveLineIndex = 0;
-            Seq.bHasPlayed = true;
-            PlayLine(i, 0);
-            return;
+            return NPC;
         }
     }
+    return nullptr;
 }
 
-void UDialogueSystemComponent::RegisterSequence(FNarr_DialogueSequence Sequence)
+void UNarr_DialogueManager::NotifyQuestCompleted(const FString& QuestID)
 {
-    // Check for duplicate ID
-    for (const FNarr_DialogueSequence& Existing : RegisteredSequences)
+    for (ANarr_DialogueNPC* NPC : RegisteredNPCs)
     {
-        if (Existing.SequenceID == Sequence.SequenceID)
+        if (NPC)
         {
-            return; // Already registered
+            NPC->OnQuestCompleted(QuestID);
         }
     }
-    RegisteredSequences.Add(Sequence);
+    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Quest completed broadcast: %s"), *QuestID);
 }
 
-FNarr_DialogueLine UDialogueSystemComponent::GetCurrentLine() const
+int32 UNarr_DialogueManager::GetRegisteredNPCCount() const
 {
-    if (ActiveSequenceIndex < 0 || ActiveSequenceIndex >= RegisteredSequences.Num())
-    {
-        return FNarr_DialogueLine();
-    }
-    const FNarr_DialogueSequence& Seq = RegisteredSequences[ActiveSequenceIndex];
-    if (ActiveLineIndex < 0 || ActiveLineIndex >= Seq.Lines.Num())
-    {
-        return FNarr_DialogueLine();
-    }
-    return Seq.Lines[ActiveLineIndex];
-}
-
-bool UDialogueSystemComponent::IsDialogueActive() const
-{
-    return ActiveSequenceIndex >= 0;
-}
-
-void UDialogueSystemComponent::AdvanceLine()
-{
-    if (ActiveSequenceIndex < 0 || ActiveSequenceIndex >= RegisteredSequences.Num())
-    {
-        return;
-    }
-
-    // Clear existing timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(LineTimerHandle);
-    }
-
-    const FNarr_DialogueSequence& Seq = RegisteredSequences[ActiveSequenceIndex];
-    int32 NextLine = ActiveLineIndex + 1;
-
-    if (NextLine >= Seq.Lines.Num())
-    {
-        // Sequence complete
-        int32 CompletedIdx = ActiveSequenceIndex;
-        ActiveSequenceIndex = -1;
-        ActiveLineIndex = 0;
-        OnDialogueSequenceEnded.Broadcast();
-    }
-    else
-    {
-        ActiveLineIndex = NextLine;
-        PlayLine(ActiveSequenceIndex, NextLine);
-    }
-}
-
-void UDialogueSystemComponent::SkipSequence()
-{
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(LineTimerHandle);
-    }
-    ActiveSequenceIndex = -1;
-    ActiveLineIndex = 0;
-    OnDialogueSequenceEnded.Broadcast();
-}
-
-void UDialogueSystemComponent::PlayLine(int32 SequenceIdx, int32 LineIdx)
-{
-    if (SequenceIdx < 0 || SequenceIdx >= RegisteredSequences.Num())
-    {
-        return;
-    }
-    const FNarr_DialogueSequence& Seq = RegisteredSequences[SequenceIdx];
-    if (LineIdx < 0 || LineIdx >= Seq.Lines.Num())
-    {
-        return;
-    }
-
-    const FNarr_DialogueLine& Line = Seq.Lines[LineIdx];
-
-    // Broadcast to HUD
-    OnDialogueLineChanged.Broadcast(Line);
-
-    // Auto-advance after duration
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            LineTimerHandle,
-            this,
-            &UDialogueSystemComponent::OnLineTimerExpired,
-            Line.DisplayDuration,
-            false
-        );
-    }
-}
-
-void UDialogueSystemComponent::OnLineTimerExpired()
-{
-    AdvanceLine();
+    return RegisteredNPCs.Num();
 }
