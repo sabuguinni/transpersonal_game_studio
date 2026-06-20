@@ -4,10 +4,6 @@
 #include "Animation/AnimInstance.h"
 #include "DinoSurvivorAnimInstance.generated.h"
 
-/**
- * Animation Instance for the prehistoric human survivor character.
- * Drives locomotion blend spaces, foot IK, aim offset, and survival state flags.
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivorAnimInstance : public UAnimInstance
 {
@@ -19,7 +15,7 @@ public:
 	virtual void NativeInitializeAnimation() override;
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-	// ── Locomotion ──────────────────────────────────────────────────────────
+	// --- Locomotion ---
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	float Speed;
 
@@ -41,7 +37,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	bool bIsMoving;
 
-	// ── Foot IK ─────────────────────────────────────────────────────────────
+	// --- Aim Offset ---
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
+	float AimPitch;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
+	float AimYaw;
+
+	// --- Foot IK ---
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
 	FVector LeftFootIKLocation;
 
@@ -55,22 +58,15 @@ public:
 	FRotator RightFootIKRotation;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-	float PelvisOffset;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
 	float LeftFootIKAlpha;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
 	float RightFootIKAlpha;
 
-	// ── Aim Offset ──────────────────────────────────────────────────────────
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
-	float AimPitch;
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	FVector PelvisOffset;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
-	float AimYaw;
-
-	// ── Survival State ──────────────────────────────────────────────────────
+	// --- Survival State ---
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
 	float StaminaNormalized;
 
@@ -84,14 +80,7 @@ public:
 	bool bIsInjured;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-	bool bIsFleeing;
-
-	// ── Smooth interpolation targets ────────────────────────────────────────
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Internal")
-	float SmoothedSpeed;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Internal")
-	float SmoothedDirection;
+	bool bIsDead;
 
 private:
 	void UpdateLocomotion(float DeltaSeconds);
@@ -99,15 +88,6 @@ private:
 	void UpdateAimOffset(float DeltaSeconds);
 	void UpdateSurvivalState(float DeltaSeconds);
 
-	FVector TraceFootIK(FName SocketName, FVector& OutHitNormal);
-
-	UPROPERTY()
-	class ACharacter* OwnerCharacter;
-
-	UPROPERTY()
-	class UCharacterMovementComponent* MovementComponent;
-
-	float LeanAngleVelocity;
-	float SpeedInterpVelocity;
-	float DirectionInterpVelocity;
+	float LeanAngleSmoothed;
+	float SpeedSmoothed;
 };
