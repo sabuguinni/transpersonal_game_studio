@@ -1,0 +1,23 @@
+{
+  "asset_name": "cretaceous_stone_ruin_pillar",
+  "category": "Buildings",
+  "prompt": "Ancient Cretaceous stone ruin pillar, weathered limestone column with moss and vine growth, broken top, game-ready low-poly prop, realistic PBR textures, Unreal Engine 5 style, 3 meters tall, standalone architectural element",
+  "meshy_task_id": "019ee361-029d-706e-a545-85f879d3bc84",
+  "status": "completed",
+  "result_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781931294051_Ancient_Cretaceous_stone_ruin_pillar__we.glb",
+  "thumbnail_url": "https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019ee361-029d-706e-a545-85f879d3bc84/output/preview.png",
+  "credits_used": 5,
+  "cycle": "PROD_CYCLE_AUTO_20260620_004",
+  "agent": "Architecture & Interior Agent #07",
+  "placement": {
+    "biome": "BiomeB",
+    "positions": [
+      {"label": "Arch_StoneRuinPillar_01", "x": 50000, "y": 50000, "z": 100},
+      {"label": "Arch_StoneRuinPillar_02", "x": 50300, "y": 50000, "z": 100},
+      {"label": "Arch_StoneRuinPillar_03", "x": 50150, "y": 50250, "z": 100}
+    ],
+    "scale": {"x": 0.5, "y": 0.5, "z": 3.0},
+    "notes": "Placeholder cubes spawned. Replace with GLB mesh once imported via AssetTools pipeline."
+  },
+  "narrative": "These limestone pillars are remnants of a pre-human geological formation — natural stone columns shaped by erosion over millions of years. They serve as navigation landmarks and shelter points for the player in BiomeB."
+}
