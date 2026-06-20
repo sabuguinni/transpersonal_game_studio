@@ -1,283 +1,373 @@
 #include "NPCBehaviorComponent.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for NPC logic
-
-    CurrentState = ENPC_BehaviorState::Idle;
-    CurrentThreatLevel = ENPC_ThreatLevel::None;
-    TimeInCurrentState = 0.0f;
-    CurrentPatrolIndex = 0;
-    AlertTimer = 0.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for NPC AI
 }
 
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-    TransitionToState(ENPC_BehaviorState::Idle);
+
+    ApplySpeciesDefaults();
+
+    if (AActor* Owner = GetOwner())
+    {
+        PatrolOrigin = Owner->GetActorLocation();
+        CurrentPatrolTarget = PatrolOrigin;
+    }
+
+    // Start in idle, transition to patrol after short delay
+    SetBehaviorState(ENPC_BehaviorState::Idle);
+    StateTimer = 0.0f;
 }
 
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    TimeInCurrentState += DeltaTime;
+    UpdateMemoryDecay(DeltaTime);
+    StateTimer += DeltaTime;
 
-    TickMemoryDecay(DeltaTime);
-    TickAlertTimer(DeltaTime);
+    switch (CurrentState)
+    {
+    case ENPC_BehaviorState::Idle:        UpdateIdle(DeltaTime);    break;
+    case ENPC_BehaviorState::Patrol:      UpdatePatrol(DeltaTime);  break;
+    case ENPC_BehaviorState::Alert:       UpdateAlert(DeltaTime);   break;
+    case ENPC_BehaviorState::Flee:        UpdateFlee(DeltaTime);    break;
+    case ENPC_BehaviorState::Attack:      UpdateAttack(DeltaTime);  break;
+    case ENPC_BehaviorState::Graze:       UpdateGraze(DeltaTime);   break;
+    case ENPC_BehaviorState::Rest:        UpdateRest(DeltaTime);    break;
+    case ENPC_BehaviorState::Investigate: UpdateAlert(DeltaTime);   break;
+    default: break;
+    }
 }
 
-// --- State Machine ---
+// ── State Machine ──────────────────────────────────────────────────────────────
 
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
-    if (NewState != CurrentState)
-    {
-        TransitionToState(NewState);
-    }
-}
+    if (CurrentState == NewState) return;
 
-void UNPCBehaviorComponent::TransitionToState(ENPC_BehaviorState NewState)
-{
     CurrentState = NewState;
-    TimeInCurrentState = 0.0f;
+    StateTimer = 0.0f;
 }
 
-void UNPCBehaviorComponent::OnThreatDetected(AActor* ThreatActor, ENPC_ThreatLevel Level)
+void UNPCBehaviorComponent::OnStimulusReceived(const FNPC_StimulusEvent& Stimulus)
 {
-    if (!ThreatActor) return;
-
-    CurrentThreatLevel = Level;
-
-    // Update memory immediately
-    if (ThreatActor)
+    // Herbivores flee from any strong stimulus; carnivores investigate
+    if (Stimulus.Intensity > 0.5f)
     {
-        UpdateMemory(ThreatActor, ThreatActor->GetActorLocation(), Level);
-    }
-
-    // State transitions based on threat level and aggression
-    switch (Level)
-    {
-        case ENPC_ThreatLevel::Low:
-            if (CurrentState == ENPC_BehaviorState::Idle || CurrentState == ENPC_BehaviorState::Patrol)
+        if (bIsHerbivore)
+        {
+            CurrentThreatLevel = FMath::Clamp(CurrentThreatLevel + Stimulus.Intensity * 0.5f, 0.0f, 1.0f);
+            if (CurrentThreatLevel > 0.6f)
             {
-                TransitionToState(ENPC_BehaviorState::Investigate);
-            }
-            break;
-
-        case ENPC_ThreatLevel::Medium:
-            TransitionToState(ENPC_BehaviorState::Alert);
-            AlertTimer = AlertDuration;
-            break;
-
-        case ENPC_ThreatLevel::High:
-        case ENPC_ThreatLevel::Extreme:
-            if (bIsAggressive)
-            {
-                TransitionToState(ENPC_BehaviorState::Attack);
+                SetBehaviorState(ENPC_BehaviorState::Flee);
             }
             else
             {
-                TransitionToState(ENPC_BehaviorState::Flee);
-            }
-            AlertTimer = AlertDuration;
-            break;
-
-        default:
-            break;
-    }
-}
-
-void UNPCBehaviorComponent::OnThreatLost()
-{
-    CurrentThreatLevel = ENPC_ThreatLevel::None;
-
-    // Only go back to alert/investigate — don't immediately return to patrol
-    if (CurrentState == ENPC_BehaviorState::Attack || CurrentState == ENPC_BehaviorState::Flee)
-    {
-        TransitionToState(ENPC_BehaviorState::Alert);
-        AlertTimer = AlertDuration;
-    }
-}
-
-// --- Memory System ---
-
-void UNPCBehaviorComponent::UpdateMemory(AActor* Target, FVector Location, ENPC_ThreatLevel Threat)
-{
-    if (!Target) return;
-
-    TWeakObjectPtr<AActor> WeakTarget(Target);
-    FNPC_MemoryEntry& Entry = MemoryMap.FindOrAdd(WeakTarget);
-    Entry.LastKnownLocation = Location;
-    Entry.TimeSinceLastSeen = 0.0f;
-    Entry.ThreatLevel = Threat;
-    Entry.bIsPlayerTarget = Target->ActorHasTag(FName("Player"));
-}
-
-bool UNPCBehaviorComponent::HasMemoryOfTarget(AActor* Target) const
-{
-    if (!Target) return false;
-    TWeakObjectPtr<AActor> WeakTarget(Target);
-    return MemoryMap.Contains(WeakTarget);
-}
-
-FVector UNPCBehaviorComponent::GetLastKnownLocation(AActor* Target) const
-{
-    if (!Target) return FVector::ZeroVector;
-    TWeakObjectPtr<AActor> WeakTarget(Target);
-    const FNPC_MemoryEntry* Entry = MemoryMap.Find(WeakTarget);
-    return Entry ? Entry->LastKnownLocation : FVector::ZeroVector;
-}
-
-void UNPCBehaviorComponent::ForgetTarget(AActor* Target)
-{
-    if (!Target) return;
-    TWeakObjectPtr<AActor> WeakTarget(Target);
-    MemoryMap.Remove(WeakTarget);
-}
-
-void UNPCBehaviorComponent::ForgetAllMemories()
-{
-    MemoryMap.Empty();
-}
-
-void UNPCBehaviorComponent::TickMemoryDecay(float DeltaTime)
-{
-    TArray<TWeakObjectPtr<AActor>> ToRemove;
-
-    for (auto& Pair : MemoryMap)
-    {
-        if (!Pair.Key.IsValid())
-        {
-            ToRemove.Add(Pair.Key);
-            continue;
-        }
-
-        Pair.Value.TimeSinceLastSeen += DeltaTime;
-
-        // Decay threat level over time
-        // Each threat level decays after a threshold of seconds
-        float DecayThreshold = 30.0f; // 30 seconds before threat level drops
-        if (Pair.Value.TimeSinceLastSeen > DecayThreshold)
-        {
-            uint8 ThreatInt = (uint8)Pair.Value.ThreatLevel;
-            if (ThreatInt > 0)
-            {
-                Pair.Value.ThreatLevel = (ENPC_ThreatLevel)(ThreatInt - 1);
-                Pair.Value.TimeSinceLastSeen = 0.0f; // reset timer for next decay step
-            }
-            else
-            {
-                // Fully forgotten
-                ToRemove.Add(Pair.Key);
+                SetBehaviorState(ENPC_BehaviorState::Alert);
             }
         }
-    }
-
-    for (auto& Key : ToRemove)
-    {
-        MemoryMap.Remove(Key);
-    }
-}
-
-void UNPCBehaviorComponent::TickAlertTimer(float DeltaTime)
-{
-    if (CurrentState == ENPC_BehaviorState::Alert && AlertTimer > 0.0f)
-    {
-        AlertTimer -= DeltaTime;
-        if (AlertTimer <= 0.0f)
+        else
         {
-            AlertTimer = 0.0f;
-            // Return to patrol if we have a route, otherwise idle
-            if (HasPatrolRoute())
-            {
-                TransitionToState(ENPC_BehaviorState::Patrol);
-            }
-            else
-            {
-                TransitionToState(ENPC_BehaviorState::Idle);
-            }
+            // Carnivore: investigate the stimulus location
+            Memory.LastKnownPlayerLocation = Stimulus.Location;
+            Memory.ThreatLevel = FMath::Clamp(Memory.ThreatLevel + Stimulus.Intensity * 0.3f, 0.0f, 1.0f);
+            SetBehaviorState(ENPC_BehaviorState::Investigate);
         }
     }
 }
 
-// --- Daily Routine ---
-
-void UNPCBehaviorComponent::AddRoutineSlot(float TimeOfDay, FVector Location, ENPC_BehaviorState State, float Duration)
+void UNPCBehaviorComponent::OnPlayerDetected(FVector PlayerLocation, float Distance)
 {
-    FNPC_DailyRoutineSlot Slot;
-    Slot.TimeOfDay = TimeOfDay;
-    Slot.TargetLocation = Location;
-    Slot.RoutineState = State;
-    Slot.Duration = Duration;
-    DailyRoutine.Add(Slot);
+    Memory.LastKnownPlayerLocation = PlayerLocation;
+    Memory.TimeSinceLastSighting = 0.0f;
+    Memory.bPlayerKnown = true;
 
-    // Keep sorted by time of day
-    DailyRoutine.Sort([](const FNPC_DailyRoutineSlot& A, const FNPC_DailyRoutineSlot& B)
+    if (bIsHerbivore)
     {
-        return A.TimeOfDay < B.TimeOfDay;
-    });
-}
-
-void UNPCBehaviorComponent::EvaluateRoutine(float CurrentTimeOfDay)
-{
-    if (!bUseDailyRoutine || DailyRoutine.Num() == 0) return;
-
-    // Only evaluate routine if not in a threat state
-    if (CurrentState == ENPC_BehaviorState::Attack ||
-        CurrentState == ENPC_BehaviorState::Flee ||
-        CurrentState == ENPC_BehaviorState::Alert)
-    {
+        // Herbivores flee from player
+        CurrentThreatLevel = FMath::Clamp(CurrentThreatLevel + 0.4f, 0.0f, 1.0f);
+        SetBehaviorState(ENPC_BehaviorState::Flee);
         return;
     }
 
-    // Find the most recent routine slot for the current time
-    FNPC_DailyRoutineSlot* ActiveSlot = nullptr;
-    for (int32 i = DailyRoutine.Num() - 1; i >= 0; --i)
+    // Carnivore logic
+    if (ShouldFlee())
     {
-        if (DailyRoutine[i].TimeOfDay <= CurrentTimeOfDay)
+        SetBehaviorState(ENPC_BehaviorState::Flee);
+    }
+    else if (Distance <= AttackRadius)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Attack);
+    }
+    else
+    {
+        Memory.ThreatLevel = FMath::Clamp(Memory.ThreatLevel + 0.3f, 0.0f, 1.0f);
+        CurrentThreatLevel = Memory.ThreatLevel;
+        SetBehaviorState(ENPC_BehaviorState::Alert);
+    }
+}
+
+void UNPCBehaviorComponent::OnPlayerLost()
+{
+    Memory.bPlayerKnown = false;
+
+    // Carnivores investigate last known position; herbivores calm down
+    if (!bIsHerbivore && Memory.ThreatLevel > 0.3f)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Investigate);
+    }
+    else
+    {
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
+    }
+}
+
+// ── Memory ─────────────────────────────────────────────────────────────────────
+
+void UNPCBehaviorComponent::ForgetPlayer()
+{
+    Memory.bPlayerKnown = false;
+    Memory.ThreatLevel = 0.0f;
+    Memory.TimeSinceLastSighting = 0.0f;
+    CurrentThreatLevel = 0.0f;
+    SetBehaviorState(ENPC_BehaviorState::Patrol);
+}
+
+// ── State Updates ──────────────────────────────────────────────────────────────
+
+void UNPCBehaviorComponent::UpdateIdle(float DeltaTime)
+{
+    // After 3-5 seconds idle, transition to patrol or graze
+    if (StateTimer > 3.0f)
+    {
+        if (bIsHerbivore)
         {
-            ActiveSlot = &DailyRoutine[i];
-            break;
+            SetBehaviorState(ENPC_BehaviorState::Graze);
+        }
+        else
+        {
+            ChooseNewPatrolTarget();
+            SetBehaviorState(ENPC_BehaviorState::Patrol);
+        }
+    }
+}
+
+void UNPCBehaviorComponent::UpdatePatrol(float DeltaTime)
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector CurrentLocation = Owner->GetActorLocation();
+    float DistToTarget = FVector::Dist(CurrentLocation, CurrentPatrolTarget);
+
+    if (DistToTarget < 200.0f)
+    {
+        // Reached patrol point — wait briefly then choose new target
+        if (!bPatrolWaiting)
+        {
+            bPatrolWaiting = true;
+            PatrolWaitTimer = 0.0f;
+        }
+
+        PatrolWaitTimer += DeltaTime;
+        if (PatrolWaitTimer > 2.0f)
+        {
+            bPatrolWaiting = false;
+            ChooseNewPatrolTarget();
         }
     }
 
-    // Wrap around: if no slot found before current time, use last slot of previous day
-    if (!ActiveSlot && DailyRoutine.Num() > 0)
+    // Occasionally rest (10% chance per patrol cycle)
+    if (StateTimer > 30.0f && FMath::FRand() < 0.1f)
     {
-        ActiveSlot = &DailyRoutine.Last();
-    }
-
-    if (ActiveSlot)
-    {
-        SetBehaviorState(ActiveSlot->RoutineState);
+        SetBehaviorState(ENPC_BehaviorState::Rest);
     }
 }
 
-// --- Patrol ---
-
-void UNPCBehaviorComponent::SetPatrolWaypoints(const TArray<FVector>& Waypoints)
+void UNPCBehaviorComponent::UpdateAlert(float DeltaTime)
 {
-    PatrolWaypoints = Waypoints;
-    CurrentPatrolIndex = 0;
+    // Alert state: scan for player, escalate or de-escalate
+    CurrentThreatLevel = FMath::Max(0.0f, CurrentThreatLevel - DeltaTime * 0.05f);
 
-    if (PatrolWaypoints.Num() > 0)
+    if (CurrentThreatLevel <= 0.0f && !Memory.bPlayerKnown)
     {
-        TransitionToState(ENPC_BehaviorState::Patrol);
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
+    }
+    else if (Memory.bPlayerKnown && IsPlayerInAttackRange())
+    {
+        SetBehaviorState(ENPC_BehaviorState::Attack);
     }
 }
 
-FVector UNPCBehaviorComponent::GetNextPatrolPoint()
+void UNPCBehaviorComponent::UpdateFlee(float DeltaTime)
 {
-    if (PatrolWaypoints.Num() == 0)
+    // Flee: reduce threat over time, return to patrol when safe
+    CurrentThreatLevel = FMath::Max(0.0f, CurrentThreatLevel - DeltaTime * 0.15f);
+    Memory.ThreatLevel = FMath::Max(0.0f, Memory.ThreatLevel - DeltaTime * 0.1f);
+
+    if (CurrentThreatLevel <= 0.1f)
     {
-        return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+        SetBehaviorState(ENPC_BehaviorState::Idle);
+    }
+}
+
+void UNPCBehaviorComponent::UpdateAttack(float DeltaTime)
+{
+    if (!Memory.bPlayerKnown)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Alert);
+        return;
     }
 
-    FVector NextPoint = PatrolWaypoints[CurrentPatrolIndex];
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolWaypoints.Num();
-    return NextPoint;
+    if (ShouldFlee())
+    {
+        SetBehaviorState(ENPC_BehaviorState::Flee);
+        return;
+    }
+
+    // If player escaped attack range, go back to alert/chase
+    if (!IsPlayerInAttackRange())
+    {
+        SetBehaviorState(ENPC_BehaviorState::Alert);
+    }
+}
+
+void UNPCBehaviorComponent::UpdateGraze(float DeltaTime)
+{
+    // Herbivores graze for 10-20 seconds then move to new spot
+    if (StateTimer > 12.0f)
+    {
+        ChooseNewPatrolTarget();
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
+    }
+}
+
+void UNPCBehaviorComponent::UpdateRest(float DeltaTime)
+{
+    // Rest for 8-15 seconds, then resume patrol
+    if (StateTimer > 10.0f)
+    {
+        ChooseNewPatrolTarget();
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
+    }
+}
+
+void UNPCBehaviorComponent::UpdateMemoryDecay(float DeltaTime)
+{
+    if (Memory.bPlayerKnown)
+    {
+        Memory.TimeSinceLastSighting += DeltaTime;
+
+        // Forget player after 30 seconds without sighting
+        if (Memory.TimeSinceLastSighting > 30.0f)
+        {
+            Memory.bPlayerKnown = false;
+            Memory.ThreatLevel = FMath::Max(0.0f, Memory.ThreatLevel - DeltaTime * MemoryDecayRate);
+        }
+    }
+    else
+    {
+        Memory.ThreatLevel = FMath::Max(0.0f, Memory.ThreatLevel - DeltaTime * MemoryDecayRate);
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+void UNPCBehaviorComponent::ChooseNewPatrolTarget()
+{
+    // Pick a random point within PatrolRadius of origin
+    float Angle = FMath::FRandRange(0.0f, 360.0f);
+    float Dist = FMath::FRandRange(PatrolRadius * 0.3f, PatrolRadius);
+    float RadAngle = FMath::DegreesToRadians(Angle);
+
+    CurrentPatrolTarget = PatrolOrigin + FVector(
+        FMath::Cos(RadAngle) * Dist,
+        FMath::Sin(RadAngle) * Dist,
+        0.0f
+    );
+}
+
+bool UNPCBehaviorComponent::IsPlayerInAttackRange() const
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return false;
+
+    if (!Memory.bPlayerKnown) return false;
+
+    float Dist = FVector::Dist(Owner->GetActorLocation(), Memory.LastKnownPlayerLocation);
+    return Dist <= AttackRadius;
+}
+
+bool UNPCBehaviorComponent::ShouldFlee() const
+{
+    return CurrentHealth <= FleeHealthThreshold;
+}
+
+void UNPCBehaviorComponent::ApplySpeciesDefaults()
+{
+    switch (Species)
+    {
+    case ENPC_DinoSpecies::TRex:
+        DetectionRadius = 3000.0f;
+        AttackRadius = 350.0f;
+        PatrolRadius = 5000.0f;
+        FleeHealthThreshold = 0.1f; // T-Rex rarely flees
+        bIsHerbivore = false;
+        bIsPack = false;
+        MemoryDecayRate = 0.05f; // Long memory
+        break;
+
+    case ENPC_DinoSpecies::Raptor:
+        DetectionRadius = 2500.0f;
+        AttackRadius = 250.0f;
+        PatrolRadius = 4000.0f;
+        FleeHealthThreshold = 0.2f;
+        bIsHerbivore = false;
+        bIsPack = true; // Pack hunter
+        MemoryDecayRate = 0.08f;
+        break;
+
+    case ENPC_DinoSpecies::Brachiosaurus:
+        DetectionRadius = 1500.0f;
+        AttackRadius = 500.0f; // Stomp range
+        PatrolRadius = 6000.0f;
+        FleeHealthThreshold = 0.3f;
+        bIsHerbivore = true;
+        bIsPack = false;
+        MemoryDecayRate = 0.2f; // Short memory
+        break;
+
+    case ENPC_DinoSpecies::Triceratops:
+        DetectionRadius = 1800.0f;
+        AttackRadius = 400.0f;
+        PatrolRadius = 3500.0f;
+        FleeHealthThreshold = 0.15f;
+        bIsHerbivore = true;
+        bIsPack = true; // Herd animal
+        MemoryDecayRate = 0.12f;
+        break;
+
+    case ENPC_DinoSpecies::Pterodactyl:
+        DetectionRadius = 4000.0f; // High vantage point
+        AttackRadius = 200.0f;
+        PatrolRadius = 8000.0f;
+        FleeHealthThreshold = 0.35f; // Fragile — flees easily
+        bIsHerbivore = false;
+        bIsPack = false;
+        MemoryDecayRate = 0.15f;
+        break;
+
+    default:
+        break;
+    }
 }
