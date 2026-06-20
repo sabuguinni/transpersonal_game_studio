@@ -3,83 +3,165 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
 #include "AudioZoneManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    RiverBank       UMETA(DisplayName = "River Bank"),
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    CampSite        UMETA(DisplayName = "Camp Site"),
-    DangerZone      UMETA(DisplayName = "Danger Zone")
+    Forest      UMETA(DisplayName = "Forest"),
+    Riverbank   UMETA(DisplayName = "Riverbank"),
+    Hilltop     UMETA(DisplayName = "Hilltop"),
+    Cave        UMETA(DisplayName = "Cave"),
+    Clearing    UMETA(DisplayName = "Clearing"),
+    HuntingGround UMETA(DisplayName = "HuntingGround"),
+    RockShelter UMETA(DisplayName = "RockShelter"),
+    WaterHole   UMETA(DisplayName = "WaterHole")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DinoSpecies : uint8
+{
+    TRex        UMETA(DisplayName = "TRex"),
+    Raptor      UMETA(DisplayName = "Raptor"),
+    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
+    Unknown     UMETA(DisplayName = "Unknown")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ZoneData
+struct FAudio_DinoSoundProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::OpenPlains;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    EAudio_DinoSpecies Species = EAudio_DinoSpecies::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float BlendRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    FString RoarSoundCuePath = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float AmbientVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    FString FootstepSoundCuePath = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float MusicIntensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    FString IdleBreathPath = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bDangerousZone = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    float RoarVolumeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    float FootstepVolumeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    float RoarCooldownSeconds = 8.0f;
 };
 
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API AAudioZoneManager : public AActor
+USTRUCT(BlueprintType)
+struct FAudio_ZoneAmbience
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Clearing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FString AmbienceSoundCuePath = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FString VoiceBriefURL = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    float AmbienceVolume = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    bool bIsActive = false;
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_DangerCue
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    EAudio_DinoSpecies TriggerSpecies = EAudio_DinoSpecies::Unknown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    FString VoiceWarningURL = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    float TriggerRadiusMeters = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    bool bHasTriggered = false;
+};
+
+/**
+ * AAudio_ZoneManager
+ * Manages ambient audio zones and dinosaur sound profiles in MinPlayableMap.
+ * Tracks player proximity to dino placeholders and triggers danger voice cues.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AAudioZoneManager();
+    AAudio_ZoneManager();
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetZoneType(EAudio_ZoneType NewZoneType);
+    // === Zone Ambience ===
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_ZoneType GetZoneType() const { return ZoneData.ZoneType; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
+    TArray<FAudio_ZoneAmbience> ZoneAmbienceProfiles;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetAmbientVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
+    void InitialiseZoneAmbience();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetBlendRadius() const { return ZoneData.BlendRadius; }
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
+    void ActivateZone(EAudio_ZoneType ZoneType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void TriggerDangerAlert();
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
+    void DeactivateZone(EAudio_ZoneType ZoneType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void ClearDangerAlert();
+    // === Dino Sound Profiles ===
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    FAudio_ZoneData ZoneData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinos")
+    TArray<FAudio_DinoSoundProfile> DinoSoundProfiles;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    USoundBase* AmbientSound = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinos")
+    void InitialiseDinoProfiles();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    USoundBase* DangerStinger = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinos")
+    FAudio_DinoSoundProfile GetProfileForSpecies(EAudio_DinoSpecies Species) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinos")
+    void TriggerDinoRoar(EAudio_DinoSpecies Species, FVector Location);
+
+    // === Danger Voice Cues ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    TArray<FAudio_DangerCue> DangerCues;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void InitialiseDangerCues();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void CheckProximityDangerCues(FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void ResetAllDangerCues();
+
+    // === Audio State ===
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
+    EAudio_ZoneType CurrentActiveZone = EAudio_ZoneType::Clearing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|State")
+    float ProximityCheckInterval = 2.0f;
 
 private:
-    UPROPERTY()
-    UAudioComponent* AmbientAudioComponent = nullptr;
+    float TimeSinceLastProximityCheck = 0.0f;
 
-    bool bDangerActive = false;
-    float DangerCooldown = 0.0f;
+    UPROPERTY()
+    UAudioComponent* ActiveAmbienceComponent = nullptr;
 };
