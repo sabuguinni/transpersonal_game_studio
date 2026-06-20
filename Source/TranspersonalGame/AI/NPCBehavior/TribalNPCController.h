@@ -2,29 +2,34 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "GameFramework/Pawn.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "TribalNPCController.generated.h"
 
 UENUM(BlueprintType)
-enum class ENPC_TribalRole : uint8
+enum class ENPC_TribalState : uint8
 {
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Gatherer    UMETA(DisplayName = "Gatherer"), 
-    Scout       UMETA(DisplayName = "Scout"),
-    Elder       UMETA(DisplayName = "Elder")
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrol      UMETA(DisplayName = "Patrol"),
+    Gather      UMETA(DisplayName = "Gather"),
+    Flee        UMETA(DisplayName = "Flee"),
+    Hide        UMETA(DisplayName = "Hide"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Dead        UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
+enum class ENPC_ThreatLevel : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Working     UMETA(DisplayName = "Working"),
-    Socializing UMETA(DisplayName = "Socializing"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Investigating UMETA(DisplayName = "Investigating")
+    None        UMETA(DisplayName = "None"),
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
@@ -32,28 +37,27 @@ struct FNPC_MemoryEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FVector Location;
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    FVector ThreatLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Timestamp;
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    float ThreatTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FString EventType;
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    ENPC_ThreatLevel ThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Importance;
+    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    FString ThreatActorName;
 
     FNPC_MemoryEntry()
-    {
-        Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        EventType = TEXT("Unknown");
-        Importance = 1.0f;
-    }
+        : ThreatLocation(FVector::ZeroVector)
+        , ThreatTime(0.0f)
+        , ThreatLevel(ENPC_ThreatLevel::None)
+        , ThreatActorName(TEXT(""))
+    {}
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ATribalNPCController : public AAIController
 {
     GENERATED_BODY()
@@ -61,96 +65,104 @@ class TRANSPERSONALGAME_API ATribalNPCController : public AAIController
 public:
     ATribalNPCController();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
-    // Core NPC Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal NPC", meta = (AllowPrivateAccess = "true"))
-    ENPC_TribalRole TribalRole;
+    // Perception callbacks
+    UFUNCTION()
+    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal NPC", meta = (AllowPrivateAccess = "true"))
-    ENPC_BehaviorState CurrentBehaviorState;
+    // State management
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void SetNPCState(ENPC_TribalState NewState);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal NPC", meta = (AllowPrivateAccess = "true"))
-    float PatrolRadius;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    ENPC_TribalState GetNPCState() const { return CurrentState; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal NPC", meta = (AllowPrivateAccess = "true"))
-    float WorkDuration;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void RegisterThreat(AActor* ThreatActor, ENPC_ThreatLevel Level, const FVector& Location);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal NPC", meta = (AllowPrivateAccess = "true"))
-    float SocialDistance;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void ClearMemory();
 
-    // Memory System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory", meta = (AllowPrivateAccess = "true"))
-    TArray<FNPC_MemoryEntry> ShortTermMemory;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    bool HasRecentThreat(float WithinSeconds = 10.0f) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory", meta = (AllowPrivateAccess = "true"))
-    TArray<FNPC_MemoryEntry> LongTermMemory;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    FVector GetLastKnownThreatLocation() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory", meta = (AllowPrivateAccess = "true"))
-    int32 MaxShortTermMemories;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    float GetFearLevel() const { return FearLevel; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory", meta = (AllowPrivateAccess = "true"))
-    int32 MaxLongTermMemories;
+    // Blackboard keys
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Blackboard")
+    FName BB_TargetLocation = FName("TargetLocation");
 
-    // Behavior Timers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (AllowPrivateAccess = "true"))
-    float StateChangeTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Blackboard")
+    FName BB_ThreatActor = FName("ThreatActor");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (AllowPrivateAccess = "true"))
-    float NextStateChangeTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Blackboard")
+    FName BB_NPCState = FName("NPCState");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (AllowPrivateAccess = "true"))
-    FVector HomeLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Blackboard")
+    FName BB_FearLevel = FName("FearLevel");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior", meta = (AllowPrivateAccess = "true"))
-    FVector CurrentTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Blackboard")
+    FName BB_FleeTarget = FName("FleeTarget");
 
-public:
-    // Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetTribalRole(ENPC_TribalRole NewRole);
+    // Behavior tree
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|AI")
+    UBehaviorTree* BehaviorTree;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void ChangeBehaviorState(ENPC_BehaviorState NewState);
+    // Perception radii
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
+    float SightRadius = 2000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void StartPatrolling();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
+    float HearingRadius = 1500.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void StartWorking();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
+    float LoseSightRadius = 2500.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void StartSocializing();
+    // Memory decay
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float MemoryDecayTime = 30.0f;
 
-    // Memory Functions
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemoryEntry(FVector Location, FString EventType, float Importance);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    int32 MaxMemoryEntries = 8;
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ProcessMemories();
+    // Fear
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Fear")
+    float FearDecayRate = 0.05f;
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    bool HasMemoryOfLocation(FVector Location, float Radius);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Fear")
+    float FearBuildRate = 0.3f;
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FNPC_MemoryEntry GetMostImportantMemory();
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Perception")
+    UAIPerceptionComponent* AIPerceptionComp;
 
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    float GetDistanceToPlayer();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Perception")
+    UAISenseConfig_Sight* SightConfig;
 
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    bool IsPlayerNearby(float Radius);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Perception")
+    UAISenseConfig_Hearing* HearingConfig;
 
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    FVector GetRandomPatrolPoint();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|State")
+    ENPC_TribalState CurrentState;
 
-private:
-    void UpdateBehaviorState(float DeltaTime);
-    void ExecuteCurrentBehavior();
-    void HandleRoleSpecificBehavior();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Memory")
+    TArray<FNPC_MemoryEntry> MemoryEntries;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Fear")
+    float FearLevel;
+
+    void UpdateFear(float DeltaTime);
+    void ProcessMemoryDecay(float DeltaTime);
+    void UpdateBlackboard();
+    void DetermineStateFromPerception();
+    FVector FindFleeLocation(const FVector& ThreatLocation) const;
+    FVector FindHideLocation(const FVector& ThreatLocation) const;
 };
-
-#include "TribalNPCController.generated.h"
