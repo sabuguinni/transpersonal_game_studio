@@ -1,199 +1,257 @@
-// CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Implements prehistoric herd and pack crowd simulation using UE5 Mass AI patterns.
-
 #include "CrowdSimulationManager.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "NavigationSystem.h"
-#include "NavMesh/NavMeshBoundsVolume.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
-UCrowdSimulationManager::UCrowdSimulationManager()
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxHerdAgents = 50;
-    MaxPackAgents = 12;
-    HerdUpdateInterval = 0.5f;
-    PackUpdateInterval = 0.25f;
-    bSimulationActive = false;
-    AgentSeparationRadius = 150.0f;
-    HerdCohesionRadius = 800.0f;
-    PackHuntingRadius = 1200.0f;
-    FleeResponseRadius = 600.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f;
+
+    MaxCrowdAgents = 50;
+    CrowdUpdateInterval = 0.5f;
+    ThreatDetectionRadius = 1500.0f;
+    FleeRadius = 800.0f;
+
+    ActiveAgentCount = 0;
+    GlobalAlertLevel = 0.0f;
+    bTribeInPanic = false;
+
+    TimeSinceLastUpdate = 0.0f;
+    bHasActiveThreat = false;
+    LastKnownThreatLocation = FVector::ZeroVector;
+
+    // Default waypoints for camp layout
+    FCrowd_WaypointData CampCenter;
+    CampCenter.Location = FVector(0, 0, 50);
+    CampCenter.WaypointName = TEXT("Camp_Center");
+    CampCenter.Radius = 300.0f;
+    CampCenter.bIsDangerZone = false;
+    Waypoints.Add(CampCenter);
+
+    FCrowd_WaypointData HuntEast;
+    HuntEast.Location = FVector(600, 0, 50);
+    HuntEast.WaypointName = TEXT("Hunt_East");
+    HuntEast.Radius = 200.0f;
+    HuntEast.bIsDangerZone = false;
+    Waypoints.Add(HuntEast);
+
+    FCrowd_WaypointData GatherWest;
+    GatherWest.Location = FVector(-600, 0, 50);
+    GatherWest.WaypointName = TEXT("Gather_West");
+    GatherWest.Radius = 200.0f;
+    GatherWest.bIsDangerZone = false;
+    Waypoints.Add(GatherWest);
+
+    FCrowd_WaypointData WaterNorth;
+    WaterNorth.Location = FVector(0, 600, 50);
+    WaterNorth.WaypointName = TEXT("Water_North");
+    WaterNorth.Radius = 150.0f;
+    WaterNorth.bIsDangerZone = false;
+    Waypoints.Add(WaterNorth);
+
+    FCrowd_WaypointData LookoutSouth;
+    LookoutSouth.Location = FVector(0, -600, 50);
+    LookoutSouth.WaypointName = TEXT("Lookout_South");
+    LookoutSouth.Radius = 150.0f;
+    LookoutSouth.bIsDangerZone = false;
+    Waypoints.Add(LookoutSouth);
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bSimulationActive = true;
-    RegisteredHerds.Empty();
-    RegisteredPacks.Empty();
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized. MaxHerd=%d MaxPack=%d"), MaxHerdAgents, MaxPackAgents);
+    Super::BeginPlay();
+    ActiveAgentCount = AgentRegistry.Num();
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Started with %d agents, %d waypoints"), ActiveAgentCount, Waypoints.Num());
 }
 
-void UCrowdSimulationManager::Deinitialize()
+void ACrowdSimulationManager::Tick(float DeltaTime)
 {
-    bSimulationActive = false;
-    RegisteredHerds.Empty();
-    RegisteredPacks.Empty();
-    Super::Deinitialize();
-}
+    Super::Tick(DeltaTime);
 
-void UCrowdSimulationManager::RegisterHerd(const FCrowd_HerdDescriptor& HerdDesc)
-{
-    if (RegisteredHerds.Num() >= 10)
+    TimeSinceLastUpdate += DeltaTime;
+    if (TimeSinceLastUpdate >= CrowdUpdateInterval)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Herd cap reached (10). Cannot register %s"), *HerdDesc.HerdID.ToString());
+        UpdateCrowdBehavior(TimeSinceLastUpdate);
+        TimeSinceLastUpdate = 0.0f;
+    }
+
+    // Decay alert level over time
+    if (GlobalAlertLevel > 0.0f && !bHasActiveThreat)
+    {
+        GlobalAlertLevel = FMath::Max(0.0f, GlobalAlertLevel - DeltaTime * 0.1f);
+        if (GlobalAlertLevel <= 0.0f)
+        {
+            bTribeInPanic = false;
+        }
+    }
+}
+
+void ACrowdSimulationManager::RegisterAgent(FCrowd_AgentData AgentData)
+{
+    if (AgentRegistry.Num() >= MaxCrowdAgents)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Max agents reached (%d)"), MaxCrowdAgents);
         return;
     }
-    RegisteredHerds.Add(HerdDesc);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd registered — ID=%s Species=%s AgentCount=%d"),
-        *HerdDesc.HerdID.ToString(), *HerdDesc.SpeciesName, HerdDesc.AgentCount);
+    AgentRegistry.Add(AgentData);
+    ActiveAgentCount = AgentRegistry.Num();
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Agent registered. Total: %d"), ActiveAgentCount);
 }
 
-void UCrowdSimulationManager::RegisterPack(const FCrowd_PackDescriptor& PackDesc)
+void ACrowdSimulationManager::TriggerThreatAlert(FVector ThreatLocation, float ThreatRadius)
 {
-    if (RegisteredPacks.Num() >= 5)
+    bHasActiveThreat = true;
+    LastKnownThreatLocation = ThreatLocation;
+    GlobalAlertLevel = FMath::Clamp(GlobalAlertLevel + 0.5f, 0.0f, 1.0f);
+
+    if (GlobalAlertLevel >= 0.7f)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Pack cap reached (5). Cannot register %s"), *PackDesc.PackID.ToString());
-        return;
+        bTribeInPanic = true;
     }
-    RegisteredPacks.Add(PackDesc);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Pack registered — ID=%s Species=%s AgentCount=%d HuntMode=%d"),
-        *PackDesc.PackID.ToString(), *PackDesc.SpeciesName, PackDesc.AgentCount, (int32)PackDesc.HuntingMode);
-}
 
-void UCrowdSimulationManager::UpdateHerdBehavior(float DeltaTime)
-{
-    if (!bSimulationActive) return;
-
-    for (FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+    // Update all agents to fleeing state if within threat radius
+    for (FCrowd_AgentData& Agent : AgentRegistry)
     {
-        // Advance migration progress
-        Herd.MigrationProgress = FMath::Clamp(Herd.MigrationProgress + DeltaTime * 0.01f, 0.0f, 1.0f);
-
-        // State transitions based on threat level
-        if (Herd.ThreatLevel > 0.7f && Herd.CurrentState != ECrowd_HerdState::Fleeing)
+        float DistToThreat = FVector::Dist(Agent.HomeLocation, ThreatLocation);
+        if (DistToThreat <= ThreatRadius)
         {
-            Herd.CurrentState = ECrowd_HerdState::Fleeing;
-            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd %s FLEEING (threat=%.2f)"), *Herd.HerdID.ToString(), Herd.ThreatLevel);
-        }
-        else if (Herd.ThreatLevel < 0.2f && Herd.CurrentState == ECrowd_HerdState::Fleeing)
-        {
-            Herd.CurrentState = ECrowd_HerdState::Grazing;
-            Herd.ThreatLevel = 0.0f;
-        }
+            Agent.State = ECrowd_AgentState::Fleeing;
+            Agent.AlertLevel = 1.0f;
 
-        // Decay threat over time
-        Herd.ThreatLevel = FMath::Max(0.0f, Herd.ThreatLevel - DeltaTime * 0.05f);
+            // Set flee target away from threat
+            FVector FleeDir = (Agent.HomeLocation - ThreatLocation).GetSafeNormal();
+            Agent.CurrentTarget = Agent.HomeLocation + FleeDir * FleeRadius;
+        }
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: THREAT ALERT at %s — GlobalAlert=%.2f, Panic=%s"),
+        *ThreatLocation.ToString(), GlobalAlertLevel, bTribeInPanic ? TEXT("YES") : TEXT("NO"));
 }
 
-void UCrowdSimulationManager::UpdatePackBehavior(float DeltaTime)
+void ACrowdSimulationManager::ClearThreatAlert()
 {
-    if (!bSimulationActive) return;
+    bHasActiveThreat = false;
+    LastKnownThreatLocation = FVector::ZeroVector;
 
-    for (FCrowd_PackDescriptor& Pack : RegisteredPacks)
+    // Return agents to normal state
+    for (FCrowd_AgentData& Agent : AgentRegistry)
     {
-        // Pack hunting state machine
-        switch (Pack.HuntingMode)
+        if (Agent.State == ECrowd_AgentState::Fleeing)
         {
-            case ECrowd_PackHuntMode::Patrolling:
-                // Check if any herd is within hunting range
-                for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
-                {
-                    float Dist = FVector::Dist(Pack.PackCenterLocation, Herd.HerdCenterLocation);
-                    if (Dist < PackHuntingRadius)
-                    {
-                        Pack.HuntingMode = ECrowd_PackHuntMode::Stalking;
-                        Pack.TargetHerdID = Herd.HerdID;
-                        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Pack %s STALKING herd %s"),
-                            *Pack.PackID.ToString(), *Herd.HerdID.ToString());
-                        break;
-                    }
-                }
-                break;
+            Agent.State = ECrowd_AgentState::Patrolling;
+            Agent.AlertLevel = FMath::Max(0.0f, Agent.AlertLevel - 0.5f);
+        }
+    }
 
-            case ECrowd_PackHuntMode::Stalking:
-                // Transition to coordinated attack if close enough
-                for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
-                {
-                    if (Herd.HerdID == Pack.TargetHerdID)
-                    {
-                        float Dist = FVector::Dist(Pack.PackCenterLocation, Herd.HerdCenterLocation);
-                        if (Dist < FleeResponseRadius)
-                        {
-                            Pack.HuntingMode = ECrowd_PackHuntMode::CoordinatedAttack;
-                            // Alert the herd
-                            for (FCrowd_HerdDescriptor& MutableHerd : RegisteredHerds)
-                            {
-                                if (MutableHerd.HerdID == Pack.TargetHerdID)
-                                {
-                                    MutableHerd.ThreatLevel = 1.0f;
-                                    MutableHerd.CurrentState = ECrowd_HerdState::Fleeing;
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-                break;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Threat cleared. Agents returning to patrol."));
+}
 
-            case ECrowd_PackHuntMode::CoordinatedAttack:
-                // After attack, return to patrol
-                Pack.HuntCooldown -= DeltaTime;
-                if (Pack.HuntCooldown <= 0.0f)
-                {
-                    Pack.HuntingMode = ECrowd_PackHuntMode::Patrolling;
-                    Pack.TargetHerdID = FName(NAME_None);
-                    Pack.HuntCooldown = 120.0f; // 2 min cooldown
-                }
-                break;
+void ACrowdSimulationManager::UpdateCrowdBehavior(float DeltaTime)
+{
+    for (FCrowd_AgentData& Agent : AgentRegistry)
+    {
+        switch (Agent.State)
+        {
+        case ECrowd_AgentState::Idle:
+            // Idle agents occasionally start patrolling
+            if (FMath::RandRange(0, 10) > 7)
+            {
+                Agent.State = ECrowd_AgentState::Patrolling;
+                FCrowd_WaypointData NearWP = GetNearestWaypoint(Agent.HomeLocation);
+                Agent.CurrentTarget = NearWP.Location;
+            }
+            break;
 
-            default:
-                break;
+        case ECrowd_AgentState::Patrolling:
+            // Check if reached target
+            if (FVector::Dist(Agent.HomeLocation, Agent.CurrentTarget) < 100.0f)
+            {
+                Agent.State = ECrowd_AgentState::Working;
+            }
+            break;
+
+        case ECrowd_AgentState::Working:
+            // Work for a bit then return to idle
+            if (FMath::RandRange(0, 10) > 8)
+            {
+                Agent.State = ECrowd_AgentState::Idle;
+                Agent.CurrentTarget = Agent.HomeLocation;
+            }
+            break;
+
+        case ECrowd_AgentState::Fleeing:
+            // Keep fleeing while threat active
+            if (!bHasActiveThreat)
+            {
+                Agent.State = ECrowd_AgentState::Patrolling;
+            }
+            break;
+
+        case ECrowd_AgentState::Socializing:
+        case ECrowd_AgentState::Sleeping:
+        default:
+            break;
         }
     }
 }
 
-void UCrowdSimulationManager::NotifyThreatAtLocation(FVector ThreatLocation, float ThreatRadius, float ThreatIntensity)
+FCrowd_WaypointData ACrowdSimulationManager::GetNearestWaypoint(FVector FromLocation) const
 {
-    for (FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+    FCrowd_WaypointData Nearest;
+    float MinDist = MAX_FLT;
+
+    for (const FCrowd_WaypointData& WP : Waypoints)
     {
-        float Dist = FVector::Dist(ThreatLocation, Herd.HerdCenterLocation);
-        if (Dist < ThreatRadius)
+        float Dist = FVector::Dist(FromLocation, WP.Location);
+        if (Dist < MinDist)
         {
-            float DistanceFactor = 1.0f - (Dist / ThreatRadius);
-            Herd.ThreatLevel = FMath::Max(Herd.ThreatLevel, ThreatIntensity * DistanceFactor);
-            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd %s threat updated to %.2f"),
-                *Herd.HerdID.ToString(), Herd.ThreatLevel);
+            MinDist = Dist;
+            Nearest = WP;
         }
     }
+
+    return Nearest;
 }
 
-int32 UCrowdSimulationManager::GetTotalActiveAgents() const
+int32 ACrowdSimulationManager::GetAgentCountByRole(ECrowd_AgentRole Role) const
 {
-    int32 Total = 0;
-    for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+    int32 Count = 0;
+    for (const FCrowd_AgentData& Agent : AgentRegistry)
     {
-        Total += Herd.AgentCount;
-    }
-    for (const FCrowd_PackDescriptor& Pack : RegisteredPacks)
-    {
-        Total += Pack.AgentCount;
-    }
-    return Total;
-}
-
-TArray<FCrowd_HerdDescriptor> UCrowdSimulationManager::GetHerdsInRadius(FVector Center, float Radius) const
-{
-    TArray<FCrowd_HerdDescriptor> Result;
-    for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
-    {
-        if (FVector::Dist(Center, Herd.HerdCenterLocation) <= Radius)
+        if (Agent.Role == Role)
         {
-            Result.Add(Herd);
+            Count++;
         }
     }
-    return Result;
+    return Count;
+}
+
+bool ACrowdSimulationManager::IsTribeInDanger() const
+{
+    return bTribeInPanic || GlobalAlertLevel >= 0.5f;
+}
+
+void ACrowdSimulationManager::DebugDrawCrowdState()
+{
+#if WITH_EDITOR
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Draw waypoints
+    for (const FCrowd_WaypointData& WP : Waypoints)
+    {
+        FColor WPColor = WP.bIsDangerZone ? FColor::Red : FColor::Green;
+        DrawDebugSphere(World, WP.Location, WP.Radius, 12, WPColor, false, 5.0f);
+        DrawDebugString(World, WP.Location + FVector(0, 0, 50), WP.WaypointName, nullptr, WPColor, 5.0f);
+    }
+
+    // Draw threat radius if active
+    if (bHasActiveThreat)
+    {
+        DrawDebugSphere(World, LastKnownThreatLocation, ThreatDetectionRadius, 16, FColor::Orange, false, 5.0f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdDebug: %d agents, AlertLevel=%.2f, Panic=%s"),
+        ActiveAgentCount, GlobalAlertLevel, bTribeInPanic ? TEXT("YES") : TEXT("NO"));
+#endif
 }
