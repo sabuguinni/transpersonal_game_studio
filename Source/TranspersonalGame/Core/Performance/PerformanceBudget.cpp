@@ -1,216 +1,236 @@
 // PerformanceBudget.cpp
 // Performance Optimizer — Agent #04
-// Full implementation of UPerformanceBudgetManager.
+// Implementation of UPerf_BudgetLibrary — per-platform budget queries and validation.
 
 #include "PerformanceBudget.h"
-#include "HAL/IConsoleManager.h"
-#include "Engine/Engine.h"
 
-// ---------------------------------------------------------------------------
-// Constructor
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFrameTargets
+// ─────────────────────────────────────────────────────────────────────────────
 
-UPerformanceBudgetManager::UPerformanceBudgetManager()
+FPerf_FrameTargets UPerf_BudgetLibrary::GetFrameTargets(EPerf_Platform Platform)
 {
-    ActivePreset = EPerf_QualityPreset::PCMedium;
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-void UPerformanceBudgetManager::ApplyCVarProfile(EPerf_QualityPreset Preset)
-{
-    ActivePreset = Preset;
-    FPerf_CVarProfile Profile = GetCVarProfile(Preset);
-
-    ApplyCVar(TEXT("r.Shadow.MaxResolution"),                  Profile.ShadowMaxResolution);
-    ApplyCVar(TEXT("r.Shadow.RadiusThreshold"),                Profile.ShadowRadiusThreshold);
-    ApplyCVar(TEXT("r.Shadow.CSM.MaxCascades"),                Profile.ShadowCSMMaxCascades);
-    ApplyCVar(TEXT("r.Lumen.GlobalIllumination.MaxTraceDistance"), Profile.LumenMaxTraceDistance);
-    ApplyCVar(TEXT("r.Lumen.Reflections.MaxRoughnessToTrace"), Profile.LumenReflectionsMaxRoughness);
-    ApplyCVar(TEXT("foliage.LODDistanceScale"),                Profile.FoliageLODDistanceScale);
-    ApplyCVar(TEXT("r.StaticMeshLODDistanceScale"),            Profile.StaticMeshLODDistanceScale);
-    ApplyCVar(TEXT("r.Streaming.PoolSize"),                    Profile.StreamingPoolSizeMB);
-    ApplyCVar(TEXT("r.Nanite.MaxPixelsPerEdge"),               Profile.NaniteMaxPixelsPerEdge);
-    ApplyCVar(TEXT("r.TSR.History.ScreenPercentage"),          Profile.TSRHistoryScreenPercentage);
-
-    // Sky atmosphere — always fast
-    ApplyCVar(TEXT("r.SkyAtmosphere.FastSkyLUT"), 1);
-    ApplyCVar(TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApply"), 1);
-
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceBudget] Applied CVar profile for preset %d"), (int32)Preset);
-}
-
-FPerf_FrameBudget UPerformanceBudgetManager::GetFrameBudget(EPerf_QualityPreset Preset) const
-{
-    FPerf_FrameBudget Budget;
-
-    switch (Preset)
+    FPerf_FrameTargets Targets;
+    switch (Platform)
     {
-    case EPerf_QualityPreset::Console:
-        Budget.TotalBudgetMs      = 33.33f;
-        Budget.RenderBudgetMs     = 20.0f;
-        Budget.GameThreadBudgetMs = 8.0f;
-        Budget.RenderThreadBudgetMs = 5.0f;
+    case EPerf_Platform::PC_High:
+        Targets.FrameTimeMS        = 16.67f;  // 60 fps
+        Targets.GPUBudgetMS        = 10.0f;
+        Targets.CPUGameThreadMS    = 4.0f;
+        Targets.CPURenderThreadMS  = 6.0f;
         break;
 
-    case EPerf_QualityPreset::PCMedium:
-        Budget.TotalBudgetMs      = 16.67f;
-        Budget.RenderBudgetMs     = 10.0f;
-        Budget.GameThreadBudgetMs = 4.0f;
-        Budget.RenderThreadBudgetMs = 3.0f;
+    case EPerf_Platform::PC_Mid:
+        Targets.FrameTimeMS        = 22.22f;  // 45 fps
+        Targets.GPUBudgetMS        = 14.0f;
+        Targets.CPUGameThreadMS    = 5.0f;
+        Targets.CPURenderThreadMS  = 8.0f;
         break;
 
-    case EPerf_QualityPreset::PCHigh:
-        Budget.TotalBudgetMs      = 16.67f;
-        Budget.RenderBudgetMs     = 11.0f;
-        Budget.GameThreadBudgetMs = 3.5f;
-        Budget.RenderThreadBudgetMs = 3.0f;
+    case EPerf_Platform::Console:
+        Targets.FrameTimeMS        = 33.33f;  // 30 fps
+        Targets.GPUBudgetMS        = 22.0f;
+        Targets.CPUGameThreadMS    = 6.0f;
+        Targets.CPURenderThreadMS  = 10.0f;
         break;
 
-    case EPerf_QualityPreset::PCUltra:
-        Budget.TotalBudgetMs      = 11.11f; // ~90fps target
-        Budget.RenderBudgetMs     = 7.0f;
-        Budget.GameThreadBudgetMs = 2.5f;
-        Budget.RenderThreadBudgetMs = 2.0f;
+    case EPerf_Platform::Mobile:
+        Targets.FrameTimeMS        = 33.33f;  // 30 fps
+        Targets.GPUBudgetMS        = 25.0f;
+        Targets.CPUGameThreadMS    = 8.0f;
+        Targets.CPURenderThreadMS  = 12.0f;
         break;
 
     default:
         break;
     }
+    return Targets;
+}
 
-    Budget.HeadroomMs = Budget.TotalBudgetMs
-        - Budget.RenderBudgetMs
-        - Budget.GameThreadBudgetMs
-        - Budget.RenderThreadBudgetMs;
+// ─────────────────────────────────────────────────────────────────────────────
+// GetDrawCallBudget
+// ─────────────────────────────────────────────────────────────────────────────
 
+FPerf_DrawCallBudget UPerf_BudgetLibrary::GetDrawCallBudget(EPerf_Platform Platform)
+{
+    FPerf_DrawCallBudget Budget;
+    switch (Platform)
+    {
+    case EPerf_Platform::PC_High:
+        Budget.MaxStaticMeshActors   = 500;
+        Budget.MaxSkeletalMeshActors = 50;
+        Budget.MaxDynamicLights      = 20;
+        Budget.MaxParticleSystems    = 30;
+        Budget.MaxTotalActors        = 300;
+        Budget.MaxDinoAIAgents       = 12;
+        break;
+
+    case EPerf_Platform::PC_Mid:
+        Budget.MaxStaticMeshActors   = 300;
+        Budget.MaxSkeletalMeshActors = 30;
+        Budget.MaxDynamicLights      = 12;
+        Budget.MaxParticleSystems    = 20;
+        Budget.MaxTotalActors        = 200;
+        Budget.MaxDinoAIAgents       = 8;
+        break;
+
+    case EPerf_Platform::Console:
+        Budget.MaxStaticMeshActors   = 200;
+        Budget.MaxSkeletalMeshActors = 20;
+        Budget.MaxDynamicLights      = 8;
+        Budget.MaxParticleSystems    = 15;
+        Budget.MaxTotalActors        = 150;
+        Budget.MaxDinoAIAgents       = 6;
+        break;
+
+    case EPerf_Platform::Mobile:
+        Budget.MaxStaticMeshActors   = 100;
+        Budget.MaxSkeletalMeshActors = 10;
+        Budget.MaxDynamicLights      = 4;
+        Budget.MaxParticleSystems    = 8;
+        Budget.MaxTotalActors        = 80;
+        Budget.MaxDinoAIAgents       = 3;
+        break;
+
+    default:
+        break;
+    }
     return Budget;
 }
 
-EPerf_BudgetZone UPerformanceBudgetManager::EvaluateBudgetZone(float MeasuredFrameTimeMs, EPerf_QualityPreset Preset) const
-{
-    FPerf_FrameBudget Budget = GetFrameBudget(Preset);
-    float Ratio = MeasuredFrameTimeMs / Budget.TotalBudgetMs;
+// ─────────────────────────────────────────────────────────────────────────────
+// GetMemoryBudget
+// ─────────────────────────────────────────────────────────────────────────────
 
-    if (Ratio < 0.80f)
+FPerf_MemoryBudget UPerf_BudgetLibrary::GetMemoryBudget(EPerf_Platform Platform)
+{
+    FPerf_MemoryBudget Mem;
+    switch (Platform)
     {
-        return EPerf_BudgetZone::Safe;
+    case EPerf_Platform::PC_High:
+        Mem.TextureStreamingPoolMB = 2048;
+        Mem.MeshMemoryMB           = 1024;
+        Mem.AudioMemoryMB          = 256;
+        Mem.TotalGPUMemoryMB       = 8192;
+        break;
+
+    case EPerf_Platform::PC_Mid:
+        Mem.TextureStreamingPoolMB = 1024;
+        Mem.MeshMemoryMB           = 512;
+        Mem.AudioMemoryMB          = 128;
+        Mem.TotalGPUMemoryMB       = 4096;
+        break;
+
+    case EPerf_Platform::Console:
+        Mem.TextureStreamingPoolMB = 512;
+        Mem.MeshMemoryMB           = 256;
+        Mem.AudioMemoryMB          = 64;
+        Mem.TotalGPUMemoryMB       = 2048;
+        break;
+
+    case EPerf_Platform::Mobile:
+        Mem.TextureStreamingPoolMB = 256;
+        Mem.MeshMemoryMB           = 128;
+        Mem.AudioMemoryMB          = 32;
+        Mem.TotalGPUMemoryMB       = 1024;
+        break;
+
+    default:
+        break;
     }
-    else if (Ratio < 0.95f)
+    return Mem;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CheckActorBudget
+// ─────────────────────────────────────────────────────────────────────────────
+
+EPerf_BudgetStatus UPerf_BudgetLibrary::CheckActorBudget(
+    EPerf_Platform Platform,
+    int32 CurrentStaticMeshCount,
+    int32 CurrentSkeletalMeshCount,
+    int32 CurrentDynamicLightCount,
+    int32 AdditionalStatic,
+    int32 AdditionalSkeletal,
+    int32 AdditionalLights)
+{
+    const FPerf_DrawCallBudget Budget = GetDrawCallBudget(Platform);
+
+    const int32 FutureStatic    = CurrentStaticMeshCount   + AdditionalStatic;
+    const int32 FutureSkeletal  = CurrentSkeletalMeshCount + AdditionalSkeletal;
+    const int32 FutureLights    = CurrentDynamicLightCount + AdditionalLights;
+
+    // Hard violation — over cap
+    if (FutureStatic   > Budget.MaxStaticMeshActors   ||
+        FutureSkeletal > Budget.MaxSkeletalMeshActors  ||
+        FutureLights   > Budget.MaxDynamicLights)
     {
-        return EPerf_BudgetZone::Warning;
+        return EPerf_BudgetStatus::Violated;
     }
-    else
+
+    // Critical — over 90% of cap
+    const float WarnThreshold = 0.9f;
+    if (FutureStatic   > FMath::FloorToInt(Budget.MaxStaticMeshActors   * WarnThreshold) ||
+        FutureSkeletal > FMath::FloorToInt(Budget.MaxSkeletalMeshActors  * WarnThreshold) ||
+        FutureLights   > FMath::FloorToInt(Budget.MaxDynamicLights       * WarnThreshold))
     {
-        return EPerf_BudgetZone::Critical;
+        return EPerf_BudgetStatus::Critical;
+    }
+
+    // Warning — over 75% of cap
+    const float CritThreshold = 0.75f;
+    if (FutureStatic   > FMath::FloorToInt(Budget.MaxStaticMeshActors   * CritThreshold) ||
+        FutureSkeletal > FMath::FloorToInt(Budget.MaxSkeletalMeshActors  * CritThreshold) ||
+        FutureLights   > FMath::FloorToInt(Budget.MaxDynamicLights       * CritThreshold))
+    {
+        return EPerf_BudgetStatus::Warning;
+    }
+
+    return EPerf_BudgetStatus::OK;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IsWithinHardLimits
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool UPerf_BudgetLibrary::IsWithinHardLimits(EPerf_Platform Platform, const FPerf_RuntimeSnapshot& Snapshot)
+{
+    const FPerf_DrawCallBudget Budget = GetDrawCallBudget(Platform);
+
+    return (Snapshot.ActiveStaticMeshes   <= Budget.MaxStaticMeshActors   &&
+            Snapshot.ActiveSkeletalMeshes <= Budget.MaxSkeletalMeshActors  &&
+            Snapshot.ActiveDynamicLights  <= Budget.MaxDynamicLights       &&
+            Snapshot.ActiveParticleSystems<= Budget.MaxParticleSystems);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetRecommendedLODBias
+// ─────────────────────────────────────────────────────────────────────────────
+
+int32 UPerf_BudgetLibrary::GetRecommendedLODBias(EPerf_Platform Platform)
+{
+    switch (Platform)
+    {
+    case EPerf_Platform::PC_High:    return 0;
+    case EPerf_Platform::PC_Mid:     return 1;
+    case EPerf_Platform::Console:    return 1;
+    case EPerf_Platform::Mobile:     return 2;
+    default:                         return 0;
     }
 }
 
-FPerf_CVarProfile UPerformanceBudgetManager::GetCVarProfile(EPerf_QualityPreset Preset) const
+// ─────────────────────────────────────────────────────────────────────────────
+// GetRecommendedShadowResolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+int32 UPerf_BudgetLibrary::GetRecommendedShadowResolution(EPerf_Platform Platform)
 {
-    switch (Preset)
+    switch (Platform)
     {
-    case EPerf_QualityPreset::Console:    return BuildConsoleProfile();
-    case EPerf_QualityPreset::PCMedium:   return BuildPCMediumProfile();
-    case EPerf_QualityPreset::PCHigh:     return BuildPCHighProfile();
-    case EPerf_QualityPreset::PCUltra:    return BuildPCUltraProfile();
-    default:                              return BuildPCMediumProfile();
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Private — Profile builders
-// ---------------------------------------------------------------------------
-
-FPerf_CVarProfile UPerformanceBudgetManager::BuildConsoleProfile() const
-{
-    FPerf_CVarProfile P;
-    P.ShadowMaxResolution           = 512;
-    P.ShadowRadiusThreshold         = 0.05f;
-    P.ShadowCSMMaxCascades          = 2;
-    P.LumenMaxTraceDistance         = 4000.0f;
-    P.LumenReflectionsMaxRoughness  = 0.3f;
-    P.FoliageLODDistanceScale       = 0.8f;
-    P.StaticMeshLODDistanceScale    = 0.8f;
-    P.StreamingPoolSizeMB           = 512;
-    P.NaniteMaxPixelsPerEdge        = 2.0f;
-    P.TSRHistoryScreenPercentage    = 150.0f;
-    return P;
-}
-
-FPerf_CVarProfile UPerformanceBudgetManager::BuildPCMediumProfile() const
-{
-    FPerf_CVarProfile P;
-    P.ShadowMaxResolution           = 1024;
-    P.ShadowRadiusThreshold         = 0.03f;
-    P.ShadowCSMMaxCascades          = 3;
-    P.LumenMaxTraceDistance         = 8000.0f;
-    P.LumenReflectionsMaxRoughness  = 0.4f;
-    P.FoliageLODDistanceScale       = 1.5f;
-    P.StaticMeshLODDistanceScale    = 1.0f;
-    P.StreamingPoolSizeMB           = 1024;
-    P.NaniteMaxPixelsPerEdge        = 1.0f;
-    P.TSRHistoryScreenPercentage    = 200.0f;
-    return P;
-}
-
-FPerf_CVarProfile UPerformanceBudgetManager::BuildPCHighProfile() const
-{
-    FPerf_CVarProfile P;
-    P.ShadowMaxResolution           = 2048;
-    P.ShadowRadiusThreshold         = 0.02f;
-    P.ShadowCSMMaxCascades          = 4;
-    P.LumenMaxTraceDistance         = 12000.0f;
-    P.LumenReflectionsMaxRoughness  = 0.6f;
-    P.FoliageLODDistanceScale       = 2.0f;
-    P.StaticMeshLODDistanceScale    = 1.2f;
-    P.StreamingPoolSizeMB           = 2048;
-    P.NaniteMaxPixelsPerEdge        = 0.8f;
-    P.TSRHistoryScreenPercentage    = 200.0f;
-    return P;
-}
-
-FPerf_CVarProfile UPerformanceBudgetManager::BuildPCUltraProfile() const
-{
-    FPerf_CVarProfile P;
-    P.ShadowMaxResolution           = 4096;
-    P.ShadowRadiusThreshold         = 0.01f;
-    P.ShadowCSMMaxCascades          = 4;
-    P.LumenMaxTraceDistance         = 20000.0f;
-    P.LumenReflectionsMaxRoughness  = 0.8f;
-    P.FoliageLODDistanceScale       = 3.0f;
-    P.StaticMeshLODDistanceScale    = 1.5f;
-    P.StreamingPoolSizeMB           = 4096;
-    P.NaniteMaxPixelsPerEdge        = 0.5f;
-    P.TSRHistoryScreenPercentage    = 200.0f;
-    return P;
-}
-
-// ---------------------------------------------------------------------------
-// Private — CVar application helpers
-// ---------------------------------------------------------------------------
-
-void UPerformanceBudgetManager::ApplyCVar(const FString& Name, float Value) const
-{
-    if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*Name))
-    {
-        CVar->Set(Value, ECVF_SetByCode);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PerformanceBudget] CVar not found: %s"), *Name);
-    }
-}
-
-void UPerformanceBudgetManager::ApplyCVar(const FString& Name, int32 Value) const
-{
-    if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*Name))
-    {
-        CVar->Set(Value, ECVF_SetByCode);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PerformanceBudget] CVar not found: %s"), *Name);
+    case EPerf_Platform::PC_High:    return 2048;
+    case EPerf_Platform::PC_Mid:     return 1024;
+    case EPerf_Platform::Console:    return 1024;
+    case EPerf_Platform::Mobile:     return 512;
+    default:                         return 1024;
     }
 }
