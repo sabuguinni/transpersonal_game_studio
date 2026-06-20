@@ -2,104 +2,115 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Engine/StaticMeshActor.h"
 #include "ArchitectureManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureData
+UENUM(BlueprintType)
+enum class EArch_StructureType : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FRotator Rotation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsRuin;
-
-    FArch_StructureData()
-    {
-        StructureName = TEXT("Unknown");
-        StructureType = EArch_StructureType::Shelter;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        StructuralIntegrity = 100.0f;
-        bIsRuin = false;
-    }
+    RuinPillar      UMETA(DisplayName = "Ruin Pillar"),
+    StoneWall       UMETA(DisplayName = "Stone Wall"),
+    RockyOutcrop    UMETA(DisplayName = "Rocky Outcrop"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    AncientAltar    UMETA(DisplayName = "Ancient Altar"),
+    BoulderCluster  UMETA(DisplayName = "Boulder Cluster")
 };
 
+UENUM(BlueprintType)
+enum class EArch_DecayState : uint8
+{
+    Intact      UMETA(DisplayName = "Intact"),
+    Weathered   UMETA(DisplayName = "Weathered"),
+    Crumbling   UMETA(DisplayName = "Crumbling"),
+    Ruined      UMETA(DisplayName = "Ruined"),
+    Buried      UMETA(DisplayName = "Buried")
+};
+
+USTRUCT(BlueprintType)
+struct FArch_StructureData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_StructureType StructureType = EArch_StructureType::RuinPillar;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_DecayState DecayState = EArch_DecayState::Weathered;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FVector WorldLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float HeightMeters = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasMossGrowth = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasPrehistoricFerns = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FString MeshyAssetURL;
+};
+
+/**
+ * AArch_ArchitectureManager
+ * Manages placement and state of prehistoric architectural structures
+ * (ruins, stone formations, cave entrances) in the Cretaceous world.
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArchitectureManager : public AActor
+class TRANSPERSONALGAME_API AArch_ArchitectureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AArchitectureManager();
+    AArch_ArchitectureManager();
 
-protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> ManagedStructures;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 MaxStructuresPerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MinDistanceBetweenStructures;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<TSoftObjectPtr<UStaticMesh>> StructureMeshes;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructureAtLocation(const FVector& Location, EArch_StructureType StructureType);
+    /** All registered structures in the world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Structures")
+    TArray<FArch_StructureData> RegisteredStructures;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnStructuresInBiome(EBiomeType BiomeType, int32 Count);
+    /** Maximum number of structures to spawn in the world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Spawning")
+    int32 MaxStructureCount = 50;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void DestroyStructure(const FString& StructureName);
+    /** Radius around player to activate structure LOD */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|LOD")
+    float ActivationRadius = 10000.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_StructureData> GetStructuresInRadius(const FVector& Center, float Radius);
+    /** Meshy GLB URL for the Cretaceous stone ruin pillar */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Assets")
+    FString CretaceousRuinPillarURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781924995225_Ancient_Cretaceous_stone_ruin_pillar__we.glb");
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructuralIntegrity(const FString& StructureName, float NewIntegrity);
+    /** Meshy task ID for tracking */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Assets")
+    FString MeshyTaskID = TEXT("019ee300-e685-7390-9303-299fa2fec0df");
 
+    /** Register a new structure at the given location */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ConvertToRuin(const FString& StructureName);
+    void RegisterStructure(FArch_StructureData StructureData);
 
+    /** Get all structures within radius of a location */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FArch_StructureData> GetStructuresInRadius(FVector Center, float Radius) const;
+
+    /** Spawn a ruin pillar at biome coordinates */
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void GenerateArchitecturalElements();
+    void SpawnRuinPillarAtBiomeCoords();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
-    void ClearAllStructures();
+    /** Get structure count */
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    int32 GetStructureCount() const { return RegisteredStructures.Num(); }
 
-protected:
-    UFUNCTION()
-    void OnStructureDestroyed(AActor* DestroyedActor);
+private:
+    /** Seed structures for the Cretaceous biome */
+    void InitializeCretaceousStructures();
 
-    FVector GetBiomeCenter(EBiomeType BiomeType);
-    bool IsValidStructureLocation(const FVector& Location);
-    UStaticMesh* GetMeshForStructureType(EArch_StructureType StructureType);
+    /** Biome spawn coordinates (X=50000, Y=50000) */
+    static constexpr float BiomeX = 50000.0f;
+    static constexpr float BiomeY = 50000.0f;
+    static constexpr float BiomeZ = 100.0f;
 };
