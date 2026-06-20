@@ -1,231 +1,147 @@
 #include "AudioZoneSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 
-// ─────────────────────────────────────────────
-// AAudio_ZoneTrigger
-// ─────────────────────────────────────────────
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
 
-AAudio_ZoneTrigger::AAudio_ZoneTrigger()
+UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(500.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
-void AAudio_ZoneTrigger::BeginPlay()
+float UAudio_ZoneComponent::GetBlendWeightForPlayer(const FVector& PlayerLocation) const
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return 0.0f;
+
+    const float Distance = FVector::Dist(PlayerLocation, Owner->GetActorLocation());
+    const float Radius = ZoneConfig.BlendRadius;
+
+    if (Distance >= Radius) return 0.0f;
+    if (Distance <= 0.0f)   return 1.0f;
+
+    // Smooth falloff: cosine curve for natural audio blend
+    const float Alpha = Distance / Radius;
+    return FMath::Clamp(FMath::Cos(Alpha * PI * 0.5f), 0.0f, 1.0f);
+}
+
+// ============================================================
+// AAudio_ZoneActor
+// ============================================================
+
+AAudio_ZoneActor::AAudio_ZoneActor()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    AudioZoneComponent = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("AudioZoneComponent"));
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+}
+
+void AAudio_ZoneActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
-
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneTrigger::HandleBeginOverlap);
-    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneTrigger::HandleEndOverlap);
-}
-
-void AAudio_ZoneTrigger::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
+    // Sync config to component on play
+    if (AudioZoneComponent)
     {
-        AmbientAudioComponent->Stop();
+        AudioZoneComponent->ZoneConfig = ZoneConfig;
     }
-    Super::EndPlay(EndPlayReason);
-}
 
-void AAudio_ZoneTrigger::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bFadingIn)
+    // Auto-register with ZoneManager
+    if (UGameInstance* GI = GetGameInstance())
     {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeInTime, 0.01f), 0.0f, 1.0f);
-        CurrentBlendAlpha = Alpha;
-        if (AmbientAudioComponent)
+        if (UAudio_ZoneManager* Mgr = GI->GetSubsystem<UAudio_ZoneManager>())
         {
-            AmbientAudioComponent->SetVolumeMultiplier(Alpha * ZoneConfig.AmbientVolume);
-        }
-        if (Alpha >= 1.0f)
-        {
-            bFadingIn = false;
-        }
-    }
-    else if (bFadingOut)
-    {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeOutTime, 0.01f), 0.0f, 1.0f);
-        CurrentBlendAlpha = 1.0f - Alpha;
-        if (AmbientAudioComponent)
-        {
-            AmbientAudioComponent->SetVolumeMultiplier(CurrentBlendAlpha * ZoneConfig.AmbientVolume);
-        }
-        if (Alpha >= 1.0f)
-        {
-            bFadingOut = false;
-            if (AmbientAudioComponent)
-            {
-                AmbientAudioComponent->Stop();
-            }
+            Mgr->RegisterZone(this);
         }
     }
 }
 
-void AAudio_ZoneTrigger::HandleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void AAudio_ZoneActor::OnConstruction(const FTransform& Transform)
 {
-    if (OtherActor && OtherActor->IsA(ACharacter::StaticClass()))
+    Super::OnConstruction(Transform);
+
+    if (AudioZoneComponent)
     {
-        OnPlayerEnterZone(OtherActor);
+        AudioZoneComponent->ZoneConfig = ZoneConfig;
     }
 }
 
-void AAudio_ZoneTrigger::HandleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void AAudio_ZoneActor::PreviewZoneConfig()
 {
-    if (OtherActor && OtherActor->IsA(ACharacter::StaticClass()))
+#if WITH_EDITOR
+    UE_LOG(LogTemp, Log, TEXT("[AudioZone] PreviewZoneConfig — Zone: %s | Radius: %.0f | DangerMusic: %s"),
+        *GetActorLabel(),
+        ZoneConfig.BlendRadius,
+        ZoneConfig.bDangerMusic ? TEXT("YES") : TEXT("NO"));
+#endif
+}
+
+// ============================================================
+// UAudio_ZoneManager
+// ============================================================
+
+void UAudio_ZoneManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    RegisteredZones.Empty();
+    UE_LOG(LogTemp, Log, TEXT("[AudioZoneManager] Initialized"));
+}
+
+void UAudio_ZoneManager::Deinitialize()
+{
+    RegisteredZones.Empty();
+    Super::Deinitialize();
+}
+
+void UAudio_ZoneManager::RegisterZone(AAudio_ZoneActor* Zone)
+{
+    if (Zone && !RegisteredZones.Contains(Zone))
     {
-        OnPlayerExitZone(OtherActor);
+        RegisteredZones.Add(Zone);
+        UE_LOG(LogTemp, Log, TEXT("[AudioZoneManager] Registered zone: %s"), *Zone->GetActorLabel());
     }
 }
 
-void AAudio_ZoneTrigger::OnPlayerEnterZone(AActor* OverlappingActor)
+void UAudio_ZoneManager::UnregisterZone(AAudio_ZoneActor* Zone)
 {
-    bPlayerInZone = true;
-    FadeAmbientIn();
+    RegisteredZones.Remove(Zone);
 }
 
-void AAudio_ZoneTrigger::OnPlayerExitZone(AActor* OverlappingActor)
+EAudio_ZoneType UAudio_ZoneManager::GetDominantZoneForPlayer(const FVector& PlayerLocation) const
 {
-    bPlayerInZone = false;
-    FadeAmbientOut();
-}
+    EAudio_ZoneType Dominant = EAudio_ZoneType::OpenPlain;
+    float BestWeight = 0.0f;
 
-void AAudio_ZoneTrigger::SetDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    ZoneConfig.DangerLevel = NewLevel;
-
-    // Adjust music volume based on danger
-    switch (NewLevel)
+    for (AAudio_ZoneActor* Zone : RegisteredZones)
     {
-    case EAudio_DangerLevel::Safe:
-        ZoneConfig.MusicVolume = 0.4f;
-        break;
-    case EAudio_DangerLevel::Caution:
-        ZoneConfig.MusicVolume = 0.6f;
-        break;
-    case EAudio_DangerLevel::Danger:
-        ZoneConfig.MusicVolume = 0.85f;
-        break;
-    case EAudio_DangerLevel::Critical:
-        ZoneConfig.MusicVolume = 1.0f;
-        break;
-    default:
-        break;
-    }
-}
+        if (!Zone || !Zone->AudioZoneComponent) continue;
 
-EAudio_DangerLevel AAudio_ZoneTrigger::GetDangerLevel() const
-{
-    return ZoneConfig.DangerLevel;
-}
-
-void AAudio_ZoneTrigger::FadeAmbientIn()
-{
-    if (!AmbientAudioComponent) return;
-
-    if (!AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Play();
+        const float Weight = Zone->AudioZoneComponent->GetBlendWeightForPlayer(PlayerLocation);
+        if (Weight > BestWeight)
+        {
+            BestWeight = Weight;
+            Dominant = Zone->ZoneConfig.ZoneType;
+        }
     }
 
-    FadeTimer = 0.0f;
-    bFadingIn = true;
-    bFadingOut = false;
+    return Dominant;
 }
 
-void AAudio_ZoneTrigger::FadeAmbientOut()
+float UAudio_ZoneManager::GetDangerLevel(const FVector& PlayerLocation) const
 {
-    if (!AmbientAudioComponent) return;
+    float TotalDanger = 0.0f;
 
-    FadeTimer = 0.0f;
-    bFadingOut = true;
-    bFadingIn = false;
-}
-
-// ─────────────────────────────────────────────
-// AAudio_DinosaurSoundEmitter
-// ─────────────────────────────────────────────
-
-AAudio_DinosaurSoundEmitter::AAudio_DinosaurSoundEmitter()
-{
-    PrimaryActorTick.bCanEverTick = true;
-
-    RoarAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RoarAudio"));
-    RoarAudioComponent->bAutoActivate = false;
-    RootComponent = RoarAudioComponent;
-
-    FootstepAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FootstepAudio"));
-    FootstepAudioComponent->SetupAttachment(RootComponent);
-    FootstepAudioComponent->bAutoActivate = false;
-}
-
-void AAudio_DinosaurSoundEmitter::BeginPlay()
-{
-    Super::BeginPlay();
-    ScheduleNextRoar();
-}
-
-void AAudio_DinosaurSoundEmitter::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    RoarTimer += DeltaTime;
-    if (RoarTimer >= TimeUntilNextRoar)
+    for (AAudio_ZoneActor* Zone : RegisteredZones)
     {
-        TriggerRoar();
-        ScheduleNextRoar();
-    }
-}
+        if (!Zone || !Zone->AudioZoneComponent) continue;
+        if (!Zone->ZoneConfig.bDangerMusic) continue;
 
-void AAudio_DinosaurSoundEmitter::TriggerRoar()
-{
-    if (RoarAudioComponent && RoarAudioComponent->Sound)
-    {
-        RoarAudioComponent->Play();
+        const float Weight = Zone->AudioZoneComponent->GetBlendWeightForPlayer(PlayerLocation);
+        TotalDanger = FMath::Max(TotalDanger, Weight * Zone->ZoneConfig.MusicIntensity);
     }
-}
 
-void AAudio_DinosaurSoundEmitter::TriggerFootstep()
-{
-    if (FootstepAudioComponent && FootstepAudioComponent->Sound)
-    {
-        FootstepAudioComponent->Play();
-    }
-}
-
-void AAudio_DinosaurSoundEmitter::SetDistanceAttenuation(float MaxDistance)
-{
-    MaxHearingDistance = MaxDistance;
-    if (RoarAudioComponent)
-    {
-        RoarAudioComponent->SetVolumeMultiplier(1.0f);
-    }
-}
-
-void AAudio_DinosaurSoundEmitter::ScheduleNextRoar()
-{
-    RoarTimer = 0.0f;
-    TimeUntilNextRoar = FMath::RandRange(RoarCooldownMin, RoarCooldownMax);
+    return FMath::Clamp(TotalDanger, 0.0f, 1.0f);
 }
