@@ -1,233 +1,212 @@
 // PCGBiomeSystem.h
-// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260620_006
-// Biome system: defines 5 biome types, zone data, and PCG spawning rules.
-// Uses World_ prefix for all types per RULE 2.
+// Procedural World Generator — Agent #05
+// PROD_CYCLE_AUTO_20260620_007
+// Biome zone definitions, scatter parameters, and world partition integration.
+// All types prefixed World_ per RULE 2.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/BoxComponent.h"
+#include "Engine/DataTable.h"
 #include "PCGBiomeSystem.generated.h"
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
-
+// ─── BIOME TYPE ENUM ──────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Plains      UMETA(DisplayName = "Plains"),
-    Rocky       UMETA(DisplayName = "Rocky Highlands"),
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Volcanic    UMETA(DisplayName = "Volcanic"),
-    None        UMETA(DisplayName = "None / Transition")
+    Forest      UMETA(DisplayName = "Cretaceous Forest"),
+    Plains      UMETA(DisplayName = "Open Plains"),
+    Rocky       UMETA(DisplayName = "Rocky Badlands"),
+    Swamp       UMETA(DisplayName = "Swamp / Wetland"),
+    Riverbank   UMETA(DisplayName = "Riverbank"),
+    COUNT       UMETA(Hidden)
 };
 
+// ─── WEATHER STATE ENUM ───────────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class EWorld_VegetationDensity : uint8
+enum class EWorld_WeatherState : uint8
 {
-    Sparse      UMETA(DisplayName = "Sparse"),
-    Moderate    UMETA(DisplayName = "Moderate"),
-    Dense       UMETA(DisplayName = "Dense"),
-    Barren      UMETA(DisplayName = "Barren")
+    Clear       UMETA(DisplayName = "Clear"),
+    Overcast    UMETA(DisplayName = "Overcast"),
+    Rain        UMETA(DisplayName = "Rain"),
+    Storm       UMETA(DisplayName = "Storm"),
+    Fog         UMETA(DisplayName = "Dense Fog"),
+    COUNT       UMETA(Hidden)
 };
 
-// ─── Structs ─────────────────────────────────────────────────────────────────
-
+// ─── BIOME SCATTER PARAMETERS ─────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeSpawnRule
+struct TRANSPERSONALGAME_API FWorld_BiomeScatterParams
 {
     GENERATED_BODY()
 
-    /** Mesh asset soft reference for this spawn rule */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    TSoftObjectPtr<UStaticMesh> MeshAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
-    /** Minimum scale multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0.1", ClampMax = "20.0"))
-    float ScaleMin = 0.8f;
-
-    /** Maximum scale multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0.1", ClampMax = "20.0"))
-    float ScaleMax = 1.5f;
-
-    /** Spawn density: instances per 10000 cm² */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0", ClampMax = "100"))
-    int32 DensityPer10kSqCm = 5;
-
-    /** Maximum slope angle (degrees) for valid spawn */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0", ClampMax = "90"))
-    float MaxSlopeAngle = 35.0f;
-
-    /** Align to surface normal */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    bool bAlignToSurface = true;
-
-    /** Random yaw rotation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    bool bRandomYaw = true;
-};
-
-USTRUCT(BlueprintType)
-struct FWorld_BiomeZoneData
-{
-    GENERATED_BODY()
-
-    /** Biome type identifier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Plains;
-
-    /** Display name for debug/UI */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    FString BiomeName = TEXT("Plains");
-
-    /** World-space center of this biome zone */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    // World-space center of this biome zone
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
     FVector ZoneCenter = FVector::ZeroVector;
 
-    /** Radius of influence (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "100", ClampMax = "100000"))
-    float ZoneRadius = 5000.0f;
+    // Radius in cm within which foliage is scattered
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float ZoneRadius = 2500.0f;
 
-    /** Vegetation density category */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    EWorld_VegetationDensity VegetationDensity = EWorld_VegetationDensity::Moderate;
+    // Max foliage instances per biome zone (performance cap from PerformanceConfig.h)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    int32 MaxFoliageInstances = 200;
 
-    /** Base ground color tint for this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    FLinearColor GroundColorTint = FLinearColor(0.3f, 0.25f, 0.1f, 1.0f);
+    // Foliage density: instances per 10000 cm² (100m²)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float FoliageDensity = 0.8f;
 
-    /** Fog density multiplier for this biome (1.0 = global default) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float FogDensityMultiplier = 1.0f;
+    // Average tree/rock height scale
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float AverageHeightScale = 2.0f;
 
-    /** Ambient temperature in Celsius (affects survival mechanics) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "-50", ClampMax = "80"))
-    float AmbientTemperatureCelsius = 22.0f;
+    // Scale variance (±)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float HeightScaleVariance = 0.8f;
 
-    /** Spawn rules for vegetation in this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    TArray<FWorld_BiomeSpawnRule> VegetationSpawnRules;
+    // Random seed for deterministic scatter
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    int32 ScatterSeed = 42;
 
-    /** Dinosaur species tags that prefer this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    TArray<FName> PreferredDinoSpecies;
-
-    /** Hazard level 0-1 (0=safe, 1=extreme danger) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float HazardLevel = 0.3f;
+    // Cull distance for foliage in this zone (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float CullDistanceCm = 20000.0f;
 };
 
-// ─── Actor ───────────────────────────────────────────────────────────────────
-
-/**
- * APCGBiomeZoneActor
- * Placed in the level to define a biome region.
- * The PCGWorldGenerator queries these actors to determine biome at any world position.
- * Supports up to 5 biome zones in MinPlayableMap (Forest/Plains/Rocky/Swamp/Volcanic).
- */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome Zone"))
-class TRANSPERSONALGAME_API APCGBiomeZoneActor : public AActor
+// ─── BIOME ZONE ACTOR ─────────────────────────────────────────────────────────
+// Placed in the level to define a biome region.
+// PCGWorldGenerator reads these at runtime to drive foliage scatter.
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Zone Marker"))
+class TRANSPERSONALGAME_API AWorld_BiomeZoneMarker : public AActor
 {
     GENERATED_BODY()
 
 public:
-    APCGBiomeZoneActor();
+    AWorld_BiomeZoneMarker();
 
-    // ── Zone data ──────────────────────────────────────────────────────────
+    // Biome parameters for this zone
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    FWorld_BiomeScatterParams BiomeParams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    FWorld_BiomeZoneData BiomeData;
+    // Current weather state in this zone
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Weather")
+    EWorld_WeatherState CurrentWeather = EWorld_WeatherState::Clear;
 
-    // ── Components ────────────────────────────────────────────────────────
+    // Temperature in Celsius (affects dinosaur behaviour)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Climate")
+    float TemperatureCelsius = 28.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World|PCG",
-              meta = (AllowPrivateAccess = "true"))
-    UBoxComponent* ZoneBounds;
+    // Humidity 0-1 (affects fog density, plant density)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Climate")
+    float Humidity = 0.6f;
 
-    // ── Interface ─────────────────────────────────────────────────────────
+    // Whether this zone has a water body (river/lake)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Water")
+    bool bHasWaterBody = false;
 
-    /** Returns true if WorldLocation falls within this biome zone */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    bool IsLocationInZone(const FVector& WorldLocation) const;
+    // Water body center offset from zone center
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Water",
+              meta = (EditCondition = "bHasWaterBody"))
+    FVector WaterBodyOffset = FVector::ZeroVector;
 
-    /** Returns blend weight 0-1 based on distance from zone center */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetBlendWeightAtLocation(const FVector& WorldLocation) const;
+    // Returns true if a world-space point is inside this biome zone
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    bool IsPointInZone(const FVector& WorldPoint) const;
 
-    /** Returns the biome type at this zone */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    EWorld_BiomeType GetBiomeType() const { return BiomeData.BiomeType; }
+    // Returns the biome type at a given point (accounts for blend radius)
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    EWorld_BiomeType GetBiomeAtPoint(const FVector& WorldPoint) const;
 
-    /** Returns ambient temperature for survival system */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetAmbientTemperature() const { return BiomeData.AmbientTemperatureCelsius; }
+    // Returns a normalised blend weight (0-1) for this zone at WorldPoint
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    float GetBlendWeightAtPoint(const FVector& WorldPoint) const;
 
-    /** Returns hazard level for AI threat assessment */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetHazardLevel() const { return BiomeData.HazardLevel; }
+    // Called by PCGWorldGenerator to regenerate scatter in this zone
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Biome")
+    void RegenerateScatter();
+
+    // Debug: draw zone boundary in editor
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Debug")
+    void DrawZoneBoundary();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void Tick(float DeltaTime) override;
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+private:
+    // Blend falloff radius (10% of zone radius)
+    float GetBlendFalloffRadius() const { return BiomeParams.ZoneRadius * 0.1f; }
 };
 
-// ─── Manager ─────────────────────────────────────────────────────────────────
-
-/**
- * APCGBiomeManager
- * Singleton-style actor that aggregates all APCGBiomeZoneActor instances
- * and provides world-position → biome queries for other systems.
- */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome Manager"))
-class TRANSPERSONALGAME_API APCGBiomeManager : public AActor
+// ─── WORLD BIOME MANAGER ──────────────────────────────────────────────────────
+// Singleton-style actor that aggregates all BiomeZoneMarkers in the level
+// and provides query interface for other systems.
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "World Biome Manager"))
+class TRANSPERSONALGAME_API AWorld_BiomeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    APCGBiomeManager();
+    AWorld_BiomeManager();
 
-    // ── Registered zones ──────────────────────────────────────────────────
+    // All registered biome zones (auto-populated on BeginPlay)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World|Biome")
+    TArray<AWorld_BiomeZoneMarker*> RegisteredZones;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World|PCG")
-    TArray<APCGBiomeZoneActor*> RegisteredZones;
+    // Global weather override (overrides per-zone weather when active)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Weather")
+    bool bGlobalWeatherOverride = false;
 
-    // ── Interface ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Weather",
+              meta = (EditCondition = "bGlobalWeatherOverride"))
+    EWorld_WeatherState GlobalWeatherState = EWorld_WeatherState::Clear;
 
-    /** Scan the world for all APCGBiomeZoneActor instances and register them */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void RefreshZoneRegistry();
+    // Day/night cycle speed multiplier (1.0 = real-time, 60.0 = 1 game day per 24 real minutes)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|DayNight",
+              meta = (ClampMin = "0.1", ClampMax = "3600.0"))
+    float DayNightSpeedMultiplier = 60.0f;
 
-    /** Returns the dominant biome type at WorldLocation */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    // Current time of day in hours (0-24)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World|DayNight")
+    float CurrentTimeOfDay = 8.0f;
 
-    /** Returns the full biome zone data for the dominant biome at WorldLocation */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    FWorld_BiomeZoneData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    // Query: what biome is at this world position?
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    EWorld_BiomeType GetBiomeAtWorldPosition(const FVector& WorldPos) const;
 
-    /** Returns ambient temperature at WorldLocation (for survival system) */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+    // Query: what weather is active at this world position?
+    UFUNCTION(BlueprintCallable, Category = "World|Weather")
+    EWorld_WeatherState GetWeatherAtWorldPosition(const FVector& WorldPos) const;
 
-    /** Returns hazard level at WorldLocation (for AI threat system) */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetHazardLevelAtLocation(const FVector& WorldLocation) const;
+    // Query: temperature at world position
+    UFUNCTION(BlueprintCallable, Category = "World|Climate")
+    float GetTemperatureAtWorldPosition(const FVector& WorldPos) const;
 
-    /** Returns number of registered biome zones */
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    int32 GetZoneCount() const { return RegisteredZones.Num(); }
+    // Trigger a weather transition in a specific zone
+    UFUNCTION(BlueprintCallable, Category = "World|Weather")
+    void SetWeatherInZone(AWorld_BiomeZoneMarker* Zone, EWorld_WeatherState NewWeather);
+
+    // Scan level for all BiomeZoneMarkers and register them
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Biome")
+    void ScanAndRegisterZones();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    /** Default biome data returned when no zone matches */
-    FWorld_BiomeZoneData DefaultBiomeData;
+    void AdvanceDayNightCycle(float DeltaTime);
+    void UpdateDirectionalLight();
 
-    void InitializeDefaultBiomeData();
+    // Cached directional light reference
+    UPROPERTY()
+    class ADirectionalLight* SunLight = nullptr;
 };
