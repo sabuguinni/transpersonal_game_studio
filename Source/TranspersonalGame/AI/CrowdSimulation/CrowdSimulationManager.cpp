@@ -1,332 +1,199 @@
+// CrowdSimulationManager.cpp
+// Agent #13 — Crowd & Traffic Simulation
+// Implements prehistoric herd and pack crowd simulation using UE5 Mass AI patterns.
+
 #include "CrowdSimulationManager.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Actor.h"
+#include "NavigationSystem.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
+#include "DrawDebugHelpers.h"
 
-ACrowdSimulationManager::ACrowdSimulationManager()
+UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for crowd management
-    
-    // Initialize default biome data
-    InitializeBiomeData();
+    MaxHerdAgents = 50;
+    MaxPackAgents = 12;
+    HerdUpdateInterval = 0.5f;
+    PackUpdateInterval = 0.25f;
+    bSimulationActive = false;
+    AgentSeparationRadius = 150.0f;
+    HerdCohesionRadius = 800.0f;
+    PackHuntingRadius = 1200.0f;
+    FleeResponseRadius = 600.0f;
 }
 
-void ACrowdSimulationManager::BeginPlay()
+void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    
-    // Get Mass subsystems
-    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-    MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
-    
-    if (!MassEntitySubsystem || !MassSpawnerSubsystem)
+    Super::Initialize(Collection);
+    bSimulationActive = true;
+    RegisteredHerds.Empty();
+    RegisteredPacks.Empty();
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized. MaxHerd=%d MaxPack=%d"), MaxHerdAgents, MaxPackAgents);
+}
+
+void UCrowdSimulationManager::Deinitialize()
+{
+    bSimulationActive = false;
+    RegisteredHerds.Empty();
+    RegisteredPacks.Empty();
+    Super::Deinitialize();
+}
+
+void UCrowdSimulationManager::RegisterHerd(const FCrowd_HerdDescriptor& HerdDesc)
+{
+    if (RegisteredHerds.Num() >= 10)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationManager: Failed to get Mass subsystems"));
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Herd cap reached (10). Cannot register %s"), *HerdDesc.HerdID.ToString());
         return;
     }
-    
-    // Start with initial population
-    UpdatePopulationDensity();
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Initialized with %d max entities"), MaxTotalEntities);
+    RegisteredHerds.Add(HerdDesc);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd registered — ID=%s Species=%s AgentCount=%d"),
+        *HerdDesc.HerdID.ToString(), *HerdDesc.SpeciesName, HerdDesc.AgentCount);
 }
 
-void ACrowdSimulationManager::Tick(float DeltaTime)
+void UCrowdSimulationManager::RegisterPack(const FCrowd_PackDescriptor& PackDesc)
 {
-    Super::Tick(DeltaTime);
-    
-    LastFrameTime = DeltaTime;
-    
-    // Update time of day
-    UpdateTimeOfDay(DeltaTime);
-    
-    // Update population periodically
-    PopulationUpdateTimer += DeltaTime;
-    if (PopulationUpdateTimer >= PopulationUpdateInterval)
+    if (RegisteredPacks.Num() >= 5)
     {
-        UpdatePopulationDensity();
-        PopulationUpdateTimer = 0.0f;
-    }
-    
-    // Process emergent behaviors
-    ProcessEmergentTriggers(DeltaTime);
-    
-    // Optimize performance if needed
-    if (bPerformanceOptimizationEnabled)
-    {
-        OptimizePerformance();
-    }
-}
-
-void ACrowdSimulationManager::InitializeBiomeData()
-{
-    BiomePopulations.Empty();
-    
-    // Dense Forest - High herbivore density, moderate carnivores
-    FBiomePopulationData DenseForest;
-    DenseForest.BiomeType = EBiomeType::DenseForest;
-    DenseForest.MaxHerbivores = 300;
-    DenseForest.MaxCarnivores = 75;
-    DenseForest.MaxSmallCreatures = 800;
-    DenseForest.ActivityMultiplier = 0.8f; // Slower movement in dense forest
-    DenseForest.TimeOfDayMultipliers = {0.6f, 1.0f, 0.8f, 1.2f, 1.5f, 0.3f}; // Dawn to Night
-    BiomePopulations.Add(DenseForest);
-    
-    // Open Plains - High visibility, large herds
-    FBiomePopulationData OpenPlains;
-    OpenPlains.BiomeType = EBiomeType::OpenPlains;
-    OpenPlains.MaxHerbivores = 500;
-    OpenPlains.MaxCarnivores = 100;
-    OpenPlains.MaxSmallCreatures = 400;
-    OpenPlains.ActivityMultiplier = 1.3f; // Faster movement in open areas
-    OpenPlains.TimeOfDayMultipliers = {1.2f, 1.5f, 1.0f, 1.3f, 1.8f, 0.2f};
-    BiomePopulations.Add(OpenPlains);
-    
-    // River Banks - Water-dependent species
-    FBiomePopulationData RiverBanks;
-    RiverBanks.BiomeType = EBiomeType::RiverBanks;
-    RiverBanks.MaxHerbivores = 250;
-    RiverBanks.MaxCarnivores = 80;
-    RiverBanks.MaxSmallCreatures = 600;
-    RiverBanks.ActivityMultiplier = 1.1f;
-    RiverBanks.TimeOfDayMultipliers = {1.8f, 1.2f, 0.8f, 1.0f, 2.0f, 0.4f}; // High activity at dawn/dusk
-    BiomePopulations.Add(RiverBanks);
-    
-    // Rocky Outcrops - Specialized climbers and ambush predators
-    FBiomePopulationData RockyOutcrops;
-    RockyOutcrops.BiomeType = EBiomeType::RockyOutcrops;
-    RockyOutcrops.MaxHerbivores = 150;
-    RockyOutcrops.MaxCarnivores = 120;
-    RockyOutcrops.MaxSmallCreatures = 300;
-    RockyOutcrops.ActivityMultiplier = 0.7f; // Careful movement on rocks
-    RockyOutcrops.TimeOfDayMultipliers = {0.8f, 1.0f, 1.2f, 1.0f, 0.9f, 1.5f}; // More active at night
-    BiomePopulations.Add(RockyOutcrops);
-    
-    // Swamp Lands - Amphibious and specialized species
-    FBiomePopulationData SwampLands;
-    SwampLands.BiomeType = EBiomeType::SwampLands;
-    SwampLands.MaxHerbivores = 200;
-    SwampLands.MaxCarnivores = 150;
-    SwampLands.MaxSmallCreatures = 700;
-    SwampLands.ActivityMultiplier = 0.6f; // Slow movement in swamp
-    SwampLands.TimeOfDayMultipliers = {1.0f, 0.8f, 0.6f, 0.8f, 1.2f, 1.8f}; // Most active at night
-    BiomePopulations.Add(SwampLands);
-    
-    // Caves - Specialized cave dwellers
-    FBiomePopulationData Caves;
-    Caves.BiomeType = EBiomeType::Caves;
-    Caves.MaxHerbivores = 50;
-    Caves.MaxCarnivores = 80;
-    Caves.MaxSmallCreatures = 200;
-    Caves.ActivityMultiplier = 0.5f; // Limited movement in caves
-    Caves.TimeOfDayMultipliers = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // Constant activity
-    BiomePopulations.Add(Caves);
-}
-
-void ACrowdSimulationManager::UpdatePopulationDensity()
-{
-    if (!MassSpawnerSubsystem)
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Pack cap reached (5). Cannot register %s"), *PackDesc.PackID.ToString());
         return;
-    
-    CurrentActiveEntities = GetActiveEntityCount();
-    
-    // Calculate desired population based on time of day and biome
-    int32 DesiredTotal = 0;
-    
-    for (const FBiomePopulationData& BiomeData : BiomePopulations)
+    }
+    RegisteredPacks.Add(PackDesc);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Pack registered — ID=%s Species=%s AgentCount=%d HuntMode=%d"),
+        *PackDesc.PackID.ToString(), *PackDesc.SpeciesName, PackDesc.AgentCount, (int32)PackDesc.HuntingMode);
+}
+
+void UCrowdSimulationManager::UpdateHerdBehavior(float DeltaTime)
+{
+    if (!bSimulationActive) return;
+
+    for (FCrowd_HerdDescriptor& Herd : RegisteredHerds)
     {
-        float TimeMultiplier = 1.0f;
-        if (BiomeData.TimeOfDayMultipliers.IsValidIndex(static_cast<int32>(CurrentTimeOfDay)))
+        // Advance migration progress
+        Herd.MigrationProgress = FMath::Clamp(Herd.MigrationProgress + DeltaTime * 0.01f, 0.0f, 1.0f);
+
+        // State transitions based on threat level
+        if (Herd.ThreatLevel > 0.7f && Herd.CurrentState != ECrowd_HerdState::Fleeing)
         {
-            TimeMultiplier = BiomeData.TimeOfDayMultipliers[static_cast<int32>(CurrentTimeOfDay)];
+            Herd.CurrentState = ECrowd_HerdState::Fleeing;
+            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd %s FLEEING (threat=%.2f)"), *Herd.HerdID.ToString(), Herd.ThreatLevel);
         }
-        
-        int32 BiomeDesired = FMath::RoundToInt(
-            (BiomeData.MaxHerbivores + BiomeData.MaxCarnivores + BiomeData.MaxSmallCreatures) * 
-            TimeMultiplier * BiomeData.ActivityMultiplier
-        );
-        
-        DesiredTotal += BiomeDesired;
-    }
-    
-    // Clamp to maximum
-    DesiredTotal = FMath::Min(DesiredTotal, MaxTotalEntities);
-    
-    // Adjust population if needed
-    int32 PopulationDifference = DesiredTotal - CurrentActiveEntities;
-    
-    if (FMath::Abs(PopulationDifference) > MaxTotalEntities * 0.1f) // 10% threshold
-    {
-        if (PopulationDifference > 0)
+        else if (Herd.ThreatLevel < 0.2f && Herd.CurrentState == ECrowd_HerdState::Fleeing)
         {
-            // Spawn more entities
-            UE_LOG(LogTemp, Log, TEXT("CrowdSimulation: Spawning %d entities (Current: %d, Target: %d)"), 
-                   PopulationDifference, CurrentActiveEntities, DesiredTotal);
+            Herd.CurrentState = ECrowd_HerdState::Grazing;
+            Herd.ThreatLevel = 0.0f;
         }
-        else
+
+        // Decay threat over time
+        Herd.ThreatLevel = FMath::Max(0.0f, Herd.ThreatLevel - DeltaTime * 0.05f);
+    }
+}
+
+void UCrowdSimulationManager::UpdatePackBehavior(float DeltaTime)
+{
+    if (!bSimulationActive) return;
+
+    for (FCrowd_PackDescriptor& Pack : RegisteredPacks)
+    {
+        // Pack hunting state machine
+        switch (Pack.HuntingMode)
         {
-            // Despawn excess entities
-            UE_LOG(LogTemp, Log, TEXT("CrowdSimulation: Despawning %d entities (Current: %d, Target: %d)"), 
-                   -PopulationDifference, CurrentActiveEntities, DesiredTotal);
-        }
-    }
-}
+            case ECrowd_PackHuntMode::Patrolling:
+                // Check if any herd is within hunting range
+                for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+                {
+                    float Dist = FVector::Dist(Pack.PackCenterLocation, Herd.HerdCenterLocation);
+                    if (Dist < PackHuntingRadius)
+                    {
+                        Pack.HuntingMode = ECrowd_PackHuntMode::Stalking;
+                        Pack.TargetHerdID = Herd.HerdID;
+                        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Pack %s STALKING herd %s"),
+                            *Pack.PackID.ToString(), *Herd.HerdID.ToString());
+                        break;
+                    }
+                }
+                break;
 
-void ACrowdSimulationManager::SetTimeOfDay(ETimeOfDay NewTimeOfDay)
-{
-    if (CurrentTimeOfDay != NewTimeOfDay)
-    {
-        CurrentTimeOfDay = NewTimeOfDay;
-        UE_LOG(LogTemp, Log, TEXT("CrowdSimulation: Time of day changed to %d"), static_cast<int32>(NewTimeOfDay));
-        
-        // Trigger immediate population update
-        UpdatePopulationDensity();
-    }
-}
+            case ECrowd_PackHuntMode::Stalking:
+                // Transition to coordinated attack if close enough
+                for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+                {
+                    if (Herd.HerdID == Pack.TargetHerdID)
+                    {
+                        float Dist = FVector::Dist(Pack.PackCenterLocation, Herd.HerdCenterLocation);
+                        if (Dist < FleeResponseRadius)
+                        {
+                            Pack.HuntingMode = ECrowd_PackHuntMode::CoordinatedAttack;
+                            // Alert the herd
+                            for (FCrowd_HerdDescriptor& MutableHerd : RegisteredHerds)
+                            {
+                                if (MutableHerd.HerdID == Pack.TargetHerdID)
+                                {
+                                    MutableHerd.ThreatLevel = 1.0f;
+                                    MutableHerd.CurrentState = ECrowd_HerdState::Fleeing;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                break;
 
-int32 ACrowdSimulationManager::GetActiveEntityCount() const
-{
-    if (MassEntitySubsystem)
-    {
-        // This would need to be implemented based on actual Mass Entity counting
-        // For now, return tracked count
-        return CurrentActiveEntities;
-    }
-    return 0;
-}
+            case ECrowd_PackHuntMode::CoordinatedAttack:
+                // After attack, return to patrol
+                Pack.HuntCooldown -= DeltaTime;
+                if (Pack.HuntCooldown <= 0.0f)
+                {
+                    Pack.HuntingMode = ECrowd_PackHuntMode::Patrolling;
+                    Pack.TargetHerdID = FName(NAME_None);
+                    Pack.HuntCooldown = 120.0f; // 2 min cooldown
+                }
+                break;
 
-float ACrowdSimulationManager::GetBiomeActivityLevel(EBiomeType BiomeType) const
-{
-    for (const FBiomePopulationData& BiomeData : BiomePopulations)
-    {
-        if (BiomeData.BiomeType == BiomeType)
-        {
-            float TimeMultiplier = 1.0f;
-            if (BiomeData.TimeOfDayMultipliers.IsValidIndex(static_cast<int32>(CurrentTimeOfDay)))
-            {
-                TimeMultiplier = BiomeData.TimeOfDayMultipliers[static_cast<int32>(CurrentTimeOfDay)];
-            }
-            return BiomeData.ActivityMultiplier * TimeMultiplier;
-        }
-    }
-    return 1.0f;
-}
-
-void ACrowdSimulationManager::TriggerEmergentBehavior(const FString& TriggerName, FVector Location, float Intensity)
-{
-    FEmergentBehaviorTrigger NewTrigger;
-    NewTrigger.TriggerName = TriggerName;
-    NewTrigger.TriggerRadius = 1000.0f * Intensity;
-    NewTrigger.IntensityMultiplier = 1.0f + Intensity;
-    NewTrigger.DurationSeconds = 30.0f;
-    
-    ActiveTriggers.Add(NewTrigger);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulation: Triggered emergent behavior '%s' at intensity %.2f"), 
-           *TriggerName, Intensity);
-}
-
-void ACrowdSimulationManager::HandlePlayerMovement(FVector PlayerLocation, bool bIsPlayerStealth)
-{
-    float EffectiveRadius = PlayerInfluenceRadius;
-    if (bIsPlayerStealth)
-    {
-        EffectiveRadius *= PlayerStealthMultiplier;
-    }
-    
-    // Create temporary influence trigger
-    TriggerEmergentBehavior(TEXT("PlayerMovement"), PlayerLocation, bIsPlayerStealth ? 0.3f : 1.0f);
-}
-
-void ACrowdSimulationManager::HandleLargePredatorSighting(FVector Location, float ThreatLevel)
-{
-    // Large predators cause widespread panic
-    TriggerEmergentBehavior(TEXT("PredatorSighting"), Location, ThreatLevel * 2.0f);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulation: Large predator sighted! Threat level: %.2f"), ThreatLevel);
-}
-
-void ACrowdSimulationManager::HandleHerdMovement(FVector HerdCenter, FVector Direction, int32 HerdSize)
-{
-    float HerdInfluence = FMath::Clamp(HerdSize / 50.0f, 0.5f, 3.0f);
-    TriggerEmergentBehavior(TEXT("HerdMovement"), HerdCenter, HerdInfluence);
-}
-
-void ACrowdSimulationManager::SimulatePredatorPreyInteractions()
-{
-    // This would implement complex predator-prey dynamics
-    // For now, log the simulation
-    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulation: Simulating predator-prey interactions"));
-}
-
-void ACrowdSimulationManager::UpdateMigrationPatterns()
-{
-    // Seasonal migration patterns based on time and environment
-    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulation: Updating migration patterns"));
-}
-
-void ACrowdSimulationManager::HandleWeatherEffects(float RainIntensity, float WindStrength)
-{
-    // Weather affects animal behavior significantly
-    float WeatherMultiplier = 1.0f - (RainIntensity * 0.3f) - (WindStrength * 0.2f);
-    WeatherMultiplier = FMath::Clamp(WeatherMultiplier, 0.2f, 1.0f);
-    
-    // Apply weather effects to all biomes
-    for (FBiomePopulationData& BiomeData : BiomePopulations)
-    {
-        BiomeData.ActivityMultiplier *= WeatherMultiplier;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulation: Weather effects applied - Rain: %.2f, Wind: %.2f"), 
-           RainIntensity, WindStrength);
-}
-
-void ACrowdSimulationManager::UpdateTimeOfDay(float DeltaTime)
-{
-    TimeOfDayTimer += DeltaTime;
-    
-    // Each time period lasts DayDurationMinutes / 6
-    float TimePerPeriod = (DayDurationMinutes * 60.0f) / 6.0f;
-    
-    if (TimeOfDayTimer >= TimePerPeriod)
-    {
-        int32 NextTime = (static_cast<int32>(CurrentTimeOfDay) + 1) % 6;
-        SetTimeOfDay(static_cast<ETimeOfDay>(NextTime));
-        TimeOfDayTimer = 0.0f;
-    }
-}
-
-void ACrowdSimulationManager::ProcessEmergentTriggers(float DeltaTime)
-{
-    for (int32 i = ActiveTriggers.Num() - 1; i >= 0; i--)
-    {
-        ActiveTriggers[i].DurationSeconds -= DeltaTime;
-        
-        if (ActiveTriggers[i].DurationSeconds <= 0.0f)
-        {
-            UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulation: Emergent trigger '%s' expired"), 
-                   *ActiveTriggers[i].TriggerName);
-            ActiveTriggers.RemoveAt(i);
+            default:
+                break;
         }
     }
 }
 
-void ACrowdSimulationManager::OptimizePerformance()
+void UCrowdSimulationManager::NotifyThreatAtLocation(FVector ThreatLocation, float ThreatRadius, float ThreatIntensity)
 {
-    // Performance optimization based on frame time
-    if (LastFrameTime > 0.033f) // If frame time > 33ms (30 FPS)
+    for (FCrowd_HerdDescriptor& Herd : RegisteredHerds)
     {
-        // Reduce population slightly
-        MaxTotalEntities = FMath::Max(MaxTotalEntities * 0.95f, 10000);
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulation: Performance optimization - reducing max entities to %d"), 
-               MaxTotalEntities);
+        float Dist = FVector::Dist(ThreatLocation, Herd.HerdCenterLocation);
+        if (Dist < ThreatRadius)
+        {
+            float DistanceFactor = 1.0f - (Dist / ThreatRadius);
+            Herd.ThreatLevel = FMath::Max(Herd.ThreatLevel, ThreatIntensity * DistanceFactor);
+            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Herd %s threat updated to %.2f"),
+                *Herd.HerdID.ToString(), Herd.ThreatLevel);
+        }
     }
-    else if (LastFrameTime < 0.016f && CurrentActiveEntities < MaxTotalEntities * 0.8f) // If frame time < 16ms (60+ FPS)
+}
+
+int32 UCrowdSimulationManager::GetTotalActiveAgents() const
+{
+    int32 Total = 0;
+    for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
     {
-        // Can increase population
-        MaxTotalEntities = FMath::Min(MaxTotalEntities * 1.02f, 50000);
+        Total += Herd.AgentCount;
     }
+    for (const FCrowd_PackDescriptor& Pack : RegisteredPacks)
+    {
+        Total += Pack.AgentCount;
+    }
+    return Total;
+}
+
+TArray<FCrowd_HerdDescriptor> UCrowdSimulationManager::GetHerdsInRadius(FVector Center, float Radius) const
+{
+    TArray<FCrowd_HerdDescriptor> Result;
+    for (const FCrowd_HerdDescriptor& Herd : RegisteredHerds)
+    {
+        if (FVector::Dist(Center, Herd.HerdCenterLocation) <= Radius)
+        {
+            Result.Add(Herd);
+        }
+    }
+    return Result;
 }
