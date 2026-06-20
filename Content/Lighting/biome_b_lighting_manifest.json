@@ -1,0 +1,101 @@
+{
+  "manifest_id": "BiomeB_Lighting_v1",
+  "cycle": "PROD_CYCLE_AUTO_20260620_004",
+  "agent": "#08 Lighting & Atmosphere",
+  "description": "Lighting setup for BiomeB stone ruins area at X=50000, Y=50000",
+
+  "global_settings": {
+    "lumen_gi": true,
+    "lumen_reflections": true,
+    "r_DynamicGlobalIlluminationMethod": 1,
+    "r_ReflectionMethod": 1,
+    "r_Lumen_MaxTraceDistance": 20000,
+    "r_SkyAtmosphere_FastSkyLUT": 1
+  },
+
+  "directional_light": {
+    "label": "Sun_Main",
+    "pitch": -45.0,
+    "yaw": 45.0,
+    "roll": 0.0,
+    "intensity": 10.0,
+    "note": "CRITICAL: pitch MUST be negative. Positive pitch = black screen (sun points at sky)."
+  },
+
+  "sky_light": {
+    "intensity": 1.5,
+    "real_time_capture": true
+  },
+
+  "volumetric_fog": {
+    "fog_density": 0.02,
+    "fog_height_falloff": 0.2,
+    "volumetric_fog": true,
+    "volumetric_fog_distance": 6000.0,
+    "start_distance": 100.0
+  },
+
+  "post_process": {
+    "auto_exposure_method": "AEM_MANUAL",
+    "auto_exposure_bias": 1.0,
+    "auto_exposure_min_brightness": 1.0,
+    "auto_exposure_max_brightness": 1.0,
+    "note": "AEM_MANUAL prevents black screen from auto-exposure over-darkening."
+  },
+
+  "point_lights": [
+    {
+      "label": "PillarLight_A",
+      "position": {"x": 50000, "y": 50000, "z": 200},
+      "intensity": 2000.0,
+      "attenuation_radius": 800.0,
+      "color": {"r": 255, "g": 160, "b": 60},
+      "cast_shadows": true,
+      "purpose": "Warm amber torch glow at base of stone pillar A — tactical shadow coverage"
+    },
+    {
+      "label": "PillarLight_B",
+      "position": {"x": 50300, "y": 50000, "z": 200},
+      "intensity": 2000.0,
+      "attenuation_radius": 800.0,
+      "color": {"r": 255, "g": 160, "b": 60},
+      "cast_shadows": true,
+      "purpose": "Warm amber torch glow at base of stone pillar B — tactical shadow coverage"
+    },
+    {
+      "label": "PillarLight_C",
+      "position": {"x": 50150, "y": 50260, "z": 200},
+      "intensity": 2000.0,
+      "attenuation_radius": 800.0,
+      "color": {"r": 255, "g": 160, "b": 60},
+      "cast_shadows": true,
+      "purpose": "Warm amber torch glow at base of stone pillar C — tactical shadow coverage"
+    }
+  ],
+
+  "design_intent": {
+    "emotional_tone": "Danger and discovery — player enters ancient ruin zone, warm pillar lights create navigational beacons against cool ambient Lumen GI",
+    "gameplay_function": "Tactical shadow coverage from pillars creates ambush zones for dinosaur AI and player stealth",
+    "cinematography_reference": "Roger Deakins — light as meaning, not decoration. Each pillar light marks a point of interest and creates depth contrast.",
+    "color_palette": {
+      "ambient": "Cool blue-teal (Lumen sky bounce)",
+      "accent": "Warm amber-orange (pillar point lights)",
+      "shadow": "Deep blue-purple (volumetric fog fill)"
+    }
+  },
+
+  "pending_lighting": [
+    {
+      "label": "CaveEntrance_SpotLight",
+      "type": "SpotLight",
+      "position": "TBD — pending cretaceous_cave_entrance_arch asset placement",
+      "purpose": "Dramatic backlit silhouette for cave entrance — player sees danger zone clearly"
+    },
+    {
+      "label": "WallSlab_RimLight",
+      "type": "RectLight",
+      "position": "Adjacent to Arch_StoneRuinWall_01",
+      "purpose": "Rim lighting on wall slab to define silhouette against sky"
+    }
+  ]
+}
