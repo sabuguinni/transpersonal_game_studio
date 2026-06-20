@@ -7,26 +7,26 @@
 UENUM(BlueprintType)
 enum class EQuest_ResourceType : uint8
 {
+    None    UMETA(DisplayName = "None"),
     Rock    UMETA(DisplayName = "Rock"),
     Stick   UMETA(DisplayName = "Stick"),
     Leaf    UMETA(DisplayName = "Leaf"),
     Bone    UMETA(DisplayName = "Bone"),
-    Hide    UMETA(DisplayName = "Hide"),
-    None    UMETA(DisplayName = "None")
+    Hide    UMETA(DisplayName = "Hide")
 };
 
 UENUM(BlueprintType)
-enum class EQuest_CraftedItemType : uint8
+enum class EQuest_CraftedItem : uint8
 {
+    None            UMETA(DisplayName = "None"),
     StoneAxe        UMETA(DisplayName = "Stone Axe"),
     Campfire        UMETA(DisplayName = "Campfire"),
     WaterContainer  UMETA(DisplayName = "Water Container"),
-    Spear           UMETA(DisplayName = "Spear"),
-    None            UMETA(DisplayName = "None")
+    Spear           UMETA(DisplayName = "Spear")
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_ResourceRequirement
+struct FQuest_CraftingIngredient
 {
     GENERATED_BODY()
 
@@ -43,37 +43,19 @@ struct FQuest_CraftingRecipe
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    EQuest_CraftedItemType OutputItem = EQuest_CraftedItemType::None;
+    EQuest_CraftedItem OutputItem = EQuest_CraftedItem::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    FString DisplayName;
+    FString RecipeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    TArray<FQuest_ResourceRequirement> Requirements;
+    TArray<FQuest_CraftingIngredient> Ingredients;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    float CraftingTime = 2.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FQuest_PlayerInventory
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Rocks = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Sticks = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Leaves = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Bones = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Hides = 0;
-};
-
-UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Quest), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCraftingSystemComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -85,44 +67,40 @@ public:
     TArray<FQuest_CraftingRecipe> Recipes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    FQuest_PlayerInventory PlayerInventory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    bool bCraftingMenuOpen = false;
+    TMap<EQuest_ResourceType, int32> Inventory;
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void InitializeRecipes();
+    void InitializeDefaultRecipes();
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool CanCraft(EQuest_CraftedItemType ItemType) const;
+    bool CanCraft(EQuest_CraftedItem Item) const;
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool CraftItem(EQuest_CraftedItemType ItemType);
+    bool CraftItem(EQuest_CraftedItem Item);
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void AddResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
+    void AddResource(EQuest_ResourceType Resource, int32 Amount = 1);
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void ToggleCraftingMenu();
+    int32 GetResourceCount(EQuest_ResourceType Resource) const;
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    TArray<FQuest_CraftingRecipe> GetAvailableRecipes() const;
+    TArray<EQuest_CraftedItem> GetAvailableRecipes() const;
 
 protected:
     virtual void BeginPlay() override;
 
 private:
-    int32 GetResourceCount(EQuest_ResourceType ResourceType) const;
-    bool ConsumeResources(const FQuest_CraftingRecipe& Recipe);
+    const FQuest_CraftingRecipe* FindRecipe(EQuest_CraftedItem Item) const;
 };
 
-UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UResourcePickupComponent : public UActorComponent
+UCLASS()
+class TRANSPERSONALGAME_API AQuest_ResourcePickup : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UResourcePickupComponent();
+    AQuest_ResourcePickup();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
     EQuest_ResourceType ResourceType = EQuest_ResourceType::Rock;
@@ -134,5 +112,19 @@ public:
     bool bHasBeenPickedUp = false;
 
     UFUNCTION(BlueprintCallable, Category = "Resource")
-    void PickUp(UCraftingSystemComponent* CraftingComp);
+    void PickUp(AActor* Collector);
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource")
+    UStaticMeshComponent* MeshComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource")
+    class USphereComponent* PickupRadius;
+
+protected:
+    virtual void BeginPlay() override;
+
+    UFUNCTION()
+    void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
 };
