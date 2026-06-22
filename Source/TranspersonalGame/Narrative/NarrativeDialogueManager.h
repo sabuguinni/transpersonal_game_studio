@@ -1,117 +1,133 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
-#include "Sound/SoundCue.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
 #include "NarrativeDialogueManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ENarr_NPCRole : uint8
+{
+    TribalElder     UMETA(DisplayName = "Tribal Elder"),
+    HunterScout     UMETA(DisplayName = "Hunter Scout"),
+    Forager         UMETA(DisplayName = "Forager"),
+    Ambient         UMETA(DisplayName = "Ambient")
+};
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Greeting        UMETA(DisplayName = "Greeting"),
+    QuestAssign     UMETA(DisplayName = "Quest Assign"),
+    QuestComplete   UMETA(DisplayName = "Quest Complete"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Lore            UMETA(DisplayName = "Lore")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FText DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LineText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TSoftObjectPtr<USoundCue> VoiceClip;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueState State;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    float Duration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    ENarr_DialogueTrigger TriggerType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FString TriggerCondition;
-
-    FNarr_DialogueEntry()
-    {
-        SpeakerName = TEXT("Narrator");
-        DialogueText = FText::GetEmpty();
-        Duration = 5.0f;
-        TriggerType = ENarr_DialogueTrigger::Manual;
-        TriggerCondition = TEXT("");
-    }
+    FNarr_DialogueLine()
+        : SpeakerName(TEXT("Unknown"))
+        , LineText(TEXT(""))
+        , State(ENarr_DialogueState::Idle)
+        , DisplayDuration(4.0f)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_QuestDialogue
+struct FNarr_NPCDialogueSet
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
-    FString QuestID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCLabel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
-    TArray<FNarr_DialogueEntry> DialogueEntries;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole Role;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
-    bool bIsCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueLine> Lines;
 
-    FNarr_QuestDialogue()
-    {
-        QuestID = TEXT("");
-        bIsCompleted = false;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 CurrentLineIndex;
+
+    FNarr_NPCDialogueSet()
+        : NPCLabel(TEXT(""))
+        , Role(ENarr_NPCRole::Ambient)
+        , CurrentLineIndex(0)
+    {}
 };
 
-UCLASS()
-class TRANSPERSONALGAME_API UNarrativeDialogueManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    ANarrativeDialogueManager();
+
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float ProximityTriggerRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float AmbientLineCooldown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Data")
+    TArray<FNarr_NPCDialogueSet> NPCDialogueSets;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    ENarr_DialogueState CurrentGlobalState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    FString ActiveSpeaker;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    FString ActiveLineText;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogue(const FString& DialogueID);
+    void InitializeDialogueSets();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerEnvironmentalNarration(ENarr_BiomeType BiomeType, ENarr_ThreatLevel ThreatLevel);
+    FNarr_DialogueLine GetNextLine(const FString& NPCLabel);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterQuestDialogue(const FString& QuestID, const TArray<FNarr_DialogueEntry>& Entries);
+    void TriggerDialogue(const FString& NPCLabel, ENarr_DialogueState State);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialoguePlaying() const;
+    void AdvanceDialogue(const FString& NPCLabel);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StopCurrentDialogue();
+    bool IsPlayerNearNPC(const FString& NPCLabel, float Radius) const;
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Data")
-    TSoftObjectPtr<UDataTable> DialogueDataTable;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetAmbientLines() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
-    float DefaultVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
-    float FadeInDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
-    float FadeOutDuration;
+    UFUNCTION(CallInEditor, Category = "Narrative|Debug")
+    void DebugPrintAllDialogue();
 
 private:
-    UPROPERTY()
-    TMap<FString, FNarr_QuestDialogue> QuestDialogues;
+    float AmbientCooldownTimer;
+    int32 AmbientLineIndex;
 
-    UPROPERTY()
-    TArray<FNarr_DialogueEntry> EnvironmentalNarration;
-
-    UPROPERTY()
-    class UAudioComponent* CurrentAudioComponent;
-
-    UPROPERTY()
-    FTimerHandle DialogueTimerHandle;
-
-    void OnDialogueFinished();
-    void LoadEnvironmentalNarration();
-    FNarr_DialogueEntry GetEnvironmentalDialogue(ENarr_BiomeType BiomeType, ENarr_ThreatLevel ThreatLevel);
+    void SetupElderDialogue(FNarr_NPCDialogueSet& Set);
+    void SetupScoutDialogue(FNarr_NPCDialogueSet& Set);
+    void SetupForagerDialogue(FNarr_NPCDialogueSet& Set);
 };
