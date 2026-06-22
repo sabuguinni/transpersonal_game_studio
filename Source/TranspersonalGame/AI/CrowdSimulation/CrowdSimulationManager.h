@@ -1,29 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
+
+// Agent #13 — Crowd & Traffic Simulation
+// Prehistoric tribe crowd simulation system
 
 UENUM(BlueprintType)
 enum class ECrowd_AgentRole : uint8
 {
-    Hunter      UMETA(DisplayName = "Hunter"),
     Gatherer    UMETA(DisplayName = "Gatherer"),
-    Scout       UMETA(DisplayName = "Scout"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Guard       UMETA(DisplayName = "Guard"),
     Elder       UMETA(DisplayName = "Elder"),
     Child       UMETA(DisplayName = "Child"),
-    Guard       UMETA(DisplayName = "Guard")
 };
 
 UENUM(BlueprintType)
 enum class ECrowd_AgentState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Wandering   UMETA(DisplayName = "Wandering"),
     Working     UMETA(DisplayName = "Working"),
-    Socializing UMETA(DisplayName = "Socializing"),
-    Sleeping    UMETA(DisplayName = "Sleeping")
+    Alerted     UMETA(DisplayName = "Alerted"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Resting     UMETA(DisplayName = "Resting"),
 };
 
 USTRUCT(BlueprintType)
@@ -31,128 +33,76 @@ struct FCrowd_AgentData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector HomeLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    TWeakObjectPtr<AActor> AgentActor;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentTarget;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_AgentRole Role = ECrowd_AgentRole::Gatherer;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentRole Role;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    ECrowd_AgentState CurrentState = ECrowd_AgentState::Idle;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentState State;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    int32 LODLevel = 0;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float AlertLevel;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    FVector HomeLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float MoveSpeed;
-
-    FCrowd_AgentData()
-        : HomeLocation(FVector::ZeroVector)
-        , CurrentTarget(FVector::ZeroVector)
-        , Role(ECrowd_AgentRole::Hunter)
-        , State(ECrowd_AgentState::Idle)
-        , AlertLevel(0.0f)
-        , MoveSpeed(150.0f)
-    {}
-};
-
-USTRUCT(BlueprintType)
-struct FCrowd_WaypointData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector Location;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FString WaypointName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float Radius;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bIsDangerZone;
-
-    FCrowd_WaypointData()
-        : Location(FVector::ZeroVector)
-        , WaypointName(TEXT("Waypoint"))
-        , Radius(200.0f)
-        , bIsDangerZone(false)
-    {}
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    float WanderRadius = 400.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACrowdSimulationManager();
+    UCrowdSimulationManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UnregisterCrowdAgent(AActor* Agent);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UpdateCrowdLOD(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetActiveCrowdCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    TArray<FCrowd_AgentData> GetAgentsByRole(ECrowd_AgentRole Role) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerCrowdFlee(const FVector& ThreatLocation, float FleeRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerCrowdAlert(const FVector& AlertLocation, float AlertRadius);
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
     int32 MaxCrowdAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float CrowdUpdateInterval;
+    float AgentUpdateRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float ThreatDetectionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceClose;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float FleeRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceMedium;
 
-    // Runtime data
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Runtime")
-    int32 ActiveAgentCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceFar;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Runtime")
-    float GlobalAlertLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Runtime")
-    bool bTribeInPanic;
-
-    // Waypoints
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Waypoints")
-    TArray<FCrowd_WaypointData> Waypoints;
-
-    // Agent registry
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Agents")
-    TArray<FCrowd_AgentData> AgentRegistry;
-
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterAgent(FCrowd_AgentData AgentData);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerThreatAlert(FVector ThreatLocation, float ThreatRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ClearThreatAlert();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateCrowdBehavior(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    FCrowd_WaypointData GetNearestWaypoint(FVector FromLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 GetAgentCountByRole(ECrowd_AgentRole Role) const;
-
-    UFUNCTION(BlueprintPure, Category = "Crowd")
-    bool IsTribeInDanger() const;
-
-    UFUNCTION(CallInEditor, Category = "Crowd")
-    void DebugDrawCrowdState();
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    bool bCrowdSimulationActive;
 
 private:
-    float TimeSinceLastUpdate;
-    FVector LastKnownThreatLocation;
-    bool bHasActiveThreat;
+    UPROPERTY()
+    TArray<FCrowd_AgentData> ActiveAgents;
 };
