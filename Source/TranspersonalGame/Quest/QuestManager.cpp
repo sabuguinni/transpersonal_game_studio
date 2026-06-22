@@ -1,420 +1,418 @@
-// QuestManager.cpp — Quest & Mission Designer Agent #14
-// Implements the core quest system for Transpersonal Game (Prehistoric Survival)
+// QuestManager.cpp
+// Quest & Mission Designer — Agent #14
+// Full implementation of quest lifecycle world subsystem
 
 #include "QuestManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "GameFramework/Actor.h"
 
 UQuestManager::UQuestManager()
+    : ElapsedTime(0.0f)
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    ActiveQuestIndex = -1;
-    bQuestSystemInitialized = false;
 }
 
-void UQuestManager::BeginPlay()
+void UQuestManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    InitializeQuestDatabase();
-    bQuestSystemInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("QuestManager: Initialized with %d quests"), QuestDatabase.Num());
+    Super::Initialize(Collection);
+    RegisterDefaultQuests();
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Initialized with %d quests"), QuestRegistry.Num());
 }
 
-void UQuestManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UQuestManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    QuestRegistry.Empty();
+    Super::Deinitialize();
+}
 
-    if (!bQuestSystemInitialized) return;
+TStatId UQuestManager::GetStatId() const
+{
+    RETURN_QUICK_DECLARE_CYCLE_STAT(UQuestManager, STATGROUP_Tickables);
+}
 
-    // Update active quest objective timers
-    for (FQuest_ObjectiveData& Obj : ActiveObjectives)
+void UQuestManager::RegisterDefaultQuests()
+{
+    // -------------------------------------------------------
+    // QUEST 1: Hunt the Predator
+    // Giver: CrowdAgent_Elder_01 at tribal camp (800, 400)
+    // -------------------------------------------------------
     {
-        if (Obj.ObjectiveState == EQuest_ObjectiveState::InProgress && Obj.TimeLimit > 0.0f)
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_HUNT_PREDATOR");
+        Q.QuestName = TEXT("Hunt the Predator");
+        Q.QuestDescription = TEXT("A large predator has been stalking the camp and taken two hunters. Track it and drive it away from our lands.");
+        Q.QuestType = EQuest_Type::Hunt;
+        Q.Status = EQuest_Status::Available;
+        Q.GiverActorLabel = TEXT("CrowdAgent_Elder_01");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_FIND_PREDATOR");
+        Obj1.Description = TEXT("Track the predator to its territory");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj1.RequiredCount = 1;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_KILL_PREDATOR");
+        Obj2.Description = TEXT("Defeat the predator");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::KillTarget;
+        Obj2.RequiredCount = 1;
+        Q.Objectives.Add(Obj2);
+
+        Q.Reward.ResourceBonus = 5;
+        Q.Reward.HealthRestorePercent = 50.0f;
+        Q.Reward.UnlockedRecipeID = TEXT("RECIPE_BONE_SPEAR");
+
+        QuestRegistry.Add(Q.QuestID, Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 2: Escort the Migrants
+    // Giver: CrowdAgent_Scout_01 at migration column (-250, -250)
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_ESCORT_MIGRANTS");
+        Q.QuestName = TEXT("Escort the Migrants");
+        Q.QuestDescription = TEXT("A group of travelers is moving through raptor territory. Escort them safely to the tribal camp.");
+        Q.QuestType = EQuest_Type::Escort;
+        Q.Status = EQuest_Status::Available;
+        Q.GiverActorLabel = TEXT("CrowdAgent_Scout_01");
+        Q.bHasTimeLimit = true;
+        Q.TimeLimit = 300.0f; // 5 minutes
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_MEET_MIGRANTS");
+        Obj1.Description = TEXT("Find the migration column");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj1.RequiredCount = 1;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_ESCORT_SAFE");
+        Obj2.Description = TEXT("Escort all 5 migrants to the camp");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::ProtectTarget;
+        Obj2.RequiredCount = 5;
+        Q.Objectives.Add(Obj2);
+
+        Q.Reward.ResourceBonus = 8;
+        Q.Reward.HealthRestorePercent = 25.0f;
+        Q.Reward.UnlockedRecipeID = TEXT("RECIPE_CAMPFIRE");
+
+        QuestRegistry.Add(Q.QuestID, Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 3: Gather Resources
+    // Zone: QuestZone_GatherResources at (200, -600)
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_GATHER_RESOURCES");
+        Q.QuestName = TEXT("Gather Resources");
+        Q.QuestDescription = TEXT("The camp needs materials to survive the coming cold. Gather rocks, sticks, and leaves from the valley.");
+        Q.QuestType = EQuest_Type::Gather;
+        Q.Status = EQuest_Status::Available;
+        Q.GiverActorLabel = TEXT("CrowdAgent_Gatherer_01");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_COLLECT_ROCKS");
+        Obj1.Description = TEXT("Collect 3 rocks");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::CollectItem;
+        Obj1.RequiredCount = 3;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_COLLECT_STICKS");
+        Obj2.Description = TEXT("Collect 3 sticks");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::CollectItem;
+        Obj2.RequiredCount = 3;
+        Q.Objectives.Add(Obj2);
+
+        FQuest_Objective Obj3;
+        Obj3.ObjectiveID = TEXT("OBJ_COLLECT_LEAVES");
+        Obj3.Description = TEXT("Collect 2 large leaves");
+        Obj3.ObjectiveType = EQuest_ObjectiveType::CollectItem;
+        Obj3.RequiredCount = 2;
+        Q.Objectives.Add(Obj3);
+
+        Q.Reward.ResourceBonus = 3;
+        Q.Reward.HealthRestorePercent = 20.0f;
+        Q.Reward.UnlockedRecipeID = TEXT("RECIPE_STONE_AXE");
+
+        QuestRegistry.Add(Q.QuestID, Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 4: Defend the Camp
+    // Zone: QuestZone_DefendCamp at (900, 600)
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_DEFEND_CAMP");
+        Q.QuestName = TEXT("Defend the Camp");
+        Q.QuestDescription = TEXT("Raptors have been circling the camp at night. Survive the night and repel the attack.");
+        Q.QuestType = EQuest_Type::Defend;
+        Q.Status = EQuest_Status::Locked;
+        Q.GiverActorLabel = TEXT("CrowdAgent_Hunter_01");
+        Q.bHasTimeLimit = true;
+        Q.TimeLimit = 180.0f; // 3 minutes
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_SURVIVE_NIGHT");
+        Obj1.Description = TEXT("Survive until dawn");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::SurviveTime;
+        Obj1.RequiredCount = 1;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_REPEL_RAPTORS");
+        Obj2.Description = TEXT("Repel raptor attacks (kill 3)");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::KillTarget;
+        Obj2.RequiredCount = 3;
+        Q.Objectives.Add(Obj2);
+
+        Q.Reward.ResourceBonus = 10;
+        Q.Reward.HealthRestorePercent = 100.0f;
+        Q.Reward.UnlockedRecipeID = TEXT("RECIPE_BONE_SHIELD");
+
+        QuestRegistry.Add(Q.QuestID, Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 5: Scout the Valley
+    // Zone: QuestZone_ScoutValley at (-250, -250)
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_SCOUT_VALLEY");
+        Q.QuestName = TEXT("Scout the Valley");
+        Q.QuestDescription = TEXT("We need to know what lies beyond the ridge. Scout three key locations and return safely.");
+        Q.QuestType = EQuest_Type::Scout;
+        Q.Status = EQuest_Status::Available;
+        Q.GiverActorLabel = TEXT("CrowdAgent_Scout_01");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_SCOUT_RIVER");
+        Obj1.Description = TEXT("Reach the river crossing");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj1.RequiredCount = 1;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_SCOUT_RIDGE");
+        Obj2.Description = TEXT("Reach the high ridge");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj2.RequiredCount = 1;
+        Q.Objectives.Add(Obj2);
+
+        FQuest_Objective Obj3;
+        Obj3.ObjectiveID = TEXT("OBJ_SCOUT_DINO_TERRITORY");
+        Obj3.Description = TEXT("Observe the dinosaur territory from a safe distance");
+        Obj3.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj3.RequiredCount = 1;
+        Q.Objectives.Add(Obj3);
+
+        Q.Reward.ResourceBonus = 4;
+        Q.Reward.HealthRestorePercent = 30.0f;
+        Q.Reward.UnlockedRecipeID = TEXT("RECIPE_WATER_CONTAINER");
+
+        QuestRegistry.Add(Q.QuestID, Q);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Registered %d default quests"), QuestRegistry.Num());
+}
+
+void UQuestManager::RegisterQuest(const FQuest_Data& QuestData)
+{
+    if (QuestData.QuestID.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Cannot register quest with empty ID"));
+        return;
+    }
+    QuestRegistry.Add(QuestData.QuestID, QuestData);
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Registered quest '%s'"), *QuestData.QuestName);
+}
+
+bool UQuestManager::ActivateQuest(const FString& QuestID)
+{
+    FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (!Quest)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest '%s' not found"), *QuestID);
+        return false;
+    }
+    if (Quest->Status != EQuest_Status::Available)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest '%s' is not available (status=%d)"), *QuestID, (int32)Quest->Status);
+        return false;
+    }
+    Quest->Status = EQuest_Status::Active;
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Activated quest '%s'"), *Quest->QuestName);
+    return true;
+}
+
+bool UQuestManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID, int32 ProgressAmount)
+{
+    FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (!Quest || Quest->Status != EQuest_Status::Active)
+    {
+        return false;
+    }
+
+    for (FQuest_Objective& Obj : Quest->Objectives)
+    {
+        if (Obj.ObjectiveID == ObjectiveID && !Obj.bCompleted)
         {
-            Obj.TimeLimit -= DeltaTime;
-            if (Obj.TimeLimit <= 0.0f)
+            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + ProgressAmount, Obj.RequiredCount);
+            if (Obj.CurrentCount >= Obj.RequiredCount)
             {
-                Obj.ObjectiveState = EQuest_ObjectiveState::Failed;
-                OnObjectiveFailed(Obj.ObjectiveID);
+                Obj.bCompleted = true;
+                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective '%s' completed in quest '%s'"), *ObjectiveID, *QuestID);
             }
-        }
-    }
-}
-
-void UQuestManager::InitializeQuestDatabase()
-{
-    QuestDatabase.Empty();
-
-    // --- QUEST 1: Protect the Camp ---
-    {
-        FQuest_QuestData Q;
-        Q.QuestID = FName("Q_ProtectCamp");
-        Q.QuestTitle = FText::FromString("Protect the Camp");
-        Q.QuestDescription = FText::FromString("A T-Rex has been spotted approaching the tribe's camp. Drive it away before it destroys your shelter and harms your people.");
-        Q.QuestType = EQuest_QuestType::Defense;
-        Q.QuestState = EQuest_QuestState::Available;
-        Q.bIsMainQuest = false;
-        Q.RewardBones = 15;
-        Q.RewardHides = 5;
-
-        FQuest_ObjectiveData Obj1;
-        Obj1.ObjectiveID = FName("OBJ_SpotTRex");
-        Obj1.Description = FText::FromString("Spot the approaching T-Rex");
-        Obj1.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj1.TargetCount = 1;
-        Obj1.CurrentCount = 0;
-        Obj1.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj1.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_ObjectiveData Obj2;
-        Obj2.ObjectiveID = FName("OBJ_DriveTRex");
-        Obj2.Description = FText::FromString("Drive the T-Rex away from camp (deal 200 damage or lure it 500m away)");
-        Obj2.ObjectiveType = EQuest_ObjectiveType::Kill;
-        Obj2.TargetCount = 1;
-        Obj2.CurrentCount = 0;
-        Obj2.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj2.TimeLimit = 120.0f; // 2 minutes
-        Q.Objectives.Add(Obj2);
-
-        FQuest_ObjectiveData Obj3;
-        Obj3.ObjectiveID = FName("OBJ_ReturnToElder");
-        Obj3.Description = FText::FromString("Return to the Elder and report");
-        Obj3.ObjectiveType = EQuest_ObjectiveType::TalkToNPC;
-        Obj3.TargetCount = 1;
-        Obj3.CurrentCount = 0;
-        Obj3.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj3.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj3);
-
-        QuestDatabase.Add(Q);
-    }
-
-    // --- QUEST 2: The First Hunt ---
-    {
-        FQuest_QuestData Q;
-        Q.QuestID = FName("Q_FirstHunt");
-        Q.QuestTitle = FText::FromString("The First Hunt");
-        Q.QuestDescription = FText::FromString("The tribe is running low on food. Track down a herd of herbivores and bring back enough meat to last the week.");
-        Q.QuestType = EQuest_QuestType::Hunt;
-        Q.QuestState = EQuest_QuestState::Available;
-        Q.bIsMainQuest = true;
-        Q.RewardBones = 8;
-        Q.RewardHides = 12;
-
-        FQuest_ObjectiveData Obj1;
-        Obj1.ObjectiveID = FName("OBJ_FindHerd");
-        Obj1.Description = FText::FromString("Find the herbivore herd (follow the tracks east)");
-        Obj1.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj1.TargetCount = 1;
-        Obj1.CurrentCount = 0;
-        Obj1.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj1.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_ObjectiveData Obj2;
-        Obj2.ObjectiveID = FName("OBJ_HuntDinos");
-        Obj2.Description = FText::FromString("Hunt 3 herbivores");
-        Obj2.ObjectiveType = EQuest_ObjectiveType::Kill;
-        Obj2.TargetCount = 3;
-        Obj2.CurrentCount = 0;
-        Obj2.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj2.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj2);
-
-        FQuest_ObjectiveData Obj3;
-        Obj3.ObjectiveID = FName("OBJ_ReturnMeat");
-        Obj3.Description = FText::FromString("Return the meat to camp before it spoils");
-        Obj3.ObjectiveType = EQuest_ObjectiveType::Deliver;
-        Obj3.TargetCount = 3;
-        Obj3.CurrentCount = 0;
-        Obj3.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj3.TimeLimit = 300.0f; // 5 minutes real time
-        Q.Objectives.Add(Obj3);
-
-        QuestDatabase.Add(Q);
-    }
-
-    // --- QUEST 3: Stone Tools ---
-    {
-        FQuest_QuestData Q;
-        Q.QuestID = FName("Q_StoneTools");
-        Q.QuestTitle = FText::FromString("Sharper Than Claws");
-        Q.QuestDescription = FText::FromString("Craft a stone axe and a spear. Without proper tools, survival in this world is impossible.");
-        Q.QuestType = EQuest_QuestType::Crafting;
-        Q.QuestState = EQuest_QuestState::Available;
-        Q.bIsMainQuest = true;
-        Q.RewardBones = 0;
-        Q.RewardHides = 0;
-
-        FQuest_ObjectiveData Obj1;
-        Obj1.ObjectiveID = FName("OBJ_GatherStones");
-        Obj1.Description = FText::FromString("Gather 4 sharp stones from the riverbed");
-        Obj1.ObjectiveType = EQuest_ObjectiveType::Gather;
-        Obj1.TargetCount = 4;
-        Obj1.CurrentCount = 0;
-        Obj1.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj1.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_ObjectiveData Obj2;
-        Obj2.ObjectiveID = FName("OBJ_GatherSticks");
-        Obj2.Description = FText::FromString("Gather 3 sturdy branches");
-        Obj2.ObjectiveType = EQuest_ObjectiveType::Gather;
-        Obj2.TargetCount = 3;
-        Obj2.CurrentCount = 0;
-        Obj2.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj2.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj2);
-
-        FQuest_ObjectiveData Obj3;
-        Obj3.ObjectiveID = FName("OBJ_CraftAxe");
-        Obj3.Description = FText::FromString("Craft a Stone Axe at the crafting stone");
-        Obj3.ObjectiveType = EQuest_ObjectiveType::Craft;
-        Obj3.TargetCount = 1;
-        Obj3.CurrentCount = 0;
-        Obj3.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj3.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj3);
-
-        FQuest_ObjectiveData Obj4;
-        Obj4.ObjectiveID = FName("OBJ_CraftSpear");
-        Obj4.Description = FText::FromString("Craft a Wooden Spear at the crafting stone");
-        Obj4.ObjectiveType = EQuest_ObjectiveType::Craft;
-        Obj4.TargetCount = 1;
-        Obj4.CurrentCount = 0;
-        Obj4.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj4.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj4);
-
-        QuestDatabase.Add(Q);
-    }
-
-    // --- QUEST 4: Scouting the Territory ---
-    {
-        FQuest_QuestData Q;
-        Q.QuestID = FName("Q_ScoutTerritory");
-        Q.QuestTitle = FText::FromString("Know Your Ground");
-        Q.QuestDescription = FText::FromString("The Scout needs to map the surrounding territory. Reach 4 high vantage points to survey the land and identify safe routes.");
-        Q.QuestType = EQuest_QuestType::Exploration;
-        Q.QuestState = EQuest_QuestState::Available;
-        Q.bIsMainQuest = false;
-        Q.RewardBones = 5;
-        Q.RewardHides = 3;
-
-        FQuest_ObjectiveData Obj1;
-        Obj1.ObjectiveID = FName("OBJ_VantageNorth");
-        Obj1.Description = FText::FromString("Reach the northern ridge");
-        Obj1.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj1.TargetCount = 1;
-        Obj1.CurrentCount = 0;
-        Obj1.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj1.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_ObjectiveData Obj2;
-        Obj2.ObjectiveID = FName("OBJ_VantageEast");
-        Obj2.Description = FText::FromString("Reach the eastern cliffs");
-        Obj2.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj2.TargetCount = 1;
-        Obj2.CurrentCount = 0;
-        Obj2.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj2.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj2);
-
-        FQuest_ObjectiveData Obj3;
-        Obj3.ObjectiveID = FName("OBJ_VantageSouth");
-        Obj3.Description = FText::FromString("Reach the southern plateau");
-        Obj3.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj3.TargetCount = 1;
-        Obj3.CurrentCount = 0;
-        Obj3.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj3.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj3);
-
-        FQuest_ObjectiveData Obj4;
-        Obj4.ObjectiveID = FName("OBJ_VantageWest");
-        Obj4.Description = FText::FromString("Reach the western river crossing");
-        Obj4.ObjectiveType = EQuest_ObjectiveType::Reach;
-        Obj4.TargetCount = 1;
-        Obj4.CurrentCount = 0;
-        Obj4.ObjectiveState = EQuest_ObjectiveState::NotStarted;
-        Obj4.TimeLimit = -1.0f;
-        Q.Objectives.Add(Obj4);
-
-        QuestDatabase.Add(Q);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("QuestManager: Database initialized with %d quests"), QuestDatabase.Num());
-}
-
-bool UQuestManager::StartQuest(FName QuestID)
-{
-    for (FQuest_QuestData& Quest : QuestDatabase)
-    {
-        if (Quest.QuestID == QuestID && Quest.QuestState == EQuest_QuestState::Available)
-        {
-            Quest.QuestState = EQuest_QuestState::Active;
-            ActiveQuestIndex = QuestDatabase.IndexOfByKey(Quest);
-
-            // Activate first objective
-            if (Quest.Objectives.Num() > 0)
-            {
-                Quest.Objectives[0].ObjectiveState = EQuest_ObjectiveState::InProgress;
-                ActiveObjectives.Add(Quest.Objectives[0]);
-            }
-
-            OnQuestStarted.Broadcast(QuestID);
-            UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest started — %s"), *QuestID.ToString());
-            return true;
-        }
-    }
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Cannot start quest %s — not found or not available"), *QuestID.ToString());
-    return false;
-}
-
-bool UQuestManager::UpdateObjectiveProgress(FName ObjectiveID, int32 ProgressAmount)
-{
-    for (FQuest_ObjectiveData& Obj : ActiveObjectives)
-    {
-        if (Obj.ObjectiveID == ObjectiveID && Obj.ObjectiveState == EQuest_ObjectiveState::InProgress)
-        {
-            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + ProgressAmount, Obj.TargetCount);
-
-            if (Obj.CurrentCount >= Obj.TargetCount)
-            {
-                Obj.ObjectiveState = EQuest_ObjectiveState::Completed;
-                OnObjectiveCompleted.Broadcast(ObjectiveID);
-                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective completed — %s"), *ObjectiveID.ToString());
-                AdvanceToNextObjective(ObjectiveID);
-            }
+            CheckQuestCompletion(QuestID);
             return true;
         }
     }
     return false;
 }
 
-void UQuestManager::AdvanceToNextObjective(FName CompletedObjectiveID)
+void UQuestManager::CheckQuestCompletion(const FString& QuestID)
 {
-    if (ActiveQuestIndex < 0 || ActiveQuestIndex >= QuestDatabase.Num()) return;
+    FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (!Quest) return;
 
-    FQuest_QuestData& Quest = QuestDatabase[ActiveQuestIndex];
-    bool bFoundCompleted = false;
-
-    for (int32 i = 0; i < Quest.Objectives.Num(); ++i)
+    bool bAllDone = true;
+    for (const FQuest_Objective& Obj : Quest->Objectives)
     {
-        if (Quest.Objectives[i].ObjectiveID == CompletedObjectiveID)
+        if (!Obj.bCompleted)
         {
-            bFoundCompleted = true;
-            // Activate next objective if exists
-            if (i + 1 < Quest.Objectives.Num())
-            {
-                Quest.Objectives[i + 1].ObjectiveState = EQuest_ObjectiveState::InProgress;
-                ActiveObjectives.Add(Quest.Objectives[i + 1]);
-                UE_LOG(LogTemp, Log, TEXT("QuestManager: Next objective activated — %s"), *Quest.Objectives[i + 1].ObjectiveID.ToString());
-            }
-            else
-            {
-                // All objectives done — complete quest
-                CompleteQuest(Quest.QuestID);
-            }
+            bAllDone = false;
             break;
         }
     }
+
+    if (bAllDone)
+    {
+        CompleteQuest(QuestID);
+    }
 }
 
-void UQuestManager::CompleteQuest(FName QuestID)
+bool UQuestManager::CompleteQuest(const FString& QuestID)
 {
-    for (FQuest_QuestData& Quest : QuestDatabase)
+    FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (!Quest) return false;
+
+    Quest->Status = EQuest_Status::Completed;
+    GrantReward(Quest->Reward);
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' COMPLETED. Reward granted."), *Quest->QuestName);
+    return true;
+}
+
+bool UQuestManager::FailQuest(const FString& QuestID)
+{
+    FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (!Quest) return false;
+
+    Quest->Status = EQuest_Status::Failed;
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' FAILED."), *Quest->QuestName);
+    return true;
+}
+
+void UQuestManager::GrantReward(const FQuest_Reward& Reward)
+{
+    // Reward integration point — CraftingSystem and CharacterStats will hook here
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Granting reward — Resources:%d Health:%.0f%% Recipe:%s"),
+        Reward.ResourceBonus, Reward.HealthRestorePercent, *Reward.UnlockedRecipeID);
+}
+
+EQuest_Status UQuestManager::GetQuestStatus(const FString& QuestID) const
+{
+    const FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    return Quest ? Quest->Status : EQuest_Status::Locked;
+}
+
+bool UQuestManager::GetQuestData(const FString& QuestID, FQuest_Data& OutData) const
+{
+    const FQuest_Data* Quest = QuestRegistry.Find(QuestID);
+    if (Quest)
     {
-        if (Quest.QuestID == QuestID)
+        OutData = *Quest;
+        return true;
+    }
+    return false;
+}
+
+TArray<FQuest_Data> UQuestManager::GetActiveQuests() const
+{
+    TArray<FQuest_Data> Result;
+    for (const auto& Pair : QuestRegistry)
+    {
+        if (Pair.Value.Status == EQuest_Status::Active)
         {
-            Quest.QuestState = EQuest_QuestState::Completed;
-            CompletedQuestIDs.Add(QuestID);
-            ActiveQuestIndex = -1;
-            ActiveObjectives.Empty();
-            OnQuestCompleted.Broadcast(QuestID);
-            UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest COMPLETED — %s"), *QuestID.ToString());
-            return;
+            Result.Add(Pair.Value);
+        }
+    }
+    return Result;
+}
+
+TArray<FQuest_Data> UQuestManager::GetAvailableQuests() const
+{
+    TArray<FQuest_Data> Result;
+    for (const auto& Pair : QuestRegistry)
+    {
+        if (Pair.Value.Status == EQuest_Status::Available)
+        {
+            Result.Add(Pair.Value);
+        }
+    }
+    return Result;
+}
+
+int32 UQuestManager::GetActiveQuestCount() const
+{
+    int32 Count = 0;
+    for (const auto& Pair : QuestRegistry)
+    {
+        if (Pair.Value.Status == EQuest_Status::Active) Count++;
+    }
+    return Count;
+}
+
+void UQuestManager::OnDinoThreatDetected(const FString& DinoActorLabel, const FVector& ThreatLocation)
+{
+    // When a dino threat is detected near camp, unlock the Defend quest
+    if (DinoActorLabel.Contains(TEXT("Raptor")) || DinoActorLabel.Contains(TEXT("Rex")))
+    {
+        FQuest_Data* DefendQuest = QuestRegistry.Find(TEXT("QUEST_DEFEND_CAMP"));
+        if (DefendQuest && DefendQuest->Status == EQuest_Status::Locked)
+        {
+            DefendQuest->Status = EQuest_Status::Available;
+            UE_LOG(LogTemp, Log, TEXT("QuestManager: QUEST_DEFEND_CAMP unlocked by dino threat from '%s'"), *DinoActorLabel);
+        }
+
+        // Progress Hunt quest if active
+        FQuest_Data* HuntQuest = QuestRegistry.Find(TEXT("QUEST_HUNT_PREDATOR"));
+        if (HuntQuest && HuntQuest->Status == EQuest_Status::Active)
+        {
+            CompleteObjective(TEXT("QUEST_HUNT_PREDATOR"), TEXT("OBJ_FIND_PREDATOR"), 1);
         }
     }
 }
 
-void UQuestManager::FailQuest(FName QuestID)
+void UQuestManager::Tick(float DeltaTime)
 {
-    for (FQuest_QuestData& Quest : QuestDatabase)
+    ElapsedTime += DeltaTime;
+
+    // Check time-limited quests
+    for (auto& Pair : QuestRegistry)
     {
-        if (Quest.QuestID == QuestID && Quest.QuestState == EQuest_QuestState::Active)
+        FQuest_Data& Quest = Pair.Value;
+        if (Quest.Status == EQuest_Status::Active && Quest.bHasTimeLimit)
         {
-            Quest.QuestState = EQuest_QuestState::Failed;
-            ActiveQuestIndex = -1;
-            ActiveObjectives.Empty();
-            OnQuestFailed.Broadcast(QuestID);
-            UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest FAILED — %s"), *QuestID.ToString());
-            return;
+            Quest.TimeLimit -= DeltaTime;
+            if (Quest.TimeLimit <= 0.0f)
+            {
+                FailQuest(Quest.QuestID);
+            }
         }
     }
-}
-
-void UQuestManager::OnObjectiveFailed(FName ObjectiveID)
-{
-    // Find parent quest and fail it
-    if (ActiveQuestIndex >= 0 && ActiveQuestIndex < QuestDatabase.Num())
-    {
-        FailQuest(QuestDatabase[ActiveQuestIndex].QuestID);
-    }
-}
-
-FQuest_QuestData UQuestManager::GetQuestData(FName QuestID) const
-{
-    for (const FQuest_QuestData& Quest : QuestDatabase)
-    {
-        if (Quest.QuestID == QuestID)
-        {
-            return Quest;
-        }
-    }
-    return FQuest_QuestData();
-}
-
-TArray<FQuest_QuestData> UQuestManager::GetAvailableQuests() const
-{
-    TArray<FQuest_QuestData> Available;
-    for (const FQuest_QuestData& Quest : QuestDatabase)
-    {
-        if (Quest.QuestState == EQuest_QuestState::Available)
-        {
-            Available.Add(Quest);
-        }
-    }
-    return Available;
-}
-
-TArray<FQuest_QuestData> UQuestManager::GetActiveQuests() const
-{
-    TArray<FQuest_QuestData> Active;
-    for (const FQuest_QuestData& Quest : QuestDatabase)
-    {
-        if (Quest.QuestState == EQuest_QuestState::Active)
-        {
-            Active.Add(Quest);
-        }
-    }
-    return Active;
-}
-
-bool UQuestManager::IsQuestCompleted(FName QuestID) const
-{
-    return CompletedQuestIDs.Contains(QuestID);
-}
-
-int32 UQuestManager::GetTotalQuestCount() const
-{
-    return QuestDatabase.Num();
-}
-
-int32 UQuestManager::GetCompletedQuestCount() const
-{
-    return CompletedQuestIDs.Num();
 }
