@@ -1,7 +1,3 @@
-// DialogueSystem.h
-// Narrative & Dialogue Agent #15 — PROD_CYCLE_AUTO_20260622_009
-// Dialogue system for NPC interactions in prehistoric survival game
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,13 +6,13 @@
 #include "DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
+enum class ENarr_DialogueTriggerType : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Greeting    UMETA(DisplayName = "Greeting"),
-    InDialogue  UMETA(DisplayName = "InDialogue"),
-    Farewell    UMETA(DisplayName = "Farewell"),
-    Busy        UMETA(DisplayName = "Busy")
+    NPC_Greeting    UMETA(DisplayName = "NPC Greeting"),
+    QuestOffer      UMETA(DisplayName = "Quest Offer"),
+    DangerWarning   UMETA(DisplayName = "Danger Warning"),
+    LoreReveal      UMETA(DisplayName = "Lore Reveal"),
+    HuntingTip      UMETA(DisplayName = "Hunting Tip")
 };
 
 USTRUCT(BlueprintType)
@@ -33,14 +29,10 @@ struct FNarr_DialogueLine
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bRequiresPlayerResponse;
-
     FNarr_DialogueLine()
         : SpeakerName(TEXT("Unknown"))
         , LineText(TEXT(""))
-        , DisplayDuration(3.0f)
-        , bRequiresPlayerResponse(false)
+        , DisplayDuration(4.0f)
     {}
 };
 
@@ -50,74 +42,26 @@ struct FNarr_DialogueSequence
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID;
+    FString SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bCanRepeat;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName NextSequenceID;
+    bool bPlayedOnce;
 
     FNarr_DialogueSequence()
-        : SequenceID(NAME_None)
-        , bCanRepeat(false)
-        , NextSequenceID(NAME_None)
+        : SequenceID(TEXT(""))
+        , bPlayedOnce(false)
     {}
 };
 
-UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UNarr_DialogueComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName ActiveSequenceID;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
-    ENarr_DialogueState CurrentState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float InteractionRadius;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue(FName SequenceID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetCurrentLine() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsInDialogue() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    ENarr_DialogueState GetDialogueState() const;
-
-protected:
-    virtual void BeginPlay() override;
-
-private:
-    int32 CurrentLineIndex;
-    FNarr_DialogueSequence* ActiveSequence;
-};
-
-UCLASS()
+/**
+ * ANarr_DialogueTrigger — proximity-based dialogue trigger actor.
+ * Player enters sphere radius → dialogue sequence fires.
+ * Realistic survival dialogue only: hunting tips, danger warnings, lore.
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ANarr_DialogueTrigger : public AActor
 {
     GENERATED_BODY()
@@ -125,24 +69,42 @@ class TRANSPERSONALGAME_API ANarr_DialogueTrigger : public AActor
 public:
     ANarr_DialogueTrigger();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USphereComponent* TriggerSphere;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName DialogueSequenceToTrigger;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    AActor* LinkedNPCActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bOneShot;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnPlayerEnterRange(AActor* PlayerActor);
+    void TriggerDialogue(AActor* InstigatorActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ResetTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool HasBeenTriggered() const { return bHasTriggered; }
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueSequence GetCurrentSequence() const { return DialogueSequence; }
 
 protected:
-    virtual void BeginPlay() override;
+    UFUNCTION()
+    void OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
 
 private:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    USphereComponent* TriggerSphere;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    ENarr_DialogueTriggerType TriggerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    FNarr_DialogueSequence DialogueSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    bool bOneShot;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    float TriggerRadius;
+
     bool bHasTriggered;
 };
