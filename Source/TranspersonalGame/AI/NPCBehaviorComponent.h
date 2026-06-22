@@ -10,69 +10,71 @@ enum class ENPC_BehaviorState : uint8
     Idle        UMETA(DisplayName = "Idle"),
     Patrol      UMETA(DisplayName = "Patrol"),
     Alert       UMETA(DisplayName = "Alert"),
-    Flee        UMETA(DisplayName = "Flee"),
+    Chase       UMETA(DisplayName = "Chase"),
     Attack      UMETA(DisplayName = "Attack"),
-    Graze       UMETA(DisplayName = "Graze"),
+    Flee        UMETA(DisplayName = "Flee"),
+    Eat         UMETA(DisplayName = "Eat"),
     Rest        UMETA(DisplayName = "Rest"),
-    Investigate UMETA(DisplayName = "Investigate")
 };
 
 UENUM(BlueprintType)
 enum class ENPC_DinoSpecies : uint8
 {
-    TRex         UMETA(DisplayName = "T-Rex"),
-    Raptor       UMETA(DisplayName = "Raptor"),
+    TRex        UMETA(DisplayName = "T-Rex"),
+    Raptor      UMETA(DisplayName = "Raptor"),
     Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
-    Triceratops  UMETA(DisplayName = "Triceratops"),
-    Pterodactyl  UMETA(DisplayName = "Pterodactyl")
+    Generic     UMETA(DisplayName = "Generic"),
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_StimulusEvent
+struct FNPC_BehaviorConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Stimulus")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float PatrolRadius = 3000.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Stimulus")
-    float Intensity = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float ChaseRange = 2000.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Stimulus")
-    float Timestamp = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float AttackRange = 200.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Stimulus")
-    bool bIsVisual = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float MoveSpeed = 600.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Stimulus")
-    bool bIsAuditory = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    bool bIsPassive = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    int32 PackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float FearRadiusNear = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    float FearRadiusFar = 3000.0f;
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_MemoryRecord
+struct FNPC_PerceptionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Perception")
+    bool bPlayerDetected = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Perception")
+    float DistanceToPlayer = 99999.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Perception")
     FVector LastKnownPlayerLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float TimeSinceLastSighting = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float ThreatLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    bool bPlayerKnown = false;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Perception")
+    float TimeSinceLastSeen = 0.0f;
 };
 
-/**
- * NPCBehaviorComponent
- * Drives NPC state machine: patrol, alert, flee, attack, graze, rest.
- * Designed for dinosaur NPCs in the prehistoric survival world.
- * Integrates with UE5 AI Perception and Behavior Trees.
- */
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "NPC Behavior Component")
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent), BlueprintType)
 class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -83,91 +85,55 @@ public:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ── State Machine ──────────────────────────────────────────────────────────
-
+    // State machine
     UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
     void SetBehaviorState(ENPC_BehaviorState NewState);
 
     UFUNCTION(BlueprintPure, Category = "NPC|Behavior")
-    ENPC_BehaviorState GetBehaviorState() const { return CurrentState; }
+    ENPC_BehaviorState GetBehaviorState() const { return NPC_CurrentState; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void OnStimulusReceived(const FNPC_StimulusEvent& Stimulus);
+    // Perception
+    UFUNCTION(BlueprintCallable, Category = "NPC|Perception")
+    void UpdatePerception(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void OnPlayerDetected(FVector PlayerLocation, float Distance);
+    UFUNCTION(BlueprintPure, Category = "NPC|Perception")
+    float GetDistanceToPlayer() const { return NPC_Perception.DistanceToPlayer; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void OnPlayerLost();
+    UFUNCTION(BlueprintPure, Category = "NPC|Perception")
+    bool IsPlayerDetected() const { return NPC_Perception.bPlayerDetected; }
 
-    // ── Memory ─────────────────────────────────────────────────────────────────
+    // Config
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
+    ENPC_DinoSpecies NPC_Species = ENPC_DinoSpecies::Generic;
 
-    UFUNCTION(BlueprintPure, Category = "NPC|Memory")
-    FNPC_MemoryRecord GetMemoryRecord() const { return Memory; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
+    FNPC_BehaviorConfig NPC_Config;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
-    void ForgetPlayer();
+    // Current patrol waypoint index
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
+    int32 NPC_CurrentWaypointIndex = 0;
 
-    // ── Species Config ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
+    TArray<FVector> NPC_PatrolWaypoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    ENPC_DinoSpecies Species = ENPC_DinoSpecies::Raptor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    float DetectionRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    float AttackRadius = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    float FleeHealthThreshold = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    float PatrolRadius = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    float MemoryDecayRate = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    bool bIsHerbivore = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    bool bIsPack = false;
-
-    // ── Runtime State ──────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State", meta = (AllowPrivateAccess = "true"))
-    ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Idle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    float CurrentThreatLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    float CurrentHealth = 1.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    FVector PatrolOrigin = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    FVector CurrentPatrolTarget = FVector::ZeroVector;
+    // Fear output — read by AnimInstance
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Output")
+    float NPC_FearNormalized = 0.0f;
 
 private:
-    FNPC_MemoryRecord Memory;
+    UPROPERTY()
+    ENPC_BehaviorState NPC_CurrentState = ENPC_BehaviorState::Idle;
 
-    float StateTimer = 0.0f;
-    float PatrolWaitTimer = 0.0f;
-    bool bPatrolWaiting = false;
+    UPROPERTY()
+    FNPC_PerceptionData NPC_Perception;
 
-    void UpdateIdle(float DeltaTime);
-    void UpdatePatrol(float DeltaTime);
-    void UpdateAlert(float DeltaTime);
-    void UpdateFlee(float DeltaTime);
-    void UpdateAttack(float DeltaTime);
-    void UpdateGraze(float DeltaTime);
-    void UpdateRest(float DeltaTime);
-    void UpdateMemoryDecay(float DeltaTime);
-    void ChooseNewPatrolTarget();
-    bool IsPlayerInAttackRange() const;
-    bool ShouldFlee() const;
+    UPROPERTY()
+    float NPC_StateTimer = 0.0f;
+
+    UPROPERTY()
+    float NPC_PatrolTimer = 0.0f;
+
+    void UpdateStateMachine(float DeltaTime);
     void ApplySpeciesDefaults();
+    APawn* FindPlayerPawn() const;
 };
