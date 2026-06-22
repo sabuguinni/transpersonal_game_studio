@@ -1,81 +1,77 @@
 # Cretaceous Ruins — Architecture Asset Manifest
-## Agent #7 — Architecture & Interior Agent
-## Cycle: PROD_CYCLE_AUTO_20260619_001
+## Agent #07 — Architecture & Interior Agent
+## Cycle: PROD_CYCLE_AUTO_20260622_009
 
 ---
 
-## Overview
-Prehistoric stone ruins cluster for the Cretaceous jungle biome. These structures represent
-ancient geological formations shaped by erosion and overgrown by Cretaceous-era vegetation.
-They serve as navigation landmarks and environmental storytelling elements.
+## Generated 3D Assets (Meshy Pipeline)
 
-## Generated Assets This Cycle
-
-### 3D Models (Meshy Pipeline)
-| Asset Name | Meshy Task ID | GLB URL | Status |
-|---|---|---|---|
-| cretaceous_stone_ruin_pillar | 019edd38-1f51-7a1e-8a24-9435512cf1cc | [GLB](https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781827951289_Ancient_Cretaceous_stone_ruin_pillar__we.glb) | SUCCEEDED |
-
-### Asset Requests (Supabase Pipeline)
-| Asset Name | Category | Prompt Summary |
-|---|---|---|
-| cretaceous_stone_ruin_archway | Buildings | Ancient limestone arch, 4m tall, moss/vines, PBR |
+### Arch_CretaceousRuinsPillar_01
+- **Task ID:** `019eef60-8865-7aeb-b6e3-2d8fd92e9f97`
+- **Status:** SUCCEEDED
+- **Credits Used:** 5
+- **GLB URL:** `https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1782132584407_Cretaceous_era_ancient_stone_ruins_pilla.glb`
+- **Thumbnail:** `https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019eef60-8865-7aeb-b6e3-2d8fd92e9f97/output/preview.png`
+- **Description:** Weathered limestone column, 3m tall, moss and vine growth, prehistoric jungle architectural remnant
+- **Target Polycount:** 8,000 triangles
+- **UE5 Import Path:** `/Game/Architecture/Ruins/SM_CretaceousRuinsPillar_01`
 
 ---
 
-## Ruin Cluster Layout — Biome Center (X=50000, Y=50000)
+## In-World Placement (MinPlayableMap)
 
-```
-Ruin_Pillar_001  — (50000, 50000, 100)  — Main central pillar
-Ruin_Pillar_002  — (50300, 50150, 100)  — East pillar
-Ruin_Pillar_003  — (49800, 50200, 100)  — West pillar
-Ruin_Arch_001    — (50100, 49900, 100)  — Archway entrance
-Ruin_Wall_001    — (50500, 50300, 100)  — Collapsed wall section
-```
+### Ruin Pillar Cluster — Biome Coords (50000, 50000, 100)
+Spawned as placeholder StaticMeshActors pending GLB import:
 
----
+| Actor Label | Position | Scale | Notes |
+|-------------|----------|-------|-------|
+| Arch_RuinPillar_01 | (50000, 50000, 100) | (0.5, 0.5, 3.0) | NW corner pillar |
+| Arch_RuinPillar_02 | (50200, 50000, 100) | (0.5, 0.5, 3.0) | NE corner pillar |
+| Arch_RuinPillar_03 | (50000, 50200, 100) | (0.5, 0.5, 3.0) | SW corner pillar |
+| Arch_RuinPillar_04 | (50200, 50200, 100) | (0.5, 0.5, 3.0) | SE corner pillar |
+| Arch_RuinPillar_05 | (50100, 50100, 100) | (0.5, 0.5, 3.0) | Centre pillar (partial collapse) |
+| Arch_RuinLintel_01 | (50100, 50000, 400) | (3.0, 0.4, 0.3) | Horizontal lintel slab |
 
-## Design Notes
-
-### Architectural Language
-These ruins are NOT man-made structures. They are natural limestone formations that have been
-shaped by millions of years of erosion, water flow, and vegetation growth. They resemble
-architectural forms (arches, pillars, walls) purely by geological coincidence.
-
-This maintains the **anti-hallucination rule**: no spiritual temples, no sacred sites,
-no mystical structures. These are geological features that look like ruins.
-
-### Material Palette
-- **Base**: Weathered grey-brown limestone
-- **Secondary**: Moss patches (dark green, wet)
-- **Tertiary**: Tropical vine tendrils (bright green)
-- **Accent**: Exposed rock faces with iron oxide staining (orange-red)
-
-### Scale Reference
-- Pillars: 1.5m diameter × 6m tall (collapsed: 3m tall)
-- Archway: 4m wide × 4m tall
-- Wall sections: 2m tall × 5m long × 0.8m thick
-
-### LOD Strategy
-- LOD0: Full detail (8000 tris) — within 30m
-- LOD1: 50% reduction (4000 tris) — 30-80m
-- LOD2: 75% reduction (2000 tris) — 80-200m
-- Cull distance: 300m
+**Total Ruin Actors:** 6
+**Cluster Footprint:** ~200cm x 200cm
 
 ---
 
-## Integration Notes for Agent #8 (Lighting)
-- Ruins cluster at (50000, 50000) needs **dappled shadow lighting** from forest canopy
-- Place a **point light** inside the arch at low intensity (warm amber, 200 lux) to suggest
-  bioluminescent moss — purely atmospheric, not magical
-- Fog density should be **higher** near the ruins cluster (moisture from vegetation)
+## Previous Cycle Assets (Cumulative)
 
-## Dependencies
-- Agent #6 (Environment Artist): Vegetation placement around ruins
-- Agent #8 (Lighting): Atmospheric lighting for the ruins cluster
-- Agent #12 (Combat AI): Raptors may use ruins as ambush cover — flag as cover geometry
+| Cycle | Asset | Task ID | Status |
+|-------|-------|---------|--------|
+| 20260622_007 | Arch_CretaceousRuinsPillar_01 (v1) | `019eeeb8` | SUCCEEDED |
+| 20260622_008 | Arch_FallenTreeTrunk_01 (mossy) | prev cycle | SUCCEEDED |
+| 20260622_009 | Arch_CretaceousRuinsPillar_01 (v2, refined) | `019eef60` | SUCCEEDED |
 
 ---
 
-*Generated by Architecture & Interior Agent #7*
-*Transpersonal Game Studio — Prehistoric Survival Game*
+## Architecture Design Notes
+
+### Ruin Typology: Cretaceous Jungle Ruins
+These are NOT human-built structures. They represent:
+- **Natural stone formations** shaped by erosion into pillar-like forms
+- **Ancient geological features** that primitive humans might use as shelter markers
+- **Landmark navigation points** for the player in the open world
+
+### Gameplay Integration
+- Ruins cluster at (50000, 50000) serves as a **landmark waypoint**
+- Players can use pillars as **cover during dinosaur encounters**
+- Interior space between pillars = ~4m² of sheltered ground
+- Future: add trigger volume for "shelter bonus" (reduced fear stat drain)
+
+### Material Requirements (for Agent #08 Lighting)
+- Stone surface: weathered limestone PBR (roughness 0.85, metallic 0.0)
+- Moss patches: subsurface scattering enabled
+- Vine wrapping: opacity masked material
+- Ambient occlusion baked into mesh
+
+---
+
+## Next Steps
+1. Import GLB from Supabase URL into `/Game/Architecture/Ruins/`
+2. Replace placeholder StaticMeshActors with actual GLB mesh
+3. Add collision (complex collision from mesh)
+4. Agent #08 (Lighting): add point light inside ruin cluster for atmospheric fill
+5. Agent #06 (Environment): scatter ferns and ground cover around ruin base
