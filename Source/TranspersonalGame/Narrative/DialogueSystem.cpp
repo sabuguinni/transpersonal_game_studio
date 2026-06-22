@@ -1,93 +1,203 @@
+// DialogueSystem.cpp
+// Narrative & Dialogue Agent #15 — PROD_CYCLE_AUTO_20260622_009
+// Implementation of NPC dialogue system for prehistoric survival game
+
 #include "DialogueSystem.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Actor.h"
 
-ANarr_DialogueActor::ANarr_DialogueActor()
-    : InteractionRadius(300.0f)
-    , bIsInteractable(true)
-    , CurrentLineIndex(0)
+// ============================================================
+// UNarr_DialogueComponent
+// ============================================================
+
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = false;
 
-    // Default TribalLeader dialogue data
-    DialogueData.NPCName = TEXT("TribalLeader");
-    DialogueData.CurrentState = ENarr_DialogueState::Idle;
+    NPCName = TEXT("Unknown");
+    InteractionRadius = 300.0f;
+    CurrentState = ENarr_DialogueState::Idle;
+    CurrentLineIndex = 0;
+    ActiveSequence = nullptr;
 
-    // Greeting line
-    FNarr_DialogueLine GreetLine;
-    GreetLine.SpeakerName = TEXT("Korg");
-    GreetLine.LineText = TEXT("Stranger. You have survived the long dark. Our tribe has watched you from the treeline.");
-    GreetLine.TriggerState = ENarr_DialogueState::Greeting;
-    DialogueData.Lines.Add(GreetLine);
+    // Default greeting sequence for Tribal Elder
+    FNarr_DialogueSequence GreetingSeq;
+    GreetingSeq.SequenceID = FName("ElderGreeting");
+    GreetingSeq.bCanRepeat = true;
+    GreetingSeq.NextSequenceID = FName("ElderInfo");
 
-    // Quest offer line
-    FNarr_DialogueLine QuestLine;
-    QuestLine.SpeakerName = TEXT("Korg");
-    QuestLine.LineText = TEXT("If you wish to earn your place among us, prove yourself. Drive the raptors from the eastern valley.");
-    QuestLine.TriggerState = ENarr_DialogueState::QuestOffer;
-    DialogueData.Lines.Add(QuestLine);
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Tribal Elder");
+    Line1.LineText = TEXT("You survived the night. Good. The predators are moving south — tracks near the river.");
+    Line1.DisplayDuration = 4.0f;
+    Line1.bRequiresPlayerResponse = false;
 
-    // Quest active line
-    FNarr_DialogueLine ActiveLine;
-    ActiveLine.SpeakerName = TEXT("Korg");
-    ActiveLine.LineText = TEXT("Three raptors. Fast. Dangerous. They took two of our hunters last moon. Do not underestimate them.");
-    ActiveLine.TriggerState = ENarr_DialogueState::QuestActive;
-    DialogueData.Lines.Add(ActiveLine);
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Tribal Elder");
+    Line2.LineText = TEXT("Stay close to camp until we know how many there are. Scouts have not returned.");
+    Line2.DisplayDuration = 4.0f;
+    Line2.bRequiresPlayerResponse = true;
 
-    // Quest done line
-    FNarr_DialogueLine DoneLine;
-    DoneLine.SpeakerName = TEXT("Korg");
-    DoneLine.LineText = TEXT("You did it. The valley is clear. You have earned your place at our fire. Welcome, hunter.");
-    DoneLine.TriggerState = ENarr_DialogueState::QuestDone;
-    DialogueData.Lines.Add(DoneLine);
+    GreetingSeq.Lines.Add(Line1);
+    GreetingSeq.Lines.Add(Line2);
+    DialogueSequences.Add(GreetingSeq);
+
+    // Scout warning sequence
+    FNarr_DialogueSequence ScoutSeq;
+    ScoutSeq.SequenceID = FName("ScoutWarning");
+    ScoutSeq.bCanRepeat = false;
+    ScoutSeq.NextSequenceID = NAME_None;
+
+    FNarr_DialogueLine ScoutLine1;
+    ScoutLine1.SpeakerName = TEXT("Scout");
+    ScoutLine1.LineText = TEXT("Three raptors. North ridge. They circled the herd twice before moving on.");
+    ScoutLine1.DisplayDuration = 3.5f;
+    ScoutLine1.bRequiresPlayerResponse = false;
+
+    FNarr_DialogueLine ScoutLine2;
+    ScoutLine2.SpeakerName = TEXT("Scout");
+    ScoutLine2.LineText = TEXT("The big one — the Rex — it was watching from the tree line. Waiting.");
+    ScoutLine2.DisplayDuration = 4.0f;
+    ScoutLine2.bRequiresPlayerResponse = true;
+
+    ScoutSeq.Lines.Add(ScoutLine1);
+    ScoutSeq.Lines.Add(ScoutLine2);
+    DialogueSequences.Add(ScoutSeq);
 }
 
-void ANarr_DialogueActor::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentLineIndex = 0;
 }
 
-void ANarr_DialogueActor::StartDialogue()
+void UNarr_DialogueComponent::StartDialogue(FName SequenceID)
 {
-    if (!bIsInteractable) return;
-    CurrentLineIndex = 0;
-    SetDialogueState(ENarr_DialogueState::Greeting);
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Started dialogue with %s"), *DialogueData.NPCName);
-}
-
-void ANarr_DialogueActor::AdvanceDialogue()
-{
-    if (DialogueData.Lines.Num() == 0) return;
-
-    CurrentLineIndex++;
-    if (CurrentLineIndex >= DialogueData.Lines.Num())
+    if (CurrentState == ENarr_DialogueState::InDialogue)
     {
-        EndDialogue();
         return;
     }
 
-    FNarr_DialogueLine& Line = DialogueData.Lines[CurrentLineIndex];
-    SetDialogueState(Line.TriggerState);
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: [%s] %s"), *Line.SpeakerName, *Line.LineText);
-}
-
-void ANarr_DialogueActor::EndDialogue()
-{
-    SetDialogueState(ENarr_DialogueState::Farewell);
-    CurrentLineIndex = 0;
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Ended dialogue with %s"), *DialogueData.NPCName);
-}
-
-FNarr_DialogueLine ANarr_DialogueActor::GetCurrentLine() const
-{
-    if (DialogueData.Lines.IsValidIndex(CurrentLineIndex))
+    for (FNarr_DialogueSequence& Seq : DialogueSequences)
     {
-        return DialogueData.Lines[CurrentLineIndex];
+        if (Seq.SequenceID == SequenceID)
+        {
+            ActiveSequence = &Seq;
+            ActiveSequenceID = SequenceID;
+            CurrentLineIndex = 0;
+            CurrentState = ENarr_DialogueState::Greeting;
+
+            if (Seq.Lines.Num() > 0)
+            {
+                CurrentState = ENarr_DialogueState::InDialogue;
+            }
+            return;
+        }
     }
-    return FNarr_DialogueLine();
+
+    UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence '%s' not found on %s"),
+        *SequenceID.ToString(), *NPCName);
 }
 
-void ANarr_DialogueActor::SetDialogueState(ENarr_DialogueState NewState)
+void UNarr_DialogueComponent::AdvanceDialogue()
 {
-    DialogueData.CurrentState = NewState;
+    if (CurrentState != ENarr_DialogueState::InDialogue || !ActiveSequence)
+    {
+        return;
+    }
+
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= ActiveSequence->Lines.Num())
+    {
+        // Sequence complete
+        if (!ActiveSequence->NextSequenceID.IsNone())
+        {
+            StartDialogue(ActiveSequence->NextSequenceID);
+        }
+        else
+        {
+            EndDialogue();
+        }
+    }
+}
+
+void UNarr_DialogueComponent::EndDialogue()
+{
+    CurrentState = ENarr_DialogueState::Farewell;
+    CurrentLineIndex = 0;
+    ActiveSequence = nullptr;
+    ActiveSequenceID = NAME_None;
+
+    // Reset to idle after farewell
+    CurrentState = ENarr_DialogueState::Idle;
+}
+
+FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
+{
+    if (!ActiveSequence || CurrentLineIndex >= ActiveSequence->Lines.Num())
+    {
+        return FNarr_DialogueLine();
+    }
+    return ActiveSequence->Lines[CurrentLineIndex];
+}
+
+bool UNarr_DialogueComponent::IsInDialogue() const
+{
+    return CurrentState == ENarr_DialogueState::InDialogue;
+}
+
+ENarr_DialogueState UNarr_DialogueComponent::GetDialogueState() const
+{
+    return CurrentState;
+}
+
+// ============================================================
+// ANarr_DialogueTrigger
+// ============================================================
+
+ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(300.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    DialogueSequenceToTrigger = FName("ElderGreeting");
+    LinkedNPCActor = nullptr;
+    bOneShot = true;
+    bHasTriggered = false;
+}
+
+void ANarr_DialogueTrigger::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void ANarr_DialogueTrigger::OnPlayerEnterRange(AActor* PlayerActor)
+{
+    if (!PlayerActor)
+    {
+        return;
+    }
+
+    if (bOneShot && bHasTriggered)
+    {
+        return;
+    }
+
+    if (LinkedNPCActor)
+    {
+        UNarr_DialogueComponent* DialogueComp = LinkedNPCActor->FindComponentByClass<UNarr_DialogueComponent>();
+        if (DialogueComp)
+        {
+            DialogueComp->StartDialogue(DialogueSequenceToTrigger);
+            bHasTriggered = true;
+
+            UE_LOG(LogTemp, Log, TEXT("DialogueTrigger: Started sequence '%s' for player '%s'"),
+                *DialogueSequenceToTrigger.ToString(),
+                *PlayerActor->GetName());
+        }
+    }
 }
