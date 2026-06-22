@@ -1,338 +1,308 @@
-// AudioZoneSystem.cpp
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260622_011
-// Full implementation of ambient audio zone system for prehistoric survival game.
-
 #include "AudioZoneSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "Math/UnrealMathUtility.h"
+#include "DrawDebugHelpers.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AAudio_AmbientZone
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
 
-AAudio_AmbientZone::AAudio_AmbientZone()
+UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    ZoneSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneSphere"));
-    ZoneSphere->SetSphereRadius(500.0f);
-    ZoneSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = ZoneSphere;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+    PrimaryComponentTick.bCanEverTick = true;
+    CurrentBlendWeight = 0.0f;
+    bFadingIn = false;
+    bFadingOut = false;
 }
 
-void AAudio_AmbientZone::BeginPlay()
+void UAudio_ZoneComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    ZoneSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_AmbientZone::OnSphereBeginOverlap);
-    ZoneSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_AmbientZone::OnSphereEndOverlap);
-
-    // Apply zone radius from config
-    ZoneSphere->SetSphereRadius(ZoneConfig.BlendRadius);
-
-    // Assign sound if set
-    if (AmbientSound)
-    {
-        AmbientAudioComponent->SetSound(AmbientSound);
-    }
-
-    // Start playing at zero volume (will fade in when player enters)
-    if (ZoneConfig.bLooping && AmbientAudioComponent->Sound)
-    {
-        AmbientAudioComponent->Play();
-        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
-    }
 }
 
-void AAudio_AmbientZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Stop();
-    }
-    Super::EndPlay(EndPlayReason);
-}
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-void AAudio_AmbientZone::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Smooth fade in/out
     if (bFadingIn)
     {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeInTime, 0.01f), 0.0f, 1.0f);
-        CurrentVolume = FMath::Lerp(0.0f, ZoneConfig.BaseVolume, Alpha);
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-
-        if (Alpha >= 1.0f)
+        float FadeSpeed = (ZoneConfig.FadeInTime > 0.0f) ? (1.0f / ZoneConfig.FadeInTime) : 1.0f;
+        CurrentBlendWeight = FMath::Clamp(CurrentBlendWeight + DeltaTime * FadeSpeed, 0.0f, ZoneConfig.MaxVolume);
+        if (CurrentBlendWeight >= ZoneConfig.MaxVolume)
         {
             bFadingIn = false;
-            FadeTimer = 0.0f;
         }
     }
     else if (bFadingOut)
     {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeOutTime, 0.01f), 0.0f, 1.0f);
-        CurrentVolume = FMath::Lerp(ZoneConfig.BaseVolume, 0.0f, Alpha);
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-
-        if (Alpha >= 1.0f)
+        float FadeSpeed = (ZoneConfig.FadeOutTime > 0.0f) ? (1.0f / ZoneConfig.FadeOutTime) : 1.0f;
+        CurrentBlendWeight = FMath::Clamp(CurrentBlendWeight - DeltaTime * FadeSpeed, 0.0f, ZoneConfig.MaxVolume);
+        if (CurrentBlendWeight <= 0.0f)
         {
             bFadingOut = false;
-            FadeTimer = 0.0f;
-            if (AmbientAudioComponent->IsPlaying() && !ZoneConfig.bLooping)
-            {
-                AmbientAudioComponent->Stop();
-            }
         }
     }
 }
 
-void AAudio_AmbientZone::OnPlayerEnterZone(AActor* Player)
+void UAudio_ZoneComponent::SetBlendWeight(float Weight)
 {
-    if (!Player) return;
-    bPlayerInZone = true;
+    CurrentBlendWeight = FMath::Clamp(Weight, 0.0f, ZoneConfig.MaxVolume);
+}
+
+float UAudio_ZoneComponent::GetBlendWeight() const
+{
+    return CurrentBlendWeight;
+}
+
+void UAudio_ZoneComponent::FadeIn()
+{
     bFadingIn = true;
     bFadingOut = false;
-    FadeTimer = 0.0f;
-
-    if (!AmbientAudioComponent->IsPlaying() && AmbientAudioComponent->Sound)
-    {
-        AmbientAudioComponent->Play();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s]: Player entered — fading in (%.1fs)"),
-           *GetActorLabel(), ZoneConfig.FadeInTime);
 }
 
-void AAudio_AmbientZone::OnPlayerExitZone(AActor* Player)
+void UAudio_ZoneComponent::FadeOut()
 {
-    if (!Player) return;
-    bPlayerInZone = false;
     bFadingOut = true;
     bFadingIn = false;
-    FadeTimer = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s]: Player exited — fading out (%.1fs)"),
-           *GetActorLabel(), ZoneConfig.FadeOutTime);
 }
 
-void AAudio_AmbientZone::SetDangerLevel(EAudio_DangerLevel NewDanger)
+EAudio_ZoneType UAudio_ZoneComponent::GetZoneType() const
 {
-    CurrentDanger = NewDanger;
-
-    // Adjust volume multiplier based on danger — danger suppresses ambient
-    float DangerMult = 1.0f;
-    switch (NewDanger)
-    {
-        case EAudio_DangerLevel::Cautious:  DangerMult = 0.7f; break;
-        case EAudio_DangerLevel::Danger:    DangerMult = 0.4f; break;
-        case EAudio_DangerLevel::Critical:  DangerMult = 0.1f; break;
-        default:                            DangerMult = 1.0f; break;
-    }
-
-    if (bPlayerInZone)
-    {
-        AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.BaseVolume * DangerMult);
-    }
+    return ZoneConfig.ZoneType;
 }
 
-float AAudio_AmbientZone::GetDistanceBlend(AActor* Player) const
-{
-    if (!Player) return 0.0f;
-    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    float Radius = ZoneConfig.BlendRadius;
-    return FMath::Clamp(1.0f - (Dist / Radius), 0.0f, 1.0f);
-}
+// ============================================================
+// AAudio_AmbientZoneActor
+// ============================================================
 
-void AAudio_AmbientZone::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp,
-                                               AActor* OtherActor,
-                                               UPrimitiveComponent* OtherComp,
-                                               int32 OtherBodyIndex,
-                                               bool bFromSweep,
-                                               const FHitResult& SweepResult)
-{
-    if (OtherActor && OtherActor->IsA<ACharacter>())
-    {
-        OnPlayerEnterZone(OtherActor);
-    }
-}
-
-void AAudio_AmbientZone::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp,
-                                             AActor* OtherActor,
-                                             UPrimitiveComponent* OtherComp,
-                                             int32 OtherBodyIndex)
-{
-    if (OtherActor && OtherActor->IsA<ACharacter>())
-    {
-        OnPlayerExitZone(OtherActor);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AAudio_DinoCallEmitter
-// ─────────────────────────────────────────────────────────────────────────────
-
-AAudio_DinoCallEmitter::AAudio_DinoCallEmitter()
+AAudio_AmbientZoneActor::AAudio_AmbientZoneActor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    CallAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DinoCallAudio"));
-    RootComponent = CallAudioComponent;
-    CallAudioComponent->bAutoActivate = false;
+    BlendSphere = CreateDefaultSubobject<USphereComponent>(TEXT("BlendSphere"));
+    BlendSphere->InitSphereRadius(500.0f);
+    BlendSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    RootComponent = BlendSphere;
+
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+
+    ZoneComponent = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("ZoneComponent"));
 }
 
-void AAudio_DinoCallEmitter::BeginPlay()
+void AAudio_AmbientZoneActor::BeginPlay()
 {
     Super::BeginPlay();
-    ScheduleNextCall();
+
+    // Apply zone config to sphere radius
+    if (BlendSphere)
+    {
+        BlendSphere->SetSphereRadius(ZoneConfig.BlendRadius);
+    }
+
+    // Bind overlap events
+    if (BlendSphere)
+    {
+        BlendSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_AmbientZoneActor::OnPlayerEnterZone);
+        BlendSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_AmbientZoneActor::OnPlayerExitZone);
+    }
+
+    // Apply config to zone component
+    if (ZoneComponent)
+    {
+        ZoneComponent->ZoneConfig = ZoneConfig;
+    }
 }
 
-void AAudio_DinoCallEmitter::Tick(float DeltaTime)
+void AAudio_AmbientZoneActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    TimeUntilNextCall -= DeltaTime;
-    if (TimeUntilNextCall <= 0.0f)
+    if (!AudioComponent || !ZoneComponent)
     {
-        TriggerCall();
-        ScheduleNextCall();
+        return;
+    }
+
+    // Sync audio volume with blend weight
+    float BlendWeight = ZoneComponent->GetBlendWeight();
+    AudioComponent->SetVolumeMultiplier(BlendWeight);
+
+    // Start/stop audio based on blend weight
+    if (BlendWeight > 0.01f && !AudioComponent->IsPlaying())
+    {
+        AudioComponent->Play();
+    }
+    else if (BlendWeight <= 0.01f && AudioComponent->IsPlaying())
+    {
+        AudioComponent->Stop();
     }
 }
 
-void AAudio_DinoCallEmitter::TriggerCall()
+void AAudio_AmbientZoneActor::OnPlayerEnterZone(AActor* OverlappingActor)
 {
-    if (CallSounds.Num() == 0) return;
+    if (!OverlappingActor)
+    {
+        return;
+    }
 
-    // Pick random call from array
-    int32 Idx = FMath::RandRange(0, CallSounds.Num() - 1);
-    USoundBase* ChosenSound = CallSounds[Idx];
-    if (!ChosenSound) return;
-
-    // Play at world location with attenuation
-    UGameplayStatics::PlaySoundAtLocation(this, ChosenSound, GetActorLocation(),
-                                          1.0f, 1.0f, 0.0f, nullptr, nullptr);
-
-    UE_LOG(LogTemp, Log, TEXT("DinoCallEmitter [%s]: %s vocalization triggered"),
-           *GetActorLabel(), *DinoCallConfig.DinoSpecies);
+    // Check if this is the player character
+    ACharacter* Character = Cast<ACharacter>(OverlappingActor);
+    if (Character && Character->IsPlayerControlled())
+    {
+        bPlayerInZone = true;
+        if (ZoneComponent)
+        {
+            ZoneComponent->FadeIn();
+        }
+    }
 }
 
-void AAudio_DinoCallEmitter::ScheduleNextCall()
+void AAudio_AmbientZoneActor::OnPlayerExitZone(AActor* OverlappingActor)
 {
-    TimeUntilNextCall = FMath::FRandRange(DinoCallConfig.MinCallInterval,
-                                          DinoCallConfig.MaxCallInterval);
+    if (!OverlappingActor)
+    {
+        return;
+    }
+
+    ACharacter* Character = Cast<ACharacter>(OverlappingActor);
+    if (Character && Character->IsPlayerControlled())
+    {
+        bPlayerInZone = false;
+        if (ZoneComponent)
+        {
+            ZoneComponent->FadeOut();
+        }
+    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UAudio_SoundscapeManager
-// ─────────────────────────────────────────────────────────────────────────────
+bool AAudio_AmbientZoneActor::IsPlayerInZone() const
+{
+    return bPlayerInZone;
+}
 
-UAudio_SoundscapeManager::UAudio_SoundscapeManager()
+// ============================================================
+// UAudio_FootstepManager
+// ============================================================
+
+UAudio_FootstepManager::UAudio_FootstepManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    StepTimer = 0.0f;
+    bIsMoving = false;
+    CurrentSurface = EAudio_FootstepSurface::Dirt;
 }
 
-void UAudio_SoundscapeManager::BeginPlay()
+void UAudio_FootstepManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Auto-discover all ambient zones and emitters in the world
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    TArray<AActor*> FoundZones;
-    UGameplayStatics::GetAllActorsOfClass(World, AAudio_AmbientZone::StaticClass(), FoundZones);
-    for (AActor* A : FoundZones)
-    {
-        if (AAudio_AmbientZone* Zone = Cast<AAudio_AmbientZone>(A))
-        {
-            RegisteredZones.Add(Zone);
-        }
-    }
-
-    TArray<AActor*> FoundEmitters;
-    UGameplayStatics::GetAllActorsOfClass(World, AAudio_DinoCallEmitter::StaticClass(), FoundEmitters);
-    for (AActor* A : FoundEmitters)
-    {
-        if (AAudio_DinoCallEmitter* Emitter = Cast<AAudio_DinoCallEmitter>(A))
-        {
-            RegisteredEmitters.Add(Emitter);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("SoundscapeManager: %d zones, %d emitters registered"),
-           RegisteredZones.Num(), RegisteredEmitters.Num());
 }
 
-void UAudio_SoundscapeManager::TickComponent(float DeltaTime, ELevelTick TickType,
-                                              FActorComponentTickFunction* ThisTickFunction)
+void UAudio_FootstepManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    // Manager tick — future: dynamic mix updates based on time of day / weather
-}
 
-void UAudio_SoundscapeManager::RegisterZone(AAudio_AmbientZone* Zone)
-{
-    if (Zone && !RegisteredZones.Contains(Zone))
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        RegisteredZones.Add(Zone);
+        return;
     }
-}
 
-void UAudio_SoundscapeManager::RegisterEmitter(AAudio_DinoCallEmitter* Emitter)
-{
-    if (Emitter && !RegisteredEmitters.Contains(Emitter))
+    ACharacter* Character = Cast<ACharacter>(Owner);
+    if (!Character)
     {
-        RegisteredEmitters.Add(Emitter);
+        return;
     }
-}
 
-void UAudio_SoundscapeManager::SetGlobalDanger(EAudio_DangerLevel NewLevel)
-{
-    GlobalDangerLevel = NewLevel;
-    for (AAudio_AmbientZone* Zone : RegisteredZones)
+    UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
+    if (!Movement)
     {
-        if (Zone)
+        return;
+    }
+
+    // Check if character is moving on ground
+    float Speed = Character->GetVelocity().Size();
+    bIsMoving = Speed > 10.0f && Movement->IsMovingOnGround();
+
+    if (bIsMoving)
+    {
+        bool bRunning = Speed > 300.0f;
+        float Interval = bRunning ? StepIntervalRun : StepIntervalWalk;
+
+        StepTimer += DeltaTime;
+        if (StepTimer >= Interval)
         {
-            Zone->SetDangerLevel(NewLevel);
+            StepTimer = 0.0f;
+            TriggerFootstep(bRunning);
         }
-    }
-}
-
-void UAudio_SoundscapeManager::NotifyTRexProximity(float Distance)
-{
-    // T-Rex proximity drives danger level and ambient suppression
-    // Distance thresholds (cm): 3000 = danger, 1500 = critical
-    if (Distance < 1500.0f)
-    {
-        SetGlobalDanger(EAudio_DangerLevel::Critical);
-    }
-    else if (Distance < 3000.0f)
-    {
-        SetGlobalDanger(EAudio_DangerLevel::Danger);
-    }
-    else if (Distance < 6000.0f)
-    {
-        SetGlobalDanger(EAudio_DangerLevel::Cautious);
     }
     else
     {
-        SetGlobalDanger(EAudio_DangerLevel::Safe);
+        StepTimer = 0.0f;
+    }
+}
+
+void UAudio_FootstepManager::TriggerFootstep(bool bRunning)
+{
+    // Detect surface before triggering
+    CurrentSurface = DetectSurfaceUnderFoot();
+
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("SoundscapeManager: TRex dist=%.0f -> DangerLevel=%d"),
-           Distance, (int32)GlobalDangerLevel);
+    // Volume scales with run speed
+    float Volume = bRunning ? 1.0f : 0.6f;
+
+    // In a full implementation, this would select from a sound cue bank
+    // based on CurrentSurface and play via UGameplayStatics::PlaySoundAtLocation
+    // For now, log the event for Blueprint/MetaSound hookup
+    UE_LOG(LogTemp, Verbose, TEXT("Footstep: Surface=%d Running=%d Volume=%.2f Location=%s"),
+        (int32)CurrentSurface, bRunning ? 1 : 0, Volume,
+        *Owner->GetActorLocation().ToString());
+}
+
+EAudio_FootstepSurface UAudio_FootstepManager::DetectSurfaceUnderFoot()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return EAudio_FootstepSurface::Dirt;
+    }
+
+    UWorld* World = Owner->GetWorld();
+    if (!World)
+    {
+        return EAudio_FootstepSurface::Dirt;
+    }
+
+    FVector Start = Owner->GetActorLocation();
+    FVector End = Start - FVector(0.0f, 0.0f, 100.0f);
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Owner);
+
+    bool bHit = World->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+
+    if (!bHit || !HitResult.PhysMaterial.IsValid())
+    {
+        return EAudio_FootstepSurface::Dirt;
+    }
+
+    // In a full implementation, physical material surface type would map to footstep sound
+    // Default to Dirt for now — Blueprint can override via SetCurrentSurface
+    return EAudio_FootstepSurface::Dirt;
+}
+
+void UAudio_FootstepManager::SetCurrentSurface(EAudio_FootstepSurface NewSurface)
+{
+    CurrentSurface = NewSurface;
 }
