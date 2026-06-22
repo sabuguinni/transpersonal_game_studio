@@ -1,166 +1,207 @@
-// DialogueManager.h — Narrative & Dialogue Agent #15
-// PROD_CYCLE_AUTO_20260620_006
-// UGameInstanceSubsystem managing all NPC dialogue trees.
-// Integrates with QuestManager via OnQuestShouldStart delegate.
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "DialogueManager.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-//  Structs — all prefixed Narr_ per UE5 compilation rules
-// ─────────────────────────────────────────────────────────────
+// ============================================================
+// Narrative & Dialogue Agent #15 — DialogueManager
+// Dialogue system for NPC conversations, quest dialogue,
+// and tribal elder interactions in MinPlayableMap.
+// ============================================================
 
-USTRUCT(BlueprintType)
-struct FNarr_DialogueChoice
+UENUM(BlueprintType)
+enum class ENarr_DialogueState : uint8
 {
-    GENERATED_BODY()
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Active          UMETA(DisplayName = "Active"),
+    WaitingInput    UMETA(DisplayName = "WaitingInput"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Interrupted     UMETA(DisplayName = "Interrupted")
+};
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText ChoiceText;
+UENUM(BlueprintType)
+enum class ENarr_DialogueContext : uint8
+{
+    QuestGive       UMETA(DisplayName = "QuestGive"),
+    QuestCheckIn    UMETA(DisplayName = "QuestCheckIn"),
+    QuestComplete   UMETA(DisplayName = "QuestComplete"),
+    QuestFailed     UMETA(DisplayName = "QuestFailed"),
+    Greeting        UMETA(DisplayName = "Greeting"),
+    Ambient         UMETA(DisplayName = "Ambient"),
+    Warning         UMETA(DisplayName = "Warning")
+};
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 NextNodeIndex = -1;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName RequiredQuestState = NAME_None;
+UENUM(BlueprintType)
+enum class ENarr_NPCIdentity : uint8
+{
+    TribalElder     UMETA(DisplayName = "TribalElder"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Crafter         UMETA(DisplayName = "Crafter"),
+    Survivor        UMETA(DisplayName = "Survivor")
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueNode
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 NodeIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString SpeakerName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText SpeakerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LineText;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCIdentity SpeakerIdentity = ENarr_NPCIdentity::TribalElder;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueChoice> Choices;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DisplayDuration = 4.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bIsPlayerChoice = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bRequiresPlayerInput = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bEndsDialogue = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bStartsQuest = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioCueID;
+    FNarr_DialogueLine() {}
+    FNarr_DialogueLine(const FString& Speaker, const FString& Text, float Duration = 4.0f)
+        : SpeakerName(Speaker), LineText(Text), DisplayDuration(Duration) {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueTree
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName DialogueID = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString SequenceID;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText NPCName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LinkedQuestID;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueNode> Nodes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueContext Context = ENarr_DialogueContext::Greeting;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName QuestToStartOnComplete = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueLine> Lines;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioURL_Offer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bHasBeenPlayed = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioURL_InProgress;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioURL_Complete;
+    FNarr_DialogueSequence() {}
 };
 
-// ─────────────────────────────────────────────────────────────
-//  Delegates
-// ─────────────────────────────────────────────────────────────
+USTRUCT(BlueprintType)
+struct FNarr_NPCDialogueSet
+{
+    GENERATED_BODY()
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNarr_OnDialogueStarted, FName, DialogueID, FText, NPCName);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNarr_OnDialogueNodeAdvanced, FName, DialogueID, FNarr_DialogueNode, Node);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueEnded, FName, DialogueID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnQuestShouldStart, FName, QuestID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCIdentity NPCIdentity = ENarr_NPCIdentity::TribalElder;
 
-// ─────────────────────────────────────────────────────────────
-//  UDialogueManager — GameInstance Subsystem
-// ─────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCLabel;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueSequence> Sequences;
+
+    FNarr_NPCDialogueSet() {}
+};
+
+/**
+ * UDialogueManager — World Subsystem
+ * Manages all NPC dialogue sequences, quest-linked conversations,
+ * and tribal elder interactions. Queries QuestManager state to
+ * branch dialogue based on active/completed quests.
+ */
 UCLASS()
-class TRANSPERSONALGAME_API UDialogueManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UDialogueManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UDialogueManager();
 
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // ── Start / Control ──────────────────────────────────────
+    // --- Core Dialogue API ---
 
+    /** Start a dialogue sequence by ID */
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool StartDialogue(FName DialogueID);
+    bool StartDialogue(const FString& SequenceID);
 
+    /** Advance to next line in active sequence */
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void SelectChoice(int32 ChoiceIndex);
+    bool AdvanceDialogue();
 
+    /** End current dialogue immediately */
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
     void EndDialogue();
 
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    bool IsDialogueActive() const;
-
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    FName GetActiveDialogueID() const;
-
-    // ── Query ────────────────────────────────────────────────
-
+    /** Get current active dialogue line */
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    FNarr_DialogueTree GetDialogueTree(FName DialogueID) const;
+    FNarr_DialogueLine GetCurrentLine() const;
 
+    /** Get current dialogue state */
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    TArray<FName> GetAllDialogueIDs() const;
+    ENarr_DialogueState GetDialogueState() const { return CurrentState; }
 
-    // ── Delegates ────────────────────────────────────────────
+    /** Is any dialogue currently active? */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    bool IsDialogueActive() const { return CurrentState == ENarr_DialogueState::Active || CurrentState == ENarr_DialogueState::WaitingInput; }
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Dialogue")
-    FNarr_OnDialogueStarted OnDialogueStarted;
+    // --- Quest-Linked Dialogue ---
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Dialogue")
-    FNarr_OnDialogueNodeAdvanced OnDialogueNodeAdvanced;
+    /** Get appropriate dialogue sequence ID for NPC + quest context */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    FString GetQuestDialogueID(ENarr_NPCIdentity NPC, const FString& QuestID, ENarr_DialogueContext Context) const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Dialogue")
-    FNarr_OnDialogueEnded OnDialogueEnded;
+    /** Trigger elder dialogue based on current quest state */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void TriggerElderDialogue(const FString& QuestID);
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Dialogue")
-    FNarr_OnQuestShouldStart OnQuestShouldStart;
+    // --- Dialogue Library ---
+
+    /** Get all sequences for a given NPC */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueSequence> GetNPCSequences(ENarr_NPCIdentity NPC) const;
+
+    /** Mark a sequence as played */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void MarkSequencePlayed(const FString& SequenceID);
+
+    /** Has sequence been played before? */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    bool HasSequenceBeenPlayed(const FString& SequenceID) const;
+
+    // --- Ambient Dialogue ---
+
+    /** Get random ambient line for NPC (for idle chatter) */
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    FNarr_DialogueLine GetAmbientLine(ENarr_NPCIdentity NPC) const;
 
 private:
-
-    void BuildDialogueDatabase();
-    void AdvanceToNode(int32 NodeIndex);
+    UPROPERTY()
+    ENarr_DialogueState CurrentState;
 
     UPROPERTY()
-    TMap<FName, FNarr_DialogueTree> DialogueDatabase;
+    FString ActiveSequenceID;
 
     UPROPERTY()
-    FName ActiveDialogueID;
+    int32 CurrentLineIndex;
 
     UPROPERTY()
-    int32 ActiveNodeIndex = 0;
+    TArray<FNarr_NPCDialogueSet> DialogueLibrary;
 
     UPROPERTY()
-    bool bDialogueActive = false;
+    TArray<FString> PlayedSequences;
+
+    void BuildDialogueLibrary();
+    void BuildElderDialogues(FNarr_NPCDialogueSet& ElderSet);
+    void BuildHunterDialogues(FNarr_NPCDialogueSet& HunterSet);
+    void BuildScoutDialogues(FNarr_NPCDialogueSet& ScoutSet);
+
+    FNarr_DialogueSequence* FindSequence(const FString& SequenceID);
+    const FNarr_DialogueSequence* FindSequenceConst(const FString& SequenceID) const;
 };
