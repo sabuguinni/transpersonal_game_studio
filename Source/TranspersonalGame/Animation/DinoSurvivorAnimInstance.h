@@ -4,6 +4,9 @@
 #include "Animation/AnimInstance.h"
 #include "DinoSurvivorAnimInstance.generated.h"
 
+// ============================================================
+// Locomotion state enum — drives state machine transitions
+// ============================================================
 UENUM(BlueprintType)
 enum class EAnim_LocomotionState : uint8
 {
@@ -17,6 +20,9 @@ enum class EAnim_LocomotionState : uint8
     Fall        UMETA(DisplayName = "Fall")
 };
 
+// ============================================================
+// Combat stance enum
+// ============================================================
 UENUM(BlueprintType)
 enum class EAnim_CombatStance : uint8
 {
@@ -26,33 +32,39 @@ enum class EAnim_CombatStance : uint8
     Shield      UMETA(DisplayName = "Shield")
 };
 
+// ============================================================
+// Foot IK data — bilateral foot placement on terrain
+// ============================================================
 USTRUCT(BlueprintType)
 struct FAnim_FootIKData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     FVector LeftFootLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     FVector RightFootLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     FRotator LeftFootRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     FRotator RightFootRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     float LeftFootAlpha = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     float RightFootAlpha = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
     float PelvisOffset = 0.0f;
 };
 
+// ============================================================
+// DinoSurvivorAnimInstance — main AnimInstance for the player
+// ============================================================
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivorAnimInstance : public UAnimInstance
 {
@@ -64,75 +76,108 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // --- Locomotion ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    EAnim_LocomotionState Anim_LocomotionState;
+    // ── Locomotion ──────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    EAnim_LocomotionState LocomotionState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    float Anim_Speed;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    float Anim_Direction;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    bool Anim_bIsInAir;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    bool Anim_bIsCrouching;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsCrouching;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-    bool Anim_bIsSprinting;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsSprinting;
 
-    // --- Foot IK ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK", meta = (AllowPrivateAccess = "true"))
-    FAnim_FootIKData Anim_FootIK;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+              meta = (AllowPrivateAccess = "true"))
+    float LeanAngle;
 
-    // --- Aim Offset ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset", meta = (AllowPrivateAccess = "true"))
-    float Anim_AimPitch;
+    // ── Foot IK ─────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK",
+              meta = (AllowPrivateAccess = "true"))
+    FAnim_FootIKData FootIKData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset", meta = (AllowPrivateAccess = "true"))
-    float Anim_AimYaw;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    float FootIKTraceDistance;
 
-    // --- Survival Stats ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-    float Anim_StaminaNormalized;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    float FootIKInterpSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-    float Anim_HealthNormalized;
+    // ── Aim Offset ──────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|AimOffset",
+              meta = (AllowPrivateAccess = "true"))
+    float AimPitch;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-    float Anim_FearNormalized;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|AimOffset",
+              meta = (AllowPrivateAccess = "true"))
+    float AimYaw;
 
-    // --- Combat ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat", meta = (AllowPrivateAccess = "true"))
-    EAnim_CombatStance Anim_CombatStance;
+    // ── Survival Stats ──────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
+              meta = (AllowPrivateAccess = "true"))
+    float StaminaNormalized;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat", meta = (AllowPrivateAccess = "true"))
-    bool Anim_bIsAttacking;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
+              meta = (AllowPrivateAccess = "true"))
+    float HealthNormalized;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat", meta = (AllowPrivateAccess = "true"))
-    bool Anim_bIsBlocking;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsExhausted;
 
-    // --- Thresholds ---
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float Anim_WalkSpeedThreshold = 10.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsInjured;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float Anim_RunSpeedThreshold = 250.0f;
+    // ── Combat ──────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat",
+              meta = (AllowPrivateAccess = "true"))
+    EAnim_CombatStance CombatStance;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float Anim_SprintSpeedThreshold = 500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsAttacking;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float Anim_FootIKTraceDistance = 50.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsBlocking;
 
-private:
+    // ── Speed thresholds (configurable) ─────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
+    float WalkSpeedThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
+    float RunSpeedThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
+    float SprintSpeedThreshold;
+
+protected:
+    // Internal helpers
     void UpdateLocomotionState();
     void UpdateFootIK(float DeltaSeconds);
     void UpdateAimOffset();
-    void UpdateSurvivalStats();
+    void UpdateSurvivalState();
+
+    bool TraceFootToGround(const FName& FootSocketName, FVector& OutLocation, FRotator& OutRotation);
+
+private:
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
 
     UPROPERTY()
-    TObjectPtr<class ACharacter> Anim_OwnerCharacter;
+    class UCharacterMovementComponent* MovementComponent;
 };
