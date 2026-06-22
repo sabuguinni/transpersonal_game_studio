@@ -1,238 +1,311 @@
 // AudioZoneSystem.cpp
-// Audio Agent #16 — PROD_CYCLE_AUTO_20260622_002
-// Manages ambient audio zone transitions and event cues for the prehistoric survival world.
-// Designed to work with MetaSounds when available; degrades gracefully without them.
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260622_003
+// Implementation of adaptive audio zones for prehistoric survival world.
+// Campfire ambience at elder camp, raptor distant calls on patrol path, wind on open plains.
 
-#include "Audio/AudioZoneSystem.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "AudioZoneSystem.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 
-UAudio_ZoneComponent::UAudio_ZoneComponent()
+// ─── AAudio_ZoneActor ─────────────────────────────────────────────────────────
+
+AAudio_ZoneActor::AAudio_ZoneActor()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Check every 100ms — not every frame
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Trigger sphere — detects player proximity
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    // Ambient audio component — looping background sound
+    AmbientAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComp"));
+    AmbientAudioComp->SetupAttachment(RootComponent);
+    AmbientAudioComp->bAutoActivate = false;
+    AmbientAudioComp->SetVolumeMultiplier(0.0f);  // Start silent, fade in on enter
+
+    // Threat audio component — one-shot distant calls
+    ThreatAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudioComp"));
+    ThreatAudioComp->SetupAttachment(RootComponent);
+    ThreatAudioComp->bAutoActivate = false;
+
+    // Default zone config
+    ZoneConfig.ZoneType = EAudio_ZoneType::OpenPlains;
+    ZoneConfig.BlendRadius = 500.0f;
+    ZoneConfig.AmbientVolume = 0.8f;
+    ZoneConfig.ThreatCallInterval = 12.0f;
+    ZoneConfig.bLoopAmbient = true;
+    ZoneConfig.bHasThreatCalls = false;
 }
 
-void UAudio_ZoneComponent::BeginPlay()
+void AAudio_ZoneActor::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultLayers();
-    ZoneActiveTime = 0.0f;
-    CrossfadeProgress = 1.0f;
-    CrossfadeDurationRemaining = 0.0f;
-    PreviousZone = EAudio_ZoneType::None;
-}
 
-void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
 
-    if (!bZoneActive)
+    // Register with the world audio subsystem
+    if (UWorld* World = GetWorld())
     {
-        return;
-    }
-
-    ZoneActiveTime += DeltaTime;
-
-    // Advance crossfade
-    if (CrossfadeDurationRemaining > 0.0f)
-    {
-        CrossfadeDurationRemaining -= DeltaTime;
-        if (CrossfadeDurationRemaining <= 0.0f)
+        if (UAudio_WorldSubsystem* AudioMgr = World->GetSubsystem<UAudio_WorldSubsystem>())
         {
-            CrossfadeProgress = 1.0f;
-            CrossfadeDurationRemaining = 0.0f;
-            PreviousZone = EAudio_ZoneType::None;
-        }
-        else
-        {
-            // Linear crossfade — could be replaced with curve-based in future
-            float TotalDuration = CrossfadeProgress > 0.0f ? CrossfadeDurationRemaining / CrossfadeProgress : 1.0f;
-            CrossfadeProgress = 1.0f - (CrossfadeDurationRemaining / FMath::Max(TotalDuration, 0.001f));
+            AudioMgr->RegisterZone(this);
         }
     }
-}
 
-void UAudio_ZoneComponent::TransitionToZone(EAudio_ZoneType NewZone, float CrossfadeDuration)
-{
-    if (NewZone == ActiveZone)
+    // Configure zone-specific defaults
+    switch (ZoneConfig.ZoneType)
     {
-        return; // Already in this zone
-    }
-
-    PreviousZone = ActiveZone;
-    ActiveZone = NewZone;
-    CrossfadeProgress = 0.0f;
-    CrossfadeDurationRemaining = FMath::Max(CrossfadeDuration, 0.1f);
-    ZoneActiveTime = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Transitioning from %d to %d over %.1fs"),
-        (int32)PreviousZone, (int32)ActiveZone, CrossfadeDuration);
-}
-
-void UAudio_ZoneComponent::FireEventCue(FName CueID)
-{
-    for (const FAudio_EventCue& Cue : EventCues)
-    {
-        if (Cue.CueID == CueID)
-        {
-            UE_LOG(LogTemp, Log, TEXT("AudioZone: Firing event cue '%s' (vol=%.2f, delay=%.1fs, dur=%.1fs)"),
-                *CueID.ToString(), Cue.Volume, Cue.TriggerDelay, Cue.Duration);
-            // MetaSound parameter dispatch would go here when MetaSounds are wired
-            return;
-        }
-    }
-    UE_LOG(LogTemp, Warning, TEXT("AudioZone: Event cue '%s' not found"), *CueID.ToString());
-}
-
-bool UAudio_ZoneComponent::IsPlayerInZone() const
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return false;
-    }
-
-    UWorld* World = Owner->GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    if (!PC || !PC->GetPawn())
-    {
-        return false;
-    }
-
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    FVector ZoneLocation = Owner->GetActorLocation();
-    float DistanceSq = FVector::DistSquared(PlayerLocation, ZoneLocation);
-
-    return DistanceSq <= (ZoneRadius * ZoneRadius);
-}
-
-void UAudio_ZoneComponent::RegisterAmbientLayer(FAudio_AmbientLayer NewLayer)
-{
-    // Prevent duplicate layer IDs
-    for (const FAudio_AmbientLayer& Existing : AmbientLayers)
-    {
-        if (Existing.LayerID == NewLayer.LayerID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("AudioZone: Layer '%s' already registered — skipping"), *NewLayer.LayerID.ToString());
-            return;
-        }
-    }
-    AmbientLayers.Add(NewLayer);
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Registered ambient layer '%s' for zone type %d"),
-        *NewLayer.LayerID.ToString(), (int32)NewLayer.ZoneType);
-}
-
-void UAudio_ZoneComponent::RegisterEventCue(FAudio_EventCue NewCue)
-{
-    // Prevent duplicate cue IDs
-    for (const FAudio_EventCue& Existing : EventCues)
-    {
-        if (Existing.CueID == NewCue.CueID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("AudioZone: Cue '%s' already registered — skipping"), *NewCue.CueID.ToString());
-            return;
-        }
-    }
-    EventCues.Add(NewCue);
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Registered event cue '%s' (trigger: '%s')"),
-        *NewCue.CueID.ToString(), *NewCue.TriggerEvent.ToString());
-}
-
-void UAudio_ZoneComponent::InitializeDefaultLayers()
-{
-    // Default layers based on active zone type at BeginPlay
-    // These are documentation stubs — actual USoundBase assets assigned in Blueprint/Editor
-
-    switch (ActiveZone)
-    {
-        case EAudio_ZoneType::Camp:
-        {
-            // Campfire crackling — Freesound #856943 (FIREBurn_Campfire Forest Birds)
-            FAudio_AmbientLayer CampfireLayer;
-            CampfireLayer.LayerID = FName("Campfire_Crackle");
-            CampfireLayer.ZoneType = EAudio_ZoneType::Camp;
-            CampfireLayer.Volume = 0.7f;
-            CampfireLayer.FadeInDuration = 1.5f;
-            CampfireLayer.FadeOutDuration = 2.0f;
-            CampfireLayer.bLooping = true;
-            CampfireLayer.FreesoundID = TEXT("856943");
-            AmbientLayers.Add(CampfireLayer);
-
-            // Soft wind at camp perimeter
-            FAudio_AmbientLayer WindLayer;
-            WindLayer.LayerID = FName("Camp_Wind_Soft");
-            WindLayer.ZoneType = EAudio_ZoneType::Camp;
-            WindLayer.Volume = 0.3f;
-            WindLayer.FadeInDuration = 3.0f;
-            WindLayer.FadeOutDuration = 4.0f;
-            WindLayer.bLooping = true;
-            AmbientLayers.Add(WindLayer);
-
-            // TRex quest accepted — tension sting cue
-            FAudio_EventCue TRexQuestCue;
-            TRexQuestCue.CueID = FName("TRex_Quest_Accepted");
-            TRexQuestCue.TriggerEvent = FName("Quest_HuntTRex_Accepted");
-            TRexQuestCue.Volume = 0.9f;
-            TRexQuestCue.TriggerDelay = 0.5f;
-            TRexQuestCue.Duration = 5.0f; // Matches FNarr_DialogueLine.DisplayDuration range
-            EventCues.Add(TRexQuestCue);
-
-            // Elder dialogue start cue
-            FAudio_EventCue ElderDialogueCue;
-            ElderDialogueCue.CueID = FName("Elder_Dialogue_Start");
-            ElderDialogueCue.TriggerEvent = FName("Dialogue_Elder_Start");
-            ElderDialogueCue.Volume = 0.6f;
-            ElderDialogueCue.TriggerDelay = 0.0f;
-            ElderDialogueCue.Duration = 4.0f;
-            EventCues.Add(ElderDialogueCue);
+        case EAudio_ZoneType::TribalCamp:
+            ZoneConfig.bHasThreatCalls = false;
+            ZoneConfig.AmbientVolume = 0.9f;
+            ZoneConfig.ThreatCallInterval = 20.0f;
             break;
-        }
 
-        case EAudio_ZoneType::TRexProximity:
-        {
-            // Ground rumble — low frequency, felt more than heard
-            FAudio_AmbientLayer RumbleLayer;
-            RumbleLayer.LayerID = FName("TRex_Ground_Rumble");
-            RumbleLayer.ZoneType = EAudio_ZoneType::TRexProximity;
-            RumbleLayer.Volume = 0.8f;
-            RumbleLayer.FadeInDuration = 4.0f; // Slow build — player feels dread
-            RumbleLayer.FadeOutDuration = 6.0f;
-            RumbleLayer.bLooping = true;
-            AmbientLayers.Add(RumbleLayer);
-
-            // Silence of prey — reduce all other ambient layers (handled by zone transition)
-            FAudio_EventCue TRexApproachCue;
-            TRexApproachCue.CueID = FName("TRex_Approach_Warning");
-            TRexApproachCue.TriggerEvent = FName("TRex_Within_400_Units");
-            TRexApproachCue.Volume = 1.0f;
-            TRexApproachCue.TriggerDelay = 0.0f;
-            TRexApproachCue.Duration = 6.0f;
-            EventCues.Add(TRexApproachCue);
+        case EAudio_ZoneType::RaptorPatrol:
+            ZoneConfig.bHasThreatCalls = true;
+            ZoneConfig.AmbientVolume = 0.6f;
+            ZoneConfig.ThreatCallInterval = 8.0f;
+            CurrentState.ThreatLevel = EAudio_ThreatLevel::Cautious;
             break;
-        }
 
-        case EAudio_ZoneType::Forest:
+        case EAudio_ZoneType::OpenPlains:
+            ZoneConfig.bHasThreatCalls = false;
+            ZoneConfig.AmbientVolume = 0.7f;
+            ZoneConfig.ThreatCallInterval = 30.0f;
+            break;
+
+        case EAudio_ZoneType::DenseForest:
+            ZoneConfig.bHasThreatCalls = true;
+            ZoneConfig.AmbientVolume = 0.85f;
+            ZoneConfig.ThreatCallInterval = 10.0f;
+            break;
+
+        case EAudio_ZoneType::RiverBank:
+            ZoneConfig.bHasThreatCalls = false;
+            ZoneConfig.AmbientVolume = 0.75f;
+            break;
+
+        case EAudio_ZoneType::CaveEntrance:
+            ZoneConfig.bHasThreatCalls = true;
+            ZoneConfig.AmbientVolume = 0.5f;
+            ZoneConfig.ThreatCallInterval = 15.0f;
+            CurrentState.ThreatLevel = EAudio_ThreatLevel::Danger;
+            break;
+
         default:
-        {
-            // Forest default — insects, wind, distant birds
-            FAudio_AmbientLayer ForestLayer;
-            ForestLayer.LayerID = FName("Forest_Insects_Wind");
-            ForestLayer.ZoneType = EAudio_ZoneType::Forest;
-            ForestLayer.Volume = 0.5f;
-            ForestLayer.FadeInDuration = 2.0f;
-            ForestLayer.FadeOutDuration = 3.0f;
-            ForestLayer.bLooping = true;
-            AmbientLayers.Add(ForestLayer);
             break;
+    }
+
+    ThreatCallAccumulator = 0.0f;
+}
+
+void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    // Unregister from subsystem
+    if (UWorld* World = GetWorld())
+    {
+        if (UAudio_WorldSubsystem* AudioMgr = World->GetSubsystem<UAudio_WorldSubsystem>())
+        {
+            AudioMgr->UnregisterZone(this);
         }
     }
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void AAudio_ZoneActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bPlayerInZone && ZoneConfig.bHasThreatCalls)
+    {
+        TickThreatCallTimer(DeltaTime);
+    }
+
+    // Update time-since-last-threat-call in state
+    CurrentState.TimeSinceLastThreatCall += DeltaTime;
+}
+
+void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                                              bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        bPlayerInZone = true;
+        CurrentState.ActiveZone = ZoneConfig.ZoneType;
+        CurrentState.bPlayerNearCampfire = (ZoneConfig.ZoneType == EAudio_ZoneType::TribalCamp);
+
+        // Activate ambient audio
+        if (AmbientAudioComp && !AmbientAudioComp->IsPlaying())
+        {
+            AmbientAudioComp->Play();
+            AmbientAudioComp->SetVolumeMultiplier(ZoneConfig.AmbientVolume);
+        }
+
+        OnPlayerEnterZone(OtherActor);
+    }
+}
+
+void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        bPlayerInZone = false;
+        CurrentState.bPlayerNearCampfire = false;
+
+        // Fade out ambient audio
+        if (AmbientAudioComp && AmbientAudioComp->IsPlaying())
+        {
+            AmbientAudioComp->SetVolumeMultiplier(0.0f);
+            AmbientAudioComp->Stop();
+        }
+
+        OnPlayerExitZone(OtherActor);
+    }
+}
+
+void AAudio_ZoneActor::OnPlayerEnterZone_Implementation(AActor* PlayerActor)
+{
+    // Blueprint can override — default: log entry
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone type %d"),
+           static_cast<int32>(ZoneConfig.ZoneType));
+}
+
+void AAudio_ZoneActor::OnPlayerExitZone_Implementation(AActor* PlayerActor)
+{
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone type %d"),
+           static_cast<int32>(ZoneConfig.ZoneType));
+}
+
+void AAudio_ZoneActor::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+{
+    CurrentState.ThreatLevel = NewThreatLevel;
+
+    // Adjust ambient volume based on threat
+    float VolumeScale = 1.0f;
+    switch (NewThreatLevel)
+    {
+        case EAudio_ThreatLevel::Safe:     VolumeScale = 1.0f;  break;
+        case EAudio_ThreatLevel::Cautious: VolumeScale = 0.8f;  break;
+        case EAudio_ThreatLevel::Danger:   VolumeScale = 0.5f;  break;
+        case EAudio_ThreatLevel::Critical: VolumeScale = 0.2f;  break;
+    }
+
+    if (AmbientAudioComp && AmbientAudioComp->IsPlaying())
+    {
+        AmbientAudioComp->SetVolumeMultiplier(ZoneConfig.AmbientVolume * VolumeScale);
+    }
+
+    // Increase threat call frequency on danger/critical
+    if (NewThreatLevel == EAudio_ThreatLevel::Danger || NewThreatLevel == EAudio_ThreatLevel::Critical)
+    {
+        ZoneConfig.bHasThreatCalls = true;
+        ZoneConfig.ThreatCallInterval = (NewThreatLevel == EAudio_ThreatLevel::Critical) ? 4.0f : 6.0f;
+    }
+}
+
+void AAudio_ZoneActor::TickThreatCallTimer(float DeltaTime)
+{
+    ThreatCallAccumulator += DeltaTime;
+
+    if (ThreatCallAccumulator >= ZoneConfig.ThreatCallInterval)
+    {
+        ThreatCallAccumulator = 0.0f;
+        CurrentState.TimeSinceLastThreatCall = 0.0f;
+        PlayThreatCall();
+    }
+}
+
+void AAudio_ZoneActor::PlayThreatCall()
+{
+    // Play threat audio — sound asset assigned in Blueprint/editor
+    if (ThreatAudioComp && !ThreatAudioComp->IsPlaying())
+    {
+        ThreatAudioComp->Play();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Threat call played — zone %d, threat %d"),
+           static_cast<int32>(ZoneConfig.ZoneType),
+           static_cast<int32>(CurrentState.ThreatLevel));
+}
+
+// ─── UAudio_WorldSubsystem ────────────────────────────────────────────────────
+
+void UAudio_WorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    RegisteredZones.Empty();
+    UE_LOG(LogTemp, Log, TEXT("AudioWorldSubsystem: Initialized"));
+}
+
+void UAudio_WorldSubsystem::Deinitialize()
+{
+    RegisteredZones.Empty();
+    Super::Deinitialize();
+}
+
+void UAudio_WorldSubsystem::RegisterZone(AAudio_ZoneActor* Zone)
+{
+    if (Zone && !RegisteredZones.Contains(Zone))
+    {
+        RegisteredZones.Add(Zone);
+        UE_LOG(LogTemp, Log, TEXT("AudioWorldSubsystem: Registered zone %s (total: %d)"),
+               *Zone->GetActorLabel(), RegisteredZones.Num());
+    }
+}
+
+void UAudio_WorldSubsystem::UnregisterZone(AAudio_ZoneActor* Zone)
+{
+    if (Zone)
+    {
+        RegisteredZones.Remove(Zone);
+    }
+}
+
+AAudio_ZoneActor* UAudio_WorldSubsystem::GetActiveZoneForLocation(FVector WorldLocation) const
+{
+    AAudio_ZoneActor* NearestZone = nullptr;
+    float NearestDist = FLT_MAX;
+
+    for (AAudio_ZoneActor* Zone : RegisteredZones)
+    {
+        if (!Zone) continue;
+
+        float Dist = FVector::Dist(Zone->GetActorLocation(), WorldLocation);
+        if (Dist < Zone->ZoneConfig.BlendRadius && Dist < NearestDist)
+        {
+            NearestDist = Dist;
+            NearestZone = Zone;
+        }
+    }
+
+    return NearestZone;
+}
+
+void UAudio_WorldSubsystem::BroadcastThreatLevel(FVector ThreatOrigin, float Radius, EAudio_ThreatLevel Level)
+{
+    for (AAudio_ZoneActor* Zone : RegisteredZones)
+    {
+        if (!Zone) continue;
+
+        float Dist = FVector::Dist(Zone->GetActorLocation(), ThreatOrigin);
+        if (Dist <= Radius)
+        {
+            Zone->SetThreatLevel(Level);
+        }
+    }
+
+    GlobalState.ThreatLevel = Level;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioWorldSubsystem: Broadcast threat level %d from (%.0f,%.0f,%.0f) r=%.0f"),
+           static_cast<int32>(Level), ThreatOrigin.X, ThreatOrigin.Y, ThreatOrigin.Z, Radius);
 }
