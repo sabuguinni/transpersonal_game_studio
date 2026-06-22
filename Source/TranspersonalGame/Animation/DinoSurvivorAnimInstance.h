@@ -1,22 +1,27 @@
-// DinoSurvivorAnimInstance.h
-// Animation Agent #10 — Transpersonal Game Studio
-// AnimInstance for the prehistoric survivor character
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "DinoSurvivorAnimInstance.generated.h"
 
-// Survival posture enum — drives additive pose blending
 UENUM(BlueprintType)
-enum class EAnim_SurvivalPosture : uint8
+enum class EAnim_LocomotionState : uint8
 {
-    Upright     UMETA(DisplayName = "Upright"),
-    Cautious    UMETA(DisplayName = "Cautious"),
-    Exhausted   UMETA(DisplayName = "Exhausted"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Fleeing     UMETA(DisplayName = "Fleeing")
+    Idle        UMETA(DisplayName = "Idle"),
+    Walk        UMETA(DisplayName = "Walk"),
+    Run         UMETA(DisplayName = "Run"),
+    Sprint      UMETA(DisplayName = "Sprint"),
+    Crouch      UMETA(DisplayName = "Crouch"),
+    InAir       UMETA(DisplayName = "InAir")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_CombatStance : uint8
+{
+    Unarmed     UMETA(DisplayName = "Unarmed"),
+    Spear       UMETA(DisplayName = "Spear"),
+    Bow         UMETA(DisplayName = "Bow"),
+    Shield      UMETA(DisplayName = "Shield")
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -30,7 +35,7 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ---- Locomotion ----
+    // ── Locomotion ──────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     float Speed;
 
@@ -47,105 +52,83 @@ public:
     bool bIsSprinting;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bShouldMove;
+    EAnim_LocomotionState LocomotionState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsAccelerating;
+    // ── Combat ───────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    EAnim_CombatStance CombatStance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsJumping;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsAttacking;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsLanding;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsBlocking;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float JumpStartSpeed;
+    // ── Survival ─────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    float StaminaRatio;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float TimeSinceLastLand;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    float HealthRatio;
 
-    // ---- Foot IK ----
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    float LeftFootIKAlpha;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    bool bIsExhausted;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    float RightFootIKAlpha;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    bool bIsInjured;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    FVector LeftFootOffset;
+    // ── IK ───────────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftFootIKLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    FVector RightFootOffset;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightFootIKLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    FVector PelvisOffset;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float IKAlpha;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|FootIK")
-    float FootIKTraceDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|FootIK")
-    float FootIKInterpSpeed;
-
-    // ---- Aim Offset ----
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
-    float AimYaw;
-
+    // ── Lean / AimOffset ─────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
     float AimPitch;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
-    float AimYawDelta;
+    float AimYaw;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
-    bool bIsAiming;
+    float LeanAngle;
 
-    // ---- Survival Posture ----
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Posture")
-    EAnim_SurvivalPosture CurrentPosture;
+    // ── Thresholds (designer-tunable) ────────────────────────────────────────
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Config")
+    float WalkSpeedThreshold;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Posture")
-    float PostureBlendAlpha;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Config")
+    float RunSpeedThreshold;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Posture")
-    float SurvivalHealthRatio;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Config")
+    float SprintSpeedThreshold;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Posture")
-    float SurvivalStaminaRatio;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Config")
+    float IKTraceDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Posture")
-    bool bIsFleeing;
+    UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    void SetCombatStance(EAnim_CombatStance NewStance);
 
-    // ---- Lean ----
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Lean")
-    float LeanAmount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Lean")
-    float LeanInterpSpeed;
-
-    // ---- Public API ----
-    UFUNCTION(BlueprintCallable, Category = "Anim|Survival")
-    void SetSurvivalStats(float HealthRatio, float StaminaRatio, bool bFleeing);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Aim")
-    void SetAimingState(bool bAiming);
-
-protected:
-    void UpdateLocomotionState(float DeltaSeconds);
-    void UpdateFootIK(float DeltaSeconds);
-    void UpdateAimOffset(float DeltaSeconds);
-    void UpdateSurvivalPosture(float DeltaSeconds);
-    void UpdateLean(float DeltaSeconds);
-
-    FVector TraceFootIK(UWorld* World, const FName& FootBoneName, FVector& OutFootOffset, float DeltaSeconds);
+    UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    void TriggerAttack();
 
 private:
-    UPROPERTY()
-    ACharacter* OwnerCharacter;
+    void UpdateLocomotionState(float DeltaSeconds);
+    void UpdateCombatState(float DeltaSeconds);
+    void UpdateSurvivalState(float DeltaSeconds);
+    void UpdateFootIK(float DeltaSeconds);
+    void UpdateAimOffset(float DeltaSeconds);
 
     UPROPERTY()
-    UCharacterMovementComponent* OwnerMovement;
+    class ACharacter* OwnerCharacter;
 
+    UPROPERTY()
+    class UCharacterMovementComponent* MovementComponent;
+
+    float AttackCooldown;
     float PreviousSpeed;
-    FVector PreviousVelocityDirection;
-    float PreviousAimYaw;
 };
