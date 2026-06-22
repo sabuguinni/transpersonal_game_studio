@@ -1,72 +1,126 @@
-// BiomeManager.h
-// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260622_002
-// Manages biome zones, terrain features, and environmental audio triggers
-// for the MinPlayableMap. Four biomes: Forest, Plains, RockyRidge, RiverValley.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Engine/DataTable.h"
+#include "../SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// Biome type enum — unique prefix World_ to avoid conflicts
+// ============================================================
+// Biome system — P1 World Generation
+// Defines biome classification, transition blending, and
+// per-biome survival modifiers for the prehistoric world.
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
+enum class EEng_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Dense Forest"),
-    Plains      UMETA(DisplayName = "Open Plains"),
-    RockyRidge  UMETA(DisplayName = "Rocky Ridge"),
-    RiverValley UMETA(DisplayName = "River Valley"),
-    Unknown     UMETA(DisplayName = "Unknown")
+    None            UMETA(DisplayName = "None"),
+    Jungle          UMETA(DisplayName = "Jungle"),
+    Savanna         UMETA(DisplayName = "Savanna"),
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Volcanic        UMETA(DisplayName = "Volcanic"),
+    Coastal         UMETA(DisplayName = "Coastal"),
+    Forest          UMETA(DisplayName = "Forest"),
+    Desert          UMETA(DisplayName = "Desert"),
+    Tundra          UMETA(DisplayName = "Tundra"),
+    River           UMETA(DisplayName = "River"),
 };
 
-// Per-biome configuration data
 USTRUCT(BlueprintType)
-struct FWorld_BiomeConfig
+struct TRANSPERSONALGAME_API FEng_BiomeSurvivalModifiers
+{
+    GENERATED_BODY()
+
+    // Temperature offset in Celsius relative to world baseline
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float TemperatureOffset = 0.0f;
+
+    // Multiplier on player thirst drain (1.0 = normal)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float ThirstDrainMultiplier = 1.0f;
+
+    // Multiplier on player hunger drain
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float HungerDrainMultiplier = 1.0f;
+
+    // Multiplier on stamina recovery speed
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float StaminaRecoveryMultiplier = 1.0f;
+
+    // Visibility range modifier (fog/canopy density)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float VisibilityRange = 5000.0f;
+
+    // Ambient danger level 0-1 (affects NPC spawn rates)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float DangerLevel = 0.5f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeData : public FTableRowBase
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    EEng_BiomeType BiomeType = EEng_BiomeType::None;
 
-    // World-space center of this biome zone
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector ZoneCenter = FVector::ZeroVector;
+    FName BiomeName = NAME_None;
 
-    // Radius in Unreal Units within which this biome is active
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float ZoneRadius = 2000.0f;
+    FLinearColor DebugColor = FLinearColor::White;
 
-    // Ambient temperature in Celsius — affects player survival stats
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float AmbientTemperatureCelsius = 28.0f;
+    FEng_BiomeSurvivalModifiers SurvivalModifiers;
 
-    // Humidity 0-1 — affects thirst drain rate
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float Humidity = 0.5f;
+    // Minimum/maximum altitude for this biome (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float MinAltitude = 0.0f;
 
-    // Danger level 0-1 — used by AI spawn system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|AI")
-    float DangerLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float MaxAltitude = 50000.0f;
 
-    // Max dinosaur population in this zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|AI")
-    int32 MaxDinoPopulation = 5;
+    // Rainfall 0-1 (drives vegetation density)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float Rainfall = 0.5f;
 
-    // Fog density multiplier for this biome
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
-    float FogDensityMultiplier = 1.0f;
-
-    FWorld_BiomeConfig() {}
+    // Primary dinosaur species that spawn in this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Fauna")
+    TArray<FName> DinosaurSpecies;
 };
 
-// Biome transition event delegate
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FWorld_OnBiomeChanged,
-    EWorld_BiomeType, OldBiome,
-    EWorld_BiomeType, NewBiome);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeSample
+{
+    GENERATED_BODY()
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (DisplayName = "Biome Manager"))
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EEng_BiomeType PrimaryBiome = EEng_BiomeType::None;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EEng_BiomeType SecondaryBiome = EEng_BiomeType::None;
+
+    // 0-1 blend weight between primary and secondary
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float BlendWeight = 0.0f;
+
+    // Blended survival modifiers
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FEng_BiomeSurvivalModifiers BlendedModifiers;
+};
+
+/**
+ * ABiomeManager
+ *
+ * World-space biome classification and query system.
+ * Placed once in the level. Other systems query it via
+ * GetBiomeAtLocation() to get blended biome data.
+ *
+ * Architecture: Singleton actor pattern — one per world.
+ * Biome boundaries driven by noise + altitude + moisture.
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -74,63 +128,84 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
+    // ── Configuration ──────────────────────────────────────────
+
+    /** DataTable of FEng_BiomeData rows, keyed by biome name */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    UDataTable* BiomeDataTable;
+
+    /** World scale for the noise-based biome map (larger = bigger biomes) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float BiomeNoiseScale = 0.00015f;
+
+    /** Blend radius at biome edges (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float BiomeBlendRadius = 50000.0f;
+
+    /** Random seed for biome placement */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    int32 BiomeSeed = 42;
+
+    // ── Runtime State ──────────────────────────────────────────
+
+    /** Cached biome data map, populated from DataTable at BeginPlay */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Runtime")
+    TMap<uint8, FEng_BiomeData> BiomeDataMap;
+
+    // ── Public API ─────────────────────────────────────────────
+
+    /**
+     * Query the biome at a world-space location.
+     * Returns blended sample if on a biome boundary.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeSample GetBiomeAtLocation(FVector WorldLocation) const;
+
+    /**
+     * Get the primary biome type at a location (fast path, no blending).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetPrimaryBiomeType(FVector WorldLocation) const;
+
+    /**
+     * Get blended survival modifiers for a world location.
+     * Used by the character survival system every tick.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeSurvivalModifiers GetSurvivalModifiers(FVector WorldLocation) const;
+
+    /**
+     * Debug: draw biome boundaries in the viewport.
+     */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void DrawBiomeBoundaries();
+
+    /**
+     * Get the singleton BiomeManager from the world.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome", meta = (WorldContext = "WorldContextObject"))
+    static ABiomeManager* GetInstance(UObject* WorldContextObject);
+
 protected:
     virtual void BeginPlay() override;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // --- Biome Configurations ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
-
-    // Current biome the player is in
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biomes")
-    EWorld_BiomeType CurrentPlayerBiome = EWorld_BiomeType::Unknown;
-
-    // How often (seconds) to check player biome position
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float BiomeCheckInterval = 2.0f;
-
-    // Broadcast when player crosses biome boundary
-    UPROPERTY(BlueprintAssignable, Category = "Biomes")
-    FWorld_OnBiomeChanged OnBiomeChanged;
-
-    // --- API ---
-
-    // Returns the biome type at a given world location
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    // Returns config for a given biome type (nullptr if not found)
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    bool GetBiomeConfig(EWorld_BiomeType BiomeType, FWorld_BiomeConfig& OutConfig) const;
-
-    // Returns danger level at a given location (0-1)
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
-
-    // Returns ambient temperature at a given location
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
-
-    // Returns humidity at a given location (affects thirst drain)
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    float GetHumidityAtLocation(const FVector& WorldLocation) const;
-
-    // Force-initialize the four default MinPlayableMap biomes
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biomes")
-    void InitializeDefaultBiomes();
+    virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-    float BiomeCheckTimer = 0.0f;
+    /** Evaluate raw biome noise at a 2D position, returns 0-1 */
+    float EvaluateBiomeNoise(float X, float Y, int32 OctaveOffset) const;
 
-    // Cached player pawn location for biome checks
-    FVector LastCheckedPlayerLocation = FVector::ZeroVector;
+    /** Map noise value + altitude to a biome type */
+    EEng_BiomeType ClassifyBiome(float NoiseValue, float Altitude, float Moisture) const;
 
-    void CheckPlayerBiome();
-    void SetupForestBiome();
-    void SetupPlainsBiome();
-    void SetupRockyRidgeBiome();
-    void SetupRiverValleyBiome();
+    /** Blend two BiomeData structs by weight */
+    FEng_BiomeSurvivalModifiers BlendModifiers(
+        const FEng_BiomeSurvivalModifiers& A,
+        const FEng_BiomeSurvivalModifiers& B,
+        float BlendWeight) const;
+
+    /** Load BiomeDataTable rows into BiomeDataMap */
+    void InitializeBiomeDataMap();
+
+    /** Cached singleton reference */
+    static TWeakObjectPtr<ABiomeManager> InstanceCache;
 };
