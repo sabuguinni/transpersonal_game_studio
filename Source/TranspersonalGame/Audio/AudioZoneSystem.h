@@ -2,125 +2,84 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/TriggerSphere.h"
 #include "AudioZoneSystem.generated.h"
 
-// ============================================================
-// Audio Zone System — Agent #16 Audio Agent
-// Prehistoric survival ambient audio: proximity-based zone
-// triggers for camp, predator, water, cave, herd environments.
-// ============================================================
-
+// Audio zone type — controls which ambient layer is active
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Camp            UMETA(DisplayName = "Camp"),
-    PredatorNear    UMETA(DisplayName = "PredatorNear"),
-    Water           UMETA(DisplayName = "Water"),
-    Cave            UMETA(DisplayName = "Cave"),
-    OpenPlains      UMETA(DisplayName = "OpenPlains"),
-    Forest          UMETA(DisplayName = "Forest"),
-    None            UMETA(DisplayName = "None")
+    None        UMETA(DisplayName = "None"),
+    Camp        UMETA(DisplayName = "Camp"),       // Campfire, voices, safety
+    Forest      UMETA(DisplayName = "Forest"),     // Wind, insects, birds
+    Danger      UMETA(DisplayName = "Danger"),     // Tension sting, heartbeat
+    Combat      UMETA(DisplayName = "Combat"),     // Percussion, chaos
+    Night       UMETA(DisplayName = "Night"),      // Crickets, distant howls
+    TRexProximity UMETA(DisplayName = "TRexProximity") // Ground rumble, silence of prey
 };
 
-UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
-{
-    Safe        UMETA(DisplayName = "Safe"),
-    Cautious    UMETA(DisplayName = "Cautious"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_ZoneConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float ProximityRadius = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float AmbientVolume = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float CrossfadeDuration = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bLooping = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString FreesoundAssetID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString FreesoundPreviewURL;
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_DinosaурSoundProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    FName DinosaurSpecies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float RoarRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float FootstepRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float FootstepInterval = 1.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float BreathingRadius = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float RoarCooldown = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    bool bCausesScreenShake = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float ScreenShakeIntensity = 1.0f;
-};
-
+// Describes a single ambient audio layer
 USTRUCT(BlueprintType)
 struct FAudio_AmbientLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    FString LayerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FName LayerID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    EAudio_ZoneType AssociatedZone = EAudio_ZoneType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float BaseVolume = 0.6f;
+    // Volume 0.0 - 1.0
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Volume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float NightMultiplier = 1.3f;
+    // Fade-in time in seconds when zone becomes active
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInDuration = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float RainMultiplier = 0.5f;
+    // Fade-out time in seconds when zone becomes inactive
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutDuration = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtNight = true;
+    // Whether this layer loops
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtDay = true;
+    // Freesound asset reference ID (for documentation)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString FreesoundID;
+};
+
+// Describes a one-shot audio event (dialogue sting, danger alert)
+USTRUCT(BlueprintType)
+struct FAudio_EventCue
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FName CueID;
+
+    // Game event that triggers this cue
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FName TriggerEvent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Volume = 0.8f;
+
+    // Delay after trigger event fires (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float TriggerDelay = 0.0f;
+
+    // Duration of the cue (seconds) — should match dialogue line DisplayDuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Duration = 4.0f;
 };
 
 /**
  * UAudio_ZoneComponent
- * Attach to any actor to define its ambient audio zone.
- * Handles proximity detection, volume crossfade, and
- * threat-level-driven music intensity changes.
+ * ActorComponent that manages ambient audio zone transitions and event cues.
+ * Attach to AmbientSound actors or zone trigger volumes.
+ * Drives MetaSound parameter blocks when MetaSounds are available.
  */
 UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Audio Zone Component")
 class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
@@ -130,116 +89,65 @@ class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
 public:
     UAudio_ZoneComponent();
 
-    // Zone configuration
+    // Current active zone type
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
+    EAudio_ZoneType ActiveZone = EAudio_ZoneType::Forest;
 
-    // Current threat level — set by AI/combat system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-
-    // Ambient layers active in this zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    // Registered ambient layers for this zone actor
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layers")
     TArray<FAudio_AmbientLayer> AmbientLayers;
 
-    // Is player currently inside this zone?
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone", meta = (AllowPrivateAccess = "true"))
-    bool bPlayerInZone = false;
+    // Registered one-shot event cues
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Events")
+    TArray<FAudio_EventCue> EventCues;
 
-    // Distance to player (updated each tick)
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone", meta = (AllowPrivateAccess = "true"))
-    float DistanceToPlayer = 99999.0f;
+    // Radius (cm) within which this zone is audible
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    float ZoneRadius = 1500.0f;
 
-    // Current blended volume (0-1)
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone", meta = (AllowPrivateAccess = "true"))
-    float CurrentVolume = 0.0f;
+    // Whether zone transitions are currently enabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    bool bZoneActive = true;
 
-    // ---- UActorComponent overrides ----
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // ---- Blueprint callable ----
+    // Transition to a new zone type with crossfade
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
+    void TransitionToZone(EAudio_ZoneType NewZone, float CrossfadeDuration = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetZoneType(EAudio_ZoneType NewZoneType);
+    // Fire a named event cue immediately
+    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
+    void FireEventCue(FName CueID);
 
+    // Get current zone type
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    EAudio_ZoneType GetActiveZone() const { return ActiveZone; }
+
+    // Check if player is within zone radius
     UFUNCTION(BlueprintPure, Category = "Audio|Zone")
     bool IsPlayerInZone() const;
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    float GetNormalizedProximity() const;
+    // Register a new ambient layer at runtime
+    UFUNCTION(BlueprintCallable, Category = "Audio|Layers")
+    void RegisterAmbientLayer(FAudio_AmbientLayer NewLayer);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void ForceEnterZone();
+    // Register a new event cue at runtime
+    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
+    void RegisterEventCue(FAudio_EventCue NewCue);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void ForceExitZone();
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    EAudio_ThreatLevel GetCurrentThreatLevel() const;
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    FString GetZoneDebugInfo() const;
-
-private:
-    void UpdateProximity(float DeltaTime);
-    void CrossfadeVolume(float TargetVolume, float DeltaTime);
-    float ComputeTargetVolume() const;
-
-    FTimerHandle ThreatLevelCooldownHandle;
-};
-
-/**
- * UAudio_DinosaurSoundManager
- * Manages per-species dinosaur audio profiles.
- * Drives footstep rumble, roar radius, and screen shake
- * based on distance to player.
- */
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Dinosaur Sound Manager")
-class TRANSPERSONALGAME_API UAudio_DinosaurSoundManager : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UAudio_DinosaurSoundManager();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    FAudio_DinosaурSoundProfile SoundProfile;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dinosaur", meta = (AllowPrivateAccess = "true"))
-    float CurrentDistanceToPlayer = 99999.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dinosaur", meta = (AllowPrivateAccess = "true"))
-    bool bPlayerInRoarRadius = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dinosaur", meta = (AllowPrivateAccess = "true"))
-    bool bPlayerInFootstepRadius = false;
-
+protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void TriggerRoar();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void TriggerFootstep();
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Dinosaur")
-    float GetFootstepScreenShakeIntensity() const;
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Dinosaur")
-    bool ShouldTriggerScreenShake() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void SetDinosaurSpecies(FName Species);
-
 private:
-    float FootstepTimer = 0.0f;
-    float RoarCooldownTimer = 0.0f;
-    bool bRoarOnCooldown = false;
+    // Time elapsed in current zone
+    float ZoneActiveTime = 0.0f;
 
-    void UpdateDistanceToPlayer();
-    void InitDefaultProfiles();
+    // Previous zone for crossfade tracking
+    EAudio_ZoneType PreviousZone = EAudio_ZoneType::None;
+
+    // Crossfade progress (0.0 = full previous, 1.0 = full new)
+    float CrossfadeProgress = 1.0f;
+    float CrossfadeDurationRemaining = 0.0f;
+
+    // Initialize default layers based on zone type
+    void InitializeDefaultLayers();
 };
