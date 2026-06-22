@@ -1,206 +1,256 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribe crowd simulation using UE5 Mass AI primitives
+// Implementation of prehistoric crowd simulation with tribe groups, flee events, LOD clusters
 
 #include "CrowdSimulationManager.h"
-#include "NavigationSystem.h"
-#include "NavigationPath.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-UCrowdSimulationManager::UCrowdSimulationManager()
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxActiveAgents = 50;
-    AgentUpdateRadius = 5000.0f;
-    LODDistanceClose = 1500.0f;
-    LODDistanceMid = 4000.0f;
-    bSimulationActive = false;
-    TickInterval = 0.1f;
-    CurrentTickAccumulator = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = TickInterval;
+    MaxActiveAgents = 50000;
+    MaxFullDetailAgents = 200;
+    LODSwitchDistance = 2000.0f;
+    FleeResponseRadius = 600.0f;
+    CurrentActiveCount = 0;
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bSimulationActive = true;
-    ActiveAgents.Reserve(MaxActiveAgents);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized — max %d agents"), MaxActiveAgents);
-}
+    Super::BeginPlay();
 
-void UCrowdSimulationManager::Deinitialize()
-{
-    bSimulationActive = false;
-    ActiveAgents.Empty();
-    Super::Deinitialize();
-}
+    // Register default waypoints matching MinPlayableMap layout
+    RegisterWaypoint(FVector(0.0f, 0.0f, 80.0f),       FName("WP_Center"));
+    RegisterWaypoint(FVector(800.0f, 0.0f, 80.0f),     FName("WP_East"));
+    RegisterWaypoint(FVector(-800.0f, 0.0f, 80.0f),    FName("WP_West"));
+    RegisterWaypoint(FVector(0.0f, 800.0f, 80.0f),     FName("WP_North"));
+    RegisterWaypoint(FVector(0.0f, -800.0f, 80.0f),    FName("WP_South"));
+    RegisterWaypoint(FVector(1500.0f, 800.0f, 80.0f),  FName("WP_TribeCamp"));
 
-void UCrowdSimulationManager::RegisterAgent(FCrowd_AgentData& AgentData)
-{
-    if (ActiveAgents.Num() >= MaxActiveAgents)
+    // Connect waypoints (simple star topology from center)
+    if (WaypointGraph.Num() >= 6)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Agent cap reached (%d)"), MaxActiveAgents);
-        return;
-    }
-    AgentData.AgentID = NextAgentID++;
-    AgentData.bIsActive = true;
-    AgentData.CurrentLOD = ECrowd_AgentLOD::Full;
-    ActiveAgents.Add(AgentData);
-    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulationManager: Registered agent ID=%d type=%d"), AgentData.AgentID, (int32)AgentData.AgentType);
-}
-
-void UCrowdSimulationManager::UnregisterAgent(int32 AgentID)
-{
-    ActiveAgents.RemoveAll([AgentID](const FCrowd_AgentData& A) { return A.AgentID == AgentID; });
-}
-
-void UCrowdSimulationManager::Tick(float DeltaTime)
-{
-    if (!bSimulationActive) return;
-
-    CurrentTickAccumulator += DeltaTime;
-    if (CurrentTickAccumulator < TickInterval) return;
-    CurrentTickAccumulator = 0.0f;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Get player location for LOD calculation
-    APlayerController* PC = World->GetFirstPlayerController();
-    FVector PlayerLoc = FVector::ZeroVector;
-    if (PC && PC->GetPawn())
-    {
-        PlayerLoc = PC->GetPawn()->GetActorLocation();
+        WaypointGraph[0].ConnectedNodeIndices = {1, 2, 3, 4, 5};
+        WaypointGraph[1].ConnectedNodeIndices = {0, 5};
+        WaypointGraph[2].ConnectedNodeIndices = {0, 4};
+        WaypointGraph[3].ConnectedNodeIndices = {0, 5};
+        WaypointGraph[4].ConnectedNodeIndices = {0, 2};
+        WaypointGraph[5].ConnectedNodeIndices = {0, 1, 3};
     }
 
-    // Update each agent
+    // Spawn default tribe at camp
+    SpawnTribeGroup(FVector(1500.0f, 800.0f, 100.0f), 8, 1);
+
+    // Register LOD clusters for distant herds
+    FCrowd_LODCluster HerdA;
+    HerdA.CenterLocation = FVector(3000.0f, 1500.0f, 100.0f);
+    HerdA.AgentCount = 24;
+    HerdA.ClusterRadius = 600.0f;
+    HerdA.ClusterType = ECrowd_GroupType::HerdAnimal;
+    LODClusters.Add(HerdA);
+
+    FCrowd_LODCluster HerdB;
+    HerdB.CenterLocation = FVector(-2500.0f, 2000.0f, 100.0f);
+    HerdB.AgentCount = 18;
+    HerdB.ClusterRadius = 500.0f;
+    HerdB.ClusterType = ECrowd_GroupType::HerdAnimal;
+    LODClusters.Add(HerdB);
+
+    FCrowd_LODCluster Nomads;
+    Nomads.CenterLocation = FVector(500.0f, -3000.0f, 100.0f);
+    Nomads.AgentCount = 12;
+    Nomads.ClusterRadius = 400.0f;
+    Nomads.ClusterType = ECrowd_GroupType::NomadGroup;
+    LODClusters.Add(Nomads);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized with %d agents, %d waypoints, %d LOD clusters"),
+        CurrentActiveCount, WaypointGraph.Num(), LODClusters.Num());
+}
+
+void ACrowdSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    TickAgents(DeltaTime);
+}
+
+void ACrowdSimulationManager::SpawnTribeGroup(FVector CampCenter, int32 MemberCount, int32 GroupID)
+{
+    const int32 Clamped = FMath::Clamp(MemberCount, 1, 32);
+    const float Radius = 300.0f;
+
+    for (int32 i = 0; i < Clamped; ++i)
+    {
+        if (ActiveAgents.Num() >= MaxActiveAgents)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: MaxActiveAgents (%d) reached"), MaxActiveAgents);
+            break;
+        }
+
+        const float Angle = (float)i / (float)Clamped * 2.0f * PI;
+        const float OffsetX = FMath::Cos(Angle) * Radius * FMath::FRandRange(0.3f, 1.0f);
+        const float OffsetY = FMath::Sin(Angle) * Radius * FMath::FRandRange(0.3f, 1.0f);
+
+        FCrowd_AgentData Agent;
+        Agent.Location = CampCenter + FVector(OffsetX, OffsetY, 0.0f);
+        Agent.State = (i == 0) ? ECrowd_AgentState::Working : ECrowd_AgentState::Wandering;
+        Agent.GroupType = ECrowd_GroupType::TribeMember;
+        Agent.MoveSpeed = FMath::FRandRange(80.0f, 160.0f);
+        Agent.FleeRadius = FleeResponseRadius;
+        Agent.GroupID = GroupID;
+
+        ActiveAgents.Add(Agent);
+        ++CurrentActiveCount;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned tribe group %d with %d members at (%.0f,%.0f)"),
+        GroupID, Clamped, CampCenter.X, CampCenter.Y);
+}
+
+void ACrowdSimulationManager::TriggerFleeEvent(FVector ThreatLocation, float ThreatRadius)
+{
+    int32 AffectedCount = 0;
+
     for (FCrowd_AgentData& Agent : ActiveAgents)
     {
-        if (!Agent.bIsActive) continue;
-        UpdateAgentLOD(Agent, PlayerLoc);
-        UpdateAgentBehavior(Agent, DeltaTime * (TickInterval / DeltaTime));
-    }
-}
-
-void UCrowdSimulationManager::UpdateAgentLOD(FCrowd_AgentData& Agent, const FVector& PlayerLocation)
-{
-    float Distance = FVector::Dist(Agent.CurrentLocation, PlayerLocation);
-
-    if (Distance < LODDistanceClose)
-    {
-        Agent.CurrentLOD = ECrowd_AgentLOD::Full;
-    }
-    else if (Distance < LODDistanceMid)
-    {
-        Agent.CurrentLOD = ECrowd_AgentLOD::Reduced;
-    }
-    else
-    {
-        Agent.CurrentLOD = ECrowd_AgentLOD::Minimal;
-    }
-}
-
-void UCrowdSimulationManager::UpdateAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Skip full simulation for distant agents
-    if (Agent.CurrentLOD == ECrowd_AgentLOD::Minimal) return;
-
-    switch (Agent.AgentType)
-    {
-        case ECrowd_AgentType::Gatherer:
-            SimulateGathererBehavior(Agent, DeltaTime);
-            break;
-        case ECrowd_AgentType::Hunter:
-            SimulateHunterBehavior(Agent, DeltaTime);
-            break;
-        case ECrowd_AgentType::Sentinel:
-            SimulateSentinelBehavior(Agent, DeltaTime);
-            break;
-        default:
-            break;
-    }
-}
-
-void UCrowdSimulationManager::SimulateGathererBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Gatherers move slowly between resource nodes
-    // Simplified: wander within home radius
-    if (FVector::Dist(Agent.CurrentLocation, Agent.HomeLocation) > Agent.WanderRadius)
-    {
-        // Move back toward home
-        FVector Direction = (Agent.HomeLocation - Agent.CurrentLocation).GetSafeNormal();
-        Agent.CurrentLocation += Direction * Agent.MoveSpeed * DeltaTime;
-    }
-    else
-    {
-        // Random wander
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-50.0f, 50.0f),
-            FMath::RandRange(-50.0f, 50.0f),
-            0.0f
-        );
-        Agent.CurrentLocation += RandomOffset * DeltaTime;
-    }
-}
-
-void UCrowdSimulationManager::SimulateHunterBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Hunters patrol a wider radius, alert to threats
-    if (Agent.bAlerted)
-    {
-        // Move toward threat location
-        FVector Direction = (Agent.TargetLocation - Agent.CurrentLocation).GetSafeNormal();
-        Agent.CurrentLocation += Direction * Agent.MoveSpeed * 1.5f * DeltaTime;
-    }
-    else
-    {
-        // Standard patrol
-        SimulateGathererBehavior(Agent, DeltaTime);
-    }
-}
-
-void UCrowdSimulationManager::SimulateSentinelBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Sentinels stay near home, rotate to scan
-    // Minimal movement — just update facing direction
-    Agent.FacingAngle += 15.0f * DeltaTime;
-    if (Agent.FacingAngle > 360.0f) Agent.FacingAngle -= 360.0f;
-}
-
-void UCrowdSimulationManager::AlertNearbyAgents(const FVector& ThreatLocation, float AlertRadius, ECrowd_ThreatType ThreatType)
-{
-    int32 AlertedCount = 0;
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (!Agent.bIsActive) continue;
-        float Distance = FVector::Dist(Agent.CurrentLocation, ThreatLocation);
-        if (Distance <= AlertRadius)
+        const float Dist = FVector::Dist(Agent.Location, ThreatLocation);
+        if (Dist <= ThreatRadius)
         {
-            Agent.bAlerted = true;
-            Agent.TargetLocation = ThreatLocation;
-            Agent.CurrentThreat = ThreatType;
-            AlertedCount++;
+            Agent.State = ECrowd_AgentState::Fleeing;
+            ++AffectedCount;
         }
     }
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Alerted %d agents — threat type %d at (%.0f,%.0f,%.0f)"),
-        AlertedCount, (int32)ThreatType, ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: FleeEvent at (%.0f,%.0f) radius=%.0f affected %d agents"),
+        ThreatLocation.X, ThreatLocation.Y, ThreatRadius, AffectedCount);
 }
 
-int32 UCrowdSimulationManager::GetActiveAgentCount() const
+void ACrowdSimulationManager::RegisterWaypoint(FVector WorldPos, FName Label)
 {
-    return ActiveAgents.Num();
+    FCrowd_WaypointNode Node;
+    Node.WorldPosition = WorldPos;
+    Node.NodeLabel = Label;
+    Node.TrafficWeight = 1.0f;
+    WaypointGraph.Add(Node);
 }
 
-TArray<FCrowd_AgentData> UCrowdSimulationManager::GetAgentsInRadius(const FVector& Center, float Radius) const
+void ACrowdSimulationManager::UpdateLODClusters(FVector PlayerLocation)
 {
-    TArray<FCrowd_AgentData> Result;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    for (FCrowd_LODCluster& Cluster : LODClusters)
     {
-        if (FVector::Dist(Agent.CurrentLocation, Center) <= Radius)
+        const float Dist = FVector::Dist(Cluster.CenterLocation, PlayerLocation);
+        Cluster.bIsVisible = (Dist <= LODSwitchDistance * 3.0f);
+    }
+}
+
+int32 ACrowdSimulationManager::GetActiveAgentCount() const
+{
+    return CurrentActiveCount;
+}
+
+void ACrowdSimulationManager::SetAgentState(int32 AgentIndex, ECrowd_AgentState NewState)
+{
+    if (ActiveAgents.IsValidIndex(AgentIndex))
+    {
+        ActiveAgents[AgentIndex].State = NewState;
+    }
+}
+
+FCrowd_AgentData ACrowdSimulationManager::GetAgentData(int32 AgentIndex) const
+{
+    if (ActiveAgents.IsValidIndex(AgentIndex))
+    {
+        return ActiveAgents[AgentIndex];
+    }
+    return FCrowd_AgentData();
+}
+
+// ─── Private ──────────────────────────────────────────────────────────────────
+
+void ACrowdSimulationManager::TickAgents(float DeltaTime)
+{
+    // Only tick full-detail agents (first MaxFullDetailAgents)
+    const int32 TickCount = FMath::Min(ActiveAgents.Num(), MaxFullDetailAgents);
+
+    for (int32 i = 0; i < TickCount; ++i)
+    {
+        UpdateAgentMovement(ActiveAgents[i], DeltaTime);
+    }
+}
+
+void ACrowdSimulationManager::UpdateAgentMovement(FCrowd_AgentData& Agent, float DeltaTime)
+{
+    switch (Agent.State)
+    {
+    case ECrowd_AgentState::Wandering:
+    {
+        // Simple random wander within local area
+        const FVector Target = GetNextWaypointTarget(Agent);
+        const FVector Dir = (Target - Agent.Location).GetSafeNormal();
+        Agent.Location += Dir * Agent.MoveSpeed * DeltaTime;
+        break;
+    }
+    case ECrowd_AgentState::Fleeing:
+    {
+        // Move away from group center (simplified flee)
+        const FVector FleeDir = FVector(FMath::FRandRange(-1.0f, 1.0f), FMath::FRandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
+        Agent.Location += FleeDir * Agent.MoveSpeed * 2.0f * DeltaTime;
+
+        // After fleeing, transition to wandering
+        AccumulatedTime += DeltaTime;
+        if (AccumulatedTime > 5.0f)
         {
-            Result.Add(Agent);
+            Agent.State = ECrowd_AgentState::Wandering;
+        }
+        break;
+    }
+    case ECrowd_AgentState::Idle:
+    case ECrowd_AgentState::Working:
+    case ECrowd_AgentState::Gathering:
+    case ECrowd_AgentState::Sleeping:
+    default:
+        // Stationary states — no movement
+        break;
+    }
+}
+
+FVector ACrowdSimulationManager::GetNextWaypointTarget(const FCrowd_AgentData& Agent) const
+{
+    if (WaypointGraph.Num() == 0)
+    {
+        return Agent.Location;
+    }
+
+    // Find nearest waypoint
+    int32 NearestIdx = 0;
+    float NearestDist = MAX_FLT;
+    for (int32 i = 0; i < WaypointGraph.Num(); ++i)
+    {
+        const float D = FVector::Dist(Agent.Location, WaypointGraph[i].WorldPosition);
+        if (D < NearestDist)
+        {
+            NearestDist = D;
+            NearestIdx = i;
         }
     }
-    return Result;
+
+    // Pick a connected node randomly
+    const FCrowd_WaypointNode& Nearest = WaypointGraph[NearestIdx];
+    if (Nearest.ConnectedNodeIndices.Num() > 0)
+    {
+        const int32 RandConn = FMath::RandRange(0, Nearest.ConnectedNodeIndices.Num() - 1);
+        const int32 TargetIdx = Nearest.ConnectedNodeIndices[RandConn];
+        if (WaypointGraph.IsValidIndex(TargetIdx))
+        {
+            return WaypointGraph[TargetIdx].WorldPosition;
+        }
+    }
+
+    return WaypointGraph[NearestIdx].WorldPosition;
+}
+
+bool ACrowdSimulationManager::IsAgentInLODRange(const FCrowd_AgentData& Agent, const FVector& PlayerLoc) const
+{
+    return FVector::Dist(Agent.Location, PlayerLoc) <= LODSwitchDistance;
 }
