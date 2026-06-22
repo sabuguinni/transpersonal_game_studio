@@ -1,241 +1,491 @@
 // NPCBehaviorComponent.cpp
-// NPC Behavior Agent #11 — Transpersonal Game Studio
-// Full implementation of prehistoric NPC behavior state machine
+// NPC Behavior Agent #11 — PROD_CYCLE_AUTO_20260622_009
+// Full implementation of modular NPC behavior state machine
 
 #include "NPCBehaviorComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+
+// ─── Constructor ──────────────────────────────────────────────────────────────
 
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    CurrentState = ENPC_BehaviorState::Idle;
-    HomeLocation = FVector::ZeroVector;
-    CurrentPatrolTarget = FVector::ZeroVector;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for performance
+    CurrentHealth = MaxHealth;
 }
+
+// ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-    HomeLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    CurrentPatrolTarget = HomeLocation;
+
+    // Cache home location from owner spawn position
+    if (AActor* Owner = GetOwner())
+    {
+        HomeLocation = Owner->GetActorLocation();
+    }
+
+    // Initialize health
+    CurrentHealth = MaxHealth;
+
+    // Generate patrol waypoints around home
+    GeneratePatrolWaypoints();
+
+    // Start patrolling
+    CurrentState = ENPC_BehaviorState::Patrolling;
 }
 
-void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                           FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Decay threat memory every tick
-    DecayThreatMemory(DeltaTime);
-
-    // Scan for new threats
-    ScanForThreats();
-
-    // Auto-transition based on threat level
-    float MaxThreat = GetMaxThreatLevel();
-    if (MaxThreat > 0.7f && CurrentState != ENPC_BehaviorState::Flee && CurrentState != ENPC_BehaviorState::Dead)
+    if (!IsAlive())
     {
-        SetBehaviorState(ENPC_BehaviorState::Flee);
-    }
-    else if (MaxThreat > 0.3f && CurrentState == ENPC_BehaviorState::Idle)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Alert);
-    }
-    else if (MaxThreat < 0.1f && CurrentState == ENPC_BehaviorState::Alert)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
+        return;
     }
 
-    // Execute current state behavior
+    // Decay memory over time
+    UpdateMemoryDecay(DeltaTime);
+    TimeSinceLastAttack += DeltaTime;
+
+    // State machine dispatch
     switch (CurrentState)
     {
         case ENPC_BehaviorState::Idle:
-            UpdateIdleBehavior(DeltaTime);
+        case ENPC_BehaviorState::Patrolling:
+            TickPatrol(DeltaTime);
             break;
-        case ENPC_BehaviorState::Patrol:
-            UpdatePatrolBehavior(DeltaTime);
+        case ENPC_BehaviorState::Alerted:
+            TickAlert(DeltaTime);
             break;
-        case ENPC_BehaviorState::Flee:
-            UpdateFleeBehavior(DeltaTime);
+        case ENPC_BehaviorState::Chasing:
+            TickChase(DeltaTime);
             break;
-        case ENPC_BehaviorState::Forage:
-            UpdateForageBehavior(DeltaTime);
+        case ENPC_BehaviorState::Attacking:
+            TickAttack(DeltaTime);
+            break;
+        case ENPC_BehaviorState::Fleeing:
+            TickFlee(DeltaTime);
             break;
         default:
             break;
     }
 }
 
+// ─── State Machine ────────────────────────────────────────────────────────────
+
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
-    if (CurrentState == NewState) return;
+    if (NewState == CurrentState)
+    {
+        return;
+    }
+
+    ENPC_BehaviorState OldState = CurrentState;
     CurrentState = NewState;
-    bHasPatrolTarget = false;
+    OnStateChanged.Broadcast(OldState, NewState);
 }
 
-void UNPCBehaviorComponent::RegisterThreat(AActor* ThreatActor, float ThreatLevel)
+void UNPCBehaviorComponent::TickPatrol(float DeltaTime)
 {
-    if (!ThreatActor) return;
-
-    // Check if threat already in memory
-    for (FNPC_ThreatMemory& Mem : ThreatMemory)
+    // Check if player is within detection radius — transition to Alerted
+    float DistToPlayer = GetDistanceToPlayer();
+    if (DistToPlayer > 0.0f && DistToPlayer <= CombatConfig.DetectionRadius)
     {
-        if (Mem.ThreatActor == ThreatActor)
+        AActor* Player = FindPlayerActor();
+        if (Player && CanSeePlayer(Player))
         {
-            Mem.ThreatLevel = FMath::Max(Mem.ThreatLevel, ThreatLevel);
-            Mem.LastSeenTime = 0.0f;
-            Mem.LastKnownLocation = ThreatActor->GetActorLocation();
+            UpdatePlayerSighting(Player->GetActorLocation());
+            SetBehaviorState(ENPC_BehaviorState::Alerted);
             return;
         }
     }
 
-    // Add new threat
-    FNPC_ThreatMemory NewThreat;
-    NewThreat.ThreatActor = ThreatActor;
-    NewThreat.ThreatLevel = ThreatLevel;
-    NewThreat.LastSeenTime = 0.0f;
-    NewThreat.LastKnownLocation = ThreatActor->GetActorLocation();
-    ThreatMemory.Add(NewThreat);
-}
-
-void UNPCBehaviorComponent::DecayThreatMemory(float DeltaTime)
-{
-    const float DecayRate = 0.05f;
-    const float ForgetThreshold = 0.05f;
-
-    for (int32 i = ThreatMemory.Num() - 1; i >= 0; --i)
+    // Patrol logic — move toward current waypoint
+    if (PatrolWaypoints.Num() == 0)
     {
-        ThreatMemory[i].LastSeenTime += DeltaTime;
-        // Decay threat level over time (forget after ~20 seconds of no sight)
-        ThreatMemory[i].ThreatLevel -= DecayRate * DeltaTime;
-        if (ThreatMemory[i].ThreatLevel < ForgetThreshold)
-        {
-            ThreatMemory.RemoveAt(i);
-        }
-    }
-}
-
-float UNPCBehaviorComponent::GetMaxThreatLevel() const
-{
-    float Max = 0.0f;
-    for (const FNPC_ThreatMemory& Mem : ThreatMemory)
-    {
-        Max = FMath::Max(Max, Mem.ThreatLevel);
-    }
-    return Max;
-}
-
-bool UNPCBehaviorComponent::ShouldFlee() const
-{
-    return GetMaxThreatLevel() > 0.7f;
-}
-
-void UNPCBehaviorComponent::ScanForThreats()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    UWorld* World = Owner->GetWorld();
-    if (!World) return;
-
-    // Find player pawn as potential threat source (dinosaur chasing player)
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (!PlayerPawn) return;
-
-    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-    if (DistToPlayer < ThreatDetectionRadius)
-    {
-        // Player proximity is low threat for NPCs — they just become aware
-        float ThreatLevel = FMath::Clamp(1.0f - (DistToPlayer / ThreatDetectionRadius), 0.0f, 0.4f);
-        bAwareOfPlayer = true;
-        RegisterThreat(PlayerPawn, ThreatLevel);
-    }
-    else
-    {
-        bAwareOfPlayer = false;
-    }
-}
-
-void UNPCBehaviorComponent::UpdateIdleBehavior(float DeltaTime)
-{
-    // Idle: stand still, occasionally look around
-    // Transition to patrol after 5 seconds
-    TimeSinceLastPatrolUpdate += DeltaTime;
-    if (TimeSinceLastPatrolUpdate > 5.0f)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
-        TimeSinceLastPatrolUpdate = 0.0f;
-    }
-}
-
-void UNPCBehaviorComponent::UpdatePatrolBehavior(float DeltaTime)
-{
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    if (!bHasPatrolTarget)
-    {
-        CurrentPatrolTarget = GetRandomPatrolPoint();
-        bHasPatrolTarget = true;
-    }
-
-    float DistToTarget = FVector::Dist2D(Owner->GetActorLocation(), CurrentPatrolTarget);
-    if (DistToTarget < 200.0f)
-    {
-        // Reached patrol point — pick new one or go idle
-        bHasPatrolTarget = false;
-        TimeSinceLastPatrolUpdate = 0.0f;
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-    }
-}
-
-void UNPCBehaviorComponent::UpdateFleeBehavior(float DeltaTime)
-{
-    // Flee: move away from highest threat
-    // Actual movement handled by AIController/CharacterMovement
-    // This component sets the direction intent
-    if (ThreatMemory.Num() == 0)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
         return;
     }
 
-    // Find highest threat
-    const FNPC_ThreatMemory* HighestThreat = nullptr;
-    for (const FNPC_ThreatMemory& Mem : ThreatMemory)
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        if (!HighestThreat || Mem.ThreatLevel > HighestThreat->ThreatLevel)
+        return;
+    }
+
+    FVector TargetWaypoint = PatrolWaypoints[CurrentWaypointIndex];
+    float DistToWaypoint = FVector::Dist(Owner->GetActorLocation(), TargetWaypoint);
+
+    if (DistToWaypoint <= PatrolConfig.WaypointAcceptanceRadius)
+    {
+        // Reached waypoint — idle briefly then advance
+        IdleTimer += DeltaTime;
+        if (IdleTimer >= PatrolConfig.IdleWaitTime)
         {
-            HighestThreat = &Mem;
+            IdleTimer = 0.0f;
+            AdvancePatrolWaypoint();
+        }
+        SetBehaviorState(ENPC_BehaviorState::Idle);
+    }
+    else
+    {
+        // Move toward waypoint via character movement
+        ACharacter* OwnerChar = Cast<ACharacter>(Owner);
+        if (OwnerChar)
+        {
+            FVector Direction = (TargetWaypoint - Owner->GetActorLocation()).GetSafeNormal();
+            OwnerChar->AddMovementInput(Direction, 1.0f);
+        }
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+    }
+}
+
+void UNPCBehaviorComponent::TickAlert(float DeltaTime)
+{
+    float DistToPlayer = GetDistanceToPlayer();
+
+    if (DistToPlayer <= 0.0f || DistToPlayer > CombatConfig.DetectionRadius * 1.5f)
+    {
+        // Lost the player — return to patrol
+        ClearPlayerMemory();
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        return;
+    }
+
+    if (DistToPlayer <= CombatConfig.AttackRadius)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Attacking);
+        return;
+    }
+
+    // Within detection range — chase
+    SetBehaviorState(ENPC_BehaviorState::Chasing);
+}
+
+void UNPCBehaviorComponent::TickChase(float DeltaTime)
+{
+    AActor* Player = FindPlayerActor();
+    AActor* Owner = GetOwner();
+
+    if (!Player || !Owner)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        return;
+    }
+
+    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), Player->GetActorLocation());
+
+    // Check flee condition — low health
+    float HealthRatio = CurrentHealth / FMath::Max(MaxHealth, 1.0f);
+    if (HealthRatio <= CombatConfig.FleeHealthThreshold)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Fleeing);
+        return;
+    }
+
+    // Lost player beyond detection range
+    if (DistToPlayer > CombatConfig.DetectionRadius * 2.0f)
+    {
+        ClearPlayerMemory();
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        return;
+    }
+
+    // Within attack range
+    if (DistToPlayer <= CombatConfig.AttackRadius)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Attacking);
+        return;
+    }
+
+    // Chase — move toward player
+    ACharacter* OwnerChar = Cast<ACharacter>(Owner);
+    if (OwnerChar)
+    {
+        FVector Direction = (Player->GetActorLocation() - Owner->GetActorLocation()).GetSafeNormal();
+        OwnerChar->AddMovementInput(Direction, 1.0f);
+
+        // Update movement speed for chase
+        UCharacterMovementComponent* MovComp = OwnerChar->GetCharacterMovement();
+        if (MovComp)
+        {
+            MovComp->MaxWalkSpeed = CombatConfig.ChaseSpeed;
         }
     }
 
-    if (HighestThreat && GetMaxThreatLevel() < 0.2f)
+    // Update memory with current player location
+    UpdatePlayerSighting(Player->GetActorLocation());
+}
+
+void UNPCBehaviorComponent::TickAttack(float DeltaTime)
+{
+    AActor* Player = FindPlayerActor();
+    AActor* Owner = GetOwner();
+
+    if (!Player || !Owner)
     {
-        // Threat has subsided — return to patrol
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        return;
+    }
+
+    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), Player->GetActorLocation());
+
+    // Player escaped attack range — chase again
+    if (DistToPlayer > CombatConfig.AttackRadius * 1.5f)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Chasing);
+        return;
+    }
+
+    // Attack cooldown check
+    if (TimeSinceLastAttack >= CombatConfig.AttackCooldown)
+    {
+        TimeSinceLastAttack = 0.0f;
+
+        // Apply damage to player via generic damage system
+        UGameplayStatics::ApplyDamage(Player, CombatConfig.AttackDamage,
+                                       nullptr, Owner, nullptr);
     }
 }
 
-void UNPCBehaviorComponent::UpdateForageBehavior(float DeltaTime)
+void UNPCBehaviorComponent::TickFlee(float DeltaTime)
 {
-    // Forage: look for food resources nearby
-    // Placeholder — full implementation in resource system integration
-    TimeSinceLastPatrolUpdate += DeltaTime;
-    if (TimeSinceLastPatrolUpdate > 10.0f)
+    AActor* Player = FindPlayerActor();
+    AActor* Owner = GetOwner();
+
+    if (!Owner)
     {
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-        TimeSinceLastPatrolUpdate = 0.0f;
+        return;
+    }
+
+    // Flee away from player toward home
+    FVector FleeDirection = FVector::ZeroVector;
+
+    if (Player)
+    {
+        FVector AwayFromPlayer = (Owner->GetActorLocation() - Player->GetActorLocation()).GetSafeNormal();
+        FVector TowardHome = (HomeLocation - Owner->GetActorLocation()).GetSafeNormal();
+        FleeDirection = (AwayFromPlayer + TowardHome * 0.5f).GetSafeNormal();
+    }
+    else
+    {
+        FleeDirection = (HomeLocation - Owner->GetActorLocation()).GetSafeNormal();
+    }
+
+    ACharacter* OwnerChar = Cast<ACharacter>(Owner);
+    if (OwnerChar)
+    {
+        OwnerChar->AddMovementInput(FleeDirection, 1.0f);
+        UCharacterMovementComponent* MovComp = OwnerChar->GetCharacterMovement();
+        if (MovComp)
+        {
+            MovComp->MaxWalkSpeed = CombatConfig.ChaseSpeed * 0.8f;
+        }
+    }
+
+    // Recover health slightly while fleeing (regeneration)
+    CurrentHealth = FMath::Min(CurrentHealth + DeltaTime * 5.0f, MaxHealth);
+
+    // If health recovered enough, return to patrol
+    float HealthRatio = CurrentHealth / FMath::Max(MaxHealth, 1.0f);
+    if (HealthRatio > CombatConfig.FleeHealthThreshold * 2.0f)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Patrolling);
     }
 }
 
-FVector UNPCBehaviorComponent::GetRandomPatrolPoint() const
+// ─── Memory System ────────────────────────────────────────────────────────────
+
+void UNPCBehaviorComponent::UpdateMemoryDecay(float DeltaTime)
 {
-    float Angle = FMath::RandRange(0.0f, 360.0f);
-    float Radius = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
-    float X = HomeLocation.X + Radius * FMath::Cos(FMath::DegreesToRadians(Angle));
-    float Y = HomeLocation.Y + Radius * FMath::Sin(FMath::DegreesToRadians(Angle));
-    return FVector(X, Y, HomeLocation.Z);
+    if (Memory.bHasSeenPlayer)
+    {
+        Memory.TimeSinceLastSighting += DeltaTime;
+
+        // Forget player after 30 seconds
+        if (Memory.TimeSinceLastSighting > 30.0f)
+        {
+            ClearPlayerMemory();
+        }
+        else
+        {
+            // Threat level decays over time
+            Memory.ThreatLevel = FMath::Max(0.0f,
+                Memory.ThreatLevel - DeltaTime * 0.02f);
+        }
+    }
+}
+
+void UNPCBehaviorComponent::UpdatePlayerSighting(const FVector& PlayerLocation)
+{
+    Memory.LastKnownPlayerLocation = PlayerLocation;
+    Memory.TimeSinceLastSighting = 0.0f;
+    Memory.bHasSeenPlayer = true;
+    Memory.ThreatLevel = FMath::Min(1.0f, Memory.ThreatLevel + 0.1f);
+}
+
+void UNPCBehaviorComponent::ClearPlayerMemory()
+{
+    Memory.bHasSeenPlayer = false;
+    Memory.TimeSinceLastSighting = 0.0f;
+    Memory.ThreatLevel = 0.0f;
+    Memory.LastKnownPlayerLocation = FVector::ZeroVector;
+}
+
+// ─── Patrol Waypoints ─────────────────────────────────────────────────────────
+
+void UNPCBehaviorComponent::GeneratePatrolWaypoints()
+{
+    PatrolWaypoints.Empty();
+
+    int32 N = FMath::Max(PatrolConfig.NumWaypoints, 3);
+    float Radius = PatrolConfig.PatrolRadius;
+
+    for (int32 i = 0; i < N; ++i)
+    {
+        float Angle = (2.0f * PI / N) * i;
+        float X = HomeLocation.X + Radius * FMath::Cos(Angle);
+        float Y = HomeLocation.Y + Radius * FMath::Sin(Angle);
+        // Add slight random variation to avoid perfect circles
+        X += FMath::RandRange(-500.0f, 500.0f);
+        Y += FMath::RandRange(-500.0f, 500.0f);
+        PatrolWaypoints.Add(FVector(X, Y, HomeLocation.Z));
+    }
+
+    CurrentWaypointIndex = 0;
+    bPatrolWaypointsGenerated = true;
+}
+
+FVector UNPCBehaviorComponent::GetNextPatrolWaypoint() const
+{
+    if (PatrolWaypoints.Num() == 0)
+    {
+        return HomeLocation;
+    }
+    return PatrolWaypoints[CurrentWaypointIndex % PatrolWaypoints.Num()];
+}
+
+void UNPCBehaviorComponent::AdvancePatrolWaypoint()
+{
+    if (PatrolWaypoints.Num() > 0)
+    {
+        CurrentWaypointIndex = (CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
+    }
+}
+
+// ─── Combat ───────────────────────────────────────────────────────────────────
+
+float UNPCBehaviorComponent::ApplyDamage(float DamageAmount)
+{
+    if (!IsAlive())
+    {
+        return 0.0f;
+    }
+
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+
+    // Raise threat level when hit
+    Memory.ThreatLevel = FMath::Min(1.0f, Memory.ThreatLevel + 0.3f);
+
+    if (!IsAlive())
+    {
+        SetBehaviorState(ENPC_BehaviorState::Dead);
+        OnNPCDeath.Broadcast(GetOwner());
+    }
+    else if (CurrentHealth / FMath::Max(MaxHealth, 1.0f) <= CombatConfig.FleeHealthThreshold)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Fleeing);
+    }
+    else if (CurrentState == ENPC_BehaviorState::Patrolling ||
+             CurrentState == ENPC_BehaviorState::Idle)
+    {
+        // Getting hit triggers alert even without seeing player
+        SetBehaviorState(ENPC_BehaviorState::Alerted);
+    }
+
+    return CurrentHealth;
+}
+
+bool UNPCBehaviorComponent::IsAlive() const
+{
+    return CurrentHealth > 0.0f && CurrentState != ENPC_BehaviorState::Dead;
+}
+
+bool UNPCBehaviorComponent::IsHostile() const
+{
+    return Species == ENPC_DinoSpecies::TRex ||
+           Species == ENPC_DinoSpecies::Raptor ||
+           Species == ENPC_DinoSpecies::Triceratops;
+}
+
+// ─── Perception ───────────────────────────────────────────────────────────────
+
+bool UNPCBehaviorComponent::CanSeePlayer(AActor* Player) const
+{
+    AActor* Owner = GetOwner();
+    if (!Owner || !Player)
+    {
+        return false;
+    }
+
+    UWorld* World = Owner->GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Line of sight check
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(Owner);
+
+    bool bBlocked = World->LineTraceSingleByChannel(
+        HitResult,
+        Owner->GetActorLocation() + FVector(0, 0, 100.0f),
+        Player->GetActorLocation() + FVector(0, 0, 100.0f),
+        ECC_Visibility,
+        Params
+    );
+
+    // Can see player if line trace is not blocked (or hits the player)
+    return !bBlocked || (HitResult.GetActor() == Player);
+}
+
+float UNPCBehaviorComponent::GetDistanceToPlayer() const
+{
+    AActor* Player = FindPlayerActor();
+    AActor* Owner = GetOwner();
+
+    if (!Player || !Owner)
+    {
+        return -1.0f;
+    }
+
+    return FVector::Dist(Owner->GetActorLocation(), Player->GetActorLocation());
+}
+
+AActor* UNPCBehaviorComponent::FindPlayerActor() const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC)
+    {
+        return nullptr;
+    }
+
+    return PC->GetPawn();
 }
