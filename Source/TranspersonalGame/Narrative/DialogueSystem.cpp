@@ -1,318 +1,317 @@
 // DialogueSystem.cpp
 // Agent #15 — Narrative & Dialogue Agent
-// Prehistoric survival dialogue system — full implementation
+// Full implementation of dialogue trigger and manager systems
 
 #include "DialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Components/BoxComponent.h"
+#include "GameFramework/Character.h"
+#include "Engine/World.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueNPC — Constructor
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// ANarr_DialogueTrigger — Implementation
+// ============================================================
 
-ANarr_DialogueNPC::ANarr_DialogueNPC()
-    : NPCName(TEXT("Tribal Elder"))
-    , NPCRole(ENarr_NPCRole::TribalElder)
-    , ActiveTreeID(NAME_None)
-    , InteractionRadius(300.0f)
-    , bIsInDialogue(false)
-    , CurrentLineIndex(0)
-    , CurrentTreeIndex(0)
+ANarr_DialogueTrigger::ANarr_DialogueTrigger()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Root mesh component
-    NPCMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NPCMesh"));
-    RootComponent = NPCMesh;
+    TriggerVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerVolume"));
+    TriggerVolume->SetBoxExtent(FVector(150.0f, 150.0f, 100.0f));
+    TriggerVolume->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerVolume;
 
-    // Assign basic sphere mesh as placeholder
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(
-        TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-    if (SphereMeshAsset.Succeeded())
-    {
-        NPCMesh->SetStaticMesh(SphereMeshAsset.Object);
-        NPCMesh->SetRelativeScale3D(FVector(1.5f, 1.5f, 2.0f));
-    }
+    // Default dialogue tree with 3 lines for TribalElder
+    DialogueTree.DialogueID = TEXT("DIALOGUE_ELDER_DEFAULT");
+    DialogueTree.NPCRole = ENarr_NPCRole::TribalElder;
+    DialogueTree.State = ENarr_DialogueState::Idle;
 
-    // Interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(InteractionRadius);
-    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Tribal Elder");
+    Line1.LineText = TEXT("Stranger. You come to our fire. The great lizards grow bold — three nights ago they took two of ours.");
+    Line1.FearDelta = 5.0f;
+    DialogueTree.Lines.Add(Line1);
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Tribal Elder");
+    Line2.LineText = TEXT("If you want to stay, you must prove you can survive. Go east. Find what the hunters left behind.");
+    Line2.FearDelta = 0.0f;
+    DialogueTree.Lines.Add(Line2);
+
+    FNarr_DialogueLine Line3;
+    Line3.SpeakerName = TEXT("Tribal Elder");
+    Line3.LineText = TEXT("Do not go after dark. The big one — the one with the small arms — it hunts by sound.");
+    Line3.FearDelta = 10.0f;
+    DialogueTree.Lines.Add(Line3);
+
+    DialogueTree.UnlocksQuestID = TEXT("QUEST_FIND_HUNTERS_CACHE");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueNPC — BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::BeginPlay()
+void ANarr_DialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Load default survival dialogue
-    LoadDefaultDialogue();
-
-    // Register with the dialogue manager
-    if (UWorld* World = GetWorld())
+    if (TriggerVolume)
     {
-        if (UNarr_DialogueManager* Manager = World->GetSubsystem<UNarr_DialogueManager>())
-        {
-            Manager->RegisterNPC(this);
-        }
+        TriggerVolume->OnComponentBeginOverlap.AddDynamic(
+            this, &ANarr_DialogueTrigger::OnTriggerBeginOverlap);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueNPC — Tick
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::Tick(float DeltaTime)
+void ANarr_DialogueTrigger::OnTriggerBeginOverlap(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
 {
-    Super::Tick(DeltaTime);
-    // Future: patrol, idle animation triggers
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueNPC — Dialogue Logic
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::StartDialogue(AActor* Initiator)
-{
-    if (bIsInDialogue || DialogueTrees.Num() == 0)
+    // Only trigger for player characters
+    if (!OtherActor || !OtherActor->IsA(ACharacter::StaticClass()))
     {
         return;
     }
 
-    bIsInDialogue = true;
-    CurrentTreeIndex = 0;
+    if (bFireOnce && bHasFired)
+    {
+        return;
+    }
+
+    if (CurrentState == ENarr_DialogueState::Locked)
+    {
+        return;
+    }
+
+    StartDialogue();
+}
+
+void ANarr_DialogueTrigger::StartDialogue()
+{
+    if (DialogueTree.Lines.Num() == 0)
+    {
+        return;
+    }
+
     CurrentLineIndex = 0;
+    CurrentState = ENarr_DialogueState::Active;
+    DialogueTree.State = ENarr_DialogueState::Active;
 
-    // Set active tree to first available
-    if (DialogueTrees.IsValidIndex(0))
-    {
-        ActiveTreeID = DialogueTrees[0].TreeID;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueNPC [%s]: Dialogue started with %s"),
-        *NPCName, Initiator ? *Initiator->GetName() : TEXT("Unknown"));
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue started: %s | Speaker: %s | Line: %s"),
+        *DialogueTree.DialogueID,
+        *DialogueTree.Lines[0].SpeakerName,
+        *DialogueTree.Lines[0].LineText);
 }
 
-void ANarr_DialogueNPC::AdvanceDialogue()
+void ANarr_DialogueTrigger::AdvanceLine()
 {
-    if (!bIsInDialogue)
+    if (CurrentState != ENarr_DialogueState::Active)
     {
-        return;
-    }
-
-    FNarr_DialogueTree* ActiveTree = FindTree(ActiveTreeID);
-    if (!ActiveTree)
-    {
-        EndDialogue();
         return;
     }
 
     CurrentLineIndex++;
 
-    if (CurrentLineIndex >= ActiveTree->Lines.Num())
+    if (CurrentLineIndex >= DialogueTree.Lines.Num())
     {
-        // Move to next tree if available
-        if (!ActiveTree->NextTreeID.IsNone())
-        {
-            ActiveTreeID = ActiveTree->NextTreeID;
-            CurrentLineIndex = 0;
-        }
-        else
-        {
-            // Mark complete and end
-            ActiveTree->bIsCompleted = true;
-            EndDialogue();
-        }
+        EndDialogue();
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Line %d: %s — %s"),
+        CurrentLineIndex,
+        *DialogueTree.Lines[CurrentLineIndex].SpeakerName,
+        *DialogueTree.Lines[CurrentLineIndex].LineText);
+}
+
+void ANarr_DialogueTrigger::EndDialogue()
+{
+    CurrentState = ENarr_DialogueState::Completed;
+    DialogueTree.State = ENarr_DialogueState::Completed;
+    bHasFired = true;
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue completed: %s | Unlocks quest: %s"),
+        *DialogueTree.DialogueID,
+        *DialogueTree.UnlocksQuestID);
+
+    // If not fire-once, reset after completion
+    if (!bFireOnce)
+    {
+        ResetDialogue();
     }
 }
 
-void ANarr_DialogueNPC::EndDialogue()
+void ANarr_DialogueTrigger::ResetDialogue()
 {
-    bIsInDialogue = false;
     CurrentLineIndex = 0;
-    ActiveTreeID = NAME_None;
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueNPC [%s]: Dialogue ended"), *NPCName);
+    CurrentState = ENarr_DialogueState::Idle;
+    DialogueTree.State = ENarr_DialogueState::Idle;
+    bHasFired = false;
 }
 
-FNarr_DialogueLine ANarr_DialogueNPC::GetCurrentLine() const
+FString ANarr_DialogueTrigger::GetCurrentLineText() const
 {
-    FNarr_DialogueLine EmptyLine;
-
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
+    if (CurrentState != ENarr_DialogueState::Active)
     {
-        if (Tree.TreeID == ActiveTreeID)
+        return FString();
+    }
+
+    if (!DialogueTree.Lines.IsValidIndex(CurrentLineIndex))
+    {
+        return FString();
+    }
+
+    return DialogueTree.Lines[CurrentLineIndex].LineText;
+}
+
+FString ANarr_DialogueTrigger::GetCurrentSpeakerName() const
+{
+    if (CurrentState != ENarr_DialogueState::Active)
+    {
+        return FString();
+    }
+
+    if (!DialogueTree.Lines.IsValidIndex(CurrentLineIndex))
+    {
+        return FString();
+    }
+
+    return DialogueTree.Lines[CurrentLineIndex].SpeakerName;
+}
+
+// ============================================================
+// UNarr_DialogueManager — Implementation
+// ============================================================
+
+UNarr_DialogueManager::UNarr_DialogueManager()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    bAutoActivate = true;
+}
+
+void UNarr_DialogueManager::InitializeComponent()
+{
+    Super::InitializeComponent();
+
+    // Pre-populate with default dialogue trees for the main story beats
+    FNarr_DialogueTree ElderTree;
+    ElderTree.DialogueID = TEXT("DIALOGUE_ELDER_DEFAULT");
+    ElderTree.NPCRole = ENarr_NPCRole::TribalElder;
+    ElderTree.State = ENarr_DialogueState::Idle;
+    ElderTree.UnlocksQuestID = TEXT("QUEST_FIND_HUNTERS_CACHE");
+
+    FNarr_DialogueLine E1;
+    E1.SpeakerName = TEXT("Tribal Elder");
+    E1.LineText = TEXT("Three suns have passed since our hunters returned empty-handed. The great beasts move south now.");
+    E1.FearDelta = 5.0f;
+    ElderTree.Lines.Add(E1);
+
+    FNarr_DialogueLine E2;
+    E2.SpeakerName = TEXT("Tribal Elder");
+    E2.LineText = TEXT("We cannot stay here much longer. The valley is no longer safe.");
+    E2.FearDelta = 8.0f;
+    ElderTree.Lines.Add(E2);
+
+    AllDialogueTrees.Add(ElderTree);
+
+    FNarr_DialogueTree ScoutTree;
+    ScoutTree.DialogueID = TEXT("DIALOGUE_SCOUT_PATROL");
+    ScoutTree.NPCRole = ENarr_NPCRole::Scout;
+    ScoutTree.State = ENarr_DialogueState::Idle;
+    ScoutTree.UnlocksQuestID = TEXT("QUEST_SCOUT_VALLEY");
+
+    FNarr_DialogueLine S1;
+    S1.SpeakerName = TEXT("Scout");
+    S1.LineText = TEXT("I tracked the pack to the river bend. Four of them — maybe five. They move fast.");
+    S1.FearDelta = 12.0f;
+    ScoutTree.Lines.Add(S1);
+
+    FNarr_DialogueLine S2;
+    S2.SpeakerName = TEXT("Scout");
+    S2.LineText = TEXT("Do not go near the water at dusk. That is when they drink — and when they hunt.");
+    S2.FearDelta = 15.0f;
+    ScoutTree.Lines.Add(S2);
+
+    AllDialogueTrees.Add(ScoutTree);
+
+    FNarr_DialogueTree HunterTree;
+    HunterTree.DialogueID = TEXT("DIALOGUE_HUNTER_RETURN");
+    HunterTree.NPCRole = ENarr_NPCRole::Hunter;
+    HunterTree.State = ENarr_DialogueState::Idle;
+    HunterTree.UnlocksQuestID = TEXT("QUEST_HUNT_SMALL_PREY");
+
+    FNarr_DialogueLine H1;
+    H1.SpeakerName = TEXT("Hunter");
+    H1.LineText = TEXT("The spear is not enough against the big ones. You need fire — or distance.");
+    H1.FearDelta = 3.0f;
+    HunterTree.Lines.Add(H1);
+
+    FNarr_DialogueLine H2;
+    H2.SpeakerName = TEXT("Hunter");
+    H2.LineText = TEXT("I brought back what I could. The rest... the rest I had to leave behind.");
+    H2.FearDelta = 5.0f;
+    HunterTree.Lines.Add(H2);
+
+    AllDialogueTrees.Add(HunterTree);
+}
+
+void UNarr_DialogueManager::BeginPlay()
+{
+    Super::BeginPlay();
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] DialogueManager initialized with %d dialogue trees"),
+        AllDialogueTrees.Num());
+}
+
+void UNarr_DialogueManager::RegisterDialogue(const FNarr_DialogueTree& Tree)
+{
+    // Check for duplicate ID
+    for (const FNarr_DialogueTree& Existing : AllDialogueTrees)
+    {
+        if (Existing.DialogueID == Tree.DialogueID)
         {
-            if (Tree.Lines.IsValidIndex(CurrentLineIndex))
-            {
-                return Tree.Lines[CurrentLineIndex];
-            }
+            UE_LOG(LogTemp, Warning, TEXT("[Narrative] Dialogue ID already registered: %s"), *Tree.DialogueID);
+            return;
         }
     }
 
-    return EmptyLine;
+    AllDialogueTrees.Add(Tree);
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Registered dialogue: %s"), *Tree.DialogueID);
 }
 
-bool ANarr_DialogueNPC::HasActiveDialogue() const
+void UNarr_DialogueManager::CompleteDialogue(const FString& DialogueID)
 {
-    return bIsInDialogue && !ActiveTreeID.IsNone();
-}
-
-FString ANarr_DialogueNPC::GetNPCDisplayName() const
-{
-    return NPCName;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueNPC — Private Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::LoadDefaultDialogue()
-{
-    // Survival-focused dialogue — no spiritual content
-    // Tree 1: Warning about raptor pack
-    FNarr_DialogueTree WarningTree;
-    WarningTree.TreeID = FName("Warning_RaptorPack");
-    WarningTree.bIsCompleted = false;
-    WarningTree.NextTreeID = FName("Quest_ScoutNorth");
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = NPCName;
-    Line1.LineText = TEXT("The raptors are moving in packs now. Three days ago, one scout. Yesterday, five. Today I stopped counting.");
-    Line1.DialogueType = ENarr_DialogueType::Warning;
-    Line1.DisplayDuration = 5.0f;
-    Line1.bRequiresPlayerResponse = false;
-    WarningTree.Lines.Add(Line1);
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = NPCName;
-    Line2.LineText = TEXT("We cannot move the wounded. But staying here means death when the pack returns at dusk.");
-    Line2.DialogueType = ENarr_DialogueType::Warning;
-    Line2.DisplayDuration = 5.0f;
-    Line2.bRequiresPlayerResponse = false;
-    WarningTree.Lines.Add(Line2);
-
-    FNarr_DialogueLine Line3;
-    Line3.SpeakerName = NPCName;
-    Line3.LineText = TEXT("You are fast. Scout the northern ridge. Find us a defensible position. Come back before the sun touches the valley rim.");
-    Line3.DialogueType = ENarr_DialogueType::QuestGive;
-    Line3.DisplayDuration = 6.0f;
-    Line3.bRequiresPlayerResponse = true;
-    WarningTree.Lines.Add(Line3);
-
-    DialogueTrees.Add(WarningTree);
-
-    // Tree 2: Quest follow-up
-    FNarr_DialogueTree QuestTree;
-    QuestTree.TreeID = FName("Quest_ScoutNorth");
-    QuestTree.bIsCompleted = false;
-    QuestTree.NextTreeID = NAME_None;
-
-    FNarr_DialogueLine QLine1;
-    QLine1.SpeakerName = NPCName;
-    QLine1.LineText = TEXT("The northern ridge — look for the two dead trees on the skyline. The caves below them held our people three seasons ago.");
-    QLine1.DialogueType = ENarr_DialogueType::Lore;
-    QLine1.DisplayDuration = 5.0f;
-    QLine1.bRequiresPlayerResponse = false;
-    QuestTree.Lines.Add(QLine1);
-
-    FNarr_DialogueLine QLine2;
-    QLine2.SpeakerName = NPCName;
-    QLine2.LineText = TEXT("Watch for the big one. The TRex has been marking territory along the river. Stay high. Stay quiet.");
-    QLine2.DialogueType = ENarr_DialogueType::Urgent;
-    QLine2.DisplayDuration = 5.0f;
-    QLine2.bRequiresPlayerResponse = false;
-    QuestTree.Lines.Add(QLine2);
-
-    DialogueTrees.Add(QuestTree);
-}
-
-FNarr_DialogueTree* ANarr_DialogueNPC::FindTree(FName TreeID)
-{
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    for (FNarr_DialogueTree& Tree : AllDialogueTrees)
     {
-        if (Tree.TreeID == TreeID)
+        if (Tree.DialogueID == DialogueID)
         {
-            return &Tree;
+            Tree.State = ENarr_DialogueState::Completed;
+            UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue completed: %s | Unlocks: %s"),
+                *DialogueID, *Tree.UnlocksQuestID);
+            return;
         }
     }
-    return nullptr;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UNarr_DialogueManager — World Subsystem
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+bool UNarr_DialogueManager::IsDialogueAvailable(const FString& DialogueID) const
 {
-    Super::Initialize(Collection);
-    bAnyDialogueActive = false;
-    RegisteredNPCs.Empty();
-    UE_LOG(LogTemp, Log, TEXT("NarrDialogueManager: Initialized"));
-}
-
-void UNarr_DialogueManager::Deinitialize()
-{
-    RegisteredNPCs.Empty();
-    Super::Deinitialize();
-}
-
-void UNarr_DialogueManager::RegisterNPC(ANarr_DialogueNPC* NPC)
-{
-    if (NPC && !RegisteredNPCs.Contains(NPC))
+    for (const FNarr_DialogueTree& Tree : AllDialogueTrees)
     {
-        RegisteredNPCs.Add(NPC);
-        UE_LOG(LogTemp, Log, TEXT("NarrDialogueManager: Registered NPC [%s]"), *NPC->GetNPCDisplayName());
-    }
-}
-
-void UNarr_DialogueManager::UnregisterNPC(ANarr_DialogueNPC* NPC)
-{
-    RegisteredNPCs.Remove(NPC);
-}
-
-ANarr_DialogueNPC* UNarr_DialogueManager::FindNearestNPC(FVector PlayerLocation, float MaxRadius) const
-{
-    ANarr_DialogueNPC* Nearest = nullptr;
-    float NearestDistSq = MaxRadius * MaxRadius;
-
-    for (ANarr_DialogueNPC* NPC : RegisteredNPCs)
-    {
-        if (!NPC || !IsValid(NPC))
+        if (Tree.DialogueID == DialogueID)
         {
-            continue;
-        }
-
-        float DistSq = FVector::DistSquared(PlayerLocation, NPC->GetActorLocation());
-        if (DistSq < NearestDistSq)
-        {
-            NearestDistSq = DistSq;
-            Nearest = NPC;
-        }
-    }
-
-    return Nearest;
-}
-
-bool UNarr_DialogueManager::IsAnyDialogueActive() const
-{
-    for (const ANarr_DialogueNPC* NPC : RegisteredNPCs)
-    {
-        if (NPC && NPC->HasActiveDialogue())
-        {
-            return true;
+            return Tree.State == ENarr_DialogueState::Idle;
         }
     }
     return false;
 }
 
-int32 UNarr_DialogueManager::GetRegisteredNPCCount() const
+bool UNarr_DialogueManager::GetDialogueByID(const FString& DialogueID, FNarr_DialogueTree& OutTree) const
 {
-    return RegisteredNPCs.Num();
+    for (const FNarr_DialogueTree& Tree : AllDialogueTrees)
+    {
+        if (Tree.DialogueID == DialogueID)
+        {
+            OutTree = Tree;
+            return true;
+        }
+    }
+    return false;
 }
