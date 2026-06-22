@@ -1,136 +1,75 @@
-# Day/Night Cycle — Blueprint Implementation Guide
-## Agent #8 — Lighting & Atmosphere | Transpersonal Game Studio
-
----
+# Day/Night Cycle — Blueprint Reference
+**Agent:** #08 — Lighting & Atmosphere Agent  
+**Status:** Design Complete — Implementation via Blueprint recommended
 
 ## Overview
-The day/night cycle drives the emotional and gameplay rhythm of the prehistoric survival experience.
-A full 24-hour cycle should complete in **20 real-time minutes** (configurable).
+The Cretaceous day/night cycle drives the emotional rhythm of the survival experience.
+Dawn is hopeful and dangerous (predators active). Midday is harsh and bright (heat/thirst pressure).
+Dusk is golden and tense (predators hunting). Night is terrifying (near-zero visibility, sound-driven).
 
----
+## Time Periods & Lighting Intent
 
-## Core Architecture
+| Period | Time | Sun Pitch | Sun Intensity | Fog Color | Emotional Tone |
+|--------|------|-----------|---------------|-----------|----------------|
+| Pre-Dawn | 04:00-06:00 | -5° | 0.5 | Deep blue-purple | Dread, anticipation |
+| Dawn | 06:00-08:00 | -15° | 3.0 | Warm orange-pink | Hope, danger |
+| Morning | 08:00-11:00 | -35° | 8.0 | Light blue | Alert, active |
+| Midday | 11:00-14:00 | -75° | 15.0 | White-yellow | Harsh, oppressive |
+| Afternoon | 14:00-17:00 | -45° | 10.0 | Warm amber | Golden, beautiful |
+| Dusk | 17:00-19:00 | -10° | 2.0 | Deep orange-red | Tense, hunting |
+| Twilight | 19:00-20:30 | -2° | 0.3 | Purple-grey | Transition, fear |
+| Night | 20:30-04:00 | +5° (below horizon) | 0.0 | Dark blue-black | Terror, survival |
 
-### Blueprint: BP_DayNightCycle (Actor)
-Place one instance in MinPlayableMap at origin (0,0,0).
+## Blueprint Implementation (UE5)
 
+### BP_DayNightManager (Actor Blueprint)
 ```
 Variables:
-  - TimeOfDay (float, 0.0–24.0) — current hour
-  - DayDuration (float, default=1200.0) — seconds per full day
-  - SunActor (DirectionalLight ref)
-  - MoonActor (DirectionalLight ref, optional)
-  - SkyLightActor (SkyLight ref)
-  - FogActor (ExponentialHeightFog ref)
+- CurrentTimeOfDay: Float (0.0 = midnight, 0.5 = noon, 1.0 = midnight)
+- DayDurationSeconds: Float (default: 1200.0 = 20 real minutes per day)
+- SunActor: DirectionalLight reference
+- FogActor: ExponentialHeightFog reference
+- SkyLightActor: SkyLight reference
 
-Event Tick:
-  1. TimeOfDay += (DeltaTime / DayDuration) * 24.0
-  2. If TimeOfDay >= 24.0: TimeOfDay = 0.0
-  3. Call UpdateSunPosition(TimeOfDay)
-  4. Call UpdateFogDensity(TimeOfDay)
-  5. Call UpdateSkyLightIntensity(TimeOfDay)
+Tick Event:
+  CurrentTimeOfDay += DeltaTime / DayDurationSeconds
+  If CurrentTimeOfDay >= 1.0: CurrentTimeOfDay = 0.0
+  Call UpdateLighting(CurrentTimeOfDay)
+
+UpdateLighting(T: Float):
+  SunPitch = Lerp curve based on T
+  SunIntensity = Lerp curve based on T
+  FogColor = Lerp curve based on T
+  Apply to SunActor, FogActor, SkyLightActor
 ```
 
-### Sun Position Curve
-```
-Hour  | Pitch  | Yaw   | Intensity | Color
-------|--------|-------|-----------|------------------
-0.0   | +10°   | 180°  | 0.0       | Night (no sun)
-5.0   | -2°    | 90°   | 0.5       | Pre-dawn grey
-6.0   | -5°    | 80°   | 2.0       | Dawn orange-pink
-8.0   | -25°   | 60°   | 6.0       | Morning warm gold
-12.0  | -75°   | 45°   | 10.0      | Noon white-yellow
-16.0  | -30°   | 20°   | 7.0       | Afternoon amber
-18.0  | -5°    | -10°  | 2.5       | Dusk orange-red
-19.0  | +5°    | -20°  | 0.3       | Twilight purple
-20.0  | +10°   | -30°  | 0.0       | Night
-```
+### Curve Assets Needed
+- `CRV_SunPitch` — Float curve, 0-1 time, -90 to +5 pitch values
+- `CRV_SunIntensity` — Float curve, 0-1 time, 0.0 to 15.0 intensity
+- `CRV_FogR/G/B` — Three float curves for fog color channels
+- `CRV_SkyLightIntensity` — Float curve, 0.1 to 2.0
 
-### Fog Density by Time
-```
-Dawn (5-7h):   density=0.04, inscatter=(0.9, 0.6, 0.4) — warm morning mist
-Day (8-16h):   density=0.02, inscatter=(0.6, 0.7, 0.9) — clear blue-grey
-Dusk (17-19h): density=0.05, inscatter=(0.8, 0.4, 0.2) — dusty orange
-Night (20-4h): density=0.08, inscatter=(0.1, 0.1, 0.3) — dark blue night fog
-```
-
-### SkyLight Intensity by Time
-```
-Day (6-18h):   intensity=1.5, real_time_capture=True
-Dusk/Dawn:     intensity=0.8
-Night (20-4h): intensity=0.3 (moonlight simulation)
-```
-
----
-
-## Weather System Integration
-
-### Weather States
-| State | Fog Density | Sun Intensity | Volumetric Fog Extinction |
-|---|---|---|---|
-| Clear | 0.02 | 10.0 | 0.15 |
-| Overcast | 0.06 | 3.0 | 0.4 |
-| Light Rain | 0.08 | 1.5 | 0.6 |
-| Heavy Rain | 0.15 | 0.5 | 1.2 |
-| Storm | 0.20 | 0.2 | 2.0 |
-| Fog | 0.25 | 4.0 | 3.0 |
-
-### Weather Transition
-- Blend duration: 60–300 seconds
-- Use Timeline or Lerp in Blueprint
-- Trigger weather changes via gameplay events (e.g., player enters new biome)
-
----
-
-## UE5 Python Implementation (Quick Setup)
-
-```python
-import unreal
-
-# Find existing DirectionalLight (Sun)
-actors = unreal.EditorLevelLibrary.get_all_level_actors()
-sun = None
-for a in actors:
-    if a.get_class().get_name() == "DirectionalLight":
-        sun = a
-        break
-
-if sun:
-    # Set to golden hour (16:00)
-    sun.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=-30.0, yaw=20.0), False)
-    comp = sun.get_component_by_class(unreal.DirectionalLightComponent)
-    if comp:
-        comp.set_editor_property("intensity", 7.0)
-        # Warm afternoon color temperature
-        comp.set_editor_property("light_color", unreal.LinearColor(1.0, 0.85, 0.6, 1.0))
-    print("SUN_GOLDEN_HOUR_SET")
-```
-
----
-
-## Gameplay Impact of Lighting
-
-### Survival Mechanics Tied to Time
-- **Dawn (5-7h)**: Herbivores most active (feeding), predators returning to rest
-- **Day (8-16h)**: Safe exploration window, best visibility
-- **Dusk (17-19h)**: Predators becoming active, player should seek shelter
-- **Night (20-4h)**: Maximum danger, reduced visibility, temperature drops
-
-### Player Visibility Thresholds
-- Day: Full visibility, no penalties
-- Dusk/Dawn: -10% detection range for player
-- Night: -40% visibility, require fire/torch for safety
-- Storm: -30% visibility, movement speed reduced
-
----
+## Weather Integration
+Day/night cycle interacts with weather system:
+- Storm clouds reduce sun intensity by 60-80%
+- Rain increases fog density (0.02 → 0.08)
+- Lightning flashes: SpotLight with random interval, intensity spike 50000 → 0
+- Overcast: SkyLight color shifts to grey, intensity drops to 0.8
 
 ## Performance Notes
-- Lumen GI: Software tracing (no RT hardware required)
-- Volumetric Fog: GridPixelSize=8, GridSizeZ=64 (balanced quality/perf)
-- SkyLight: Real-time capture (updates every frame — can be throttled to every 0.5s)
-- Day/Night tick: Only update sun every 1.0s (not every frame) for performance
+- SkyLight recapture: every 30 seconds during day, every 60 at night
+- Lumen GI updates automatically with sun movement
+- VolumetricFog: reduce GridSizeZ to 32 at night (less variation needed)
+- PostProcess exposure: auto-adjust min/max based on time of day
 
----
+## Audio Triggers (for Agent #16)
+- Dawn: bird calls, distant dinosaur roars begin
+- Midday: insect chorus, heat shimmer audio
+- Dusk: hunting calls, urgency music layer
+- Night: silence broken by predator sounds, heartbeat ambient
 
-*Agent #8 — Lighting & Atmosphere Agent | Day/Night Cycle Reference*
-*For Agent #9 (Character Artist): Characters will be lit by this dynamic system — ensure materials use Lumen-compatible shading models*
+## Survival Mechanics Integration (for Agent #03)
+- Temperature: peaks at midday (heat damage risk), drops at night (cold damage risk)
+- Visibility: night reduces player sight range by 80%
+- Predator activity: nocturnal species active at night, diurnal during day
+- Plant growth: some resources only harvestable at specific times
