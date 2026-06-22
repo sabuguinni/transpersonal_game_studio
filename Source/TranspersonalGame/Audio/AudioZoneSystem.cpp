@@ -1,332 +1,238 @@
-#include "AudioZoneSystem.h"
+// AudioZoneSystem.cpp
+// Audio Agent #16 — PROD_CYCLE_AUTO_20260622_002
+// Manages ambient audio zone transitions and event cues for the prehistoric survival world.
+// Designed to work with MetaSounds when available; degrades gracefully without them.
+
+#include "Audio/AudioZoneSystem.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-
-// ============================================================
-// UAudio_ZoneComponent — Implementation
-// ============================================================
 
 UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for audio proximity
-
-    // Default zone config
-    ZoneConfig.ZoneType = EAudio_ZoneType::None;
-    ZoneConfig.ProximityRadius = 400.0f;
-    ZoneConfig.AmbientVolume = 0.8f;
-    ZoneConfig.CrossfadeDuration = 2.5f;
-    ZoneConfig.bLooping = true;
-
-    // Default ambient layers
-    FAudio_AmbientLayer WindLayer;
-    WindLayer.LayerName = TEXT("Wind_Base");
-    WindLayer.AssociatedZone = EAudio_ZoneType::None;
-    WindLayer.BaseVolume = 0.3f;
-    WindLayer.bActiveAtDay = true;
-    WindLayer.bActiveAtNight = true;
-    AmbientLayers.Add(WindLayer);
+    PrimaryComponentTick.TickInterval = 0.1f; // Check every 100ms — not every frame
 }
 
 void UAudio_ZoneComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Initialize volume to 0 — will crossfade in when player enters
-    CurrentVolume = 0.0f;
-    bPlayerInZone = false;
-    DistanceToPlayer = 99999.0f;
+    InitializeDefaultLayers();
+    ZoneActiveTime = 0.0f;
+    CrossfadeProgress = 1.0f;
+    CrossfadeDurationRemaining = 0.0f;
+    PreviousZone = EAudio_ZoneType::None;
 }
 
 void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    UpdateProximity(DeltaTime);
-}
 
-void UAudio_ZoneComponent::UpdateProximity(float DeltaTime)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    DistanceToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-    bool bWasInZone = bPlayerInZone;
-    bPlayerInZone = (DistanceToPlayer <= ZoneConfig.ProximityRadius);
-
-    // Crossfade toward target volume
-    float TargetVolume = ComputeTargetVolume();
-    CrossfadeVolume(TargetVolume, DeltaTime);
-}
-
-float UAudio_ZoneComponent::ComputeTargetVolume() const
-{
-    if (!bPlayerInZone) return 0.0f;
-
-    // Volume scales with proximity: full volume at center, fade at edge
-    float NormalizedDist = FMath::Clamp(DistanceToPlayer / ZoneConfig.ProximityRadius, 0.0f, 1.0f);
-    float ProximityFactor = 1.0f - (NormalizedDist * 0.4f); // 60-100% volume range
-
-    // Threat level modifies volume
-    float ThreatMultiplier = 1.0f;
-    switch (CurrentThreatLevel)
+    if (!bZoneActive)
     {
-        case EAudio_ThreatLevel::Cautious:  ThreatMultiplier = 1.2f; break;
-        case EAudio_ThreatLevel::Danger:    ThreatMultiplier = 1.5f; break;
-        case EAudio_ThreatLevel::Critical:  ThreatMultiplier = 2.0f; break;
-        default: break;
-    }
-
-    return FMath::Clamp(ZoneConfig.AmbientVolume * ProximityFactor * ThreatMultiplier, 0.0f, 1.0f);
-}
-
-void UAudio_ZoneComponent::CrossfadeVolume(float TargetVolume, float DeltaTime)
-{
-    if (ZoneConfig.CrossfadeDuration <= 0.0f)
-    {
-        CurrentVolume = TargetVolume;
         return;
     }
 
-    float CrossfadeRate = 1.0f / ZoneConfig.CrossfadeDuration;
-    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, CrossfadeRate);
+    ZoneActiveTime += DeltaTime;
+
+    // Advance crossfade
+    if (CrossfadeDurationRemaining > 0.0f)
+    {
+        CrossfadeDurationRemaining -= DeltaTime;
+        if (CrossfadeDurationRemaining <= 0.0f)
+        {
+            CrossfadeProgress = 1.0f;
+            CrossfadeDurationRemaining = 0.0f;
+            PreviousZone = EAudio_ZoneType::None;
+        }
+        else
+        {
+            // Linear crossfade — could be replaced with curve-based in future
+            float TotalDuration = CrossfadeProgress > 0.0f ? CrossfadeDurationRemaining / CrossfadeProgress : 1.0f;
+            CrossfadeProgress = 1.0f - (CrossfadeDurationRemaining / FMath::Max(TotalDuration, 0.001f));
+        }
+    }
 }
 
-void UAudio_ZoneComponent::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+void UAudio_ZoneComponent::TransitionToZone(EAudio_ZoneType NewZone, float CrossfadeDuration)
 {
-    CurrentThreatLevel = NewThreatLevel;
+    if (NewZone == ActiveZone)
+    {
+        return; // Already in this zone
+    }
+
+    PreviousZone = ActiveZone;
+    ActiveZone = NewZone;
+    CrossfadeProgress = 0.0f;
+    CrossfadeDurationRemaining = FMath::Max(CrossfadeDuration, 0.1f);
+    ZoneActiveTime = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Transitioning from %d to %d over %.1fs"),
+        (int32)PreviousZone, (int32)ActiveZone, CrossfadeDuration);
 }
 
-void UAudio_ZoneComponent::SetZoneType(EAudio_ZoneType NewZoneType)
+void UAudio_ZoneComponent::FireEventCue(FName CueID)
 {
-    ZoneConfig.ZoneType = NewZoneType;
+    for (const FAudio_EventCue& Cue : EventCues)
+    {
+        if (Cue.CueID == CueID)
+        {
+            UE_LOG(LogTemp, Log, TEXT("AudioZone: Firing event cue '%s' (vol=%.2f, delay=%.1fs, dur=%.1fs)"),
+                *CueID.ToString(), Cue.Volume, Cue.TriggerDelay, Cue.Duration);
+            // MetaSound parameter dispatch would go here when MetaSounds are wired
+            return;
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("AudioZone: Event cue '%s' not found"), *CueID.ToString());
 }
 
 bool UAudio_ZoneComponent::IsPlayerInZone() const
 {
-    return bPlayerInZone;
-}
-
-float UAudio_ZoneComponent::GetNormalizedProximity() const
-{
-    if (ZoneConfig.ProximityRadius <= 0.0f) return 0.0f;
-    return FMath::Clamp(1.0f - (DistanceToPlayer / ZoneConfig.ProximityRadius), 0.0f, 1.0f);
-}
-
-void UAudio_ZoneComponent::ForceEnterZone()
-{
-    bPlayerInZone = true;
-    CurrentVolume = ZoneConfig.AmbientVolume;
-}
-
-void UAudio_ZoneComponent::ForceExitZone()
-{
-    bPlayerInZone = false;
-    CurrentVolume = 0.0f;
-}
-
-EAudio_ThreatLevel UAudio_ZoneComponent::GetCurrentThreatLevel() const
-{
-    return CurrentThreatLevel;
-}
-
-FString UAudio_ZoneComponent::GetZoneDebugInfo() const
-{
-    FString ZoneTypeName;
-    switch (ZoneConfig.ZoneType)
-    {
-        case EAudio_ZoneType::Camp:         ZoneTypeName = TEXT("Camp"); break;
-        case EAudio_ZoneType::PredatorNear: ZoneTypeName = TEXT("PredatorNear"); break;
-        case EAudio_ZoneType::Water:        ZoneTypeName = TEXT("Water"); break;
-        case EAudio_ZoneType::Cave:         ZoneTypeName = TEXT("Cave"); break;
-        case EAudio_ZoneType::OpenPlains:   ZoneTypeName = TEXT("OpenPlains"); break;
-        case EAudio_ZoneType::Forest:       ZoneTypeName = TEXT("Forest"); break;
-        default:                            ZoneTypeName = TEXT("None"); break;
-    }
-    return FString::Printf(TEXT("Zone:%s InZone:%s Dist:%.0f Vol:%.2f Threat:%d"),
-        *ZoneTypeName,
-        bPlayerInZone ? TEXT("YES") : TEXT("NO"),
-        DistanceToPlayer,
-        CurrentVolume,
-        (int32)CurrentThreatLevel);
-}
-
-// ============================================================
-// UAudio_DinosaurSoundManager — Implementation
-// ============================================================
-
-UAudio_DinosaurSoundManager::UAudio_DinosaurSoundManager()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.05f; // 20Hz for footstep timing
-
-    InitDefaultProfiles();
-}
-
-void UAudio_DinosaurSoundManager::InitDefaultProfiles()
-{
-    // Default to TRex-scale profile
-    SoundProfile.DinosaurSpecies = FName("TRex");
-    SoundProfile.RoarRadius = 2000.0f;
-    SoundProfile.FootstepRadius = 800.0f;
-    SoundProfile.FootstepInterval = 1.2f;
-    SoundProfile.BreathingRadius = 300.0f;
-    SoundProfile.RoarCooldown = 15.0f;
-    SoundProfile.bCausesScreenShake = true;
-    SoundProfile.ScreenShakeIntensity = 1.0f;
-}
-
-void UAudio_DinosaurSoundManager::BeginPlay()
-{
-    Super::BeginPlay();
-    FootstepTimer = 0.0f;
-    RoarCooldownTimer = 0.0f;
-    bRoarOnCooldown = false;
-}
-
-void UAudio_DinosaurSoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    UpdateDistanceToPlayer();
-
-    // Footstep timer
-    if (bPlayerInFootstepRadius)
-    {
-        FootstepTimer += DeltaTime;
-        if (FootstepTimer >= SoundProfile.FootstepInterval)
-        {
-            TriggerFootstep();
-            FootstepTimer = 0.0f;
-        }
-    }
-    else
-    {
-        FootstepTimer = 0.0f;
-    }
-
-    // Roar cooldown
-    if (bRoarOnCooldown)
-    {
-        RoarCooldownTimer -= DeltaTime;
-        if (RoarCooldownTimer <= 0.0f)
-        {
-            bRoarOnCooldown = false;
-            RoarCooldownTimer = 0.0f;
-        }
-    }
-}
-
-void UAudio_DinosaurSoundManager::UpdateDistanceToPlayer()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
     AActor* Owner = GetOwner();
-    if (!Owner) return;
+    if (!Owner)
+    {
+        return false;
+    }
 
-    CurrentDistanceToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-    bPlayerInRoarRadius = (CurrentDistanceToPlayer <= SoundProfile.RoarRadius);
-    bPlayerInFootstepRadius = (CurrentDistanceToPlayer <= SoundProfile.FootstepRadius);
+    UWorld* World = Owner->GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PC || !PC->GetPawn())
+    {
+        return false;
+    }
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    FVector ZoneLocation = Owner->GetActorLocation();
+    float DistanceSq = FVector::DistSquared(PlayerLocation, ZoneLocation);
+
+    return DistanceSq <= (ZoneRadius * ZoneRadius);
 }
 
-void UAudio_DinosaurSoundManager::TriggerRoar()
+void UAudio_ZoneComponent::RegisterAmbientLayer(FAudio_AmbientLayer NewLayer)
 {
-    if (bRoarOnCooldown) return;
-
-    // Mark cooldown
-    bRoarOnCooldown = true;
-    RoarCooldownTimer = SoundProfile.RoarCooldown;
-
-    // Blueprint/MetaSound will handle actual audio playback via event
-    // Screen shake is driven by GetFootstepScreenShakeIntensity()
-    UE_LOG(LogTemp, Log, TEXT("AudioDino: %s ROAR triggered at dist=%.0f"),
-        *SoundProfile.DinosaurSpecies.ToString(), CurrentDistanceToPlayer);
+    // Prevent duplicate layer IDs
+    for (const FAudio_AmbientLayer& Existing : AmbientLayers)
+    {
+        if (Existing.LayerID == NewLayer.LayerID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("AudioZone: Layer '%s' already registered — skipping"), *NewLayer.LayerID.ToString());
+            return;
+        }
+    }
+    AmbientLayers.Add(NewLayer);
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Registered ambient layer '%s' for zone type %d"),
+        *NewLayer.LayerID.ToString(), (int32)NewLayer.ZoneType);
 }
 
-void UAudio_DinosaurSoundManager::TriggerFootstep()
+void UAudio_ZoneComponent::RegisterEventCue(FAudio_EventCue NewCue)
 {
-    // Blueprint/MetaSound handles audio
-    // Screen shake intensity computed from distance
-    float ShakeIntensity = GetFootstepScreenShakeIntensity();
-    if (ShakeIntensity > 0.01f)
+    // Prevent duplicate cue IDs
+    for (const FAudio_EventCue& Existing : EventCues)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("AudioDino: %s FOOTSTEP shake=%.2f dist=%.0f"),
-            *SoundProfile.DinosaurSpecies.ToString(), ShakeIntensity, CurrentDistanceToPlayer);
+        if (Existing.CueID == NewCue.CueID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("AudioZone: Cue '%s' already registered — skipping"), *NewCue.CueID.ToString());
+            return;
+        }
     }
+    EventCues.Add(NewCue);
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Registered event cue '%s' (trigger: '%s')"),
+        *NewCue.CueID.ToString(), *NewCue.TriggerEvent.ToString());
 }
 
-float UAudio_DinosaurSoundManager::GetFootstepScreenShakeIntensity() const
+void UAudio_ZoneComponent::InitializeDefaultLayers()
 {
-    if (!SoundProfile.bCausesScreenShake) return 0.0f;
-    if (CurrentDistanceToPlayer > SoundProfile.FootstepRadius) return 0.0f;
+    // Default layers based on active zone type at BeginPlay
+    // These are documentation stubs — actual USoundBase assets assigned in Blueprint/Editor
 
-    // Linear falloff: full intensity at 0 distance, zero at FootstepRadius
-    float NormalizedDist = FMath::Clamp(CurrentDistanceToPlayer / SoundProfile.FootstepRadius, 0.0f, 1.0f);
-    return SoundProfile.ScreenShakeIntensity * (1.0f - NormalizedDist);
-}
+    switch (ActiveZone)
+    {
+        case EAudio_ZoneType::Camp:
+        {
+            // Campfire crackling — Freesound #856943 (FIREBurn_Campfire Forest Birds)
+            FAudio_AmbientLayer CampfireLayer;
+            CampfireLayer.LayerID = FName("Campfire_Crackle");
+            CampfireLayer.ZoneType = EAudio_ZoneType::Camp;
+            CampfireLayer.Volume = 0.7f;
+            CampfireLayer.FadeInDuration = 1.5f;
+            CampfireLayer.FadeOutDuration = 2.0f;
+            CampfireLayer.bLooping = true;
+            CampfireLayer.FreesoundID = TEXT("856943");
+            AmbientLayers.Add(CampfireLayer);
 
-bool UAudio_DinosaurSoundManager::ShouldTriggerScreenShake() const
-{
-    return GetFootstepScreenShakeIntensity() > 0.05f;
-}
+            // Soft wind at camp perimeter
+            FAudio_AmbientLayer WindLayer;
+            WindLayer.LayerID = FName("Camp_Wind_Soft");
+            WindLayer.ZoneType = EAudio_ZoneType::Camp;
+            WindLayer.Volume = 0.3f;
+            WindLayer.FadeInDuration = 3.0f;
+            WindLayer.FadeOutDuration = 4.0f;
+            WindLayer.bLooping = true;
+            AmbientLayers.Add(WindLayer);
 
-void UAudio_DinosaurSoundManager::SetDinosaurSpecies(FName Species)
-{
-    SoundProfile.DinosaurSpecies = Species;
+            // TRex quest accepted — tension sting cue
+            FAudio_EventCue TRexQuestCue;
+            TRexQuestCue.CueID = FName("TRex_Quest_Accepted");
+            TRexQuestCue.TriggerEvent = FName("Quest_HuntTRex_Accepted");
+            TRexQuestCue.Volume = 0.9f;
+            TRexQuestCue.TriggerDelay = 0.5f;
+            TRexQuestCue.Duration = 5.0f; // Matches FNarr_DialogueLine.DisplayDuration range
+            EventCues.Add(TRexQuestCue);
 
-    // Adjust profile by species
-    if (Species == FName("TRex"))
-    {
-        SoundProfile.RoarRadius = 2000.0f;
-        SoundProfile.FootstepRadius = 800.0f;
-        SoundProfile.FootstepInterval = 1.2f;
-        SoundProfile.ScreenShakeIntensity = 1.0f;
-    }
-    else if (Species == FName("Raptor"))
-    {
-        SoundProfile.RoarRadius = 800.0f;
-        SoundProfile.FootstepRadius = 300.0f;
-        SoundProfile.FootstepInterval = 0.4f;
-        SoundProfile.ScreenShakeIntensity = 0.2f;
-    }
-    else if (Species == FName("Brachiosaurus"))
-    {
-        SoundProfile.RoarRadius = 1500.0f;
-        SoundProfile.FootstepRadius = 1200.0f;
-        SoundProfile.FootstepInterval = 2.0f;
-        SoundProfile.ScreenShakeIntensity = 1.5f;
-    }
-    else if (Species == FName("Stegosaurus"))
-    {
-        SoundProfile.RoarRadius = 600.0f;
-        SoundProfile.FootstepRadius = 400.0f;
-        SoundProfile.FootstepInterval = 1.0f;
-        SoundProfile.ScreenShakeIntensity = 0.5f;
-    }
-    else if (Species == FName("Triceratops"))
-    {
-        SoundProfile.RoarRadius = 1000.0f;
-        SoundProfile.FootstepRadius = 600.0f;
-        SoundProfile.FootstepInterval = 0.9f;
-        SoundProfile.ScreenShakeIntensity = 0.7f;
+            // Elder dialogue start cue
+            FAudio_EventCue ElderDialogueCue;
+            ElderDialogueCue.CueID = FName("Elder_Dialogue_Start");
+            ElderDialogueCue.TriggerEvent = FName("Dialogue_Elder_Start");
+            ElderDialogueCue.Volume = 0.6f;
+            ElderDialogueCue.TriggerDelay = 0.0f;
+            ElderDialogueCue.Duration = 4.0f;
+            EventCues.Add(ElderDialogueCue);
+            break;
+        }
+
+        case EAudio_ZoneType::TRexProximity:
+        {
+            // Ground rumble — low frequency, felt more than heard
+            FAudio_AmbientLayer RumbleLayer;
+            RumbleLayer.LayerID = FName("TRex_Ground_Rumble");
+            RumbleLayer.ZoneType = EAudio_ZoneType::TRexProximity;
+            RumbleLayer.Volume = 0.8f;
+            RumbleLayer.FadeInDuration = 4.0f; // Slow build — player feels dread
+            RumbleLayer.FadeOutDuration = 6.0f;
+            RumbleLayer.bLooping = true;
+            AmbientLayers.Add(RumbleLayer);
+
+            // Silence of prey — reduce all other ambient layers (handled by zone transition)
+            FAudio_EventCue TRexApproachCue;
+            TRexApproachCue.CueID = FName("TRex_Approach_Warning");
+            TRexApproachCue.TriggerEvent = FName("TRex_Within_400_Units");
+            TRexApproachCue.Volume = 1.0f;
+            TRexApproachCue.TriggerDelay = 0.0f;
+            TRexApproachCue.Duration = 6.0f;
+            EventCues.Add(TRexApproachCue);
+            break;
+        }
+
+        case EAudio_ZoneType::Forest:
+        default:
+        {
+            // Forest default — insects, wind, distant birds
+            FAudio_AmbientLayer ForestLayer;
+            ForestLayer.LayerID = FName("Forest_Insects_Wind");
+            ForestLayer.ZoneType = EAudio_ZoneType::Forest;
+            ForestLayer.Volume = 0.5f;
+            ForestLayer.FadeInDuration = 2.0f;
+            ForestLayer.FadeOutDuration = 3.0f;
+            ForestLayer.bLooping = true;
+            AmbientLayers.Add(ForestLayer);
+            break;
+        }
     }
 }
