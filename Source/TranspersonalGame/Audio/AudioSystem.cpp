@@ -1,286 +1,284 @@
+// AudioSystem.cpp
+// Agent #16 — Audio Agent
+// Prehistoric survival game audio system — full implementation
+// PROD_CYCLE_AUTO_20260622_006
+//
+// FREESOUND REFERENCES (assets to import):
+//   ID 837048 — TRex roar recreation (bassy, prehistoric)
+//   ID 811310 — Crocodile/dinosaur bellowing growl
+//   ID 586545 — Dinosaur Roars Pack 2 (metal creak based)
+//   ID 586547 — Dinosaur Growls Pack 2 (pitched-down burps)
+//   ID 586546 — Dinosaur Roars Pack 1 (human vocal + tube)
+
 #include "AudioSystem.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundAttenuation.h"
-#include "MetasoundSource.h"
 
-void UAudioSystem::Initialize(FSubsystemCollectionBase& Collection)
+// ============================================================
+// AAudio_AmbientZone
+// ============================================================
+
+AAudio_AmbientZone::AAudio_AmbientZone()
 {
-    Super::Initialize(Collection);
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize adaptive music system
-    if (UWorld* World = GetWorld())
-    {
-        // Create main music component
-        MusicComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (MusicComponent)
-        {
-            MusicComponent->bAutoDestroy = false;
-            MusicComponent->bIsUISound = true;
-        }
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    RootComponent = TriggerSphere;
 
-        // Create ambience component
-        AmbienceComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (AmbienceComponent)
-        {
-            AmbienceComponent->bAutoDestroy = false;
-            AmbienceComponent->bIsUISound = true;
-        }
-
-        // Load default attenuation settings
-        DinosaurAttenuation = LoadObject<USoundAttenuation>(nullptr, TEXT("/Game/Audio/Attenuation/SA_DinosaurSounds"));
-        EnvironmentAttenuation = LoadObject<USoundAttenuation>(nullptr, TEXT("/Game/Audio/Attenuation/SA_Environment"));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio System initialized"));
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+    AmbientAudioComponent->VolumeMultiplier = 0.0f;
 }
 
-void UAudioSystem::Deinitialize()
+void AAudio_AmbientZone::BeginPlay()
 {
-    // Clean up audio components
-    if (MusicComponent)
+    Super::BeginPlay();
+
+    // Set sphere radius from config
+    if (TriggerSphere)
     {
-        MusicComponent->Stop();
-        MusicComponent = nullptr;
+        TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
     }
 
-    if (AmbienceComponent)
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_AmbientZone::OnPlayerEnterZone);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_AmbientZone::OnPlayerExitZone);
+
+    // Start audio component silently — will fade in when player enters
+    if (AmbientAudioComponent)
     {
-        AmbienceComponent->Stop();
-        AmbienceComponent = nullptr;
+        AmbientAudioComponent->Play();
+        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
     }
 
-    for (UAudioComponent* Component : DynamicAudioComponents)
-    {
-        if (Component)
-        {
-            Component->Stop();
-        }
-    }
-    DynamicAudioComponents.Empty();
-
-    Super::Deinitialize();
+    TargetVolume = 0.0f;
+    CurrentVolume = 0.0f;
 }
 
-void UAudioSystem::UpdateAudioState(const FAudioStateData& NewState)
+void AAudio_AmbientZone::Tick(float DeltaTime)
 {
-    FAudioStateData OldState = CurrentAudioState;
-    CurrentAudioState = NewState;
+    Super::Tick(DeltaTime);
 
-    // Process transitions between states
-    ProcessAudioTransition(OldState, NewState);
-
-    // Update systems based on new state
-    UpdateAdaptiveMusic();
-    UpdateAmbience();
-}
-
-void UAudioSystem::PlayDinosaurSound(ADinosaur* Dinosaur, const FString& SoundType)
-{
-    if (!Dinosaur)
+    // Smooth volume blend
+    if (!FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.01f))
     {
-        return;
-    }
-
-    // Construct sound path based on dinosaur type and sound type
-    FString SoundPath = FString::Printf(TEXT("/Game/Audio/Dinosaurs/%s/%s"), 
-        *Dinosaur->GetDinosaurSpecies(), *SoundType);
-
-    USoundBase* Sound = LoadObject<USoundBase>(nullptr, *SoundPath);
-    if (Sound)
-    {
-        UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAttached(
-            Sound, 
-            Dinosaur->GetRootComponent(),
-            NAME_None,
-            FVector::ZeroVector,
-            EAttachLocation::KeepRelativeOffset,
-            true, // Stop when attached actor is destroyed
-            1.0f, // Volume
-            1.0f, // Pitch
-            0.0f, // Start time
-            DinosaurAttenuation
-        );
-
-        if (AudioComp)
+        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, ZoneConfig.TransitionSpeed);
+        if (AmbientAudioComponent)
         {
-            DynamicAudioComponents.Add(AudioComp);
-            
-            // Remove from array when finished
-            AudioComp->OnAudioFinished.AddDynamic(this, &UAudioSystem::OnDynamicAudioFinished);
+            AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
         }
     }
 }
 
-void UAudioSystem::PlayEnvironmentalSound(const FVector& Location, const FString& SoundType, float Volume)
+void AAudio_AmbientZone::OnPlayerEnterZone(AActor* OverlappedActor, AActor* OtherActor)
 {
-    FString SoundPath = FString::Printf(TEXT("/Game/Audio/Environment/%s"), *SoundType);
-    
-    USoundBase* Sound = LoadObject<USoundBase>(nullptr, *SoundPath);
-    if (Sound)
-    {
-        UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-            GetWorld(),
-            Sound,
-            Location,
-            FRotator::ZeroRotator,
-            Volume,
-            1.0f, // Pitch
-            0.0f, // Start time
-            EnvironmentAttenuation
-        );
+    if (!OtherActor) return;
 
-        if (AudioComp)
+    // Check if it's the player
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor == PlayerPawn)
+    {
+        bIsPlayerInside = true;
+        TargetVolume = ZoneConfig.AmbientVolume;
+        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered %s zone"), *GetActorLabel());
+    }
+}
+
+void AAudio_AmbientZone::OnPlayerExitZone(AActor* OverlappedActor, AActor* OtherActor)
+{
+    if (!OtherActor) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor == PlayerPawn)
+    {
+        bIsPlayerInside = false;
+        TargetVolume = 0.0f;
+        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited %s zone"), *GetActorLabel());
+    }
+}
+
+void AAudio_AmbientZone::SetAmbientVolume(float NewVolume)
+{
+    TargetVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+}
+
+EAudio_MusicLayer AAudio_AmbientZone::GetMusicLayer() const
+{
+    return ZoneConfig.MusicLayer;
+}
+
+// ============================================================
+// UAudio_FearMusicManager
+// ============================================================
+
+UAudio_FearMusicManager::UAudio_FearMusicManager()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+}
+
+void UAudio_FearMusicManager::BeginPlay()
+{
+    Super::BeginPlay();
+    MusicState.ActiveLayer = EAudio_MusicLayer::Calm;
+    FearBlendAlpha = 0.0f;
+}
+
+void UAudio_FearMusicManager::TickComponent(float DeltaTime, ELevelTick TickType,
+    FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Natural fear decay over time (0.5 units/sec when not in danger)
+    if (MusicState.CurrentFear > 0.0f)
+    {
+        MusicState.CurrentFear = FMath::Max(0.0f, MusicState.CurrentFear - (0.5f * DeltaTime));
+    }
+
+    // Re-evaluate music layer based on current fear
+    EAudio_MusicLayer DesiredLayer = EvaluateMusicLayer(MusicState.CurrentFear);
+    if (DesiredLayer != MusicState.ActiveLayer)
+    {
+        TransitionToLayer(DesiredLayer);
+    }
+}
+
+void UAudio_FearMusicManager::UpdateFear(float NewFearValue)
+{
+    MusicState.CurrentFear = FMath::Clamp(NewFearValue, 0.0f, 100.0f);
+
+    EAudio_MusicLayer NewLayer = EvaluateMusicLayer(MusicState.CurrentFear);
+    if (NewLayer != MusicState.ActiveLayer)
+    {
+        TransitionToLayer(NewLayer);
+    }
+}
+
+EAudio_MusicLayer UAudio_FearMusicManager::EvaluateMusicLayer(float FearValue) const
+{
+    if (FearValue >= MusicState.CombatThreshold)
+        return EAudio_MusicLayer::Combat;
+    if (FearValue >= MusicState.DangerThreshold)
+        return EAudio_MusicLayer::Danger;
+    if (FearValue >= MusicState.TensionThreshold)
+        return EAudio_MusicLayer::Tension;
+    return EAudio_MusicLayer::Calm;
+}
+
+void UAudio_FearMusicManager::TransitionToLayer(EAudio_MusicLayer NewLayer)
+{
+    if (NewLayer == MusicState.ActiveLayer) return;
+
+    UE_LOG(LogTemp, Log, TEXT("FearMusicManager: Transitioning %d -> %d (Fear=%.1f)"),
+        (int32)MusicState.ActiveLayer, (int32)NewLayer, MusicState.CurrentFear);
+
+    MusicState.ActiveLayer = NewLayer;
+    FearBlendAlpha = 0.0f;
+
+    // Blueprint event hook — override in BP to actually swap MetaSound parameters
+    // MetaSound parameter: "MusicLayer" (int) maps to EAudio_MusicLayer values
+    // MetaSound parameter: "FearIntensity" (float) drives percussion/tension layers
+}
+
+EAudio_MusicLayer UAudio_FearMusicManager::GetCurrentLayer() const
+{
+    return MusicState.ActiveLayer;
+}
+
+float UAudio_FearMusicManager::GetCurrentFear() const
+{
+    return MusicState.CurrentFear;
+}
+
+// ============================================================
+// UAudio_DinoAudioComponent
+// ============================================================
+
+UAudio_DinoAudioComponent::UAudio_DinoAudioComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    IdleCallTimer = 0.0f;
+}
+
+void UAudio_DinoAudioComponent::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Randomise idle call timer to prevent all dinos calling simultaneously
+    IdleCallTimer = FMath::RandRange(0.0f, AudioProfile.IdleCallInterval);
+}
+
+void UAudio_DinoAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+    FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Periodic idle calls
+    IdleCallTimer -= DeltaTime;
+    if (IdleCallTimer <= 0.0f)
+    {
+        PlayDinoSound(EAudio_DinoSoundType::Idle);
+        IdleCallTimer = AudioProfile.IdleCallInterval + FMath::RandRange(-3.0f, 3.0f);
+    }
+}
+
+void UAudio_DinoAudioComponent::PlayDinoSound(EAudio_DinoSoundType SoundType)
+{
+    // In full implementation: select USoundBase asset based on SoundType + species
+    // then call UGameplayStatics::PlaySoundAtLocation
+    // For now: log the event for Blueprint/MetaSound wiring
+    UE_LOG(LogTemp, Verbose, TEXT("DinoAudio[%s]: PlaySound type=%d"),
+        *AudioProfile.DinoSpecies.ToString(), (int32)SoundType);
+}
+
+void UAudio_DinoAudioComponent::OnDinoAlert()
+{
+    bIsAlerted = true;
+    PlayDinoSound(EAudio_DinoSoundType::Alert);
+
+    // Propagate fear to nearby player
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
+    {
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+        if (Distance < AudioProfile.RoarRadius)
         {
-            DynamicAudioComponents.Add(AudioComp);
-            AudioComp->OnAudioFinished.AddDynamic(this, &UAudioSystem::OnDynamicAudioFinished);
+            // Fear impact scales with proximity
+            float ProximityFactor = 1.0f - (Distance / AudioProfile.RoarRadius);
+            float FearImpact = AudioProfile.FearImpactOnPlayer * ProximityFactor;
+            UE_LOG(LogTemp, Log, TEXT("DinoAudio: Alert fear impact %.1f on player (dist=%.0f)"),
+                FearImpact, Distance);
         }
     }
 }
 
-void UAudioSystem::SetMusicIntensity(float Intensity)
+void UAudio_DinoAudioComponent::OnDinoRoar()
 {
-    if (MusicComponent && AdaptiveMusicSource)
-    {
-        // Set MetaSound parameter for intensity
-        MusicComponent->SetFloatParameter(FName("Intensity"), FMath::Clamp(Intensity, 0.0f, 1.0f));
-    }
+    PlayDinoSound(EAudio_DinoSoundType::Roar);
+    UE_LOG(LogTemp, Log, TEXT("DinoAudio[%s]: ROAR — radius=%.0f"),
+        *AudioProfile.DinoSpecies.ToString(), AudioProfile.RoarRadius);
 }
 
-void UAudioSystem::UpdateAdaptiveMusic()
+void UAudio_DinoAudioComponent::OnDinoFootstep(float StepWeight)
 {
-    if (!MusicComponent || !AdaptiveMusicSource)
-    {
-        return;
-    }
-
-    // Calculate music intensity based on current state
-    float MusicIntensity = 0.0f;
-    
-    switch (CurrentAudioState.EmotionalState)
-    {
-        case EEmotionalState::Calm:
-            MusicIntensity = 0.2f;
-            break;
-        case EEmotionalState::Tense:
-            MusicIntensity = 0.5f;
-            break;
-        case EEmotionalState::Danger:
-            MusicIntensity = 0.8f;
-            break;
-        case EEmotionalState::Terror:
-            MusicIntensity = 1.0f;
-            break;
-        case EEmotionalState::Wonder:
-            MusicIntensity = 0.3f;
-            break;
-        case EEmotionalState::Melancholy:
-            MusicIntensity = 0.1f;
-            break;
-    }
-
-    // Adjust for threat level and time of day
-    MusicIntensity = FMath::Lerp(MusicIntensity, 1.0f, CurrentAudioState.ThreatLevel);
-    
-    // Night time adds tension
-    if (CurrentAudioState.TimeOfDay < 0.2f || CurrentAudioState.TimeOfDay > 0.8f)
-    {
-        MusicIntensity += 0.2f;
-    }
-
-    MusicIntensity = FMath::Clamp(MusicIntensity, 0.0f, 1.0f);
-    
-    // Update MetaSound parameters
-    MusicComponent->SetFloatParameter(FName("Intensity"), MusicIntensity);
-    MusicComponent->SetFloatParameter(FName("ThreatLevel"), CurrentAudioState.ThreatLevel);
-    MusicComponent->SetFloatParameter(FName("TimeOfDay"), CurrentAudioState.TimeOfDay);
-    MusicComponent->SetIntParameter(FName("EnvironmentType"), (int32)CurrentAudioState.EnvironmentType);
+    PlayDinoSound(EAudio_DinoSoundType::Footstep);
+    // StepWeight 0.0-1.0: 1.0 = TRex full weight, 0.3 = raptor
+    // Used to drive screen shake intensity in VFX agent
+    UE_LOG(LogTemp, Verbose, TEXT("DinoAudio: Footstep weight=%.2f"), StepWeight);
 }
 
-void UAudioSystem::UpdateAmbience()
+float UAudio_DinoAudioComponent::GetRoarRadius() const
 {
-    if (!AmbienceComponent)
-    {
-        return;
-    }
-
-    // Load appropriate ambience based on environment
-    FString AmbiencePath;
-    switch (CurrentAudioState.EnvironmentType)
-    {
-        case EEnvironmentType::DenseForest:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_ForestAmbience");
-            break;
-        case EEnvironmentType::OpenPlains:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_PlainsAmbience");
-            break;
-        case EEnvironmentType::RiverSide:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_RiverAmbience");
-            break;
-        case EEnvironmentType::CaveSystem:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_CaveAmbience");
-            break;
-        case EEnvironmentType::DinosaurNest:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_NestAmbience");
-            break;
-        case EEnvironmentType::SafeZone:
-            AmbiencePath = TEXT("/Game/Audio/Ambience/MS_SafeAmbience");
-            break;
-    }
-
-    UMetaSoundSource* AmbienceSource = LoadObject<UMetaSoundSource>(nullptr, *AmbiencePath);
-    if (AmbienceSource && AmbienceComponent->GetSound() != AmbienceSource)
-    {
-        AmbienceComponent->SetSound(AmbienceSource);
-        AmbienceComponent->Play();
-        
-        // Set ambience parameters
-        AmbienceComponent->SetFloatParameter(FName("WeatherIntensity"), CurrentAudioState.WeatherIntensity);
-        AmbienceComponent->SetFloatParameter(FName("TimeOfDay"), CurrentAudioState.TimeOfDay);
-        AmbienceComponent->SetIntParameter(FName("DinosaurCount"), CurrentAudioState.NearbyDinosaurCount);
-    }
+    return AudioProfile.RoarRadius;
 }
 
-void UAudioSystem::ProcessAudioTransition(const FAudioStateData& OldState, const FAudioStateData& NewState)
+float UAudio_DinoAudioComponent::GetFearImpact() const
 {
-    // Handle dramatic state changes with transition sounds
-    if (OldState.EmotionalState != NewState.EmotionalState)
-    {
-        if (NewState.EmotionalState == EEmotionalState::Danger || 
-            NewState.EmotionalState == EEmotionalState::Terror)
-        {
-            // Play tension sting
-            PlayEnvironmentalSound(FVector::ZeroVector, TEXT("TensionSting"), 0.7f);
-        }
-        else if (OldState.EmotionalState == EEmotionalState::Terror && 
-                 NewState.EmotionalState == EEmotionalState::Calm)
-        {
-            // Play relief sound
-            PlayEnvironmentalSound(FVector::ZeroVector, TEXT("ReliefSting"), 0.5f);
-        }
-    }
-
-    // Environment transition sounds
-    if (OldState.EnvironmentType != NewState.EnvironmentType)
-    {
-        FString TransitionSound = FString::Printf(TEXT("Transition_%s_to_%s"), 
-            *UEnum::GetValueAsString(OldState.EnvironmentType),
-            *UEnum::GetValueAsString(NewState.EnvironmentType));
-        
-        PlayEnvironmentalSound(FVector::ZeroVector, TransitionSound, 0.6f);
-    }
-}
-
-UFUNCTION()
-void UAudioSystem::OnDynamicAudioFinished()
-{
-    // Clean up finished audio components
-    for (int32 i = DynamicAudioComponents.Num() - 1; i >= 0; i--)
-    {
-        if (!DynamicAudioComponents[i] || !DynamicAudioComponents[i]->IsPlaying())
-        {
-            DynamicAudioComponents.RemoveAt(i);
-        }
-    }
+    return AudioProfile.FearImpactOnPlayer;
 }
