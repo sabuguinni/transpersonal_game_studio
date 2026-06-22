@@ -1,153 +1,197 @@
+// AudioZoneSystem.h
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260622_003
+// Adaptive ambient audio zones for prehistoric survival world.
+// Zones: tribal camp (campfire), raptor patrol (distant calls), open plains (wind).
+// NO spiritual/mystical content — pure environmental survival audio.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "AudioZoneSystem.generated.h"
 
-// Audio zone type — controls which ambient layer is active
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    None        UMETA(DisplayName = "None"),
-    Camp        UMETA(DisplayName = "Camp"),       // Campfire, voices, safety
-    Forest      UMETA(DisplayName = "Forest"),     // Wind, insects, birds
-    Danger      UMETA(DisplayName = "Danger"),     // Tension sting, heartbeat
-    Combat      UMETA(DisplayName = "Combat"),     // Percussion, chaos
-    Night       UMETA(DisplayName = "Night"),      // Crickets, distant howls
-    TRexProximity UMETA(DisplayName = "TRexProximity") // Ground rumble, silence of prey
+    TribalCamp      UMETA(DisplayName = "Tribal Camp"),
+    RaptorPatrol    UMETA(DisplayName = "Raptor Patrol"),
+    OpenPlains      UMETA(DisplayName = "Open Plains"),
+    DenseForest     UMETA(DisplayName = "Dense Forest"),
+    RiverBank       UMETA(DisplayName = "River Bank"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance")
 };
 
-// Describes a single ambient audio layer
+UENUM(BlueprintType)
+enum class EAudio_ThreatLevel : uint8
+{
+    Safe        UMETA(DisplayName = "Safe"),
+    Cautious    UMETA(DisplayName = "Cautious"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Critical    UMETA(DisplayName = "Critical")
+};
+
+// ─── Structs ──────────────────────────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
-struct FAudio_AmbientLayer
+struct FAudio_ZoneConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FName LayerID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::OpenPlains;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float BlendRadius = 500.0f;
 
-    // Volume 0.0 - 1.0
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Volume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float AmbientVolume = 0.8f;
 
-    // Fade-in time in seconds when zone becomes active
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInDuration = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float ThreatCallInterval = 12.0f;  // seconds between distant threat calls
 
-    // Fade-out time in seconds when zone becomes inactive
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutDuration = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bLoopAmbient = true;
 
-    // Whether this layer loops
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bLooping = true;
-
-    // Freesound asset reference ID (for documentation)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString FreesoundID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bHasThreatCalls = false;
 };
 
-// Describes a one-shot audio event (dialogue sting, danger alert)
 USTRUCT(BlueprintType)
-struct FAudio_EventCue
+struct FAudio_SoundscapeState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FName CueID;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudio_ZoneType ActiveZone = EAudio_ZoneType::OpenPlains;
 
-    // Game event that triggers this cue
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FName TriggerEvent;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudio_ThreatLevel ThreatLevel = EAudio_ThreatLevel::Safe;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Volume = 0.8f;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float BlendAlpha = 0.0f;  // 0=previous zone, 1=current zone
 
-    // Delay after trigger event fires (seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float TriggerDelay = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float TimeSinceLastThreatCall = 0.0f;
 
-    // Duration of the cue (seconds) — should match dialogue line DisplayDuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Duration = 4.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    bool bPlayerNearCampfire = false;
 };
 
-/**
- * UAudio_ZoneComponent
- * ActorComponent that manages ambient audio zone transitions and event cues.
- * Attach to AmbientSound actors or zone trigger volumes.
- * Drives MetaSound parameter blocks when MetaSounds are available.
- */
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Audio Zone Component")
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
+// ─── Audio Zone Actor ─────────────────────────────────────────────────────────
+
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone"))
+class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneComponent();
-
-    // Current active zone type
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ActiveZone = EAudio_ZoneType::Forest;
-
-    // Registered ambient layers for this zone actor
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layers")
-    TArray<FAudio_AmbientLayer> AmbientLayers;
-
-    // Registered one-shot event cues
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Events")
-    TArray<FAudio_EventCue> EventCues;
-
-    // Radius (cm) within which this zone is audible
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float ZoneRadius = 1500.0f;
-
-    // Whether zone transitions are currently enabled
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bZoneActive = true;
-
-    // Transition to a new zone type with crossfade
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void TransitionToZone(EAudio_ZoneType NewZone, float CrossfadeDuration = 2.0f);
-
-    // Fire a named event cue immediately
-    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
-    void FireEventCue(FName CueID);
-
-    // Get current zone type
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    EAudio_ZoneType GetActiveZone() const { return ActiveZone; }
-
-    // Check if player is within zone radius
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    bool IsPlayerInZone() const;
-
-    // Register a new ambient layer at runtime
-    UFUNCTION(BlueprintCallable, Category = "Audio|Layers")
-    void RegisterAmbientLayer(FAudio_AmbientLayer NewLayer);
-
-    // Register a new event cue at runtime
-    UFUNCTION(BlueprintCallable, Category = "Audio|Events")
-    void RegisterEventCue(FAudio_EventCue NewCue);
+    AAudio_ZoneActor();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Zone configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_ZoneConfig ZoneConfig;
+
+    // Trigger sphere — player enters to activate zone
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+              meta = (AllowPrivateAccess = "true"))
+    USphereComponent* TriggerSphere;
+
+    // Primary ambient audio component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+              meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* AmbientAudioComp;
+
+    // Secondary threat/event audio component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+              meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* ThreatAudioComp;
+
+    // Current soundscape state
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    FAudio_SoundscapeState CurrentState;
+
+    // Called when player enters the zone
+    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
+    void OnPlayerEnterZone(AActor* PlayerActor);
+
+    // Called when player exits the zone
+    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
+    void OnPlayerExitZone(AActor* PlayerActor);
+
+    // Update threat level (called by DinosaurAI when raptors are nearby)
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
+
+    // Get zone type
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
+
+    // Get current threat level
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    EAudio_ThreatLevel GetThreatLevel() const { return CurrentState.ThreatLevel; }
 
 private:
-    // Time elapsed in current zone
-    float ZoneActiveTime = 0.0f;
+    UFUNCTION()
+    void OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                               UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                               bool bFromSweep, const FHitResult& SweepResult);
 
-    // Previous zone for crossfade tracking
-    EAudio_ZoneType PreviousZone = EAudio_ZoneType::None;
+    UFUNCTION()
+    void OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                             UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
-    // Crossfade progress (0.0 = full previous, 1.0 = full new)
-    float CrossfadeProgress = 1.0f;
-    float CrossfadeDurationRemaining = 0.0f;
+    void TickThreatCallTimer(float DeltaTime);
+    void PlayThreatCall();
 
-    // Initialize default layers based on zone type
-    void InitializeDefaultLayers();
+    bool bPlayerInZone = false;
+    float ThreatCallAccumulator = 0.0f;
+};
+
+// ─── Audio Manager Subsystem ──────────────────────────────────────────────────
+
+UCLASS()
+class TRANSPERSONALGAME_API UAudio_WorldSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Register an audio zone with the manager
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void RegisterZone(AAudio_ZoneActor* Zone);
+
+    // Unregister an audio zone
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void UnregisterZone(AAudio_ZoneActor* Zone);
+
+    // Get the active zone for a world location
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    AAudio_ZoneActor* GetActiveZoneForLocation(FVector WorldLocation) const;
+
+    // Broadcast threat level change to all nearby zones
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void BroadcastThreatLevel(FVector ThreatOrigin, float Radius, EAudio_ThreatLevel Level);
+
+    // Get global soundscape state
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    FAudio_SoundscapeState GetGlobalSoundscapeState() const { return GlobalState; }
+
+private:
+    UPROPERTY()
+    TArray<AAudio_ZoneActor*> RegisteredZones;
+
+    FAudio_SoundscapeState GlobalState;
 };
