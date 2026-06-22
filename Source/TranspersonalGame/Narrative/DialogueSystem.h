@@ -1,7 +1,12 @@
+// DialogueSystem.h
+// Narrative & Dialogue Agent #15 — PROD_CYCLE_AUTO_20260622_009
+// Dialogue system for NPC interactions in prehistoric survival game
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
 #include "DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -9,10 +14,9 @@ enum class ENarr_DialogueState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Greeting    UMETA(DisplayName = "Greeting"),
-    QuestOffer  UMETA(DisplayName = "QuestOffer"),
-    QuestActive UMETA(DisplayName = "QuestActive"),
-    QuestDone   UMETA(DisplayName = "QuestDone"),
-    Farewell    UMETA(DisplayName = "Farewell")
+    InDialogue  UMETA(DisplayName = "InDialogue"),
+    Farewell    UMETA(DisplayName = "Farewell"),
+    Busy        UMETA(DisplayName = "Busy")
 };
 
 USTRUCT(BlueprintType)
@@ -27,54 +31,68 @@ struct FNarr_DialogueLine
     FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState TriggerState;
+    float DisplayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bRequiresPlayerResponse;
 
     FNarr_DialogueLine()
         : SpeakerName(TEXT("Unknown"))
         , LineText(TEXT(""))
-        , TriggerState(ENarr_DialogueState::Idle)
+        , DisplayDuration(3.0f)
+        , bRequiresPlayerResponse(false)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_NPCDialogueData
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCName;
+    FName SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState CurrentState;
+    bool bCanRepeat;
 
-    FNarr_NPCDialogueData()
-        : NPCName(TEXT("Unknown"))
-        , CurrentState(ENarr_DialogueState::Idle)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName NextSequenceID;
+
+    FNarr_DialogueSequence()
+        : SequenceID(NAME_None)
+        , bCanRepeat(false)
+        , NextSequenceID(NAME_None)
     {}
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueActor : public AActor
+UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueActor();
+    UNarr_DialogueComponent();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_NPCDialogueData DialogueData;
+    TArray<FNarr_DialogueSequence> DialogueSequences;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName ActiveSequenceID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    ENarr_DialogueState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float InteractionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsInteractable;
-
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue();
+    void StartDialogue(FName SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     void AdvanceDialogue();
@@ -86,11 +104,45 @@ public:
     FNarr_DialogueLine GetCurrentLine() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetDialogueState(ENarr_DialogueState NewState);
+    bool IsInDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    ENarr_DialogueState GetDialogueState() const;
 
 protected:
     virtual void BeginPlay() override;
 
 private:
     int32 CurrentLineIndex;
+    FNarr_DialogueSequence* ActiveSequence;
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API ANarr_DialogueTrigger : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_DialogueTrigger();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* TriggerSphere;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName DialogueSequenceToTrigger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    AActor* LinkedNPCActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bOneShot;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnPlayerEnterRange(AActor* PlayerActor);
+
+protected:
+    virtual void BeginPlay() override;
+
+private:
+    bool bHasTriggered;
 };
