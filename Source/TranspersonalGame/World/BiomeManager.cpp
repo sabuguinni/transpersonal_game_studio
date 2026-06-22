@@ -1,331 +1,218 @@
 // BiomeManager.cpp
 // Engine Architect #02 — Transpersonal Game Studio
-// Biome system implementation: classification, transitions, dinosaur spawning rules
+// Biome system implementation — P1 World Generation priority
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogBiomeManager, Log, All);
-
-// ============================================================
-// Constructor
-// ============================================================
-
-ABiomeManager::ABiomeManager()
+UBiomeManager::UBiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 2.0f; // Biome checks every 2 seconds for performance
-
-    CurrentPlayerBiome = EBiomeType::Forest;
-    bDebugDrawBiomes = false;
-    BiomeTransitionBlendRadius = 200.0f;
-    MaxActiveBiomes = 8;
+    // Default biome configuration
+    ActiveBiomeType = EBiomeType::Grassland;
+    TransitionBlendRadius = 500.0f;
+    bBiomeSystemInitialized = false;
 }
 
-// ============================================================
-// Lifecycle
-// ============================================================
-
-void ABiomeManager::BeginPlay()
+void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    // Initialize default biome definitions if none configured
-    if (BiomeDefinitions.Num() == 0)
-    {
-        InitializeDefaultBiomes();
-    }
-
-    UE_LOG(LogBiomeManager, Log, TEXT("BiomeManager initialized with %d biome definitions"), BiomeDefinitions.Num());
+    Super::Initialize(Collection);
+    InitializeBiomeData();
+    bBiomeSystemInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome definitions"), BiomeDataMap.Num());
 }
 
-void ABiomeManager::Tick(float DeltaTime)
+void UBiomeManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
-
-    // Update player biome classification
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        EBiomeType NewBiome = ClassifyLocationBiome(PlayerLocation);
-
-        if (NewBiome != CurrentPlayerBiome)
-        {
-            OnBiomeTransition(CurrentPlayerBiome, NewBiome);
-            CurrentPlayerBiome = NewBiome;
-        }
-    }
-
-#if WITH_EDITOR
-    if (bDebugDrawBiomes)
-    {
-        DebugDrawBiomeBoundaries();
-    }
-#endif
+    BiomeDataMap.Empty();
+    ActiveBiomes.Empty();
+    Super::Deinitialize();
 }
 
-// ============================================================
-// Biome Classification
-// ============================================================
-
-EBiomeType ABiomeManager::ClassifyLocationBiome(const FVector& WorldLocation) const
+void UBiomeManager::InitializeBiomeData()
 {
-    if (BiomeDefinitions.Num() == 0)
-    {
-        return EBiomeType::Forest;
-    }
+    // Grassland biome
+    FEng_BiomeData Grassland;
+    Grassland.BiomeType = EBiomeType::Grassland;
+    Grassland.DisplayName = FText::FromString(TEXT("Prehistoric Grassland"));
+    Grassland.TemperatureMin = 18.0f;
+    Grassland.TemperatureMax = 32.0f;
+    Grassland.Humidity = 0.45f;
+    Grassland.FoliageDensity = 0.6f;
+    Grassland.bAllowsDinosaurSpawn = true;
+    Grassland.DinosaurSpawnWeight = 1.0f;
+    BiomeDataMap.Add(EBiomeType::Grassland, Grassland);
 
-    float ClosestDistSq = FLT_MAX;
-    EBiomeType ClosestBiome = EBiomeType::Forest;
+    // Forest biome
+    FEng_BiomeData Forest;
+    Forest.BiomeType = EBiomeType::Forest;
+    Forest.DisplayName = FText::FromString(TEXT("Ancient Forest"));
+    Forest.TemperatureMin = 14.0f;
+    Forest.TemperatureMax = 26.0f;
+    Forest.Humidity = 0.75f;
+    Forest.FoliageDensity = 0.95f;
+    Forest.bAllowsDinosaurSpawn = true;
+    Forest.DinosaurSpawnWeight = 0.8f;
+    BiomeDataMap.Add(EBiomeType::Forest, Forest);
 
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
-    {
-        FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-        float DistSq = FVector2D::DistSquared(Loc2D, Def.CenterLocation);
+    // Desert biome
+    FEng_BiomeData Desert;
+    Desert.BiomeType = EBiomeType::Desert;
+    Desert.DisplayName = FText::FromString(TEXT("Arid Badlands"));
+    Desert.TemperatureMin = 28.0f;
+    Desert.TemperatureMax = 52.0f;
+    Desert.Humidity = 0.08f;
+    Desert.FoliageDensity = 0.1f;
+    Desert.bAllowsDinosaurSpawn = true;
+    Desert.DinosaurSpawnWeight = 0.5f;
+    BiomeDataMap.Add(EBiomeType::Desert, Desert);
 
-        if (DistSq < ClosestDistSq)
-        {
-            ClosestDistSq = DistSq;
-            ClosestBiome = Def.BiomeType;
-        }
-    }
+    // Swamp biome
+    FEng_BiomeData Swamp;
+    Swamp.BiomeType = EBiomeType::Swamp;
+    Swamp.DisplayName = FText::FromString(TEXT("Primordial Swamp"));
+    Swamp.TemperatureMin = 22.0f;
+    Swamp.TemperatureMax = 36.0f;
+    Swamp.Humidity = 0.92f;
+    Swamp.FoliageDensity = 0.85f;
+    Swamp.bAllowsDinosaurSpawn = true;
+    Swamp.DinosaurSpawnWeight = 1.2f;
+    BiomeDataMap.Add(EBiomeType::Swamp, Swamp);
 
-    return ClosestBiome;
+    // Volcanic biome
+    FEng_BiomeData Volcanic;
+    Volcanic.BiomeType = EBiomeType::Volcanic;
+    Volcanic.DisplayName = FText::FromString(TEXT("Volcanic Highlands"));
+    Volcanic.TemperatureMin = 40.0f;
+    Volcanic.TemperatureMax = 80.0f;
+    Volcanic.Humidity = 0.15f;
+    Volcanic.FoliageDensity = 0.05f;
+    Volcanic.bAllowsDinosaurSpawn = false;
+    Volcanic.DinosaurSpawnWeight = 0.0f;
+    BiomeDataMap.Add(EBiomeType::Volcanic, Volcanic);
+
+    // Tundra biome
+    FEng_BiomeData Tundra;
+    Tundra.BiomeType = EBiomeType::Tundra;
+    Tundra.DisplayName = FText::FromString(TEXT("Frozen Tundra"));
+    Tundra.TemperatureMin = -20.0f;
+    Tundra.TemperatureMax = 5.0f;
+    Tundra.Humidity = 0.3f;
+    Tundra.FoliageDensity = 0.15f;
+    Tundra.bAllowsDinosaurSpawn = true;
+    Tundra.DinosaurSpawnWeight = 0.4f;
+    BiomeDataMap.Add(EBiomeType::Tundra, Tundra);
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: %d biomes initialized"), BiomeDataMap.Num());
 }
 
-float ABiomeManager::GetBiomeBlendWeight(const FVector& WorldLocation, EBiomeType BiomeType) const
+EBiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
+    if (!bBiomeSystemInitialized)
     {
-        if (Def.BiomeType != BiomeType) continue;
-
-        FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-        float Dist = FVector2D::Distance(Loc2D, Def.CenterLocation);
-
-        if (Dist >= Def.Radius + BiomeTransitionBlendRadius)
-        {
-            return 0.0f;
-        }
-        if (Dist <= Def.Radius - BiomeTransitionBlendRadius)
-        {
-            return 1.0f;
-        }
-
-        // Smooth blend in transition zone
-        float Alpha = (Dist - (Def.Radius - BiomeTransitionBlendRadius)) / (2.0f * BiomeTransitionBlendRadius);
-        return FMath::SmoothStep(0.0f, 1.0f, 1.0f - Alpha);
+        return EBiomeType::Grassland;
     }
 
+    // Simplified biome lookup using world coordinates
+    // In full implementation this queries the PCG biome map texture
+    // For MinPlayableMap: use distance-based zones from origin
+    float DistFromOrigin = FVector2D(WorldLocation.X, WorldLocation.Y).Size();
+    float Angle = FMath::Atan2(WorldLocation.Y, WorldLocation.X);
+
+    if (DistFromOrigin < 1000.0f)
+    {
+        return EBiomeType::Grassland;
+    }
+    else if (DistFromOrigin < 2500.0f)
+    {
+        // Quadrant-based biome assignment
+        if (Angle > 0.0f && Angle < HALF_PI)
+            return EBiomeType::Forest;
+        else if (Angle >= HALF_PI || Angle < -HALF_PI)
+            return EBiomeType::Swamp;
+        else if (Angle >= -HALF_PI && Angle < 0.0f)
+            return EBiomeType::Desert;
+        else
+            return EBiomeType::Grassland;
+    }
+    else if (DistFromOrigin < 5000.0f)
+    {
+        return EBiomeType::Tundra;
+    }
+    else
+    {
+        return EBiomeType::Volcanic;
+    }
+}
+
+bool UBiomeManager::GetBiomeData(EBiomeType BiomeType, FEng_BiomeData& OutBiomeData) const
+{
+    if (const FEng_BiomeData* Found = BiomeDataMap.Find(BiomeType))
+    {
+        OutBiomeData = *Found;
+        return true;
+    }
+    return false;
+}
+
+float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeData Data;
+    if (GetBiomeData(Biome, Data))
+    {
+        // Interpolate based on altitude
+        float AltitudeFactor = FMath::Clamp(WorldLocation.Z / 5000.0f, 0.0f, 1.0f);
+        float BaseTemp = FMath::Lerp(Data.TemperatureMax, Data.TemperatureMin, AltitudeFactor);
+        return BaseTemp;
+    }
+    return 20.0f; // Default temperature
+}
+
+float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeData Data;
+    if (GetBiomeData(Biome, Data))
+    {
+        return Data.Humidity;
+    }
+    return 0.5f;
+}
+
+bool UBiomeManager::CanDinosaursSpawnAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeData Data;
+    if (GetBiomeData(Biome, Data))
+    {
+        return Data.bAllowsDinosaurSpawn;
+    }
+    return false;
+}
+
+float UBiomeManager::GetDinosaurSpawnWeightAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeData Data;
+    if (GetBiomeData(Biome, Data))
+    {
+        return Data.DinosaurSpawnWeight;
+    }
     return 0.0f;
 }
 
-const FEng_BiomeDefinition* ABiomeManager::GetBiomeDefinition(EBiomeType BiomeType) const
+TArray<EBiomeType> UBiomeManager::GetActiveBiomes() const
 {
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
-    {
-        if (Def.BiomeType == BiomeType)
-        {
-            return &Def;
-        }
-    }
-    return nullptr;
+    return ActiveBiomes;
 }
 
-TArray<EBiomeType> ABiomeManager::GetBiomesAtLocation(const FVector& WorldLocation, float SearchRadius) const
+void UBiomeManager::RegisterActiveBiome(EBiomeType BiomeType)
 {
-    TArray<EBiomeType> FoundBiomes;
-
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
+    if (!ActiveBiomes.Contains(BiomeType))
     {
-        FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-        float Dist = FVector2D::Distance(Loc2D, Def.CenterLocation);
-
-        if (Dist <= Def.Radius + SearchRadius)
-        {
-            FoundBiomes.AddUnique(Def.BiomeType);
-        }
+        ActiveBiomes.Add(BiomeType);
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered active biome %d"), (int32)BiomeType);
     }
-
-    return FoundBiomes;
-}
-
-// ============================================================
-// Dinosaur Spawning Rules
-// ============================================================
-
-TArray<EDinosaurSpecies> ABiomeManager::GetValidDinosaursForBiome(EBiomeType BiomeType) const
-{
-    const FEng_BiomeDefinition* Def = GetBiomeDefinition(BiomeType);
-    if (Def)
-    {
-        return Def->NativeDinosaurs;
-    }
-
-    // Fallback: return common species for unknown biomes
-    return TArray<EDinosaurSpecies>{ EDinosaurSpecies::Compsognathus };
-}
-
-bool ABiomeManager::CanSpawnDinosaurInBiome(EDinosaurSpecies Species, EBiomeType BiomeType) const
-{
-    TArray<EDinosaurSpecies> ValidSpecies = GetValidDinosaursForBiome(BiomeType);
-    return ValidSpecies.Contains(Species);
-}
-
-float ABiomeManager::GetDinosaurAggressionModifier(EDinosaurSpecies Species, EBiomeType BiomeType) const
-{
-    // Territorial biomes increase aggression
-    switch (BiomeType)
-    {
-        case EBiomeType::Canyon:    return 1.4f;  // Confined spaces = more territorial
-        case EBiomeType::Swamp:     return 1.2f;  // Ambush predator territory
-        case EBiomeType::Forest:    return 1.1f;  // Cover-based hunting
-        case EBiomeType::Savanna:   return 0.9f;  // Open ground = less ambush
-        case EBiomeType::Mountain:  return 1.3f;  // Defensive high ground
-        case EBiomeType::River:     return 0.8f;  // Water = escape routes
-        case EBiomeType::Lake:      return 0.7f;  // Open water = visibility
-        case EBiomeType::Desert:    return 1.0f;  // Baseline
-        default:                    return 1.0f;
-    }
-}
-
-// ============================================================
-// Biome Transition Events
-// ============================================================
-
-void ABiomeManager::OnBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome)
-{
-    UE_LOG(LogBiomeManager, Log, TEXT("Player biome transition: %d -> %d"),
-        (int32)FromBiome, (int32)ToBiome);
-
-    OnPlayerBiomeChanged.Broadcast(FromBiome, ToBiome);
-}
-
-// ============================================================
-// Default Biome Initialization
-// ============================================================
-
-void ABiomeManager::InitializeDefaultBiomes()
-{
-    // Forest biome — central, lush, medium danger
-    {
-        FEng_BiomeDefinition Forest;
-        Forest.BiomeType = EBiomeType::Forest;
-        Forest.BiomeName = TEXT("Cretaceous Forest");
-        Forest.CenterLocation = FVector2D(0.0f, 0.0f);
-        Forest.Radius = 3000.0f;
-        Forest.BaseTemperature = 22.0f;
-        Forest.Humidity = 75.0f;
-        Forest.NativeDinosaurs = {
-            EDinosaurSpecies::Velociraptor,
-            EDinosaurSpecies::Compsognathus,
-            EDinosaurSpecies::Stegosaurus,
-            EDinosaurSpecies::Parasaurolophus
-        };
-        BiomeDefinitions.Add(Forest);
-    }
-
-    // Savanna biome — open plains, high visibility, T-Rex territory
-    {
-        FEng_BiomeDefinition Savanna;
-        Savanna.BiomeType = EBiomeType::Savanna;
-        Savanna.BiomeName = TEXT("Open Savanna");
-        Savanna.CenterLocation = FVector2D(4000.0f, 0.0f);
-        Savanna.Radius = 4000.0f;
-        Savanna.BaseTemperature = 32.0f;
-        Savanna.Humidity = 30.0f;
-        Savanna.NativeDinosaurs = {
-            EDinosaurSpecies::TRex,
-            EDinosaurSpecies::Triceratops,
-            EDinosaurSpecies::Ankylosaurus,
-            EDinosaurSpecies::Brachiosaurus
-        };
-        BiomeDefinitions.Add(Savanna);
-    }
-
-    // Swamp biome — low visibility, ambush danger
-    {
-        FEng_BiomeDefinition Swamp;
-        Swamp.BiomeType = EBiomeType::Swamp;
-        Swamp.BiomeName = TEXT("Primordial Swamp");
-        Swamp.CenterLocation = FVector2D(-3000.0f, 2000.0f);
-        Swamp.Radius = 2500.0f;
-        Swamp.BaseTemperature = 28.0f;
-        Swamp.Humidity = 95.0f;
-        Swamp.NativeDinosaurs = {
-            EDinosaurSpecies::Compsognathus,
-            EDinosaurSpecies::Velociraptor
-        };
-        BiomeDefinitions.Add(Swamp);
-    }
-
-    // Mountain biome — high altitude, sparse, dangerous terrain
-    {
-        FEng_BiomeDefinition Mountain;
-        Mountain.BiomeType = EBiomeType::Mountain;
-        Mountain.BiomeName = TEXT("Rocky Highlands");
-        Mountain.CenterLocation = FVector2D(0.0f, -5000.0f);
-        Mountain.Radius = 3500.0f;
-        Mountain.BaseTemperature = 8.0f;
-        Mountain.Humidity = 40.0f;
-        Mountain.NativeDinosaurs = {
-            EDinosaurSpecies::Ankylosaurus,
-            EDinosaurSpecies::Stegosaurus
-        };
-        BiomeDefinitions.Add(Mountain);
-    }
-
-    // River biome — linear, resource-rich, migration corridor
-    {
-        FEng_BiomeDefinition River;
-        River.BiomeType = EBiomeType::River;
-        River.BiomeName = TEXT("Great River Corridor");
-        River.CenterLocation = FVector2D(-1000.0f, 1000.0f);
-        River.Radius = 800.0f;
-        River.BaseTemperature = 20.0f;
-        River.Humidity = 85.0f;
-        River.NativeDinosaurs = {
-            EDinosaurSpecies::Brachiosaurus,
-            EDinosaurSpecies::Parasaurolophus,
-            EDinosaurSpecies::Compsognathus
-        };
-        BiomeDefinitions.Add(River);
-    }
-
-    UE_LOG(LogBiomeManager, Log, TEXT("Initialized %d default biome definitions"), BiomeDefinitions.Num());
-}
-
-// ============================================================
-// Debug
-// ============================================================
-
-void ABiomeManager::DebugDrawBiomeBoundaries() const
-{
-#if WITH_EDITOR
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
-    {
-        FVector Center3D(Def.CenterLocation.X, Def.CenterLocation.Y, 100.0f);
-        FColor DebugColor = FColor::Green;
-
-        switch (Def.BiomeType)
-        {
-            case EBiomeType::Swamp:     DebugColor = FColor::Cyan;    break;
-            case EBiomeType::Forest:    DebugColor = FColor::Green;   break;
-            case EBiomeType::Savanna:   DebugColor = FColor::Yellow;  break;
-            case EBiomeType::Desert:    DebugColor = FColor::Orange;  break;
-            case EBiomeType::Mountain:  DebugColor = FColor::White;   break;
-            case EBiomeType::River:     DebugColor = FColor::Blue;    break;
-            case EBiomeType::Lake:      DebugColor = FColor::Purple;  break;
-            case EBiomeType::Canyon:    DebugColor = FColor::Red;     break;
-        }
-
-        DrawDebugCircle(GetWorld(), Center3D, Def.Radius, 64,
-            DebugColor, false, 2.0f, 0, 5.0f,
-            FVector(1,0,0), FVector(0,1,0));
-    }
-#endif
 }
