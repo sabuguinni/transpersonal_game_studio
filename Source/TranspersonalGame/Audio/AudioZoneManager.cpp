@@ -1,189 +1,114 @@
-// AudioZoneManager.cpp
-// Agent #16 — Audio Agent
-// Implementation of adaptive audio zone manager
-
 #include "AudioZoneManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
 #include "Engine/World.h"
-
-// ============================================================
-// UAudio_ZoneComponent
-// ============================================================
-
-UAudio_ZoneComponent::UAudio_ZoneComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    SetSphereRadius(1000.0f);
-    SetCollisionEnabled(ECollisionEnabled::NoCollision);
-}
-
-void UAudio_ZoneComponent::SetThreatLevel(EAudio_ThreatLevel NewLevel)
-{
-    CurrentThreatLevel = NewLevel;
-}
-
-float UAudio_ZoneComponent::GetBlendWeight(const FVector& PlayerLocation) const
-{
-    const float Distance = FVector::Dist(PlayerLocation, GetComponentLocation());
-    const float Radius = ZoneConfig.BlendRadius;
-    if (Distance >= Radius) return 0.0f;
-    // Smooth blend: 1.0 at centre, 0.0 at edge
-    const float Alpha = 1.0f - (Distance / Radius);
-    return FMath::SmoothStep(0.0f, 1.0f, Alpha);
-}
-
-// ============================================================
-// AAudio_ZoneManager
-// ============================================================
 
 AAudio_ZoneManager::AAudio_ZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Update every 500ms — not every frame
+
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+    AudioComponent->bIsUISound = false;
+
+    bPlayerInZone = false;
+    CurrentVolume = 0.0f;
+    TargetVolume = 0.0f;
 }
 
 void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Discover all zone components in the world
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
-    for (AActor* Actor : FoundActors)
-    {
-        UAudio_ZoneComponent* ZoneComp = Actor->FindComponentByClass<UAudio_ZoneComponent>();
-        if (ZoneComp)
-        {
-            RegisteredZones.Add(ZoneComp);
-        }
-    }
+    // Apply zone config to sphere radius
+    TriggerSphere->SetSphereRadius(ZoneConfig.TriggerRadius);
+    AudioComponent->SetVolumeMultiplier(0.0f);
 
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Registered %d audio zones"), RegisteredZones.Num());
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Zone '%s' initialized (Type=%d, Radius=%.0f)"),
+        *GetActorLabel(), (int32)ZoneConfig.ZoneType, ZoneConfig.TriggerRadius);
 }
 
 void AAudio_ZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    AudioUpdateTimer += DeltaTime;
-    if (AudioUpdateTimer < AudioUpdateInterval) return;
-    AudioUpdateTimer = 0.0f;
-
-    // Cache player location
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC && PC->GetPawn())
-    {
-        CachedPlayerLocation = PC->GetPawn()->GetActorLocation();
-    }
-
-    UpdateActiveZone();
-    EvaluateDayNightTransition();
+    UpdateVolumeFade(DeltaTime);
 }
 
-void AAudio_ZoneManager::UpdateActiveZone()
+void AAudio_ZoneManager::OnPlayerEnterZone(AActor* PlayerActor)
 {
-    if (RegisteredZones.Num() == 0) return;
+    if (!PlayerActor) return;
 
-    float MaxWeight = 0.0f;
-    EAudio_ZoneType DominantZone = EAudio_ZoneType::Forest;
+    bPlayerInZone = true;
+    TargetVolume = ZoneConfig.MaxVolume;
 
-    for (UAudio_ZoneComponent* Zone : RegisteredZones)
+    if (AudioComponent && !AudioComponent->IsPlaying())
     {
-        if (!Zone) continue;
-        const float Weight = Zone->GetBlendWeight(CachedPlayerLocation);
-        if (Weight > MaxWeight)
-        {
-            MaxWeight = Weight;
-            DominantZone = Zone->GetZoneType();
-        }
-    }
-
-    if (DominantZone != ActiveZoneType)
-    {
-        ActiveZoneType = DominantZone;
-        UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Zone transition -> %d"), (int32)ActiveZoneType);
+        AudioComponent->Play();
+        UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Player entered zone '%s' — audio starting"),
+            *GetActorLabel());
     }
 }
 
-void AAudio_ZoneManager::EvaluateDayNightTransition()
+void AAudio_ZoneManager::OnPlayerExitZone(AActor* PlayerActor)
 {
-    const bool bShouldBeNight = (TimeOfDay < 6.0f || TimeOfDay > 20.0f);
-    if (bShouldBeNight != bIsNight)
-    {
-        bIsNight = bShouldBeNight;
-        UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Day/Night transition -> %s"),
-            bIsNight ? TEXT("NIGHT") : TEXT("DAY"));
-    }
+    if (!PlayerActor) return;
+
+    bPlayerInZone = false;
+    TargetVolume = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Player exited zone '%s' — audio fading out"),
+        *GetActorLabel());
 }
 
-void AAudio_ZoneManager::UpdateThreatLevel(EAudio_ThreatLevel NewLevel)
+void AAudio_ZoneManager::SetZoneType(EAudio_ZoneType NewType)
 {
-    if (NewLevel != GlobalThreatLevel)
-    {
-        GlobalThreatLevel = NewLevel;
-        UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Threat level -> %d"), (int32)GlobalThreatLevel);
-    }
+    ZoneConfig.ZoneType = NewType;
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Zone '%s' type changed to %d"),
+        *GetActorLabel(), (int32)NewType);
 }
 
-void AAudio_ZoneManager::UpdateTimeOfDay(float NewTime)
+float AAudio_ZoneManager::GetDistanceToPlayer() const
 {
-    TimeOfDay = FMath::Clamp(NewTime, 0.0f, 24.0f);
+    UWorld* World = GetWorld();
+    if (!World) return -1.0f;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn()) return -1.0f;
+
+    return FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
 }
 
-void AAudio_ZoneManager::RegisterZone(UAudio_ZoneComponent* Zone)
+void AAudio_ZoneManager::UpdateVolumeFade(float DeltaTime)
 {
-    if (Zone && !RegisteredZones.Contains(Zone))
+    if (FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.01f))
     {
-        RegisteredZones.Add(Zone);
-    }
-}
-
-EAudio_ZoneType AAudio_ZoneManager::GetDominantZoneAtLocation(const FVector& Location) const
-{
-    float MaxWeight = 0.0f;
-    EAudio_ZoneType Result = EAudio_ZoneType::Forest;
-
-    for (UAudio_ZoneComponent* Zone : RegisteredZones)
-    {
-        if (!Zone) continue;
-        const float Weight = Zone->GetBlendWeight(Location);
-        if (Weight > MaxWeight)
-        {
-            MaxWeight = Weight;
-            Result = Zone->GetZoneType();
-        }
-    }
-    return Result;
-}
-
-void AAudio_ZoneManager::OnDinosaurProximityEnter(float DinosaurDangerRating)
-{
-    // Escalate threat based on dinosaur danger rating (0-1 scale)
-    if (DinosaurDangerRating >= 0.8f)
-    {
-        UpdateThreatLevel(EAudio_ThreatLevel::Extreme);
-    }
-    else if (DinosaurDangerRating >= 0.5f)
-    {
-        UpdateThreatLevel(EAudio_ThreatLevel::Danger);
+        CurrentVolume = TargetVolume;
     }
     else
     {
-        UpdateThreatLevel(EAudio_ThreatLevel::Cautious);
-    }
-}
+        float FadeSpeed = (TargetVolume > CurrentVolume)
+            ? (ZoneConfig.MaxVolume / FMath::Max(ZoneConfig.FadeInTime, 0.1f))
+            : (ZoneConfig.MaxVolume / FMath::Max(ZoneConfig.FadeOutTime, 0.1f));
 
-void AAudio_ZoneManager::OnDinosaurProximityExit()
-{
-    // Gradually de-escalate — go to Cautious first, then Safe on next call
-    if (GlobalThreatLevel == EAudio_ThreatLevel::Extreme || GlobalThreatLevel == EAudio_ThreatLevel::Danger)
-    {
-        UpdateThreatLevel(EAudio_ThreatLevel::Cautious);
+        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
     }
-    else
+
+    if (AudioComponent)
     {
-        UpdateThreatLevel(EAudio_ThreatLevel::Safe);
+        AudioComponent->SetVolumeMultiplier(CurrentVolume);
+
+        // Stop audio when fully faded out and not in zone
+        if (!bPlayerInZone && CurrentVolume <= 0.01f && AudioComponent->IsPlaying())
+        {
+            AudioComponent->Stop();
+        }
     }
 }
