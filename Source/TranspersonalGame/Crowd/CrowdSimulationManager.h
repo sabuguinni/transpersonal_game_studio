@@ -1,156 +1,174 @@
 // CrowdSimulationManager.h
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribe crowd simulation — Mass AI primitive layer
+// Prehistoric crowd simulation: tribe members, migrating herds, LOD crowd clusters
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "Engine/DataTable.h"
 #include "CrowdSimulationManager.generated.h"
 
-// ============================================================
-// ENUMS — ECrowd_ prefix (unique across project)
-// ============================================================
+// ─── Enums ───────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
-enum class ECrowd_AgentType : uint8
+enum class ECrowd_AgentState : uint8
 {
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Sentinel    UMETA(DisplayName = "Sentinel"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Child       UMETA(DisplayName = "Child")
+    Idle        UMETA(DisplayName = "Idle"),
+    Wandering   UMETA(DisplayName = "Wandering"),
+    Working     UMETA(DisplayName = "Working"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Gathering   UMETA(DisplayName = "Gathering"),
+    Sleeping    UMETA(DisplayName = "Sleeping")
 };
 
 UENUM(BlueprintType)
-enum class ECrowd_AgentLOD : uint8
+enum class ECrowd_GroupType : uint8
 {
-    Full        UMETA(DisplayName = "Full Simulation"),
-    Reduced     UMETA(DisplayName = "Reduced Simulation"),
-    Minimal     UMETA(DisplayName = "Minimal / Frozen")
+    TribeMember     UMETA(DisplayName = "Tribe Member"),
+    HerdAnimal      UMETA(DisplayName = "Herd Animal"),
+    NomadGroup      UMETA(DisplayName = "Nomad Group"),
+    ScavengerPack   UMETA(DisplayName = "Scavenger Pack"),
+    LODCluster      UMETA(DisplayName = "LOD Cluster")
 };
 
-UENUM(BlueprintType)
-enum class ECrowd_ThreatType : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Predator        UMETA(DisplayName = "Predator Dinosaur"),
-    Fire            UMETA(DisplayName = "Fire"),
-    StrangerHuman   UMETA(DisplayName = "Stranger Human"),
-    Earthquake      UMETA(DisplayName = "Earthquake")
-};
-
-// ============================================================
-// STRUCTS — FCrowd_ prefix
-// ============================================================
+// ─── Structs ─────────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FCrowd_AgentData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    int32 AgentID = -1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentType AgentType = ECrowd_AgentType::Gatherer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_AgentState State = ECrowd_AgentState::Idle;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentLOD CurrentLOD = ECrowd_AgentLOD::Full;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_GroupType GroupType = ECrowd_GroupType::TribeMember;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_ThreatType CurrentThreat = ECrowd_ThreatType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float MoveSpeed = 150.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float FleeRadius = 800.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector HomeLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float MoveSpeed = 120.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float WanderRadius = 400.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float FacingAngle = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bIsActive = true;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bAlerted = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 GroupID = 0;
 };
 
-// ============================================================
-// UCrowdSimulationManager — World Subsystem
-// ============================================================
+USTRUCT(BlueprintType)
+struct FCrowd_WaypointNode
+{
+    GENERATED_BODY()
 
-UCLASS()
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector WorldPosition = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FName NodeLabel = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    TArray<int32> ConnectedNodeIndices;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float TrafficWeight = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FCrowd_LODCluster
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    FVector CenterLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    int32 AgentCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float ClusterRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    ECrowd_GroupType ClusterType = ECrowd_GroupType::LODCluster;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    bool bIsVisible = true;
+};
+
+// ─── Main Class ──────────────────────────────────────────────────────────────
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (DisplayName = "Crowd Simulation Manager"))
+class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCrowdSimulationManager();
+    ACrowdSimulationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Tick (manual — called from GameMode or tick delegate)
+    // ── Configuration ──────────────────────────────────────────────────────
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 MaxActiveAgents = 50000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 MaxFullDetailAgents = 200;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float LODSwitchDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float FleeResponseRadius = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float TickInterval = 0.1f;
+
+    // ── Runtime Data ───────────────────────────────────────────────────────
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
+    TArray<FCrowd_AgentData> ActiveAgents;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
+    TArray<FCrowd_WaypointNode> WaypointGraph;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
+    TArray<FCrowd_LODCluster> LODClusters;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
+    int32 CurrentActiveCount = 0;
+
+    // ── Public API ─────────────────────────────────────────────────────────
+
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void Tick(float DeltaTime);
-
-    // Agent management
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterAgent(UPARAM(ref) FCrowd_AgentData& AgentData);
+    void SpawnTribeGroup(FVector CampCenter, int32 MemberCount, int32 GroupID);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UnregisterAgent(int32 AgentID);
+    void TriggerFleeEvent(FVector ThreatLocation, float ThreatRadius);
 
-    // Threat system
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void AlertNearbyAgents(const FVector& ThreatLocation, float AlertRadius, ECrowd_ThreatType ThreatType);
+    void RegisterWaypoint(FVector WorldPos, FName Label);
 
-    // Queries
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UpdateLODClusters(FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
     int32 GetActiveAgentCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    TArray<FCrowd_AgentData> GetAgentsInRadius(const FVector& Center, float Radius) const;
+    void SetAgentState(int32 AgentIndex, ECrowd_AgentState NewState);
 
-    // Config
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxActiveAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float AgentUpdateRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LODDistanceClose;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LODDistanceMid;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float TickInterval;
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    FCrowd_AgentData GetAgentData(int32 AgentIndex) const;
 
 private:
-    UPROPERTY()
-    TArray<FCrowd_AgentData> ActiveAgents;
+    float AccumulatedTime = 0.0f;
 
-    bool bSimulationActive;
-    int32 NextAgentID = 0;
-    float CurrentTickAccumulator;
-
-    void UpdateAgentLOD(FCrowd_AgentData& Agent, const FVector& PlayerLocation);
-    void UpdateAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void SimulateGathererBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void SimulateHunterBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void SimulateSentinelBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void TickAgents(float DeltaTime);
+    void UpdateAgentMovement(FCrowd_AgentData& Agent, float DeltaTime);
+    FVector GetNextWaypointTarget(const FCrowd_AgentData& Agent) const;
+    bool IsAgentInLODRange(const FCrowd_AgentData& Agent, const FVector& PlayerLoc) const;
 };
