@@ -1,20 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
 
 // Agent #13 — Crowd & Traffic Simulation
-// Manages prehistoric herd migration and predator pack patrol using waypoint-driven crowd AI.
-// Supports up to MaxActiveAgents simultaneous agents with LOD-based update throttling.
+// Prehistoric crowd: tribal camps, migration columns, threat scatter
 
 UENUM(BlueprintType)
-enum class ECrowd_AgentType : uint8
+enum class ECrowd_AgentRole : uint8
 {
-    Herbivore   UMETA(DisplayName = "Herbivore Herd"),
-    Predator    UMETA(DisplayName = "Predator Pack"),
-    Scavenger   UMETA(DisplayName = "Scavenger"),
-    Neutral     UMETA(DisplayName = "Neutral")
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Child       UMETA(DisplayName = "Child"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Migrant     UMETA(DisplayName = "Migrant"),
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_AgentState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Working     UMETA(DisplayName = "Working"),
+    Migrating   UMETA(DisplayName = "Migrating"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Dead        UMETA(DisplayName = "Dead"),
 };
 
 USTRUCT(BlueprintType)
@@ -26,96 +37,72 @@ struct FCrowd_AgentData
     TWeakObjectPtr<AActor> AgentActor;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentType AgentType = ECrowd_AgentType::Neutral;
+    ECrowd_AgentRole Role = ECrowd_AgentRole::Gatherer;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentLocation = FVector::ZeroVector;
+    ECrowd_AgentState CurrentState = ECrowd_AgentState::Idle;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector TargetLocation = FVector::ZeroVector;
+    FVector HomeLocation = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bIsActive = true;
+    FVector FleeTarget = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bIsFleeing = false;
+    TArray<FVector> MigrationWaypoints;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    int32 CurrentWaypointIndex = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    bool bIsAlive = true;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCrowdSimulationManager();
 
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // --- Configuration ---
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxActiveAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float HerdCohesionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float PredatorFleeRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float WaypointReachThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float HerdMigrationInterval = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float PackPatrolInterval = 15.0f;
-
-    // --- Runtime State ---
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    bool bSimulationActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    int32 ActiveAgentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_AgentData> RegisteredAgents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FVector> HerdWaypoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FVector> PackWaypoints;
-
-    // --- Public API ---
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterAgent(AActor* Agent, ECrowd_AgentType AgentType);
+    void RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UnregisterAgent(AActor* Agent);
+    void UnregisterCrowdAgent(AActor* Agent);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius);
+    void TriggerThreatResponse(FVector ThreatLocation, float ThreatRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    FVector GetCurrentHerdTarget() const;
+    void UpdateCrowdTick(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    FVector GetCurrentPackTarget() const;
+    int32 GetActiveCrowdCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void CollectWaypointsFromLevel();
+    void SetCrowdActive(bool bActive);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 MaxCrowdAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float ThreatScatterRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float CampRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float MigrationSpeed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    bool bCrowdActive;
 
 private:
-    void UpdateHerdBehavior(float DeltaTime);
-    void UpdatePackBehavior(float DeltaTime);
-    void EnforceCrowdCap();
-
-    int32 CurrentHerdWaypointIndex = 0;
-    int32 CurrentPackWaypointIndex = 0;
-    float HerdWaypointTimer = 0.0f;
-    float PackPatrolTimer = 0.0f;
+    UPROPERTY()
+    TArray<FCrowd_AgentData> CrowdAgents;
 };
