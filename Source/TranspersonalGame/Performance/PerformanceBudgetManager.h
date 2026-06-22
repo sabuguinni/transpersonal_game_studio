@@ -1,189 +1,194 @@
 // PerformanceBudgetManager.h
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260620_003
-// Manages per-system frame budgets and dynamic quality scaling for 60fps PC / 30fps console.
+// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260622_011
+// Runtime performance budget enforcement: 60fps PC / 30fps console
+// Monitors frame time, draw calls, memory, and applies dynamic scalability
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "PerformanceBudgetManager.generated.h"
 
-// ─── Enums (global scope — UHT requirement) ───────────────────────────────────
-
+// --- Scalability tier enum (global scope, Perf_ prefix) ---
 UENUM(BlueprintType)
-enum class EPerf_QualityTier : uint8
+enum class EPerf_ScalabilityTier : uint8
 {
-    Ultra    UMETA(DisplayName = "Ultra"),
-    High     UMETA(DisplayName = "High"),
-    Medium   UMETA(DisplayName = "Medium"),
-    Low      UMETA(DisplayName = "Low"),
-    Potato   UMETA(DisplayName = "Potato")
+    Low      UMETA(DisplayName = "Low (Console 30fps)"),
+    Medium   UMETA(DisplayName = "Medium (PC 30fps)"),
+    High     UMETA(DisplayName = "High (PC 60fps)"),
+    Epic     UMETA(DisplayName = "Epic (PC 60fps Ultra)")
 };
 
-UENUM(BlueprintType)
-enum class EPerf_BudgetSystem : uint8
-{
-    Rendering    UMETA(DisplayName = "Rendering"),
-    Physics      UMETA(DisplayName = "Physics"),
-    AI           UMETA(DisplayName = "AI"),
-    Animation    UMETA(DisplayName = "Animation"),
-    Audio        UMETA(DisplayName = "Audio"),
-    Streaming    UMETA(DisplayName = "Streaming")
-};
-
-// ─── Structs ──────────────────────────────────────────────────────────────────
-
+// --- Per-frame budget snapshot ---
 USTRUCT(BlueprintType)
-struct FPerf_SystemBudget
+struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_BudgetSystem System = EPerf_BudgetSystem::Rendering;
-
-    /** Budget in milliseconds per frame (16.67ms = 60fps target) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float BudgetMs = 8.0f;
-
-    /** Last measured time for this system */
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastMeasuredMs = 0.0f;
+    float FrameTimeMS = 16.67f;   // Target: 16.67ms @ 60fps
 
-    /** True if this system exceeded its budget last frame */
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bOverBudget = false;
+    float GameThreadMS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float RenderThreadMS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUTimeMS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bBudgetExceeded = false;
 };
 
+// --- LOD distance config per scalability tier ---
 USTRUCT(BlueprintType)
-struct FPerf_QualitySettings
+struct FPerf_LODConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_QualityTier Tier = EPerf_QualityTier::High;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float StaticMeshLODScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float ShadowDistanceScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float SkeletalMeshLODScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float FoliageLODScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float FoliageDensityScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
     int32 MaxShadowResolution = 2048;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float ScreenPercentage = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bLumenGI = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bLumenReflections = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDinoLOD = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveDinosaurs = 20;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float ShadowDistanceScale = 1.0f;
 };
 
-// ─── Class ────────────────────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (DisplayName = "Performance Budget Manager"))
-class TRANSPERSONALGAME_API APerformanceBudgetManager : public AActor
+/**
+ * APerf_BudgetManager
+ * Placed once in the level. Monitors frame budget and applies
+ * dynamic scalability adjustments to maintain target FPS.
+ * 
+ * Budget targets:
+ *   PC High-end:  60fps = 16.67ms total (Game 6ms, Render 6ms, GPU 10ms)
+ *   Console:      30fps = 33.33ms total (Game 10ms, Render 10ms, GPU 20ms)
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Budget Manager"))
+class TRANSPERSONALGAME_API APerf_BudgetManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    APerformanceBudgetManager();
+    APerf_BudgetManager();
 
-protected:
+    // --- Configuration ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float TargetFPS = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float TargetFrameTimeMS = 16.67f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float GameThreadBudgetMS = 6.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float RenderThreadBudgetMS = 6.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float GPUBudgetMS = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Target")
+    float MemoryBudgetMB = 2048.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Scalability")
+    EPerf_ScalabilityTier CurrentTier = EPerf_ScalabilityTier::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Scalability")
+    bool bEnableDynamicScalability = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Scalability")
+    float ScalabilityCheckIntervalSeconds = 2.0f;
+
+    // --- LOD configs per tier ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig LODConfig_Low;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig LODConfig_Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig LODConfig_High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig LODConfig_Epic;
+
+    // --- Runtime state (read-only) ---
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
+    FPerf_FrameBudget CurrentBudget;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
+    float AverageFPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
+    int32 BudgetViolationCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
+    bool bIsUnderBudget = true;
+
+    // --- Blueprint-callable API ---
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetScalabilityTier(EPerf_ScalabilityTier NewTier);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyLODConfig(const FPerf_LODConfig& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_FrameBudget GetCurrentFrameBudget() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceScalabilityCheck();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFPS() const { return AverageFPS; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsUnderBudget() const { return bIsUnderBudget; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetTargetFPS(float NewTargetFPS);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EPerf_ScalabilityTier GetCurrentTier() const { return CurrentTier; }
+
+    // --- AActor overrides ---
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-public:
-    // ── Configuration ────────────────────────────────────────────────────────
-
-    /** Target FPS — 60 for PC, 30 for console */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Targets")
-    float TargetFPS = 60.0f;
-
-    /** Total frame budget in ms (1000 / TargetFPS) */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Targets")
-    float TotalFrameBudgetMs = 16.67f;
-
-    /** Current quality tier applied to the scene */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Quality")
-    EPerf_QualityTier CurrentQualityTier = EPerf_QualityTier::High;
-
-    /** Per-system budgets */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budgets")
-    TArray<FPerf_SystemBudget> SystemBudgets;
-
-    /** Quality presets for each tier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Quality")
-    TArray<FPerf_QualitySettings> QualityPresets;
-
-    /** Enable automatic dynamic quality scaling */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
-    bool bEnableDynamicScaling = true;
-
-    /** FPS threshold below which quality is reduced */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
-    float ScaleDownThresholdFPS = 50.0f;
-
-    /** FPS threshold above which quality can be increased */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
-    float ScaleUpThresholdFPS = 65.0f;
-
-    /** Seconds to wait before scaling quality up (hysteresis) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
-    float ScaleUpHysteresisSeconds = 5.0f;
-
-    // ── Runtime State ─────────────────────────────────────────────────────────
-
-    /** Smoothed FPS over last 60 frames */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    float SmoothedFPS = 60.0f;
-
-    /** Current frame time in ms */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    float CurrentFrameMs = 16.67f;
-
-    /** Number of consecutive frames over budget */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    int32 OverBudgetFrameCount = 0;
-
-    /** Seconds since last quality scale-up */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    float TimeSinceLastScaleUp = 0.0f;
-
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    /** Apply a specific quality tier immediately */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyQualityTier(EPerf_QualityTier NewTier);
-
-    /** Get current quality settings for a tier */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_QualitySettings GetQualitySettings(EPerf_QualityTier Tier) const;
-
-    /** Force a performance audit — logs all system budgets */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void RunPerformanceAudit();
-
-    /** Get budget usage ratio (0-1) for a specific system */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetBudgetUsageRatio(EPerf_BudgetSystem System) const;
-
-    /** Register a system's measured frame time */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ReportSystemTime(EPerf_BudgetSystem System, float MeasuredMs);
+#if WITH_EDITOR
+    UFUNCTION(CallInEditor, Category = "Performance")
+    void PrintBudgetReport();
+#endif
 
 private:
-    void InitializeDefaultBudgets();
-    void InitializeQualityPresets();
-    void UpdateFPSSmoothing(float DeltaTime);
-    void CheckDynamicScaling();
-    void ApplyCVarsForTier(const FPerf_QualitySettings& Settings);
+    float ScalabilityCheckTimer = 0.0f;
+    TArray<float> FPSSamples;
+    static const int32 FPS_SAMPLE_COUNT = 60;
 
-    TArray<float> FPSHistory;
-    static constexpr int32 FPS_HISTORY_SIZE = 60;
+    void UpdateFPSSamples(float DeltaTime);
+    void CheckBudgetAndAdjust();
+    void ApplyTierConfig(EPerf_ScalabilityTier Tier);
+    void ExecuteConsoleCommand(const FString& Command);
+    FPerf_LODConfig GetLODConfigForTier(EPerf_ScalabilityTier Tier) const;
+    void InitDefaultLODConfigs();
 };
