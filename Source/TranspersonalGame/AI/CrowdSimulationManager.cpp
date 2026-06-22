@@ -1,238 +1,319 @@
 // CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric herd/flock crowd simulation using UE5 Mass-style entity management
+// Crowd & Traffic Simulation Agent #13
+// Implements prehistoric crowd simulation: tribal NPCs, dinosaur herds, migration paths
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Math/UnrealMathUtility.h"
 
-UCrowdSimulationManager::UCrowdSimulationManager()
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxHerdAgents = 50;
-    MaxFlockAgents = 30;
-    HerdCohesionRadius = 800.0f;
-    HerdSeparationRadius = 150.0f;
-    FlockAltitudeMin = 300.0f;
-    FlockAltitudeMax = 600.0f;
-    AgentMoveSpeed = 120.0f;
-    bSimulationActive = false;
-    SimulationTickRate = 0.1f;
-    AccumulatedTime = 0.0f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    MaxAgents = 200;
+    ThreatDetectionRadius = 1500.0f;
+    AgentSeparationDistance = 150.0f;
+    CohesionStrength = 0.5f;
+    ActiveAgentCount = 0;
+
+    // Default migration corridor (matches waypoints placed in MinPlayableMap)
+    FCrowd_MigrationWaypoint WP0, WP1, WP2, WP3, WP4;
+    WP0.WorldPosition = FVector(-2000, -1500, 100); WP0.WaypointIndex = 0; WP0.Radius = 300.0f;
+    WP1.WorldPosition = FVector(-1000, -800, 100);  WP1.WaypointIndex = 1; WP1.Radius = 300.0f;
+    WP2.WorldPosition = FVector(0, 0, 100);          WP2.WaypointIndex = 2; WP2.Radius = 300.0f;
+    WP3.WorldPosition = FVector(1000, 800, 100);    WP3.WaypointIndex = 3; WP3.Radius = 300.0f;
+    WP4.WorldPosition = FVector(2000, 1500, 100);   WP4.WaypointIndex = 4; WP4.Radius = 300.0f;
+    MigrationWaypoints.Add(WP0);
+    MigrationWaypoints.Add(WP1);
+    MigrationWaypoints.Add(WP2);
+    MigrationWaypoints.Add(WP3);
+    MigrationWaypoints.Add(WP4);
 }
 
-void UCrowdSimulationManager::InitializeSimulation(UWorld* InWorld)
+void ACrowdSimulationManager::BeginPlay()
 {
-    if (!InWorld)
+    Super::BeginPlay();
+    ActiveAgentCount = 0;
+}
+
+void ACrowdSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Update all active agents
+    for (FCrowd_AgentData& Agent : ActiveAgents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: InitializeSimulation called with null world"));
-        return;
+        UpdateAgentState(Agent, DeltaTime);
     }
 
-    WorldRef = InWorld;
-    bSimulationActive = true;
-    HerdAgents.Empty();
-    FlockAgents.Empty();
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Simulation initialized. MaxHerd=%d MaxFlock=%d"),
-        MaxHerdAgents, MaxFlockAgents);
+    ActiveAgentCount = ActiveAgents.Num();
 }
 
-void UCrowdSimulationManager::RegisterHerdAgent(AActor* Agent, ECrowd_HerdType HerdType)
+void ACrowdSimulationManager::SpawnTribalGroup(FVector CenterLocation, int32 GroupSize, int32 GroupID)
 {
-    if (!Agent) return;
-
-    FCrowd_HerdAgentData Data;
-    Data.AgentActor = Agent;
-    Data.HerdType = HerdType;
-    Data.CurrentVelocity = FVector::ZeroVector;
-    Data.TargetLocation = Agent->GetActorLocation();
-    Data.bIsFleeing = false;
-    Data.FleeTimer = 0.0f;
-    Data.AgentState = ECrowd_AgentState::Grazing;
-
-    HerdAgents.Add(Data);
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Registered herd agent %s type=%d"),
-        *Agent->GetName(), (int32)HerdType);
-}
-
-void UCrowdSimulationManager::RegisterFlockAgent(AActor* Agent)
-{
-    if (!Agent) return;
-
-    FCrowd_FlockAgentData Data;
-    Data.AgentActor = Agent;
-    Data.CurrentVelocity = FVector(50.0f, 0.0f, 0.0f);
-    Data.TargetLocation = Agent->GetActorLocation();
-    Data.CircleCenter = Agent->GetActorLocation();
-    Data.CircleRadius = 400.0f;
-    Data.CircleAngle = FMath::RandRange(0.0f, 360.0f);
-    Data.AgentState = ECrowd_AgentState::Patrolling;
-
-    FlockAgents.Add(Data);
-}
-
-void UCrowdSimulationManager::TickSimulation(float DeltaTime)
-{
-    if (!bSimulationActive || !WorldRef) return;
-
-    AccumulatedTime += DeltaTime;
-    if (AccumulatedTime < SimulationTickRate) return;
-    AccumulatedTime = 0.0f;
-
-    TickHerdBehavior(SimulationTickRate);
-    TickFlockBehavior(SimulationTickRate);
-}
-
-void UCrowdSimulationManager::TickHerdBehavior(float DeltaTime)
-{
-    if (HerdAgents.Num() == 0) return;
-
-    // Compute herd centroid
-    FVector Centroid = FVector::ZeroVector;
-    int32 ValidCount = 0;
-    for (const FCrowd_HerdAgentData& Agent : HerdAgents)
+    if (ActiveAgents.Num() + GroupSize > MaxAgents)
     {
-        if (Agent.AgentActor)
+        GroupSize = MaxAgents - ActiveAgents.Num();
+    }
+    if (GroupSize <= 0) return;
+
+    for (int32 i = 0; i < GroupSize; i++)
+    {
+        FCrowd_AgentData NewAgent;
+        float Angle = (float(i) / float(GroupSize)) * 2.0f * PI;
+        float Radius = FMath::RandRange(100.0f, 400.0f);
+        NewAgent.Location = CenterLocation + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0f);
+        NewAgent.Velocity = FVector::ZeroVector;
+        NewAgent.State = ECrowd_AgentState::Idle;
+        NewAgent.AgentType = ECrowd_AgentType::TribalHuman;
+        NewAgent.FearLevel = 0.0f;
+        NewAgent.Energy = FMath::RandRange(60.0f, 100.0f);
+        NewAgent.GroupID = GroupID;
+        ActiveAgents.Add(NewAgent);
+    }
+}
+
+void ACrowdSimulationManager::SpawnDinosaurHerd(FVector StartLocation, int32 HerdSize, int32 GroupID)
+{
+    if (ActiveAgents.Num() + HerdSize > MaxAgents)
+    {
+        HerdSize = MaxAgents - ActiveAgents.Num();
+    }
+    if (HerdSize <= 0) return;
+
+    for (int32 i = 0; i < HerdSize; i++)
+    {
+        FCrowd_AgentData NewAgent;
+        float OffsetX = FMath::RandRange(-500.0f, 500.0f);
+        float OffsetY = FMath::RandRange(-500.0f, 500.0f);
+        NewAgent.Location = StartLocation + FVector(OffsetX, OffsetY, 0.0f);
+        NewAgent.Velocity = FVector(100.0f, 0.0f, 0.0f); // Initial forward velocity
+        NewAgent.State = ECrowd_AgentState::Herding;
+        NewAgent.AgentType = ECrowd_AgentType::DinosaurHerd;
+        NewAgent.FearLevel = 0.0f;
+        NewAgent.Energy = 100.0f;
+        NewAgent.GroupID = GroupID;
+        ActiveAgents.Add(NewAgent);
+    }
+}
+
+void ACrowdSimulationManager::TriggerFearResponse(FVector ThreatLocation, float FearRadius, float FearIntensity)
+{
+    for (FCrowd_AgentData& Agent : ActiveAgents)
+    {
+        float Distance = FVector::Dist(Agent.Location, ThreatLocation);
+        if (Distance < FearRadius)
         {
-            Centroid += Agent.AgentActor->GetActorLocation();
-            ValidCount++;
+            float FearFalloff = 1.0f - (Distance / FearRadius);
+            Agent.FearLevel = FMath::Clamp(Agent.FearLevel + FearIntensity * FearFalloff, 0.0f, 1.0f);
+            Agent.State = ECrowd_AgentState::Fleeing;
+
+            // Flee direction — away from threat
+            FVector FleeDir = (Agent.Location - ThreatLocation).GetSafeNormal();
+            Agent.Velocity = FleeDir * 600.0f * FearFalloff;
         }
     }
-    if (ValidCount > 0) Centroid /= ValidCount;
+}
 
-    for (FCrowd_HerdAgentData& Agent : HerdAgents)
+void ACrowdSimulationManager::UpdateFlockingBehavior(float DeltaTime)
+{
+    for (FCrowd_AgentData& Agent : ActiveAgents)
     {
-        if (!Agent.AgentActor) continue;
-
-        FVector AgentPos = Agent.AgentActor->GetActorLocation();
-
-        if (Agent.bIsFleeing)
+        if (Agent.State == ECrowd_AgentState::Herding || Agent.State == ECrowd_AgentState::Wandering)
         {
-            Agent.FleeTimer -= DeltaTime;
-            if (Agent.FleeTimer <= 0.0f)
+            FVector Separation = ComputeFlockingSeparation(Agent);
+            FVector Alignment  = ComputeFlockingAlignment(Agent);
+            FVector Cohesion   = ComputeFlockingCohesion(Agent);
+            FVector Migration  = ComputeMigrationSteering(Agent);
+
+            FVector SteeringForce = Separation * 2.0f + Alignment * 1.0f + Cohesion * CohesionStrength + Migration * 1.5f;
+            Agent.Velocity = (Agent.Velocity + SteeringForce * DeltaTime).GetClampedToMaxSize(400.0f);
+        }
+    }
+}
+
+bool ACrowdSimulationManager::GetNearestAgent(FVector WorldPosition, FCrowd_AgentData& OutAgent)
+{
+    float NearestDist = FLT_MAX;
+    bool bFound = false;
+
+    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    {
+        float Dist = FVector::Dist(Agent.Location, WorldPosition);
+        if (Dist < NearestDist)
+        {
+            NearestDist = Dist;
+            OutAgent = Agent;
+            bFound = true;
+        }
+    }
+    return bFound;
+}
+
+void ACrowdSimulationManager::ClearAllAgents()
+{
+    ActiveAgents.Empty();
+    ActiveAgentCount = 0;
+}
+
+void ACrowdSimulationManager::ApplyDistanceLOD(FVector PlayerLocation, float FullSimRadius, float LowSimRadius)
+{
+    for (FCrowd_AgentData& Agent : ActiveAgents)
+    {
+        float Distance = FVector::Dist(Agent.Location, PlayerLocation);
+        if (Distance > LowSimRadius)
+        {
+            // Beyond LOD range — freeze agent, save CPU
+            Agent.Velocity = FVector::ZeroVector;
+        }
+        else if (Distance > FullSimRadius)
+        {
+            // Reduced sim — simple linear movement only, no flocking
+            Agent.Location += Agent.Velocity * 0.016f; // ~60fps tick approximation
+        }
+        // Within FullSimRadius — full simulation handled in Tick()
+    }
+}
+
+// --- Private helpers ---
+
+void ACrowdSimulationManager::UpdateAgentState(FCrowd_AgentData& Agent, float DeltaTime)
+{
+    // Decay fear over time
+    if (Agent.FearLevel > 0.0f)
+    {
+        Agent.FearLevel = FMath::Max(0.0f, Agent.FearLevel - DeltaTime * 0.2f);
+        if (Agent.FearLevel < 0.1f && Agent.State == ECrowd_AgentState::Fleeing)
+        {
+            Agent.State = ECrowd_AgentState::Wandering;
+        }
+    }
+
+    // Move agent
+    Agent.Location += Agent.Velocity * DeltaTime;
+
+    // Decay velocity (friction)
+    Agent.Velocity *= 0.95f;
+
+    // Energy drain
+    Agent.Energy = FMath::Max(0.0f, Agent.Energy - DeltaTime * 0.5f);
+    if (Agent.Energy < 20.0f)
+    {
+        Agent.State = ECrowd_AgentState::Resting;
+        Agent.Velocity = FVector::ZeroVector;
+    }
+    else if (Agent.State == ECrowd_AgentState::Resting)
+    {
+        Agent.Energy = FMath::Min(100.0f, Agent.Energy + DeltaTime * 2.0f);
+        if (Agent.Energy > 50.0f)
+        {
+            Agent.State = ECrowd_AgentState::Wandering;
+        }
+    }
+}
+
+FVector ACrowdSimulationManager::ComputeFlockingSeparation(const FCrowd_AgentData& Agent)
+{
+    FVector Steer = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (const FCrowd_AgentData& Other : ActiveAgents)
+    {
+        if (&Other == &Agent) continue;
+        float Dist = FVector::Dist(Agent.Location, Other.Location);
+        if (Dist < AgentSeparationDistance && Dist > 0.0f)
+        {
+            FVector Diff = (Agent.Location - Other.Location).GetSafeNormal() / Dist;
+            Steer += Diff;
+            Count++;
+        }
+    }
+    if (Count > 0) Steer /= float(Count);
+    return Steer;
+}
+
+FVector ACrowdSimulationManager::ComputeFlockingAlignment(const FCrowd_AgentData& Agent)
+{
+    FVector AvgVelocity = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (const FCrowd_AgentData& Other : ActiveAgents)
+    {
+        if (&Other == &Agent) continue;
+        if (Other.GroupID == Agent.GroupID)
+        {
+            float Dist = FVector::Dist(Agent.Location, Other.Location);
+            if (Dist < AgentSeparationDistance * 3.0f)
             {
-                Agent.bIsFleeing = false;
-                Agent.AgentState = ECrowd_AgentState::Grazing;
+                AvgVelocity += Other.Velocity;
+                Count++;
             }
-            // Move away from threat
-            FVector FleeDir = (AgentPos - Agent.ThreatLocation).GetSafeNormal();
-            FVector NewPos = AgentPos + FleeDir * AgentMoveSpeed * 2.0f * DeltaTime;
-            NewPos.Z = AgentPos.Z;
-            Agent.AgentActor->SetActorLocation(NewPos, false);
-            continue;
         }
+    }
+    if (Count > 0)
+    {
+        AvgVelocity /= float(Count);
+        return (AvgVelocity - Agent.Velocity) * 0.1f;
+    }
+    return FVector::ZeroVector;
+}
 
-        // Cohesion: move toward centroid
-        FVector CohesionForce = (Centroid - AgentPos);
-        float DistToCentroid = CohesionForce.Size();
-        if (DistToCentroid > HerdCohesionRadius)
-        {
-            CohesionForce.Normalize();
-            CohesionForce *= AgentMoveSpeed * DeltaTime;
-        }
-        else
-        {
-            CohesionForce = FVector::ZeroVector;
-        }
+FVector ACrowdSimulationManager::ComputeFlockingCohesion(const FCrowd_AgentData& Agent)
+{
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 Count = 0;
 
-        // Separation: avoid neighbors
-        FVector SeparationForce = FVector::ZeroVector;
-        for (const FCrowd_HerdAgentData& Other : HerdAgents)
+    for (const FCrowd_AgentData& Other : ActiveAgents)
+    {
+        if (&Other == &Agent) continue;
+        if (Other.GroupID == Agent.GroupID)
         {
-            if (!Other.AgentActor || Other.AgentActor == Agent.AgentActor) continue;
-            FVector Diff = AgentPos - Other.AgentActor->GetActorLocation();
-            float Dist = Diff.Size();
-            if (Dist < HerdSeparationRadius && Dist > 0.1f)
+            float Dist = FVector::Dist(Agent.Location, Other.Location);
+            if (Dist < AgentSeparationDistance * 5.0f)
             {
-                SeparationForce += Diff.GetSafeNormal() * (HerdSeparationRadius - Dist);
+                CenterOfMass += Other.Location;
+                Count++;
             }
         }
-
-        // Wander: small random drift
-        FVector WanderForce = FVector(
-            FMath::RandRange(-30.0f, 30.0f),
-            FMath::RandRange(-30.0f, 30.0f),
-            0.0f) * DeltaTime;
-
-        FVector TotalForce = CohesionForce + SeparationForce * 0.5f + WanderForce;
-        TotalForce.Z = 0.0f;
-
-        FVector NewPos = AgentPos + TotalForce;
-        if (!TotalForce.IsNearlyZero())
-        {
-            Agent.AgentActor->SetActorLocation(NewPos, false);
-            FRotator NewRot = TotalForce.Rotation();
-            NewRot.Pitch = 0.0f;
-            NewRot.Roll = 0.0f;
-            Agent.AgentActor->SetActorRotation(NewRot);
-        }
     }
-}
-
-void UCrowdSimulationManager::TickFlockBehavior(float DeltaTime)
-{
-    for (FCrowd_FlockAgentData& Agent : FlockAgents)
+    if (Count > 0)
     {
-        if (!Agent.AgentActor) continue;
-
-        // Circular patrol pattern at altitude
-        Agent.CircleAngle += 45.0f * DeltaTime; // degrees/sec
-        if (Agent.CircleAngle > 360.0f) Agent.CircleAngle -= 360.0f;
-
-        float RadAngle = FMath::DegreesToRadians(Agent.CircleAngle);
-        FVector NewPos;
-        NewPos.X = Agent.CircleCenter.X + FMath::Cos(RadAngle) * Agent.CircleRadius;
-        NewPos.Y = Agent.CircleCenter.Y + FMath::Sin(RadAngle) * Agent.CircleRadius;
-        NewPos.Z = Agent.CircleCenter.Z + FMath::Sin(RadAngle * 2.0f) * 30.0f; // gentle altitude variation
-
-        // Clamp altitude
-        NewPos.Z = FMath::Clamp(NewPos.Z, FlockAltitudeMin, FlockAltitudeMax);
-
-        Agent.AgentActor->SetActorLocation(NewPos, false);
-
-        // Face movement direction
-        FVector MoveDir = NewPos - Agent.AgentActor->GetActorLocation();
-        if (!MoveDir.IsNearlyZero())
-        {
-            Agent.AgentActor->SetActorRotation(MoveDir.Rotation());
-        }
+        CenterOfMass /= float(Count);
+        return (CenterOfMass - Agent.Location) * 0.01f;
     }
+    return FVector::ZeroVector;
 }
 
-void UCrowdSimulationManager::TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius)
+FVector ACrowdSimulationManager::ComputeMigrationSteering(const FCrowd_AgentData& Agent)
 {
-    int32 AffectedCount = 0;
-    for (FCrowd_HerdAgentData& Agent : HerdAgents)
+    if (MigrationWaypoints.Num() == 0) return FVector::ZeroVector;
+
+    // Find nearest waypoint ahead
+    float NearestDist = FLT_MAX;
+    int32 TargetIdx = 0;
+    for (int32 i = 0; i < MigrationWaypoints.Num(); i++)
     {
-        if (!Agent.AgentActor) continue;
-        float Dist = FVector::Dist(Agent.AgentActor->GetActorLocation(), ThreatLocation);
-        if (Dist <= ThreatRadius)
+        float Dist = FVector::Dist(Agent.Location, MigrationWaypoints[i].WorldPosition);
+        if (Dist < NearestDist)
         {
-            Agent.bIsFleeing = true;
-            Agent.FleeTimer = FMath::RandRange(5.0f, 12.0f);
-            Agent.ThreatLocation = ThreatLocation;
-            Agent.AgentState = ECrowd_AgentState::Fleeing;
-            AffectedCount++;
+            NearestDist = Dist;
+            TargetIdx = i;
         }
     }
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: FleeResponse triggered. Affected=%d radius=%.0f"),
-        AffectedCount, ThreatRadius);
+
+    // If within waypoint radius, target next waypoint
+    if (NearestDist < MigrationWaypoints[TargetIdx].Radius)
+    {
+        TargetIdx = GetNextWaypointIndex(TargetIdx);
+    }
+
+    FVector ToWaypoint = (MigrationWaypoints[TargetIdx].WorldPosition - Agent.Location).GetSafeNormal();
+    return ToWaypoint * 200.0f;
 }
 
-void UCrowdSimulationManager::GetCrowdStats(int32& OutHerdCount, int32& OutFlockCount, bool& OutSimActive) const
+int32 ACrowdSimulationManager::GetNextWaypointIndex(int32 CurrentWaypoint) const
 {
-    OutHerdCount = HerdAgents.Num();
-    OutFlockCount = FlockAgents.Num();
-    OutSimActive = bSimulationActive;
-}
-
-void UCrowdSimulationManager::StopSimulation()
-{
-    bSimulationActive = false;
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Simulation stopped."));
+    if (MigrationWaypoints.Num() == 0) return 0;
+    return (CurrentWaypoint + 1) % MigrationWaypoints.Num();
 }
