@@ -1,122 +1,141 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric crowd simulation: tribal camps, migration columns, scatter-on-threat
+// Prehistoric crowd simulation: tribe members + dinosaur herds
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "NavigationSystem.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxCrowdAgents = 50;
-    ThreatScatterRadius = 1500.0f;
-    CampRadius = 400.0f;
-    MigrationSpeed = 120.0f;
-    bCrowdActive = true;
+    MaxTribeAgents = 50;
+    MaxHerdAgents = 20;
+    MaxRaptorPackAgents = 8;
+    AgentUpdateInterval = 0.5f;
+    FlockingRadius = 300.0f;
+    SeparationRadius = 80.0f;
+    bSimulationActive = false;
 }
 
 void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized — MaxAgents:%d"), MaxCrowdAgents);
+    bSimulationActive = true;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized — Max agents: Tribe=%d, Herd=%d, Pack=%d"),
+        MaxTribeAgents, MaxHerdAgents, MaxRaptorPackAgents);
 }
 
 void UCrowdSimulationManager::Deinitialize()
 {
-    CrowdAgents.Empty();
+    bSimulationActive = false;
+    TribeAgents.Empty();
+    HerdAgents.Empty();
+    RaptorPackAgents.Empty();
     Super::Deinitialize();
 }
 
-void UCrowdSimulationManager::RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role)
+void UCrowdSimulationManager::RegisterTribeAgent(AActor* Agent)
 {
     if (!Agent) return;
-    FCrowd_AgentData Data;
-    Data.AgentActor = Agent;
-    Data.Role = Role;
-    Data.HomeLocation = Agent->GetActorLocation();
-    Data.CurrentState = ECrowd_AgentState::Idle;
-    Data.bIsAlive = true;
-    CrowdAgents.Add(Data);
-    UE_LOG(LogTemp, Verbose, TEXT("[CrowdSim] Registered agent: %s Role:%d"), *Agent->GetName(), (int32)Role);
+    if (TribeAgents.Num() >= MaxTribeAgents)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Tribe agent cap reached (%d)"), MaxTribeAgents);
+        return;
+    }
+    TribeAgents.AddUnique(Agent);
+    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulationManager: Registered tribe agent %s (total: %d)"),
+        *Agent->GetName(), TribeAgents.Num());
 }
 
-void UCrowdSimulationManager::UnregisterCrowdAgent(AActor* Agent)
+void UCrowdSimulationManager::RegisterHerdAgent(AActor* Agent)
 {
     if (!Agent) return;
-    CrowdAgents.RemoveAll([Agent](const FCrowd_AgentData& D){ return D.AgentActor == Agent; });
+    if (HerdAgents.Num() >= MaxHerdAgents)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Herd agent cap reached (%d)"), MaxHerdAgents);
+        return;
+    }
+    HerdAgents.AddUnique(Agent);
 }
 
-void UCrowdSimulationManager::TriggerThreatResponse(FVector ThreatLocation, float ThreatRadius)
+void UCrowdSimulationManager::RegisterRaptorPackAgent(AActor* Agent)
 {
-    for (FCrowd_AgentData& Agent : CrowdAgents)
+    if (!Agent) return;
+    if (RaptorPackAgents.Num() >= MaxRaptorPackAgents)
     {
-        if (!Agent.AgentActor.IsValid() || !Agent.bIsAlive) continue;
-        float Dist = FVector::Dist(Agent.AgentActor->GetActorLocation(), ThreatLocation);
-        if (Dist <= ThreatRadius)
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Raptor pack cap reached (%d)"), MaxRaptorPackAgents);
+        return;
+    }
+    RaptorPackAgents.AddUnique(Agent);
+}
+
+FVector UCrowdSimulationManager::ComputeFlockingVector(AActor* Agent, const TArray<AActor*>& Group) const
+{
+    if (!Agent || Group.Num() <= 1) return FVector::ZeroVector;
+
+    FVector Separation = FVector::ZeroVector;
+    FVector Alignment = FVector::ZeroVector;
+    FVector Cohesion = FVector::ZeroVector;
+    int32 NeighborCount = 0;
+
+    FVector AgentLoc = Agent->GetActorLocation();
+
+    for (AActor* Other : Group)
+    {
+        if (!Other || Other == Agent) continue;
+
+        FVector Delta = AgentLoc - Other->GetActorLocation();
+        float Dist = Delta.Size();
+
+        if (Dist < FlockingRadius)
         {
-            Agent.CurrentState = ECrowd_AgentState::Fleeing;
-            // Scatter direction: away from threat
-            FVector AwayDir = (Agent.AgentActor->GetActorLocation() - ThreatLocation).GetSafeNormal();
-            Agent.FleeTarget = Agent.AgentActor->GetActorLocation() + AwayDir * ThreatScatterRadius;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Agent %s FLEEING from threat at dist %.0f"),
-                *Agent.AgentActor->GetName(), Dist);
+            // Separation: push away from close neighbors
+            if (Dist < SeparationRadius && Dist > 0.0f)
+            {
+                Separation += Delta.GetSafeNormal() * (SeparationRadius / FMath::Max(Dist, 1.0f));
+            }
+
+            // Cohesion: move toward group center
+            Cohesion += Other->GetActorLocation();
+
+            // Alignment: match velocity direction
+            Alignment += Other->GetActorForwardVector();
+
+            NeighborCount++;
         }
     }
+
+    if (NeighborCount == 0) return FVector::ZeroVector;
+
+    Cohesion = (Cohesion / NeighborCount) - AgentLoc;
+    Cohesion.Normalize();
+    Alignment /= NeighborCount;
+    Alignment.Normalize();
+
+    // Weighted combination: separation has highest priority
+    FVector Result = (Separation * 2.0f) + (Alignment * 1.0f) + (Cohesion * 0.5f);
+    Result.Z = 0.0f; // Keep movement on ground plane
+    return Result.GetSafeNormal();
 }
 
-void UCrowdSimulationManager::UpdateCrowdTick(float DeltaTime)
+int32 UCrowdSimulationManager::GetTotalActiveAgents() const
 {
-    if (!bCrowdActive) return;
-    for (FCrowd_AgentData& Agent : CrowdAgents)
-    {
-        if (!Agent.AgentActor.IsValid() || !Agent.bIsAlive) continue;
-        switch (Agent.CurrentState)
-        {
-            case ECrowd_AgentState::Idle:
-                // Idle: minor random drift around home
-                break;
-            case ECrowd_AgentState::Migrating:
-                // Move toward migration waypoint
-                if (!Agent.MigrationWaypoints.IsEmpty())
-                {
-                    FVector Target = Agent.MigrationWaypoints[Agent.CurrentWaypointIndex % Agent.MigrationWaypoints.Num()];
-                    FVector Dir = (Target - Agent.AgentActor->GetActorLocation()).GetSafeNormal();
-                    FVector NewLoc = Agent.AgentActor->GetActorLocation() + Dir * MigrationSpeed * DeltaTime;
-                    Agent.AgentActor->SetActorLocation(NewLoc);
-                    if (FVector::Dist(NewLoc, Target) < 50.0f)
-                        Agent.CurrentWaypointIndex++;
-                }
-                break;
-            case ECrowd_AgentState::Fleeing:
-                {
-                    FVector Dir = (Agent.FleeTarget - Agent.AgentActor->GetActorLocation()).GetSafeNormal();
-                    FVector NewLoc = Agent.AgentActor->GetActorLocation() + Dir * MigrationSpeed * 2.0f * DeltaTime;
-                    Agent.AgentActor->SetActorLocation(NewLoc);
-                    if (FVector::Dist(NewLoc, Agent.FleeTarget) < 100.0f)
-                        Agent.CurrentState = ECrowd_AgentState::Idle;
-                }
-                break;
-            case ECrowd_AgentState::Working:
-                // Gathering/crafting: stay near home, animate in place
-                break;
-            default:
-                break;
-        }
-    }
+    return TribeAgents.Num() + HerdAgents.Num() + RaptorPackAgents.Num();
 }
 
-int32 UCrowdSimulationManager::GetActiveCrowdCount() const
+FCrowd_SimulationStats UCrowdSimulationManager::GetSimulationStats() const
 {
-    int32 Count = 0;
-    for (const FCrowd_AgentData& D : CrowdAgents)
-        if (D.AgentActor.IsValid() && D.bIsAlive) Count++;
-    return Count;
-}
-
-void UCrowdSimulationManager::SetCrowdActive(bool bActive)
-{
-    bCrowdActive = bActive;
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Crowd active: %s"), bActive ? TEXT("true") : TEXT("false"));
+    FCrowd_SimulationStats Stats;
+    Stats.TribeAgentCount = TribeAgents.Num();
+    Stats.HerdAgentCount = HerdAgents.Num();
+    Stats.RaptorPackCount = RaptorPackAgents.Num();
+    Stats.TotalAgents = GetTotalActiveAgents();
+    Stats.bIsActive = bSimulationActive;
+    Stats.MaxCapacity = MaxTribeAgents + MaxHerdAgents + MaxRaptorPackAgents;
+    return Stats;
 }
