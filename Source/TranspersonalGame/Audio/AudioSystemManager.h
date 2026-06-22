@@ -3,199 +3,170 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
 #include "AudioSystemManager.generated.h"
 
 // ============================================================
 // Audio Agent #16 — AudioSystemManager
-// Prehistoric survival ambient + reactive audio system
+// Adaptive audio system for prehistoric survival game.
+// Controls music tension state, ambient zone transitions,
+// and NPC proximity audio triggers.
 // ============================================================
+
+UENUM(BlueprintType)
+enum class EAudio_TensionState : uint8
+{
+    Safe        UMETA(DisplayName = "Safe — Camp"),
+    Cautious    UMETA(DisplayName = "Cautious — Open World"),
+    Danger      UMETA(DisplayName = "Danger — Dino Nearby"),
+    Critical    UMETA(DisplayName = "Critical — Under Attack")
+};
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    River       UMETA(DisplayName = "River"),
-    Cave        UMETA(DisplayName = "Cave"),
-    DangerZone  UMETA(DisplayName = "DangerZone"),
-    Camp        UMETA(DisplayName = "Camp"),
-    OpenPlains  UMETA(DisplayName = "OpenPlains")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
-{
-    Calm        UMETA(DisplayName = "Calm"),
-    Uneasy      UMETA(DisplayName = "Uneasy"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Combat      UMETA(DisplayName = "Combat")
+    Camp        UMETA(DisplayName = "Camp Zone"),
+    Jungle      UMETA(DisplayName = "Jungle Zone"),
+    River       UMETA(DisplayName = "River Zone"),
+    DinoTerritory UMETA(DisplayName = "Dino Territory"),
+    Cave        UMETA(DisplayName = "Cave Zone")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ZoneConfig
+struct FAudio_AmbientZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FString ZoneLabel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BlendRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    EAudio_ZoneType ZoneType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BaseVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FVector WorldLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float NightVolumeMultiplier = 1.4f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    float BlendRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bLooping = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    float AmbientVolume;
+
+    FAudio_AmbientZone()
+        : ZoneLabel(TEXT("DefaultZone"))
+        , ZoneType(EAudio_ZoneType::Jungle)
+        , WorldLocation(FVector::ZeroVector)
+        , BlendRadius(1500.0f)
+        , AmbientVolume(0.8f)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ImpactEvent
+struct FAudio_SoundReference
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FVector WorldLocation = FVector::ZeroVector;
+    // Freesound IDs catalogued by Audio Agent #16
+    // Campfire: 394952 (crackling campfire, 1805s loop)
+    // Dino Roars Pack 1: 586546
+    // Dino Roars Pack 2: 586545
+    // Dino Growls Pack 2: 586547
+    // Croc/Dino Bellow: 811310
+    // Berserker Roar (TRex): 837048
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Magnitude = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
+    int32 FreesoundID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString SourceTag;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
+    FString SoundName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Timestamp = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
+    FString PreviewURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
+    FString UseCase;
+
+    FAudio_SoundReference()
+        : FreesoundID(0)
+        , SoundName(TEXT("Unknown"))
+        , PreviewURL(TEXT(""))
+        , UseCase(TEXT(""))
+    {}
 };
 
-// ============================================================
-// UAudio_ZoneComponent — attach to any actor to define audio zone
-// ============================================================
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UAudio_ZoneComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Calm;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetThreatLevel(EAudio_ThreatLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_ThreatLevel GetThreatLevel() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetBlendedVolume(float TimeOfDay) const;
-
-protected:
-    virtual void BeginPlay() override;
-};
-
-// ============================================================
-// AAudio_AmbientZoneActor — spatial ambient audio source
-// ============================================================
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AmbientZoneActor : public AActor
+class TRANSPERSONALGAME_API AAudioSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AAudio_AmbientZoneActor();
+    AAudioSystemManager();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio",
-        meta = (AllowPrivateAccess = "true"))
-    UAudio_ZoneComponent* AudioZoneComp;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio",
-        meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* AmbientAudioComp;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ActivationRadius = 1200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bActiveAtNight = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bActiveAtDay = true;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void ActivateZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void DeactivateZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool IsPlayerInRange() const;
-
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
+    // ---- Tension State ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
+    EAudio_TensionState CurrentTensionState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
+    float TensionBlendSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
+    float DinoProximityRadius;
+
+    // ---- Ambient Zones ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
+    TArray<FAudio_AmbientZone> AmbientZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
+    EAudio_ZoneType CurrentZone;
+
+    // ---- Sound References (Freesound catalogue) ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Catalogue")
+    TArray<FAudio_SoundReference> SoundCatalogue;
+
+    // ---- Audio Components ----
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
+        meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* CampfireAudioComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
+        meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* AmbientLoopComponent;
+
+    // ---- Public Functions ----
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
+    void SetTensionState(EAudio_TensionState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
+    EAudio_TensionState GetTensionState() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
+    EAudio_ZoneType GetZoneAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
+    void UpdatePlayerZone(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Catalogue")
+    void InitialiseSoundCatalogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
+    float GetTensionIntensity() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Debug")
+    FString GetAudioDebugString() const;
+
 private:
-    bool bIsActive = false;
-    float LastCheckTime = 0.0f;
-};
+    float CurrentTensionIntensity;
+    float TargetTensionIntensity;
+    float TimeSinceLastDinoDetected;
 
-// ============================================================
-// AAudio_SystemManager — world-level audio orchestrator
-// ============================================================
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_SystemManager();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ThreatLevel GlobalThreatLevel = EAudio_ThreatLevel::Calm;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float TimeOfDay = 0.5f;  // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ThreatTransitionSpeed = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float DinosaurProximityRadius = 1500.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void RegisterImpactEvent(const FAudio_ImpactEvent& Event);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetGlobalThreatLevel(EAudio_ThreatLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_ThreatLevel GetGlobalThreatLevel() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateTimeOfDay(float NewTimeOfDay);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    bool IsNightTime() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void TriggerDinosaurProximityAlert(FVector DinosaurLocation, float DinosaurSize);
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-private:
-    TArray<FAudio_ImpactEvent> RecentImpacts;
-    float CurrentThreatBlend = 0.0f;
-    float TargetThreatBlend = 0.0f;
-
-    void UpdateThreatBlend(float DeltaTime);
-    void AuditDinosaurProximity();
+    void UpdateTensionBlend(float DeltaTime);
+    void DetectNearbyDinosaurs();
+    void InitialiseDefaultZones();
 };
