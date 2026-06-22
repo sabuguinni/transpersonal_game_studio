@@ -1,9 +1,6 @@
-// NPCBehaviorComponent.cpp
-// NPC Behavior Agent #11 — Transpersonal Game Studio
-// Implements patrol, alert, and flee behavior states for tribal NPCs
-
 #include "NPCBehaviorComponent.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
@@ -11,163 +8,298 @@
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    DetectionRadius = 1500.0f;
-    FleeRadius = 800.0f;
     CurrentState = ENPC_BehaviorState::Idle;
-    CurrentPatrolIndex = 0;
-    WaitTimer = 0.0f;
-    bWaiting = false;
+    CurrentThreat = ENPC_ThreatLevel::None;
+    CurrentWaypointIndex = 0;
+    StateTimer = 0.0f;
+    DialogueCooldownTimer = 0.0f;
 }
 
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-    // Start patrolling if patrol points are defined
-    if (PatrolPoints.Num() > 0)
+
+    // Seed default patrol waypoints around spawn location
+    if (Waypoints.Num() == 0 && GetOwner())
     {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
+        FVector Origin = GetOwner()->GetActorLocation();
+        float R = PatrolRadius * 0.5f;
+
+        FNPC_WaypointData WP0, WP1, WP2, WP3;
+        WP0.Location = Origin + FVector(R, 0, 0);   WP0.WaitDuration = 3.0f;
+        WP1.Location = Origin + FVector(0, R, 0);   WP1.WaitDuration = 2.0f;
+        WP2.Location = Origin + FVector(-R, 0, 0);  WP2.WaitDuration = 4.0f;
+        WP3.Location = Origin + FVector(0, -R, 0);  WP3.WaitDuration = 2.5f;
+
+        Waypoints.Add(WP0);
+        Waypoints.Add(WP1);
+        Waypoints.Add(WP2);
+        Waypoints.Add(WP3);
     }
+
+    // Seed default dialogue lines
+    if (DialogueLines.Num() == 0)
+    {
+        AddDialogueLine(TEXT("Stay quiet. Something is out there."), ENPC_BehaviorState::Alert, 20.0f);
+        AddDialogueLine(TEXT("The herd moved north this morning."), ENPC_BehaviorState::Patrol, 45.0f);
+        AddDialogueLine(TEXT("Keep your spear ready."), ENPC_BehaviorState::Idle, 60.0f);
+        AddDialogueLine(TEXT("Run! Do not look back!"), ENPC_BehaviorState::Flee, 5.0f);
+    }
+
+    SetBehaviorState(ENPC_BehaviorState::Patrol);
 }
 
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+    StateTimer += DeltaTime;
+    if (DialogueCooldownTimer > 0.0f)
+    {
+        DialogueCooldownTimer -= DeltaTime;
+    }
+
+    // Threat detection every 2 seconds
+    if (FMath::Fmod(StateTimer, 2.0f) < DeltaTime)
+    {
+        bool bThreatDetected = DetectThreatInRadius(DetectionRadius);
+        if (bThreatDetected && CurrentState != ENPC_BehaviorState::Flee)
+        {
+            if (CurrentThreat >= ENPC_ThreatLevel::High)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Flee);
+            }
+            else
+            {
+                SetBehaviorState(ENPC_BehaviorState::Alert);
+            }
+        }
+        else if (!bThreatDetected && CurrentState == ENPC_BehaviorState::Alert)
+        {
+            // Calm down after 10s with no threat
+            if (StateTimer > 10.0f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Patrol);
+            }
+        }
+    }
+
+    // State tick
     switch (CurrentState)
     {
-        case ENPC_BehaviorState::Patrol:
-            TickPatrol(DeltaTime);
-            break;
-        case ENPC_BehaviorState::Alert:
-            TickAlert(DeltaTime);
-            break;
-        case ENPC_BehaviorState::Flee:
-            TickFlee(DeltaTime);
-            break;
-        default:
-            break;
+        case ENPC_BehaviorState::Patrol:    TickPatrol(DeltaTime);  break;
+        case ENPC_BehaviorState::Alert:     TickAlert(DeltaTime);   break;
+        case ENPC_BehaviorState::Flee:      TickFlee(DeltaTime);    break;
+        case ENPC_BehaviorState::Idle:      TickIdle(DeltaTime);    break;
+        default: break;
     }
 }
 
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
     if (CurrentState == NewState) return;
+
     CurrentState = NewState;
-    WaitTimer = 0.0f;
-    bWaiting = false;
+    StateTimer = 0.0f;
+    SelectDialogueForState();
+
+    UE_LOG(LogTemp, Log, TEXT("NPC [%s] State -> %d"),
+        GetOwner() ? *GetOwner()->GetActorLabel() : TEXT("Unknown"),
+        (int32)NewState);
 }
 
-void UNPCBehaviorComponent::AlertNearbyNPCs(float AlertRadius)
+void UNPCBehaviorComponent::UpdateThreatLevel(ENPC_ThreatLevel NewThreat)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
+    CurrentThreat = NewThreat;
 
-    UWorld* World = Owner->GetWorld();
-    if (!World) return;
-
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), NearbyActors);
-
-    for (AActor* Actor : NearbyActors)
+    if (NewThreat >= ENPC_ThreatLevel::High)
     {
-        if (Actor == Owner) continue;
-        float Distance = FVector::Dist(Owner->GetActorLocation(), Actor->GetActorLocation());
-        if (Distance <= AlertRadius)
-        {
-            UNPCBehaviorComponent* OtherBehavior = Actor->FindComponentByClass<UNPCBehaviorComponent>();
-            if (OtherBehavior && OtherBehavior->CurrentState == ENPC_BehaviorState::Idle)
-            {
-                OtherBehavior->SetBehaviorState(ENPC_BehaviorState::Alert);
-            }
-        }
+        AlertNearbyNPCs(AlertRadius);
     }
 }
 
-void UNPCBehaviorComponent::AddPatrolPoint(FVector Location, float WaitTime)
+void UNPCBehaviorComponent::AddWaypoint(FVector Location, float WaitTime)
 {
-    FNPC_PatrolPoint Point;
-    Point.Location = Location;
-    Point.WaitTime = WaitTime;
-    PatrolPoints.Add(Point);
+    FNPC_WaypointData WP;
+    WP.Location = Location;
+    WP.WaitDuration = WaitTime;
+    WP.bLookAround = true;
+    Waypoints.Add(WP);
+}
+
+void UNPCBehaviorComponent::ClearWaypoints()
+{
+    Waypoints.Empty();
+    CurrentWaypointIndex = 0;
+}
+
+void UNPCBehaviorComponent::AddDialogueLine(FString Text, ENPC_BehaviorState TriggerState, float Cooldown)
+{
+    FNPC_DialogueLine Line;
+    Line.LineText = Text;
+    Line.TriggerState = TriggerState;
+    Line.Cooldown = Cooldown;
+    DialogueLines.Add(Line);
+}
+
+FString UNPCBehaviorComponent::GetCurrentDialogue() const
+{
+    return ActiveDialogueLine;
+}
+
+bool UNPCBehaviorComponent::DetectThreatInRadius(float Radius)
+{
+    if (!GetOwner() || !GetWorld()) return false;
+
+    TArray<AActor*> OverlappingActors;
+    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        GetOwner()->GetActorLocation(),
+        Radius,
+        ObjectTypes,
+        nullptr,
+        TArray<AActor*>(),
+        OverlappingActors
+    );
+
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (!Actor || Actor == GetOwner()) continue;
+
+        FString Label = Actor->GetActorLabel();
+        // Dinosaurs are threats
+        if (Label.Contains(TEXT("TRex")) || Label.Contains(TEXT("Raptor")) ||
+            Label.Contains(TEXT("Rex"))  || Label.Contains(TEXT("Dino")))
+        {
+            float Dist = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+            if (Dist < Radius * 0.4f)
+            {
+                UpdateThreatLevel(ENPC_ThreatLevel::Critical);
+            }
+            else if (Dist < Radius * 0.7f)
+            {
+                UpdateThreatLevel(ENPC_ThreatLevel::High);
+            }
+            else
+            {
+                UpdateThreatLevel(ENPC_ThreatLevel::Medium);
+            }
+            return true;
+        }
+    }
+
+    if (CurrentThreat != ENPC_ThreatLevel::None)
+    {
+        UpdateThreatLevel(ENPC_ThreatLevel::None);
+    }
+    return false;
+}
+
+void UNPCBehaviorComponent::AlertNearbyNPCs(float Radius)
+{
+    if (!GetOwner() || !GetWorld()) return;
+
+    TArray<AActor*> NearbyActors;
+    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        GetOwner()->GetActorLocation(),
+        Radius,
+        ObjectTypes,
+        nullptr,
+        TArray<AActor*>(),
+        NearbyActors
+    );
+
+    int32 AlertCount = 0;
+    for (AActor* Actor : NearbyActors)
+    {
+        if (!Actor || Actor == GetOwner()) continue;
+
+        UNPCBehaviorComponent* OtherNPC = Actor->FindComponentByClass<UNPCBehaviorComponent>();
+        if (OtherNPC && OtherNPC->CurrentState != ENPC_BehaviorState::Flee)
+        {
+            OtherNPC->SetBehaviorState(ENPC_BehaviorState::Alert);
+            OtherNPC->UpdateThreatLevel(ENPC_ThreatLevel::High);
+            AlertCount++;
+        }
+    }
+
+    if (AlertCount > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("NPC [%s] alerted %d nearby NPCs"),
+            *GetOwner()->GetActorLabel(), AlertCount);
+    }
 }
 
 void UNPCBehaviorComponent::TickPatrol(float DeltaTime)
 {
-    if (PatrolPoints.Num() == 0) return;
+    if (Waypoints.Num() == 0) return;
 
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    if (bWaiting)
+    // Advance waypoint index every 8 seconds (movement handled by AI controller)
+    if (StateTimer > 8.0f)
     {
-        WaitTimer -= DeltaTime;
-        if (WaitTimer <= 0.0f)
-        {
-            bWaiting = false;
-            CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-        }
-        return;
-    }
-
-    const FNPC_PatrolPoint& Target = PatrolPoints[CurrentPatrolIndex];
-    FVector CurrentLoc = Owner->GetActorLocation();
-    FVector TargetLoc = Target.Location;
-    float Distance = FVector::Dist2D(CurrentLoc, TargetLoc);
-
-    if (Distance < 100.0f)
-    {
-        // Reached patrol point — wait
-        bWaiting = true;
-        WaitTimer = Target.WaitTime;
-    }
-    else
-    {
-        // Move toward patrol point
-        FVector Direction = (TargetLoc - CurrentLoc).GetSafeNormal2D();
-        float MoveSpeed = 200.0f; // cm/s walking speed
-        FVector NewLoc = CurrentLoc + Direction * MoveSpeed * DeltaTime;
-        Owner->SetActorLocation(NewLoc, true);
-
-        // Face movement direction
-        FRotator FaceRot = Direction.Rotation();
-        Owner->SetActorRotation(FaceRot);
+        CurrentWaypointIndex = (CurrentWaypointIndex + 1) % Waypoints.Num();
+        StateTimer = 0.0f;
     }
 }
 
 void UNPCBehaviorComponent::TickAlert(float DeltaTime)
 {
-    // Alert state: NPC looks around for 3 seconds then returns to patrol
-    WaitTimer += DeltaTime;
-    if (WaitTimer >= 3.0f)
+    // Alert: stop moving, scan for threats
+    // After 15s with no escalation, return to patrol
+    if (StateTimer > 15.0f && CurrentThreat <= ENPC_ThreatLevel::Low)
     {
-        SetBehaviorState(PatrolPoints.Num() > 0 ? ENPC_BehaviorState::Patrol : ENPC_BehaviorState::Idle);
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
     }
 }
 
 void UNPCBehaviorComponent::TickFlee(float DeltaTime)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    // Flee away from player
-    APlayerController* PC = Owner->GetWorld()->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn()) return;
-
-    FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
-    FVector OwnerLoc = Owner->GetActorLocation();
-    float Distance = FVector::Dist(OwnerLoc, PlayerLoc);
-
-    if (Distance > FleeRadius * 2.0f)
+    // Flee: run away from threat
+    // After 20s, check if threat is gone
+    if (StateTimer > 20.0f)
     {
-        // Safe distance reached — return to idle
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-        return;
+        bool bStillThreat = DetectThreatInRadius(DetectionRadius * 1.5f);
+        if (!bStillThreat)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Alert);
+        }
+        else
+        {
+            StateTimer = 10.0f; // Keep fleeing, reset partial timer
+        }
     }
+}
 
-    // Run away from player
-    FVector FleeDir = (OwnerLoc - PlayerLoc).GetSafeNormal2D();
-    float FleeSpeed = 400.0f; // cm/s running speed
-    FVector NewLoc = OwnerLoc + FleeDir * FleeSpeed * DeltaTime;
-    Owner->SetActorLocation(NewLoc, true);
-    Owner->SetActorRotation(FleeDir.Rotation());
+void UNPCBehaviorComponent::TickIdle(float DeltaTime)
+{
+    // Idle: occasionally start patrolling
+    if (StateTimer > 12.0f)
+    {
+        SetBehaviorState(ENPC_BehaviorState::Patrol);
+    }
+}
+
+void UNPCBehaviorComponent::SelectDialogueForState()
+{
+    if (DialogueCooldownTimer > 0.0f) return;
+
+    for (const FNPC_DialogueLine& Line : DialogueLines)
+    {
+        if (Line.TriggerState == CurrentState)
+        {
+            ActiveDialogueLine = Line.LineText;
+            DialogueCooldownTimer = Line.Cooldown;
+            UE_LOG(LogTemp, Log, TEXT("NPC [%s] says: %s"),
+                GetOwner() ? *GetOwner()->GetActorLabel() : TEXT("Unknown"),
+                *ActiveDialogueLine);
+            return;
+        }
+    }
 }
