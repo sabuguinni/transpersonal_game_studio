@@ -4,30 +4,26 @@
 #include "Components/ActorComponent.h"
 #include "DialogueSystem.generated.h"
 
-// ============================================================
-// Narrative & Dialogue Agent #15 — DialogueSystem
-// Prehistoric survival dialogue: NPC conversations, quest-giving
-// dialogue lines, and environmental narrative triggers.
-// ============================================================
+// Narr_ prefix per UE5 compilation rules — unique across project
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueSpeaker : uint8
+enum class ENarr_DialogueState : uint8
 {
-    Player          UMETA(DisplayName = "Player"),
-    TribalLeader    UMETA(DisplayName = "Tribal Leader"),
-    Scout           UMETA(DisplayName = "Scout"),
-    Elder           UMETA(DisplayName = "Elder"),
-    Narrator        UMETA(DisplayName = "Narrator"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Active      UMETA(DisplayName = "Active"),
+    Completed   UMETA(DisplayName = "Completed"),
+    Locked      UMETA(DisplayName = "Locked")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueTriggerType : uint8
+enum class ENarr_NPCRole : uint8
 {
-    Proximity       UMETA(DisplayName = "Proximity"),
-    QuestStart      UMETA(DisplayName = "Quest Start"),
-    QuestComplete   UMETA(DisplayName = "Quest Complete"),
-    FirstSighting   UMETA(DisplayName = "First Sighting"),
-    PlayerDeath     UMETA(DisplayName = "Player Death"),
+    QuestGiver      UMETA(DisplayName = "QuestGiver"),
+    Merchant        UMETA(DisplayName = "Merchant"),
+    TribalMember    UMETA(DisplayName = "TribalMember"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Elder           UMETA(DisplayName = "Elder")
 };
 
 USTRUCT(BlueprintType)
@@ -36,114 +32,108 @@ struct FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueSpeaker Speaker = ENarr_DialogueSpeaker::Narrator;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString LineText;
 
-    // Duration in seconds before auto-advancing (0 = wait for input)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration = 4.0f;
+    float DisplayDuration;
 
-    // Optional: tag that links this line to a quest objective
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName LinkedQuestTag = NAME_None;
+    bool bRequiresPlayerResponse;
+
+    FNarr_DialogueLine()
+        : SpeakerName(TEXT("Unknown"))
+        , LineText(TEXT(""))
+        , DisplayDuration(4.0f)
+        , bRequiresPlayerResponse(false)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
+struct FNarr_DialogueTree
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID = NAME_None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTriggerType TriggerType = ENarr_DialogueTriggerType::Proximity;
+    FName DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
-    // Once played, do not replay
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bPlayOnce = true;
+    ENarr_DialogueState State;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bHasPlayed = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName LinkedQuestID;
+
+    FNarr_DialogueTree()
+        : DialogueID(NAME_None)
+        , State(ENarr_DialogueState::Idle)
+        , LinkedQuestID(NAME_None)
+    {}
 };
 
-// ============================================================
-// UDialogueSystem — ActorComponent attached to NPCs or triggers
-// ============================================================
 UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UDialogueSystem : public UActorComponent
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UDialogueSystem();
+    UNarr_DialogueComponent();
 
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole NPCRole;
 
-    // All dialogue sequences this actor can deliver
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCName;
 
-    // Proximity radius for auto-trigger (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    float ProximityTriggerRadius = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueTree> DialogueTrees;
 
-    // Currently active sequence index (-1 = none)
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
-    int32 ActiveSequenceIndex = -1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float InteractionRadius;
 
-    // Currently active line index within sequence
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
-    int32 ActiveLineIndex = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bIsInDialogue;
 
-    // Is a dialogue currently playing?
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
-    bool bDialogueActive = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    int32 CurrentLineIndex;
 
-    // Trigger a dialogue sequence by ID
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool TriggerDialogueByID(FName SequenceID);
+    // Start dialogue with given ID
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool StartDialogue(FName DialogueID);
 
-    // Advance to next line (called by UI or timer)
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool AdvanceDialogue();
+    // Advance to next line
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool AdvanceLine();
 
-    // End current dialogue immediately
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    // End current dialogue
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
     void EndDialogue();
 
-    // Get the current line being displayed
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool GetCurrentLine(FNarr_DialogueLine& OutLine) const;
+    // Get current line text
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FString GetCurrentLineText() const;
 
-    // Check proximity to player and auto-trigger if within radius
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void CheckProximityTrigger(AActor* PlayerActor);
+    // Get current speaker name
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FString GetCurrentSpeakerName() const;
 
-    // Initialize built-in dialogue sequences (called in BeginPlay)
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void InitializeDefaultSequences();
+    // Check if player is in range
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsPlayerInRange(AActor* Player) const;
 
-    // Mark a sequence as played
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void MarkSequencePlayed(FName SequenceID);
+    // Mark dialogue as completed
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void MarkDialogueCompleted(FName DialogueID);
 
-    // Has a sequence already played?
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool HasSequencePlayed(FName SequenceID) const;
+protected:
+    virtual void BeginPlay() override;
 
 private:
-    // Find sequence index by ID
-    int32 FindSequenceIndex(FName SequenceID) const;
+    int32 ActiveTreeIndex;
 
-    // Timer handle for auto-advance
-    FTimerHandle AutoAdvanceTimerHandle;
-
-    // Called by timer to auto-advance
-    void OnAutoAdvanceTimer();
+    void InitializeDefaultDialogues();
 };
