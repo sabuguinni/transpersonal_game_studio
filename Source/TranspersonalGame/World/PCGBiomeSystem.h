@@ -1,90 +1,91 @@
+// PCGBiomeSystem.h
+// Agent #05 — Procedural World Generator
+// Biome classification and terrain generation system for Cretaceous world
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Engine/StaticMeshActor.h"
 #include "PCGBiomeSystem.generated.h"
 
-// ── Biome type enum ────────────────────────────────────────────────────────
+// ── Biome Types ──────────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Forest    UMETA(DisplayName = "Forest"),
-    Plains    UMETA(DisplayName = "Plains"),
-    Rocky     UMETA(DisplayName = "Rocky"),
-    Swamp     UMETA(DisplayName = "Swamp"),
-    Volcanic  UMETA(DisplayName = "Volcanic"),
-    River     UMETA(DisplayName = "River"),
-    Unknown   UMETA(DisplayName = "Unknown")
+    None            UMETA(DisplayName = "None"),
+    JungleForest    UMETA(DisplayName = "Jungle Forest"),
+    OpenPlains      UMETA(DisplayName = "Open Plains"),
+    RiverValley     UMETA(DisplayName = "River Valley"),
+    RockyBadlands   UMETA(DisplayName = "Rocky Badlands"),
+    VolcanicField   UMETA(DisplayName = "Volcanic Field"),
+    CoastalShore    UMETA(DisplayName = "Coastal Shore"),
+    FernMeadow      UMETA(DisplayName = "Fern Meadow")
 };
 
-// ── Per-biome configuration ────────────────────────────────────────────────
+// ── Biome Cell Data ──────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeConfig
+struct FWorld_BiomeCell
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
 
-    /** World-space center of this biome zone */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Center = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    FVector2D GridCoord = FVector2D::ZeroVector;
 
-    /** Approximate radius in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 5000.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float TerrainHeight = 0.0f;
 
-    /** Foliage density multiplier (0=bare, 1=normal, 2=dense) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float FoliageDensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float VegetationDensity = 1.0f;
 
-    /** Ambient temperature in Celsius — affects player survival stats */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float AmbientTemperature = 22.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float WaterLevel = -1000.0f;  // -1000 = no water
 
-    /** Humidity 0-1 — affects fog density and plant growth */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Humidity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    bool bHasRiver = false;
 
-    /** Danger level 0-1 — scales predator spawn frequency */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DangerLevel = 0.3f;
-
-    /** Primary dino species tags that spawn in this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FName> DinoSpeciesTags;
-
-    /** Whether this biome has a water source (affects dino migration paths) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bHasWaterSource = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    bool bIsGenerated = false;
 };
 
-// ── Dino spawn point data ──────────────────────────────────────────────────
+// ── Terrain Generation Config ────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_DinoSpawnPoint
+struct FWorld_TerrainConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    int32 GridRows = 9;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FName DinoSpeciesTag = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    int32 GridColumns = 9;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    EWorld_BiomeType Biome = EWorld_BiomeType::Unknown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    float CellSize = 2000.0f;  // Unreal Units (20m)
 
-    /** Max simultaneous dinos at this point */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn", meta = (ClampMin = "1", ClampMax = "10"))
-    int32 MaxCount = 3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    float MaxHeightVariation = 1200.0f;  // UU
 
-    /** Respawn delay in seconds after last dino dies */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float RespawnDelay = 120.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    float RiverDepth = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    float RiverWidth = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    bool bGenerateRiver = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    bool bGenerateRockyBadlands = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    FVector WorldOrigin = FVector(-8000.0f, -8000.0f, 0.0f);
 };
 
-// ── PCG Biome System Actor ─────────────────────────────────────────────────
+// ── PCG Biome System Actor ───────────────────────────────────────────────────
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome System"))
 class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
@@ -93,48 +94,53 @@ class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 public:
     APCGBiomeSystem();
 
-    // ── Biome registry ────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biomes")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
+    // ── Config ───────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    FWorld_TerrainConfig TerrainConfig;
 
-    // ── Spawn points ──────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Spawning")
-    TArray<FWorld_DinoSpawnPoint> DinoSpawnPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    TArray<FWorld_BiomeCell> BiomeCells;
 
-    // ── World partition tile size (must be >= Lumen trace distance 8000cm) ─
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Streaming")
-    float WorldPartitionTileSize = 16000.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    bool bAutoGenerateOnBeginPlay = false;
 
-    // ── Foliage cull distance scale (max 1.0 per PerformanceConfig.ini) ──
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Performance", meta = (ClampMin = "0.1", ClampMax = "1.0"))
-    float FoliageCullDistanceScale = 1.0f;
+    // ── Generation ───────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
+    void GenerateTerrain();
 
-    // ── Query ─────────────────────────────────────────────────────────────
-    /** Returns the biome type at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
+    void ClearGeneratedTerrain();
+
+    UFUNCTION(BlueprintCallable, Category = "World|PCG")
     EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    /** Returns the full biome config at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    FWorld_BiomeConfig GetBiomeConfigAtLocation(FVector WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "World|PCG")
+    float GetTerrainHeightAtLocation(FVector WorldLocation) const;
 
-    /** Returns all spawn points for a given species tag */
-    UFUNCTION(BlueprintCallable, Category = "World|Spawning")
-    TArray<FWorld_DinoSpawnPoint> GetSpawnPointsForSpecies(FName SpeciesTag) const;
+    UFUNCTION(BlueprintCallable, Category = "World|PCG")
+    bool IsLocationInRiver(FVector WorldLocation) const;
 
-    /** Returns danger level at location (0-1) */
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    float GetDangerLevelAtLocation(FVector WorldLocation) const;
+    // ── Stats ────────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "World|PCG")
+    int32 GetGeneratedCellCount() const;
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "World|PCG")
+    float GetHeightVariationRange() const;
+
+protected:
     virtual void BeginPlay() override;
 
-#if WITH_EDITOR
-    UFUNCTION(CallInEditor, Category = "World|Debug")
-    void PopulateDefaultBiomes();
-#endif
-
 private:
-    void InitDefaultBiomeConfigs();
-    void InitDefaultSpawnPoints();
+    // Height calculation using multi-octave sine waves
+    float CalculateTerrainHeight(float NormalizedX, float NormalizedY) const;
+
+    // Biome classification from height + position
+    EWorld_BiomeType ClassifyBiome(float NormalizedX, float NormalizedY, float Height) const;
+
+    // Spawned terrain actors (tracked for cleanup)
+    UPROPERTY()
+    TArray<AActor*> SpawnedTerrainActors;
+
+    float CachedMinHeight = 0.0f;
+    float CachedMaxHeight = 0.0f;
 };
