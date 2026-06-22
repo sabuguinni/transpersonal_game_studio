@@ -1,382 +1,466 @@
 #include "DinosaurCombatAI.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 
-ADinosaurCombatAI::ADinosaurCombatAI()
+UDinosaurCombatAI::UDinosaurCombatAI()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Initialize AI components
-    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-
-    // Configure sight perception
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    if (SightConfig)
-    {
-        SightConfig->SightRadius = 2000.0f;
-        SightConfig->LoseSightRadius = 2500.0f;
-        SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-        SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-        SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-        AIPerceptionComponent->ConfigureSense(*SightConfig);
-    }
-
-    // Configure hearing perception
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    if (HearingConfig)
-    {
-        HearingConfig->HearingRange = 1500.0f;
-        HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-        HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-        HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-        AIPerceptionComponent->ConfigureSense(*HearingConfig);
-    }
-
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Initialize combat state
-    CurrentCombatState = ECombat_DinosaurCombatState::Idle;
-    CurrentTarget = nullptr;
-    LastAttackTime = 0.0f;
-    AttackCooldown = 2.0f;
-
-    // Initialize combat stats
-    CombatStats.AttackDamage = 50.0f;
-    CombatStats.AttackRange = 300.0f;
-    CombatStats.SightRange = 2000.0f;
-    CombatStats.HearingRange = 1500.0f;
-    CombatStats.AggressionLevel = 0.7f;
-    CombatStats.FearThreshold = 0.3f;
-    CombatStats.bIsPackHunter = false;
-    CombatStats.MaxPackSize = 3;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz for AI tick — performance friendly
 }
 
-void ADinosaurCombatAI::BeginPlay()
+void UDinosaurCombatAI::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind perception events
-    if (AIPerceptionComponent)
+    InitializeForSpecies(Species);
+    if (PatrolWaypoints.Num() > 0)
     {
-        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ADinosaurCombatAI::OnPerceptionUpdated);
+        SetCombatState(ECombat_DinoState::Patrol);
     }
-
-    // Set up blackboard
-    if (BlackboardComponent && Blackboard)
-    {
-        BlackboardComponent->InitializeBlackboard(*Blackboard);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI initialized for %s"), GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"));
 }
 
-void ADinosaurCombatAI::Tick(float DeltaTime)
+void UDinosaurCombatAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-    
-    UpdateCombatBehavior(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!IsAlive())
+    {
+        SetCombatState(ECombat_DinoState::Dead);
+        return;
+    }
+
+    AttackTimer = FMath::Max(0.0f, AttackTimer - DeltaTime);
+
+    switch (CurrentState)
+    {
+        case ECombat_DinoState::Idle:    UpdateIdle(DeltaTime);    break;
+        case ECombat_DinoState::Patrol:  UpdatePatrol(DeltaTime);  break;
+        case ECombat_DinoState::Alert:   UpdateAlert(DeltaTime);   break;
+        case ECombat_DinoState::Chase:   UpdateChase(DeltaTime);   break;
+        case ECombat_DinoState::Attack:  UpdateAttack(DeltaTime);  break;
+        case ECombat_DinoState::Flank:   UpdateFlank(DeltaTime);   break;
+        case ECombat_DinoState::Retreat: UpdateRetreat(DeltaTime); break;
+        default: break;
+    }
 }
 
-void ADinosaurCombatAI::SetCombatState(ECombat_DinosaurCombatState NewState)
+void UDinosaurCombatAI::SetCombatState(ECombat_DinoState NewState)
 {
-    if (CurrentCombatState != NewState)
-    {
-        ECombat_DinosaurCombatState PreviousState = CurrentCombatState;
-        CurrentCombatState = NewState;
+    if (CurrentState == NewState) return;
+    CurrentState = NewState;
+    UE_LOG(LogTemp, Verbose, TEXT("DinosaurCombatAI [%s]: State -> %d"),
+        *GetOwner()->GetActorLabel(), (int32)NewState);
+}
 
-        // Update blackboard
-        if (BlackboardComponent)
+void UDinosaurCombatAI::DetectPlayer(AActor* PlayerActor)
+{
+    if (!PlayerActor || !IsAlive()) return;
+
+    float Dist = FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
+    if (Dist <= DinoStats.DetectionRadius)
+    {
+        CurrentTarget = PlayerActor;
+        if (DinoStats.bIsPackHunter)
         {
-            BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(NewState));
+            NotifyPackMembers(PlayerActor);
+            SetCombatState(ECombat_DinoState::Flank);
         }
-
-        UE_LOG(LogTemp, Log, TEXT("Combat state changed from %d to %d"), 
-               static_cast<int32>(PreviousState), static_cast<int32>(NewState));
+        else
+        {
+            SetCombatState(ECombat_DinoState::Chase);
+        }
     }
 }
 
-void ADinosaurCombatAI::SetTarget(AActor* NewTarget)
+void UDinosaurCombatAI::ExecuteAttack()
 {
-    CurrentTarget = NewTarget;
-    
-    if (BlackboardComponent)
+    if (!CurrentTarget || AttackTimer > 0.0f) return;
+
+    if (IsPlayerInRange(DinoStats.AttackRange))
     {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), NewTarget);
+        // Apply damage to player
+        UGameplayStatics::ApplyDamage(
+            CurrentTarget,
+            DinoStats.AttackDamage,
+            nullptr,
+            GetOwner(),
+            nullptr
+        );
+        AttackTimer = DinoStats.AttackCooldown;
+        UE_LOG(LogTemp, Log, TEXT("DinosaurCombatAI: Attack hit for %.1f damage"), DinoStats.AttackDamage);
+    }
+}
+
+void UDinosaurCombatAI::TakeDamage_Combat(float DamageAmount)
+{
+    if (!IsAlive()) return;
+
+    DinoStats.CurrentHealth = FMath::Max(0.0f, DinoStats.CurrentHealth - DamageAmount);
+    UE_LOG(LogTemp, Log, TEXT("DinosaurCombatAI: Took %.1f damage, HP: %.1f/%.1f"),
+        DamageAmount, DinoStats.CurrentHealth, DinoStats.MaxHealth);
+
+    if (!IsAlive())
+    {
+        SetCombatState(ECombat_DinoState::Dead);
+        return;
     }
 
-    if (NewTarget)
+    // Retreat if critically wounded (below 20% HP)
+    float HealthPct = DinoStats.CurrentHealth / DinoStats.MaxHealth;
+    if (HealthPct < 0.20f && CurrentState != ECombat_DinoState::Retreat)
     {
-        SetCombatState(ECombat_DinosaurCombatState::Hunting);
-        UE_LOG(LogTemp, Log, TEXT("New target acquired: %s"), *NewTarget->GetName());
+        SetCombatState(ECombat_DinoState::Retreat);
+    }
+    else if (CurrentState == ECombat_DinoState::Idle || CurrentState == ECombat_DinoState::Patrol)
+    {
+        SetCombatState(ECombat_DinoState::Alert);
+    }
+}
+
+void UDinosaurCombatAI::NotifyPackMembers(AActor* Threat)
+{
+    if (!Threat) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Find nearby pack members (same species within 2000 units)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+
+    int32 PackIndex = 0;
+    int32 PackCount = 0;
+
+    // Count pack members first
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor == GetOwner()) continue;
+        UDinosaurCombatAI* OtherAI = Actor->FindComponentByClass<UDinosaurCombatAI>();
+        if (OtherAI && OtherAI->Species == Species)
+        {
+            float Dist = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+            if (Dist < 2000.0f) PackCount++;
+        }
+    }
+
+    // Assign flank positions
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor == GetOwner()) continue;
+        UDinosaurCombatAI* OtherAI = Actor->FindComponentByClass<UDinosaurCombatAI>();
+        if (OtherAI && OtherAI->Species == Species)
+        {
+            float Dist = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+            if (Dist < 2000.0f)
+            {
+                OtherAI->CurrentTarget = Threat;
+                OtherAI->AssignFlankPosition(PackIndex, PackCount + 1);
+                OtherAI->SetCombatState(ECombat_DinoState::Flank);
+                PackIndex++;
+            }
+        }
+    }
+}
+
+void UDinosaurCombatAI::AssignFlankPosition(int32 PackIndex, int32 TotalPackSize)
+{
+    if (TotalPackSize <= 0 || !CurrentTarget) return;
+
+    // Distribute flankers evenly around the target in a circle
+    float AngleStep = 360.0f / FMath::Max(TotalPackSize, 1);
+    float Angle = FMath::DegreesToRadians(AngleStep * PackIndex);
+    float FlankRadius = DinoStats.AttackRange * 1.5f;
+
+    FlankOffset = FVector(
+        FMath::Cos(Angle) * FlankRadius,
+        FMath::Sin(Angle) * FlankRadius,
+        0.0f
+    );
+}
+
+void UDinosaurCombatAI::AddPatrolWaypoint(FVector Location, float WaitTime)
+{
+    FCombat_PatrolWaypoint WP;
+    WP.Location = Location;
+    WP.WaitTime = WaitTime;
+    PatrolWaypoints.Add(WP);
+}
+
+void UDinosaurCombatAI::StartPatrol()
+{
+    if (PatrolWaypoints.Num() > 0)
+    {
+        CurrentWaypointIndex = 0;
+        SetCombatState(ECombat_DinoState::Patrol);
+    }
+}
+
+void UDinosaurCombatAI::InitializeForSpecies(ECombat_DinoSpecies InSpecies)
+{
+    Species = InSpecies;
+    switch (InSpecies)
+    {
+        case ECombat_DinoSpecies::TyrannosaurusRex:
+            DinoStats.MaxHealth = 2000.0f;
+            DinoStats.CurrentHealth = 2000.0f;
+            DinoStats.AttackDamage = 200.0f;
+            DinoStats.AttackRange = 300.0f;
+            DinoStats.DetectionRadius = 3000.0f;
+            DinoStats.MoveSpeed = 500.0f;
+            DinoStats.ChaseSpeed = 700.0f;
+            DinoStats.AttackCooldown = 3.0f;
+            DinoStats.bIsPackHunter = false;
+            DinoStats.PackSize = 1;
+            break;
+
+        case ECombat_DinoSpecies::Velociraptor:
+            DinoStats.MaxHealth = 300.0f;
+            DinoStats.CurrentHealth = 300.0f;
+            DinoStats.AttackDamage = 60.0f;
+            DinoStats.AttackRange = 150.0f;
+            DinoStats.DetectionRadius = 2000.0f;
+            DinoStats.MoveSpeed = 800.0f;
+            DinoStats.ChaseSpeed = 1100.0f;
+            DinoStats.AttackCooldown = 1.2f;
+            DinoStats.bIsPackHunter = true;
+            DinoStats.PackSize = 3;
+            break;
+
+        case ECombat_DinoSpecies::Triceratops:
+            DinoStats.MaxHealth = 1200.0f;
+            DinoStats.CurrentHealth = 1200.0f;
+            DinoStats.AttackDamage = 120.0f;
+            DinoStats.AttackRange = 250.0f;
+            DinoStats.DetectionRadius = 1200.0f;
+            DinoStats.MoveSpeed = 450.0f;
+            DinoStats.ChaseSpeed = 600.0f;
+            DinoStats.AttackCooldown = 2.5f;
+            DinoStats.bIsPackHunter = false;
+            DinoStats.PackSize = 1;
+            break;
+
+        case ECombat_DinoSpecies::Brachiosaurus:
+            DinoStats.MaxHealth = 3000.0f;
+            DinoStats.CurrentHealth = 3000.0f;
+            DinoStats.AttackDamage = 50.0f; // Stomp
+            DinoStats.AttackRange = 400.0f;
+            DinoStats.DetectionRadius = 800.0f;
+            DinoStats.MoveSpeed = 300.0f;
+            DinoStats.ChaseSpeed = 350.0f;
+            DinoStats.AttackCooldown = 4.0f;
+            DinoStats.bIsPackHunter = false;
+            DinoStats.PackSize = 1;
+            break;
+
+        case ECombat_DinoSpecies::Stegosaurus:
+            DinoStats.MaxHealth = 900.0f;
+            DinoStats.CurrentHealth = 900.0f;
+            DinoStats.AttackDamage = 90.0f;
+            DinoStats.AttackRange = 200.0f;
+            DinoStats.DetectionRadius = 1000.0f;
+            DinoStats.MoveSpeed = 400.0f;
+            DinoStats.ChaseSpeed = 500.0f;
+            DinoStats.AttackCooldown = 2.0f;
+            DinoStats.bIsPackHunter = false;
+            DinoStats.PackSize = 1;
+            break;
+    }
+}
+
+// === PRIVATE STATE UPDATES ===
+
+void UDinosaurCombatAI::UpdateIdle(float DeltaTime)
+{
+    // Scan for player every tick
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (PlayerPawn)
+    {
+        DetectPlayer(PlayerPawn);
+    }
+}
+
+void UDinosaurCombatAI::UpdatePatrol(float DeltaTime)
+{
+    if (PatrolWaypoints.Num() == 0) return;
+
+    // Check for player while patrolling
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+        if (PlayerPawn)
+        {
+            float Dist = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+            if (Dist <= DinoStats.DetectionRadius)
+            {
+                DetectPlayer(PlayerPawn);
+                return;
+            }
+        }
+    }
+
+    // Move to next waypoint
+    if (bWaitingAtWaypoint)
+    {
+        WaypointWaitTimer -= DeltaTime;
+        if (WaypointWaitTimer <= 0.0f)
+        {
+            bWaitingAtWaypoint = false;
+            CurrentWaypointIndex = (CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
+        }
+        return;
+    }
+
+    FVector WPLocation = PatrolWaypoints[CurrentWaypointIndex].Location;
+    float DistToWP = FVector::Dist(GetOwner()->GetActorLocation(), WPLocation);
+
+    if (DistToWP < 100.0f)
+    {
+        bWaitingAtWaypoint = true;
+        WaypointWaitTimer = PatrolWaypoints[CurrentWaypointIndex].WaitTime;
     }
     else
     {
-        SetCombatState(ECombat_DinosaurCombatState::Idle);
+        // Move toward waypoint
+        FVector Dir = (WPLocation - GetOwner()->GetActorLocation()).GetSafeNormal();
+        FVector NewLocation = GetOwner()->GetActorLocation() + Dir * DinoStats.MoveSpeed * DeltaTime;
+        GetOwner()->SetActorLocation(NewLocation, true);
     }
 }
 
-bool ADinosaurCombatAI::CanAttack() const
+void UDinosaurCombatAI::UpdateAlert(float DeltaTime)
 {
-    if (!CurrentTarget || !GetPawn())
-    {
-        return false;
-    }
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastAttackTime < AttackCooldown)
-    {
-        return false;
-    }
-
-    float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-    return DistanceToTarget <= CombatStats.AttackRange;
-}
-
-void ADinosaurCombatAI::PerformAttack()
-{
-    if (!CanAttack())
-    {
-        return;
-    }
-
-    LastAttackTime = GetWorld()->GetTimeSeconds();
-
-    // Apply damage to target
+    // Brief alert state before committing to chase
     if (CurrentTarget)
     {
-        // Simple damage application - in a full system this would use UE5's damage system
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurCombatAI attacking %s for %.1f damage"), 
-               *CurrentTarget->GetName(), CombatStats.AttackDamage);
-
-        // Trigger attack animation and effects here
-        ExecuteAttackPattern();
+        SetCombatState(DinoStats.bIsPackHunter ? ECombat_DinoState::Flank : ECombat_DinoState::Chase);
     }
-
-    // Coordinate pack attack if in pack
-    if (IsInPack())
+    else
     {
-        CoordinatePackAttack();
+        SetCombatState(ECombat_DinoState::Patrol);
     }
 }
 
-void ADinosaurCombatAI::JoinPack(ADinosaurCombatAI* PackLeader)
+void UDinosaurCombatAI::UpdateChase(float DeltaTime)
 {
-    if (!PackLeader || PackLeader == this)
+    if (!CurrentTarget)
     {
+        SetCombatState(ECombat_DinoState::Patrol);
         return;
     }
 
-    // Leave current pack first
-    LeavePack();
+    float Dist = GetDistanceToTarget();
 
-    // Join new pack
-    PackMembers.Empty();
-    PackMembers.Add(PackLeader);
-    
-    // Add this to leader's pack
-    PackLeader->PackMembers.AddUnique(this);
-
-    CombatStats.bIsPackHunter = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("Joined pack led by %s"), 
-           PackLeader->GetPawn() ? *PackLeader->GetPawn()->GetName() : TEXT("Unknown"));
-}
-
-void ADinosaurCombatAI::LeavePack()
-{
-    if (PackMembers.Num() > 0)
+    if (Dist <= DinoStats.AttackRange)
     {
-        // Remove from leader's pack
-        if (PackMembers[0])
-        {
-            PackMembers[0]->PackMembers.Remove(this);
-        }
-        PackMembers.Empty();
-    }
-
-    // Remove others from this pack if this was the leader
-    for (ADinosaurCombatAI* Member : PackMembers)
-    {
-        if (Member)
-        {
-            Member->PackMembers.Empty();
-            Member->CombatStats.bIsPackHunter = false;
-        }
-    }
-
-    CombatStats.bIsPackHunter = false;
-}
-
-bool ADinosaurCombatAI::IsInPack() const
-{
-    return CombatStats.bIsPackHunter && PackMembers.Num() > 0;
-}
-
-void ADinosaurCombatAI::CoordinatePackAttack()
-{
-    if (!IsInPack() || !CurrentTarget)
-    {
+        SetCombatState(ECombat_DinoState::Attack);
         return;
     }
 
-    // Signal pack members to attack
-    for (ADinosaurCombatAI* Member : PackMembers)
+    // Lost target — too far
+    if (Dist > DinoStats.DetectionRadius * 2.0f)
     {
-        if (Member && Member != this)
-        {
-            Member->SetTarget(CurrentTarget);
-            Member->SetCombatState(ECombat_DinosaurCombatState::PackCoordination);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Pack attack coordinated with %d members"), PackMembers.Num());
-}
-
-void ADinosaurCombatAI::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
-{
-    for (AActor* Actor : UpdatedActors)
-    {
-        if (!Actor)
-        {
-            continue;
-        }
-
-        // Check if this is a potential target (player character)
-        if (Actor->IsA<ACharacter>() && Actor != GetPawn())
-        {
-            float ThreatLevel = CalculateThreatLevel(Actor);
-            
-            if (ThreatLevel > CombatStats.FearThreshold)
-            {
-                if (!CurrentTarget || ThreatLevel > CalculateThreatLevel(CurrentTarget))
-                {
-                    SetTarget(Actor);
-                }
-            }
-        }
-    }
-}
-
-void ADinosaurCombatAI::UpdateCombatBehavior(float DeltaTime)
-{
-    if (!GetPawn())
-    {
+        CurrentTarget = nullptr;
+        SetCombatState(ECombat_DinoState::Patrol);
         return;
     }
 
-    ProcessTargetSelection();
-
-    switch (CurrentCombatState)
-    {
-        case ECombat_DinosaurCombatState::Idle:
-            // Look for targets
-            break;
-
-        case ECombat_DinosaurCombatState::Hunting:
-            if (CurrentTarget)
-            {
-                float DistanceToTarget = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
-                
-                if (DistanceToTarget <= CombatStats.AttackRange)
-                {
-                    SetCombatState(ECombat_DinosaurCombatState::Attacking);
-                }
-                else if (DistanceToTarget > CombatStats.SightRange * 1.5f)
-                {
-                    SetTarget(nullptr); // Lost target
-                }
-            }
-            break;
-
-        case ECombat_DinosaurCombatState::Attacking:
-            if (CanAttack())
-            {
-                PerformAttack();
-            }
-            break;
-
-        case ECombat_DinosaurCombatState::Retreating:
-            if (ShouldRetreat())
-            {
-                // Move away from threat
-                SetCombatState(ECombat_DinosaurCombatState::Idle);
-            }
-            break;
-
-        case ECombat_DinosaurCombatState::PackCoordination:
-            HandlePackCoordination();
-            break;
-    }
+    MoveTowardsTarget(DinoStats.ChaseSpeed, DeltaTime);
 }
 
-void ADinosaurCombatAI::ProcessTargetSelection()
+void UDinosaurCombatAI::UpdateAttack(float DeltaTime)
 {
-    // Simple target validation
-    if (CurrentTarget && !IsValid(CurrentTarget))
+    if (!CurrentTarget)
     {
-        SetTarget(nullptr);
-    }
-}
-
-void ADinosaurCombatAI::HandlePackCoordination()
-{
-    if (!IsInPack())
-    {
-        SetCombatState(ECombat_DinosaurCombatState::Hunting);
+        SetCombatState(ECombat_DinoState::Patrol);
         return;
     }
 
-    // Implement pack coordination logic
-    // This could include flanking maneuvers, coordinated attacks, etc.
-}
+    float Dist = GetDistanceToTarget();
 
-float ADinosaurCombatAI::CalculateThreatLevel(AActor* Actor) const
-{
-    if (!Actor || !GetPawn())
+    if (Dist > DinoStats.AttackRange * 1.5f)
     {
-        return 0.0f;
+        SetCombatState(ECombat_DinoState::Chase);
+        return;
     }
 
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
-    float ThreatLevel = CombatStats.AggressionLevel;
-
-    // Closer targets are more threatening
-    if (Distance < CombatStats.AttackRange)
-    {
-        ThreatLevel += 0.3f;
-    }
-
-    // Player characters are high priority
-    if (Actor->IsA<ACharacter>())
-    {
-        ThreatLevel += 0.4f;
-    }
-
-    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+    ExecuteAttack();
 }
 
-bool ADinosaurCombatAI::ShouldRetreat() const
+void UDinosaurCombatAI::UpdateFlank(float DeltaTime)
 {
-    // Simple retreat logic - could be expanded with health, pack status, etc.
-    return false;
+    if (!CurrentTarget)
+    {
+        SetCombatState(ECombat_DinoState::Patrol);
+        return;
+    }
+
+    // Move to flank position
+    FVector TargetFlankPos = CurrentTarget->GetActorLocation() + FlankOffset;
+    float DistToFlank = FVector::Dist(GetOwner()->GetActorLocation(), TargetFlankPos);
+
+    if (DistToFlank < 100.0f)
+    {
+        // Reached flank position — now attack
+        SetCombatState(ECombat_DinoState::Attack);
+        return;
+    }
+
+    MoveTowardsFlankPosition(DeltaTime);
 }
 
-void ADinosaurCombatAI::ExecuteAttackPattern()
+void UDinosaurCombatAI::UpdateRetreat(float DeltaTime)
 {
-    // Placeholder for attack animation and effects
-    UE_LOG(LogTemp, Warning, TEXT("Executing attack pattern"));
-    
-    // In a full implementation, this would:
-    // - Play attack animation
-    // - Spawn particle effects
-    // - Play sound effects
-    // - Apply actual damage through UE5's damage system
+    if (!CurrentTarget) return;
+
+    // Move away from target
+    FVector AwayDir = (GetOwner()->GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + AwayDir * DinoStats.MoveSpeed * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+
+    float Dist = GetDistanceToTarget();
+    if (Dist > DinoStats.DetectionRadius * 1.5f)
+    {
+        CurrentTarget = nullptr;
+        SetCombatState(ECombat_DinoState::Patrol);
+    }
+}
+
+// === PRIVATE HELPERS ===
+
+float UDinosaurCombatAI::GetDistanceToTarget() const
+{
+    if (!CurrentTarget) return TNumericLimits<float>::Max();
+    return FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
+}
+
+bool UDinosaurCombatAI::IsPlayerInRange(float Range) const
+{
+    return GetDistanceToTarget() <= Range;
+}
+
+void UDinosaurCombatAI::MoveTowardsTarget(float Speed, float DeltaTime)
+{
+    if (!CurrentTarget) return;
+    FVector Dir = (CurrentTarget->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + Dir * Speed * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+
+    // Face target
+    FRotator LookAt = Dir.Rotation();
+    GetOwner()->SetActorRotation(LookAt);
+}
+
+void UDinosaurCombatAI::MoveTowardsFlankPosition(float DeltaTime)
+{
+    if (!CurrentTarget) return;
+    FVector TargetFlankPos = CurrentTarget->GetActorLocation() + FlankOffset;
+    FVector Dir = (TargetFlankPos - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + Dir * DinoStats.ChaseSpeed * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+    GetOwner()->SetActorRotation(Dir.Rotation());
 }
