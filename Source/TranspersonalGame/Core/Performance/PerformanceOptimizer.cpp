@@ -1,335 +1,193 @@
-#include "PerformanceOptimizer.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
-#include "RenderingThread.h"
-#include "RHI.h"
-#include "Engine/GameViewportClient.h"
+// PerformanceOptimizer.cpp
+// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260622_009
+// Runtime performance manager: scalability tiers, LOD bias, Lumen budget, BiomeTick throttle
 
-DEFINE_LOG_CATEGORY_STATIC(LogPerformanceOptimizer, Log, All);
+#include "PerformanceOptimizer.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/Engine.h"
 
 UPerformanceOptimizer::UPerformanceOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    // Initialize performance targets
-    TargetFrameRate = 60.0f;
-    MinimumFrameRate = 30.0f;
-    MaxMemoryUsageMB = 8192.0f; // 8GB
-    
-    // Initialize monitoring variables
-    CurrentFrameRate = 0.0f;
-    CurrentMemoryUsageMB = 0.0f;
-    FrameTimeHistory.Reserve(100);
-    
-    // Performance thresholds
-    LowPerformanceThreshold = 0.7f; // 70% of target
-    CriticalPerformanceThreshold = 0.5f; // 50% of target
-    
-    bIsOptimizationActive = false;
-    bAutoOptimization = true;
-    
-    LastOptimizationTime = 0.0f;
-    OptimizationCooldown = 5.0f; // 5 seconds between optimizations
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every 1s — not per-frame
+
+    TargetFPS_PC = 60.0f;
+    TargetFPS_Console = 30.0f;
+    CurrentTier = EPerf_ScalabilityTier::High;
+    BiomeTickInterval = 5.0f;
+    SprintStaminaDrainRate = 15.0f;
+    SprintStaminaRecoveryRate = 8.0f;
+    MaxDrawCallBudget_PC = 2000;
+    MaxDrawCallBudget_Console = 800;
+    LumenMaxTraceDistance = 20000.0f;
+    ShadowMaxCSMResolution = 2048;
+    StreamingPoolSizeMB = 2048;
+    bAdaptiveScalabilityEnabled = true;
+    FrameTimeAccumulator = 0.0f;
+    FrameSampleCount = 0;
+    AverageFPS = 60.0f;
 }
 
 void UPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance Optimizer initialized"));
-    
-    // Start performance monitoring
-    StartPerformanceMonitoring();
+    ApplyTier(CurrentTier);
 }
 
 void UPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    UpdatePerformanceMetrics(DeltaTime);
-    
-    if (bAutoOptimization)
+
+    if (!bAdaptiveScalabilityEnabled) return;
+
+    // Rolling average FPS over 60 samples (~1 min at 1s tick)
+    FrameTimeAccumulator += DeltaTime;
+    FrameSampleCount++;
+    if (FrameSampleCount >= 10)
     {
-        CheckPerformanceThresholds();
+        AverageFPS = (float)FrameSampleCount / FrameTimeAccumulator;
+        FrameTimeAccumulator = 0.0f;
+        FrameSampleCount = 0;
+        AdaptScalability(AverageFPS);
     }
 }
 
-void UPerformanceOptimizer::StartPerformanceMonitoring()
+void UPerformanceOptimizer::ApplyTier(EPerf_ScalabilityTier Tier)
 {
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Starting performance monitoring"));
-    
-    // Reset metrics
-    FrameTimeHistory.Empty();
-    CurrentFrameRate = 0.0f;
-    CurrentMemoryUsageMB = 0.0f;
-    
-    // Start monitoring timer
-    if (UWorld* World = GetWorld())
+    CurrentTier = Tier;
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    switch (Tier)
     {
-        World->GetTimerManager().SetTimer(
-            MonitoringTimerHandle,
-            this,
-            &UPerformanceOptimizer::CollectPerformanceData,
-            0.1f, // Collect data every 100ms
-            true
-        );
+        case EPerf_ScalabilityTier::Ultra:
+            ExecConsoleCmd(World, TEXT("sg.ResolutionQuality 100"));
+            ExecConsoleCmd(World, TEXT("sg.ViewDistanceQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.AntiAliasingQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.ShadowQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.GlobalIlluminationQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.ReflectionQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.PostProcessQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.TextureQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.EffectsQuality 4"));
+            ExecConsoleCmd(World, TEXT("sg.FoliageQuality 4"));
+            ExecConsoleCmd(World, TEXT("r.Lumen.MaxTraceDistance 30000"));
+            ExecConsoleCmd(World, TEXT("r.Shadow.MaxCSMResolution 4096"));
+            break;
+
+        case EPerf_ScalabilityTier::High:
+            ExecConsoleCmd(World, TEXT("sg.ResolutionQuality 100"));
+            ExecConsoleCmd(World, TEXT("sg.ViewDistanceQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.AntiAliasingQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.ShadowQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.GlobalIlluminationQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.ReflectionQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.PostProcessQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.TextureQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.EffectsQuality 3"));
+            ExecConsoleCmd(World, TEXT("sg.FoliageQuality 3"));
+            ExecConsoleCmd(World, TEXT("r.Lumen.MaxTraceDistance 20000"));
+            ExecConsoleCmd(World, TEXT("r.Shadow.MaxCSMResolution 2048"));
+            break;
+
+        case EPerf_ScalabilityTier::Medium:
+            ExecConsoleCmd(World, TEXT("sg.ResolutionQuality 85"));
+            ExecConsoleCmd(World, TEXT("sg.ViewDistanceQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.AntiAliasingQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.ShadowQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.GlobalIlluminationQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.ReflectionQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.PostProcessQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.TextureQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.EffectsQuality 2"));
+            ExecConsoleCmd(World, TEXT("sg.FoliageQuality 2"));
+            ExecConsoleCmd(World, TEXT("r.Lumen.MaxTraceDistance 10000"));
+            ExecConsoleCmd(World, TEXT("r.Shadow.MaxCSMResolution 1024"));
+            break;
+
+        case EPerf_ScalabilityTier::Low:
+            ExecConsoleCmd(World, TEXT("sg.ResolutionQuality 70"));
+            ExecConsoleCmd(World, TEXT("sg.ViewDistanceQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.AntiAliasingQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.ShadowQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.GlobalIlluminationQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.ReflectionQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.PostProcessQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.TextureQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.EffectsQuality 1"));
+            ExecConsoleCmd(World, TEXT("sg.FoliageQuality 1"));
+            ExecConsoleCmd(World, TEXT("r.Lumen.MaxTraceDistance 5000"));
+            ExecConsoleCmd(World, TEXT("r.Shadow.MaxCSMResolution 512"));
+            break;
     }
+
+    // Always-on settings regardless of tier
+    ExecConsoleCmd(World, TEXT("r.HZBOcclusion 1"));
+    ExecConsoleCmd(World, TEXT("r.AllowOcclusionQueries 1"));
+    ExecConsoleCmd(World, TEXT("r.TextureStreaming 1"));
+    ExecConsoleCmd(World, TEXT("r.TemporalAA.Upsampling 1"));
+    ExecConsoleCmd(World, TEXT("r.Nanite.MaxPixelsPerEdge 1.0"));
+    ExecConsoleCmd(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+    ExecConsoleCmd(World, TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApply 1"));
 }
 
-void UPerformanceOptimizer::StopPerformanceMonitoring()
+void UPerformanceOptimizer::AdaptScalability(float CurrentAverageFPS)
 {
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Stopping performance monitoring"));
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(MonitoringTimerHandle);
-    }
-}
+    // Adaptive tier stepping — only step down/up one tier at a time
+    const float TargetFPS = TargetFPS_PC;
 
-void UPerformanceOptimizer::UpdatePerformanceMetrics(float DeltaTime)
-{
-    // Update frame rate
-    if (DeltaTime > 0.0f)
+    if (CurrentAverageFPS < TargetFPS * 0.75f) // Below 75% of target — step down
     {
-        float InstantFPS = 1.0f / DeltaTime;
-        
-        // Add to history
-        FrameTimeHistory.Add(DeltaTime);
-        if (FrameTimeHistory.Num() > 100)
+        int32 TierInt = (int32)CurrentTier;
+        if (TierInt > 0)
         {
-            FrameTimeHistory.RemoveAt(0);
-        }
-        
-        // Calculate average FPS over last 100 frames
-        if (FrameTimeHistory.Num() > 0)
-        {
-            float AverageFrameTime = 0.0f;
-            for (float FrameTime : FrameTimeHistory)
-            {
-                AverageFrameTime += FrameTime;
-            }
-            AverageFrameTime /= FrameTimeHistory.Num();
-            CurrentFrameRate = 1.0f / AverageFrameTime;
-        }
-    }
-    
-    // Update memory usage
-    UpdateMemoryUsage();
-}
-
-void UPerformanceOptimizer::UpdateMemoryUsage()
-{
-    FPlatformMemoryStats MemoryStats = FPlatformMemory::GetStats();
-    CurrentMemoryUsageMB = MemoryStats.UsedPhysical / (1024.0f * 1024.0f);
-}
-
-void UPerformanceOptimizer::CollectPerformanceData()
-{
-    // Collect additional performance data
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        // Get render thread stats
-        ENQUEUE_RENDER_COMMAND(GetRenderStats)(
-            [this](FRHICommandListImmediate& RHICmdList)
-            {
-                // Collect GPU stats here if needed
-            });
-    }
-}
-
-void UPerformanceOptimizer::CheckPerformanceThresholds()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Don't optimize too frequently
-    if (CurrentTime - LastOptimizationTime < OptimizationCooldown)
-    {
-        return;
-    }
-    
-    // Check frame rate performance
-    float PerformanceRatio = CurrentFrameRate / TargetFrameRate;
-    
-    if (PerformanceRatio < CriticalPerformanceThreshold)
-    {
-        UE_LOG(LogPerformanceOptimizer, Warning, TEXT("Critical performance detected: %.1f FPS (%.1f%% of target)"), 
-               CurrentFrameRate, PerformanceRatio * 100.0f);
-        ApplyCriticalOptimizations();
-        LastOptimizationTime = CurrentTime;
-    }
-    else if (PerformanceRatio < LowPerformanceThreshold)
-    {
-        UE_LOG(LogPerformanceOptimizer, Warning, TEXT("Low performance detected: %.1f FPS (%.1f%% of target)"), 
-               CurrentFrameRate, PerformanceRatio * 100.0f);
-        ApplyStandardOptimizations();
-        LastOptimizationTime = CurrentTime;
-    }
-    
-    // Check memory usage
-    if (CurrentMemoryUsageMB > MaxMemoryUsageMB)
-    {
-        UE_LOG(LogPerformanceOptimizer, Warning, TEXT("High memory usage detected: %.1f MB"), CurrentMemoryUsageMB);
-        ApplyMemoryOptimizations();
-        LastOptimizationTime = CurrentTime;
-    }
-}
-
-void UPerformanceOptimizer::ApplyStandardOptimizations()
-{
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Applying standard optimizations"));
-    
-    bIsOptimizationActive = true;
-    
-    // Reduce view distance for non-essential objects
-    if (UWorld* World = GetWorld())
-    {
-        // Reduce foliage density
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("foliage.DensityScale 0.8"));
-        }
-        
-        // Reduce particle density
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("fx.MaxGPUParticlesSpawnedPerFrame 512"));
+            ApplyTier((EPerf_ScalabilityTier)(TierInt - 1));
+            UE_LOG(LogTemp, Warning, TEXT("PerformanceOptimizer: FPS=%.1f below target %.1f — stepped down to tier %d"), CurrentAverageFPS, TargetFPS, TierInt - 1);
         }
     }
-    
-    // Broadcast optimization event
-    OnOptimizationApplied.Broadcast(EPerformanceOptimizationLevel::Standard);
-}
-
-void UPerformanceOptimizer::ApplyCriticalOptimizations()
-{
-    UE_LOG(LogPerformanceOptimizer, Warning, TEXT("Applying critical optimizations"));
-    
-    bIsOptimizationActive = true;
-    
-    // Apply more aggressive optimizations
-    if (UWorld* World = GetWorld())
+    else if (CurrentAverageFPS > TargetFPS * 1.2f) // 20% headroom — step up
     {
-        // Significantly reduce foliage
-        if (GEngine)
+        int32 TierInt = (int32)CurrentTier;
+        if (TierInt < (int32)EPerf_ScalabilityTier::Ultra)
         {
-            GEngine->Exec(World, TEXT("foliage.DensityScale 0.5"));
+            ApplyTier((EPerf_ScalabilityTier)(TierInt + 1));
+            UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: FPS=%.1f above target %.1f — stepped up to tier %d"), CurrentAverageFPS, TargetFPS, TierInt + 1);
         }
-        
-        // Reduce shadow quality
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("r.ShadowQuality 2"));
-        }
-        
-        // Reduce particle effects
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("fx.MaxGPUParticlesSpawnedPerFrame 256"));
-        }
-        
-        // Force garbage collection
-        GEngine->ForceGarbageCollection(true);
-    }
-    
-    // Broadcast optimization event
-    OnOptimizationApplied.Broadcast(EPerformanceOptimizationLevel::Critical);
-}
-
-void UPerformanceOptimizer::ApplyMemoryOptimizations()
-{
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Applying memory optimizations"));
-    
-    if (UWorld* World = GetWorld())
-    {
-        // Force garbage collection
-        if (GEngine)
-        {
-            GEngine->ForceGarbageCollection(true);
-        }
-        
-        // Reduce texture streaming pool
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("r.Streaming.PoolSize 512"));
-        }
-    }
-    
-    // Broadcast optimization event
-    OnOptimizationApplied.Broadcast(EPerformanceOptimizationLevel::Memory);
-}
-
-void UPerformanceOptimizer::ResetOptimizations()
-{
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Resetting optimizations to default"));
-    
-    bIsOptimizationActive = false;
-    
-    if (UWorld* World = GetWorld())
-    {
-        // Reset to default values
-        if (GEngine)
-        {
-            GEngine->Exec(World, TEXT("foliage.DensityScale 1.0"));
-            GEngine->Exec(World, TEXT("r.ShadowQuality 3"));
-            GEngine->Exec(World, TEXT("fx.MaxGPUParticlesSpawnedPerFrame 1024"));
-            GEngine->Exec(World, TEXT("r.Streaming.PoolSize 1024"));
-        }
-    }
-    
-    // Broadcast reset event
-    OnOptimizationReset.Broadcast();
-}
-
-float UPerformanceOptimizer::GetCurrentFrameRate() const
-{
-    return CurrentFrameRate;
-}
-
-float UPerformanceOptimizer::GetCurrentMemoryUsage() const
-{
-    return CurrentMemoryUsageMB;
-}
-
-float UPerformanceOptimizer::GetPerformanceRatio() const
-{
-    return CurrentFrameRate / TargetFrameRate;
-}
-
-bool UPerformanceOptimizer::IsPerformanceGood() const
-{
-    return GetPerformanceRatio() >= LowPerformanceThreshold;
-}
-
-void UPerformanceOptimizer::SetTargetFrameRate(float NewTargetFPS)
-{
-    TargetFrameRate = FMath::Clamp(NewTargetFPS, 15.0f, 120.0f);
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Target frame rate set to %.1f FPS"), TargetFrameRate);
-}
-
-void UPerformanceOptimizer::SetAutoOptimization(bool bEnabled)
-{
-    bAutoOptimization = bEnabled;
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Auto optimization %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
-    
-    if (!bEnabled && bIsOptimizationActive)
-    {
-        ResetOptimizations();
     }
 }
 
-FPerformanceStats UPerformanceOptimizer::GetPerformanceStats() const
+float UPerformanceOptimizer::GetBiomeTickInterval() const
 {
-    FPerformanceStats Stats;
-    Stats.CurrentFPS = CurrentFrameRate;
-    Stats.TargetFPS = TargetFrameRate;
-    Stats.MemoryUsageMB = CurrentMemoryUsageMB;
-    Stats.MaxMemoryMB = MaxMemoryUsageMB;
-    Stats.PerformanceRatio = GetPerformanceRatio();
-    Stats.bIsOptimizationActive = bIsOptimizationActive;
-    return Stats;
+    return BiomeTickInterval;
+}
+
+float UPerformanceOptimizer::GetSprintDrainRate() const
+{
+    return SprintStaminaDrainRate;
+}
+
+float UPerformanceOptimizer::GetSprintRecoveryRate() const
+{
+    return SprintStaminaRecoveryRate;
+}
+
+EPerf_ScalabilityTier UPerformanceOptimizer::GetCurrentTier() const
+{
+    return CurrentTier;
+}
+
+float UPerformanceOptimizer::GetAverageFPS() const
+{
+    return AverageFPS;
+}
+
+void UPerformanceOptimizer::ExecConsoleCmd(UWorld* World, const FString& Cmd)
+{
+    if (World)
+    {
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, Cmd);
+    }
 }
