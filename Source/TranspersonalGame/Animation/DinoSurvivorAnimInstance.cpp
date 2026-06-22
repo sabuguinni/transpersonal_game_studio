@@ -1,60 +1,54 @@
 // DinoSurvivorAnimInstance.cpp
 // Animation Agent #10 — Transpersonal Game Studio
-// Implements the AnimInstance for the prehistoric survivor character
-// Handles locomotion state machine, foot IK, and survival posture blending
+// Full AnimInstance implementation: locomotion state machine, bilateral foot IK,
+// survival posture blending, aim offset, lean calculation.
 
 #include "DinoSurvivorAnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Components/CapsuleComponent.h"
+#include "DrawDebugHelpers.h"
 
 UDinoSurvivorAnimInstance::UDinoSurvivorAnimInstance()
 {
     // Locomotion defaults
-    GroundSpeed = 0.0f;
-    bIsMoving = false;
-    bIsFalling = false;
+    Speed = 0.0f;
+    Direction = 0.0f;
+    bIsInAir = false;
     bIsCrouching = false;
     bIsSprinting = false;
-    MovementDirection = 0.0f;
-    LeanAmount = 0.0f;
+    bIsAiming = false;
+    bIsInjured = false;
+    bIsExhausted = false;
 
-    // Survival posture defaults
-    CurrentSurvivalPosture = EAnim_SurvivalPosture::Upright;
-    CurrentLocomotionState = EAnim_LocomotionState::Idle;
+    // State defaults
+    LocomotionState = EAnim_LocomotionState::Idle;
+    SurvivalPosture = EAnim_SurvivalPosture::Upright;
 
     // IK defaults
-    FootIKData.LeftFootLocation = FVector::ZeroVector;
-    FootIKData.RightFootLocation = FVector::ZeroVector;
-    FootIKData.LeftFootRotation = FRotator::ZeroRotator;
-    FootIKData.RightFootRotation = FRotator::ZeroRotator;
-    FootIKData.PelvisOffset = 0.0f;
-    FootIKData.bLeftFootGrounded = true;
-    FootIKData.bRightFootGrounded = true;
-    FootIKData.LeftFootAlpha = 1.0f;
-    FootIKData.RightFootAlpha = 1.0f;
+    bEnableFootIK = true;
+    FootIKTraceDistance = 50.0f;
+    FootIKInterpSpeed = 15.0f;
+    PelvisAdjustmentSpeed = 8.0f;
+
+    // Survival stat defaults
+    HealthNormalized = 1.0f;
+    StaminaNormalized = 1.0f;
+    FearLevel = 0.0f;
 
     // Aim offset defaults
     AimOffsetData.AimYaw = 0.0f;
     AimOffsetData.AimPitch = 0.0f;
     AimOffsetData.AimAlpha = 0.0f;
-    AimOffsetData.bIsAiming = false;
 
-    // Survival stats defaults
-    StaminaRatio = 1.0f;
-    FearLevel = 0.0f;
-    InjuryLevel = 0.0f;
+    // Lean defaults
+    LeanAngle = 0.0f;
+    LeanInterpSpeed = 6.0f;
 
-    // Foot IK trace params
-    FootIKTraceDistance = 50.0f;
-    FootIKInterpSpeed = 15.0f;
-    PelvisInterpSpeed = 10.0f;
-
-    // Transition speeds
-    WalkSpeed = 200.0f;
-    RunSpeed = 400.0f;
-    SprintSpeed = 650.0f;
+    // Internal
+    PreviousVelocity = FVector::ZeroVector;
+    AccelerationDirection = FVector::ZeroVector;
 }
 
 void UDinoSurvivorAnimInstance::NativeInitializeAnimation()
@@ -83,72 +77,69 @@ void UDinoSurvivorAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     }
 
     UpdateLocomotionData(DeltaSeconds);
-    UpdateLocomotionState();
-    UpdateFootIK(DeltaSeconds);
+    UpdateSurvivalPosture(DeltaSeconds);
     UpdateAimOffset(DeltaSeconds);
-    UpdateSurvivalPosture();
+    UpdateLean(DeltaSeconds);
+
+    if (bEnableFootIK)
+    {
+        UpdateFootIK(DeltaSeconds);
+    }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOCOMOTION
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinoSurvivorAnimInstance::UpdateLocomotionData(float DeltaSeconds)
 {
-    if (!OwnerCharacter || !MovementComponent) return;
-
-    // Ground speed (horizontal only)
     FVector Velocity = MovementComponent->Velocity;
-    GroundSpeed = FVector(Velocity.X, Velocity.Y, 0.0f).Size();
+    Speed = Velocity.Size2D();
 
-    // Is moving threshold
-    bIsMoving = GroundSpeed > 10.0f;
-
-    // Falling state
-    bIsFalling = MovementComponent->IsFalling();
-
-    // Crouch state
-    bIsCrouching = OwnerCharacter->bIsCrouched;
-
-    // Sprint detection (above run threshold)
-    bIsSprinting = GroundSpeed > RunSpeed && !bIsFalling;
-
-    // Movement direction (for strafe blending)
-    if (bIsMoving)
+    // Direction relative to actor forward
+    if (Speed > 1.0f)
     {
         FRotator ActorRot = OwnerCharacter->GetActorRotation();
-        FRotator VelocityRot = Velocity.Rotation();
-        FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot);
-        MovementDirection = DeltaRot.Yaw;
+        FVector LocalVel = ActorRot.UnrotateVector(Velocity);
+        Direction = FMath::RadiansToDegrees(FMath::Atan2(LocalVel.Y, LocalVel.X));
     }
     else
     {
-        MovementDirection = FMath::FInterpTo(MovementDirection, 0.0f, DeltaSeconds, 5.0f);
+        Direction = 0.0f;
     }
 
-    // Lean amount (based on acceleration)
-    FVector Accel = MovementComponent->GetCurrentAcceleration();
-    float AccelSize = Accel.Size();
-    float TargetLean = bIsMoving ? FMath::Clamp(AccelSize / MovementComponent->MaxAcceleration, -1.0f, 1.0f) : 0.0f;
-    LeanAmount = FMath::FInterpTo(LeanAmount, TargetLean, DeltaSeconds, 8.0f);
-}
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = MovementComponent->IsCrouching();
 
-void UDinoSurvivorAnimInstance::UpdateLocomotionState()
-{
-    EAnim_LocomotionState NewState = EAnim_LocomotionState::Idle;
+    // Determine locomotion state
+    EAnim_LocomotionState NewState = LocomotionState;
 
-    if (bIsFalling)
+    if (bIsInAir)
     {
-        FVector Velocity = MovementComponent ? MovementComponent->Velocity : FVector::ZeroVector;
-        NewState = (Velocity.Z > 0.0f) ? EAnim_LocomotionState::Jump : EAnim_LocomotionState::Fall;
+        if (Velocity.Z > 50.0f)
+        {
+            NewState = EAnim_LocomotionState::Jump;
+        }
+        else if (Velocity.Z < -50.0f)
+        {
+            NewState = EAnim_LocomotionState::Fall;
+        }
     }
     else if (bIsCrouching)
     {
-        NewState = bIsMoving ? EAnim_LocomotionState::CrouchWalk : EAnim_LocomotionState::Crouch;
+        NewState = (Speed > 10.0f) ? EAnim_LocomotionState::CrouchWalk : EAnim_LocomotionState::Crouch;
     }
-    else if (bIsMoving)
+    else
     {
-        if (bIsSprinting)
+        if (Speed < 10.0f)
+        {
+            NewState = EAnim_LocomotionState::Idle;
+        }
+        else if (bIsSprinting && Speed > 400.0f)
         {
             NewState = EAnim_LocomotionState::Sprint;
         }
-        else if (GroundSpeed > WalkSpeed)
+        else if (Speed > 200.0f)
         {
             NewState = EAnim_LocomotionState::Run;
         }
@@ -157,155 +148,258 @@ void UDinoSurvivorAnimInstance::UpdateLocomotionState()
             NewState = EAnim_LocomotionState::Walk;
         }
     }
-    else
+
+    // Landing transition: if we were falling and now grounded
+    if ((LocomotionState == EAnim_LocomotionState::Fall || LocomotionState == EAnim_LocomotionState::Jump)
+        && !bIsInAir)
     {
-        NewState = EAnim_LocomotionState::Idle;
+        NewState = EAnim_LocomotionState::Land;
     }
 
-    CurrentLocomotionState = NewState;
+    LocomotionState = NewState;
+    PreviousVelocity = Velocity;
 }
 
-void UDinoSurvivorAnimInstance::UpdateFootIK(float DeltaSeconds)
+// ─────────────────────────────────────────────────────────────────────────────
+// SURVIVAL POSTURE
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinoSurvivorAnimInstance::UpdateSurvivalPosture(float DeltaSeconds)
 {
-    if (!OwnerCharacter || bIsFalling) return;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Trace for left foot
-    FVector LeftFootSocket = OwnerCharacter->GetMesh() ?
-        OwnerCharacter->GetMesh()->GetSocketLocation(FName("foot_l")) :
-        OwnerCharacter->GetActorLocation();
-
-    FVector RightFootSocket = OwnerCharacter->GetMesh() ?
-        OwnerCharacter->GetMesh()->GetSocketLocation(FName("foot_r")) :
-        OwnerCharacter->GetActorLocation();
-
-    FHitResult LeftHit, RightHit;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(OwnerCharacter);
-
-    // Left foot trace
-    FVector LeftStart = LeftFootSocket + FVector(0, 0, FootIKTraceDistance);
-    FVector LeftEnd = LeftFootSocket - FVector(0, 0, FootIKTraceDistance);
-    bool bLeftHit = World->LineTraceSingleByChannel(LeftHit, LeftStart, LeftEnd, ECC_Visibility, Params);
-
-    // Right foot trace
-    FVector RightStart = RightFootSocket + FVector(0, 0, FootIKTraceDistance);
-    FVector RightEnd = RightFootSocket - FVector(0, 0, FootIKTraceDistance);
-    bool bRightHit = World->LineTraceSingleByChannel(RightHit, RightStart, RightEnd, ECC_Visibility, Params);
-
-    // Update foot IK data
-    FootIKData.bLeftFootGrounded = bLeftHit;
-    FootIKData.bRightFootGrounded = bRightHit;
-
-    if (bLeftHit)
+    // Priority: Injured > Exhausted > Fleeing > Cautious > Upright
+    if (bIsInjured && HealthNormalized < 0.3f)
     {
-        FVector TargetLeft = LeftHit.ImpactPoint;
-        FootIKData.LeftFootLocation = FMath::VInterpTo(FootIKData.LeftFootLocation, TargetLeft, DeltaSeconds, FootIKInterpSpeed);
-        FRotator LeftNormalRot = FRotator(FMath::RadiansToDegrees(FMath::Atan2(LeftHit.ImpactNormal.X, LeftHit.ImpactNormal.Z)), 0.0f, -FMath::RadiansToDegrees(FMath::Atan2(LeftHit.ImpactNormal.Y, LeftHit.ImpactNormal.Z)));
-        FootIKData.LeftFootRotation = FMath::RInterpTo(FootIKData.LeftFootRotation, LeftNormalRot, DeltaSeconds, FootIKInterpSpeed);
-        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 1.0f, DeltaSeconds, FootIKInterpSpeed);
+        SurvivalPosture = EAnim_SurvivalPosture::Injured;
+    }
+    else if (bIsExhausted || StaminaNormalized < 0.15f)
+    {
+        SurvivalPosture = EAnim_SurvivalPosture::Exhausted;
+    }
+    else if (FearLevel > 0.75f)
+    {
+        SurvivalPosture = EAnim_SurvivalPosture::Fleeing;
+    }
+    else if (FearLevel > 0.35f || bIsAiming)
+    {
+        SurvivalPosture = EAnim_SurvivalPosture::Cautious;
     }
     else
     {
-        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 0.0f, DeltaSeconds, FootIKInterpSpeed);
+        SurvivalPosture = EAnim_SurvivalPosture::Upright;
     }
-
-    if (bRightHit)
-    {
-        FVector TargetRight = RightHit.ImpactPoint;
-        FootIKData.RightFootLocation = FMath::VInterpTo(FootIKData.RightFootLocation, TargetRight, DeltaSeconds, FootIKInterpSpeed);
-        FRotator RightNormalRot = FRotator(FMath::RadiansToDegrees(FMath::Atan2(RightHit.ImpactNormal.X, RightHit.ImpactNormal.Z)), 0.0f, -FMath::RadiansToDegrees(FMath::Atan2(RightHit.ImpactNormal.Y, RightHit.ImpactNormal.Z)));
-        FootIKData.RightFootRotation = FMath::RInterpTo(FootIKData.RightFootRotation, RightNormalRot, DeltaSeconds, FootIKInterpSpeed);
-        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 1.0f, DeltaSeconds, FootIKInterpSpeed);
-    }
-    else
-    {
-        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 0.0f, DeltaSeconds, FootIKInterpSpeed);
-    }
-
-    // Pelvis offset: lower pelvis to match lowest foot
-    float LeftDelta = bLeftHit ? (LeftHit.ImpactPoint.Z - LeftFootSocket.Z) : 0.0f;
-    float RightDelta = bRightHit ? (RightHit.ImpactPoint.Z - RightFootSocket.Z) : 0.0f;
-    float TargetPelvis = FMath::Min(LeftDelta, RightDelta);
-    FootIKData.PelvisOffset = FMath::FInterpTo(FootIKData.PelvisOffset, TargetPelvis, DeltaSeconds, PelvisInterpSpeed);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AIM OFFSET
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinoSurvivorAnimInstance::UpdateAimOffset(float DeltaSeconds)
 {
-    if (!OwnerCharacter) return;
+    if (!OwnerCharacter)
+    {
+        return;
+    }
 
-    // Get aim direction relative to character
-    FRotator CharRot = OwnerCharacter->GetActorRotation();
-    FRotator ControlRot = OwnerCharacter->GetControlRotation();
-    FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, CharRot);
+    APawn* Pawn = Cast<APawn>(OwnerCharacter);
+    if (!Pawn)
+    {
+        return;
+    }
 
+    AController* Controller = Pawn->GetController();
+    if (!Controller)
+    {
+        AimOffsetData.AimYaw = 0.0f;
+        AimOffsetData.AimPitch = 0.0f;
+        AimOffsetData.AimAlpha = bIsAiming ? 1.0f : 0.0f;
+        return;
+    }
+
+    FRotator ControlRot = Controller->GetControlRotation();
+    FRotator ActorRot = OwnerCharacter->GetActorRotation();
+
+    // Delta between control and actor rotation
+    FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, ActorRot);
+
+    // Clamp to aim offset range [-90, 90]
     AimOffsetData.AimYaw = FMath::ClampAngle(DeltaRot.Yaw, -90.0f, 90.0f);
-    AimOffsetData.AimPitch = FMath::ClampAngle(ControlRot.Pitch, -90.0f, 90.0f);
+    AimOffsetData.AimPitch = FMath::ClampAngle(DeltaRot.Pitch, -90.0f, 90.0f);
+    AimOffsetData.AimAlpha = bIsAiming ? 1.0f : 0.5f;  // 0.5 for idle look-around
 }
 
-void UDinoSurvivorAnimInstance::UpdateSurvivalPosture()
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAN
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinoSurvivorAnimInstance::UpdateLean(float DeltaSeconds)
 {
-    // Determine survival posture based on fear and injury levels
-    if (InjuryLevel > 0.7f)
+    if (!OwnerCharacter || !MovementComponent)
     {
-        CurrentSurvivalPosture = EAnim_SurvivalPosture::Injured;
+        return;
     }
-    else if (FearLevel > 0.8f)
+
+    FVector Velocity = MovementComponent->Velocity;
+    FVector Accel = MovementComponent->GetCurrentAcceleration();
+
+    if (Speed < 10.0f)
     {
-        CurrentSurvivalPosture = EAnim_SurvivalPosture::Fleeing;
+        LeanAngle = FMath::FInterpTo(LeanAngle, 0.0f, DeltaSeconds, LeanInterpSpeed);
+        return;
     }
-    else if (bIsCrouching || FearLevel > 0.4f)
+
+    // Project acceleration onto right vector for lateral lean
+    FVector RightVec = OwnerCharacter->GetActorRightVector();
+    float LateralAccel = FVector::DotProduct(Accel.GetSafeNormal(), RightVec);
+
+    float TargetLean = LateralAccel * 15.0f;  // Max 15 degrees lean
+    LeanAngle = FMath::FInterpTo(LeanAngle, TargetLean, DeltaSeconds, LeanInterpSpeed);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FOOT IK
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinoSurvivorAnimInstance::UpdateFootIK(float DeltaSeconds)
+{
+    if (!OwnerCharacter)
     {
-        CurrentSurvivalPosture = EAnim_SurvivalPosture::Cautious;
+        return;
     }
-    else if (StaminaRatio < 0.2f)
+
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh)
     {
-        CurrentSurvivalPosture = EAnim_SurvivalPosture::Exhausted;
+        return;
+    }
+
+    // Trace for left foot
+    FVector LeftFootBoneLocation = Mesh->GetSocketLocation(FName("foot_l"));
+    FVector RightFootBoneLocation = Mesh->GetSocketLocation(FName("foot_r"));
+
+    FAnim_FootIKData NewIKData;
+
+    // Left foot trace
+    FVector LeftTraceStart = LeftFootBoneLocation + FVector(0.0f, 0.0f, FootIKTraceDistance);
+    FVector LeftTraceEnd = LeftFootBoneLocation - FVector(0.0f, 0.0f, FootIKTraceDistance);
+
+    FHitResult LeftHit;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerCharacter);
+
+    bool bLeftHit = GetWorld()->LineTraceSingleByChannel(
+        LeftHit, LeftTraceStart, LeftTraceEnd,
+        ECollisionChannel::ECC_Visibility, QueryParams
+    );
+
+    if (bLeftHit)
+    {
+        NewIKData.LeftFootLocation = LeftHit.ImpactPoint;
+        // Align foot to surface normal
+        FRotator SurfaceRot = UKismetMathLibrary::MakeRotFromZX(LeftHit.ImpactNormal, OwnerCharacter->GetActorForwardVector());
+        NewIKData.LeftFootRotation = FMath::RInterpTo(FootIKData.LeftFootRotation, SurfaceRot, DeltaSeconds, FootIKInterpSpeed);
     }
     else
     {
-        CurrentSurvivalPosture = EAnim_SurvivalPosture::Upright;
+        NewIKData.LeftFootLocation = LeftFootBoneLocation;
+        NewIKData.LeftFootRotation = FRotator::ZeroRotator;
     }
-}
 
-void UDinoSurvivorAnimInstance::SetSurvivalStats(float Stamina, float Fear, float Injury)
-{
-    StaminaRatio = FMath::Clamp(Stamina, 0.0f, 1.0f);
-    FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
-    InjuryLevel = FMath::Clamp(Injury, 0.0f, 1.0f);
-}
+    // Right foot trace
+    FVector RightTraceStart = RightFootBoneLocation + FVector(0.0f, 0.0f, FootIKTraceDistance);
+    FVector RightTraceEnd = RightFootBoneLocation - FVector(0.0f, 0.0f, FootIKTraceDistance);
 
-void UDinoSurvivorAnimInstance::TriggerJumpAnimation()
-{
-    if (!bIsFalling)
+    FHitResult RightHit;
+    bool bRightHit = GetWorld()->LineTraceSingleByChannel(
+        RightHit, RightTraceStart, RightTraceEnd,
+        ECollisionChannel::ECC_Visibility, QueryParams
+    );
+
+    if (bRightHit)
     {
-        CurrentLocomotionState = EAnim_LocomotionState::Jump;
+        NewIKData.RightFootLocation = RightHit.ImpactPoint;
+        FRotator SurfaceRot = UKismetMathLibrary::MakeRotFromZX(RightHit.ImpactNormal, OwnerCharacter->GetActorForwardVector());
+        NewIKData.RightFootRotation = FMath::RInterpTo(FootIKData.RightFootRotation, SurfaceRot, DeltaSeconds, FootIKInterpSpeed);
     }
+    else
+    {
+        NewIKData.RightFootLocation = RightFootBoneLocation;
+        NewIKData.RightFootRotation = FRotator::ZeroRotator;
+    }
+
+    // Pelvis offset: lower pelvis to accommodate the lower foot
+    float LeftDelta = bLeftHit ? (LeftHit.ImpactPoint.Z - LeftFootBoneLocation.Z) : 0.0f;
+    float RightDelta = bRightHit ? (RightHit.ImpactPoint.Z - RightFootBoneLocation.Z) : 0.0f;
+    float TargetPelvisOffset = FMath::Min(LeftDelta, RightDelta);
+
+    NewIKData.PelvisOffset = FMath::FInterpTo(
+        FootIKData.PelvisOffset,
+        TargetPelvisOffset,
+        DeltaSeconds,
+        PelvisAdjustmentSpeed
+    );
+
+    // Interp foot locations
+    NewIKData.LeftFootLocation = FMath::VInterpTo(
+        FootIKData.LeftFootLocation, NewIKData.LeftFootLocation,
+        DeltaSeconds, FootIKInterpSpeed
+    );
+    NewIKData.RightFootLocation = FMath::VInterpTo(
+        FootIKData.RightFootLocation, NewIKData.RightFootLocation,
+        DeltaSeconds, FootIKInterpSpeed
+    );
+
+    FootIKData = NewIKData;
 }
 
-void UDinoSurvivorAnimInstance::TriggerLandAnimation()
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC SETTERS (called from Character or GameMode)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinoSurvivorAnimInstance::SetSurvivalStats(float Health, float Stamina, float Fear)
 {
-    CurrentLocomotionState = EAnim_LocomotionState::Land;
+    HealthNormalized = FMath::Clamp(Health, 0.0f, 1.0f);
+    StaminaNormalized = FMath::Clamp(Stamina, 0.0f, 1.0f);
+    FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
+
+    bIsInjured = (HealthNormalized < 0.5f);
+    bIsExhausted = (StaminaNormalized < 0.2f);
 }
+
+void UDinoSurvivorAnimInstance::SetSprintingState(bool bSprinting)
+{
+    bIsSprinting = bSprinting;
+}
+
+void UDinoSurvivorAnimInstance::SetAimingState(bool bAiming)
+{
+    bIsAiming = bAiming;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLUEPRINT CALLABLE GETTERS
+// ─────────────────────────────────────────────────────────────────────────────
 
 EAnim_LocomotionState UDinoSurvivorAnimInstance::GetLocomotionState() const
 {
-    return CurrentLocomotionState;
+    return LocomotionState;
 }
 
-float UDinoSurvivorAnimInstance::GetGroundSpeed() const
+EAnim_SurvivalPosture UDinoSurvivorAnimInstance::GetSurvivalPosture() const
 {
-    return GroundSpeed;
-}
-
-bool UDinoSurvivorAnimInstance::GetIsMoving() const
-{
-    return bIsMoving;
+    return SurvivalPosture;
 }
 
 FAnim_FootIKData UDinoSurvivorAnimInstance::GetFootIKData() const
 {
     return FootIKData;
+}
+
+FAnim_AimOffsetData UDinoSurvivorAnimInstance::GetAimOffsetData() const
+{
+    return AimOffsetData;
+}
+
+float UDinoSurvivorAnimInstance::GetLeanAngle() const
+{
+    return LeanAngle;
 }
