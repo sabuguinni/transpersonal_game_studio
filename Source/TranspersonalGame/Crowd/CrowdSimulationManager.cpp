@@ -1,287 +1,320 @@
-// CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribal crowd simulation using UE5 Mass AI primitives
-
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "NavigationSystem.h"
-#include "NavMesh/NavMeshBoundsVolume.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxCrowdAgents = 50;
-    CampCenter = FVector(800.f, 400.f, 100.f);
-    CampRadius = 300.f;
-    PatrolSpeed = 120.f;
-    FleeSpeed = 400.f;
-    bCrowdInitialized = false;
-    ThreatLevel = 0.f;
-    DayPhase = ECrowd_DayPhase::Day;
-}
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — performance-safe
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    InitializeCrowdAgents();
-    bCrowdInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized with %d agents"), ActiveAgents.Num());
-}
+    MaxTotalAgents = 50000;
+    bEnableMigration = true;
+    bEnablePlayerAvoidance = true;
+    PlayerAvoidanceRadius = 800.0f;
 
-void UCrowdSimulationManager::Deinitialize()
-{
-    ActiveAgents.Empty();
-    PatrolWaypoints.Empty();
-    Super::Deinitialize();
-}
+    ActiveAgentCount = 0;
+    CulledAgentCount = 0;
+    CurrentSimulationLoad = 0.0f;
+    TickAccumulator = 0.0f;
+    MigrationTimer = 0.0f;
 
-void UCrowdSimulationManager::InitializeCrowdAgents()
-{
-    // Define camp tribal agents in circular formation
-    const int32 TribeCount = 8;
-    for (int32 i = 0; i < TribeCount; ++i)
+    // Default LOD chain
+    LODConfig.FullSimDistance = 2000.0f;
+    LODConfig.ReducedTickDistance = 5000.0f;
+    LODConfig.MinimalPresenceDistance = 10000.0f;
+    LODConfig.CullDistance = 15000.0f;
+    LODConfig.FullSimTickRate = 0.1f;
+    LODConfig.ReducedTickRate = 0.5f;
+
+    // Default migration corridors
     {
-        FCrowd_AgentData Agent;
-        float Angle = (2.f * PI * i) / TribeCount;
-        Agent.AgentID = i;
-        Agent.Location = CampCenter + FVector(
-            CampRadius * FMath::Cos(Angle),
-            CampRadius * FMath::Sin(Angle),
-            0.f
-        );
-        Agent.AgentType = ECrowd_AgentType::TribalMember;
-        Agent.CurrentState = ECrowd_AgentState::Idle;
-        Agent.MoveSpeed = PatrolSpeed;
-        Agent.bIsAlive = true;
-        Agent.FearLevel = 0.f;
-        ActiveAgents.Add(Agent);
+        FCrowd_MigrationCorridor CorridorA;
+        CorridorA.CorridorID = TEXT("HerdCorridor_A");
+        CorridorA.AgentType = ECrowd_AgentType::Herbivore_Herd;
+        CorridorA.Waypoints = {
+            FVector(-2000, -1500, 50),
+            FVector(-1000, -1200, 50),
+            FVector(0,      -800, 50),
+            FVector(1000,   -600, 50),
+            FVector(2000,   -400, 50)
+        };
+        CorridorA.AgentSpeedMultiplier = 1.0f;
+        CorridorA.MaxAgentsInCorridor = 80;
+        CorridorA.bIsActive = true;
+        MigrationCorridors.Add(CorridorA);
+
+        FCrowd_MigrationCorridor CorridorB;
+        CorridorB.CorridorID = TEXT("HerdCorridor_B");
+        CorridorB.AgentType = ECrowd_AgentType::Herbivore_Herd;
+        CorridorB.Waypoints = {
+            FVector(-1500, 1000, 50),
+            FVector(-500,   800, 50),
+            FVector(500,    600, 50),
+            FVector(1500,   400, 50)
+        };
+        CorridorB.AgentSpeedMultiplier = 0.8f;
+        CorridorB.MaxAgentsInCorridor = 60;
+        CorridorB.bIsActive = true;
+        MigrationCorridors.Add(CorridorB);
     }
 
-    // Define forager agents spread in the world
-    TArray<FVector> ForagerPositions = {
-        FVector(-300.f, 200.f, 100.f),
-        FVector(-500.f, -400.f, 100.f),
-        FVector(1500.f, 600.f, 100.f),
-        FVector(600.f, 1400.f, 100.f)
-    };
-
-    for (int32 i = 0; i < ForagerPositions.Num(); ++i)
+    // Default density zones
     {
-        FCrowd_AgentData Agent;
-        Agent.AgentID = TribeCount + i;
-        Agent.Location = ForagerPositions[i];
-        Agent.AgentType = ECrowd_AgentType::Forager;
-        Agent.CurrentState = ECrowd_AgentState::Foraging;
-        Agent.MoveSpeed = PatrolSpeed * 0.8f;
-        Agent.bIsAlive = true;
-        Agent.FearLevel = 0.f;
-        ActiveAgents.Add(Agent);
+        // Watering hole — HIGH density
+        FCrowd_DensityZoneData WateringHole;
+        WateringHole.Center = FVector(300, 400, 0);
+        WateringHole.Radius = 400.0f;
+        WateringHole.DensityLevel = ECrowd_DensityZone::High;
+        WateringHole.MaxConcurrentAgents = 120;
+        WateringHole.AgentRespawnInterval = 2.0f;
+        DensityZones.Add(WateringHole);
+
+        // Open plains — MEDIUM density
+        FCrowd_DensityZoneData Plains;
+        Plains.Center = FVector(0, 1800, 0);
+        Plains.Radius = 1200.0f;
+        Plains.DensityLevel = ECrowd_DensityZone::Medium;
+        Plains.MaxConcurrentAgents = 200;
+        Plains.AgentRespawnInterval = 5.0f;
+        DensityZones.Add(Plains);
+
+        // Forest edge — LOW density
+        FCrowd_DensityZoneData Forest;
+        Forest.Center = FVector(1200, 1200, 0);
+        Forest.Radius = 800.0f;
+        Forest.DensityLevel = ECrowd_DensityZone::Low;
+        Forest.MaxConcurrentAgents = 30;
+        Forest.AgentRespawnInterval = 10.0f;
+        DensityZones.Add(Forest);
     }
-
-    // Define patrol waypoints
-    PatrolWaypoints = {
-        FVector(1200.f, 400.f, 100.f),
-        FVector(1000.f, 900.f, 100.f),
-        FVector(400.f, 1000.f, 100.f),
-        FVector(100.f, 500.f, 100.f),
-        FVector(300.f, 0.f, 100.f),
-        FVector(900.f, -100.f, 100.f)
-    };
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] %d tribal + %d forager agents initialized"),
-        TribeCount, ForagerPositions.Num());
 }
 
-void UCrowdSimulationManager::TickCrowdSimulation(float DeltaTime)
+void UCrowdSimulationManager::BeginPlay()
 {
-    if (!bCrowdInitialized) return;
+    Super::BeginPlay();
+    InitializeCrowdSystem();
+}
 
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+void UCrowdSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    TickAccumulator += DeltaTime;
+    MigrationTimer += DeltaTime;
+
+    // Update LOD every tick (lightweight)
+    UpdateLODLevels();
+
+    // Process migration every 2 seconds
+    if (MigrationTimer >= 2.0f)
     {
-        if (!Agent.bIsAlive) continue;
-
-        switch (Agent.CurrentState)
+        if (bEnableMigration)
         {
-            case ECrowd_AgentState::Idle:
-                UpdateIdleAgent(Agent, DeltaTime);
-                break;
-            case ECrowd_AgentState::Patrolling:
-                UpdatePatrolAgent(Agent, DeltaTime);
-                break;
-            case ECrowd_AgentState::Foraging:
-                UpdateForagingAgent(Agent, DeltaTime);
-                break;
-            case ECrowd_AgentState::Fleeing:
-                UpdateFleeingAgent(Agent, DeltaTime);
-                break;
-            case ECrowd_AgentState::Sheltering:
-                // Agent stays at camp — no movement
-                break;
-            default:
-                break;
+            ProcessMigrationCorridors(DeltaTime);
         }
+        MigrationTimer = 0.0f;
+    }
 
-        // Propagate fear: if threat is high, transition to flee
-        if (ThreatLevel > 0.7f && Agent.CurrentState != ECrowd_AgentState::Fleeing)
+    // Player avoidance every tick
+    if (bEnablePlayerAvoidance)
+    {
+        EnforcePlayerAvoidance();
+    }
+
+    // Simulation load metric (0-1)
+    CurrentSimulationLoad = (MaxTotalAgents > 0)
+        ? FMath::Clamp((float)ActiveAgentCount / (float)MaxTotalAgents, 0.0f, 1.0f)
+        : 0.0f;
+}
+
+void UCrowdSimulationManager::InitializeCrowdSystem()
+{
+    ActiveAgentCount = 0;
+    CulledAgentCount = 0;
+    CurrentSimulationLoad = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized — MaxAgents:%d Corridors:%d DensityZones:%d"),
+        MaxTotalAgents, MigrationCorridors.Num(), DensityZones.Num());
+}
+
+void UCrowdSimulationManager::SetMigrationActive(bool bActive)
+{
+    bEnableMigration = bActive;
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Migration %s"), bActive ? TEXT("ENABLED") : TEXT("DISABLED"));
+}
+
+void UCrowdSimulationManager::TriggerHerdFlee(FVector ThreatLocation, float ThreatRadius)
+{
+    if (!GetWorld()) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] HERD FLEE triggered at (%.0f, %.0f, %.0f) radius=%.0f"),
+        ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z, ThreatRadius);
+
+    // Increase agent speed multiplier for all corridors near threat
+    for (FCrowd_MigrationCorridor& Corridor : MigrationCorridors)
+    {
+        if (!Corridor.Waypoints.IsEmpty())
         {
-            Agent.CurrentState = ECrowd_AgentState::Fleeing;
-            Agent.MoveSpeed = FleeSpeed;
-            Agent.FearLevel = ThreatLevel;
-        }
-    }
-}
-
-void UCrowdSimulationManager::UpdateIdleAgent(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Idle agents occasionally transition to patrol
-    Agent.IdleTimer += DeltaTime;
-    if (Agent.IdleTimer > 5.f)
-    {
-        Agent.IdleTimer = 0.f;
-        if (Agent.AgentType == ECrowd_AgentType::TribalMember)
-        {
-            Agent.CurrentState = ECrowd_AgentState::Patrolling;
-            Agent.CurrentWaypointIndex = FMath::RandRange(0, PatrolWaypoints.Num() - 1);
-        }
-        else if (Agent.AgentType == ECrowd_AgentType::Forager)
-        {
-            Agent.CurrentState = ECrowd_AgentState::Foraging;
-        }
-    }
-}
-
-void UCrowdSimulationManager::UpdatePatrolAgent(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    if (PatrolWaypoints.Num() == 0) return;
-
-    FVector Target = PatrolWaypoints[Agent.CurrentWaypointIndex % PatrolWaypoints.Num()];
-    FVector Direction = (Target - Agent.Location).GetSafeNormal();
-    float DistToTarget = FVector::Dist(Agent.Location, Target);
-
-    if (DistToTarget < 50.f)
-    {
-        // Reached waypoint — advance to next
-        Agent.CurrentWaypointIndex = (Agent.CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
-        Agent.CurrentState = ECrowd_AgentState::Idle;
-        Agent.IdleTimer = 0.f;
-    }
-    else
-    {
-        Agent.Location += Direction * Agent.MoveSpeed * DeltaTime;
-    }
-}
-
-void UCrowdSimulationManager::UpdateForagingAgent(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Foragers wander in a small radius around their start position
-    Agent.ForageTimer += DeltaTime;
-    if (Agent.ForageTimer > 3.f)
-    {
-        Agent.ForageTimer = 0.f;
-        // Pick a random nearby point
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-200.f, 200.f),
-            FMath::RandRange(-200.f, 200.f),
-            0.f
-        );
-        Agent.ForageTarget = Agent.Location + RandomOffset;
-    }
-
-    FVector Direction = (Agent.ForageTarget - Agent.Location).GetSafeNormal();
-    Agent.Location += Direction * Agent.MoveSpeed * DeltaTime;
-}
-
-void UCrowdSimulationManager::UpdateFleeingAgent(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Flee toward camp center
-    FVector Direction = (CampCenter - Agent.Location).GetSafeNormal();
-    float DistToCamp = FVector::Dist(Agent.Location, CampCenter);
-
-    if (DistToCamp < 100.f)
-    {
-        // Reached safety — shelter
-        Agent.CurrentState = ECrowd_AgentState::Sheltering;
-        Agent.FearLevel = FMath::Max(0.f, Agent.FearLevel - 0.1f);
-    }
-    else
-    {
-        Agent.Location += Direction * Agent.MoveSpeed * DeltaTime;
-    }
-}
-
-void UCrowdSimulationManager::NotifyThreat(FVector ThreatLocation, float Intensity)
-{
-    ThreatLevel = FMath::Clamp(Intensity, 0.f, 1.f);
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Threat notified at (%.0f,%.0f,%.0f) intensity=%.2f"),
-        ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z, Intensity);
-
-    // Propagate fear to nearby agents
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        float Dist = FVector::Dist(Agent.Location, ThreatLocation);
-        if (Dist < 1000.f)
-        {
-            float FearFromThreat = Intensity * (1.f - Dist / 1000.f);
-            Agent.FearLevel = FMath::Min(1.f, Agent.FearLevel + FearFromThreat);
+            float DistToThreat = FVector::Dist(Corridor.Waypoints[0], ThreatLocation);
+            if (DistToThreat < ThreatRadius * 2.0f)
+            {
+                Corridor.AgentSpeedMultiplier = FMath::Clamp(Corridor.AgentSpeedMultiplier * 2.5f, 1.0f, 5.0f);
+                UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Corridor %s flee speed: %.1f"),
+                    *Corridor.CorridorID, Corridor.AgentSpeedMultiplier);
+            }
         }
     }
 }
 
-void UCrowdSimulationManager::SetDayPhase(ECrowd_DayPhase NewPhase)
+void UCrowdSimulationManager::TriggerHerdGather(FVector GatherPoint, ECrowd_AgentType AgentType)
 {
-    DayPhase = NewPhase;
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] HERD GATHER at (%.0f, %.0f, %.0f) type=%d"),
+        GatherPoint.X, GatherPoint.Y, GatherPoint.Z, (int32)AgentType);
 
-    // Adjust crowd behavior based on time of day
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    // Add a temporary high-density zone at the gather point
+    FCrowd_DensityZoneData GatherZone;
+    GatherZone.Center = GatherPoint;
+    GatherZone.Radius = 600.0f;
+    GatherZone.DensityLevel = ECrowd_DensityZone::High;
+    GatherZone.MaxConcurrentAgents = 150;
+    GatherZone.AgentRespawnInterval = 1.0f;
+    DensityZones.Add(GatherZone);
+}
+
+int32 UCrowdSimulationManager::GetAgentsInRadius(FVector Center, float Radius) const
+{
+    // Returns estimated agent count based on density zones overlapping the query radius
+    int32 EstimatedCount = 0;
+    for (const FCrowd_DensityZoneData& Zone : DensityZones)
     {
-        switch (DayPhase)
+        float Dist = FVector::Dist(Zone.Center, Center);
+        if (Dist < Zone.Radius + Radius)
         {
-            case ECrowd_DayPhase::Night:
-                // At night, all agents shelter at camp
-                Agent.CurrentState = ECrowd_AgentState::Sheltering;
-                break;
-            case ECrowd_DayPhase::Dawn:
-            case ECrowd_DayPhase::Day:
-                // During day, resume normal activities
-                if (Agent.CurrentState == ECrowd_AgentState::Sheltering)
-                {
-                    Agent.CurrentState = ECrowd_AgentState::Idle;
-                }
-                break;
-            case ECrowd_DayPhase::Dusk:
-                // At dusk, foragers return to camp
-                if (Agent.AgentType == ECrowd_AgentType::Forager)
-                {
-                    Agent.CurrentState = ECrowd_AgentState::Fleeing; // reuse flee-to-camp logic
-                }
-                break;
+            float Overlap = FMath::Clamp(1.0f - (Dist / (Zone.Radius + Radius)), 0.0f, 1.0f);
+            EstimatedCount += FMath::RoundToInt(Zone.MaxConcurrentAgents * Overlap);
+        }
+    }
+    return EstimatedCount;
+}
+
+ECrowd_DensityZone UCrowdSimulationManager::GetDensityAtLocation(FVector Location) const
+{
+    ECrowd_DensityZone Best = ECrowd_DensityZone::Empty;
+    float BestDist = MAX_FLT;
+
+    for (const FCrowd_DensityZoneData& Zone : DensityZones)
+    {
+        float Dist = FVector::Dist(Zone.Center, Location);
+        if (Dist < Zone.Radius && Dist < BestDist)
+        {
+            Best = Zone.DensityLevel;
+            BestDist = Dist;
+        }
+    }
+    return Best;
+}
+
+ECrowd_LODLevel UCrowdSimulationManager::GetLODForDistance(float DistanceFromPlayer) const
+{
+    if (DistanceFromPlayer <= LODConfig.FullSimDistance)
+        return ECrowd_LODLevel::Full;
+    if (DistanceFromPlayer <= LODConfig.ReducedTickDistance)
+        return ECrowd_LODLevel::Reduced;
+    if (DistanceFromPlayer <= LODConfig.MinimalPresenceDistance)
+        return ECrowd_LODLevel::Minimal;
+    return ECrowd_LODLevel::Culled;
+}
+
+void UCrowdSimulationManager::LogCrowdStats() const
+{
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] === CROWD STATS ==="));
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Active:%d Culled:%d Load:%.1f%%"),
+        ActiveAgentCount, CulledAgentCount, CurrentSimulationLoad * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Corridors:%d DensityZones:%d"),
+        MigrationCorridors.Num(), DensityZones.Num());
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Migration:%s PlayerAvoidance:%s"),
+        bEnableMigration ? TEXT("ON") : TEXT("OFF"),
+        bEnablePlayerAvoidance ? TEXT("ON") : TEXT("OFF"));
+}
+
+void UCrowdSimulationManager::UpdateLODLevels()
+{
+    if (!GetWorld()) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+
+    // Count active vs culled based on density zones
+    int32 NewActive = 0;
+    int32 NewCulled = 0;
+
+    for (const FCrowd_DensityZoneData& Zone : DensityZones)
+    {
+        float Dist = FVector::Dist(Zone.Center, PlayerLoc);
+        ECrowd_LODLevel LOD = GetLODForDistance(Dist);
+
+        switch (LOD)
+        {
+        case ECrowd_LODLevel::Full:
+            NewActive += Zone.MaxConcurrentAgents;
+            break;
+        case ECrowd_LODLevel::Reduced:
+            NewActive += Zone.MaxConcurrentAgents / 2;
+            NewCulled += Zone.MaxConcurrentAgents / 2;
+            break;
+        case ECrowd_LODLevel::Minimal:
+            NewActive += Zone.MaxConcurrentAgents / 5;
+            NewCulled += Zone.MaxConcurrentAgents * 4 / 5;
+            break;
+        case ECrowd_LODLevel::Culled:
+            NewCulled += Zone.MaxConcurrentAgents;
+            break;
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Day phase changed to %d"), (int32)DayPhase);
+    ActiveAgentCount = FMath::Min(NewActive, MaxTotalAgents);
+    CulledAgentCount = NewCulled;
 }
 
-int32 UCrowdSimulationManager::GetActiveAgentCount() const
+void UCrowdSimulationManager::ProcessMigrationCorridors(float DeltaTime)
 {
-    int32 Count = 0;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    // Advance migration progress — in full Mass AI integration this drives agent movement
+    for (FCrowd_MigrationCorridor& Corridor : MigrationCorridors)
     {
-        if (Agent.bIsAlive) Count++;
-    }
-    return Count;
-}
+        if (!Corridor.bIsActive || Corridor.Waypoints.IsEmpty()) continue;
 
-TArray<FCrowd_AgentData> UCrowdSimulationManager::GetAgentsByType(ECrowd_AgentType Type) const
-{
-    TArray<FCrowd_AgentData> Result;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (Agent.AgentType == Type && Agent.bIsAlive)
+        // Decay flee speed back to normal over time
+        if (Corridor.AgentSpeedMultiplier > 1.0f)
         {
-            Result.Add(Agent);
+            Corridor.AgentSpeedMultiplier = FMath::FInterpTo(
+                Corridor.AgentSpeedMultiplier, 1.0f, DeltaTime, 0.1f);
         }
     }
-    return Result;
+}
+
+void UCrowdSimulationManager::EnforcePlayerAvoidance()
+{
+    if (!GetWorld()) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+
+    // Reduce density in zones too close to player (avoidance behaviour)
+    for (FCrowd_DensityZoneData& Zone : DensityZones)
+    {
+        float Dist = FVector::Dist(Zone.Center, PlayerLoc);
+        if (Dist < PlayerAvoidanceRadius)
+        {
+            // Agents scatter — reduce effective count near player
+            float ScatterFactor = Dist / PlayerAvoidanceRadius;
+            int32 EffectiveMax = FMath::RoundToInt(Zone.MaxConcurrentAgents * ScatterFactor);
+            ActiveAgentCount = FMath::Max(0, ActiveAgentCount - (Zone.MaxConcurrentAgents - EffectiveMax));
+        }
+    }
 }
