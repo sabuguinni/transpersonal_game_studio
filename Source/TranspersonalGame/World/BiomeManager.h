@@ -1,129 +1,116 @@
 // BiomeManager.h
 // Engine Architect #02 — Transpersonal Game Studio
-// Biome system: classification, transitions, dinosaur spawn rules
+// P1 World Generation — Biome system header
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "../Core/SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// Biome Definition Struct (Eng_ prefix — unique across project)
-// ============================================================
-
+// Biome data struct — defined at global scope (UHT rule)
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeDefinition
+struct TRANSPERSONALGAME_API FEng_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
+    EBiomeType BiomeType = EBiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
+    FText DisplayName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "-60.0", ClampMax = "80.0"))
+    float TemperatureMin = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "-60.0", ClampMax = "80.0"))
+    float TemperatureMax = 35.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FoliageDensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector2D CenterLocation;
+    bool bAllowsDinosaurSpawn = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BaseTemperature;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EDinosaurSpecies> NativeDinosaurs;
-
-    FEng_BiomeDefinition()
-        : BiomeType(EBiomeType::Forest)
-        , BiomeName(TEXT("Unknown Biome"))
-        , CenterLocation(FVector2D::ZeroVector)
-        , Radius(1000.0f)
-        , BaseTemperature(20.0f)
-        , Humidity(60.0f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float DinosaurSpawnWeight = 1.0f;
 };
 
-// ============================================================
-// Biome Transition Delegate
-// ============================================================
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-    FEng_OnPlayerBiomeChanged,
-    EBiomeType, FromBiome,
-    EBiomeType, ToBiome
-);
-
-// ============================================================
-// ABiomeManager — World Actor
-// ============================================================
-
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
-class TRANSPERSONALGAME_API ABiomeManager : public AActor
+/**
+ * UBiomeManager — World Subsystem
+ * Manages biome data, temperature, humidity, and dinosaur spawn weights
+ * for the prehistoric survival world. Queried by PCGWorldGenerator,
+ * FoliageManager, and DinosaurSpawnSystem.
+ *
+ * Architecture: WorldSubsystem (auto-created per world, no manual registration)
+ * Dependencies: SharedTypes.h (EBiomeType), PCGWorldGenerator (consumer)
+ */
+UCLASS(BlueprintType, meta = (DisplayName = "Biome Manager"))
+class TRANSPERSONALGAME_API UBiomeManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABiomeManager();
+    UBiomeManager();
 
-    // ---- Biome Data ----
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FEng_BiomeDefinition> BiomeDefinitions;
+    // --- Biome Queries (Blueprint-callable) ---
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biomes")
-    EBiomeType CurrentPlayerBiome;
+    /** Returns the biome type at the given world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float BiomeTransitionBlendRadius;
+    /** Returns full biome data for a given biome type. Returns false if not found. */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    bool GetBiomeData(EBiomeType BiomeType, FEng_BiomeData& OutBiomeData) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    int32 MaxActiveBiomes;
+    /** Returns interpolated temperature at location (accounts for altitude) */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Environment")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-    bool bDebugDrawBiomes;
+    /** Returns humidity value [0..1] at location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Environment")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    // ---- Events ----
+    /** Returns true if dinosaurs can spawn at this location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Dinosaurs")
+    bool CanDinosaursSpawnAtLocation(const FVector& WorldLocation) const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Biomes|Events")
-    FEng_OnPlayerBiomeChanged OnPlayerBiomeChanged;
+    /** Returns spawn weight multiplier for dinosaurs at this location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Dinosaurs")
+    float GetDinosaurSpawnWeightAtLocation(const FVector& WorldLocation) const;
 
-    // ---- Classification ----
+    /** Returns list of all currently active biome types */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Management")
+    TArray<EBiomeType> GetActiveBiomes() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    EBiomeType ClassifyLocationBiome(const FVector& WorldLocation) const;
+    /** Register a biome as active (called by PCGWorldGenerator) */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Management")
+    void RegisterActiveBiome(EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    float GetBiomeBlendWeight(const FVector& WorldLocation, EBiomeType BiomeType) const;
+    /** Blend radius for biome transitions in world units */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Settings")
+    float TransitionBlendRadius;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    const FEng_BiomeDefinition* GetBiomeDefinition(EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    TArray<EBiomeType> GetBiomesAtLocation(const FVector& WorldLocation, float SearchRadius = 500.0f) const;
-
-    // ---- Dinosaur Spawning Rules ----
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes|Dinosaurs")
-    TArray<EDinosaurSpecies> GetValidDinosaursForBiome(EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes|Dinosaurs")
-    bool CanSpawnDinosaurInBiome(EDinosaurSpecies Species, EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biomes|Dinosaurs")
-    float GetDinosaurAggressionModifier(EDinosaurSpecies Species, EBiomeType BiomeType) const;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    /** Currently active biome at player position */
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EBiomeType ActiveBiomeType;
 
 private:
-    void OnBiomeTransition(EBiomeType FromBiome, EBiomeType ToBiome);
-    void InitializeDefaultBiomes();
-    void DebugDrawBiomeBoundaries() const;
+    void InitializeBiomeData();
+
+    UPROPERTY()
+    TMap<EBiomeType, FEng_BiomeData> BiomeDataMap;
+
+    UPROPERTY()
+    TArray<EBiomeType> ActiveBiomes;
+
+    bool bBiomeSystemInitialized;
 };
