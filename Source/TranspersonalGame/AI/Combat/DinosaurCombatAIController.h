@@ -3,68 +3,144 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Engine/Engine.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
 #include "DinosaurCombatAIController.generated.h"
 
-class UBehaviorTreeComponent;
-class UBlackboardComponent;
-class UAISenseConfig_Sight;
-class UAISenseConfig_Hearing;
-class UAISenseConfig_Damage;
+// ============================================================
+// ENUMS — global scope (UHT requirement)
+// ============================================================
 
 UENUM(BlueprintType)
-enum class EDinosaurCombatState : uint8
+enum class ECombat_DinoSpecies : uint8
 {
-    Idle,
-    Hunting,
-    Stalking,
-    Attacking,
-    Fleeing,
-    Territorial,
-    Feeding,
-    Investigating
+    TyrannosaurusRex    UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Velociraptor        UMETA(DisplayName = "Velociraptor"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
+    Spinosaurus         UMETA(DisplayName = "Spinosaurus"),
+    Pterodactyl         UMETA(DisplayName = "Pterodactyl"),
+    Ankylosaurus        UMETA(DisplayName = "Ankylosaurus"),
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurThreatLevel : uint8
+enum class ECombat_TacticalState : uint8
 {
-    None,
-    Low,
-    Medium,
-    High,
-    Critical
+    Idle            UMETA(DisplayName = "Idle"),
+    Stalking        UMETA(DisplayName = "Stalking"),
+    Flanking        UMETA(DisplayName = "Flanking"),
+    Charging        UMETA(DisplayName = "Charging"),
+    Biting          UMETA(DisplayName = "Biting"),
+    Retreating      UMETA(DisplayName = "Retreating"),
+    PackCoordinate  UMETA(DisplayName = "Pack Coordinate"),
+    Ambushing       UMETA(DisplayName = "Ambushing"),
+    Circling        UMETA(DisplayName = "Circling"),
 };
+
+UENUM(BlueprintType)
+enum class ECombat_ThreatResponse : uint8
+{
+    Ignore          UMETA(DisplayName = "Ignore"),
+    Investigate     UMETA(DisplayName = "Investigate"),
+    Stalk           UMETA(DisplayName = "Stalk"),
+    Attack          UMETA(DisplayName = "Attack"),
+    FleeFromThreat  UMETA(DisplayName = "Flee From Threat"),
+    CallPack        UMETA(DisplayName = "Call Pack"),
+};
+
+// ============================================================
+// STRUCTS — global scope
+// ============================================================
 
 USTRUCT(BlueprintType)
-struct FCombatMemory
+struct FCombat_SpeciesTraits
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* LastKnownTarget = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float DetectionRadius = 1200.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector LastKnownTargetLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float AttackRadius = 200.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float TimeSinceLastSeen = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float ChaseSpeed = 600.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    EDinosaurThreatLevel ThreatLevel = EDinosaurThreatLevel::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float PatrolSpeed = 200.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    bool bHasBeenDamaged = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float BaseDamage = 40.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float LastDamageTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float AttackCooldown = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    bool bIsPackHunter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    bool bUsesAmbushTactics = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    bool bFlankingBehavior = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float RoarRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    int32 MaxPackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Traits")
+    float TerritoryRadius = 3000.0f;
 };
 
-/**
- * AI Controller especializado para combate de dinossauros
- * Implementa comportamentos táticos, memória de combate e percepção avançada
- */
-UCLASS(BlueprintType, Blueprintable)
+USTRUCT(BlueprintType)
+struct FCombat_TacticalMemory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    FVector LastKnownTargetLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    float TimeSinceLastSighting = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    int32 FailedAttackCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    bool bTargetEnteredCover = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    FVector FlankApproachVector = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    float AggressionLevel = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FCombat_PackSignal
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    FVector TargetLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    ECombat_TacticalState RequestedState = ECombat_TacticalState::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    float SignalStrength = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    bool bIsAlphaSignal = false;
+};
+
+// ============================================================
+// MAIN CLASS
+// ============================================================
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ADinosaurCombatAIController : public AAIController
 {
     GENERATED_BODY()
@@ -72,119 +148,115 @@ class TRANSPERSONALGAME_API ADinosaurCombatAIController : public AAIController
 public:
     ADinosaurCombatAIController();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
-    // Behavior Tree e Blackboard
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTree* BehaviorTree;
+    // ---- Species Configuration ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Species")
+    ECombat_DinoSpecies Species = ECombat_DinoSpecies::Velociraptor;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBlackboardAsset* BlackboardAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Species")
+    FCombat_SpeciesTraits SpeciesTraits;
 
-    // Componentes de Percepção
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    // ---- Tactical State ----
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
+    ECombat_TacticalState CurrentTacticalState = ECombat_TacticalState::Idle;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    class UAISenseConfig_Sight* SightConfig;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
+    ECombat_ThreatResponse ThreatResponse = ECombat_ThreatResponse::Ignore;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    class UAISenseConfig_Hearing* HearingConfig;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    FCombat_TacticalMemory TacticalMemory;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    class UAISenseConfig_Damage* DamageConfig;
+    // ---- Pack Coordination ----
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    bool bIsAlpha = false;
 
-    // Configurações de Combate
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackRange = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    TArray<ADinosaurCombatAIController*> PackMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float StalkingDistance = 800.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    FCombat_PackSignal LastPackSignal;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float FleeDistance = 1200.0f;
+    // ---- Target ----
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Target")
+    AActor* CurrentTarget = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float MemoryDuration = 30.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Target")
+    float DistanceToTarget = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    bool bIsAmbushPredator = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Target")
+    float TimeSinceLastAttack = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    bool bIsPackHunter = false;
+    // ---- Perception ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Perception")
+    UAIPerceptionComponent* AIPerception;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float TerritorialRadius = 1500.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Perception")
+    UAISenseConfig_Sight* SightConfig;
 
-    // Estado de Combate
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    EDinosaurCombatState CurrentCombatState = EDinosaurCombatState::Idle;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Perception")
+    UAISenseConfig_Hearing* HearingConfig;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    FCombatMemory CombatMemory;
+    // ---- Public API ----
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void SetSpecies(ECombat_DinoSpecies NewSpecies);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    TArray<AActor*> KnownThreats;
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void SetTacticalState(ECombat_TacticalState NewState);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    TArray<AActor*> PackMembers;
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void RegisterPackMember(ADinosaurCombatAIController* Member);
 
-public:
-    // Funções de Combate
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetCombatState(EDinosaurCombatState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void BroadcastPackSignal(FVector TargetLoc, ECombat_TacticalState RequestedState);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    EDinosaurThreatLevel EvaluateThreatLevel(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void ReceivePackSignal(const FCombat_PackSignal& Signal);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool CanSeeTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    float CalculateFlankAngle() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool IsInAttackRange(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    bool IsTargetInAttackRange() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    FVector GetOptimalAttackPosition(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    bool IsTargetInDetectionRange() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UpdateCombatMemory(AActor* Target, const FVector& LastSeenLocation);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void ExecuteAttack();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ForgetTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void Roar();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldFlee();
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    FVector GetFlankPosition(int32 FlankIndex, int32 TotalFlankers) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void AlertPackMembers(AActor* Threat);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void ApplySpeciesDefaults(ECombat_DinoSpecies InSpecies);
 
-    // Callbacks de Percepção
-    UFUNCTION()
-    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    ECombat_ThreatResponse EvaluateThreat(AActor* ThreatActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+    void NotifyNearbyNPCs(FVector ThreatLocation, float DangerRadius);
+
+protected:
+    void UpdateTacticalBehavior(float DeltaTime);
+    void UpdatePackCoordination(float DeltaTime);
+    void ScanForTargets();
+    void ExecuteFlankingManeuver();
+    void ExecuteAmbushTactics();
+    void UpdateTacticalMemory(float DeltaTime);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-protected:
-    // Funções internas
-    void InitializePerception();
-    void UpdateCombatLogic(float DeltaTime);
-    void ProcessThreatAssessment();
-    void ExecuteCombatBehavior();
-    
-    // Comportamentos específicos
-    void ExecuteHuntingBehavior();
-    void ExecuteStalkingBehavior();
-    void ExecuteAttackingBehavior();
-    void ExecuteFleeingBehavior();
-    void ExecuteTerritorialBehavior();
-    void ExecuteInvestigatingBehavior();
-
 private:
-    float LastPerceptionUpdate = 0.0f;
-    float PerceptionUpdateInterval = 0.1f;
-    
-    bool bIsInitialized = false;
+    float FlankAngleOffset = 0.0f;
+    float RoarCooldown = 0.0f;
+    float PackCoordinationTimer = 0.0f;
+    int32 FlankIndexInPack = 0;
 };
