@@ -2,35 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "AudioZoneSystem.generated.h"
-
-// ============================================================
-// Audio Zone System — Agent #16 Audio Agent
-// Prehistoric survival ambient audio zones for MinPlayableMap
-// ============================================================
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Campfire        UMETA(DisplayName = "Campfire"),
-    Wind            UMETA(DisplayName = "Wind"),
-    DinosaurRumble  UMETA(DisplayName = "Dinosaur Rumble"),
-    FootstepSurface UMETA(DisplayName = "Footstep Surface"),
-    RaptorPack      UMETA(DisplayName = "Raptor Pack"),
-    River           UMETA(DisplayName = "River"),
-    CaveEcho        UMETA(DisplayName = "Cave Echo")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_FootstepSurface : uint8
-{
-    Dirt    UMETA(DisplayName = "Dirt"),
-    Rock    UMETA(DisplayName = "Rock"),
-    Grass   UMETA(DisplayName = "Grass"),
-    Mud     UMETA(DisplayName = "Mud"),
-    Water   UMETA(DisplayName = "Water")
+    None            UMETA(DisplayName = "None"),
+    RaptorTension   UMETA(DisplayName = "Raptor Tension"),
+    HerdAmbient     UMETA(DisplayName = "Herd Ambient"),
+    ScoutStinger    UMETA(DisplayName = "Scout Stinger"),
+    CampfireLoop    UMETA(DisplayName = "Campfire Loop"),
+    DangerAlert     UMETA(DisplayName = "Danger Alert"),
+    SafeZone        UMETA(DisplayName = "Safe Zone")
 };
 
 USTRUCT(BlueprintType)
@@ -39,164 +24,89 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Wind;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float BlendRadius = 500.0f;
+    float TriggerRadius = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeInDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeOutDuration = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float MaxVolume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeInTime = 2.0f;
+    bool bOneShot = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeOutTime = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bLooping = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bSpatialBlend = true;
+    float CooldownSeconds = 30.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FAudio_FootstepEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    EAudio_FootstepSurface Surface = EAudio_FootstepSurface::Dirt;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float StepVelocity = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    bool bIsRunning = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    FVector StepLocation = FVector::ZeroVector;
-};
-
-// ============================================================
-// UAudio_ZoneComponent — attach to any actor for audio zone
-// ============================================================
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
+/**
+ * AAudio_ZoneActor — proximity-based audio zone that triggers ambient sounds,
+ * tension stingers, or looping ambience when the player enters its radius.
+ * Wires directly to ANarr_DialogueTrigger zones placed by Agent #15.
+ */
+UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneComponent();
+    AAudio_ZoneActor();
+
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float CurrentBlendWeight = 0.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
+              meta = (AllowPrivateAccess = "true"))
+    USphereComponent* TriggerSphere;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void SetBlendWeight(float Weight);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    float GetBlendWeight() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void FadeIn();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void FadeOut();
-
-    UFUNCTION(BlueprintPure, Category = "Audio Zone")
-    EAudio_ZoneType GetZoneType() const;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-private:
-    bool bFadingIn = false;
-    bool bFadingOut = false;
-};
-
-// ============================================================
-// AAudio_AmbientZoneActor — placeable ambient audio zone
-// ============================================================
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AmbientZoneActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_AmbientZoneActor();
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
-        meta = (AllowPrivateAccess = "true"))
-    USphereComponent* BlendSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
-        meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
+              meta = (AllowPrivateAccess = "true"))
     UAudioComponent* AudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAudio_ZoneComponent* ZoneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    FAudio_ZoneConfig ZoneConfig;
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetZoneType(EAudio_ZoneType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void OnPlayerEnterZone(AActor* OverlappingActor);
+    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
 
     UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void OnPlayerExitZone(AActor* OverlappingActor);
+    bool IsPlayerInside() const { return bPlayerInside; }
 
-    UFUNCTION(BlueprintPure, Category = "Audio Zone")
-    bool IsPlayerInZone() const;
+    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
+    void OnPlayerEnterZone(EAudio_ZoneType ZoneType);
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-private:
-    bool bPlayerInZone = false;
-    float BlendAlpha = 0.0f;
-};
-
-// ============================================================
-// UAudio_FootstepManager — tracks surface type under player
-// ============================================================
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_FootstepManager : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UAudio_FootstepManager();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float StepIntervalWalk = 0.55f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float StepIntervalRun = 0.30f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Footstep")
-    EAudio_FootstepSurface CurrentSurface = EAudio_FootstepSurface::Dirt;
-
-    UFUNCTION(BlueprintCallable, Category = "Footstep")
-    void TriggerFootstep(bool bRunning);
-
-    UFUNCTION(BlueprintCallable, Category = "Footstep")
-    EAudio_FootstepSurface DetectSurfaceUnderFoot();
-
-    UFUNCTION(BlueprintCallable, Category = "Footstep")
-    void SetCurrentSurface(EAudio_FootstepSurface NewSurface);
+    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
+    void OnPlayerExitZone(EAudio_ZoneType ZoneType);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION()
+    void HandleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                            UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                            bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void HandleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                          UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    void FadeInAudio();
+    void FadeOutAudio();
+    void ResetCooldown();
 
 private:
-    float StepTimer = 0.0f;
-    bool bIsMoving = false;
+    bool bPlayerInside = false;
+    bool bOnCooldown = false;
+    float CurrentVolume = 0.0f;
+
+    FTimerHandle FadeInHandle;
+    FTimerHandle FadeOutHandle;
+    FTimerHandle CooldownHandle;
 };
