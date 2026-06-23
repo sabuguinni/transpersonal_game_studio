@@ -1,295 +1,166 @@
 // BiomeManager.cpp
-// Engine Architect #02 — PROD_CYCLE_AUTO_20260623_001
-// Full implementation of the biome query, registration, and weather Markov chain.
+// Core Systems Programmer — Agent #3
+// P1 World Generation: Biome classification and terrain parameter management
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
 #include "DrawDebugHelpers.h"
-#include "Math/UnrealMathUtility.h"
 
-// ─── Constructor ──────────────────────────────────────────────────────────────
-
-ABiomeManager::ABiomeManager()
+UBiomeManager::UBiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f; // Check player biome every second
+    PrimaryComponentTick.bCanEverTick = false;
 
-    // Seed default biome regions so the map is never empty
-    // These are overwritten at BeginPlay by PCGWorldGenerator if present
-    FEng_BiomeRuntimeData Grassland;
-    Grassland.BiomeType = EBiomeType::Grassland;
-    Grassland.MoistureLevel = 0.6f;
-    Grassland.AmbientTemperature = 26.0f;
-    Grassland.VegetationDensity = 0.75f;
-    Grassland.BiomeBounds = FBox(FVector(-50000, -50000, -500), FVector(50000, 50000, 5000));
-    Grassland.AllowedSpecies = { EDinosaurSpecies::Triceratops, EDinosaurSpecies::Brachiosaurus, EDinosaurSpecies::Stegosaurus };
-    BiomeRegions.Add(Grassland);
+    // Default biome definitions — prehistoric world
+    FCore_BiomeDef Jungle;
+    Jungle.BiomeID = ECore_BiomeType::Jungle;
+    Jungle.DisplayName = FName("Jungle");
+    Jungle.BaseTemperature = 32.0f;
+    Jungle.Humidity = 0.9f;
+    Jungle.FoliageDensity = 1.0f;
+    Jungle.HeightMin = 0.0f;
+    Jungle.HeightMax = 400.0f;
+    Jungle.bAllowsDinosaurs = true;
+    BiomeDefs.Add(ECore_BiomeType::Jungle, Jungle);
+
+    FCore_BiomeDef Plains;
+    Plains.BiomeID = ECore_BiomeType::Plains;
+    Plains.DisplayName = FName("Plains");
+    Plains.BaseTemperature = 24.0f;
+    Plains.Humidity = 0.4f;
+    Plains.FoliageDensity = 0.3f;
+    Plains.HeightMin = 0.0f;
+    Plains.HeightMax = 200.0f;
+    Plains.bAllowsDinosaurs = true;
+    BiomeDefs.Add(ECore_BiomeType::Plains, Plains);
+
+    FCore_BiomeDef Swamp;
+    Swamp.BiomeID = ECore_BiomeType::Swamp;
+    Swamp.DisplayName = FName("Swamp");
+    Swamp.BaseTemperature = 28.0f;
+    Swamp.Humidity = 0.95f;
+    Swamp.FoliageDensity = 0.7f;
+    Swamp.HeightMin = -50.0f;
+    Swamp.HeightMax = 50.0f;
+    Swamp.bAllowsDinosaurs = true;
+    BiomeDefs.Add(ECore_BiomeType::Swamp, Swamp);
+
+    FCore_BiomeDef Volcanic;
+    Volcanic.BiomeID = ECore_BiomeType::Volcanic;
+    Volcanic.DisplayName = FName("Volcanic");
+    Volcanic.BaseTemperature = 55.0f;
+    Volcanic.Humidity = 0.1f;
+    Volcanic.FoliageDensity = 0.05f;
+    Volcanic.HeightMin = 200.0f;
+    Volcanic.HeightMax = 1200.0f;
+    Volcanic.bAllowsDinosaurs = false;
+    BiomeDefs.Add(ECore_BiomeType::Volcanic, Volcanic);
+
+    FCore_BiomeDef Coastal;
+    Coastal.BiomeID = ECore_BiomeType::Coastal;
+    Coastal.DisplayName = FName("Coastal");
+    Coastal.BaseTemperature = 22.0f;
+    Coastal.Humidity = 0.7f;
+    Coastal.FoliageDensity = 0.4f;
+    Coastal.HeightMin = -10.0f;
+    Coastal.HeightMax = 80.0f;
+    Coastal.bAllowsDinosaurs = true;
+    BiomeDefs.Add(ECore_BiomeType::Coastal, Coastal);
+
+    FCore_BiomeDef Forest;
+    Forest.BiomeID = ECore_BiomeType::Forest;
+    Forest.DisplayName = FName("Forest");
+    Forest.BaseTemperature = 18.0f;
+    Forest.Humidity = 0.6f;
+    Forest.FoliageDensity = 0.85f;
+    Forest.HeightMin = 50.0f;
+    Forest.HeightMax = 600.0f;
+    Forest.bAllowsDinosaurs = true;
+    BiomeDefs.Add(ECore_BiomeType::Forest, Forest);
 }
 
-// ─── BeginPlay ────────────────────────────────────────────────────────────────
-
-void ABiomeManager::BeginPlay()
+void UBiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: BeginPlay — %d biome regions registered"), BiomeRegions.Num());
-    UpdatePlayerBiome();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome definitions"), BiomeDefs.Num());
 }
 
-// ─── Tick ─────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::Tick(float DeltaTime)
+ECore_BiomeType UBiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
 {
-    Super::Tick(DeltaTime);
+    // Classify biome by height and noise-based humidity approximation
+    const float Height = WorldLocation.Z;
+    const float X = WorldLocation.X;
+    const float Y = WorldLocation.Y;
 
-    // Update player biome every tick (TickInterval=1s handles throttling)
-    UpdatePlayerBiome();
+    // Simple deterministic classification using position hash
+    // In full implementation this would sample a biome noise map
+    const float NoiseVal = FMath::Abs(FMath::Sin(X * 0.0003f) * FMath::Cos(Y * 0.0003f));
 
-    // Weather Markov chain
-    WeatherTickAccumulator += DeltaTime;
-    if (WeatherTickAccumulator >= WeatherTickInterval)
+    if (Height > 500.0f)
     {
-        WeatherTickAccumulator = 0.0f;
-        TickWeatherTransition();
+        return ECore_BiomeType::Volcanic;
     }
-
-    // Debug draw
-    if (bDrawBiomeBounds)
+    if (Height < 20.0f && NoiseVal > 0.7f)
     {
-        for (const FEng_BiomeRuntimeData& Region : BiomeRegions)
-        {
-            DrawDebugBox(GetWorld(), Region.BiomeBounds.GetCenter(),
-                Region.BiomeBounds.GetExtent(), FColor::Green, false, 1.1f, 0, 5.0f);
-        }
+        return ECore_BiomeType::Swamp;
     }
+    if (Height < 30.0f)
+    {
+        return ECore_BiomeType::Coastal;
+    }
+    if (NoiseVal > 0.6f)
+    {
+        return ECore_BiomeType::Jungle;
+    }
+    if (NoiseVal > 0.35f)
+    {
+        return ECore_BiomeType::Forest;
+    }
+    return ECore_BiomeType::Plains;
 }
 
-// ─── Biome Query API ─────────────────────────────────────────────────────────
-
-EBiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+FCore_BiomeDef UBiomeManager::GetBiomeDef(ECore_BiomeType BiomeType) const
 {
-    // Iterate regions — first match wins (most specific region should be registered last)
-    for (int32 i = BiomeRegions.Num() - 1; i >= 0; --i)
+    if (const FCore_BiomeDef* Found = BiomeDefs.Find(BiomeType))
     {
-        if (BiomeRegions[i].BiomeBounds.IsValid && BiomeRegions[i].BiomeBounds.IsInsideOrOn(WorldLocation))
-        {
-            return BiomeRegions[i].BiomeType;
-        }
+        return *Found;
     }
-    return EBiomeType::Grassland; // fallback
-}
-
-FEng_BiomeRuntimeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
-{
-    for (int32 i = BiomeRegions.Num() - 1; i >= 0; --i)
-    {
-        if (BiomeRegions[i].BiomeBounds.IsValid && BiomeRegions[i].BiomeBounds.IsInsideOrOn(WorldLocation))
-        {
-            return BiomeRegions[i];
-        }
-    }
-    // Return default grassland data
-    FEng_BiomeRuntimeData Default;
-    Default.BiomeType = EBiomeType::Grassland;
-    Default.CurrentWeather = ActiveWeather;
+    // Return default Plains if not found
+    FCore_BiomeDef Default;
+    Default.BiomeID = ECore_BiomeType::Plains;
+    Default.DisplayName = FName("Unknown");
+    Default.BaseTemperature = 20.0f;
+    Default.Humidity = 0.5f;
+    Default.FoliageDensity = 0.3f;
     return Default;
 }
 
-EBiomeType ABiomeManager::GetPlayerCurrentBiome() const
+float UBiomeManager::GetTemperatureAtLocation(FVector WorldLocation) const
 {
-    return CurrentPlayerBiome;
+    const ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FCore_BiomeDef Def = GetBiomeDef(Biome);
+
+    // Add altitude cooling: -6.5°C per 1000m
+    const float AltitudeCooling = FMath::Max(0.0f, WorldLocation.Z / 100.0f) * 0.65f;
+    return Def.BaseTemperature - AltitudeCooling;
 }
 
-EEng_WeatherState ABiomeManager::GetCurrentWeather() const
+float UBiomeManager::GetHumidityAtLocation(FVector WorldLocation) const
 {
-    return ActiveWeather;
+    const ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FCore_BiomeDef Def = GetBiomeDef(Biome);
+    return Def.Humidity;
 }
 
-float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+bool UBiomeManager::IsDinosaurHabitatAt(FVector WorldLocation) const
 {
-    FEng_BiomeRuntimeData Data = GetBiomeDataAtLocation(WorldLocation);
-    float Temp = Data.AmbientTemperature;
-
-    // Weather modifiers
-    switch (ActiveWeather)
-    {
-    case EEng_WeatherState::Rain:   Temp -= 5.0f;  break;
-    case EEng_WeatherState::Storm:  Temp -= 8.0f;  break;
-    case EEng_WeatherState::Fog:    Temp -= 3.0f;  break;
-    case EEng_WeatherState::Drought: Temp += 10.0f; break;
-    default: break;
-    }
-
-    // Altitude modifier: -6.5°C per 1000m (lapse rate)
-    const float AltitudeKm = FMath::Max(0.0f, WorldLocation.Z / 100000.0f);
-    Temp -= AltitudeKm * 6.5f;
-
-    return Temp;
+    const ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FCore_BiomeDef Def = GetBiomeDef(Biome);
+    return Def.bAllowsDinosaurs;
 }
 
-// ─── Biome Registration ───────────────────────────────────────────────────────
-
-void ABiomeManager::RegisterBiomeRegion(EBiomeType BiomeType, const FBox& Bounds,
-    float VegetationDensity, float MoistureLevel)
+TArray<ECore_BiomeType> UBiomeManager::GetAllBiomeTypes() const
 {
-    FEng_BiomeRuntimeData NewRegion;
-    NewRegion.BiomeType = BiomeType;
-    NewRegion.BiomeBounds = Bounds;
-    NewRegion.VegetationDensity = FMath::Clamp(VegetationDensity, 0.0f, 1.0f);
-    NewRegion.MoistureLevel = FMath::Clamp(MoistureLevel, 0.0f, 1.0f);
-    NewRegion.AmbientTemperature = GetBaseTemperatureForBiome(BiomeType);
-    NewRegion.CurrentWeather = ActiveWeather;
-
-    // Default allowed species per biome
-    switch (BiomeType)
-    {
-    case EBiomeType::Grassland:
-        NewRegion.AllowedSpecies = { EDinosaurSpecies::Triceratops, EDinosaurSpecies::Brachiosaurus, EDinosaurSpecies::Stegosaurus };
-        break;
-    case EBiomeType::Forest:
-        NewRegion.AllowedSpecies = { EDinosaurSpecies::Raptor, EDinosaurSpecies::Stegosaurus };
-        break;
-    case EBiomeType::Desert:
-        NewRegion.AllowedSpecies = { EDinosaurSpecies::TRex };
-        break;
-    case EBiomeType::Swamp:
-        NewRegion.AllowedSpecies = { EDinosaurSpecies::Brachiosaurus };
-        break;
-    default:
-        NewRegion.AllowedSpecies = { EDinosaurSpecies::Raptor };
-        break;
-    }
-
-    BiomeRegions.Add(NewRegion);
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome %d at bounds center %s"),
-        (int32)BiomeType, *Bounds.GetCenter().ToString());
-}
-
-void ABiomeManager::ClearAllBiomeRegions()
-{
-    BiomeRegions.Empty();
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: All biome regions cleared"));
-}
-
-// ─── Weather Control ──────────────────────────────────────────────────────────
-
-void ABiomeManager::ForceWeatherState(EEng_WeatherState NewWeather)
-{
-    if (NewWeather != ActiveWeather)
-    {
-        EEng_WeatherState Old = ActiveWeather;
-        ActiveWeather = NewWeather;
-        OnWeatherChanged.Broadcast(Old, NewWeather);
-        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather forced to %d"), (int32)NewWeather);
-    }
-}
-
-// ─── Debug ────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::PrintBiomeReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME MANAGER REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total regions: %d"), BiomeRegions.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Player biome: %d"), (int32)CurrentPlayerBiome);
-    UE_LOG(LogTemp, Warning, TEXT("Active weather: %d"), (int32)ActiveWeather);
-    for (const FEng_BiomeRuntimeData& R : BiomeRegions)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  Biome %d | Temp=%.1f°C | Moisture=%.2f | Veg=%.2f | Species=%d"),
-            (int32)R.BiomeType, R.AmbientTemperature, R.MoistureLevel,
-            R.VegetationDensity, R.AllowedSpecies.Num());
-    }
-}
-
-// ─── Private Helpers ──────────────────────────────────────────────────────────
-
-void ABiomeManager::UpdatePlayerBiome()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* Pawn = PC->GetPawn();
-    if (!Pawn) return;
-
-    EBiomeType NewBiome = GetBiomeAtLocation(Pawn->GetActorLocation());
-    if (NewBiome != CurrentPlayerBiome)
-    {
-        EBiomeType OldBiome = CurrentPlayerBiome;
-        CurrentPlayerBiome = NewBiome;
-        OnBiomeChanged.Broadcast(OldBiome, NewBiome);
-        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Player entered biome %d"), (int32)NewBiome);
-    }
-}
-
-void ABiomeManager::TickWeatherTransition()
-{
-    EEng_WeatherState NewWeather = AdvanceWeatherMarkov(ActiveWeather, CurrentPlayerBiome);
-    if (NewWeather != ActiveWeather)
-    {
-        EEng_WeatherState Old = ActiveWeather;
-        ActiveWeather = NewWeather;
-        OnWeatherChanged.Broadcast(Old, NewWeather);
-        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather transitioned %d -> %d"), (int32)Old, (int32)NewWeather);
-    }
-}
-
-EEng_WeatherState ABiomeManager::AdvanceWeatherMarkov(EEng_WeatherState Current, EBiomeType Biome) const
-{
-    // Simple Markov chain — transition probabilities differ per biome
-    const float Roll = FMath::FRand();
-
-    switch (Current)
-    {
-    case EEng_WeatherState::Clear:
-        // Swamp/Forest more likely to go overcast; Desert stays clear
-        if (Biome == EBiomeType::Swamp || Biome == EBiomeType::Forest)
-            return Roll < 0.30f ? EEng_WeatherState::Overcast : EEng_WeatherState::Clear;
-        if (Biome == EBiomeType::Desert)
-            return Roll < 0.05f ? EEng_WeatherState::Drought : EEng_WeatherState::Clear;
-        return Roll < 0.20f ? EEng_WeatherState::Overcast : EEng_WeatherState::Clear;
-
-    case EEng_WeatherState::Overcast:
-        if (Roll < 0.40f) return EEng_WeatherState::Rain;
-        if (Roll < 0.55f) return EEng_WeatherState::Clear;
-        return EEng_WeatherState::Overcast;
-
-    case EEng_WeatherState::Rain:
-        if (Roll < 0.20f) return EEng_WeatherState::Storm;
-        if (Roll < 0.45f) return EEng_WeatherState::Overcast;
-        return EEng_WeatherState::Rain;
-
-    case EEng_WeatherState::Storm:
-        if (Roll < 0.50f) return EEng_WeatherState::Rain;
-        if (Roll < 0.70f) return EEng_WeatherState::Overcast;
-        return EEng_WeatherState::Storm;
-
-    case EEng_WeatherState::Fog:
-        if (Roll < 0.60f) return EEng_WeatherState::Clear;
-        return EEng_WeatherState::Fog;
-
-    case EEng_WeatherState::Drought:
-        if (Roll < 0.15f) return EEng_WeatherState::Clear;
-        return EEng_WeatherState::Drought;
-
-    default:
-        return EEng_WeatherState::Clear;
-    }
-}
-
-float ABiomeManager::GetBaseTemperatureForBiome(EBiomeType Biome) const
-{
-    switch (Biome)
-    {
-    case EBiomeType::Grassland:  return 26.0f;
-    case EBiomeType::Forest:     return 22.0f;
-    case EBiomeType::Desert:     return 42.0f;
-    case EBiomeType::Swamp:      return 30.0f;
-    case EBiomeType::Tundra:     return  2.0f;
-    case EBiomeType::Volcanic:   return 55.0f;
-    case EBiomeType::Coastal:    return 24.0f;
-    default:                     return 25.0f;
-    }
+    TArray<ECore_BiomeType> Keys;
+    BiomeDefs.GetKeys(Keys);
+    return Keys;
 }
