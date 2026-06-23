@@ -1,92 +1,73 @@
-// PCGBiomeSystem.h
-// Agent #05 — Procedural World Generator
-// Biome classification and terrain generation system for Cretaceous world
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/StaticMeshActor.h"
+#include "SharedTypes.h"
 #include "PCGBiomeSystem.generated.h"
 
-// ── Biome Types ──────────────────────────────────────────────────────────────
+/**
+ * Biome types for the Cretaceous world.
+ * Each biome drives foliage density, ambient sound, survival modifiers.
+ */
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    JungleForest    UMETA(DisplayName = "Jungle Forest"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    RiverValley     UMETA(DisplayName = "River Valley"),
-    RockyBadlands   UMETA(DisplayName = "Rocky Badlands"),
-    VolcanicField   UMETA(DisplayName = "Volcanic Field"),
-    CoastalShore    UMETA(DisplayName = "Coastal Shore"),
-    FernMeadow      UMETA(DisplayName = "Fern Meadow")
+    Forest      UMETA(DisplayName = "Cretaceous Forest"),
+    Plains      UMETA(DisplayName = "Open Plains"),
+    Rocky       UMETA(DisplayName = "Rocky Highlands"),
+    Swamp       UMETA(DisplayName = "Swamp Lowlands"),
+    Volcanic    UMETA(DisplayName = "Volcanic Region"),
+    River       UMETA(DisplayName = "River Corridor"),
+    Unknown     UMETA(DisplayName = "Unknown")
 };
 
-// ── Biome Cell Data ──────────────────────────────────────────────────────────
+/**
+ * Per-biome configuration: survival modifiers, foliage density, ambient colour.
+ */
 USTRUCT(BlueprintType)
-struct FWorld_BiomeCell
+struct TRANSPERSONALGAME_API FWorld_BiomeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    FVector2D GridCoord = FVector2D::ZeroVector;
+    /** World-space centre of this biome zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector Centre = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float TerrainHeight = 0.0f;
+    /** Radius in cm where this biome is active */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 250000.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float VegetationDensity = 1.0f;
+    /** Temperature modifier applied to player survival stats (°C delta) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float TemperatureDelta = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float WaterLevel = -1000.0f;  // -1000 = no water
+    /** Humidity modifier — affects thirst drain rate (multiplier) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float HumidityMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    bool bHasRiver = false;
+    /** Foliage instances per 100m² cell — cap at 500 for 60fps */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foliage", meta = (ClampMin = "0", ClampMax = "500"))
+    int32 FoliageDensity = 200;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    bool bIsGenerated = false;
+    /** Ambient fog colour for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    FLinearColor FogTint = FLinearColor(0.5f, 0.6f, 0.5f, 1.f);
+
+    /** Dinosaur spawn weight multiplier for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    float DinoSpawnMultiplier = 1.0f;
 };
 
-// ── Terrain Generation Config ────────────────────────────────────────────────
-USTRUCT(BlueprintType)
-struct FWorld_TerrainConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    int32 GridRows = 9;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    int32 GridColumns = 9;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    float CellSize = 2000.0f;  // Unreal Units (20m)
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    float MaxHeightVariation = 1200.0f;  // UU
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    float RiverDepth = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    float RiverWidth = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    bool bGenerateRiver = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    bool bGenerateRockyBadlands = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
-    FVector WorldOrigin = FVector(-8000.0f, -8000.0f, 0.0f);
-};
-
-// ── PCG Biome System Actor ───────────────────────────────────────────────────
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome System"))
+/**
+ * APCGBiomeSystem — manages biome zones, queries player biome,
+ * and broadcasts biome-change events for audio/survival systems.
+ *
+ * Placed once in MinPlayableMap. World Partition cell size: 128m (matches shadow cascades).
+ */
+UCLASS(ClassGroup = "WorldGen", meta = (DisplayName = "PCG Biome System"))
 class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
     GENERATED_BODY()
@@ -94,53 +75,36 @@ class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 public:
     APCGBiomeSystem();
 
-    // ── Config ───────────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    FWorld_TerrainConfig TerrainConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    TArray<FWorld_BiomeCell> BiomeCells;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
-    bool bAutoGenerateOnBeginPlay = false;
-
-    // ── Generation ───────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void GenerateTerrain();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void ClearGeneratedTerrain();
-
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetTerrainHeightAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    bool IsLocationInRiver(FVector WorldLocation) const;
-
-    // ── Stats ────────────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    int32 GetGeneratedCellCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|PCG")
-    float GetHeightVariationRange() const;
-
-protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    /** All biome zones in this world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeConfig> BiomeConfigs;
+
+    /** Query which biome a world-space location falls into */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    /** Get the full config for a biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    bool GetBiomeConfig(EWorld_BiomeType BiomeType, FWorld_BiomeConfig& OutConfig) const;
+
+    /** Apply biome survival modifiers to the player (called on biome enter) */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void ApplyBiomeModifiers(EWorld_BiomeType NewBiome, AActor* PlayerActor);
+
+    /** Current biome the player is in */
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    EWorld_BiomeType CurrentPlayerBiome = EWorld_BiomeType::Unknown;
+
+    /** How often (seconds) to re-check player biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes", meta = (ClampMin = "0.5", ClampMax = "5.0"))
+    float BiomeCheckInterval = 1.0f;
 
 private:
-    // Height calculation using multi-octave sine waves
-    float CalculateTerrainHeight(float NormalizedX, float NormalizedY) const;
+    float TimeSinceLastBiomeCheck = 0.f;
 
-    // Biome classification from height + position
-    EWorld_BiomeType ClassifyBiome(float NormalizedX, float NormalizedY, float Height) const;
-
-    // Spawned terrain actors (tracked for cleanup)
-    UPROPERTY()
-    TArray<AActor*> SpawnedTerrainActors;
-
-    float CachedMinHeight = 0.0f;
-    float CachedMaxHeight = 0.0f;
+    void InitDefaultBiomes();
+    void CheckPlayerBiome();
 };
