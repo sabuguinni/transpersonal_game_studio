@@ -1,182 +1,367 @@
+// DialogueSystem.cpp
+// Narrative & Dialogue Agent #15
+// Prehistoric survival NPC dialogue — no spiritual content
+// All dialogue is practical: survival, danger, resources, territory
+
 #include "DialogueSystem.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Actor.h"
 
-// ============================================================
-// ANarr_DialogueTrigger — Constructor
-// ============================================================
-
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = false;
 
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(300.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
+    CurrentState = ENarr_DialogueState::Idle;
+    NPCRole = ENarr_NPCRole::Survivor;
+    InteractionRadius = 200.0f;
+    bIsInDialogue = false;
+    CurrentLineIndex = 0;
+    ActiveTree = nullptr;
 }
 
-void ANarr_DialogueTrigger::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
+    LoadDefaultDialogueForRole();
+}
 
-    // Update sphere radius from editable property
-    if (TriggerSphere)
+void UNarr_DialogueComponent::BeginDialogue(ENarr_DialogueState InitialState)
+{
+    if (bIsInDialogue)
     {
-        TriggerSphere->SetSphereRadius(TriggerRadius);
+        return;
     }
 
-    // Bind overlap event
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(
-        this,
-        [](UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-           bool bFromSweep, const FHitResult& SweepResult)
+    CurrentState = InitialState;
+    CurrentLineIndex = 0;
+    bIsInDialogue = true;
+    ActiveTree = FindTreeForState(InitialState);
+
+    if (!ActiveTree || ActiveTree->Lines.Num() == 0)
+    {
+        // No lines for this state — end immediately
+        bIsInDialogue = false;
+        ActiveTree = nullptr;
+    }
+}
+
+bool UNarr_DialogueComponent::AdvanceDialogue()
+{
+    if (!bIsInDialogue || !ActiveTree)
+    {
+        return false;
+    }
+
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= ActiveTree->Lines.Num())
+    {
+        // Reached end of tree
+        EndDialogue();
+        return false;
+    }
+
+    return true;
+}
+
+void UNarr_DialogueComponent::EndDialogue()
+{
+    bIsInDialogue = false;
+    CurrentLineIndex = 0;
+    ActiveTree = nullptr;
+    CurrentState = ENarr_DialogueState::Idle;
+}
+
+FString UNarr_DialogueComponent::GetCurrentLineText() const
+{
+    if (!ActiveTree || !bIsInDialogue)
+    {
+        return FString(TEXT(""));
+    }
+
+    if (CurrentLineIndex >= 0 && CurrentLineIndex < ActiveTree->Lines.Num())
+    {
+        return ActiveTree->Lines[CurrentLineIndex].LineText;
+    }
+
+    return FString(TEXT(""));
+}
+
+FString UNarr_DialogueComponent::GetCurrentSpeakerID() const
+{
+    if (!ActiveTree || !bIsInDialogue)
+    {
+        return FString(TEXT(""));
+    }
+
+    if (CurrentLineIndex >= 0 && CurrentLineIndex < ActiveTree->Lines.Num())
+    {
+        return ActiveTree->Lines[CurrentLineIndex].SpeakerID;
+    }
+
+    return FString(TEXT(""));
+}
+
+void UNarr_DialogueComponent::SetDialogueState(ENarr_DialogueState NewState)
+{
+    if (bIsInDialogue)
+    {
+        EndDialogue();
+    }
+
+    CurrentState = NewState;
+    BeginDialogue(NewState);
+}
+
+void UNarr_DialogueComponent::LoadDefaultDialogueForRole()
+{
+    DialogueTrees.Empty();
+
+    switch (NPCRole)
+    {
+        case ENarr_NPCRole::TribalElder:
+            BuildElderDialogue();
+            break;
+        case ENarr_NPCRole::ScoutHunter:
+            BuildScoutDialogue();
+            break;
+        case ENarr_NPCRole::Gatherer:
+            BuildGathererDialogue();
+            break;
+        default:
+            BuildScoutDialogue();
+            break;
+    }
+}
+
+FNarr_DialogueTree* UNarr_DialogueComponent::FindTreeForState(ENarr_DialogueState State)
+{
+    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    {
+        if (Tree.Lines.Num() > 0 && Tree.Lines[0].TriggerState == State)
         {
-            // Overlap handled via OnPlayerEnterTrigger
-        }
-    );
-}
-
-void ANarr_DialogueTrigger::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-}
-
-void ANarr_DialogueTrigger::OnPlayerEnterTrigger(AActor* OverlappingActor)
-{
-    if (!OverlappingActor)
-    {
-        return;
-    }
-
-    // Only fire for player character
-    ACharacter* Character = Cast<ACharacter>(OverlappingActor);
-    if (!Character)
-    {
-        return;
-    }
-
-    // Already triggered and not repeatable — skip
-    if (bTriggered && !DialogueSequence.bRepeatable)
-    {
-        return;
-    }
-
-    FireDialogue();
-}
-
-void ANarr_DialogueTrigger::FireDialogue()
-{
-    if (DialogueSequence.bHasPlayed && !DialogueSequence.bRepeatable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueTrigger [%s]: Sequence '%s' already played and is not repeatable."),
-            *GetActorLabel(), *DialogueSequence.SequenceID.ToString());
-        return;
-    }
-
-    bTriggered = true;
-    DialogueSequence.bHasPlayed = true;
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger [%s]: Firing sequence '%s' with %d lines. Speaker: %d"),
-        *GetActorLabel(),
-        *DialogueSequence.SequenceID.ToString(),
-        DialogueSequence.Lines.Num(),
-        (int32)SpeakerType);
-
-    // Log each line for debug (in full game, this would drive UI + audio)
-    for (int32 i = 0; i < DialogueSequence.Lines.Num(); ++i)
-    {
-        const FNarr_DialogueLine& Line = DialogueSequence.Lines[i];
-        UE_LOG(LogTemp, Log, TEXT("  [%d] %s: \"%s\" (pause=%.1fs)"),
-            i,
-            *Line.SpeakerID,
-            *Line.LineText,
-            Line.PauseDuration);
-    }
-}
-
-void ANarr_DialogueTrigger::ResetTrigger()
-{
-    bTriggered = false;
-    DialogueSequence.bHasPlayed = false;
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger [%s]: Reset — sequence '%s' can play again."),
-        *GetActorLabel(), *DialogueSequence.SequenceID.ToString());
-}
-
-// ============================================================
-// UNarr_DialogueManager
-// ============================================================
-
-UNarr_DialogueManager::UNarr_DialogueManager()
-{
-    // Default constructor — no world context needed at construction
-}
-
-void UNarr_DialogueManager::RegisterTrigger(ANarr_DialogueTrigger* Trigger)
-{
-    if (!Trigger)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Attempted to register null trigger."));
-        return;
-    }
-
-    if (!RegisteredTriggers.Contains(Trigger))
-    {
-        RegisteredTriggers.Add(Trigger);
-        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered trigger '%s'. Total: %d"),
-            *Trigger->GetActorLabel(), RegisteredTriggers.Num());
-    }
-}
-
-void UNarr_DialogueManager::UnregisterTrigger(ANarr_DialogueTrigger* Trigger)
-{
-    if (!Trigger)
-    {
-        return;
-    }
-
-    int32 Removed = RegisteredTriggers.Remove(Trigger);
-    if (Removed > 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Unregistered trigger '%s'. Total: %d"),
-            *Trigger->GetActorLabel(), RegisteredTriggers.Num());
-    }
-}
-
-TArray<ANarr_DialogueTrigger*> UNarr_DialogueManager::GetAllTriggers() const
-{
-    return RegisteredTriggers;
-}
-
-bool UNarr_DialogueManager::HasSequencePlayed(FName SequenceID) const
-{
-    return PlayedSequenceIDs.Contains(SequenceID);
-}
-
-void UNarr_DialogueManager::MarkSequencePlayed(FName SequenceID)
-{
-    PlayedSequenceIDs.Add(SequenceID);
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Marked sequence '%s' as played. Total played: %d"),
-        *SequenceID.ToString(), PlayedSequenceIDs.Num());
-}
-
-void UNarr_DialogueManager::ResetAllSequences()
-{
-    int32 Count = PlayedSequenceIDs.Num();
-    PlayedSequenceIDs.Empty();
-
-    // Reset all registered triggers too
-    for (ANarr_DialogueTrigger* Trigger : RegisteredTriggers)
-    {
-        if (Trigger)
-        {
-            Trigger->ResetTrigger();
+            return &Tree;
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Reset %d played sequences and %d triggers."),
-        Count, RegisteredTriggers.Num());
+    // Fallback: return first tree if available
+    if (DialogueTrees.Num() > 0)
+    {
+        return &DialogueTrees[0];
+    }
+
+    return nullptr;
+}
+
+void UNarr_DialogueComponent::BuildElderDialogue()
+{
+    // === GREETING TREE ===
+    {
+        FNarr_DialogueTree GreetTree;
+        GreetTree.TreeID = TEXT("Elder_Greeting");
+        GreetTree.NPCRole = ENarr_NPCRole::TribalElder;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("You are still alive. Good. The canyon took three hunters last season."),
+            ENarr_DialogueState::Greeting, 4.0f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("The great lizards move south when the rains come. We move with them — or we starve."),
+            ENarr_DialogueState::Greeting, 4.5f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("Bring me flint from the river bend. Sharp flint. Not the grey stone — the black stone."),
+            ENarr_DialogueState::Greeting, 4.0f));
+
+        DialogueTrees.Add(GreetTree);
+    }
+
+    // === WARNING TREE ===
+    {
+        FNarr_DialogueTree WarnTree;
+        WarnTree.TreeID = TEXT("Elder_Warning");
+        WarnTree.NPCRole = ENarr_NPCRole::TribalElder;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("Do not go east. The big one — the one with the small arms — it hunts there at night."),
+            ENarr_DialogueState::Warning, 4.5f));
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("I lost my brother to one of those. Thirty seasons ago. The ground shook before we heard it."),
+            ENarr_DialogueState::Warning, 5.0f));
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("If you must go east — go at midday. It rests in the shade then. Move fast. Stay downwind."),
+            ENarr_DialogueState::Warning, 5.0f));
+
+        DialogueTrees.Add(WarnTree);
+    }
+
+    // === QUEST GIVE TREE ===
+    {
+        FNarr_DialogueTree QuestTree;
+        QuestTree.TreeID = TEXT("Elder_QuestGive");
+        QuestTree.NPCRole = ENarr_NPCRole::TribalElder;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        QuestTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("The river is two days walk north. The herd crosses there — the long-necks."),
+            ENarr_DialogueState::QuestGive, 4.0f));
+
+        QuestTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("We need meat. Not lizard meat — the big herd meat. Enough for the cold season."),
+            ENarr_DialogueState::QuestGive, 4.5f));
+
+        QuestTree.Lines.Add(MakeLine(
+            TEXT("Elder"),
+            TEXT("Take the young one with you. He is fast. You are careful. Together you might survive."),
+            ENarr_DialogueState::QuestGive, 4.5f));
+
+        DialogueTrees.Add(QuestTree);
+    }
+}
+
+void UNarr_DialogueComponent::BuildScoutDialogue()
+{
+    // === GREETING TREE ===
+    {
+        FNarr_DialogueTree GreetTree;
+        GreetTree.TreeID = TEXT("Scout_Greeting");
+        GreetTree.NPCRole = ENarr_NPCRole::ScoutHunter;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("Three raptors. North ridge. Moving in a pack — they are hunting together."),
+            ENarr_DialogueState::Greeting, 4.0f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("I tracked them for half a day. They are not after us — there is a wounded long-neck near the falls."),
+            ENarr_DialogueState::Greeting, 5.0f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("When they finish — we can take what is left. But we need to be quick. And quiet."),
+            ENarr_DialogueState::Greeting, 4.5f));
+
+        DialogueTrees.Add(GreetTree);
+    }
+
+    // === WARNING TREE ===
+    {
+        FNarr_DialogueTree WarnTree;
+        WarnTree.TreeID = TEXT("Scout_Warning");
+        WarnTree.NPCRole = ENarr_NPCRole::ScoutHunter;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("Tracks. Fresh. Something big came through here last night."),
+            ENarr_DialogueState::Warning, 3.5f));
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("See how deep the print is? That is not a raptor. That is something much heavier."),
+            ENarr_DialogueState::Warning, 4.5f));
+
+        WarnTree.Lines.Add(MakeLine(
+            TEXT("Scout"),
+            TEXT("We go around. The long way. I am not dying today."),
+            ENarr_DialogueState::Warning, 3.5f));
+
+        DialogueTrees.Add(WarnTree);
+    }
+}
+
+void UNarr_DialogueComponent::BuildGathererDialogue()
+{
+    // === GREETING TREE ===
+    {
+        FNarr_DialogueTree GreetTree;
+        GreetTree.TreeID = TEXT("Gatherer_Greeting");
+        GreetTree.NPCRole = ENarr_NPCRole::Gatherer;
+
+        auto MakeLine = [](FString Speaker, FString Text, ENarr_DialogueState State, float Dur) -> FNarr_DialogueLine
+        {
+            FNarr_DialogueLine L;
+            L.SpeakerID = Speaker;
+            L.LineText = Text;
+            L.TriggerState = State;
+            L.DisplayDuration = Dur;
+            return L;
+        };
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Gatherer"),
+            TEXT("The berry bushes near the stream — they are ripe. But the ground is soft. Prints everywhere."),
+            ENarr_DialogueState::Greeting, 5.0f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Gatherer"),
+            TEXT("I filled half my bag before I heard it breathing. Did not look back. Just ran."),
+            ENarr_DialogueState::Greeting, 4.5f));
+
+        GreetTree.Lines.Add(MakeLine(
+            TEXT("Gatherer"),
+            TEXT("If you go — take a spear. And do not go alone."),
+            ENarr_DialogueState::Greeting, 3.5f));
+
+        DialogueTrees.Add(GreetTree);
+    }
 }
