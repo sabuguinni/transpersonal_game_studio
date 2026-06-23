@@ -4,24 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "NarrativeDialogueManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_NPCRole : uint8
-{
-    TribalElder     UMETA(DisplayName = "Tribal Elder"),
-    HunterScout     UMETA(DisplayName = "Hunter Scout"),
-    Forager         UMETA(DisplayName = "Forager"),
-    Ambient         UMETA(DisplayName = "Ambient")
-};
+// Narr_ prefix — unique across project per UE5 C++ rules
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
+enum class ENarr_DialogueTriggerType : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Greeting        UMETA(DisplayName = "Greeting"),
-    QuestAssign     UMETA(DisplayName = "Quest Assign"),
-    QuestComplete   UMETA(DisplayName = "Quest Complete"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Lore            UMETA(DisplayName = "Lore")
+    Camp        UMETA(DisplayName = "Camp Entrance"),
+    River       UMETA(DisplayName = "River Crossing"),
+    Predator    UMETA(DisplayName = "Predator Zone"),
+    Discovery   UMETA(DisplayName = "Discovery Point"),
+    Combat      UMETA(DisplayName = "Combat Zone")
 };
 
 USTRUCT(BlueprintType)
@@ -36,43 +28,48 @@ struct FNarr_DialogueLine
     FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState State;
+    float DisplayDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration;
+    ENarr_DialogueTriggerType TriggerContext;
 
     FNarr_DialogueLine()
         : SpeakerName(TEXT("Unknown"))
         , LineText(TEXT(""))
-        , State(ENarr_DialogueState::Idle)
-        , DisplayDuration(4.0f)
+        , DisplayDuration(3.0f)
+        , TriggerContext(ENarr_DialogueTriggerType::Camp)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_NPCDialogueSet
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCLabel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCRole Role;
+    FName SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 CurrentLineIndex;
+    bool bHasPlayed;
 
-    FNarr_NPCDialogueSet()
-        : NPCLabel(TEXT(""))
-        , Role(ENarr_NPCRole::Ambient)
-        , CurrentLineIndex(0)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueTriggerType TriggerType;
+
+    FNarr_DialogueSequence()
+        : SequenceID(NAME_None)
+        , bHasPlayed(false)
+        , TriggerType(ENarr_DialogueTriggerType::Camp)
     {}
 };
 
+/**
+ * ANarrativeDialogueManager
+ * Manages dialogue sequences, trigger zones, and narrative progression.
+ * Placed in MinPlayableMap — responds to player proximity triggers.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 {
@@ -81,53 +78,60 @@ class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 public:
     ANarrativeDialogueManager();
 
+protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
-    float ProximityTriggerRadius;
+    // --- Dialogue Data ---
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
-    float AmbientLineCooldown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueSequence> DialogueLibrary;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Data")
-    TArray<FNarr_NPCDialogueSet> NPCDialogueSets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
+    bool bDialogueActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    ENarr_DialogueState CurrentGlobalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
+    int32 CurrentLineIndex;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FString ActiveSpeaker;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
+    FName ActiveSequenceID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FString ActiveLineText;
+    // --- Survival Context ---
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void InitializeDialogueSets();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Survival")
+    float PlayerHungerThreshold;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetNextLine(const FString& NPCLabel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Survival")
+    float PlayerDangerRadius;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(const FString& NPCLabel, ENarr_DialogueState State);
+    // --- Methods ---
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceDialogue(const FString& NPCLabel);
+    void TriggerDialogueSequence(FName SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsPlayerNearNPC(const FString& NPCLabel, float Radius) const;
+    void AdvanceDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetAmbientLines() const;
+    void EndDialogue();
 
-    UFUNCTION(CallInEditor, Category = "Narrative|Debug")
-    void DebugPrintAllDialogue();
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetCurrentLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterTriggerZone(ENarr_DialogueTriggerType TriggerType, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void InitializeDefaultDialogues();
 
 private:
-    float AmbientCooldownTimer;
-    int32 AmbientLineIndex;
-
-    void SetupElderDialogue(FNarr_NPCDialogueSet& Set);
-    void SetupScoutDialogue(FNarr_NPCDialogueSet& Set);
-    void SetupForagerDialogue(FNarr_NPCDialogueSet& Set);
+    FNarr_DialogueSequence* FindSequenceByID(FName SequenceID);
+    void BuildCampDialogue();
+    void BuildRiverDialogue();
+    void BuildPredatorDialogue();
 };
