@@ -1,143 +1,254 @@
+// AudioZoneSystem.cpp
+// Audio Agent #16 — PROD_CYCLE_AUTO_20260623_003
+// Proximity-based ambient audio zone system for prehistoric survival game.
+// Zones crossfade ambient loops as the player moves through the world.
+// Creature vocalisations fire at random intervals when player is inside zone.
+
 #include "AudioZoneSystem.h"
 #include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
-#include "GameFramework/Character.h"
-#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
 
-AAudio_ZoneActor::AAudio_ZoneActor()
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
+AAudio_AmbientZone::AAudio_AmbientZone()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
+    // Root trigger sphere — radius set from ZoneConfig in BeginPlay
     TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(600.0f);
+    TriggerSphere->SetSphereRadius(800.0f);
     TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    TriggerSphere->SetGenerateOverlapEvents(true);
     RootComponent = TriggerSphere;
 
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
-    AudioComponent->SetupAttachment(RootComponent);
-    AudioComponent->bAutoActivate = false;
-    AudioComponent->VolumeMultiplier = 0.0f;
+    // Audio component — starts silent, volume driven by distance
+    AudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComp"));
+    AudioComp->SetupAttachment(RootComponent);
+    AudioComp->bAutoActivate = false;
+    AudioComp->VolumeMultiplier = 0.0f;
+
+    // Seed default Freesound references for the campfire zone
+    FAudio_SoundReference CampfireRef;
+    CampfireRef.FreesoundID = 856943;
+    CampfireRef.Description = TEXT("Campfire with forest birds — crackling wood, natural ambience");
+    CampfireRef.PreviewURL = TEXT("https://cdn.freesound.org/previews/856/856943_12846320-hq.mp3");
+    CampfireRef.Duration = 60.0f;
+    SoundReferences.Add(CampfireRef);
+
+    FAudio_SoundReference CampfireRef2;
+    CampfireRef2.FreesoundID = 729396;
+    CampfireRef2.Description = TEXT("Campfire 02 — close perspective crackling loop");
+    CampfireRef2.PreviewURL = TEXT("https://cdn.freesound.org/previews/729/729396_12863902-hq.mp3");
+    CampfireRef2.Duration = 267.0f;
+    SoundReferences.Add(CampfireRef2);
 }
 
-void AAudio_ZoneActor::BeginPlay()
+// ─────────────────────────────────────────────────────────────────────────────
+// BeginPlay
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Apply config radius to sphere
+    // Apply zone config radius to sphere
     if (TriggerSphere)
     {
-        TriggerSphere->SetSphereRadius(ZoneConfig.TriggerRadius);
-        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::HandleBeginOverlap);
-        TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::HandleEndOverlap);
+        TriggerSphere->SetSphereRadius(ZoneConfig.FadeRadius);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] BeginPlay — ZoneType=%d Radius=%.0f"),
-           *GetActorLabel(), (int32)ZoneConfig.ZoneType, ZoneConfig.TriggerRadius);
+    // Bind overlap events
+    if (TriggerSphere)
+    {
+        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_AmbientZone::OnSphereBeginOverlap);
+        TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_AmbientZone::OnSphereEndOverlap);
+    }
+
+    // Assign sound to audio component if set
+    if (AudioComp && AmbientSound)
+    {
+        AudioComp->SetSound(AmbientSound);
+    }
+
+    // Schedule first vocalisation
+    if (ZoneConfig.bPlayCreatureVocalisations)
+    {
+        ScheduleNextVocalisation();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] BeginPlay — Type=%d DangerLevel=%d FadeRadius=%.0f"),
+        *GetActorLabel(),
+        (int32)ZoneConfig.ZoneType,
+        (int32)ZoneConfig.DangerLevel,
+        ZoneConfig.FadeRadius);
 }
 
-void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+// ─────────────────────────────────────────────────────────────────────────────
+// EndPlay
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    GetWorldTimerManager().ClearTimer(FadeInHandle);
-    GetWorldTimerManager().ClearTimer(FadeOutHandle);
-    GetWorldTimerManager().ClearTimer(CooldownHandle);
-
+    if (AudioComp && AudioComp->IsPlaying())
+    {
+        AudioComp->Stop();
+    }
     Super::EndPlay(EndPlayReason);
 }
 
-void AAudio_ZoneActor::HandleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-                                           bool bFromSweep, const FHitResult& SweepResult)
+// ─────────────────────────────────────────────────────────────────────────────
+// Tick — volume fade by distance + vocalisation timer
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::Tick(float DeltaTime)
 {
-    if (!OtherActor) return;
+    Super::Tick(DeltaTime);
 
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-    if (bOnCooldown) return;
+    if (bPlayerInZone)
+    {
+        UpdateVolumeByDistance(DeltaTime);
 
-    bPlayerInside = true;
-    FadeInAudio();
-    OnPlayerEnterZone(ZoneConfig.ZoneType);
-
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] Player ENTERED — ZoneType=%d"),
-           *GetActorLabel(), (int32)ZoneConfig.ZoneType);
+        // Creature vocalisation timer
+        if (ZoneConfig.bPlayCreatureVocalisations && CreatureVocalisationSound)
+        {
+            VocalisationTimer += DeltaTime;
+            if (VocalisationTimer >= NextVocalisationTime)
+            {
+                UGameplayStatics::PlaySoundAtLocation(this, CreatureVocalisationSound, GetActorLocation());
+                UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — creature vocalisation fired"), *GetActorLabel());
+                ScheduleNextVocalisation();
+            }
+        }
+    }
 }
 
-void AAudio_ZoneActor::HandleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                         UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+// ─────────────────────────────────────────────────────────────────────────────
+// OnSphereBeginOverlap
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
 {
     if (!OtherActor) return;
 
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return;
 
-    bPlayerInside = false;
-    FadeOutAudio();
-    OnPlayerExitZone(ZoneConfig.ZoneType);
+    APawn* PlayerPawn = PC->GetPawn();
+    if (OtherActor != PlayerPawn) return;
 
-    if (ZoneConfig.bOneShot)
+    bPlayerInZone = true;
+    VocalisationTimer = 0.0f;
+
+    if (AudioComp && AmbientSound && !AudioComp->IsPlaying())
     {
-        bOnCooldown = true;
-        GetWorldTimerManager().SetTimer(CooldownHandle, this,
-            &AAudio_ZoneActor::ResetCooldown, ZoneConfig.CooldownSeconds, false);
+        AudioComp->Play();
     }
 
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] Player EXITED — ZoneType=%d"),
-           *GetActorLabel(), (int32)ZoneConfig.ZoneType);
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — player ENTERED (DangerLevel=%d)"),
+        *GetActorLabel(), (int32)ZoneConfig.DangerLevel);
 }
 
-void AAudio_ZoneActor::FadeInAudio()
+// ─────────────────────────────────────────────────────────────────────────────
+// OnSphereEndOverlap
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    if (!AudioComponent) return;
+    if (!OtherActor) return;
 
-    AudioComponent->Play();
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return;
 
-    // Ramp volume from 0 to MaxVolume over FadeInDuration using timer ticks
-    const float TickRate = 0.05f;
-    const float Steps = ZoneConfig.FadeInDuration / TickRate;
-    const float VolumeStep = ZoneConfig.MaxVolume / FMath::Max(Steps, 1.0f);
+    APawn* PlayerPawn = PC->GetPawn();
+    if (OtherActor != PlayerPawn) return;
 
-    // Simple immediate set for now — Blueprint can override with curve
-    AudioComponent->SetVolumeMultiplier(ZoneConfig.MaxVolume);
+    bPlayerInZone = false;
 
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] FadeIn — TargetVolume=%.2f Duration=%.1fs"),
-           *GetActorLabel(), ZoneConfig.MaxVolume, ZoneConfig.FadeInDuration);
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — player EXITED"), *GetActorLabel());
 }
 
-void AAudio_ZoneActor::FadeOutAudio()
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateVolumeByDistance — linear fade between FullVolumeRadius and FadeRadius
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::UpdateVolumeByDistance(float DeltaTime)
 {
-    if (!AudioComponent) return;
+    float Dist = GetDistanceToPlayer();
+    float TargetVolume = 0.0f;
 
-    AudioComponent->FadeOut(ZoneConfig.FadeOutDuration, 0.0f);
+    if (Dist <= ZoneConfig.FullVolumeRadius)
+    {
+        TargetVolume = ZoneConfig.VolumeMultiplier;
+    }
+    else if (Dist < ZoneConfig.FadeRadius)
+    {
+        float Alpha = 1.0f - ((Dist - ZoneConfig.FullVolumeRadius) /
+                              (ZoneConfig.FadeRadius - ZoneConfig.FullVolumeRadius));
+        TargetVolume = Alpha * ZoneConfig.VolumeMultiplier;
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] FadeOut — Duration=%.1fs"),
-           *GetActorLabel(), ZoneConfig.FadeOutDuration);
+    // Smooth blend toward target volume
+    float BlendSpeed = (ZoneConfig.BlendTime > 0.0f) ? (1.0f / ZoneConfig.BlendTime) : 10.0f;
+    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, BlendSpeed);
+
+    if (AudioComp)
+    {
+        AudioComp->SetVolumeMultiplier(CurrentVolume);
+    }
 }
 
-void AAudio_ZoneActor::ResetCooldown()
+// ─────────────────────────────────────────────────────────────────────────────
+// GetDistanceToPlayer
+// ─────────────────────────────────────────────────────────────────────────────
+float AAudio_AmbientZone::GetDistanceToPlayer() const
 {
-    bOnCooldown = false;
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] Cooldown reset — zone active again"),
-           *GetActorLabel());
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return TNumericLimits<float>::Max();
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return TNumericLimits<float>::Max();
+
+    return FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
 }
 
-void AAudio_ZoneActor::SetZoneType(EAudio_ZoneType NewType)
+// ─────────────────────────────────────────────────────────────────────────────
+// SetZoneActive
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::SetZoneActive(bool bActive)
 {
-    ZoneConfig.ZoneType = NewType;
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor [%s] ZoneType set to %d"),
-           *GetActorLabel(), (int32)NewType);
+    if (TriggerSphere)
+    {
+        TriggerSphere->SetGenerateOverlapEvents(bActive);
+    }
+    if (!bActive && AudioComp && AudioComp->IsPlaying())
+    {
+        AudioComp->Stop();
+        bPlayerInZone = false;
+        CurrentVolume = 0.0f;
+    }
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — SetZoneActive=%d"), *GetActorLabel(), (int32)bActive);
 }
 
-void AAudio_ZoneActor::OnPlayerEnterZone_Implementation(EAudio_ZoneType ZoneType)
+// ─────────────────────────────────────────────────────────────────────────────
+// GetDangerLevel
+// ─────────────────────────────────────────────────────────────────────────────
+EAudio_DangerLevel AAudio_AmbientZone::GetDangerLevel() const
 {
-    // Blueprint override hook — log zone entry with type for debugging
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor OnPlayerEnterZone — ZoneType=%d (Blueprint can override)"),
-           (int32)ZoneType);
+    return ZoneConfig.DangerLevel;
 }
 
-void AAudio_ZoneActor::OnPlayerExitZone_Implementation(EAudio_ZoneType ZoneType)
+// ─────────────────────────────────────────────────────────────────────────────
+// ScheduleNextVocalisation
+// ─────────────────────────────────────────────────────────────────────────────
+void AAudio_AmbientZone::ScheduleNextVocalisation()
 {
-    // Blueprint override hook — log zone exit
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor OnPlayerExitZone — ZoneType=%d (Blueprint can override)"),
-           (int32)ZoneType);
+    VocalisationTimer = 0.0f;
+    NextVocalisationTime = FMath::FRandRange(
+        ZoneConfig.VocalisationIntervalMin,
+        ZoneConfig.VocalisationIntervalMax);
+    UE_LOG(LogTemp, Verbose, TEXT("AudioZone [%s] — next vocalisation in %.1fs"),
+        *GetActorLabel(), NextVocalisationTime);
 }
