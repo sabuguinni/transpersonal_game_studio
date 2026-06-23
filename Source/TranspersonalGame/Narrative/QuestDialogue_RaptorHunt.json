@@ -1,0 +1,84 @@
+{
+  "quest_id": "QUEST_RAPTOR_HUNT_01",
+  "quest_title": "The Pack That Circles",
+  "npc_speaker": "TribalElder_Kara",
+  "dialogue_lines": {
+    "quest_intro": [
+      {
+        "line_id": "RH_INTRO_01",
+        "speaker": "TribalElder_Kara",
+        "text": "Three raptors. Moving fast. They circle before they strike — always from the flanks. Get to the rocks before they cut you off.",
+        "emotion": "urgent",
+        "trigger": "player_enters_dialogue_zone",
+        "voice_cue": "low_urgent_whisper"
+      },
+      {
+        "line_id": "RH_INTRO_02",
+        "speaker": "TribalElder_Kara",
+        "text": "They have been watching the camp for two days. The young one — the smallest — it scouts first. Kill the scout and the pack hesitates.",
+        "emotion": "tactical",
+        "trigger": "after_RH_INTRO_01",
+        "voice_cue": "calm_instructional"
+      },
+      {
+        "line_id": "RH_INTRO_03",
+        "speaker": "TribalElder_Kara",
+        "text": "If you survive this, you will know how they hunt. And you will never be prey again.",
+        "emotion": "grave",
+        "trigger": "after_RH_INTRO_02",
+        "voice_cue": "slow_deliberate"
+      }
+    ],
+    "objective_progress": [
+      {
+        "line_id": "RH_PROG_01",
+        "speaker": "TribalElder_Kara",
+        "text": "One down. Two still moving. Listen — they call to each other with clicks. When the clicking stops, they are about to charge.",
+        "emotion": "tense",
+        "trigger": "objective_1_complete",
+        "voice_cue": "breathless_warning"
+      },
+      {
+        "line_id": "RH_PROG_02",
+        "speaker": "TribalElder_Kara",
+        "text": "Two down. The last one will run. Let it. A raptor that runs carries the memory of fear back to its kind.",
+        "emotion": "measured",
+        "trigger": "objective_2_complete",
+        "voice_cue": "calm_decisive"
+      }
+    ],
+    "quest_complete": [
+      {
+        "line_id": "RH_COMP_01",
+        "speaker": "TribalElder_Kara",
+        "text": "You watched how they moved. You used the terrain. That is not luck — that is the beginning of a hunter.",
+        "emotion": "approval",
+        "trigger": "quest_completed",
+        "voice_cue": "quiet_respect"
+      },
+      {
+        "line_id": "RH_COMP_02",
+        "speaker": "TribalElder_Kara",
+        "text": "The pack will not return to this ground for many seasons. You have bought the camp time. Use it.",
+        "emotion": "pragmatic",
+        "trigger": "after_RH_COMP_01",
+        "voice_cue": "firm_dismissal"
+      }
+    ],
+    "quest_failed": [
+      {
+        "line_id": "RH_FAIL_01",
+        "speaker": "TribalElder_Kara",
+        "text": "You ran. I do not blame you — running is survival. But the pack knows this ground now. We must move camp before nightfall.",
+        "emotion": "resigned",
+        "trigger": "quest_failed",
+        "voice_cue": "flat_tired"
+      }
+    ]
+  },
+  "lore_context": {
+    "raptor_pack_behavior": "This pack of three is a juvenile hunting group — not yet integrated into a larger family unit. Juvenile packs are more aggressive and less predictable than adult groups. They test territory boundaries constantly.",
+    "why_this_matters": "Understanding raptor flanking patterns is a survival skill. Players who complete this quest unlock the 'Predator Awareness' knowledge — raptors are highlighted on the edge of screen when within 40m.",
+    "ecological_note": "Raptors in this region hunt at dawn and dusk. Midday heat forces them into shade. This is the player's safest window for travel through raptor territory."
+  }
+}
