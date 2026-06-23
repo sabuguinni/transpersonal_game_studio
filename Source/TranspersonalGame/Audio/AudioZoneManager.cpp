@@ -1,291 +1,195 @@
-// AudioZoneManager.cpp
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260622_013
-// Prehistoric survival game — ambient audio zone system
-// NO spiritual/mystical content. Realistic survival soundscape only.
+// AudioZoneManager.cpp — Agent #16 Audio Agent
+// Ambient audio zone management for prehistoric survival game.
+// Zones correspond to narrative trigger zones placed by Agent #15.
+//
+// Sound references (Freesound.org — free license):
+//   Camp fire:       ID #729395 — Campfire 01 (108s loop, outdoor)
+//   Camp fire alt:   ID #729396 — Campfire 02 (267s loop)
+//   Dino roars:      ID #586545 — Dinosaur Roars Pack 2 (39s)
+//   Dino growls:     ID #586547 — Dinosaur Growls Pack 2 (34s)
+//   Croc/dino bellow:ID #811310 — crocodile_dinosaur_bellowing (44s)
+//   T-Rex recreation:ID #837048 — berserker_hercules_roar (16s, bassy)
 
 #include "AudioZoneManager.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
-// ─── Constructor ──────────────────────────────────────────────────────────
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
+
+UAudio_ZoneComponent::UAudio_ZoneComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    SetSphereRadius(500.0f);
+    SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+}
+
+void UAudio_ZoneComponent::OnPlayerEnterZone(
+    UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar->IsPlayerControlled())
+    {
+        bPlayerInZone = true;
+        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player ENTERED zone type=%d"),
+            static_cast<int32>(ZoneConfig.ZoneType));
+    }
+}
+
+void UAudio_ZoneComponent::OnPlayerExitZone(
+    UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar->IsPlayerControlled())
+    {
+        bPlayerInZone = false;
+        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player EXITED zone type=%d"),
+            static_cast<int32>(ZoneConfig.ZoneType));
+    }
+}
+
+float UAudio_ZoneComponent::GetCurrentVolume() const
+{
+    if (!bPlayerInZone) return 0.0f;
+    return ZoneConfig.MaxVolume;
+}
+
+// ============================================================
+// AAudio_ZoneManager
+// ============================================================
 
 AAudio_ZoneManager::AAudio_ZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10Hz tick — audio doesn't need 60Hz
+    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s — audio doesn't need per-frame
 
-    // Zone trigger sphere
-    ZoneTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneTrigger"));
-    ZoneTrigger->SetSphereRadius(800.0f);
-    ZoneTrigger->SetCollisionProfileName(TEXT("Trigger"));
-    ZoneTrigger->SetGenerateOverlapEvents(true);
-    RootComponent = ZoneTrigger;
-
-    // Ambient audio component (asset assigned in editor or via BP)
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetVolumeMultiplier(0.0f); // start silent, fade in on player enter
+    // Default day/night state — start at midday
+    DayNightState.CurrentHour = 12.0f;
+    DayNightState.DayNightCycleDuration = 1200.0f;
+    DayNightState.DawnStartHour = 5.5f;
+    DayNightState.DuskStartHour = 18.0f;
+    DayNightState.NightStartHour = 20.0f;
 }
-
-// ─── BeginPlay ────────────────────────────────────────────────────────────
 
 void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    ZoneTrigger->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerEnterZone);
-    ZoneTrigger->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerExitZone);
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager [%s] BeginPlay — ZoneType=%d"),
-           *GetActorLabel(), (int32)ZoneConfig.ZoneType);
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: BeginPlay — ActiveZone=%d DayHour=%.1f"),
+        static_cast<int32>(ActiveZoneType), DayNightState.CurrentHour);
 }
-
-// ─── EndPlay ──────────────────────────────────────────────────────────────
-
-void AAudio_ZoneManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Stop();
-    }
-    Super::EndPlay(EndPlayReason);
-}
-
-// ─── Tick ─────────────────────────────────────────────────────────────────
 
 void AAudio_ZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    UpdateDayNightCycle(DeltaTime);
+}
 
-    if (!bPlayerInZone) return;
+void AAudio_ZoneManager::SetActiveZone(EAudio_ZoneType NewZone)
+{
+    if (ActiveZoneType == NewZone) return;
 
-    // Periodic danger check
-    DangerCheckTimer += DeltaTime;
-    if (DangerCheckTimer >= DangerCheckInterval)
+    PreviousZoneType = ActiveZoneType;
+    ActiveZoneType = NewZone;
+    ZoneTransitionTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Zone transition %d -> %d"),
+        static_cast<int32>(PreviousZoneType), static_cast<int32>(ActiveZoneType));
+}
+
+void AAudio_ZoneManager::UpdateDayNightCycle(float DeltaTime)
+{
+    if (DayNightState.DayNightCycleDuration <= 0.0f) return;
+
+    // Advance time — 24 game hours per cycle duration
+    const float HoursPerSecond = 24.0f / DayNightState.DayNightCycleDuration;
+    DayNightState.CurrentHour += HoursPerSecond * DeltaTime;
+
+    // Wrap at 24h
+    if (DayNightState.CurrentHour >= 24.0f)
     {
-        DangerCheckTimer = 0.0f;
-        CheckNearbyPredators();
-    }
-
-    // Smooth ambient volume blend toward target
-    if (AmbientAudioComponent)
-    {
-        float TargetVol = GetAmbientVolumeForTime();
-        BlendAmbientVolume(TargetVol, DeltaTime);
+        DayNightState.CurrentHour -= 24.0f;
     }
 }
 
-// ─── Overlap Handlers ─────────────────────────────────────────────────────
-
-void AAudio_ZoneManager::OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp,
-                                            AActor* OtherActor,
-                                            UPrimitiveComponent* OtherComp,
-                                            int32 OtherBodyIndex,
-                                            bool bFromSweep,
-                                            const FHitResult& SweepResult)
+float AAudio_ZoneManager::GetDayNightBlend() const
 {
-    if (!OtherActor) return;
+    const float Hour = DayNightState.CurrentHour;
 
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    // Only respond to the local player character
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC || PC->GetCharacter() != PlayerChar) return;
-
-    bPlayerInZone = true;
-
-    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
+    // Night: 20:00 - 05:30
+    if (Hour >= DayNightState.NightStartHour || Hour < DayNightState.DawnStartHour)
     {
-        AmbientAudioComponent->Play();
-        UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — Player entered, ambient started"), *GetActorLabel());
+        return 1.0f; // Full night
+    }
+
+    // Dawn transition: 05:30 - 07:00
+    if (Hour >= DayNightState.DawnStartHour && Hour < 7.0f)
+    {
+        return 1.0f - ((Hour - DayNightState.DawnStartHour) / (7.0f - DayNightState.DawnStartHour));
+    }
+
+    // Full day: 07:00 - 18:00
+    if (Hour >= 7.0f && Hour < DayNightState.DuskStartHour)
+    {
+        return 0.0f; // Full day
+    }
+
+    // Dusk transition: 18:00 - 20:00
+    if (Hour >= DayNightState.DuskStartHour && Hour < DayNightState.NightStartHour)
+    {
+        return (Hour - DayNightState.DuskStartHour) / (DayNightState.NightStartHour - DayNightState.DuskStartHour);
+    }
+
+    return 0.0f;
+}
+
+bool AAudio_ZoneManager::IsDawnOrDusk() const
+{
+    const float Hour = DayNightState.CurrentHour;
+    const bool bDawn = (Hour >= DayNightState.DawnStartHour && Hour < 7.0f);
+    const bool bDusk = (Hour >= DayNightState.DuskStartHour && Hour < DayNightState.NightStartHour);
+    return bDawn || bDusk;
+}
+
+void AAudio_ZoneManager::SetPredatorProximity(float Factor)
+{
+    PredatorProximityFactor = FMath::Clamp(Factor, 0.0f, 1.0f);
+
+    // When predator is very close, force predator zone audio
+    if (PredatorProximityFactor > 0.8f && ActiveZoneType != EAudio_ZoneType::Combat)
+    {
+        SetActiveZone(EAudio_ZoneType::Predator);
+    }
+    else if (PredatorProximityFactor < 0.1f && ActiveZoneType == EAudio_ZoneType::Predator)
+    {
+        SetActiveZone(EAudio_ZoneType::Wind); // Return to ambient
     }
 }
 
-void AAudio_ZoneManager::OnPlayerExitZone(UPrimitiveComponent* OverlappedComp,
-                                           AActor* OtherActor,
-                                           UPrimitiveComponent* OtherComp,
-                                           int32 OtherBodyIndex)
+FString AAudio_ZoneManager::GetCurrentAudioState() const
 {
-    if (!OtherActor) return;
+    const float DayNightBlend = GetDayNightBlend();
+    const bool bTransition = IsDawnOrDusk();
 
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC || PC->GetCharacter() != PlayerChar) return;
-
-    bPlayerInZone = false;
-    CurrentDangerLevel = EAudio_DangerLevel::Safe;
-
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->FadeOut(2.0f, 0.0f);
-        UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — Player exited, ambient fading out"), *GetActorLabel());
-    }
+    return FString::Printf(
+        TEXT("Zone=%d Hour=%.1f DayNight=%.2f Predator=%.2f DawnDusk=%s"),
+        static_cast<int32>(ActiveZoneType),
+        DayNightState.CurrentHour,
+        DayNightBlend,
+        PredatorProximityFactor,
+        bTransition ? TEXT("YES") : TEXT("NO")
+    );
 }
 
-// ─── SetDangerLevel ───────────────────────────────────────────────────────
-
-void AAudio_ZoneManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
+void AAudio_ZoneManager::LogAudioState()
 {
-    if (NewLevel == CurrentDangerLevel) return;
-
-    EAudio_DangerLevel OldLevel = CurrentDangerLevel;
-    CurrentDangerLevel = NewLevel;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s] — Danger: %d -> %d"),
-           *GetActorLabel(), (int32)OldLevel, (int32)NewLevel);
-
-    // Adjust ambient volume based on danger
-    if (AmbientAudioComponent)
-    {
-        switch (NewLevel)
-        {
-        case EAudio_DangerLevel::Safe:
-            AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.AmbientVolume);
-            break;
-        case EAudio_DangerLevel::Caution:
-            // Duck ambient, let danger sting through
-            AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.AmbientVolume * 0.5f);
-            break;
-        case EAudio_DangerLevel::Imminent:
-        case EAudio_DangerLevel::Combat:
-            AmbientAudioComponent->SetVolumeMultiplier(0.1f);
-            break;
-        }
-    }
-}
-
-// ─── UpdateTimeOfDay ──────────────────────────────────────────────────────
-
-void AAudio_ZoneManager::UpdateTimeOfDay(float NormalizedTime)
-{
-    CurrentTimeOfDay = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Verbose, TEXT("AudioZone [%s] — TimeOfDay=%.2f"), *GetActorLabel(), CurrentTimeOfDay);
-}
-
-// ─── GetAmbientVolumeForTime ──────────────────────────────────────────────
-
-float AAudio_ZoneManager::GetAmbientVolumeForTime() const
-{
-    // Sine curve: noon (0.5) = day volume, midnight (0.0/1.0) = night volume
-    // Night insects and predator calls are louder
-    float DayBlend = FMath::Sin(CurrentTimeOfDay * PI); // 0 at midnight, 1 at noon
-    return FMath::Lerp(NightAmbientVolume, DayAmbientVolume, DayBlend);
-}
-
-// ─── TriggerTRexStompShake ────────────────────────────────────────────────
-
-void AAudio_ZoneManager::TriggerTRexStompShake(float Distance)
-{
-    if (Distance > FootstepConfig.ScreenShakeRadiusTRex) return;
-
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC) return;
-
-    // Scale shake intensity by proximity (closer = stronger)
-    float ProximityFactor = 1.0f - (Distance / FootstepConfig.ScreenShakeRadiusTRex);
-    float ShakeScale = FootstepConfig.ScreenShakeIntensity * ProximityFactor;
-
-    // ClientStartCameraShake requires a camera shake class — log intent for Blueprint wiring
-    UE_LOG(LogTemp, Log, TEXT("AudioZone — T-Rex stomp shake: dist=%.0f scale=%.2f"),
-           Distance, ShakeScale);
-
-    // Console command fallback for editor testing
-    UWorld* W = GetWorld();
-    if (W)
-    {
-        FString Cmd = FString::Printf(TEXT("shake %.2f"), ShakeScale);
-        UGameplayStatics::PlayWorldCameraShake(W, nullptr, GetActorLocation(),
-                                               0.0f, FootstepConfig.ScreenShakeRadiusTRex,
-                                               ShakeScale, false);
-    }
-}
-
-// ─── TriggerDamageFlash ───────────────────────────────────────────────────
-
-void AAudio_ZoneManager::TriggerDamageFlash()
-{
-    // Damage flash is handled by HUD/UMG — this logs the event for Blueprint binding
-    UE_LOG(LogTemp, Warning, TEXT("AudioZone — DamageFlash triggered (wire to HUD BP)"));
-
-    // Play damage audio sting if component has a sound assigned
-    if (AmbientAudioComponent)
-    {
-        // Momentary volume spike to simulate impact audio
-        AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.DangerStingVolume);
-    }
-}
-
-// ─── CheckNearbyPredators ─────────────────────────────────────────────────
-
-void AAudio_ZoneManager::CheckNearbyPredators()
-{
-    UWorld* W = GetWorld();
-    if (!W) return;
-
-    APlayerController* PC = W->GetFirstPlayerController();
-    if (!PC || !PC->GetCharacter()) return;
-
-    FVector PlayerLoc = PC->GetCharacter()->GetActorLocation();
-
-    // Scan all actors for dinosaur labels (matches MinPlayableMap naming convention)
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(W, AActor::StaticClass(), AllActors);
-
-    float ClosestRaptor = TNumericLimits<float>::Max();
-    float ClosestTRex   = TNumericLimits<float>::Max();
-
-    for (AActor* A : AllActors)
-    {
-        if (!A) continue;
-        FString Label = A->GetActorLabel().ToLower();
-        float Dist = FVector::Dist(A->GetActorLocation(), PlayerLoc);
-
-        if (Label.Contains(TEXT("raptor")))
-        {
-            ClosestRaptor = FMath::Min(ClosestRaptor, Dist);
-        }
-        else if (Label.Contains(TEXT("trex")) || Label.Contains(TEXT("t-rex")))
-        {
-            ClosestTRex = FMath::Min(ClosestTRex, Dist);
-            if (Dist < FootstepConfig.ScreenShakeRadiusTRex)
-            {
-                TriggerTRexStompShake(Dist);
-            }
-        }
-    }
-
-    // Determine danger level from closest predator
-    EAudio_DangerLevel NewDanger = EAudio_DangerLevel::Safe;
-
-    if (ClosestTRex < TRexDangerRadius * 0.4f || ClosestRaptor < RaptorDangerRadius * 0.3f)
-    {
-        NewDanger = EAudio_DangerLevel::Imminent;
-    }
-    else if (ClosestTRex < TRexDangerRadius || ClosestRaptor < RaptorDangerRadius)
-    {
-        NewDanger = EAudio_DangerLevel::Caution;
-    }
-
-    SetDangerLevel(NewDanger);
-}
-
-// ─── BlendAmbientVolume ───────────────────────────────────────────────────
-
-void AAudio_ZoneManager::BlendAmbientVolume(float TargetVolume, float DeltaTime)
-{
-    if (!AmbientAudioComponent) return;
-
-    float Current = AmbientAudioComponent->VolumeMultiplier;
-    float BlendSpeed = 0.5f; // volume units per second
-    float NewVol = FMath::FInterpTo(Current, TargetVolume, DeltaTime, BlendSpeed);
-    AmbientAudioComponent->SetVolumeMultiplier(NewVol);
+    UE_LOG(LogTemp, Warning, TEXT("=== AUDIO STATE === %s"), *GetCurrentAudioState());
 }
