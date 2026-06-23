@@ -1,172 +1,209 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Sound/SoundBase.h"
 #include "Components/AudioComponent.h"
 #include "AudioSystemManager.generated.h"
 
 // ============================================================
-// Audio Agent #16 — AudioSystemManager
-// Adaptive audio system for prehistoric survival game.
-// Controls music tension state, ambient zone transitions,
-// and NPC proximity audio triggers.
+// Enums — Audio zones and states for adaptive music
 // ============================================================
 
 UENUM(BlueprintType)
-enum class EAudio_TensionState : uint8
+enum class EAudio_Zone : uint8
 {
-    Safe        UMETA(DisplayName = "Safe — Camp"),
-    Cautious    UMETA(DisplayName = "Cautious — Open World"),
-    Danger      UMETA(DisplayName = "Danger — Dino Nearby"),
-    Critical    UMETA(DisplayName = "Critical — Under Attack")
+    Safe        UMETA(DisplayName = "Safe Zone"),
+    Exploration UMETA(DisplayName = "Exploration"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Night       UMETA(DisplayName = "Night"),
+    Storm       UMETA(DisplayName = "Storm")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_ZoneType : uint8
+enum class EAudio_DinoSize : uint8
 {
-    Camp        UMETA(DisplayName = "Camp Zone"),
-    Jungle      UMETA(DisplayName = "Jungle Zone"),
-    River       UMETA(DisplayName = "River Zone"),
-    DinoTerritory UMETA(DisplayName = "Dino Territory"),
-    Cave        UMETA(DisplayName = "Cave Zone")
+    Small   UMETA(DisplayName = "Small"),   // Raptor-class
+    Medium  UMETA(DisplayName = "Medium"),  // Carnotaurus-class
+    Large   UMETA(DisplayName = "Large")    // T-Rex / Brachiosaurus-class
 };
 
+// ============================================================
+// Structs
+// ============================================================
+
 USTRUCT(BlueprintType)
-struct FAudio_AmbientZone
+struct FAudio_AmbientLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString ZoneLabel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* SoundAsset = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float BaseVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FVector WorldLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float BlendRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float AmbientVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping = true;
 
-    FAudio_AmbientZone()
-        : ZoneLabel(TEXT("DefaultZone"))
-        , ZoneType(EAudio_ZoneType::Jungle)
-        , WorldLocation(FVector::ZeroVector)
-        , BlendRadius(1500.0f)
-        , AmbientVolume(0.8f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_Zone AssociatedZone = EAudio_Zone::Exploration;
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_SoundReference
+struct FAudio_DinoFootstepConfig
 {
     GENERATED_BODY()
 
-    // Freesound IDs catalogued by Audio Agent #16
-    // Campfire: 394952 (crackling campfire, 1805s loop)
-    // Dino Roars Pack 1: 586546
-    // Dino Roars Pack 2: 586545
-    // Dino Growls Pack 2: 586547
-    // Croc/Dino Bellow: 811310
-    // Berserker Roar (TRex): 837048
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_DinoSize DinoSize = EAudio_DinoSize::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    int32 FreesoundID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float StepVolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    FString SoundName;
+    // Radius in cm within which the player hears ground rumble
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float RumbleRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    FString PreviewURL;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    FString UseCase;
-
-    FAudio_SoundReference()
-        : FreesoundID(0)
-        , SoundName(TEXT("Unknown"))
-        , PreviewURL(TEXT(""))
-        , UseCase(TEXT(""))
-    {}
+    // Screen shake intensity multiplier (0=none, 1=full)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float ScreenShakeIntensity = 0.5f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudioSystemManager : public AActor
+USTRUCT(BlueprintType)
+struct FAudio_QuestSting
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FName QuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* StartSting = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* CompleteSting = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float StingVolume = 1.0f;
+};
+
+// ============================================================
+// Delegates
+// ============================================================
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FAudio_OnZoneChanged, EAudio_Zone, NewZone);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAudio_OnDinoNearby, EAudio_DinoSize, DinoSize, float, Distance);
+
+// ============================================================
+// UAudioSystemManager — GameInstance Subsystem
+// ============================================================
+
+UCLASS()
+class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AAudioSystemManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // --- Subsystem lifecycle ---
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // ---- Tension State ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
-    EAudio_TensionState CurrentTensionState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
-    float TensionBlendSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Tension")
-    float DinoProximityRadius;
-
-    // ---- Ambient Zones ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
-    TArray<FAudio_AmbientZone> AmbientZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zones")
-    EAudio_ZoneType CurrentZone;
-
-    // ---- Sound References (Freesound catalogue) ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Catalogue")
-    TArray<FAudio_SoundReference> SoundCatalogue;
-
-    // ---- Audio Components ----
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* CampfireAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* AmbientLoopComponent;
-
-    // ---- Public Functions ----
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    void SetTensionState(EAudio_TensionState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    EAudio_TensionState GetTensionState() const;
-
+    // --- Zone management ---
     UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    EAudio_ZoneType GetZoneAtLocation(const FVector& Location) const;
+    void SetAudioZone(EAudio_Zone NewZone);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zones")
-    void UpdatePlayerZone(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintPure, Category = "Audio|Zones")
+    EAudio_Zone GetCurrentAudioZone() const { return CurrentZone; }
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Catalogue")
-    void InitialiseSoundCatalogue();
+    // --- Ambient layers ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void PlayAmbientLayer(const FAudio_AmbientLayer& Layer);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    float GetTensionIntensity() const;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void StopAllAmbientLayers(float FadeOutTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Debug")
-    FString GetAudioDebugString() const;
+    // --- Campfire audio ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void PlayCampfireAudio(FVector WorldLocation, float Radius = 400.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void StopCampfireAudio();
+
+    // --- Dinosaur proximity audio ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void NotifyDinoFootstep(EAudio_DinoSize DinoSize, FVector StepLocation, AActor* PlayerActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void PlayDinoVocalization(EAudio_DinoSize DinoSize, FVector DinoLocation);
+
+    // --- Quest audio stings ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|Quest")
+    void PlayQuestStartSting(FName QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Quest")
+    void PlayQuestCompleteSting(FName QuestID);
+
+    // --- Survival state audio ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|Survival")
+    void UpdateSurvivalAudio(float HealthNormalized, float StaminaNormalized, float FearNormalized);
+
+    // --- Day/Night audio transition ---
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    void TransitionToNightAudio(float TransitionDuration = 10.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    void TransitionToDayAudio(float TransitionDuration = 10.0f);
+
+    // --- Delegates ---
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnZoneChanged OnZoneChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnDinoNearby OnDinoNearby;
+
+    // --- Config ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    TArray<FAudio_DinoFootstepConfig> DinoFootstepConfigs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    TArray<FAudio_QuestSting> QuestStings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float MasterVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float MusicVolume = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float SFXVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float AmbientVolume = 0.9f;
 
 private:
-    float CurrentTensionIntensity;
-    float TargetTensionIntensity;
-    float TimeSinceLastDinoDetected;
 
-    void UpdateTensionBlend(float DeltaTime);
-    void DetectNearbyDinosaurs();
-    void InitialiseDefaultZones();
+    UPROPERTY()
+    EAudio_Zone CurrentZone = EAudio_Zone::Exploration;
+
+    UPROPERTY()
+    TArray<UAudioComponent*> ActiveAmbientComponents;
+
+    UPROPERTY()
+    UAudioComponent* CampfireComponent = nullptr;
+
+    // Freesound asset references (populated at runtime via config)
+    // Campfire: Freesound ID 620324 — "Campfire crackling - Loop"
+    // Raptor:   Freesound ID 0 — no results, use procedural tension
+    // Wind:     Freesound ID 0 — no results, use procedural wind
+    static const int32 FreesoundCampfireID = 620324;
+    static const int32 FreesoundFireplaceID = 852107;
 };
