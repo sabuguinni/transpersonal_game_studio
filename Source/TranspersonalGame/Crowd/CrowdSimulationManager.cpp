@@ -1,148 +1,189 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric survival game — Mass AI crowd simulation for up to 50,000 agents
+// Implements prehistoric herd simulation: migration corridors, density zones, LOD management
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "DrawDebugHelpers.h"
 #include "GameFramework/Actor.h"
-
-// ============================================================
-// UCrowdSimulationManager — UObject subsystem for crowd logic
-// ============================================================
+#include "DrawDebugHelpers.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxActiveAgents = 200;
-    LODDistanceNear = 1500.0f;
-    LODDistanceMid  = 4000.0f;
-    LODDistanceFar  = 8000.0f;
+    MaxActiveAgents = 500;
+    LODDistanceClose = 2000.0f;
+    LODDistanceMedium = 5000.0f;
+    LODDistanceFar = 10000.0f;
     bSimulationActive = false;
     CurrentAgentCount = 0;
-    DangerAlertRadius = 800.0f;
-    bDangerStateActive = false;
+    TickInterval = 0.5f;
+    TimeSinceLastTick = 0.0f;
 }
 
-void UCrowdSimulationManager::InitializeSimulation(UWorld* InWorld)
+void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    if (!InWorld)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] InitializeSimulation called with null world"));
-        return;
-    }
-
-    WorldRef = InWorld;
+    Super::Initialize(Collection);
+    InitializeMigrationCorridors();
+    InitializeDensityZones();
     bSimulationActive = true;
-    CurrentAgentCount = 0;
-
-    // Register default activity zones
-    RegisterActivityZone(ECrowd_ActivityZone::Camp,       FVector(0.0f, 0.0f, 0.0f),    500.0f, 20);
-    RegisterActivityZone(ECrowd_ActivityZone::Foraging,   FVector(600.0f, 250.0f, 0.0f), 300.0f, 15);
-    RegisterActivityZone(ECrowd_ActivityZone::WaterSource,FVector(-500.0f, 325.0f, 0.0f),200.0f, 10);
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Simulation initialized. Zones: %d, MaxAgents: %d"),
-        ActivityZones.Num(), MaxActiveAgents);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized with %d corridors, %d density zones"),
+        MigrationCorridors.Num(), DensityZones.Num());
 }
 
-void UCrowdSimulationManager::RegisterActivityZone(
-    ECrowd_ActivityZone ZoneType,
-    FVector Location,
-    float Radius,
-    int32 MaxOccupants)
+void UCrowdSimulationManager::Deinitialize()
 {
-    FCrowd_ActivityZoneData Zone;
-    Zone.ZoneType     = ZoneType;
-    Zone.Location     = Location;
-    Zone.Radius       = Radius;
-    Zone.MaxOccupants = MaxOccupants;
-    Zone.CurrentOccupants = 0;
-    Zone.bIsActive    = true;
-
-    ActivityZones.Add(Zone);
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Zone registered: Type=%d Loc=(%.0f,%.0f) R=%.0f MaxOcc=%d"),
-        (int32)ZoneType, Location.X, Location.Y, Radius, MaxOccupants);
+    bSimulationActive = false;
+    ActiveAgents.Empty();
+    Super::Deinitialize();
 }
 
-void UCrowdSimulationManager::SpawnCrowdAgent(
-    ECrowd_AgentRole Role,
-    FVector SpawnLocation,
-    ECrowd_ActivityZone InitialZone)
+void UCrowdSimulationManager::InitializeMigrationCorridors()
 {
-    if (!bSimulationActive)
+    // Brachiosaurus herd: North-South migration
+    FCrowd_MigrationCorridor BrachioPath;
+    BrachioPath.CorridorName = TEXT("Brachio_NorthSouth");
+    BrachioPath.SpeciesType = ECrowd_DinoSpecies::Brachiosaurus;
+    BrachioPath.Waypoints = {
+        FVector(-3000, -5000, 100),
+        FVector(-2500, -2500, 120),
+        FVector(-2000, 0, 100),
+        FVector(-1500, 2500, 110),
+        FVector(-1000, 5000, 100)
+    };
+    BrachioPath.HerdSize = 8;
+    BrachioPath.MovementSpeed = 150.0f;
+    BrachioPath.bIsCircular = false;
+    MigrationCorridors.Add(BrachioPath);
+
+    // Raptor pack: East-West hunting circuit
+    FCrowd_MigrationCorridor RaptorPath;
+    RaptorPath.CorridorName = TEXT("Raptor_EastWest");
+    RaptorPath.SpeciesType = ECrowd_DinoSpecies::Velociraptor;
+    RaptorPath.Waypoints = {
+        FVector(-4000, -1000, 100),
+        FVector(-2000, -500, 100),
+        FVector(0, 0, 100),
+        FVector(2000, 500, 100),
+        FVector(4000, 1000, 100)
+    };
+    RaptorPath.HerdSize = 5;
+    RaptorPath.MovementSpeed = 350.0f;
+    RaptorPath.bIsCircular = true;
+    MigrationCorridors.Add(RaptorPath);
+
+    // TRex: territorial patrol loop
+    FCrowd_MigrationCorridor TRexPath;
+    TRexPath.CorridorName = TEXT("TRex_TerritoryPatrol");
+    TRexPath.SpeciesType = ECrowd_DinoSpecies::TyrannosaurusRex;
+    TRexPath.Waypoints = {
+        FVector(1000, 1000, 100),
+        FVector(2000, -1000, 100),
+        FVector(3000, 1000, 100),
+        FVector(2000, 3000, 100)
+    };
+    TRexPath.HerdSize = 1;
+    TRexPath.MovementSpeed = 200.0f;
+    TRexPath.bIsCircular = true;
+    MigrationCorridors.Add(TRexPath);
+}
+
+void UCrowdSimulationManager::InitializeDensityZones()
+{
+    // Watering hole — high density congregation
+    FCrowd_DensityZone WaterZone;
+    WaterZone.ZoneName = TEXT("WateringHole_North");
+    WaterZone.Center = FVector(-2000, 3000, 50);
+    WaterZone.Radius = 800.0f;
+    WaterZone.MaxDensity = 25;
+    WaterZone.ZoneType = ECrowd_ZoneType::WateringHole;
+    WaterZone.bIsActive = true;
+    DensityZones.Add(WaterZone);
+
+    // Feeding ground — medium density
+    FCrowd_DensityZone FeedZone;
+    FeedZone.ZoneName = TEXT("FeedingGround_East");
+    FeedZone.Center = FVector(3500, 0, 50);
+    FeedZone.Radius = 1200.0f;
+    FeedZone.MaxDensity = 15;
+    FeedZone.ZoneType = ECrowd_ZoneType::FeedingGround;
+    FeedZone.bIsActive = true;
+    DensityZones.Add(FeedZone);
+
+    // Open plains — low density, transit zone
+    FCrowd_DensityZone PlainsZone;
+    PlainsZone.ZoneName = TEXT("OpenPlains_Center");
+    PlainsZone.Center = FVector(0, 0, 50);
+    PlainsZone.Radius = 2000.0f;
+    PlainsZone.MaxDensity = 8;
+    PlainsZone.ZoneType = ECrowd_ZoneType::OpenPlains;
+    PlainsZone.bIsActive = true;
+    DensityZones.Add(PlainsZone);
+
+    // Raptor nest — exclusive predator zone
+    FCrowd_DensityZone RaptorNest;
+    RaptorNest.ZoneName = TEXT("RaptorNest_West");
+    RaptorNest.Center = FVector(-3500, -2000, 50);
+    RaptorNest.Radius = 600.0f;
+    RaptorNest.MaxDensity = 6;
+    RaptorNest.ZoneType = ECrowd_ZoneType::PredatorTerritory;
+    RaptorNest.bIsActive = true;
+    DensityZones.Add(RaptorNest);
+
+    // TRex territory — exclusive apex predator
+    FCrowd_DensityZone TRexTerritory;
+    TRexTerritory.ZoneName = TEXT("TRexTerritory_NE");
+    TRexTerritory.Center = FVector(2500, 2500, 50);
+    TRexTerritory.Radius = 1500.0f;
+    TRexTerritory.MaxDensity = 1;
+    TRexTerritory.ZoneType = ECrowd_ZoneType::PredatorTerritory;
+    TRexTerritory.bIsActive = true;
+    DensityZones.Add(TRexTerritory);
+}
+
+void UCrowdSimulationManager::TickSimulation(float DeltaTime)
+{
+    if (!bSimulationActive) return;
+
+    TimeSinceLastTick += DeltaTime;
+    if (TimeSinceLastTick < TickInterval) return;
+    TimeSinceLastTick = 0.0f;
+
+    // Update agent LOD based on distance to player
+    UpdateAgentLOD();
+
+    // Update migration progress for each corridor
+    for (FCrowd_MigrationCorridor& Corridor : MigrationCorridors)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Cannot spawn agent — simulation not active"));
-        return;
+        UpdateCorridorProgress(Corridor, TickInterval);
     }
 
-    if (CurrentAgentCount >= MaxActiveAgents)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Agent cap reached: %d/%d"), CurrentAgentCount, MaxActiveAgents);
-        return;
-    }
-
-    FCrowd_AgentData Agent;
-    Agent.AgentID       = FGuid::NewGuid();
-    Agent.Role          = Role;
-    Agent.CurrentLocation = SpawnLocation;
-    Agent.TargetLocation  = SpawnLocation;
-    Agent.CurrentZone   = InitialZone;
-    Agent.State         = ECrowd_AgentState::Idle;
-    Agent.LODLevel      = ECrowd_LODLevel::Near;
-    Agent.bIsAlive      = true;
-    Agent.FearLevel     = 0.0f;
-    Agent.StaminaLevel  = 1.0f;
-
-    ActiveAgents.Add(Agent);
-    CurrentAgentCount++;
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Agent spawned: Role=%d Zone=%d Total=%d"),
-        (int32)Role, (int32)InitialZone, CurrentAgentCount);
+    CurrentAgentCount = ActiveAgents.Num();
 }
 
-void UCrowdSimulationManager::TriggerDangerAlert(FVector DangerSource, float AlertRadius)
+void UCrowdSimulationManager::UpdateAgentLOD()
 {
-    bDangerStateActive = true;
-    DangerAlertRadius  = AlertRadius;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    int32 AffectedCount = 0;
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+
+    for (FCrowd_AgentState& Agent : ActiveAgents)
     {
-        float Dist = FVector::Dist(Agent.CurrentLocation, DangerSource);
-        if (Dist <= AlertRadius)
-        {
-            Agent.State     = ECrowd_AgentState::Fleeing;
-            Agent.FearLevel = FMath::Clamp(1.0f - (Dist / AlertRadius), 0.2f, 1.0f);
+        float Distance = FVector::Dist(Agent.CurrentLocation, PlayerLocation);
 
-            // Flee away from danger source
-            FVector FleeDir = (Agent.CurrentLocation - DangerSource).GetSafeNormal();
-            Agent.TargetLocation = Agent.CurrentLocation + FleeDir * (AlertRadius * 1.5f);
-            AffectedCount++;
+        if (Distance < LODDistanceClose)
+        {
+            Agent.LODLevel = ECrowd_LODLevel::Full;
         }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] DANGER ALERT at (%.0f,%.0f,%.0f) R=%.0f — %d agents fleeing"),
-        DangerSource.X, DangerSource.Y, DangerSource.Z, AlertRadius, AffectedCount);
-}
-
-void UCrowdSimulationManager::UpdateAgentLOD(FVector PlayerLocation)
-{
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        float Dist = FVector::Dist(Agent.CurrentLocation, PlayerLocation);
-
-        if (Dist <= LODDistanceNear)
+        else if (Distance < LODDistanceMedium)
         {
-            Agent.LODLevel = ECrowd_LODLevel::Near;
+            Agent.LODLevel = ECrowd_LODLevel::Medium;
         }
-        else if (Dist <= LODDistanceMid)
+        else if (Distance < LODDistanceFar)
         {
-            Agent.LODLevel = ECrowd_LODLevel::Mid;
-        }
-        else if (Dist <= LODDistanceFar)
-        {
-            Agent.LODLevel = ECrowd_LODLevel::Far;
+            Agent.LODLevel = ECrowd_LODLevel::Low;
         }
         else
         {
@@ -151,81 +192,96 @@ void UCrowdSimulationManager::UpdateAgentLOD(FVector PlayerLocation)
     }
 }
 
-void UCrowdSimulationManager::TickSimulation(float DeltaTime)
+void UCrowdSimulationManager::UpdateCorridorProgress(FCrowd_MigrationCorridor& Corridor, float DeltaTime)
 {
-    if (!bSimulationActive) return;
+    if (Corridor.Waypoints.Num() < 2) return;
 
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    // Simple waypoint progression — advance target waypoint index
+    int32 NextWP = (Corridor.CurrentWaypointIndex + 1) % Corridor.Waypoints.Num();
+
+    FVector Current = Corridor.Waypoints[Corridor.CurrentWaypointIndex];
+    FVector Target = Corridor.Waypoints[NextWP];
+    float DistToTarget = FVector::Dist(Current, Target);
+
+    // Simulate movement progress
+    float MoveThisFrame = Corridor.MovementSpeed * DeltaTime;
+    if (MoveThisFrame >= DistToTarget)
     {
-        if (!Agent.bIsAlive) continue;
-        if (Agent.LODLevel == ECrowd_LODLevel::Culled) continue;
-
-        // Simple state machine tick
-        switch (Agent.State)
+        // Reached waypoint
+        Corridor.CurrentWaypointIndex = NextWP;
+        if (!Corridor.bIsCircular && NextWP == Corridor.Waypoints.Num() - 1)
         {
-            case ECrowd_AgentState::Idle:
-                // Occasionally transition to moving
-                Agent.StaminaLevel = FMath::Min(1.0f, Agent.StaminaLevel + DeltaTime * 0.1f);
-                break;
-
-            case ECrowd_AgentState::Moving:
-            {
-                FVector Dir = (Agent.TargetLocation - Agent.CurrentLocation).GetSafeNormal();
-                float Speed = (Agent.LODLevel == ECrowd_LODLevel::Near) ? 150.0f : 100.0f;
-                Agent.CurrentLocation += Dir * Speed * DeltaTime;
-
-                float DistToTarget = FVector::Dist(Agent.CurrentLocation, Agent.TargetLocation);
-                if (DistToTarget < 50.0f)
-                {
-                    Agent.State = ECrowd_AgentState::Idle;
-                }
-                break;
-            }
-
-            case ECrowd_AgentState::Fleeing:
-            {
-                FVector Dir = (Agent.TargetLocation - Agent.CurrentLocation).GetSafeNormal();
-                Agent.CurrentLocation += Dir * 300.0f * DeltaTime;
-                Agent.FearLevel = FMath::Max(0.0f, Agent.FearLevel - DeltaTime * 0.05f);
-
-                if (Agent.FearLevel <= 0.0f)
-                {
-                    Agent.State = ECrowd_AgentState::Idle;
-                }
-                break;
-            }
-
-            case ECrowd_AgentState::Working:
-                Agent.StaminaLevel = FMath::Max(0.0f, Agent.StaminaLevel - DeltaTime * 0.02f);
-                if (Agent.StaminaLevel <= 0.1f)
-                {
-                    Agent.State = ECrowd_AgentState::Idle;
-                }
-                break;
-
-            default:
-                break;
+            // End of path — reverse direction or stop
+            Corridor.CurrentWaypointIndex = 0;
         }
     }
 }
 
-int32 UCrowdSimulationManager::GetAgentCountByRole(ECrowd_AgentRole Role) const
+int32 UCrowdSimulationManager::GetAgentCountInZone(const FString& ZoneName) const
 {
-    int32 Count = 0;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    for (const FCrowd_DensityZone& Zone : DensityZones)
     {
-        if (Agent.Role == Role && Agent.bIsAlive) Count++;
+        if (Zone.ZoneName == ZoneName)
+        {
+            int32 Count = 0;
+            for (const FCrowd_AgentState& Agent : ActiveAgents)
+            {
+                if (FVector::Dist(Agent.CurrentLocation, Zone.Center) <= Zone.Radius)
+                {
+                    Count++;
+                }
+            }
+            return Count;
+        }
     }
-    return Count;
+    return 0;
 }
 
-void UCrowdSimulationManager::ShutdownSimulation()
+bool UCrowdSimulationManager::IsLocationInPredatorTerritory(const FVector& Location) const
 {
-    bSimulationActive = false;
-    ActiveAgents.Empty();
-    ActivityZones.Empty();
-    CurrentAgentCount = 0;
-    bDangerStateActive = false;
+    for (const FCrowd_DensityZone& Zone : DensityZones)
+    {
+        if (Zone.ZoneType == ECrowd_ZoneType::PredatorTerritory && Zone.bIsActive)
+        {
+            if (FVector::Dist(Location, Zone.Center) <= Zone.Radius)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Simulation shut down."));
+float UCrowdSimulationManager::GetDangerLevelAtLocation(const FVector& Location) const
+{
+    float MaxDanger = 0.0f;
+
+    for (const FCrowd_DensityZone& Zone : DensityZones)
+    {
+        if (!Zone.bIsActive) continue;
+
+        float Dist = FVector::Dist(Location, Zone.Center);
+        if (Dist <= Zone.Radius)
+        {
+            float ZoneDanger = 0.0f;
+            switch (Zone.ZoneType)
+            {
+                case ECrowd_ZoneType::PredatorTerritory:
+                    ZoneDanger = 1.0f - (Dist / Zone.Radius); // Max danger at center
+                    break;
+                case ECrowd_ZoneType::WateringHole:
+                    ZoneDanger = 0.4f; // Medium danger — predators hunt here
+                    break;
+                case ECrowd_ZoneType::FeedingGround:
+                    ZoneDanger = 0.2f;
+                    break;
+                default:
+                    ZoneDanger = 0.1f;
+                    break;
+            }
+            MaxDanger = FMath::Max(MaxDanger, ZoneDanger);
+        }
+    }
+
+    return MaxDanger;
 }
