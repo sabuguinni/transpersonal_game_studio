@@ -1,11 +1,36 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "Components/ActorComponent.h"
+#include "SharedTypes.h"
 #include "DialogueSystem.generated.h"
 
-// Dialogue line entry — one NPC utterance
+// ============================================================
+// Narrative & Dialogue Agent #15 — DialogueSystem
+// Prehistoric survival dialogue — no spiritual content
+// ============================================================
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Greeting    UMETA(DisplayName = "Greeting"),
+    Warning     UMETA(DisplayName = "Warning"),
+    QuestGive   UMETA(DisplayName = "QuestGive"),
+    QuestDone   UMETA(DisplayName = "QuestDone"),
+    Farewell    UMETA(DisplayName = "Farewell")
+};
+
+UENUM(BlueprintType)
+enum class ENarr_NPCRole : uint8
+{
+    TribalElder     UMETA(DisplayName = "TribalElder"),
+    ScoutHunter     UMETA(DisplayName = "ScoutHunter"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    TribalLeader    UMETA(DisplayName = "TribalLeader"),
+    Survivor        UMETA(DisplayName = "Survivor")
+};
+
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
@@ -17,139 +42,117 @@ struct FNarr_DialogueLine
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString LineText;
 
-    // Delay before next line (seconds)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float PauseDuration = 2.5f;
+    ENarr_DialogueState TriggerState;
 
-    // Optional: play animation tag on speaker
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName AnimationTag = NAME_None;
+    float DisplayDuration;
+
+    FNarr_DialogueLine()
+        : SpeakerID(TEXT("Unknown"))
+        , LineText(TEXT(""))
+        , TriggerState(ENarr_DialogueState::Idle)
+        , DisplayDuration(3.0f)
+    {}
 };
 
-// A full dialogue sequence (multiple lines, one conversation)
 USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
+struct FNarr_DialogueTree
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID;
+    FString TreeID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole NPCRole;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
-    // Can this sequence replay after first trigger?
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bRepeatable = false;
-
-    // Has this sequence already played?
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bHasPlayed = false;
-};
-
-// NPC speaker types (survival-focused, no spiritual roles)
-UENUM(BlueprintType)
-enum class ENarr_NPCSpeakerType : uint8
-{
-    Tracker        UMETA(DisplayName = "Tracker"),
-    Elder          UMETA(DisplayName = "Elder"),
-    Scout          UMETA(DisplayName = "Scout"),
-    Hunter         UMETA(DisplayName = "Hunter"),
-    Craftsman      UMETA(DisplayName = "Craftsman"),
-    TribalLeader   UMETA(DisplayName = "Tribal Leader"),
-    Unknown        UMETA(DisplayName = "Unknown")
+    FNarr_DialogueTree()
+        : TreeID(TEXT(""))
+        , NPCRole(ENarr_NPCRole::Survivor)
+    {}
 };
 
 /**
- * ANarr_DialogueTrigger
- * Placed in the world at story beat locations.
- * When the player enters the sphere radius, the dialogue sequence fires.
+ * UNarr_DialogueComponent
+ * Attach to any NPC actor to give it dialogue capability.
+ * Manages state machine for prehistoric survival conversations.
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueTrigger : public AActor
+UCLASS(ClassGroup = "Narrative", meta = (BlueprintSpawnableComponent), DisplayName = "Dialogue Component")
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueTrigger();
+    UNarr_DialogueComponent();
 
-    // Trigger radius — player must enter to activate
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative",
-        meta = (AllowPrivateAccess = "true"))
-    USphereComponent* TriggerSphere;
+    // Current dialogue state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
+    ENarr_DialogueState CurrentState;
 
-    // The dialogue sequence this trigger plays
+    // NPC role determines available dialogue trees
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_DialogueSequence DialogueSequence;
+    ENarr_NPCRole NPCRole;
 
-    // Which NPC speaks this dialogue
+    // Dialogue trees loaded for this NPC
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCSpeakerType SpeakerType = ENarr_NPCSpeakerType::Tracker;
+    TArray<FNarr_DialogueTree> DialogueTrees;
 
-    // Trigger radius in cm
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float TriggerRadius = 300.0f;
+    // Interaction radius — player must be within this range
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (ClampMin = "50.0", ClampMax = "500.0"))
+    float InteractionRadius;
 
-    // Called when player enters the trigger sphere
+    // Whether NPC is currently in dialogue with player
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
+    bool bIsInDialogue;
+
+    // Index of current line being displayed
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
+    int32 CurrentLineIndex;
+
+    // Begin dialogue interaction
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnPlayerEnterTrigger(AActor* OverlappingActor);
+    void BeginDialogue(ENarr_DialogueState InitialState);
 
-    // Manually fire the dialogue (for testing or quest-driven activation)
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void FireDialogue();
-
-    // Reset the trigger so it can play again
+    // Advance to next dialogue line
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void ResetTrigger();
+    bool AdvanceDialogue();
+
+    // End dialogue
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void EndDialogue();
+
+    // Get current line text
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
+    FString GetCurrentLineText() const;
+
+    // Get current speaker ID
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
+    FString GetCurrentSpeakerID() const;
+
+    // Transition to a new state
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetDialogueState(ENarr_DialogueState NewState);
+
+    // Load default lines for this NPC role
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void LoadDefaultDialogueForRole();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
 private:
-    bool bTriggered = false;
-};
+    // Active tree being played
+    FNarr_DialogueTree* ActiveTree;
 
-/**
- * UNarr_DialogueManager
- * Subsystem-style manager that tracks all active dialogue triggers in the level.
- * Registered NPCs report to this manager.
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_DialogueManager : public UObject
-{
-    GENERATED_BODY()
+    // Find tree matching current state
+    FNarr_DialogueTree* FindTreeForState(ENarr_DialogueState State);
 
-public:
-    UNarr_DialogueManager();
-
-    // Register a dialogue trigger
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterTrigger(ANarr_DialogueTrigger* Trigger);
-
-    // Unregister a trigger (e.g., when actor is destroyed)
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UnregisterTrigger(ANarr_DialogueTrigger* Trigger);
-
-    // Get all registered triggers
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<ANarr_DialogueTrigger*> GetAllTriggers() const;
-
-    // Check if a sequence has already played (by ID)
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool HasSequencePlayed(FName SequenceID) const;
-
-    // Mark a sequence as played
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void MarkSequencePlayed(FName SequenceID);
-
-    // Reset all played sequences (e.g., new game)
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void ResetAllSequences();
-
-private:
-    UPROPERTY()
-    TArray<ANarr_DialogueTrigger*> RegisteredTriggers;
-
-    TSet<FName> PlayedSequenceIDs;
+    // Build default dialogue lines per role
+    void BuildElderDialogue();
+    void BuildScoutDialogue();
+    void BuildGathererDialogue();
 };
