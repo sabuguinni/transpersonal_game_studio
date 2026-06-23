@@ -1,7 +1,7 @@
 // BiomeManager.cpp
 // Engine Architect #02 — Transpersonal Game Studio
-// Full implementation of the Biome Manager system for the prehistoric survival game.
-// Manages 6 biomes: Grassland, Forest, Desert, Swamp, Mountain, Volcanic
+// Full implementation of the Biome system for the prehistoric survival game.
+// Cycle: PROD_CYCLE_AUTO_20260623_009
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
@@ -9,20 +9,83 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-// ─── Constructor ────────────────────────────────────────────────────────────
+// ============================================================
+// Constructor
+// ============================================================
 
 UBiomeManager::UBiomeManager()
 {
-    // Default biome definitions — prehistoric survival world
-    InitializeDefaultBiomes();
+    // Default biome definitions — prehistoric Cretaceous world
+    FEng_BiomeDefinition Grassland;
+    Grassland.BiomeID        = EEng_BiomeType::Grassland;
+    Grassland.BiomeName      = FName("Grassland");
+    Grassland.MinTemperature = 15.0f;
+    Grassland.MaxTemperature = 35.0f;
+    Grassland.Humidity       = 0.4f;
+    Grassland.FoliageDensity = 0.5f;
+    Grassland.bHasPredators  = true;
+    RegisteredBiomes.Add(Grassland);
+
+    FEng_BiomeDefinition Forest;
+    Forest.BiomeID        = EEng_BiomeType::Forest;
+    Forest.BiomeName      = FName("Forest");
+    Forest.MinTemperature = 18.0f;
+    Forest.MaxTemperature = 28.0f;
+    Forest.Humidity       = 0.75f;
+    Forest.FoliageDensity = 0.9f;
+    Forest.bHasPredators  = true;
+    RegisteredBiomes.Add(Forest);
+
+    FEng_BiomeDefinition Desert;
+    Desert.BiomeID        = EEng_BiomeType::Desert;
+    Desert.BiomeName      = FName("Desert");
+    Desert.MinTemperature = 30.0f;
+    Desert.MaxTemperature = 55.0f;
+    Desert.Humidity       = 0.05f;
+    Desert.FoliageDensity = 0.1f;
+    Desert.bHasPredators  = false;
+    RegisteredBiomes.Add(Desert);
+
+    FEng_BiomeDefinition Swamp;
+    Swamp.BiomeID        = EEng_BiomeType::Swamp;
+    Swamp.BiomeName      = FName("Swamp");
+    Swamp.MinTemperature = 22.0f;
+    Swamp.MaxTemperature = 32.0f;
+    Swamp.Humidity       = 0.95f;
+    Swamp.FoliageDensity = 0.8f;
+    Swamp.bHasPredators  = true;
+    RegisteredBiomes.Add(Swamp);
+
+    FEng_BiomeDefinition Volcanic;
+    Volcanic.BiomeID        = EEng_BiomeType::Volcanic;
+    Volcanic.BiomeName      = FName("Volcanic");
+    Volcanic.MinTemperature = 40.0f;
+    Volcanic.MaxTemperature = 80.0f;
+    Volcanic.Humidity       = 0.1f;
+    Volcanic.FoliageDensity = 0.05f;
+    Volcanic.bHasPredators  = false;
+    RegisteredBiomes.Add(Volcanic);
+
+    FEng_BiomeDefinition Coastal;
+    Coastal.BiomeID        = EEng_BiomeType::Coastal;
+    Coastal.BiomeName      = FName("Coastal");
+    Coastal.MinTemperature = 20.0f;
+    Coastal.MaxTemperature = 30.0f;
+    Coastal.Humidity       = 0.65f;
+    Coastal.FoliageDensity = 0.4f;
+    Coastal.bHasPredators  = true;
+    RegisteredBiomes.Add(Coastal);
+
+    ActiveBiome = EEng_BiomeType::Grassland;
 }
 
-// ─── UGameInstanceSubsystem ─────────────────────────────────────────────────
+// ============================================================
+// Initialization
+// ============================================================
 
 void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    InitializeDefaultBiomes();
     UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biomes"), RegisteredBiomes.Num());
 }
 
@@ -32,230 +95,89 @@ void UBiomeManager::Deinitialize()
     Super::Deinitialize();
 }
 
-// ─── Biome Registration ──────────────────────────────────────────────────────
+// ============================================================
+// Core API
+// ============================================================
 
-void UBiomeManager::RegisterBiome(const FEng_BiomeDefinition& BiomeDef)
+EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Prevent duplicate IDs
-    for (const FEng_BiomeDefinition& Existing : RegisteredBiomes)
-    {
-        if (Existing.BiomeID == BiomeDef.BiomeID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Biome ID '%s' already registered — skipping."), *BiomeDef.BiomeID.ToString());
-            return;
-        }
-    }
-    RegisteredBiomes.Add(BiomeDef);
-    OnBiomeRegistered.Broadcast(BiomeDef.BiomeID);
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome '%s'"), *BiomeDef.BiomeName);
+    // Simple sector-based biome assignment using world coordinates.
+    // In production this will be driven by a noise-based biome map.
+    const float X = WorldLocation.X;
+    const float Y = WorldLocation.Y;
+
+    if (X > 5000.0f)  return EEng_BiomeType::Volcanic;
+    if (X < -5000.0f) return EEng_BiomeType::Desert;
+    if (Y > 5000.0f)  return EEng_BiomeType::Coastal;
+    if (Y < -5000.0f) return EEng_BiomeType::Swamp;
+    if (FMath::Abs(X) < 2000.0f && FMath::Abs(Y) < 2000.0f) return EEng_BiomeType::Forest;
+
+    return EEng_BiomeType::Grassland;
 }
 
-bool UBiomeManager::GetBiomeByID(FName BiomeID, FEng_BiomeDefinition& OutBiome) const
+FEng_BiomeDefinition UBiomeManager::GetBiomeDefinition(EEng_BiomeType BiomeType) const
 {
-    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
+    for (const FEng_BiomeDefinition& Def : RegisteredBiomes)
     {
-        if (Biome.BiomeID == BiomeID)
+        if (Def.BiomeID == BiomeType)
         {
-            OutBiome = Biome;
-            return true;
-        }
-    }
-    return false;
-}
-
-// ─── World Position Query ────────────────────────────────────────────────────
-
-FName UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    // Simple distance-based biome lookup using biome origin points
-    FName ClosestBiome = NAME_None;
-    float ClosestDist = MAX_FLT;
-
-    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
-    {
-        float Dist = FVector::Dist2D(WorldLocation, Biome.BiomeOrigin);
-        if (Dist < Biome.BiomeRadius && Dist < ClosestDist)
-        {
-            ClosestDist = Dist;
-            ClosestBiome = Biome.BiomeID;
+            return Def;
         }
     }
 
-    // Fallback: return nearest biome origin regardless of radius
-    if (ClosestBiome == NAME_None)
-    {
-        for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
-        {
-            float Dist = FVector::Dist2D(WorldLocation, Biome.BiomeOrigin);
-            if (Dist < ClosestDist)
-            {
-                ClosestDist = Dist;
-                ClosestBiome = Biome.BiomeID;
-            }
-        }
-    }
-
-    return ClosestBiome;
+    // Return default (Grassland) if not found
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: BiomeType %d not found, returning default"), (int32)BiomeType);
+    return RegisteredBiomes.Num() > 0 ? RegisteredBiomes[0] : FEng_BiomeDefinition();
 }
 
-FEng_BiomeEnvironment UBiomeManager::GetEnvironmentAtLocation(const FVector& WorldLocation) const
+void UBiomeManager::SetActiveBiome(EEng_BiomeType NewBiome)
 {
-    FName BiomeID = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeDefinition Def;
-    if (GetBiomeByID(BiomeID, Def))
+    if (ActiveBiome != NewBiome)
     {
-        return Def.Environment;
-    }
-    // Return default grassland environment
-    FEng_BiomeEnvironment Default;
-    Default.AmbientTemperatureCelsius = 22.0f;
-    Default.HumidityPercent = 60.0f;
-    Default.FogDensity = 0.02f;
-    Default.WindSpeedKmH = 10.0f;
-    return Default;
-}
+        EEng_BiomeType OldBiome = ActiveBiome;
+        ActiveBiome = NewBiome;
 
-TArray<FName> UBiomeManager::GetAllBiomeIDs() const
-{
-    TArray<FName> IDs;
-    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
-    {
-        IDs.Add(Biome.BiomeID);
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transition %d -> %d"), (int32)OldBiome, (int32)NewBiome);
+        OnBiomeChanged.Broadcast(OldBiome, NewBiome);
     }
-    return IDs;
 }
-
-// ─── Survival Queries ────────────────────────────────────────────────────────
 
 float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-    FEng_BiomeEnvironment Env = GetEnvironmentAtLocation(WorldLocation);
-    return Env.AmbientTemperatureCelsius;
+    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
+
+    // Interpolate temperature based on altitude (Z)
+    const float AltitudeFactor = FMath::Clamp(WorldLocation.Z / 5000.0f, 0.0f, 1.0f);
+    const float BaseTemp = FMath::Lerp(Def.MaxTemperature, Def.MinTemperature, AltitudeFactor);
+
+    // Add small noise variation
+    const float Noise = FMath::Sin(WorldLocation.X * 0.001f) * FMath::Cos(WorldLocation.Y * 0.001f) * 2.0f;
+    return BaseTemp + Noise;
 }
 
-float UBiomeManager::GetHazardLevelAtLocation(const FVector& WorldLocation) const
+float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
 {
-    FName BiomeID = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeDefinition Def;
-    if (GetBiomeByID(BiomeID, Def))
-    {
-        return Def.HazardLevel;
-    }
-    return 0.0f;
+    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
+    return Def.Humidity;
 }
 
-bool UBiomeManager::IsLocationDangerous(const FVector& WorldLocation, float DangerThreshold) const
+bool UBiomeManager::IsDangerousZone(const FVector& WorldLocation) const
 {
-    return GetHazardLevelAtLocation(WorldLocation) >= DangerThreshold;
+    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
+    return Def.bHasPredators;
 }
 
-// ─── Default Biome Initialization ───────────────────────────────────────────
-
-void UBiomeManager::InitializeDefaultBiomes()
+void UBiomeManager::RegisterBiome(const FEng_BiomeDefinition& BiomeDef)
 {
-    RegisteredBiomes.Empty();
-
-    // ── 1. GRASSLAND ──────────────────────────────────────────────────────
+    // Remove existing entry for this biome type if present
+    RegisteredBiomes.RemoveAll([&](const FEng_BiomeDefinition& Existing)
     {
-        FEng_BiomeDefinition Grassland;
-        Grassland.BiomeID = FName("Grassland");
-        Grassland.BiomeName = TEXT("Cretaceous Grassland");
-        Grassland.BiomeOrigin = FVector(0.0f, 0.0f, 0.0f);
-        Grassland.BiomeRadius = 5000.0f;
-        Grassland.HazardLevel = 0.2f;
-        Grassland.Environment.AmbientTemperatureCelsius = 24.0f;
-        Grassland.Environment.HumidityPercent = 55.0f;
-        Grassland.Environment.FogDensity = 0.01f;
-        Grassland.Environment.WindSpeedKmH = 12.0f;
-        Grassland.Environment.SkyColorTint = FLinearColor(0.53f, 0.81f, 0.98f);
-        Grassland.Environment.FogColorTint = FLinearColor(0.9f, 0.95f, 1.0f);
-        RegisteredBiomes.Add(Grassland);
-    }
+        return Existing.BiomeID == BiomeDef.BiomeID;
+    });
 
-    // ── 2. FOREST ─────────────────────────────────────────────────────────
-    {
-        FEng_BiomeDefinition Forest;
-        Forest.BiomeID = FName("Forest");
-        Forest.BiomeName = TEXT("Prehistoric Dense Forest");
-        Forest.BiomeOrigin = FVector(6000.0f, 0.0f, 0.0f);
-        Forest.BiomeRadius = 4500.0f;
-        Forest.HazardLevel = 0.45f;
-        Forest.Environment.AmbientTemperatureCelsius = 20.0f;
-        Forest.Environment.HumidityPercent = 80.0f;
-        Forest.Environment.FogDensity = 0.04f;
-        Forest.Environment.WindSpeedKmH = 4.0f;
-        Forest.Environment.SkyColorTint = FLinearColor(0.3f, 0.6f, 0.3f);
-        Forest.Environment.FogColorTint = FLinearColor(0.6f, 0.8f, 0.6f);
-        RegisteredBiomes.Add(Forest);
-    }
-
-    // ── 3. DESERT ─────────────────────────────────────────────────────────
-    {
-        FEng_BiomeDefinition Desert;
-        Desert.BiomeID = FName("Desert");
-        Desert.BiomeName = TEXT("Arid Badlands");
-        Desert.BiomeOrigin = FVector(-6000.0f, 0.0f, 0.0f);
-        Desert.BiomeRadius = 4000.0f;
-        Desert.HazardLevel = 0.6f;
-        Desert.Environment.AmbientTemperatureCelsius = 42.0f;
-        Desert.Environment.HumidityPercent = 10.0f;
-        Desert.Environment.FogDensity = 0.005f;
-        Desert.Environment.WindSpeedKmH = 25.0f;
-        Desert.Environment.SkyColorTint = FLinearColor(0.9f, 0.75f, 0.5f);
-        Desert.Environment.FogColorTint = FLinearColor(0.95f, 0.85f, 0.6f);
-        RegisteredBiomes.Add(Desert);
-    }
-
-    // ── 4. SWAMP ──────────────────────────────────────────────────────────
-    {
-        FEng_BiomeDefinition Swamp;
-        Swamp.BiomeID = FName("Swamp");
-        Swamp.BiomeName = TEXT("Primordial Swamp");
-        Swamp.BiomeOrigin = FVector(0.0f, 6000.0f, 0.0f);
-        Swamp.BiomeRadius = 3500.0f;
-        Swamp.HazardLevel = 0.55f;
-        Swamp.Environment.AmbientTemperatureCelsius = 30.0f;
-        Swamp.Environment.HumidityPercent = 95.0f;
-        Swamp.Environment.FogDensity = 0.08f;
-        Swamp.Environment.WindSpeedKmH = 2.0f;
-        Swamp.Environment.SkyColorTint = FLinearColor(0.4f, 0.5f, 0.3f);
-        Swamp.Environment.FogColorTint = FLinearColor(0.5f, 0.6f, 0.4f);
-        RegisteredBiomes.Add(Swamp);
-    }
-
-    // ── 5. MOUNTAIN ───────────────────────────────────────────────────────
-    {
-        FEng_BiomeDefinition Mountain;
-        Mountain.BiomeID = FName("Mountain");
-        Mountain.BiomeName = TEXT("Rocky Highlands");
-        Mountain.BiomeOrigin = FVector(0.0f, -6000.0f, 500.0f);
-        Mountain.BiomeRadius = 4000.0f;
-        Mountain.HazardLevel = 0.5f;
-        Mountain.Environment.AmbientTemperatureCelsius = 8.0f;
-        Mountain.Environment.HumidityPercent = 40.0f;
-        Mountain.Environment.FogDensity = 0.03f;
-        Mountain.Environment.WindSpeedKmH = 35.0f;
-        Mountain.Environment.SkyColorTint = FLinearColor(0.6f, 0.7f, 0.9f);
-        Mountain.Environment.FogColorTint = FLinearColor(0.8f, 0.85f, 0.95f);
-        RegisteredBiomes.Add(Mountain);
-    }
-
-    // ── 6. VOLCANIC ───────────────────────────────────────────────────────
-    {
-        FEng_BiomeDefinition Volcanic;
-        Volcanic.BiomeID = FName("Volcanic");
-        Volcanic.BiomeName = TEXT("Volcanic Caldera");
-        Volcanic.BiomeOrigin = FVector(4000.0f, -4000.0f, 200.0f);
-        Volcanic.BiomeRadius = 3000.0f;
-        Volcanic.HazardLevel = 0.9f;
-        Volcanic.Environment.AmbientTemperatureCelsius = 65.0f;
-        Volcanic.Environment.HumidityPercent = 20.0f;
-        Volcanic.Environment.FogDensity = 0.12f;
-        Volcanic.Environment.WindSpeedKmH = 18.0f;
-        Volcanic.Environment.SkyColorTint = FLinearColor(0.8f, 0.4f, 0.2f);
-        Volcanic.Environment.FogColorTint = FLinearColor(0.7f, 0.3f, 0.1f);
-        RegisteredBiomes.Add(Volcanic);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Default biomes initialized (%d total)"), RegisteredBiomes.Num());
+    RegisteredBiomes.Add(BiomeDef);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome '%s'"), *BiomeDef.BiomeName.ToString());
 }
