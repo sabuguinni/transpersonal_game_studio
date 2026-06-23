@@ -1,3 +1,7 @@
+// TranspersonalCharacter.h
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Prehistoric survival game — player character with full survival integration
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,17 +9,6 @@
 #include "Core/Survival/SurvivalComponent.h"
 #include "TranspersonalCharacter.generated.h"
 
-class USpringArmComponent;
-class UCameraComponent;
-class UInputMappingContext;
-class UInputAction;
-
-/**
- * ATranspersonalCharacter
- * Player-controlled prehistoric human survivor.
- * Extends ACharacter with survival stats (health, hunger, thirst, stamina, fear)
- * via USurvivalComponent. Uses UE5 Enhanced Input for WASD + jump + run.
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATranspersonalCharacter : public ACharacter
 {
@@ -26,83 +19,66 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-
-public:
     virtual void Tick(float DeltaTime) override;
+    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-    // ── Survival Component ─────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival",
-              meta = (AllowPrivateAccess = "true"))
+    // --- Survival Component ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
     USurvivalComponent* SurvivalComp;
 
-    // ── Camera ─────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
-              meta = (AllowPrivateAccess = "true"))
-    USpringArmComponent* CameraBoom;
+    // --- Camera ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+    class USpringArmComponent* CameraBoom;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
-              meta = (AllowPrivateAccess = "true"))
-    UCameraComponent* FollowCamera;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+    class UCameraComponent* FollowCamera;
 
-    // ── Movement Speeds ────────────────────────────────────────────────────
+    // --- Movement ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float WalkSpeed = 300.0f;
+    float WalkSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float RunSpeed = 600.0f;
+    float RunSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float CrouchSpeed = 150.0f;
+    bool bIsRunning;
 
-    // ── Input ──────────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputMappingContext* DefaultMappingContext;
+    // --- Survival Stats (replicated from SurvivalComp for Blueprint access) ---
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float CurrentHealth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* MoveAction;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float CurrentHunger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* LookAction;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float CurrentThirst;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* JumpAction;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float CurrentStamina;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* SprintAction;
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float CurrentFear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* CrouchAction;
+    // --- Biome environment modifiers ---
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    float CurrentBiomeTemperature;
 
-    // ── State ──────────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsSprinting = false;
-
-    // ── Blueprint-callable helpers ─────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetHealth() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetHunger() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetThirst() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetStamina() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsAlive() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StartSprint();
-
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StopSprint();
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    float CurrentBiomeHazardLevel;
 
 private:
-    void Move(const struct FInputActionValue& Value);
-    void Look(const struct FInputActionValue& Value);
-    void HandleSprintStart();
-    void HandleSprintStop();
+    // Input handlers
+    void MoveForward(float Value);
+    void MoveRight(float Value);
+    void StartRun();
+    void StopRun();
+    void StartJump();
+    void StopJump();
+
+    // Biome query — called every BiomeQueryInterval seconds
+    void QueryBiomeEnvironment();
+    float BiomeQueryTimer;
+
+    UPROPERTY(EditAnywhere, Category = "Environment")
+    float BiomeQueryInterval;
 };
