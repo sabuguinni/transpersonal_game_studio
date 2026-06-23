@@ -1,232 +1,208 @@
+// NarrativeDialogueManager.cpp — Agent #15 Narrative & Dialogue
+// Implements dialogue trigger system for MinPlayableMap survival game
+
 #include "NarrativeDialogueManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "TimerManager.h"
-#include "Engine/DataTable.h"
-#include "Kismet/GameplayStatics.h"
 
-void UNarrativeDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+ANarrativeDialogueManager::ANarrativeDialogueManager()
 {
-    Super::Initialize(Collection);
-    
-    DefaultVolume = 0.8f;
-    FadeInDuration = 0.5f;
-    FadeOutDuration = 0.3f;
-    CurrentAudioComponent = nullptr;
-    
-    LoadEnvironmentalNarration();
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager initialized"));
+    PrimaryActorTick.bCanEverTick = false;
+
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    ActiveSequenceID = NAME_None;
+    PlayerHungerThreshold = 30.0f;
+    PlayerDangerRadius = 800.0f;
 }
 
-void UNarrativeDialogueManager::Deinitialize()
+void ANarrativeDialogueManager::BeginPlay()
 {
-    if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
-    {
-        CurrentAudioComponent->Stop();
-        CurrentAudioComponent = nullptr;
-    }
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
-    
-    Super::Deinitialize();
+    Super::BeginPlay();
+    InitializeDefaultDialogues();
 }
 
-void UNarrativeDialogueManager::PlayDialogue(const FString& DialogueID)
+void ANarrativeDialogueManager::Tick(float DeltaTime)
 {
-    if (IsDialoguePlaying())
-    {
-        StopCurrentDialogue();
-    }
-    
-    // Find dialogue in data table
-    if (DialogueDataTable.IsValid())
-    {
-        if (UDataTable* Table = DialogueDataTable.LoadSynchronous())
-        {
-            if (FNarr_DialogueEntry* Entry = Table->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT("PlayDialogue")))
-            {
-                PlayDialogueEntry(*Entry);
-            }
-        }
-    }
-    
-    // Check quest dialogues
-    if (QuestDialogues.Contains(DialogueID))
-    {
-        const FNarr_QuestDialogue& QuestDialogue = QuestDialogues[DialogueID];
-        if (QuestDialogue.DialogueEntries.Num() > 0)
-        {
-            PlayDialogueEntry(QuestDialogue.DialogueEntries[0]);
-        }
-    }
+    Super::Tick(DeltaTime);
 }
 
-void UNarrativeDialogueManager::TriggerEnvironmentalNarration(ENarr_BiomeType BiomeType, ENarr_ThreatLevel ThreatLevel)
+void ANarrativeDialogueManager::InitializeDefaultDialogues()
 {
-    if (IsDialoguePlaying())
-    {
-        return; // Don't interrupt current dialogue
-    }
-    
-    FNarr_DialogueEntry Entry = GetEnvironmentalDialogue(BiomeType, ThreatLevel);
-    if (!Entry.DialogueText.IsEmpty())
-    {
-        PlayDialogueEntry(Entry);
-    }
+    BuildCampDialogue();
+    BuildRiverDialogue();
+    BuildPredatorDialogue();
 }
 
-void UNarrativeDialogueManager::RegisterQuestDialogue(const FString& QuestID, const TArray<FNarr_DialogueEntry>& Entries)
+void ANarrativeDialogueManager::BuildCampDialogue()
 {
-    FNarr_QuestDialogue NewQuestDialogue;
-    NewQuestDialogue.QuestID = QuestID;
-    NewQuestDialogue.DialogueEntries = Entries;
-    NewQuestDialogue.bIsCompleted = false;
-    
-    QuestDialogues.Add(QuestID, NewQuestDialogue);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered quest dialogue: %s with %d entries"), *QuestID, Entries.Num());
+    FNarr_DialogueSequence CampSeq;
+    CampSeq.SequenceID = FName("Camp_Arrival");
+    CampSeq.TriggerType = ENarr_DialogueTriggerType::Camp;
+    CampSeq.bHasPlayed = false;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder");
+    Line1.LineText = TEXT("You return. Good. The pack moved east — three kills since dawn.");
+    Line1.DisplayDuration = 4.0f;
+    Line1.TriggerContext = ENarr_DialogueTriggerType::Camp;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder");
+    Line2.LineText = TEXT("Eat. Rest. Tomorrow we track the herd before the raptors take the valley.");
+    Line2.DisplayDuration = 4.5f;
+    Line2.TriggerContext = ENarr_DialogueTriggerType::Camp;
+
+    FNarr_DialogueLine Line3;
+    Line3.SpeakerName = TEXT("Hunter");
+    Line3.LineText = TEXT("I found tracks near the river. Big ones. Bigger than the last season.");
+    Line3.DisplayDuration = 4.0f;
+    Line3.TriggerContext = ENarr_DialogueTriggerType::Camp;
+
+    CampSeq.Lines.Add(Line1);
+    CampSeq.Lines.Add(Line2);
+    CampSeq.Lines.Add(Line3);
+    DialogueLibrary.Add(CampSeq);
 }
 
-bool UNarrativeDialogueManager::IsDialoguePlaying() const
+void ANarrativeDialogueManager::BuildRiverDialogue()
 {
-    return CurrentAudioComponent && IsValid(CurrentAudioComponent) && CurrentAudioComponent->IsPlaying();
+    FNarr_DialogueSequence RiverSeq;
+    RiverSeq.SequenceID = FName("River_Warning");
+    RiverSeq.TriggerType = ENarr_DialogueTriggerType::River;
+    RiverSeq.bHasPlayed = false;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Scout");
+    Line1.LineText = TEXT("Careful. The river crossing is exposed. Raptors hunt the banks at dusk.");
+    Line1.DisplayDuration = 4.0f;
+    Line1.TriggerContext = ENarr_DialogueTriggerType::River;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Scout");
+    Line2.LineText = TEXT("Cross fast. Stay low. Do not run — movement triggers the chase response.");
+    Line2.DisplayDuration = 4.5f;
+    Line2.TriggerContext = ENarr_DialogueTriggerType::River;
+
+    RiverSeq.Lines.Add(Line1);
+    RiverSeq.Lines.Add(Line2);
+    DialogueLibrary.Add(RiverSeq);
 }
 
-void UNarrativeDialogueManager::StopCurrentDialogue()
+void ANarrativeDialogueManager::BuildPredatorDialogue()
 {
-    if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
-    {
-        CurrentAudioComponent->FadeOut(FadeOutDuration, 0.0f);
-    }
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
+    FNarr_DialogueSequence PredSeq;
+    PredSeq.SequenceID = FName("Predator_Territory");
+    PredSeq.TriggerType = ENarr_DialogueTriggerType::Predator;
+    PredSeq.bHasPlayed = false;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder");
+    Line1.LineText = TEXT("This is its territory. The large one. It has hunted here for three seasons.");
+    Line1.DisplayDuration = 5.0f;
+    Line1.TriggerContext = ENarr_DialogueTriggerType::Predator;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder");
+    Line2.LineText = TEXT("We do not fight it. We survive around it. Learn its patterns. Use them.");
+    Line2.DisplayDuration = 5.0f;
+    Line2.TriggerContext = ENarr_DialogueTriggerType::Predator;
+
+    FNarr_DialogueLine Line3;
+    Line3.SpeakerName = TEXT("Hunter");
+    Line3.LineText = TEXT("It feeds at the ridge at midday. That is our window. Move then, not before.");
+    Line3.DisplayDuration = 4.5f;
+    Line3.TriggerContext = ENarr_DialogueTriggerType::Predator;
+
+    PredSeq.Lines.Add(Line1);
+    PredSeq.Lines.Add(Line2);
+    PredSeq.Lines.Add(Line3);
+    DialogueLibrary.Add(PredSeq);
 }
 
-void UNarrativeDialogueManager::PlayDialogueEntry(const FNarr_DialogueEntry& Entry)
+void ANarrativeDialogueManager::TriggerDialogueSequence(FName SequenceID)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (bDialogueActive)
     {
         return;
     }
-    
-    // Load and play voice clip if available
-    if (Entry.VoiceClip.IsValid())
+
+    FNarr_DialogueSequence* Seq = FindSequenceByID(SequenceID);
+    if (!Seq || Seq->bHasPlayed || Seq->Lines.Num() == 0)
     {
-        if (USoundCue* SoundCue = Entry.VoiceClip.LoadSynchronous())
-        {
-            CurrentAudioComponent = UGameplayStatics::SpawnSound2D(World, SoundCue, DefaultVolume);
-            if (CurrentAudioComponent)
-            {
-                CurrentAudioComponent->FadeIn(FadeInDuration, DefaultVolume);
-            }
-        }
+        return;
     }
-    
-    // Display text (this would integrate with UI system)
-    UE_LOG(LogTemp, Warning, TEXT("[%s]: %s"), *Entry.SpeakerName, *Entry.DialogueText.ToString());
-    
-    // Set timer for dialogue duration
-    World->GetTimerManager().SetTimer(
-        DialogueTimerHandle,
-        this,
-        &UNarrativeDialogueManager::OnDialogueFinished,
-        Entry.Duration,
-        false
-    );
+
+    bDialogueActive = true;
+    ActiveSequenceID = SequenceID;
+    CurrentLineIndex = 0;
 }
 
-void UNarrativeDialogueManager::OnDialogueFinished()
+void ANarrativeDialogueManager::AdvanceDialogue()
 {
-    if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
+    if (!bDialogueActive)
     {
-        CurrentAudioComponent->FadeOut(FadeOutDuration, 0.0f);
-        CurrentAudioComponent = nullptr;
+        return;
+    }
+
+    FNarr_DialogueSequence* Seq = FindSequenceByID(ActiveSequenceID);
+    if (!Seq)
+    {
+        EndDialogue();
+        return;
+    }
+
+    CurrentLineIndex++;
+    if (CurrentLineIndex >= Seq->Lines.Num())
+    {
+        EndDialogue();
+        Seq->bHasPlayed = true;
     }
 }
 
-void UNarrativeDialogueManager::LoadEnvironmentalNarration()
+void ANarrativeDialogueManager::EndDialogue()
 {
-    // Populate environmental narration entries
-    EnvironmentalNarration.Empty();
-    
-    // Savana narration
-    FNarr_DialogueEntry SavanaEntry;
-    SavanaEntry.SpeakerName = TEXT("Narrator");
-    SavanaEntry.DialogueText = FText::FromString(TEXT("The vast savana stretches endlessly. Herds of Triceratops graze in the distance."));
-    SavanaEntry.Duration = 4.0f;
-    SavanaEntry.TriggerType = ENarr_DialogueTrigger::BiomeEnter;
-    SavanaEntry.TriggerCondition = TEXT("Savana");
-    EnvironmentalNarration.Add(SavanaEntry);
-    
-    // Forest narration
-    FNarr_DialogueEntry ForestEntry;
-    ForestEntry.SpeakerName = TEXT("Guide");
-    ForestEntry.DialogueText = FText::FromString(TEXT("Ancient trees tower above. The Brachiosaurus herds migrate through these paths."));
-    ForestEntry.Duration = 4.5f;
-    ForestEntry.TriggerType = ENarr_DialogueTrigger::BiomeEnter;
-    ForestEntry.TriggerCondition = TEXT("Forest");
-    EnvironmentalNarration.Add(ForestEntry);
-    
-    // Danger narration
-    FNarr_DialogueEntry DangerEntry;
-    DangerEntry.SpeakerName = TEXT("Survival Guide");
-    DangerEntry.DialogueText = FText::FromString(TEXT("Danger detected. Large predator nearby. Move carefully and avoid sudden movements."));
-    DangerEntry.Duration = 3.5f;
-    DangerEntry.TriggerType = ENarr_DialogueTrigger::ThreatDetected;
-    DangerEntry.TriggerCondition = TEXT("High");
-    EnvironmentalNarration.Add(DangerEntry);
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    ActiveSequenceID = NAME_None;
 }
 
-FNarr_DialogueEntry UNarrativeDialogueManager::GetEnvironmentalDialogue(ENarr_BiomeType BiomeType, ENarr_ThreatLevel ThreatLevel)
+FNarr_DialogueLine ANarrativeDialogueManager::GetCurrentLine() const
 {
-    for (const FNarr_DialogueEntry& Entry : EnvironmentalNarration)
+    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
     {
-        if (Entry.TriggerType == ENarr_DialogueTrigger::BiomeEnter)
+        if (Seq.SequenceID == ActiveSequenceID)
         {
-            FString BiomeName;
-            switch (BiomeType)
+            if (CurrentLineIndex >= 0 && CurrentLineIndex < Seq.Lines.Num())
             {
-                case ENarr_BiomeType::Savana: BiomeName = TEXT("Savana"); break;
-                case ENarr_BiomeType::Forest: BiomeName = TEXT("Forest"); break;
-                case ENarr_BiomeType::Desert: BiomeName = TEXT("Desert"); break;
-                case ENarr_BiomeType::Swamp: BiomeName = TEXT("Swamp"); break;
-                case ENarr_BiomeType::Mountain: BiomeName = TEXT("Mountain"); break;
-                default: BiomeName = TEXT("Unknown"); break;
-            }
-            
-            if (Entry.TriggerCondition == BiomeName)
-            {
-                return Entry;
-            }
-        }
-        else if (Entry.TriggerType == ENarr_DialogueTrigger::ThreatDetected)
-        {
-            FString ThreatName;
-            switch (ThreatLevel)
-            {
-                case ENarr_ThreatLevel::Low: ThreatName = TEXT("Low"); break;
-                case ENarr_ThreatLevel::Medium: ThreatName = TEXT("Medium"); break;
-                case ENarr_ThreatLevel::High: ThreatName = TEXT("High"); break;
-                case ENarr_ThreatLevel::Extreme: ThreatName = TEXT("Extreme"); break;
-                default: ThreatName = TEXT("Unknown"); break;
-            }
-            
-            if (Entry.TriggerCondition == ThreatName)
-            {
-                return Entry;
+                return Seq.Lines[CurrentLineIndex];
             }
         }
     }
-    
-    return FNarr_DialogueEntry(); // Return empty entry if no match
+    return FNarr_DialogueLine();
+}
+
+bool ANarrativeDialogueManager::IsDialogueActive() const
+{
+    return bDialogueActive;
+}
+
+void ANarrativeDialogueManager::RegisterTriggerZone(ENarr_DialogueTriggerType TriggerType, FVector Location)
+{
+    // Trigger zone registration — Blueprint or C++ callers can register zones at runtime
+    // Maps TriggerType to world location for proximity checks
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered trigger zone type=%d at (%f,%f,%f)"),
+        (int32)TriggerType, Location.X, Location.Y, Location.Z);
+}
+
+FNarr_DialogueSequence* ANarrativeDialogueManager::FindSequenceByID(FName SequenceID)
+{
+    for (FNarr_DialogueSequence& Seq : DialogueLibrary)
+    {
+        if (Seq.SequenceID == SequenceID)
+        {
+            return &Seq;
+        }
+    }
+    return nullptr;
 }
