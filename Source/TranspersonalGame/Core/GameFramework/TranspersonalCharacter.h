@@ -1,6 +1,6 @@
-// TranspersonalCharacter.h
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Prehistoric survival game — player character with survival stats and SurvivalComponent integration
+// TranspersonalCharacter.h — Agent #3 Core Systems Programmer
+// Prehistoric survival game — human primitive vs dinosaur world
+// CYCLE: PROD_CYCLE_AUTO_20260623_010
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,17 +18,15 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // ── Survival Component ────────────────────────────────────────────────────
+    // ── Survival Component ──────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival",
               meta = (AllowPrivateAccess = "true"))
     USurvivalComponent* SurvivalComp;
 
-    // ── Camera ────────────────────────────────────────────────────────────────
+    // ── Camera ──────────────────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
               meta = (AllowPrivateAccess = "true"))
     class USpringArmComponent* CameraBoom;
@@ -37,85 +35,76 @@ public:
               meta = (AllowPrivateAccess = "true"))
     class UCameraComponent* FollowCamera;
 
-    // ── Movement parameters ───────────────────────────────────────────────────
+    // ── Movement ─────────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float WalkSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float RunSpeed;
+    float SprintSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float CrouchSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float JumpZVelocity;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement",
+              meta = (AllowPrivateAccess = "true"))
+    bool bIsSprinting;
 
-    // ── Survival stats (replicated via SurvivalComp) ─────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    // ── Survival Stats (exposed for HUD) ────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Survival",
+              meta = (AllowPrivateAccess = "true"))
     float Health;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Survival",
+              meta = (AllowPrivateAccess = "true"))
     float Hunger;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Survival",
+              meta = (AllowPrivateAccess = "true"))
     float Thirst;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Survival",
+              meta = (AllowPrivateAccess = "true"))
     float Stamina;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Survival",
+              meta = (AllowPrivateAccess = "true"))
     float Fear;
 
-    // ── Input handlers ────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Input")
+    // ── Biome damage ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Biome")
+    float VolcanicHeatDamagePerSecond;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Biome")
+    float DesertHeatDamagePerSecond;
+
+    // ── Input handlers ───────────────────────────────────────────────────────
     void MoveForward(float Value);
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
     void MoveRight(float Value);
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
+    void Turn(float Value);
     void LookUp(float Value);
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
-    void LookRight(float Value);
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
-    void StartRun();
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
-    void StopRun();
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
+    void StartSprint();
+    void StopSprint();
     void StartCrouch();
-
-    UFUNCTION(BlueprintCallable, Category = "Input")
     void StopCrouch();
+    void Jump();
 
-    // ── Survival actions ──────────────────────────────────────────────────────
+    // ── Survival helpers ─────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ApplyDamage(float Amount);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void Eat(float NutritionValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void Drink(float HydrationValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsAlive() const;
+    void ApplyBiomeDamage(float DeltaTime, bool bInVolcanic, bool bInDesert);
 
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void SyncSurvivalStats();
 
-private:
-    bool bIsRunning;
-    bool bIsCrouching;
+    // ── Death ────────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintNativeEvent, Category = "Survival")
+    void OnCharacterDeath();
+    virtual void OnCharacterDeath_Implementation();
 
-    // Drain rates per second
-    static constexpr float HungerDrainRate  = 0.5f;
-    static constexpr float ThirstDrainRate  = 0.8f;
-    static constexpr float StaminaDrainRun  = 5.0f;
-    static constexpr float StaminaRegenIdle = 3.0f;
+public:
+    // Accessors
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    USurvivalComponent* GetSurvivalComponent() const { return SurvivalComp; }
 
-    void TickSurvivalStats(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    bool GetIsSprinting() const { return bIsSprinting; }
 };
