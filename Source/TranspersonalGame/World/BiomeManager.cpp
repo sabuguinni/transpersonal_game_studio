@@ -1,350 +1,261 @@
 // BiomeManager.cpp
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260623_007
-// Full implementation of ABiomeManager for the prehistoric survival game.
+// Engine Architect #02 — Transpersonal Game Studio
+// Full implementation of the Biome Manager system for the prehistoric survival game.
+// Manages 6 biomes: Grassland, Forest, Desert, Swamp, Mountain, Volcanic
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Constructor ────────────────────────────────────────────────────────────
 
-ABiomeManager::ABiomeManager()
+UBiomeManager::UBiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s for performance
-
-    // Default biome configuration
-    TransitionBlendRadius = 2000.0f;
-    BiomeUpdateInterval   = 1.0f;
-    bDebugBiomeOverlay    = false;
-    CurrentDominantBiome  = EEng_BiomeType::Grassland;
-    bBiomesInitialized    = false;
+    // Default biome definitions — prehistoric survival world
+    InitializeDefaultBiomes();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── UGameInstanceSubsystem ─────────────────────────────────────────────────
 
-void ABiomeManager::BeginPlay()
+void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    InitializeBiomes();
-
-    // Start periodic biome update timer
-    GetWorldTimerManager().SetTimer(
-        BiomeUpdateTimerHandle,
-        this,
-        &ABiomeManager::UpdateBiomeStates,
-        BiomeUpdateInterval,
-        true  // looping
-    );
+    Super::Initialize(Collection);
+    InitializeDefaultBiomes();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biomes"), RegisteredBiomes.Num());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tick
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::Tick(float DeltaTime)
+void UBiomeManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    RegisteredBiomes.Empty();
+    Super::Deinitialize();
+}
 
-    // Advance active transitions
-    for (FEng_BiomeTransition& Transition : ActiveTransitions)
+// ─── Biome Registration ──────────────────────────────────────────────────────
+
+void UBiomeManager::RegisterBiome(const FEng_BiomeDefinition& BiomeDef)
+{
+    // Prevent duplicate IDs
+    for (const FEng_BiomeDefinition& Existing : RegisteredBiomes)
     {
-        if (Transition.bIsActive)
+        if (Existing.BiomeID == BiomeDef.BiomeID)
         {
-            Transition.BlendAlpha = FMath::Clamp(
-                Transition.BlendAlpha + DeltaTime / FMath::Max(Transition.TransitionDuration, 0.01f),
-                0.0f, 1.0f
-            );
+            UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Biome ID '%s' already registered — skipping."), *BiomeDef.BiomeID.ToString());
+            return;
+        }
+    }
+    RegisteredBiomes.Add(BiomeDef);
+    OnBiomeRegistered.Broadcast(BiomeDef.BiomeID);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome '%s'"), *BiomeDef.BiomeName);
+}
 
-            if (Transition.BlendAlpha >= 1.0f)
+bool UBiomeManager::GetBiomeByID(FName BiomeID, FEng_BiomeDefinition& OutBiome) const
+{
+    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
+    {
+        if (Biome.BiomeID == BiomeID)
+        {
+            OutBiome = Biome;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ─── World Position Query ────────────────────────────────────────────────────
+
+FName UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    // Simple distance-based biome lookup using biome origin points
+    FName ClosestBiome = NAME_None;
+    float ClosestDist = MAX_FLT;
+
+    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
+    {
+        float Dist = FVector::Dist2D(WorldLocation, Biome.BiomeOrigin);
+        if (Dist < Biome.BiomeRadius && Dist < ClosestDist)
+        {
+            ClosestDist = Dist;
+            ClosestBiome = Biome.BiomeID;
+        }
+    }
+
+    // Fallback: return nearest biome origin regardless of radius
+    if (ClosestBiome == NAME_None)
+    {
+        for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
+        {
+            float Dist = FVector::Dist2D(WorldLocation, Biome.BiomeOrigin);
+            if (Dist < ClosestDist)
             {
-                Transition.bIsActive = false;
-                OnBiomeTransitionComplete.Broadcast(Transition.FromBiome, Transition.ToBiome);
+                ClosestDist = Dist;
+                ClosestBiome = Biome.BiomeID;
             }
         }
     }
 
-    // Remove completed transitions
-    ActiveTransitions.RemoveAll([](const FEng_BiomeTransition& T) { return !T.bIsActive; });
-
-#if WITH_EDITOR
-    if (bDebugBiomeOverlay)
-    {
-        DrawDebugBiomeOverlay();
-    }
-#endif
+    return ClosestBiome;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InitializeBiomes — populate default runtime data for all biome types
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::InitializeBiomes()
+FEng_BiomeEnvironment UBiomeManager::GetEnvironmentAtLocation(const FVector& WorldLocation) const
 {
-    if (bBiomesInitialized) return;
-
-    // ── Grassland ──────────────────────────────────────────────────────────
+    FName BiomeID = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def;
+    if (GetBiomeByID(BiomeID, Def))
     {
-        FEng_BiomeRuntimeData Grassland;
-        Grassland.BiomeType           = EEng_BiomeType::Grassland;
-        Grassland.DisplayName         = FText::FromString(TEXT("Grassland Plains"));
-        Grassland.TemperatureRange    = FVector2D(18.0f, 32.0f);
-        Grassland.HumidityRange       = FVector2D(0.3f, 0.6f);
-        Grassland.FoliageDensity      = 0.6f;
-        Grassland.PredatorSpawnWeight = 0.4f;
-        Grassland.HerbivoreSpawnWeight= 0.8f;
-        Grassland.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Grassland, Grassland);
+        return Def.Environment;
     }
-
-    // ── Forest ────────────────────────────────────────────────────────────
-    {
-        FEng_BiomeRuntimeData Forest;
-        Forest.BiomeType           = EEng_BiomeType::Forest;
-        Forest.DisplayName         = FText::FromString(TEXT("Dense Forest"));
-        Forest.TemperatureRange    = FVector2D(12.0f, 26.0f);
-        Forest.HumidityRange       = FVector2D(0.6f, 0.9f);
-        Forest.FoliageDensity      = 0.95f;
-        Forest.PredatorSpawnWeight = 0.6f;
-        Forest.HerbivoreSpawnWeight= 0.5f;
-        Forest.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Forest, Forest);
-    }
-
-    // ── Desert ────────────────────────────────────────────────────────────
-    {
-        FEng_BiomeRuntimeData Desert;
-        Desert.BiomeType           = EEng_BiomeType::Desert;
-        Desert.DisplayName         = FText::FromString(TEXT("Arid Desert"));
-        Desert.TemperatureRange    = FVector2D(35.0f, 55.0f);
-        Desert.HumidityRange       = FVector2D(0.0f, 0.15f);
-        Desert.FoliageDensity      = 0.05f;
-        Desert.PredatorSpawnWeight = 0.3f;
-        Desert.HerbivoreSpawnWeight= 0.2f;
-        Desert.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Desert, Desert);
-    }
-
-    // ── Swamp ─────────────────────────────────────────────────────────────
-    {
-        FEng_BiomeRuntimeData Swamp;
-        Swamp.BiomeType           = EEng_BiomeType::Swamp;
-        Swamp.DisplayName         = FText::FromString(TEXT("Primordial Swamp"));
-        Swamp.TemperatureRange    = FVector2D(22.0f, 34.0f);
-        Swamp.HumidityRange       = FVector2D(0.85f, 1.0f);
-        Swamp.FoliageDensity      = 0.8f;
-        Swamp.PredatorSpawnWeight = 0.7f;
-        Swamp.HerbivoreSpawnWeight= 0.3f;
-        Swamp.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Swamp, Swamp);
-    }
-
-    // ── Volcanic ──────────────────────────────────────────────────────────
-    {
-        FEng_BiomeRuntimeData Volcanic;
-        Volcanic.BiomeType           = EEng_BiomeType::Volcanic;
-        Volcanic.DisplayName         = FText::FromString(TEXT("Volcanic Badlands"));
-        Volcanic.TemperatureRange    = FVector2D(40.0f, 80.0f);
-        Volcanic.HumidityRange       = FVector2D(0.1f, 0.3f);
-        Volcanic.FoliageDensity      = 0.02f;
-        Volcanic.PredatorSpawnWeight = 0.2f;
-        Volcanic.HerbivoreSpawnWeight= 0.05f;
-        Volcanic.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Volcanic, Volcanic);
-    }
-
-    // ── Tundra ────────────────────────────────────────────────────────────
-    {
-        FEng_BiomeRuntimeData Tundra;
-        Tundra.BiomeType           = EEng_BiomeType::Tundra;
-        Tundra.DisplayName         = FText::FromString(TEXT("Frozen Tundra"));
-        Tundra.TemperatureRange    = FVector2D(-20.0f, 5.0f);
-        Tundra.HumidityRange       = FVector2D(0.2f, 0.5f);
-        Tundra.FoliageDensity      = 0.1f;
-        Tundra.PredatorSpawnWeight = 0.3f;
-        Tundra.HerbivoreSpawnWeight= 0.4f;
-        Tundra.bIsActive           = true;
-        BiomeRuntimeData.Add(EEng_BiomeType::Tundra, Tundra);
-    }
-
-    bBiomesInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized %d biomes"), BiomeRuntimeData.Num());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetBiomeAtLocation — returns the dominant biome at a world position
-// Uses a simple noise-based approach until proper heightmap integration
-// ─────────────────────────────────────────────────────────────────────────────
-
-EEng_BiomeType ABiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
-{
-    if (!bBiomesInitialized) return EEng_BiomeType::Grassland;
-
-    // Normalize coordinates to [0,1] range over a 100km world
-    const float WorldScale = 100000.0f;
-    float NX = (WorldLocation.X / WorldScale) + 0.5f;
-    float NY = (WorldLocation.Y / WorldScale) + 0.5f;
-
-    // Simple deterministic biome assignment based on position bands
-    // In production this will be replaced by PCG/heightmap sampling
-    float Elevation = WorldLocation.Z;
-
-    if (Elevation > 5000.0f)  return EEng_BiomeType::Volcanic;
-    if (Elevation > 2000.0f)  return EEng_BiomeType::Tundra;
-
-    // Use a pseudo-noise pattern based on position
-    float Pattern = FMath::Sin(NX * 3.14159f * 2.0f) * FMath::Cos(NY * 3.14159f * 2.0f);
-
-    if (Pattern > 0.5f)  return EEng_BiomeType::Forest;
-    if (Pattern > 0.0f)  return EEng_BiomeType::Grassland;
-    if (Pattern > -0.3f) return EEng_BiomeType::Swamp;
-    return EEng_BiomeType::Desert;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetBiomeBlendWeights — returns blend weights for biomes at a location
-// ─────────────────────────────────────────────────────────────────────────────
-
-TMap<EEng_BiomeType, float> ABiomeManager::GetBiomeBlendWeights(FVector WorldLocation) const
-{
-    TMap<EEng_BiomeType, float> Weights;
-
-    EEng_BiomeType Primary = GetBiomeAtLocation(WorldLocation);
-    Weights.Add(Primary, 1.0f);
-
-    // Check neighbouring sample points for blending
-    const float SampleOffset = TransitionBlendRadius * 0.5f;
-    TArray<FVector> SampleOffsets = {
-        FVector(SampleOffset, 0, 0),
-        FVector(-SampleOffset, 0, 0),
-        FVector(0, SampleOffset, 0),
-        FVector(0, -SampleOffset, 0)
-    };
-
-    for (const FVector& Offset : SampleOffsets)
-    {
-        EEng_BiomeType Neighbour = GetBiomeAtLocation(WorldLocation + Offset);
-        if (Neighbour != Primary)
-        {
-            float& Weight = Weights.FindOrAdd(Neighbour);
-            Weight += 0.25f;
-        }
-    }
-
-    // Normalize weights
-    float Total = 0.0f;
-    for (auto& Pair : Weights) Total += Pair.Value;
-    if (Total > 0.0f)
-    {
-        for (auto& Pair : Weights) Pair.Value /= Total;
-    }
-
-    return Weights;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TriggerBiomeTransition — initiates a blended transition between two biomes
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::TriggerBiomeTransition(EEng_BiomeType FromBiome, EEng_BiomeType ToBiome, float Duration)
-{
-    // Cancel any existing transition involving these biomes
-    ActiveTransitions.RemoveAll([&](const FEng_BiomeTransition& T) {
-        return T.FromBiome == FromBiome || T.ToBiome == ToBiome;
-    });
-
-    FEng_BiomeTransition NewTransition;
-    NewTransition.FromBiome          = FromBiome;
-    NewTransition.ToBiome            = ToBiome;
-    NewTransition.TransitionDuration = FMath::Max(Duration, 0.1f);
-    NewTransition.BlendAlpha         = 0.0f;
-    NewTransition.bIsActive          = true;
-
-    ActiveTransitions.Add(NewTransition);
-    CurrentDominantBiome = ToBiome;
-
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transition started %d -> %d (%.1fs)"),
-        (int32)FromBiome, (int32)ToBiome, Duration);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetBiomeRuntimeData — returns the runtime data for a specific biome
-// ─────────────────────────────────────────────────────────────────────────────
-
-FEng_BiomeRuntimeData ABiomeManager::GetBiomeRuntimeData(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeRuntimeData* Data = BiomeRuntimeData.Find(BiomeType);
-    if (Data) return *Data;
-
-    // Return default grassland data as fallback
-    FEng_BiomeRuntimeData Default;
-    Default.BiomeType  = EEng_BiomeType::Grassland;
-    Default.DisplayName= FText::FromString(TEXT("Unknown Biome"));
-    Default.FoliageDensity = 0.5f;
-    Default.bIsActive  = false;
+    // Return default grassland environment
+    FEng_BiomeEnvironment Default;
+    Default.AmbientTemperatureCelsius = 22.0f;
+    Default.HumidityPercent = 60.0f;
+    Default.FogDensity = 0.02f;
+    Default.WindSpeedKmH = 10.0f;
     return Default;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UpdateBiomeStates — periodic update called by timer
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABiomeManager::UpdateBiomeStates()
+TArray<FName> UBiomeManager::GetAllBiomeIDs() const
 {
-    if (!bBiomesInitialized) return;
-
-    // Update player-relative biome if we have a player
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
+    TArray<FName> IDs;
+    for (const FEng_BiomeDefinition& Biome : RegisteredBiomes)
     {
-        EEng_BiomeType PlayerBiome = GetBiomeAtLocation(PlayerPawn->GetActorLocation());
-        if (PlayerBiome != CurrentDominantBiome)
-        {
-            TriggerBiomeTransition(CurrentDominantBiome, PlayerBiome, 5.0f);
-        }
+        IDs.Add(Biome.BiomeID);
     }
+    return IDs;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DrawDebugBiomeOverlay — editor-only debug visualisation
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Survival Queries ────────────────────────────────────────────────────────
 
-#if WITH_EDITOR
-void ABiomeManager::DrawDebugBiomeOverlay()
+float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    const int32 GridSize   = 10;
-    const float GridSpacing= 1000.0f;
-
-    static const TMap<EEng_BiomeType, FColor> BiomeColors = {
-        { EEng_BiomeType::Grassland, FColor::Green  },
-        { EEng_BiomeType::Forest,    FColor(0, 100, 0) },
-        { EEng_BiomeType::Desert,    FColor::Yellow  },
-        { EEng_BiomeType::Swamp,     FColor(0, 128, 64) },
-        { EEng_BiomeType::Volcanic,  FColor::Red     },
-        { EEng_BiomeType::Tundra,    FColor::Cyan    }
-    };
-
-    for (int32 X = -GridSize; X <= GridSize; ++X)
-    {
-        for (int32 Y = -GridSize; Y <= GridSize; ++Y)
-        {
-            FVector Loc(X * GridSpacing, Y * GridSpacing, 0.0f);
-            EEng_BiomeType Biome = GetBiomeAtLocation(Loc);
-            const FColor* Color = BiomeColors.Find(Biome);
-            FColor DrawColor = Color ? *Color : FColor::White;
-
-            DrawDebugPoint(World, Loc, 8.0f, DrawColor, false, BiomeUpdateInterval + 0.1f);
-        }
-    }
+    FEng_BiomeEnvironment Env = GetEnvironmentAtLocation(WorldLocation);
+    return Env.AmbientTemperatureCelsius;
 }
-#endif
+
+float UBiomeManager::GetHazardLevelAtLocation(const FVector& WorldLocation) const
+{
+    FName BiomeID = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def;
+    if (GetBiomeByID(BiomeID, Def))
+    {
+        return Def.HazardLevel;
+    }
+    return 0.0f;
+}
+
+bool UBiomeManager::IsLocationDangerous(const FVector& WorldLocation, float DangerThreshold) const
+{
+    return GetHazardLevelAtLocation(WorldLocation) >= DangerThreshold;
+}
+
+// ─── Default Biome Initialization ───────────────────────────────────────────
+
+void UBiomeManager::InitializeDefaultBiomes()
+{
+    RegisteredBiomes.Empty();
+
+    // ── 1. GRASSLAND ──────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Grassland;
+        Grassland.BiomeID = FName("Grassland");
+        Grassland.BiomeName = TEXT("Cretaceous Grassland");
+        Grassland.BiomeOrigin = FVector(0.0f, 0.0f, 0.0f);
+        Grassland.BiomeRadius = 5000.0f;
+        Grassland.HazardLevel = 0.2f;
+        Grassland.Environment.AmbientTemperatureCelsius = 24.0f;
+        Grassland.Environment.HumidityPercent = 55.0f;
+        Grassland.Environment.FogDensity = 0.01f;
+        Grassland.Environment.WindSpeedKmH = 12.0f;
+        Grassland.Environment.SkyColorTint = FLinearColor(0.53f, 0.81f, 0.98f);
+        Grassland.Environment.FogColorTint = FLinearColor(0.9f, 0.95f, 1.0f);
+        RegisteredBiomes.Add(Grassland);
+    }
+
+    // ── 2. FOREST ─────────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Forest;
+        Forest.BiomeID = FName("Forest");
+        Forest.BiomeName = TEXT("Prehistoric Dense Forest");
+        Forest.BiomeOrigin = FVector(6000.0f, 0.0f, 0.0f);
+        Forest.BiomeRadius = 4500.0f;
+        Forest.HazardLevel = 0.45f;
+        Forest.Environment.AmbientTemperatureCelsius = 20.0f;
+        Forest.Environment.HumidityPercent = 80.0f;
+        Forest.Environment.FogDensity = 0.04f;
+        Forest.Environment.WindSpeedKmH = 4.0f;
+        Forest.Environment.SkyColorTint = FLinearColor(0.3f, 0.6f, 0.3f);
+        Forest.Environment.FogColorTint = FLinearColor(0.6f, 0.8f, 0.6f);
+        RegisteredBiomes.Add(Forest);
+    }
+
+    // ── 3. DESERT ─────────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Desert;
+        Desert.BiomeID = FName("Desert");
+        Desert.BiomeName = TEXT("Arid Badlands");
+        Desert.BiomeOrigin = FVector(-6000.0f, 0.0f, 0.0f);
+        Desert.BiomeRadius = 4000.0f;
+        Desert.HazardLevel = 0.6f;
+        Desert.Environment.AmbientTemperatureCelsius = 42.0f;
+        Desert.Environment.HumidityPercent = 10.0f;
+        Desert.Environment.FogDensity = 0.005f;
+        Desert.Environment.WindSpeedKmH = 25.0f;
+        Desert.Environment.SkyColorTint = FLinearColor(0.9f, 0.75f, 0.5f);
+        Desert.Environment.FogColorTint = FLinearColor(0.95f, 0.85f, 0.6f);
+        RegisteredBiomes.Add(Desert);
+    }
+
+    // ── 4. SWAMP ──────────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Swamp;
+        Swamp.BiomeID = FName("Swamp");
+        Swamp.BiomeName = TEXT("Primordial Swamp");
+        Swamp.BiomeOrigin = FVector(0.0f, 6000.0f, 0.0f);
+        Swamp.BiomeRadius = 3500.0f;
+        Swamp.HazardLevel = 0.55f;
+        Swamp.Environment.AmbientTemperatureCelsius = 30.0f;
+        Swamp.Environment.HumidityPercent = 95.0f;
+        Swamp.Environment.FogDensity = 0.08f;
+        Swamp.Environment.WindSpeedKmH = 2.0f;
+        Swamp.Environment.SkyColorTint = FLinearColor(0.4f, 0.5f, 0.3f);
+        Swamp.Environment.FogColorTint = FLinearColor(0.5f, 0.6f, 0.4f);
+        RegisteredBiomes.Add(Swamp);
+    }
+
+    // ── 5. MOUNTAIN ───────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Mountain;
+        Mountain.BiomeID = FName("Mountain");
+        Mountain.BiomeName = TEXT("Rocky Highlands");
+        Mountain.BiomeOrigin = FVector(0.0f, -6000.0f, 500.0f);
+        Mountain.BiomeRadius = 4000.0f;
+        Mountain.HazardLevel = 0.5f;
+        Mountain.Environment.AmbientTemperatureCelsius = 8.0f;
+        Mountain.Environment.HumidityPercent = 40.0f;
+        Mountain.Environment.FogDensity = 0.03f;
+        Mountain.Environment.WindSpeedKmH = 35.0f;
+        Mountain.Environment.SkyColorTint = FLinearColor(0.6f, 0.7f, 0.9f);
+        Mountain.Environment.FogColorTint = FLinearColor(0.8f, 0.85f, 0.95f);
+        RegisteredBiomes.Add(Mountain);
+    }
+
+    // ── 6. VOLCANIC ───────────────────────────────────────────────────────
+    {
+        FEng_BiomeDefinition Volcanic;
+        Volcanic.BiomeID = FName("Volcanic");
+        Volcanic.BiomeName = TEXT("Volcanic Caldera");
+        Volcanic.BiomeOrigin = FVector(4000.0f, -4000.0f, 200.0f);
+        Volcanic.BiomeRadius = 3000.0f;
+        Volcanic.HazardLevel = 0.9f;
+        Volcanic.Environment.AmbientTemperatureCelsius = 65.0f;
+        Volcanic.Environment.HumidityPercent = 20.0f;
+        Volcanic.Environment.FogDensity = 0.12f;
+        Volcanic.Environment.WindSpeedKmH = 18.0f;
+        Volcanic.Environment.SkyColorTint = FLinearColor(0.8f, 0.4f, 0.2f);
+        Volcanic.Environment.FogColorTint = FLinearColor(0.7f, 0.3f, 0.1f);
+        RegisteredBiomes.Add(Volcanic);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Default biomes initialized (%d total)"), RegisteredBiomes.Num());
+}
