@@ -1,200 +1,172 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
 
+// LOD levels for crowd agents — distance-based rendering quality
 UENUM(BlueprintType)
-enum class ECrowd_ZoneType : uint8
+enum class ECrowd_LODLevel : uint8
 {
-    WateringHole    UMETA(DisplayName = "Watering Hole"),
-    FeedingGround   UMETA(DisplayName = "Feeding Ground"),
-    ShelterArea     UMETA(DisplayName = "Shelter Area"),
-    RaptorTerritory UMETA(DisplayName = "Raptor Territory"),
-    MigrationPath   UMETA(DisplayName = "Migration Path")
+    Full    UMETA(DisplayName = "Full Detail"),
+    Medium  UMETA(DisplayName = "Medium Detail"),
+    Low     UMETA(DisplayName = "Low Detail"),
+    Culled  UMETA(DisplayName = "Culled")
 };
 
+// Crowd agent type — determines behaviour tree and animation set
 UENUM(BlueprintType)
 enum class ECrowd_AgentType : uint8
 {
-    RaptorPack      UMETA(DisplayName = "Raptor Pack"),
-    HerbivoreHerd   UMETA(DisplayName = "Herbivore Herd"),
-    ScavengerGroup  UMETA(DisplayName = "Scavenger Group"),
-    SolitaryPredator UMETA(DisplayName = "Solitary Predator")
+    HerdAnimal   UMETA(DisplayName = "Herd Animal"),
+    TribeMember  UMETA(DisplayName = "Tribe Member"),
+    RaptorPack   UMETA(DisplayName = "Raptor Pack Member"),
+    Scavenger    UMETA(DisplayName = "Scavenger")
 };
 
+// Struct for a single crowd agent state
 USTRUCT(BlueprintType)
-struct FCrowd_WaypointData
+struct FCrowd_AgentState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Location;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float WaitTimeSeconds;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float AlertRadius;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    ECrowd_AgentType AgentType = ECrowd_AgentType::HerdAnimal;
 
-    FCrowd_WaypointData()
-        : Location(FVector::ZeroVector)
-        , WaitTimeSeconds(2.0f)
-        , AlertRadius(500.0f)
-    {}
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    ECrowd_LODLevel LODLevel = ECrowd_LODLevel::Full;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    bool bIsActive = true;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    int32 CurrentWaypointIndex = 0;
 };
 
+// Struct for herd migration data
 USTRUCT(BlueprintType)
-struct FCrowd_ZoneConfig
+struct FCrowd_HerdData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Center;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    TArray<FVector> MigrationPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float Radius;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    int32 HerdSize = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_ZoneType ZoneType;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    float MigrationSpeed = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 MaxAgentCapacity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float DensityWeight;
-
-    FCrowd_ZoneConfig()
-        : Center(FVector::ZeroVector)
-        , Radius(800.0f)
-        , ZoneType(ECrowd_ZoneType::WateringHole)
-        , MaxAgentCapacity(50)
-        , DensityWeight(1.0f)
-    {}
-};
-
-USTRUCT(BlueprintType)
-struct FCrowd_AgentGroup
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentType AgentType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 GroupSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    TArray<FCrowd_WaypointData> PatrolWaypoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float MovementSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    bool bIsAlerted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector FleeDirection;
-
-    FCrowd_AgentGroup()
-        : AgentType(ECrowd_AgentType::HerbivoreHerd)
-        , GroupSize(8)
-        , MovementSpeed(300.0f)
-        , bIsAlerted(false)
-        , FleeDirection(FVector::ZeroVector)
-    {}
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    bool bMigrationActive = false;
 };
 
 /**
- * CrowdSimulationManager — manages prehistoric creature herds and pack behaviors.
- * Coordinates up to 50,000 agents using Mass AI waypoint-driven simulation.
- * Handles raptor pack tactics, herbivore herd migration, and zone-based density.
+ * UCrowdSimulationManager
+ * World subsystem managing prehistoric crowd simulation:
+ * - Dinosaur herd migration along waypoint corridors
+ * - Primitive tribe member camp behaviour
+ * - Raptor pack coordinated patrol and flanking
+ * - Distance-based LOD for up to 50,000 agents
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACrowdSimulationManager();
+    UCrowdSimulationManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // Zone management
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Zones")
-    void RegisterCrowdZone(const FCrowd_ZoneConfig& ZoneConfig);
+    // --- Waypoint Registration ---
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Zones")
-    FCrowd_ZoneConfig GetNearestZone(FVector WorldLocation, ECrowd_ZoneType ZoneType) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
+    void RegisterHerdWaypoint(const FVector& WaypointLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Zones")
-    int32 GetZoneCurrentOccupancy(const FCrowd_ZoneConfig& Zone) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Tribe")
+    void RegisterTribeMemberLocation(const FVector& Location);
 
-    // Agent group management
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Agents")
-    void RegisterAgentGroup(const FCrowd_AgentGroup& Group);
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Raptor")
+    void RegisterRaptorPatrolNode(const FVector& NodeLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Agents")
-    void AlertNearbyGroups(FVector AlertOrigin, float AlertRadius, ECrowd_AgentType AgentType);
+    // --- Simulation Control ---
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Agents")
-    void TriggerHerdFlee(FVector ThreatLocation, float FleeRadius);
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
+    void StartHerdMigration();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Agents")
-    void TriggerPackHunt(FVector PreyLocation, ECrowd_AgentType PredatorType);
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
+    void StopHerdMigration();
 
-    // Waypoint navigation
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Navigation")
-    FVector GetNextWaypoint(const FCrowd_AgentGroup& Group, int32 CurrentWaypointIndex) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Tribe")
+    void ActivateTribeCamp();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Navigation")
-    bool IsWaypointReached(FVector AgentLocation, FVector WaypointLocation, float Tolerance = 100.0f) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Raptor")
+    void ActivateRaptorPack();
 
-    // LOD management
+    // --- Query ---
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Query")
+    FVector GetNextHerdWaypoint() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Query")
+    FVector GetNextPatrolNode() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Query")
+    int32 GetActiveCrowdAgentCount() const;
+
     UFUNCTION(BlueprintCallable, Category = "Crowd|LOD")
-    void UpdateAgentLOD(FVector PlayerLocation);
+    ECrowd_LODLevel GetLODLevelForDistance(float DistanceFromPlayer) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|LOD")
-    int32 GetActiveLODLevel(float DistanceToPlayer) const;
-
-    // Stats
-    UFUNCTION(BlueprintPure, Category = "Crowd|Stats")
-    int32 GetTotalActiveAgents() const { return TotalActiveAgents; }
-
-    UFUNCTION(BlueprintPure, Category = "Crowd|Stats")
-    int32 GetRegisteredZoneCount() const { return RegisteredZones.Num(); }
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    TArray<FCrowd_ZoneConfig> RegisteredZones;
+    // --- Configuration ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    TArray<FCrowd_AgentGroup> RegisteredGroups;
+    int32 MaxHerdAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxTotalAgents;
+    int32 MaxTribeMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LOD_HighDetailRadius;
+    int32 MaxRaptorPackSize;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LOD_MediumDetailRadius;
+    float HerdMigrationSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LOD_LowDetailRadius;
+    float TribeMemberWanderRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float MigrationCycleHours;
+    float RaptorPatrolSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Runtime", meta = (AllowPrivateAccess = "true"))
-    int32 TotalActiveAgents;
+    // --- State ---
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Runtime", meta = (AllowPrivateAccess = "true"))
-    float CurrentMigrationProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    bool bHerdMigrationActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    bool bTribeCampActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    bool bRaptorPackActive;
 
 private:
-    void UpdateMigrationPaths(float DeltaTime);
-    void ProcessAlertPropagation();
-    void BalanceZoneDensity();
+    TArray<FVector> HerdWaypoints;
+    TArray<FVector> TribeMemberLocations;
+    TArray<FVector> RaptorPatrolNodes;
+
+    int32 CurrentHerdWaypointIndex = 0;
+    int32 CurrentPatrolNodeIndex = 0;
+
+    void TickHerdMigration(float DeltaTime);
+    void TickTribeCamp(float DeltaTime);
+    void TickRaptorPack(float DeltaTime);
 };
