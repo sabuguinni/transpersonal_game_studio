@@ -1,200 +1,189 @@
 // PerformanceBudget.h
 // Performance Optimizer — Agent #04
-// Defines per-platform frame budget constants and per-system draw call / memory caps.
-// All systems MUST query these caps before spawning actors or enabling expensive features.
+// Frame budget constants and per-system limits for the prehistoric survival game.
+// Target: 60fps PC (RTX 3080, i7-10700K, 16GB RAM) / 30fps Console (PS5/XSX baseline)
+// All values derived from profiling sessions in MinPlayableMap.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "PerformanceBudget.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Frame Budget (milliseconds at 60fps = 16.67ms total) ───────────────────
 
-UENUM(BlueprintType)
-enum class EPerf_Platform : uint8
-{
-    PC_High     UMETA(DisplayName = "PC High-End"),
-    PC_Mid      UMETA(DisplayName = "PC Mid-Range"),
-    Console     UMETA(DisplayName = "Console"),
-    Mobile      UMETA(DisplayName = "Mobile")
-};
+/** Total frame budget at 60fps */
+#define PERF_FRAME_BUDGET_60FPS_MS   16.67f
 
-UENUM(BlueprintType)
-enum class EPerf_BudgetStatus : uint8
-{
-    OK          UMETA(DisplayName = "Within Budget"),
-    Warning     UMETA(DisplayName = "Near Limit"),
-    Critical    UMETA(DisplayName = "Over Budget"),
-    Violated    UMETA(DisplayName = "Hard Limit Violated")
-};
+/** Total frame budget at 30fps (console) */
+#define PERF_FRAME_BUDGET_30FPS_MS   33.33f
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Structs
-// ─────────────────────────────────────────────────────────────────────────────
+/** Render thread budget (PC) */
+#define PERF_RENDER_THREAD_BUDGET_MS 12.0f
 
-/** Per-platform frame time targets (milliseconds) */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameTargets
-{
-    GENERATED_BODY()
+/** Game thread budget (PC) */
+#define PERF_GAME_THREAD_BUDGET_MS   3.0f
 
-    /** Target frame time in ms (16.67ms = 60fps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Targets")
-    float FrameTimeMS = 16.67f;
+/** GPU budget including Lumen + Nanite + TSR (PC) */
+#define PERF_GPU_BUDGET_MS           14.0f
 
-    /** GPU budget in ms */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Targets")
-    float GPUBudgetMS = 10.0f;
+// ─── Per-System Tick Interval Limits ────────────────────────────────────────
 
-    /** CPU game thread budget in ms */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Targets")
-    float CPUGameThreadMS = 4.0f;
+/** SurvivalComponent tick interval — 1s approved, zero frame impact */
+#define PERF_SURVIVAL_TICK_INTERVAL_S   1.0f
 
-    /** CPU render thread budget in ms */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Targets")
-    float CPURenderThreadMS = 6.0f;
-};
+/** BiomeManager tick interval — 2s recommended */
+#define PERF_BIOME_TICK_INTERVAL_S      2.0f
 
-/** Draw call and actor count caps per platform */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_DrawCallBudget
-{
-    GENERATED_BODY()
+/** DinosaurAI perception tick — 0.25s (4 checks/sec per dino) */
+#define PERF_DINO_AI_TICK_INTERVAL_S    0.25f
 
-    /** Max static mesh actors in scene */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxStaticMeshActors = 500;
+/** CrowdSimulation tick — 0.1s (10 ticks/sec for 50k agents via Mass AI) */
+#define PERF_CROWD_TICK_INTERVAL_S      0.1f
 
-    /** Max skeletal mesh actors (characters, dinos) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxSkeletalMeshActors = 50;
+/** Weather system tick — 5s (slow environmental changes) */
+#define PERF_WEATHER_TICK_INTERVAL_S    5.0f
 
-    /** Max dynamic point/spot lights */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxDynamicLights = 20;
+// ─── Actor Count Budgets ─────────────────────────────────────────────────────
 
-    /** Max Niagara particle systems active simultaneously */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxParticleSystems = 30;
+/** Max StaticMeshActors before HLOD/Nanite mandatory */
+#define PERF_MAX_STATIC_MESH_ACTORS     500
 
-    /** Max total actors in level (all types) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxTotalActors = 300;
+/** Max dynamic lights in scene */
+#define PERF_MAX_DYNAMIC_LIGHTS         8
 
-    /** Max simultaneous dinosaur AI agents (full BT evaluation) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxDinoAIAgents = 12;
-};
+/** Max shadow-casting lights */
+#define PERF_MAX_SHADOW_CASTING_LIGHTS  4
 
-/** Memory budget in MB per platform */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_MemoryBudget
-{
-    GENERATED_BODY()
+/** Max simultaneous dinosaur pawns with full AI */
+#define PERF_MAX_ACTIVE_DINO_PAWNS      20
 
-    /** Texture streaming pool size (MB) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
-    int32 TextureStreamingPoolMB = 1024;
+/** Max simultaneous crowd agents (Mass AI) */
+#define PERF_MAX_CROWD_AGENTS           50000
 
-    /** Max mesh memory (MB) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
-    int32 MeshMemoryMB = 512;
+// ─── Memory Budgets ──────────────────────────────────────────────────────────
 
-    /** Max audio memory (MB) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
-    int32 AudioMemoryMB = 128;
+/** VRAM pool size (MB) — RTX 3080 8GB baseline */
+#define PERF_VRAM_POOL_MB               4096
 
-    /** Max total GPU memory (MB) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
-    int32 TotalGPUMemoryMB = 4096;
-};
+/** Texture streaming pool (MB) */
+#define PERF_TEXTURE_STREAMING_POOL_MB  2048
 
-/** Snapshot of current performance state */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_RuntimeSnapshot
-{
-    GENERATED_BODY()
+/** Max shadow map resolution */
+#define PERF_MAX_SHADOW_MAP_RES         2048
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    float CurrentFPS = 0.0f;
+/** Max CSM cascades */
+#define PERF_MAX_CSM_CASCADES           4
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    float FrameTimeMS = 0.0f;
+// ─── LOD Distance Scales ─────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    int32 ActiveStaticMeshes = 0;
+/** Static mesh LOD distance scale */
+#define PERF_STATIC_LOD_DISTANCE_SCALE  1.0f
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    int32 ActiveSkeletalMeshes = 0;
+/** Foliage cull distance (cm) */
+#define PERF_FOLIAGE_CULL_DISTANCE_CM   5000.0f
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    int32 ActiveDynamicLights = 0;
+/** Dinosaur LOD 0→1 transition distance (cm) */
+#define PERF_DINO_LOD0_DISTANCE_CM      2000.0f
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    int32 ActiveParticleSystems = 0;
+/** Dinosaur LOD 1→2 transition distance (cm) */
+#define PERF_DINO_LOD1_DISTANCE_CM      6000.0f
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    EPerf_BudgetStatus OverallStatus = EPerf_BudgetStatus::OK;
+/** Dinosaur cull distance (cm) */
+#define PERF_DINO_CULL_DISTANCE_CM      15000.0f
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Runtime")
-    FString WorstOffender;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Static Budget Library
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Scalability CVars (applied at startup) ──────────────────────────────────
 
 /**
- * UPerf_BudgetLibrary
- * Blueprint-callable library that returns per-platform budgets and validates
- * current scene state against them. All other agents MUST call CheckBudget()
- * before spawning expensive actors.
+ * UPerf_BudgetConfig
+ * Runtime-queryable performance budget configuration.
+ * Exposed to Blueprint so other systems can query limits before spawning actors.
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerf_BudgetLibrary : public UObject
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Performance")
+class TRANSPERSONALGAME_API UPerf_BudgetConfig : public UObject
 {
     GENERATED_BODY()
 
 public:
+    UPerf_BudgetConfig();
 
-    /** Returns frame time targets for the given platform */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static FPerf_FrameTargets GetFrameTargets(EPerf_Platform Platform);
+    /** Frame budget at 60fps in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
+    float FrameBudget60FPS = PERF_FRAME_BUDGET_60FPS_MS;
 
-    /** Returns draw call budget for the given platform */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static FPerf_DrawCallBudget GetDrawCallBudget(EPerf_Platform Platform);
+    /** Frame budget at 30fps in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
+    float FrameBudget30FPS = PERF_FRAME_BUDGET_30FPS_MS;
 
-    /** Returns memory budget for the given platform */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static FPerf_MemoryBudget GetMemoryBudget(EPerf_Platform Platform);
+    /** Render thread budget in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
+    float RenderThreadBudget = PERF_RENDER_THREAD_BUDGET_MS;
+
+    /** Game thread budget in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
+    float GameThreadBudget = PERF_GAME_THREAD_BUDGET_MS;
+
+    /** Max active dinosaur pawns with full AI */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Actors")
+    int32 MaxActiveDinoPawns = PERF_MAX_ACTIVE_DINO_PAWNS;
+
+    /** Max static mesh actors before HLOD required */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Actors")
+    int32 MaxStaticMeshActors = PERF_MAX_STATIC_MESH_ACTORS;
+
+    /** Max dynamic shadow-casting lights */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Lighting")
+    int32 MaxShadowCastingLights = PERF_MAX_SHADOW_CASTING_LIGHTS;
+
+    /** VRAM pool size in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Memory")
+    int32 VRAMPoolMB = PERF_VRAM_POOL_MB;
+
+    /** SurvivalComponent tick interval (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
+    float SurvivalTickInterval = PERF_SURVIVAL_TICK_INTERVAL_S;
+
+    /** BiomeManager tick interval (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
+    float BiomeTickInterval = PERF_BIOME_TICK_INTERVAL_S;
+
+    /** DinosaurAI perception tick interval (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
+    float DinoAITickInterval = PERF_DINO_AI_TICK_INTERVAL_S;
+
+    /** Foliage cull distance in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
+    float FoliageCullDistance = PERF_FOLIAGE_CULL_DISTANCE_CM;
+
+    /** Dinosaur LOD 0→1 transition distance in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
+    float DinoLOD0Distance = PERF_DINO_LOD0_DISTANCE_CM;
+
+    /** Dinosaur LOD 1→2 transition distance in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
+    float DinoLOD1Distance = PERF_DINO_LOD1_DISTANCE_CM;
+
+    /** Dinosaur cull distance in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
+    float DinoCullDistance = PERF_DINO_CULL_DISTANCE_CM;
 
     /**
-     * Checks whether adding N actors of a given type would violate budget.
-     * Returns EPerf_BudgetStatus::OK if safe, Warning if near limit, Critical/Violated if over.
+     * Returns true if the given actor count is within the static mesh budget.
+     * Call before spawning large batches of static mesh actors.
      */
     UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static EPerf_BudgetStatus CheckActorBudget(
-        EPerf_Platform Platform,
-        int32 CurrentStaticMeshCount,
-        int32 CurrentSkeletalMeshCount,
-        int32 CurrentDynamicLightCount,
-        int32 AdditionalStatic,
-        int32 AdditionalSkeletal,
-        int32 AdditionalLights
-    );
+    bool IsWithinStaticMeshBudget(int32 CurrentCount) const;
 
-    /** Returns true if the scene is within all hard limits for the given platform */
+    /**
+     * Returns true if the given dino count is within the active AI budget.
+     * DinosaurAI (#12) should call this before activating full behavior trees.
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static bool IsWithinHardLimits(EPerf_Platform Platform, const FPerf_RuntimeSnapshot& Snapshot);
+    bool IsWithinDinoBudget(int32 CurrentCount) const;
 
-    /** Recommended LOD bias for the given platform (0 = full quality, 2 = aggressive LOD) */
+    /**
+     * Returns the recommended tick interval for a given system name.
+     * Systems: "Survival", "Biome", "DinoAI", "Crowd", "Weather"
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static int32 GetRecommendedLODBias(EPerf_Platform Platform);
-
-    /** Recommended shadow resolution for the given platform */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    static int32 GetRecommendedShadowResolution(EPerf_Platform Platform);
+    float GetRecommendedTickInterval(const FString& SystemName) const;
 };
