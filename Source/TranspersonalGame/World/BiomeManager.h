@@ -6,76 +6,88 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ─── Biome weather state ─────────────────────────────────────────────────────
-UENUM(BlueprintType)
-enum class EEng_WeatherState : uint8
-{
-    Clear       UMETA(DisplayName = "Clear"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Storm"),
-    Fog         UMETA(DisplayName = "Fog"),
-    Drought     UMETA(DisplayName = "Drought"),
-};
+// ============================================================
+// BiomeManager.h — P1 World Generation
+// Manages biome assignment, transitions, and per-biome
+// environmental parameters for the prehistoric survival world.
+// All types prefixed Eng_ per architecture rules.
+// ============================================================
 
-// ─── Per-biome runtime data ───────────────────────────────────────────────────
+// Per-biome environmental parameters (data-driven via DataTable)
 USTRUCT(BlueprintType)
-struct FEng_BiomeRuntimeData
+struct TRANSPERSONALGAME_API FEng_BiomeParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Grassland;
+    // Display name shown in debug HUD
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FName BiomeName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EEng_WeatherState CurrentWeather = EEng_WeatherState::Clear;
+    // Base temperature in Celsius (Cretaceous: 20-35°C typical)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float BaseTemperatureCelsius = 28.0f;
 
-    /** 0-1 moisture level — affects vegetation density and water sources */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float MoistureLevel = 0.5f;
+    // Humidity 0-1 (affects fog density, plant density)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float Humidity = 0.6f;
 
-    /** Celsius — affects stamina drain and animal behaviour */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float AmbientTemperature = 28.0f;
+    // Rainfall mm/year — drives vegetation density
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float AnnualRainfallMM = 1200.0f;
 
-    /** Dominant dinosaur species allowed to spawn in this biome */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    TArray<EDinosaurSpecies> AllowedSpecies;
+    // Fog density multiplier (1.0 = default)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    float FogDensityMultiplier = 1.0f;
 
-    /** World-space bounds of this biome region */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FBox BiomeBounds = FBox(ForceInit);
+    // Sky tint colour for this biome's atmosphere
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor SkyTint = FLinearColor(0.53f, 0.81f, 0.98f, 1.0f);
 
-    /** Foliage density multiplier (0=barren, 1=dense) */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float VegetationDensity = 0.7f;
+    // Ground albedo colour
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor GroundColour = FLinearColor(0.35f, 0.28f, 0.15f, 1.0f);
+
+    // Max foliage density (trees/10000m²)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Ecology")
+    int32 MaxFoliageDensity = 80;
+
+    // Dinosaur species that spawn in this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Ecology")
+    TArray<EDinosaurSpecies> NativeDinosaurSpecies;
+
+    // Water body coverage 0-1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float WaterCoverage = 0.1f;
+
+    // Terrain roughness 0-1 (0=flat plains, 1=jagged mountains)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Terrain")
+    float TerrainRoughness = 0.3f;
 };
 
-// ─── Biome transition event ───────────────────────────────────────────────────
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-    FEng_OnBiomeChanged,
-    EBiomeType, OldBiome,
-    EBiomeType, NewBiome);
+// Biome transition blend state (used during runtime blending)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeTransitionState
+{
+    GENERATED_BODY()
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-    FEng_OnWeatherChanged,
-    EEng_WeatherState, OldWeather,
-    EEng_WeatherState, NewWeather);
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EBiomeType FromBiome = EBiomeType::Forest;
 
-// ─── BiomeManager ─────────────────────────────────────────────────────────────
-/**
- * ABiomeManager
- *
- * Singleton actor that owns the biome map for the current level.
- * Tracks which biome the player occupies, drives weather transitions,
- * and exposes data to the foliage, AI, and audio systems.
- *
- * Architecture rules (Engine Architect #02):
- *  - One instance per level, placed in MinPlayableMap.
- *  - All cross-system queries go through GetBiomeAtLocation().
- *  - Weather is driven by a Markov chain — no random jumps.
- *  - Biome bounds are registered at BeginPlay by PCGWorldGenerator.
- */
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EBiomeType ToBiome = EBiomeType::Grassland;
+
+    // 0.0 = fully FromBiome, 1.0 = fully ToBiome
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    float BlendAlpha = 0.0f;
+
+    // Transition zone radius in cm
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    float TransitionRadiusCM = 50000.0f;
+};
+
+// ============================================================
+// ABiomeManager — world actor, one instance per level
+// ============================================================
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
@@ -84,87 +96,91 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // ---- Biome Query API ----
 
-    // ── Biome query API (used by AI, Audio, VFX, Foliage) ────────────────────
-
-    /** Returns the biome type at the given world location. */
+    // Returns the biome type at a given world XY position
     UFUNCTION(BlueprintCallable, Category = "Biome")
     EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns full runtime data for the biome at the given location. */
+    // Returns full parameters for a biome type
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeRuntimeData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    FEng_BiomeParameters GetBiomeParameters(EBiomeType BiomeType) const;
 
-    /** Returns the biome the player is currently in. */
+    // Returns blended parameters when in a transition zone
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    EBiomeType GetPlayerCurrentBiome() const;
+    FEng_BiomeParameters GetBlendedBiomeParameters(const FVector& WorldLocation) const;
 
-    /** Returns current weather in the player's biome. */
+    // Returns transition state for a location (alpha=0 if not in transition)
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    EEng_WeatherState GetCurrentWeather() const;
+    FEng_BiomeTransitionState GetTransitionState(const FVector& WorldLocation) const;
 
-    /** Returns ambient temperature at location (°C). */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+    // ---- Runtime State ----
 
-    // ── Biome registration (called by PCGWorldGenerator at BeginPlay) ─────────
+    // Current biome the player is in (updated each tick)
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EBiomeType PlayerCurrentBiome = EBiomeType::Forest;
 
-    /** Register a biome region. PCGWorldGenerator calls this for each generated chunk. */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterBiomeRegion(EBiomeType BiomeType, const FBox& Bounds, float VegetationDensity, float MoistureLevel);
+    // Active weather type (driven by biome + time of day)
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EWeatherType CurrentWeather = EWeatherType::Clear;
 
-    /** Clear all registered biome regions (called before PCG re-generation). */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void ClearAllBiomeRegions();
+    // Time of day 0-24 (drives lighting and dinosaur activity)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Time")
+    float TimeOfDayHours = 12.0f;
 
-    // ── Weather control ───────────────────────────────────────────────────────
+    // Day length in real seconds (default 20 min = 1200s)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Time")
+    float DayLengthSeconds = 1200.0f;
 
-    /** Force a specific weather state (for scripted events / cutscenes). */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Weather")
-    void ForceWeatherState(EEng_WeatherState NewWeather);
+    // ---- Configuration ----
 
-    /** How many seconds between weather evaluation ticks. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Weather")
-    float WeatherTickInterval = 300.0f;
+    // World size in cm (square world, default 4km x 4km)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
+    float WorldSizeCM = 400000.0f;
 
-    // ── Events ────────────────────────────────────────────────────────────────
+    // Noise scale for biome boundary generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
+    float BiomeNoiseScale = 0.00005f;
 
-    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
-    FEng_OnBiomeChanged OnBiomeChanged;
+    // Seed for deterministic biome layout
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
+    int32 WorldSeed = 42;
 
-    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
-    FEng_OnWeatherChanged OnWeatherChanged;
+    // Enable biome transition blending
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
+    bool bEnableBiomeBlending = true;
 
-    // ── Debug ─────────────────────────────────────────────────────────────────
+    // ---- Debug ----
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
-    bool bDrawBiomeBounds = false;
+    // Draw biome debug overlay in viewport
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void DrawBiomeDebugOverlay();
 
-    UFUNCTION(CallInEditor, Category = "Biome|Debug")
-    void PrintBiomeReport();
+    // Print current biome stats to output log
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void PrintBiomeStats();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    // Registered biome regions
+    // Internal biome parameter table (populated in constructor)
+    TMap<EBiomeType, FEng_BiomeParameters> BiomeParameterTable;
+
+    // Initialise default parameters for all biome types
+    void InitialiseBiomeParameters();
+
+    // Simple noise-based biome determination (no external dependency)
+    EBiomeType CalculateBiomeFromNoise(float NX, float NY) const;
+
+    // Advance time of day
+    void TickTimeOfDay(float DeltaTime);
+
+    // Update weather based on biome + time
+    void UpdateWeather();
+
+    // Cached player pawn reference
     UPROPERTY()
-    TArray<FEng_BiomeRuntimeData> BiomeRegions;
-
-    // Current player biome
-    UPROPERTY()
-    EBiomeType CurrentPlayerBiome = EBiomeType::Grassland;
-
-    // Current weather
-    UPROPERTY()
-    EEng_WeatherState ActiveWeather = EEng_WeatherState::Clear;
-
-    // Accumulated time since last weather tick
-    float WeatherTickAccumulator = 0.0f;
-
-    // Internal helpers
-    void TickWeatherTransition();
-    void UpdatePlayerBiome();
-    EEng_WeatherState AdvanceWeatherMarkov(EEng_WeatherState Current, EBiomeType Biome) const;
-    float GetBaseTemperatureForBiome(EBiomeType Biome) const;
+    APawn* CachedPlayerPawn = nullptr;
 };
