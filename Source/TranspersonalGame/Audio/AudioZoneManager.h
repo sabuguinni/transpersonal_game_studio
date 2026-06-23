@@ -1,87 +1,108 @@
-// AudioZoneManager.h
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260622_013
-// Prehistoric survival game — ambient audio zone system
-// NO spiritual/mystical content. Realistic survival soundscape only.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
 #include "AudioZoneManager.generated.h"
 
-// ─── Enums (global scope — UHT requirement) ───────────────────────────────
+// ============================================================
+// Audio Zone Manager — Agent #16 Audio Agent
+// Manages ambient sound zones tied to narrative trigger zones
+// from NarrativeDialogueManager (Agent #15).
+// Freesound references:
+//   Camp fire:    #729395 (Campfire 01, 109s loop)
+//   Dino roar:   #586545 (Dinosaur Roars Pack 2, 39s)
+//   Dino growl:  #586547 (Dinosaur Growls Pack 2, 34s)
+// ============================================================
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Camp        UMETA(DisplayName = "Camp Ambient"),
-    Jungle      UMETA(DisplayName = "Jungle Ambient"),
-    River       UMETA(DisplayName = "River Ambient"),
-    Danger      UMETA(DisplayName = "Danger / Predator Nearby"),
-    Combat      UMETA(DisplayName = "Active Combat"),
-    Cave        UMETA(DisplayName = "Cave Interior"),
-    OpenPlain   UMETA(DisplayName = "Open Plain")
+    Camp        UMETA(DisplayName = "Camp Fire"),
+    River       UMETA(DisplayName = "River Flow"),
+    Predator    UMETA(DisplayName = "Predator Alert"),
+    Wind        UMETA(DisplayName = "Open Wind"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Silence     UMETA(DisplayName = "Silence")
 };
-
-UENUM(BlueprintType)
-enum class EAudio_DangerLevel : uint8
-{
-    Safe        UMETA(DisplayName = "Safe"),
-    Caution     UMETA(DisplayName = "Caution — predator nearby"),
-    Imminent    UMETA(DisplayName = "Imminent — predator attacking"),
-    Combat      UMETA(DisplayName = "In Combat")
-};
-
-// ─── Structs ──────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FAudio_ZoneConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Silence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     float BlendRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float AmbientVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MaxVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float DangerStingVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInTime = 2.0f;
 
-    // Freesound reference IDs for runtime asset loading
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    int32 FreesoundAmbientID = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString AmbientAssetPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping = true;
+
+    // Freesound asset ID for reference (not runtime — used for asset pipeline)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
+    int32 FreesoundAssetID = 0;
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_FootstepConfig
+struct FAudio_DayNightLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float DustParticleThreshold = 300.0f;   // speed (cm/s) above which dust spawns
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float DawnStartHour = 5.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float ScreenShakeRadiusTRex = 1500.0f;  // radius within which T-Rex stomp shakes camera
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float DuskStartHour = 18.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float ScreenShakeIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float NightStartHour = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Footstep")
-    float StompIntervalSeconds = 0.8f;      // T-Rex step cadence
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float CurrentHour = 12.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float DayNightCycleDuration = 1200.0f; // 20 real minutes = full day
 };
 
-// ─── Main Actor ───────────────────────────────────────────────────────────
+UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_ZoneComponent : public USphereComponent
+{
+    GENERATED_BODY()
 
-UCLASS(ClassGroup = (Audio), meta = (DisplayName = "Audio Zone Manager"))
+public:
+    UAudio_ZoneComponent();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FAudio_ZoneConfig ZoneConfig;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    bool bPlayerInZone = false;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    float GetCurrentVolume() const;
+};
+
+UCLASS()
 class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 {
     GENERATED_BODY()
@@ -89,89 +110,46 @@ class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 public:
     AAudio_ZoneManager();
 
-protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // ── Zone configuration ────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_FootstepConfig FootstepConfig;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone",
-              meta = (AllowPrivateAccess = "true"))
-    USphereComponent* ZoneTrigger;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone",
-              meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* AmbientAudioComponent;
-
-    // ── Danger state ──────────────────────────────────────────────────────
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Danger")
-    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::Safe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    float DangerCheckInterval = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    float RaptorDangerRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    float TRexDangerRadius = 1500.0f;
-
-    // ── Day/Night audio blend ─────────────────────────────────────────────
-
+    // Day/Night cycle state
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
-    float DayAmbientVolume = 0.7f;
+    FAudio_DayNightLayer DayNightState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
-    float NightAmbientVolume = 0.9f;   // night is louder — insects, owls, predators
+    // Active zone tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    EAudio_ZoneType ActiveZoneType = EAudio_ZoneType::Silence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
-    float CurrentTimeOfDay = 0.5f;     // 0=midnight, 0.5=noon, 1=midnight
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    float GlobalAmbientVolume = 1.0f;
 
-    // ── Blueprint events ──────────────────────────────────────────────────
+    // Predator proximity — drives danger music layer intensity
+    UPROPERTY(BlueprintReadWrite, Category = "Audio")
+    float PredatorProximityFactor = 0.0f; // 0.0 = safe, 1.0 = imminent
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetDangerLevel(EAudio_DangerLevel NewLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetActiveZone(EAudio_ZoneType NewZone);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void UpdateTimeOfDay(float NormalizedTime);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateDayNightCycle(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void TriggerTRexStompShake(float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    float GetDayNightBlend() const; // 0.0=day, 1.0=night
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void TriggerDamageFlash();
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsDawnOrDusk() const;
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    EAudio_DangerLevel GetCurrentDangerLevel() const { return CurrentDangerLevel; }
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetPredatorProximity(float Factor);
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    float GetAmbientVolumeForTime() const;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    FString GetCurrentAudioState() const;
 
-    // ── Overlap handlers ──────────────────────────────────────────────────
-
-    UFUNCTION()
-    void OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-                           bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                          UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Audio|Debug")
+    void LogAudioState();
 
 private:
-    float DangerCheckTimer = 0.0f;
-    bool bPlayerInZone = false;
-
-    void CheckNearbyPredators();
-    void BlendAmbientVolume(float TargetVolume, float DeltaTime);
+    float ZoneTransitionTimer = 0.0f;
+    EAudio_ZoneType PreviousZoneType = EAudio_ZoneType::Silence;
 };
