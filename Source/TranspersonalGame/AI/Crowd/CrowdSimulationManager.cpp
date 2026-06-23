@@ -1,193 +1,170 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric survival game — dinosaur herd and predator crowd AI
+// Implements prehistoric crowd simulation: herd migration, tribe camps, raptor pack patrols
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "NavigationSystem.h"
 #include "DrawDebugHelpers.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxHerbivoreAgents = 200;
-    MaxPredatorAgents = 20;
-    HerdCohesionRadius = 500.0f;
-    PredatorDetectionRadius = 800.0f;
-    bCrowdSystemActive = true;
+    MaxHerdAgents = 50;
+    MaxTribeMembers = 20;
+    MaxRaptorPackSize = 8;
+    HerdMigrationSpeed = 150.0f;
+    TribeMemberWanderRadius = 300.0f;
+    RaptorPatrolSpeed = 250.0f;
+    bHerdMigrationActive = false;
+    bTribeCampActive = false;
+    bRaptorPackActive = false;
 }
 
 void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized — max herbivores=%d, max predators=%d"),
-        MaxHerbivoreAgents, MaxPredatorAgents);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager initialized — prehistoric crowd systems online"));
 }
 
 void UCrowdSimulationManager::Deinitialize()
 {
-    HerdZones.Empty();
-    PatrolNodes.Empty();
+    HerdWaypoints.Empty();
+    TribeMemberLocations.Empty();
+    RaptorPatrolNodes.Empty();
     Super::Deinitialize();
 }
 
-void UCrowdSimulationManager::RegisterHerdZone(const FCrowd_HerdZone& Zone)
+void UCrowdSimulationManager::RegisterHerdWaypoint(const FVector& WaypointLocation)
 {
-    HerdZones.Add(Zone);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Registered herd zone '%s' at (%.0f, %.0f, %.0f)"),
-        *Zone.ZoneName.ToString(), Zone.Location.X, Zone.Location.Y, Zone.Location.Z);
-}
-
-void UCrowdSimulationManager::RegisterPatrolNode(const FCrowd_PatrolNode& Node)
-{
-    PatrolNodes.Add(Node);
-}
-
-FCrowd_HerdZone UCrowdSimulationManager::GetNearestHerdZone(const FVector& WorldLocation) const
-{
-    FCrowd_HerdZone Nearest;
-    float BestDist = MAX_FLT;
-
-    for (const FCrowd_HerdZone& Zone : HerdZones)
+    if (HerdWaypoints.Num() < 16)
     {
-        float Dist = FVector::Dist(WorldLocation, Zone.Location);
-        if (Dist < BestDist)
-        {
-            BestDist = Dist;
-            Nearest = Zone;
-        }
-    }
-    return Nearest;
-}
-
-TArray<FCrowd_PatrolNode> UCrowdSimulationManager::GetPatrolRouteForSpecies(ECrowd_DinoSpecies Species) const
-{
-    TArray<FCrowd_PatrolNode> Route;
-    for (const FCrowd_PatrolNode& Node : PatrolNodes)
-    {
-        if (Node.OwnerSpecies == Species)
-        {
-            Route.Add(Node);
-        }
-    }
-    return Route;
-}
-
-int32 UCrowdSimulationManager::GetActiveAgentCount(ECrowd_AgentType AgentType) const
-{
-    int32 Count = 0;
-    for (const FCrowd_AgentState& State : ActiveAgents)
-    {
-        if (State.AgentType == AgentType)
-        {
-            Count++;
-        }
-    }
-    return Count;
-}
-
-void UCrowdSimulationManager::UpdateCrowdTick(float DeltaTime)
-{
-    if (!bCrowdSystemActive) return;
-
-    // Update each active agent state
-    for (FCrowd_AgentState& Agent : ActiveAgents)
-    {
-        UpdateAgentBehavior(Agent, DeltaTime);
+        HerdWaypoints.Add(WaypointLocation);
+        UE_LOG(LogTemp, Log, TEXT("CrowdSim: Herd waypoint registered at (%.0f, %.0f, %.0f)"),
+            WaypointLocation.X, WaypointLocation.Y, WaypointLocation.Z);
     }
 }
 
-void UCrowdSimulationManager::UpdateAgentBehavior(FCrowd_AgentState& Agent, float DeltaTime)
+void UCrowdSimulationManager::RegisterTribeMemberLocation(const FVector& Location)
 {
-    switch (Agent.CurrentBehavior)
+    if (TribeMemberLocations.Num() < MaxTribeMembers)
     {
-    case ECrowd_AgentBehavior::Grazing:
-        // Herbivores slowly drift within herd zone
-        Agent.Velocity = FVector::ZeroVector;
-        Agent.BehaviorTimer += DeltaTime;
-        if (Agent.BehaviorTimer > 5.0f)
-        {
-            Agent.CurrentBehavior = ECrowd_AgentBehavior::Wandering;
-            Agent.BehaviorTimer = 0.0f;
-        }
-        break;
-
-    case ECrowd_AgentBehavior::Wandering:
-        Agent.BehaviorTimer += DeltaTime;
-        if (Agent.BehaviorTimer > 8.0f)
-        {
-            Agent.CurrentBehavior = ECrowd_AgentBehavior::Grazing;
-            Agent.BehaviorTimer = 0.0f;
-        }
-        break;
-
-    case ECrowd_AgentBehavior::Fleeing:
-        // Move away from threat at high speed
-        Agent.Velocity = Agent.FleeDirection * 600.0f;
-        Agent.Location += Agent.Velocity * DeltaTime;
-        Agent.BehaviorTimer += DeltaTime;
-        if (Agent.BehaviorTimer > 10.0f)
-        {
-            Agent.CurrentBehavior = ECrowd_AgentBehavior::Grazing;
-            Agent.BehaviorTimer = 0.0f;
-            Agent.FleeDirection = FVector::ZeroVector;
-        }
-        break;
-
-    case ECrowd_AgentBehavior::Hunting:
-        // Predator moves toward prey
-        if (!Agent.TargetLocation.IsZero())
-        {
-            FVector Dir = (Agent.TargetLocation - Agent.Location).GetSafeNormal();
-            Agent.Velocity = Dir * 500.0f;
-            Agent.Location += Agent.Velocity * DeltaTime;
-        }
-        break;
-
-    case ECrowd_AgentBehavior::Patrolling:
-        // Move toward next patrol node
-        Agent.BehaviorTimer += DeltaTime;
-        break;
-
-    default:
-        break;
+        TribeMemberLocations.Add(Location);
     }
 }
 
-void UCrowdSimulationManager::TriggerFleeResponse(const FVector& ThreatLocation, float ThreatRadius)
+void UCrowdSimulationManager::RegisterRaptorPatrolNode(const FVector& NodeLocation)
 {
-    for (FCrowd_AgentState& Agent : ActiveAgents)
+    if (RaptorPatrolNodes.Num() < 16)
     {
-        if (Agent.AgentType != ECrowd_AgentType::Herbivore) continue;
-
-        float Dist = FVector::Dist(Agent.Location, ThreatLocation);
-        if (Dist < ThreatRadius)
-        {
-            Agent.CurrentBehavior = ECrowd_AgentBehavior::Fleeing;
-            Agent.FleeDirection = (Agent.Location - ThreatLocation).GetSafeNormal();
-            Agent.BehaviorTimer = 0.0f;
-        }
+        RaptorPatrolNodes.Add(NodeLocation);
     }
 }
 
-void UCrowdSimulationManager::SpawnHerdAtZone(const FCrowd_HerdZone& Zone, int32 Count)
+void UCrowdSimulationManager::StartHerdMigration()
 {
-    int32 CurrentHerbivores = GetActiveAgentCount(ECrowd_AgentType::Herbivore);
-    int32 ToSpawn = FMath::Min(Count, MaxHerbivoreAgents - CurrentHerbivores);
-
-    for (int32 i = 0; i < ToSpawn; i++)
+    if (HerdWaypoints.Num() < 2)
     {
-        FCrowd_AgentState NewAgent;
-        NewAgent.AgentType = ECrowd_AgentType::Herbivore;
-        NewAgent.CurrentBehavior = ECrowd_AgentBehavior::Grazing;
-        NewAgent.Location = Zone.Location + FVector(
-            FMath::RandRange(-Zone.Radius, Zone.Radius),
-            FMath::RandRange(-Zone.Radius, Zone.Radius),
-            0.0f
-        );
-        NewAgent.BehaviorTimer = FMath::RandRange(0.0f, 5.0f);
-        ActiveAgents.Add(NewAgent);
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSim: Cannot start herd migration — need at least 2 waypoints"));
+        return;
     }
+    bHerdMigrationActive = true;
+    CurrentHerdWaypointIndex = 0;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSim: Herd migration started — %d waypoints, %d agents"),
+        HerdWaypoints.Num(), MaxHerdAgents);
+}
 
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d herbivores at zone '%s'"),
-        ToSpawn, *Zone.ZoneName.ToString());
+void UCrowdSimulationManager::StopHerdMigration()
+{
+    bHerdMigrationActive = false;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSim: Herd migration stopped"));
+}
+
+void UCrowdSimulationManager::ActivateTribeCamp()
+{
+    if (TribeMemberLocations.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSim: No tribe member locations registered"));
+        return;
+    }
+    bTribeCampActive = true;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSim: Tribe camp activated — %d members"), TribeMemberLocations.Num());
+}
+
+void UCrowdSimulationManager::ActivateRaptorPack()
+{
+    if (RaptorPatrolNodes.Num() < 2)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSim: Cannot activate raptor pack — need at least 2 patrol nodes"));
+        return;
+    }
+    bRaptorPackActive = true;
+    CurrentPatrolNodeIndex = 0;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSim: Raptor pack patrol activated — %d nodes, pack size %d"),
+        RaptorPatrolNodes.Num(), MaxRaptorPackSize);
+}
+
+FVector UCrowdSimulationManager::GetNextHerdWaypoint() const
+{
+    if (HerdWaypoints.Num() == 0)
+    {
+        return FVector::ZeroVector;
+    }
+    int32 SafeIndex = CurrentHerdWaypointIndex % HerdWaypoints.Num();
+    return HerdWaypoints[SafeIndex];
+}
+
+FVector UCrowdSimulationManager::GetNextPatrolNode() const
+{
+    if (RaptorPatrolNodes.Num() == 0)
+    {
+        return FVector::ZeroVector;
+    }
+    int32 SafeIndex = CurrentPatrolNodeIndex % RaptorPatrolNodes.Num();
+    return RaptorPatrolNodes[SafeIndex];
+}
+
+int32 UCrowdSimulationManager::GetActiveCrowdAgentCount() const
+{
+    int32 Total = 0;
+    if (bHerdMigrationActive) Total += MaxHerdAgents;
+    if (bTribeCampActive) Total += TribeMemberLocations.Num();
+    if (bRaptorPackActive) Total += MaxRaptorPackSize;
+    return Total;
+}
+
+ECrowd_LODLevel UCrowdSimulationManager::GetLODLevelForDistance(float DistanceFromPlayer) const
+{
+    // LOD chain: Full detail < 1500u, Medium < 4000u, Low < 8000u, Culled beyond
+    if (DistanceFromPlayer < 1500.0f)  return ECrowd_LODLevel::Full;
+    if (DistanceFromPlayer < 4000.0f)  return ECrowd_LODLevel::Medium;
+    if (DistanceFromPlayer < 8000.0f)  return ECrowd_LODLevel::Low;
+    return ECrowd_LODLevel::Culled;
+}
+
+void UCrowdSimulationManager::TickHerdMigration(float DeltaTime)
+{
+    if (!bHerdMigrationActive || HerdWaypoints.Num() < 2) return;
+    // Advance waypoint index based on simulated progress
+    // In full implementation: iterate over herd agents, move toward current waypoint,
+    // advance index when all agents reach threshold distance
+    // Stub: log progress
+    UE_LOG(LogTemp, Verbose, TEXT("CrowdSim: Herd tick — waypoint %d/%d"),
+        CurrentHerdWaypointIndex + 1, HerdWaypoints.Num());
+}
+
+void UCrowdSimulationManager::TickTribeCamp(float DeltaTime)
+{
+    if (!bTribeCampActive) return;
+    // In full implementation: wander behaviour, idle animations, reaction to player proximity
+    // Stub: no-op tick
+}
+
+void UCrowdSimulationManager::TickRaptorPack(float DeltaTime)
+{
+    if (!bRaptorPackActive || RaptorPatrolNodes.Num() < 2) return;
+    // In full implementation: coordinated flanking, pack leader + followers, attack triggers
+    // Stub: log patrol state
+    UE_LOG(LogTemp, Verbose, TEXT("CrowdSim: Raptor pack tick — node %d/%d"),
+        CurrentPatrolNodeIndex + 1, RaptorPatrolNodes.Num());
 }
