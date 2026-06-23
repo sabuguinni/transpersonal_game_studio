@@ -1,99 +1,136 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/PostProcessComponent.h"
+#include "UObject/NoExportTypes.h"
 #include "LightingAtmosphereConfig.generated.h"
 
 /**
- * Lighting preset data for a specific time of day / weather state.
- * All values are tuned for Cretaceous-era prehistoric environment.
- * Used by ALightingAtmosphereManager to drive dynamic day/night cycle.
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_TimeOfDayPreset
-{
-	GENERATED_BODY()
-
-	/** Display name for this preset (e.g. "Golden Hour", "Midday", "Dusk") */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Preset")
-	FName PresetName;
-
-	/** Sun pitch angle (MUST be negative to illuminate terrain) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun", meta = (ClampMin = "-90.0", ClampMax = "0.0"))
-	float SunPitch = -45.0f;
-
-	/** Sun yaw angle */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
-	float SunYaw = 45.0f;
-
-	/** Sun intensity in lux */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun", meta = (ClampMin = "0.0", ClampMax = "150000.0"))
-	float SunIntensity = 12.0f;
-
-	/** Sun color tint (warm golden for golden hour, white for midday) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
-	FLinearColor SunColor = FLinearColor(1.0f, 0.86f, 0.63f, 1.0f);
-
-	/** Sky light intensity multiplier */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sky")
-	float SkyLightIntensity = 1.5f;
-
-	/** Exponential height fog density */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float FogDensity = 0.035f;
-
-	/** Fog inscattering color (atmospheric haze tint) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
-	FLinearColor FogColor = FLinearColor(0.55f, 0.72f, 0.85f, 1.0f);
-
-	/** Post-process exposure bias (manual mode) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
-	float ExposureBias = 1.2f;
-
-	/** Bloom intensity */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
-	float BloomIntensity = 0.4f;
-
-	/** Color saturation (RGBA — A = global) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|ColorGrading")
-	FVector4 ColorSaturation = FVector4(1.1f, 1.05f, 0.95f, 1.0f);
-
-	/** Transition blend time in seconds when switching presets */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Transition")
-	float BlendDuration = 5.0f;
-};
-
-/**
- * Weather state enum for atmosphere variation.
- */
-UENUM(BlueprintType)
-enum class ELight_WeatherState : uint8
-{
-	Clear        UMETA(DisplayName = "Clear Sky"),
-	PartlyCloudy UMETA(DisplayName = "Partly Cloudy"),
-	Overcast     UMETA(DisplayName = "Overcast"),
-	Stormy       UMETA(DisplayName = "Stormy"),
-	HeavyRain    UMETA(DisplayName = "Heavy Rain"),
-	Foggy        UMETA(DisplayName = "Dense Fog"),
-};
-
-/**
- * Time of day enum for preset selection.
+ * Cretaceous lighting preset configuration.
+ * All values validated against MinPlayableMap golden-hour stack.
+ * Agent #08 — Lighting & Atmosphere
  */
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay : uint8
 {
-	Dawn         UMETA(DisplayName = "Dawn"),
-	Sunrise      UMETA(DisplayName = "Sunrise"),
-	Morning      UMETA(DisplayName = "Morning"),
-	Midday       UMETA(DisplayName = "Midday"),
-	Afternoon    UMETA(DisplayName = "Afternoon"),
-	GoldenHour   UMETA(DisplayName = "Golden Hour"),
-	Dusk         UMETA(DisplayName = "Dusk"),
-	Night        UMETA(DisplayName = "Night"),
-	Midnight     UMETA(DisplayName = "Midnight"),
+    Dawn        UMETA(DisplayName = "Dawn"),
+    GoldenHour  UMETA(DisplayName = "Golden Hour"),
+    Midday      UMETA(DisplayName = "Midday"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night"),
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_SunConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float PitchDegrees = -35.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float YawDegrees = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float Intensity = 12.0f;
+
+    /** Warm golden-hour tint: R=255 G=220 B=160 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    FColor LightColor = FColor(255, 220, 160, 255);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float ShadowAmount = 0.85f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float DynamicShadowDistance = 50000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_FogConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float FogDensity = 0.025f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float HeightFalloff = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    FLinearColor InscatteringColor = FLinearColor(0.45f, 0.62f, 0.75f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float MaxOpacity = 0.85f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float StartDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    bool bVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float VolumetricFogExtinctionScale = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLight_PostProcessConfig
+{
+    GENERATED_BODY()
+
+    /** Manual exposure bias — prevents auto-exposure darkening */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float ExposureBias = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float BloomIntensity = 0.35f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float BloomThreshold = 1.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float AmbientOcclusionIntensity = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float AmbientOcclusionRadius = 120.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|PostProcess")
+    float VignetteIntensity = 0.35f;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ULightingAtmosphereConfig : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    ULightingAtmosphereConfig();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::GoldenHour;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLight_SunConfig SunConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLight_FogConfig FogConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLight_PostProcessConfig PostProcessConfig;
+
+    /** SkyLight real-time capture intensity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SkyLightIntensity = 1.5f;
+
+    /** Rayleigh scattering — denser Cretaceous atmosphere */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Atmosphere")
+    float RayleighScatteringScale = 0.0331f;
+
+    /** Mie scattering — haze and humidity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Atmosphere")
+    float MieScatteringScale = 0.003f;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    FLight_SunConfig GetSunConfigForTimeOfDay(ELight_TimeOfDay TimeOfDay) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    static FString GetTimeOfDayName(ELight_TimeOfDay TimeOfDay);
 };
