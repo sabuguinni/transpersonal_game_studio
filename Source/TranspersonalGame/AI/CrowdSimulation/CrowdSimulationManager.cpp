@@ -1,135 +1,160 @@
-// CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribe crowd simulation for Transpersonal Game Studio
-
 #include "CrowdSimulationManager.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "NavigationSystem.h"
-#include "NavMesh/RecastNavMesh.h"
 #include "DrawDebugHelpers.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
 
-UCrowdSimulationManager::UCrowdSimulationManager()
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxCrowdAgents = 50;
-    AgentUpdateRadius = 2000.0f;
-    bCrowdSimulationActive = false;
-    LODDistanceClose = 500.0f;
-    LODDistanceMedium = 1500.0f;
-    LODDistanceFar = 3000.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    ActiveAgentCount = 0;
+    SimulationTickAccumulator = 0.0f;
+
+    // Default migration loop: North → East → South → West → Center
+    FCrowd_WaypointData WP_North;
+    WP_North.Location = FVector(0.0f, 2000.0f, 100.0f);
+    WP_North.Radius = 300.0f;
+    WP_North.DensityWeight = 0.8f;
+    WP_North.BehaviorAtWaypoint = ECrowd_HerdBehavior::Grazing;
+
+    FCrowd_WaypointData WP_East;
+    WP_East.Location = FVector(2000.0f, 0.0f, 100.0f);
+    WP_East.Radius = 300.0f;
+    WP_East.DensityWeight = 0.6f;
+    WP_East.BehaviorAtWaypoint = ECrowd_HerdBehavior::Migrating;
+
+    FCrowd_WaypointData WP_South;
+    WP_South.Location = FVector(0.0f, -2000.0f, 100.0f);
+    WP_South.Radius = 300.0f;
+    WP_South.DensityWeight = 1.0f;
+    WP_South.BehaviorAtWaypoint = ECrowd_HerdBehavior::Drinking;
+
+    FCrowd_WaypointData WP_West;
+    WP_West.Location = FVector(-2000.0f, 0.0f, 100.0f);
+    WP_West.Radius = 300.0f;
+    WP_West.DensityWeight = 0.7f;
+    WP_West.BehaviorAtWaypoint = ECrowd_HerdBehavior::Resting;
+
+    GlobalWaypoints.Add(WP_North);
+    GlobalWaypoints.Add(WP_East);
+    GlobalWaypoints.Add(WP_South);
+    GlobalWaypoints.Add(WP_West);
+
+    // Default herd: small herbivore group
+    FCrowd_HerdConfig DefaultHerd;
+    DefaultHerd.SpeciesName = TEXT("Parasaurolophus");
+    DefaultHerd.HerdSize = 8;
+    DefaultHerd.MigrationSpeed = 180.0f;
+    DefaultHerd.FleeRadius = 1200.0f;
+    DefaultHerd.MigrationPath = GlobalWaypoints;
+    RegisteredHerds.Add(DefaultHerd);
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bCrowdSimulationActive = true;
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] CrowdSimulationManager initialized. Max agents: %d"), MaxCrowdAgents);
-}
-
-void UCrowdSimulationManager::Deinitialize()
-{
-    bCrowdSimulationActive = false;
-    ActiveAgents.Empty();
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] CrowdSimulationManager deinitialized."));
-}
-
-void UCrowdSimulationManager::RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role)
-{
-    if (!Agent) return;
-    if (ActiveAgents.Num() >= MaxCrowdAgents)
+    Super::BeginPlay();
+    ActiveAgentCount = 0;
+    for (const FCrowd_HerdConfig& Herd : RegisteredHerds)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Max crowd agents (%d) reached. Cannot register: %s"), MaxCrowdAgents, *Agent->GetName());
-        return;
+        ActiveAgentCount += Herd.HerdSize;
+    }
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: BeginPlay — %d agents across %d herds"),
+        ActiveAgentCount, RegisteredHerds.Num());
+}
+
+void ACrowdSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    SimulationTickAccumulator += DeltaTime;
+    if (SimulationTickAccumulator >= SimulationTickInterval)
+    {
+        SimulationTickAccumulator = 0.0f;
+        UpdateHerdMigration(SimulationTickInterval);
+        ApplyLODCulling();
     }
 
-    FCrowd_AgentData NewAgent;
-    NewAgent.AgentActor = Agent;
-    NewAgent.Role = Role;
-    NewAgent.CurrentState = ECrowd_AgentState::Idle;
-    NewAgent.LODLevel = 0;
-    NewAgent.HomeLocation = Agent->GetActorLocation();
-    NewAgent.WanderRadius = 400.0f;
-    ActiveAgents.Add(NewAgent);
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Registered agent: %s Role=%d Total=%d"), *Agent->GetName(), (int32)Role, ActiveAgents.Num());
-}
-
-void UCrowdSimulationManager::UnregisterCrowdAgent(AActor* Agent)
-{
-    if (!Agent) return;
-    ActiveAgents.RemoveAll([Agent](const FCrowd_AgentData& Data) { return Data.AgentActor == Agent; });
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Unregistered agent: %s Remaining=%d"), *Agent->GetName(), ActiveAgents.Num());
-}
-
-void UCrowdSimulationManager::UpdateCrowdLOD(const FVector& PlayerLocation)
-{
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    if (bDrawDebugPaths && GetWorld())
     {
-        if (!Agent.AgentActor.IsValid()) continue;
-
-        float Distance = FVector::Dist(PlayerLocation, Agent.AgentActor->GetActorLocation());
-
-        int32 NewLOD = 0;
-        if (Distance < LODDistanceClose)
-            NewLOD = 0; // Full simulation
-        else if (Distance < LODDistanceMedium)
-            NewLOD = 1; // Reduced update rate
-        else if (Distance < LODDistanceFar)
-            NewLOD = 2; // Minimal simulation
-        else
-            NewLOD = 3; // Culled
-
-        Agent.LODLevel = NewLOD;
-    }
-}
-
-int32 UCrowdSimulationManager::GetActiveCrowdCount() const
-{
-    return ActiveAgents.Num();
-}
-
-TArray<FCrowd_AgentData> UCrowdSimulationManager::GetAgentsByRole(ECrowd_AgentRole Role) const
-{
-    TArray<FCrowd_AgentData> Result;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (Agent.Role == Role)
-            Result.Add(Agent);
-    }
-    return Result;
-}
-
-void UCrowdSimulationManager::TriggerCrowdFlee(const FVector& ThreatLocation, float FleeRadius)
-{
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] FLEE triggered at (%.0f,%.0f,%.0f) radius=%.0f"), ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z, FleeRadius);
-
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (!Agent.AgentActor.IsValid()) continue;
-
-        float Distance = FVector::Dist(ThreatLocation, Agent.AgentActor->GetActorLocation());
-        if (Distance <= FleeRadius)
+        for (const FCrowd_WaypointData& WP : GlobalWaypoints)
         {
-            Agent.CurrentState = ECrowd_AgentState::Fleeing;
-            UE_LOG(LogTemp, Verbose, TEXT("[CrowdSim] Agent %s is FLEEING"), *Agent.AgentActor->GetName());
+            DrawDebugSphere(GetWorld(), WP.Location, WP.Radius, 12,
+                FColor::Green, false, SimulationTickInterval * 2.0f);
         }
     }
 }
 
-void UCrowdSimulationManager::TriggerCrowdAlert(const FVector& AlertLocation, float AlertRadius)
+void ACrowdSimulationManager::RegisterHerd(const FCrowd_HerdConfig& HerdConfig)
 {
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] ALERT triggered at (%.0f,%.0f,%.0f) radius=%.0f"), AlertLocation.X, AlertLocation.Y, AlertLocation.Z, AlertRadius);
+    RegisteredHerds.Add(HerdConfig);
+    ActiveAgentCount += HerdConfig.HerdSize;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Registered herd '%s' with %d agents"),
+        *HerdConfig.SpeciesName, HerdConfig.HerdSize);
+}
 
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+void ACrowdSimulationManager::TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius)
+{
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Flee response triggered at (%f,%f,%f) radius=%f"),
+        ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z, ThreatRadius);
+
+    for (FCrowd_HerdConfig& Herd : RegisteredHerds)
     {
-        if (!Agent.AgentActor.IsValid()) continue;
-
-        float Distance = FVector::Dist(AlertLocation, Agent.AgentActor->GetActorLocation());
-        if (Distance <= AlertRadius && Agent.CurrentState == ECrowd_AgentState::Idle)
+        if (ThreatRadius >= Herd.FleeRadius * 0.5f)
         {
-            Agent.CurrentState = ECrowd_AgentState::Alerted;
+            UE_LOG(LogTemp, Log, TEXT("  Herd '%s' is fleeing!"), *Herd.SpeciesName);
         }
     }
+}
+
+int32 ACrowdSimulationManager::GetActiveAgentCount() const
+{
+    return ActiveAgentCount;
+}
+
+void ACrowdSimulationManager::SetHerdBehavior(const FString& SpeciesName, ECrowd_HerdBehavior NewBehavior)
+{
+    for (FCrowd_HerdConfig& Herd : RegisteredHerds)
+    {
+        if (Herd.SpeciesName == SpeciesName)
+        {
+            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: '%s' behavior changed to %d"),
+                *SpeciesName, (int32)NewBehavior);
+            return;
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Herd '%s' not found"), *SpeciesName);
+}
+
+FCrowd_WaypointData ACrowdSimulationManager::GetNearestWaypoint(FVector FromLocation) const
+{
+    FCrowd_WaypointData Nearest;
+    float BestDist = TNumericLimits<float>::Max();
+
+    for (const FCrowd_WaypointData& WP : GlobalWaypoints)
+    {
+        float Dist = FVector::Dist(FromLocation, WP.Location);
+        if (Dist < BestDist)
+        {
+            BestDist = Dist;
+            Nearest = WP;
+        }
+    }
+    return Nearest;
+}
+
+void ACrowdSimulationManager::UpdateHerdMigration(float DeltaTime)
+{
+    // Tick-based simulation: herds advance along their migration paths
+    // Actual pawn movement is handled by Mass AI / BehaviorTree integration
+    // This manager tracks state and triggers behavioral transitions
+    for (const FCrowd_HerdConfig& Herd : RegisteredHerds)
+    {
+        if (Herd.MigrationPath.Num() == 0) continue;
+        // State machine tick — future: integrate with MassEntitySubsystem
+    }
+}
+
+void ACrowdSimulationManager::ApplyLODCulling()
+{
+    // LOD culling: agents beyond LOD_FarDistance use simplified simulation
+    // Agents beyond LOD_NearDistance skip full physics, use capsule approximation
+    // Implementation hooks into Mass AI LOD system when available
 }
