@@ -1,156 +1,170 @@
-// CrowdSimulationManager.h
-// Agent #13 — Crowd & Traffic Simulation
-// UE5 World Subsystem managing prehistoric crowd agents: herds, packs, flocks, tribes.
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "NavigationSystem.h"
 #include "CrowdSimulationManager.generated.h"
 
-// ============================================================
-// ENUMS — must be at global scope (UE5 compilation rule)
-// ============================================================
+// Forward declarations
+class UNavigationSystemV1;
 
 UENUM(BlueprintType)
-enum class ECrowd_AgentType : uint8
+enum class ECrowd_HerdBehavior : uint8
 {
-    HerbivoreHerd    UMETA(DisplayName = "Herbivore Herd"),
-    PredatorPack     UMETA(DisplayName = "Predator Pack"),
-    AerialFlock      UMETA(DisplayName = "Aerial Flock"),
-    HumanTribe       UMETA(DisplayName = "Human Tribe"),
-    ScavengerGroup   UMETA(DisplayName = "Scavenger Group")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_BehaviorState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Wandering   UMETA(DisplayName = "Wandering"),
     Grazing     UMETA(DisplayName = "Grazing"),
+    Migrating   UMETA(DisplayName = "Migrating"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Migrating   UMETA(DisplayName = "Migrating")
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Resting     UMETA(DisplayName = "Resting")
 };
-
-UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
-{
-    Near    UMETA(DisplayName = "Near — Full Sim"),
-    Mid     UMETA(DisplayName = "Mid — Reduced Sim"),
-    Far     UMETA(DisplayName = "Far — Minimal Sim"),
-    Culled  UMETA(DisplayName = "Culled — No Sim")
-};
-
-// ============================================================
-// STRUCTS — must be at global scope
-// ============================================================
 
 USTRUCT(BlueprintType)
-struct FCrowd_Agent
+struct FCrowd_HerdAgent
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    int32 AgentID = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Location;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentType AgentType = ECrowd_AgentType::HerbivoreHerd;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Velocity;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_BehaviorState BehaviorState = ECrowd_BehaviorState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_HerdBehavior CurrentBehavior;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_LODLevel LODLevel = ECrowd_LODLevel::Near;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float Speed;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 HerdID;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector Velocity = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector ThreatLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float DesiredSpeed = 200.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float Health = 100.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    bool bIsActive = true;
+    FCrowd_HerdAgent()
+        : Location(FVector::ZeroVector)
+        , Velocity(FVector::ZeroVector)
+        , CurrentBehavior(ECrowd_HerdBehavior::Grazing)
+        , Speed(200.f)
+        , HerdID(0)
+    {}
 };
 
-// ============================================================
-// MAIN CLASS
-// ============================================================
+USTRUCT(BlueprintType)
+struct FCrowd_MigrationPath
+{
+    GENERATED_BODY()
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    TArray<FVector> Waypoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FString PathName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float PathRadius;
+
+    FCrowd_MigrationPath()
+        : PathName(TEXT("DefaultPath"))
+        , PathRadius(300.f)
+    {}
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCrowdSimulationManager();
+    ACrowdSimulationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Spawn a group of agents of the given type around an origin point
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 SpawnHerd(ECrowd_AgentType AgentType, FVector Origin, int32 Count, float Radius = 500.0f);
-
-    // Tick the simulation — call from GameMode or GameState each frame
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TickSimulation(float DeltaTime, const FVector& PlayerLocation);
-
-    // Trigger a flee event — all agents within ThreatRadius will flee
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerFleeEvent(FVector ThreatLocation, float ThreatRadius = 1000.0f);
-
-    // Update LOD levels based on player distance
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateAgentLOD(const FVector& PlayerLocation);
-
-    // Query agents within a radius
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    TArray<FCrowd_Agent> GetAgentsInRadius(FVector Center, float Radius) const;
-
-    // Get current active agent count
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 GetActiveAgentCount() const;
-
-    // Configuration
+public:
+    // Max simultaneous crowd agents (performance cap)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
     int32 MaxAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float TickInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceNear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceMid;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceFar;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    // Current active agent count
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
     int32 ActiveAgentCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    // Herd separation radius (boids algorithm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Boids")
+    float SeparationRadius;
+
+    // Herd cohesion radius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Boids")
+    float CohesionRadius;
+
+    // Herd alignment radius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Boids")
+    float AlignmentRadius;
+
+    // Migration paths defined in the world
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
+    TArray<FCrowd_MigrationPath> MigrationPaths;
+
+    // All active herd agents
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
+    TArray<FCrowd_HerdAgent> HerdAgents;
+
+    // LOD distance — agents beyond this use simplified simulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODSimplifiedDistance;
+
+    // LOD distance — agents beyond this are culled from simulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODCullDistance;
+
+    // Panic radius — distance from threat that triggers flee behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Behavior")
+    float PanicRadius;
+
+    // Is simulation currently running
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
     bool bSimulationActive;
 
-private:
-    TArray<FCrowd_Agent> AgentPool;
-    float TimeSinceLastTick;
+    // Spawn a new herd at location with given behavior
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SpawnHerd(FVector SpawnLocation, int32 HerdSize, ECrowd_HerdBehavior InitialBehavior, int32 HerdID);
 
-    void TickAgent(FCrowd_Agent& Agent, float DeltaTime);
-    float GetDefaultSpeedForType(ECrowd_AgentType Type) const;
+    // Trigger panic in all agents within radius of threat location
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerPanic(FVector ThreatLocation, float Radius);
+
+    // Set behavior for all agents in a specific herd
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SetHerdBehavior(int32 HerdID, ECrowd_HerdBehavior NewBehavior);
+
+    // Get agent count for a specific herd
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
+    int32 GetHerdAgentCount(int32 HerdID) const;
+
+    // Start/stop simulation
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SetSimulationActive(bool bActive);
+
+    // Add a migration path
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void AddMigrationPath(const FCrowd_MigrationPath& Path);
+
+    // Clear all agents
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void ClearAllAgents();
+
+private:
+    // Update boids simulation for all agents
+    void UpdateBoidsSimulation(float DeltaTime);
+
+    // Update migration for agents on a path
+    void UpdateMigration(FCrowd_HerdAgent& Agent, float DeltaTime);
+
+    // Apply LOD — skip expensive updates for distant agents
+    bool ShouldUpdateAgentFull(const FCrowd_HerdAgent& Agent) const;
+
+    // Cached player location for LOD calculations
+    FVector CachedPlayerLocation;
+
+    // Timer for LOD player location update
+    float LODUpdateTimer;
 };
