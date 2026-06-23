@@ -1,263 +1,248 @@
 #include "NPCBehaviorComponent.h"
-#include "Math/UnrealMathUtility.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz for performance
+    PrimaryComponentTick.TickInterval = 0.5f; // Poll every 0.5s — not every frame
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BeginPlay — build default routine if none assigned
+// ─────────────────────────────────────────────────────────────────────────────
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Set default camp location to owner's start position
-    if (AActor* Owner = GetOwner())
+    if (DailyRoutine.Num() == 0)
     {
-        CampLocation = Owner->GetActorLocation();
-        PatrolCenter = CampLocation;
+        BuildDefaultRoutine();
     }
 
-    // Build default daily routine for a tribal survivor
-    // Dawn: wake, patrol perimeter
-    AddRoutineSlot(6.0f,  ENPC_BehaviorState::Patrol,    CampLocation + FVector(400, 0, 0),   120.0f);
-    // Morning: forage for food
-    AddRoutineSlot(8.0f,  ENPC_BehaviorState::Forage,    CampLocation + FVector(800, 600, 0),  180.0f);
-    // Midday: rest at camp
-    AddRoutineSlot(12.0f, ENPC_BehaviorState::Rest,       CampLocation,                         90.0f);
-    // Afternoon: forage again
-    AddRoutineSlot(14.0f, ENPC_BehaviorState::Forage,    CampLocation + FVector(-600, 400, 0), 180.0f);
-    // Evening: socialize at camp
-    AddRoutineSlot(17.0f, ENPC_BehaviorState::Socialize,  CampLocation,                         120.0f);
-    // Night: rest/sleep
-    AddRoutineSlot(20.0f, ENPC_BehaviorState::Rest,       CampLocation,                         600.0f);
+    // Start at Dawn
+    SetDailyPhase(ENPC_DailyPhase::Dawn);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TickComponent — advance time, decay memories, update fear
+// ─────────────────────────────────────────────────────────────────────────────
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    TickSurvivalStats(DeltaTime);
-    TickStateLogic(DeltaTime);
-    TickMemoryDecay(DeltaTime);
+    AccumulatedTime += DeltaTime;
 
-    StateTimer += DeltaTime;
-}
-
-void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
-{
-    if (CurrentState == NewState) return;
-
-    CurrentState = NewState;
-    StateTimer = 0.0f;
-}
-
-void UNPCBehaviorComponent::RegisterThreat(FVector ThreatLocation, ENPC_DangerLevel Danger, const FString& ThreatTag)
-{
-    CurrentDangerLevel = Danger;
-
-    // Add to memory
-    AddMemoryEntry(ThreatLocation, Danger, ThreatTag);
-
-    // React based on danger level
-    switch (Danger)
+    // Decay fear over time
+    if (FearLevel > 0.0f)
     {
-        case ENPC_DangerLevel::Critical:
-        case ENPC_DangerLevel::High:
-            Fear = FMath::Min(Fear + 40.0f, 100.0f);
-            SetBehaviorState(ENPC_BehaviorState::Flee);
-            break;
-        case ENPC_DangerLevel::Medium:
-            Fear = FMath::Min(Fear + 20.0f, 100.0f);
-            SetBehaviorState(ENPC_BehaviorState::Alert);
-            break;
-        case ENPC_DangerLevel::Low:
-            Fear = FMath::Min(Fear + 5.0f, 100.0f);
-            SetBehaviorState(ENPC_BehaviorState::Alert);
-            break;
-        default:
-            break;
+        FearLevel = FMath::Max(0.0f, FearLevel - DeltaTime * 0.05f);
+        if (FearLevel < 0.1f)
+        {
+            bIsFleeing = false;
+            bIsAlerting = false;
+        }
+    }
+
+    // Decay memories periodically
+    if (AccumulatedTime - LastMemoryDecayTime > 30.0f)
+    {
+        DecayMemories(AccumulatedTime);
+        LastMemoryDecayTime = AccumulatedTime;
     }
 }
 
-void UNPCBehaviorComponent::ClearThreat()
+// ─────────────────────────────────────────────────────────────────────────────
+// OnThreatDetected — react to a threat in the world
+// ─────────────────────────────────────────────────────────────────────────────
+void UNPCBehaviorComponent::OnThreatDetected(FVector ThreatLocation, float ThreatLevel, const FString& ThreatTag)
 {
-    CurrentDangerLevel = ENPC_DangerLevel::None;
-    Fear = FMath::Max(Fear - 10.0f, 0.0f);
+    if (!GetOwner()) return;
 
-    if (CurrentState == ENPC_BehaviorState::Flee || CurrentState == ENPC_BehaviorState::Alert)
+    float DistToThreat = FVector::Dist(GetOwner()->GetActorLocation(), ThreatLocation);
+
+    // Record in memory
+    RecordMemory(ThreatLocation, AccumulatedTime, ThreatLevel, ThreatTag);
+
+    // Update fear
+    FearLevel = FMath::Clamp(FearLevel + ThreatLevel * 0.5f, 0.0f, 1.0f);
+
+    // Determine reaction
+    if (DistToThreat <= FleeRadius && ThreatLevel >= 0.6f)
     {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
+        bIsFleeing = true;
+        bIsAlerting = true;
+        CurrentActivity = ENPC_Activity::Flee;
+    }
+    else if (DistToThreat <= AlertRadius && ThreatLevel >= 0.3f)
+    {
+        bIsAlerting = true;
+        if (!bIsFleeing)
+        {
+            CurrentActivity = ENPC_Activity::Alert;
+        }
     }
 }
 
-bool UNPCBehaviorComponent::HasActiveThreat() const
+// ─────────────────────────────────────────────────────────────────────────────
+// SetDailyPhase — transition to a new time-of-day phase
+// ─────────────────────────────────────────────────────────────────────────────
+void UNPCBehaviorComponent::SetDailyPhase(ENPC_DailyPhase NewPhase)
 {
-    return CurrentDangerLevel != ENPC_DangerLevel::None;
+    CurrentPhase = NewPhase;
+
+    // Only update activity if not in a threat reaction
+    if (!bIsFleeing && !bIsAlerting)
+    {
+        CurrentActivity = GetActivityForPhase(NewPhase);
+    }
 }
 
-void UNPCBehaviorComponent::AddMemoryEntry(FVector Location, ENPC_DangerLevel Danger, const FString& Tag)
+// ─────────────────────────────────────────────────────────────────────────────
+// GetActivityForPhase — look up routine for a given phase
+// ─────────────────────────────────────────────────────────────────────────────
+ENPC_Activity UNPCBehaviorComponent::GetActivityForPhase(ENPC_DailyPhase Phase) const
+{
+    for (const FNPC_RoutineSlot& Slot : DailyRoutine)
+    {
+        if (Slot.Phase == Phase)
+        {
+            return Slot.Activity;
+        }
+    }
+    return ENPC_Activity::Idle;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RecordMemory — add a new memory entry, evict oldest if over cap
+// ─────────────────────────────────────────────────────────────────────────────
+void UNPCBehaviorComponent::RecordMemory(FVector Location, float Time, float Threat, const FString& Tag)
 {
     FNPC_MemoryEntry Entry;
-    Entry.Location = Location;
-    Entry.DangerLevel = Danger;
-    Entry.ThreatTag = Tag;
+    Entry.EventLocation = Location;
+    Entry.EventTime = Time;
+    Entry.ThreatLevel = Threat;
+    Entry.EventTag = Tag;
     Entry.bIsActive = true;
-
-    if (GetWorld())
-    {
-        Entry.Timestamp = GetWorld()->GetTimeSeconds();
-    }
 
     MemoryLog.Add(Entry);
 
-    // Cap memory at 32 entries
-    if (MemoryLog.Num() > 32)
+    // Evict oldest entries beyond cap
+    while (MemoryLog.Num() > MaxMemoryEntries)
     {
         MemoryLog.RemoveAt(0);
     }
 }
 
-TArray<FNPC_MemoryEntry> UNPCBehaviorComponent::GetRecentMemories(float WithinSeconds) const
+// ─────────────────────────────────────────────────────────────────────────────
+// DecayMemories — mark old memories as inactive
+// ─────────────────────────────────────────────────────────────────────────────
+void UNPCBehaviorComponent::DecayMemories(float CurrentTime)
 {
-    TArray<FNPC_MemoryEntry> Recent;
-    float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
-    for (const FNPC_MemoryEntry& Entry : MemoryLog)
-    {
-        if (Entry.bIsActive && (Now - Entry.Timestamp) <= WithinSeconds)
-        {
-            Recent.Add(Entry);
-        }
-    }
-    return Recent;
-}
-
-void UNPCBehaviorComponent::PurgeOldMemories(float OlderThanSeconds)
-{
-    float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
     for (FNPC_MemoryEntry& Entry : MemoryLog)
     {
-        if ((Now - Entry.Timestamp) > OlderThanSeconds)
+        if (Entry.bIsActive && (CurrentTime - Entry.EventTime) > MemoryDecayTime)
         {
             Entry.bIsActive = false;
         }
     }
 
+    // Remove fully decayed entries
     MemoryLog.RemoveAll([](const FNPC_MemoryEntry& E) { return !E.bIsActive; });
 }
 
-void UNPCBehaviorComponent::AddRoutineSlot(float TimeOfDay, ENPC_BehaviorState State, FVector Location, float Duration)
+// ─────────────────────────────────────────────────────────────────────────────
+// HasMemoryOfThreat — check if NPC remembers a specific threat type
+// ─────────────────────────────────────────────────────────────────────────────
+bool UNPCBehaviorComponent::HasMemoryOfThreat(const FString& ThreatTag) const
 {
-    FNPC_DailyRoutineSlot Slot;
-    Slot.TimeOfDay = TimeOfDay;
-    Slot.TargetState = State;
-    Slot.TargetLocation = Location;
-    Slot.Duration = Duration;
-    DailyRoutine.Add(Slot);
-
-    // Keep sorted by time
-    DailyRoutine.Sort([](const FNPC_DailyRoutineSlot& A, const FNPC_DailyRoutineSlot& B)
+    for (const FNPC_MemoryEntry& Entry : MemoryLog)
     {
-        return A.TimeOfDay < B.TimeOfDay;
-    });
-}
-
-void UNPCBehaviorComponent::EvaluateRoutine(float CurrentTimeOfDay)
-{
-    // Don't override threat responses
-    if (CurrentState == ENPC_BehaviorState::Flee || CurrentState == ENPC_BehaviorState::Alert)
-    {
-        return;
-    }
-
-    // Find the appropriate routine slot for current time
-    for (int32 i = DailyRoutine.Num() - 1; i >= 0; --i)
-    {
-        if (CurrentTimeOfDay >= DailyRoutine[i].TimeOfDay)
+        if (Entry.bIsActive && Entry.EventTag == ThreatTag)
         {
-            SetBehaviorState(DailyRoutine[i].TargetState);
-            return;
+            return true;
         }
     }
-
-    // Default to last slot (night/rest) if before first slot
-    if (DailyRoutine.Num() > 0)
-    {
-        SetBehaviorState(DailyRoutine.Last().TargetState);
-    }
+    return false;
 }
 
-void UNPCBehaviorComponent::SetPatrolCenter(FVector Center, float Radius)
+// ─────────────────────────────────────────────────────────────────────────────
+// GetHighestThreatInMemory — returns the highest active threat level remembered
+// ─────────────────────────────────────────────────────────────────────────────
+float UNPCBehaviorComponent::GetHighestThreatInMemory() const
 {
-    PatrolCenter = Center;
-    PatrolRadius = Radius;
-    CurrentPatrolIndex = 0;
+    float Highest = 0.0f;
+    for (const FNPC_MemoryEntry& Entry : MemoryLog)
+    {
+        if (Entry.bIsActive && Entry.ThreatLevel > Highest)
+        {
+            Highest = Entry.ThreatLevel;
+        }
+    }
+    return Highest;
 }
 
-FVector UNPCBehaviorComponent::GetNextPatrolPoint() const
+// ─────────────────────────────────────────────────────────────────────────────
+// BuildDefaultRoutine — assign role-appropriate daily schedule
+// ─────────────────────────────────────────────────────────────────────────────
+void UNPCBehaviorComponent::BuildDefaultRoutine()
 {
-    // Generate 8 patrol waypoints around the center
-    const int32 NumPoints = 8;
-    float Angle = (CurrentPatrolIndex % NumPoints) * (360.0f / NumPoints);
-    float Rad = FMath::DegreesToRadians(Angle);
+    DailyRoutine.Empty();
 
-    return PatrolCenter + FVector(
-        FMath::Cos(Rad) * PatrolRadius,
-        FMath::Sin(Rad) * PatrolRadius,
-        0.0f
-    );
-}
-
-void UNPCBehaviorComponent::TickSurvivalStats(float DeltaTime)
-{
-    // Hunger decreases over time
-    Hunger = FMath::Max(Hunger - DeltaTime * 0.5f, 0.0f);
-
-    // Energy decreases when active, recovers when resting
-    if (CurrentState == ENPC_BehaviorState::Rest)
+    auto AddSlot = [this](ENPC_DailyPhase Phase, ENPC_Activity Activity, float Duration)
     {
-        Energy = FMath::Min(Energy + DeltaTime * 2.0f, 100.0f);
-    }
-    else
-    {
-        Energy = FMath::Max(Energy - DeltaTime * 0.3f, 0.0f);
-    }
+        FNPC_RoutineSlot Slot;
+        Slot.Phase = Phase;
+        Slot.Activity = Activity;
+        Slot.Duration = Duration;
+        DailyRoutine.Add(Slot);
+    };
 
-    // Fear naturally decays
-    Fear = FMath::Max(Fear - DeltaTime * 0.2f, 0.0f);
-
-    // Low energy forces rest
-    if (Energy < 10.0f && CurrentState != ENPC_BehaviorState::Flee)
+    switch (Role)
     {
-        SetBehaviorState(ENPC_BehaviorState::Rest);
-    }
+    case ENPC_Role::Elder:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Idle,    120.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Converse, 300.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Watch,   180.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Sleep,   480.0f);
+        break;
 
-    // Hunger drives foraging
-    if (Hunger < 20.0f && CurrentState == ENPC_BehaviorState::Idle)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Forage);
-    }
-}
+    case ENPC_Role::Scout:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Patrol,  300.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Watch,   180.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Patrol,  240.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Watch,   300.0f);
+        break;
 
-void UNPCBehaviorComponent::TickStateLogic(float DeltaTime)
-{
-    // State timeout — prevent getting stuck
-    const float MaxStateTime = 300.0f; // 5 minutes max in any state
-    if (StateTimer > MaxStateTime)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
-    }
-}
+    case ENPC_Role::Hunter:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Hunt,    360.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Idle,    120.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Hunt,    240.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Sleep,   480.0f);
+        break;
 
-void UNPCBehaviorComponent::TickMemoryDecay(float DeltaTime)
-{
-    MemoryDecayTimer += DeltaTime;
-    if (MemoryDecayTimer >= 60.0f) // Purge old memories every 60 seconds
-    {
-        PurgeOldMemories(300.0f); // Remove memories older than 5 minutes
-        MemoryDecayTimer = 0.0f;
+    case ENPC_Role::Crafter:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Gather,  180.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Craft,   360.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Craft,   180.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Sleep,   480.0f);
+        break;
+
+    case ENPC_Role::Gatherer:
+    default:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Gather,  300.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Idle,    120.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Gather,  180.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Sleep,   480.0f);
+        break;
+
+    case ENPC_Role::Guard:
+        AddSlot(ENPC_DailyPhase::Dawn,   ENPC_Activity::Watch,   300.0f);
+        AddSlot(ENPC_DailyPhase::Midday, ENPC_Activity::Patrol,  240.0f);
+        AddSlot(ENPC_DailyPhase::Dusk,   ENPC_Activity::Watch,   300.0f);
+        AddSlot(ENPC_DailyPhase::Night,  ENPC_Activity::Patrol,  360.0f);
+        break;
     }
 }
