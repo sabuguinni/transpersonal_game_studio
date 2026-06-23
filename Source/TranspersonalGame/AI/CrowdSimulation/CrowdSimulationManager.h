@@ -1,108 +1,107 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "CrowdSimulationManager.generated.h"
 
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribe crowd simulation system
-
 UENUM(BlueprintType)
-enum class ECrowd_AgentRole : uint8
+enum class ECrowd_HerdBehavior : uint8
 {
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Hunter      UMETA(DisplayName = "Hunter"),
-    Guard       UMETA(DisplayName = "Guard"),
-    Elder       UMETA(DisplayName = "Elder"),
-    Child       UMETA(DisplayName = "Child"),
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_AgentState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Wandering   UMETA(DisplayName = "Wandering"),
-    Working     UMETA(DisplayName = "Working"),
-    Alerted     UMETA(DisplayName = "Alerted"),
+    Grazing     UMETA(DisplayName = "Grazing"),
+    Migrating   UMETA(DisplayName = "Migrating"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
     Resting     UMETA(DisplayName = "Resting"),
+    Drinking    UMETA(DisplayName = "Drinking")
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_AgentData
+struct FCrowd_WaypointData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    TWeakObjectPtr<AActor> AgentActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    ECrowd_AgentRole Role = ECrowd_AgentRole::Gatherer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float Radius = 300.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    ECrowd_AgentState CurrentState = ECrowd_AgentState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float DensityWeight = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    int32 LODLevel = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_HerdBehavior BehaviorAtWaypoint = ECrowd_HerdBehavior::Grazing;
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    FVector HomeLocation = FVector::ZeroVector;
+USTRUCT(BlueprintType)
+struct FCrowd_HerdConfig
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    float WanderRadius = 400.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FString SpeciesName = TEXT("Herbivore");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 HerdSize = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float MigrationSpeed = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float FleeRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    TArray<FCrowd_WaypointData> MigrationPath;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCrowdSimulationManager();
+    ACrowdSimulationManager();
 
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UnregisterCrowdAgent(AActor* Agent);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateCrowdLOD(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 GetActiveCrowdCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    TArray<FCrowd_AgentData> GetAgentsByRole(ECrowd_AgentRole Role) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerCrowdFlee(const FVector& ThreatLocation, float FleeRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerCrowdAlert(const FVector& AlertLocation, float AlertRadius);
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxCrowdAgents;
+    int32 MaxSimultaneousAgents = 500;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float AgentUpdateRadius;
+    float LOD_NearDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceClose;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float LOD_FarDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceMedium;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    TArray<FCrowd_HerdConfig> RegisteredHerds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
-    float LODDistanceFar;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Waypoints")
+    TArray<FCrowd_WaypointData> GlobalWaypoints;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    bool bCrowdSimulationActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Debug")
+    bool bDrawDebugPaths = false;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterHerd(const FCrowd_HerdConfig& HerdConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetActiveAgentCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SetHerdBehavior(const FString& SpeciesName, ECrowd_HerdBehavior NewBehavior);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    FCrowd_WaypointData GetNearestWaypoint(FVector FromLocation) const;
 
 private:
-    UPROPERTY()
-    TArray<FCrowd_AgentData> ActiveAgents;
+    int32 ActiveAgentCount;
+    float SimulationTickAccumulator;
+    static constexpr float SimulationTickInterval = 0.1f;
+
+    void UpdateHerdMigration(float DeltaTime);
+    void ApplyLODCulling();
 };
