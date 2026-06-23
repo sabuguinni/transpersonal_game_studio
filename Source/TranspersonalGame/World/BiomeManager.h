@@ -1,70 +1,108 @@
+// BiomeManager.h
+// Engine Architect #02 — P1 World Generation
+// Manages biome detection, transitions, and environmental data for the prehistoric survival world.
+// Pairs with BiomeManager.cpp
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
 #include "TranspersonalGame/SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// Biome transition data — defines how two biomes blend
-// ============================================================
+// -------------------------------------------------------
+// USTRUCT: Biome Definition (static data per biome type)
+// -------------------------------------------------------
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeTransition
+struct TRANSPERSONALGAME_API FEng_BiomeDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType FromBiome = EBiomeType::Grassland;
+    EBiomeType BiomeType = EBiomeType::Plains;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType ToBiome = EBiomeType::Forest;
+    FText DisplayName;
 
-    /** Width of the transition zone in world units */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float TransitionWidth = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float BaseTemperature = 20.0f;
 
-    /** Blend curve exponent (1=linear, 2=quadratic) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.5", ClampMax = "4.0"))
-    float BlendExponent = 1.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float BaseHumidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    float FogDensity = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor FogColor = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor AmbientColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
+    bool bAllowsDinosaurSpawn = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
+    float DinosaurDensityMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
+    float VegetationDensityMultiplier = 1.0f;
 };
 
-// ============================================================
-// Per-biome runtime data snapshot
-// ============================================================
+// -------------------------------------------------------
+// USTRUCT: Biome Runtime Data (live state per biome)
+// -------------------------------------------------------
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_BiomeRuntimeData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Grassland;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    EBiomeType BiomeType = EBiomeType::Plains;
 
-    /** Normalised blend weight at the query point [0..1] */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float BlendWeight = 1.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    float CurrentTemperature = 20.0f;
 
-    /** Ambient temperature in Celsius */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float Temperature = 28.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    float CurrentHumidity = 0.5f;
 
-    /** Relative humidity [0..1] */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float Humidity = 0.5f;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    int32 ActiveDinosaurCount = 0;
 
-    /** Vegetation density scalar [0..1] */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float VegetationDensity = 0.7f;
-
-    /** Dominant dinosaur species in this biome */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EDinosaurSpecies DominantSpecies = EDinosaurSpecies::Raptor;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    bool bIsActive = false;
 };
 
-// ============================================================
-// ABiomeManager — world actor that owns the biome grid
-// ============================================================
-UCLASS(ClassGroup = "TranspersonalGame|World", meta = (DisplayName = "Biome Manager"))
+// -------------------------------------------------------
+// USTRUCT: Biome Transition (blend state)
+// -------------------------------------------------------
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeTransition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EBiomeType FromBiome = EBiomeType::Plains;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EBiomeType ToBiome = EBiomeType::Plains;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    float Progress = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    bool bIsActive = false;
+};
+
+// -------------------------------------------------------
+// DELEGATE: Biome change notification
+// -------------------------------------------------------
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEng_OnBiomeChanged, EBiomeType, OldBiome, EBiomeType, NewBiome);
+
+// -------------------------------------------------------
+// UCLASS: ABiomeManager
+// -------------------------------------------------------
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -72,86 +110,62 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-    // ---- AActor overrides ----
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // ---- Biome Definitions (editable in editor) ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Definitions")
+    TArray<FEng_BiomeDefinition> BiomeDefinitions;
 
-    // ---- Public API (callable from Blueprint / other C++) ----
+    // ---- Runtime State ----
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EBiomeType CurrentBiomeType;
 
-    /**
-     * Returns the dominant biome type at a given world location.
-     * Uses a fast noise-based lookup — safe to call every frame.
-     */
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EBiomeType PreviousBiomeType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    float TransitionProgress;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|State")
+    float TransitionSpeed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    bool bIsTransitioning;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Settings")
+    float BiomeTransitionBlendRadius;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Runtime")
+    TArray<FEng_BiomeRuntimeData> ActiveBiomeData;
+
+    // ---- Delegate ----
+    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
+    FEng_OnBiomeChanged OnBiomeChanged;
+
+    // ---- Public API ----
     UFUNCTION(BlueprintCallable, Category = "Biome")
     EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    /**
-     * Returns full runtime data (blend weights, temperature, humidity…)
-     * for the biome at the given world location.
-     */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeRuntimeData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    FEng_BiomeDefinition GetBiomeDefinition(EBiomeType BiomeType) const;
 
-    /**
-     * Returns the current weather state for the biome at the given location.
-     */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWeatherType GetWeatherAtLocation(const FVector& WorldLocation) const;
+    void RequestBiomeTransition(EBiomeType NewBiome);
 
-    /**
-     * Forces a weather override on a specific biome (useful for scripted events).
-     */
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    void SetWeatherOverride(EBiomeType Biome, EWeatherType Weather, float DurationSeconds);
+    void UpdatePlayerBiome(const FVector& PlayerLocation);
 
-    /**
-     * Returns true if the two world positions are in the same biome.
-     */
+    UFUNCTION(BlueprintPure, Category = "Biome")
+    float GetCurrentBiomeTemperature() const;
+
+    UFUNCTION(BlueprintPure, Category = "Biome")
+    float GetCurrentBiomeHumidity() const;
+
+    UFUNCTION(BlueprintPure, Category = "Biome")
+    int32 GetActiveDinosaurCountForBiome(EBiomeType BiomeType) const;
+
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool AreSameBiome(const FVector& LocationA, const FVector& LocationB) const;
+    void RegisterDinosaurInBiome(EBiomeType BiomeType, bool bAdding);
 
-    /**
-     * Debug: draws biome boundaries in the viewport for N seconds.
-     */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
-    void DrawBiomeBoundaries(float Duration = 10.0f);
-
-    // ---- Configuration ----
-
-    /** Total world size in X/Y (should match landscape) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float WorldSizeXY = 16000.0f;
-
-    /** Noise frequency for biome distribution (lower = larger biomes) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config", meta = (ClampMin = "0.00001", ClampMax = "0.001"))
-    float BiomeNoiseFrequency = 0.0001f;
-
-    /** Noise seed — change to get a different world layout */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    int32 NoiseSeed = 42;
-
-    /** Transition definitions between adjacent biomes */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    TArray<FEng_BiomeTransition> BiomeTransitions;
-
-    /** How often (seconds) the weather system ticks per biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Weather", meta = (ClampMin = "1.0", ClampMax = "300.0"))
-    float WeatherTickInterval = 30.0f;
-
-private:
-    // Internal noise helpers
-    float SampleNoise(float X, float Y, int32 Seed) const;
-    EBiomeType ClassifyBiome(float NoiseValue, float Altitude) const;
-    float GetAltitudeAtLocation(const FVector& WorldLocation) const;
-
-    // Weather state per biome
-    TMap<EBiomeType, EWeatherType> CurrentWeatherMap;
-    TMap<EBiomeType, float>        WeatherOverrideTimers;
-
-    // Cached world reference
-    float WeatherAccumulator = 0.0f;
-
-    void TickWeather(float DeltaTime);
-    void InitialiseDefaultWeather();
-    void InitialiseDefaultTransitions();
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 };
