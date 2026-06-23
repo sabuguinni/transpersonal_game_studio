@@ -1,0 +1,100 @@
+{
+  "quest_id": "QUEST_HERD_MIGRATION_01",
+  "quest_title": "The River Road",
+  "npc_speaker": "Scout_Davan",
+  "dialogue_lines": {
+    "quest_intro": [
+      {
+        "line_id": "HM_INTRO_01",
+        "speaker": "Scout_Davan",
+        "text": "The big ones are moving. I have been tracking them for three days — they follow the river south, same as last dry season.",
+        "emotion": "excited",
+        "trigger": "player_enters_dialogue_zone",
+        "voice_cue": "eager_fast_speech"
+      },
+      {
+        "line_id": "HM_INTRO_02",
+        "speaker": "Scout_Davan",
+        "text": "If we know where the herd crosses, we know where the predators wait. And where the predators wait, we do not camp.",
+        "emotion": "practical",
+        "trigger": "after_HM_INTRO_01",
+        "voice_cue": "matter_of_fact"
+      },
+      {
+        "line_id": "HM_INTRO_03",
+        "speaker": "Scout_Davan",
+        "text": "Follow them to the four waypoints I marked. Do not get close — a spooked herd is more dangerous than any predator. Just watch.",
+        "emotion": "cautionary",
+        "trigger": "after_HM_INTRO_02",
+        "voice_cue": "firm_instructional"
+      }
+    ],
+    "objective_progress": [
+      {
+        "line_id": "HM_PROG_01",
+        "speaker": "Scout_Davan",
+        "text": "Good — you found the grazing ground. See how they spread out? That means no predators within half a day's walk. Safe ground.",
+        "emotion": "observational",
+        "trigger": "objective_waypoint_A_reached",
+        "voice_cue": "quiet_informative"
+      },
+      {
+        "line_id": "HM_PROG_02",
+        "speaker": "Scout_Davan",
+        "text": "The river crossing. Watch the lead animal — the one with the scarred neck. Where it steps, the others follow. That is the safe ford.",
+        "emotion": "focused",
+        "trigger": "objective_waypoint_B_reached",
+        "voice_cue": "hushed_reverent"
+      },
+      {
+        "line_id": "HM_PROG_03",
+        "speaker": "Scout_Davan",
+        "text": "They are bunching together. Something spooked them from the east. Stay low — do not let them see you as a threat.",
+        "emotion": "tense",
+        "trigger": "objective_waypoint_C_reached",
+        "voice_cue": "urgent_whisper"
+      },
+      {
+        "line_id": "HM_PROG_04",
+        "speaker": "Scout_Davan",
+        "text": "The southern valley. This is where they rest before the final push. Mark this place — it will be empty of predators for three days after the herd passes.",
+        "emotion": "strategic",
+        "trigger": "objective_waypoint_D_reached",
+        "voice_cue": "calm_deliberate"
+      }
+    ],
+    "quest_complete": [
+      {
+        "line_id": "HM_COMP_01",
+        "speaker": "Scout_Davan",
+        "text": "You mapped the whole route. River ford, grazing grounds, rest valley. This is worth more than any weapon — this is a safe road south.",
+        "emotion": "satisfied",
+        "trigger": "quest_completed",
+        "voice_cue": "warm_relief"
+      },
+      {
+        "line_id": "HM_COMP_02",
+        "speaker": "Scout_Davan",
+        "text": "When the dry season bites hard, we follow the herd. They know where the water is. They have always known.",
+        "emotion": "reflective",
+        "trigger": "after_HM_COMP_01",
+        "voice_cue": "quiet_wisdom"
+      }
+    ],
+    "quest_failed": [
+      {
+        "line_id": "HM_FAIL_01",
+        "speaker": "Scout_Davan",
+        "text": "You spooked them. The herd scattered — we lost the route. It will take weeks before they settle into a new pattern. We will have to find another way south.",
+        "emotion": "frustrated",
+        "trigger": "quest_failed",
+        "voice_cue": "clipped_disappointed"
+      }
+    ]
+  },
+  "lore_context": {
+    "herd_migration_ecology": "The Brachiosaurus herd follows a seasonal migration route dictated by water availability and vegetation cycles. This route has been stable for generations — the same paths worn into the earth by thousands of years of movement.",
+    "why_this_matters": "Completing this quest unlocks the 'Migration Map' — a persistent overlay showing safe travel corridors and predator ambush zones along the herd route. This is critical for long-distance exploration.",
+    "ecological_note": "Large herbivore herds function as living ecological sensors. Where they graze calmly, no apex predators are present. Where they bunch and face outward, danger is near. Reading herd behavior is a core survival skill."
+  }
+}
