@@ -1,219 +1,181 @@
-// DialogueSystem.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// Implementation of NPC dialogue system for prehistoric survival game
-
 #include "DialogueSystem.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
-// ─── Constructor ──────────────────────────────────────────────────────────────
+// ============================================================
+// Narrative & Dialogue Agent #15 — DialogueSystem.cpp
+// Proximity-based dialogue trigger implementation
+// Prehistoric survival game — realistic, no spiritual content
+// ============================================================
 
-ANarr_DialogueNPC::ANarr_DialogueNPC()
+ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+    : TriggerContext(ENarr_DialogueContext::None)
+    , TriggerRadius(500.0f)
+    , bHasFired(false)
+    , TimeSinceLastFire(0.0f)
+    , CurrentLineIndex(0)
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    RootComponent = InteractionSphere;
-    InteractionSphere->SetSphereRadius(300.0f);
-    InteractionSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    // Root component
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    RootComponent = TriggerSphere;
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
 
     // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueNPC::OnPlayerEnterRange);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueNPC::OnPlayerExitRange);
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnSphereBeginOverlap);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnSphereEndOverlap);
 
-    // Defaults
-    NPCName = TEXT("Unknown");
-    NPCRole = ENarr_NPCRole::Survivor;
-    InteractionRadius = 300.0f;
-    CurrentState = ENarr_DialogueState::Idle;
-    bPlayerInRange = false;
-    CurrentLineIndex = 0;
-    bOffersQuest = false;
-    QuestID = TEXT("");
-    bQuestAccepted = false;
-    ActiveTreeID = TEXT("default");
+    // Default dialogue sequence — raptor warning
+    DialogueSequence.SequenceID = TEXT("RaptorWarning_01");
+    DialogueSequence.bOneShot = true;
+    DialogueSequence.CooldownSeconds = 60.0f;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerID = TEXT("Scout");
+    Line1.LineText = TEXT("The raptor pack has taken the eastern pass. Find another way through the valley.");
+    Line1.DisplayDuration = 5.0f;
+    Line1.Context = ENarr_DialogueContext::RaptorWarning;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerID = TEXT("Scout");
+    Line2.LineText = TEXT("Move fast. Stay low. They hunt by movement.");
+    Line2.DisplayDuration = 4.0f;
+    Line2.Context = ENarr_DialogueContext::DangerZone;
+
+    DialogueSequence.Lines.Add(Line1);
+    DialogueSequence.Lines.Add(Line2);
 }
 
-// ─── BeginPlay ────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::BeginPlay()
+void ANarr_DialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
 
     // Update sphere radius from property
-    if (InteractionSphere)
+    if (TriggerSphere)
     {
-        InteractionSphere->SetSphereRadius(InteractionRadius);
+        TriggerSphere->SetSphereRadius(TriggerRadius);
     }
 }
 
-// ─── Tick ─────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::Tick(float DeltaTime)
+void ANarr_DialogueTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // Future: auto-advance timed dialogue lines
-}
 
-// ─── Dialogue Control ─────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::StartDialogue()
-{
-    if (CurrentState == ENarr_DialogueState::InConversation)
+    // Track cooldown
+    if (bHasFired && !DialogueSequence.bOneShot)
     {
-        return;
-    }
-
-    CurrentLineIndex = 0;
-    CurrentState = ENarr_DialogueState::Greeting;
-
-    FNarr_DialogueTree* Tree = FindActiveTree();
-    if (Tree && Tree->Lines.Num() > 0)
-    {
-        CurrentState = ENarr_DialogueState::InConversation;
-        UE_LOG(LogTemp, Log, TEXT("[Dialogue] %s: %s"), *NPCName, *Tree->Lines[0].LineText);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[Dialogue] No dialogue tree found for NPC: %s"), *NPCName);
-        EndDialogue();
-    }
-}
-
-void ANarr_DialogueNPC::AdvanceDialogue()
-{
-    FNarr_DialogueTree* Tree = FindActiveTree();
-    if (!Tree)
-    {
-        EndDialogue();
-        return;
-    }
-
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= Tree->Lines.Num())
-    {
-        // All lines exhausted — check for quest offer
-        if (bOffersQuest && !bQuestAccepted)
+        TimeSinceLastFire += DeltaTime;
+        if (TimeSinceLastFire >= DialogueSequence.CooldownSeconds)
         {
-            CurrentState = ENarr_DialogueState::QuestOffer;
-            UE_LOG(LogTemp, Log, TEXT("[Dialogue] Quest offered: %s"), *QuestID);
+            ResetTrigger();
         }
-        else
-        {
-            EndDialogue();
-        }
-        return;
-    }
-
-    FNarr_DialogueLine& Line = Tree->Lines[CurrentLineIndex];
-    UE_LOG(LogTemp, Log, TEXT("[Dialogue] %s: %s"), *NPCName, *Line.LineText);
-}
-
-void ANarr_DialogueNPC::EndDialogue()
-{
-    CurrentState = ENarr_DialogueState::Farewell;
-    CurrentLineIndex = 0;
-
-    // Reset to idle after farewell
-    CurrentState = ENarr_DialogueState::Idle;
-    UE_LOG(LogTemp, Log, TEXT("[Dialogue] Conversation ended with %s"), *NPCName);
-}
-
-FNarr_DialogueLine ANarr_DialogueNPC::GetCurrentLine() const
-{
-    FNarr_DialogueTree* Tree = const_cast<ANarr_DialogueNPC*>(this)->FindActiveTree();
-    if (Tree && CurrentLineIndex < Tree->Lines.Num())
-    {
-        return Tree->Lines[CurrentLineIndex];
-    }
-    return FNarr_DialogueLine();
-}
-
-bool ANarr_DialogueNPC::HasMoreLines() const
-{
-    FNarr_DialogueTree* Tree = const_cast<ANarr_DialogueNPC*>(this)->FindActiveTree();
-    if (!Tree) return false;
-    return CurrentLineIndex < Tree->Lines.Num() - 1;
-}
-
-void ANarr_DialogueNPC::AcceptQuest()
-{
-    if (bOffersQuest && !bQuestAccepted)
-    {
-        bQuestAccepted = true;
-        CurrentState = ENarr_DialogueState::QuestComplete;
-        UE_LOG(LogTemp, Log, TEXT("[Dialogue] Quest accepted: %s from %s"), *QuestID, *NPCName);
-        EndDialogue();
     }
 }
 
-// ─── Pure Getters ─────────────────────────────────────────────────────────────
-
-FString ANarr_DialogueNPC::GetNPCDisplayName() const
-{
-    return NPCName;
-}
-
-ENarr_DialogueState ANarr_DialogueNPC::GetDialogueState() const
-{
-    return CurrentState;
-}
-
-// ─── Overlap Handlers ─────────────────────────────────────────────────────────
-
-void ANarr_DialogueNPC::OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void ANarr_DialogueTrigger::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
     if (!OtherActor) return;
 
-    // Check if it's a character (player)
-    if (OtherActor->IsA(ACharacter::StaticClass()))
-    {
-        bPlayerInRange = true;
-        UE_LOG(LogTemp, Log, TEXT("[Dialogue] Player entered range of %s"), *NPCName);
-        // Auto-greet
-        if (CurrentState == ENarr_DialogueState::Idle)
-        {
-            StartDialogue();
-        }
-    }
+    // Only trigger for player characters
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    OnPlayerEnterTrigger(OtherActor);
 }
 
-void ANarr_DialogueNPC::OnPlayerExitRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+void ANarr_DialogueTrigger::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
     UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
     if (!OtherActor) return;
 
-    if (OtherActor->IsA(ACharacter::StaticClass()))
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    OnPlayerExitTrigger(OtherActor);
+}
+
+void ANarr_DialogueTrigger::OnPlayerEnterTrigger_Implementation(AActor* OverlappingActor)
+{
+    // Check if we can fire
+    if (bHasFired && DialogueSequence.bOneShot) return;
+    if (bHasFired && TimeSinceLastFire < DialogueSequence.CooldownSeconds) return;
+    if (DialogueSequence.Lines.Num() == 0) return;
+
+    FireDialogueSequence();
+}
+
+void ANarr_DialogueTrigger::OnPlayerExitTrigger_Implementation(AActor* OverlappingActor)
+{
+    // Cancel ongoing dialogue if player leaves
+    UWorld* World = GetWorld();
+    if (World)
     {
-        bPlayerInRange = false;
-        if (CurrentState == ENarr_DialogueState::InConversation)
-        {
-            EndDialogue();
-        }
-        UE_LOG(LogTemp, Log, TEXT("[Dialogue] Player left range of %s"), *NPCName);
+        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
     }
 }
 
-// ─── Internal Helpers ─────────────────────────────────────────────────────────
-
-FNarr_DialogueTree* ANarr_DialogueNPC::FindActiveTree()
+void ANarr_DialogueTrigger::FireDialogueSequence()
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    if (DialogueSequence.Lines.Num() == 0) return;
+
+    CurrentLineIndex = 0;
+    bHasFired = true;
+    TimeSinceLastFire = 0.0f;
+
+    // Log first line (Blueprint will handle actual UI display)
+    const FNarr_DialogueLine& FirstLine = DialogueSequence.Lines[0];
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] %s: %s"), *FirstLine.SpeakerID, *FirstLine.LineText);
+
+    // Schedule advance to next line
+    UWorld* World = GetWorld();
+    if (World && DialogueSequence.Lines.Num() > 1)
     {
-        if (Tree.TreeID == ActiveTreeID)
-        {
-            return &Tree;
-        }
+        World->GetTimerManager().SetTimer(DialogueTimerHandle, this,
+            &ANarr_DialogueTrigger::AdvanceDialogue,
+            FirstLine.DisplayDuration, false);
     }
-    // Fallback: return first tree if available
-    if (DialogueTrees.Num() > 0)
+}
+
+void ANarr_DialogueTrigger::AdvanceDialogue()
+{
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= DialogueSequence.Lines.Num())
     {
-        return &DialogueTrees[0];
+        // Sequence complete
+        UE_LOG(LogTemp, Log, TEXT("[Narrative] Sequence '%s' complete."), *DialogueSequence.SequenceID);
+        return;
     }
-    return nullptr;
+
+    const FNarr_DialogueLine& Line = DialogueSequence.Lines[CurrentLineIndex];
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] %s: %s"), *Line.SpeakerID, *Line.LineText);
+
+    // Schedule next line
+    UWorld* World = GetWorld();
+    if (World && CurrentLineIndex < DialogueSequence.Lines.Num() - 1)
+    {
+        World->GetTimerManager().SetTimer(DialogueTimerHandle, this,
+            &ANarr_DialogueTrigger::AdvanceDialogue,
+            Line.DisplayDuration, false);
+    }
+}
+
+void ANarr_DialogueTrigger::ResetTrigger()
+{
+    bHasFired = false;
+    TimeSinceLastFire = 0.0f;
+    CurrentLineIndex = 0;
+
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        World->GetTimerManager().ClearTimer(DialogueTimerHandle);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Trigger '%s' reset."), *GetActorLabel());
 }
