@@ -1,365 +1,324 @@
-// DialogueManager.cpp — Narrative & Dialogue Agent #15
-// PROD_CYCLE_AUTO_20260620_006
-// Full dialogue tree system for prehistoric survival NPCs.
-// Integrates with QuestManager::StartQuest(FName) on dialogue completion events.
-
 #include "DialogueManager.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
 
-// ─────────────────────────────────────────────────────────────
-//  Static dialogue database — all NPC trees defined here
-// ─────────────────────────────────────────────────────────────
+// ============================================================
+// UNarr_DialogueManagerComponent
+// ============================================================
 
-void UDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
 {
-    Super::Initialize(Collection);
-    BuildDialogueDatabase();
-    ActiveDialogueID = NAME_None;
-    ActiveNodeIndex = 0;
-    bDialogueActive = false;
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initialized with %d dialogue trees"), DialogueDatabase.Num());
+    PrimaryComponentTick.bCanEverTick = true;
+    bIsDialogueActive = false;
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
+    ActiveSequence = nullptr;
 }
 
-void UDialogueManager::BuildDialogueDatabase()
+void UNarr_DialogueManagerComponent::BeginPlay()
 {
-    DialogueDatabase.Empty();
-
-    // ── TRIBE ELDER KAEL ──────────────────────────────────────
-
-    // Quest: Protect the Camp (offer)
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Elder_ProtectCamp_Offer");
-        Tree.NPCName = FText::FromString("Kael");
-        Tree.QuestToStartOnComplete = FName("Quest_ProtectCamp");
-        Tree.AudioURL_Offer = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944414278_Tribe_Elder_Quest_Alert.mp3");
-        Tree.AudioURL_InProgress = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944502150_Tribe_Elder_Kael.mp3");
-
-        // Node 0 — opening
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Kael");
-        N0.DialogueText = FText::FromString("Danger! The great lizard approaches our camp! Grab your spears — we must drive it away before it destroys everything we have built!");
-        N0.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C0A; C0A.ChoiceText = FText::FromString("I will defend the camp."); C0A.NextNodeIndex = 1;
-        FNarr_DialogueChoice C0B; C0B.ChoiceText = FText::FromString("How close is it?"); C0B.NextNodeIndex = 2;
-        N0.Choices.Add(C0A);
-        N0.Choices.Add(C0B);
-        Tree.Nodes.Add(N0);
-
-        // Node 1 — accept
-        FNarr_DialogueNode N1;
-        N1.NodeIndex = 1;
-        N1.SpeakerName = FText::FromString("Kael");
-        N1.DialogueText = FText::FromString("Good. Drive it beyond the eastern ridge. Fire and noise — that is what it fears. Go now!");
-        N1.bIsPlayerChoice = false;
-        N1.bEndsDialogue = true;
-        N1.bStartsQuest = true;
-        Tree.Nodes.Add(N1);
-
-        // Node 2 — info branch
-        FNarr_DialogueNode N2;
-        N2.NodeIndex = 2;
-        N2.SpeakerName = FText::FromString("Kael");
-        N2.DialogueText = FText::FromString("Listen well. The great lizard that stalks our camp — it is not just hunger that drives it. It remembers. Keep your spear close and your fire burning through the night.");
-        N2.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C2A; C2A.ChoiceText = FText::FromString("Understood. I will drive it away."); C2A.NextNodeIndex = 1;
-        N2.Choices.Add(C2A);
-        Tree.Nodes.Add(N2);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    // Quest: Sharper Than Claws — crafting (offer)
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Elder_CraftingQuest_Offer");
-        Tree.NPCName = FText::FromString("Kael");
-        Tree.QuestToStartOnComplete = FName("Quest_SharperThanClaws");
-        Tree.AudioURL_Offer = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944523851_Tribe_Elder_Kael_CraftingQuest.mp3");
-
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Kael");
-        N0.DialogueText = FText::FromString("Stone and wood. That is all we have between us and death. But in the right hands — shaped right, bound tight — they become something the great lizards fear. Show me you can make the tools.");
-        N0.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C0A; C0A.ChoiceText = FText::FromString("What do I need to gather?"); C0A.NextNodeIndex = 1;
-        FNarr_DialogueChoice C0B; C0B.ChoiceText = FText::FromString("I already know how to craft."); C0B.NextNodeIndex = 2;
-        N0.Choices.Add(C0A);
-        N0.Choices.Add(C0B);
-        Tree.Nodes.Add(N0);
-
-        FNarr_DialogueNode N1;
-        N1.NodeIndex = 1;
-        N1.SpeakerName = FText::FromString("Kael");
-        N1.DialogueText = FText::FromString("Three flat stones from the river bed. Two straight branches from the dry forest to the north. Bring them back and I will show you how to bind them.");
-        N1.bIsPlayerChoice = false;
-        N1.bEndsDialogue = true;
-        N1.bStartsQuest = true;
-        Tree.Nodes.Add(N1);
-
-        FNarr_DialogueNode N2;
-        N2.NodeIndex = 2;
-        N2.SpeakerName = FText::FromString("Kael");
-        N2.DialogueText = FText::FromString("Then prove it. Gather the materials and craft an axe and a spear. Actions speak louder than words.");
-        N2.bIsPlayerChoice = false;
-        N2.bEndsDialogue = true;
-        N2.bStartsQuest = true;
-        Tree.Nodes.Add(N2);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    // Elder — in-progress check-in
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Elder_InProgress");
-        Tree.NPCName = FText::FromString("Kael");
-        Tree.AudioURL_InProgress = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944502150_Tribe_Elder_Kael.mp3");
-
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Kael");
-        N0.DialogueText = FText::FromString("Not finished yet. The tribe is counting on you. Do not come back until the task is done.");
-        N0.bIsPlayerChoice = false;
-        N0.bEndsDialogue = true;
-        Tree.Nodes.Add(N0);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    // ── TRIBE SCOUT ORRA ──────────────────────────────────────
-
-    // Quest: The First Hunt (offer)
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Scout_FirstHunt_Offer");
-        Tree.NPCName = FText::FromString("Orra");
-        Tree.QuestToStartOnComplete = FName("Quest_FirstHunt");
-        Tree.AudioURL_Offer = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944447299_Tribe_Scout_Hunt_Briefing.mp3");
-        Tree.AudioURL_Complete = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944520926_Tribe_Scout_Orra_QuestComplete.mp3");
-
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Orra");
-        N0.DialogueText = FText::FromString("You there — hunter. The herd moves east at dawn. Three kills, maybe four. Enough meat to keep us alive through the cold nights. Do not come back empty handed.");
-        N0.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C0A; C0A.ChoiceText = FText::FromString("I will bring back the meat."); C0A.NextNodeIndex = 1;
-        FNarr_DialogueChoice C0B; C0B.ChoiceText = FText::FromString("Which animals are in the herd?"); C0B.NextNodeIndex = 2;
-        N0.Choices.Add(C0A);
-        N0.Choices.Add(C0B);
-        Tree.Nodes.Add(N0);
-
-        FNarr_DialogueNode N1;
-        N1.NodeIndex = 1;
-        N1.SpeakerName = FText::FromString("Orra");
-        N1.DialogueText = FText::FromString("Move fast, stay downwind. The herd spooks easily. Three kills is all we need.");
-        N1.bIsPlayerChoice = false;
-        N1.bEndsDialogue = true;
-        N1.bStartsQuest = true;
-        Tree.Nodes.Add(N1);
-
-        FNarr_DialogueNode N2;
-        N2.NodeIndex = 2;
-        N2.SpeakerName = FText::FromString("Orra");
-        N2.DialogueText = FText::FromString("Long-necks mostly. Slow, but their legs can crush you if you get too close. Aim for the neck. One clean throw.");
-        N2.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C2A; C2A.ChoiceText = FText::FromString("Understood. I will go now."); C2A.NextNodeIndex = 1;
-        N2.Choices.Add(C2A);
-        Tree.Nodes.Add(N2);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    // Quest: Know Your Ground — exploration (offer)
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Scout_KnowYourGround_Offer");
-        Tree.NPCName = FText::FromString("Orra");
-        Tree.QuestToStartOnComplete = FName("Quest_KnowYourGround");
-        Tree.AudioURL_Offer = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944509130_Tribe_Scout_Orra.mp3");
-
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Orra");
-        N0.DialogueText = FText::FromString("You want to know this land? Then walk it. Every ridge, every river bend, every shadow where a predator might wait. I have mapped it in my head. You must do the same.");
-        N0.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C0A; C0A.ChoiceText = FText::FromString("Where do I start?"); C0A.NextNodeIndex = 1;
-        FNarr_DialogueChoice C0B; C0B.ChoiceText = FText::FromString("How many vantage points?"); C0B.NextNodeIndex = 2;
-        N0.Choices.Add(C0A);
-        N0.Choices.Add(C0B);
-        Tree.Nodes.Add(N0);
-
-        FNarr_DialogueNode N1;
-        N1.NodeIndex = 1;
-        N1.SpeakerName = FText::FromString("Orra");
-        N1.DialogueText = FText::FromString("North ridge first. You can see three valleys from there. Then work your way south. Do not rush — a scout who misses a detail is a dead scout.");
-        N1.bIsPlayerChoice = false;
-        N1.bEndsDialogue = true;
-        N1.bStartsQuest = true;
-        Tree.Nodes.Add(N1);
-
-        FNarr_DialogueNode N2;
-        N2.NodeIndex = 2;
-        N2.SpeakerName = FText::FromString("Orra");
-        N2.DialogueText = FText::FromString("Four. North ridge, east bluff, river crossing, and the high rock above the valley. Each one tells you something different about the land.");
-        N2.bIsPlayerChoice = false;
-        FNarr_DialogueChoice C2A; C2A.ChoiceText = FText::FromString("I will scout all four."); C2A.NextNodeIndex = 1;
-        N2.Choices.Add(C2A);
-        Tree.Nodes.Add(N2);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    // Scout — quest completion dialogue
-    {
-        FNarr_DialogueTree Tree;
-        Tree.DialogueID = FName("Scout_HuntComplete");
-        Tree.NPCName = FText::FromString("Orra");
-        Tree.AudioURL_Complete = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781944520926_Tribe_Scout_Orra_QuestComplete.mp3");
-
-        FNarr_DialogueNode N0;
-        N0.NodeIndex = 0;
-        N0.SpeakerName = FText::FromString("Orra");
-        N0.DialogueText = FText::FromString("Good. You came back. Most do not, the first time they face the herd alone. The meat you carry will feed twelve mouths tonight. That is not nothing. That is everything.");
-        N0.bIsPlayerChoice = false;
-        N0.bEndsDialogue = true;
-        Tree.Nodes.Add(N0);
-
-        DialogueDatabase.Add(Tree.DialogueID, Tree);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Built %d dialogue trees"), DialogueDatabase.Num());
+    Super::BeginPlay();
+    InitializeDefaultDialogues();
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Runtime dialogue control
-// ─────────────────────────────────────────────────────────────
-
-bool UDialogueManager::StartDialogue(FName DialogueID)
+void UNarr_DialogueManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!DialogueDatabase.Contains(DialogueID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Dialogue '%s' not found"), *DialogueID.ToString());
-        return false;
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    ActiveDialogueID = DialogueID;
-    ActiveNodeIndex = 0;
-    bDialogueActive = true;
-
-    const FNarr_DialogueTree& Tree = DialogueDatabase[DialogueID];
-    OnDialogueStarted.Broadcast(DialogueID, Tree.NPCName);
-
-    AdvanceToNode(0);
-    return true;
-}
-
-void UDialogueManager::SelectChoice(int32 ChoiceIndex)
-{
-    if (!bDialogueActive || !DialogueDatabase.Contains(ActiveDialogueID))
+    if (!bIsDialogueActive || ActiveSequence == nullptr)
     {
         return;
     }
 
-    const FNarr_DialogueTree& Tree = DialogueDatabase[ActiveDialogueID];
-    if (!Tree.Nodes.IsValidIndex(ActiveNodeIndex))
+    LineTimer -= DeltaTime;
+    if (LineTimer <= 0.0f)
     {
-        return;
+        AdvanceLineInternal();
     }
-
-    const FNarr_DialogueNode& Node = Tree.Nodes[ActiveNodeIndex];
-    if (!Node.Choices.IsValidIndex(ChoiceIndex))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Invalid choice index %d"), ChoiceIndex);
-        return;
-    }
-
-    int32 NextNode = Node.Choices[ChoiceIndex].NextNodeIndex;
-    AdvanceToNode(NextNode);
 }
 
-void UDialogueManager::AdvanceToNode(int32 NodeIndex)
+bool UNarr_DialogueManagerComponent::PlaySequence(FName SequenceID)
 {
-    if (!DialogueDatabase.Contains(ActiveDialogueID))
+    for (FNarr_DialogueSequence& Seq : DialogueLibrary)
     {
-        return;
-    }
-
-    FNarr_DialogueTree& Tree = DialogueDatabase[ActiveDialogueID];
-
-    // Find node by index (not array position)
-    FNarr_DialogueNode* FoundNode = nullptr;
-    for (FNarr_DialogueNode& N : Tree.Nodes)
-    {
-        if (N.NodeIndex == NodeIndex)
+        if (Seq.SequenceID == SequenceID)
         {
-            FoundNode = &N;
-            break;
+            if (Seq.bHasBeenPlayed && !Seq.bCanReplay)
+            {
+                return false;
+            }
+
+            ActiveSequence = &Seq;
+            CurrentLineIndex = 0;
+            bIsDialogueActive = true;
+
+            if (Seq.Lines.Num() > 0)
+            {
+                ActiveLine = Seq.Lines[0];
+                LineTimer = ActiveLine.DisplayDuration;
+            }
+            else
+            {
+                EndDialogue();
+                return false;
+            }
+
+            return true;
         }
     }
 
-    if (!FoundNode)
+    return false;
+}
+
+void UNarr_DialogueManagerComponent::AdvanceLine()
+{
+    AdvanceLineInternal();
+}
+
+void UNarr_DialogueManagerComponent::AdvanceLineInternal()
+{
+    if (ActiveSequence == nullptr)
+    {
+        return;
+    }
+
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= ActiveSequence->Lines.Num())
     {
         EndDialogue();
         return;
     }
 
-    ActiveNodeIndex = NodeIndex;
-    OnDialogueNodeAdvanced.Broadcast(ActiveDialogueID, *FoundNode);
+    ActiveLine = ActiveSequence->Lines[CurrentLineIndex];
+    LineTimer = ActiveLine.DisplayDuration;
+}
 
-    // Auto-end if flagged
-    if (FoundNode->bEndsDialogue)
+void UNarr_DialogueManagerComponent::EndDialogue()
+{
+    if (ActiveSequence != nullptr)
     {
-        if (FoundNode->bStartsQuest && Tree.QuestToStartOnComplete != NAME_None)
+        ActiveSequence->bHasBeenPlayed = true;
+    }
+
+    bIsDialogueActive = false;
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
+    ActiveSequence = nullptr;
+}
+
+bool UNarr_DialogueManagerComponent::HasSequenceBeenPlayed(FName SequenceID) const
+{
+    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
+    {
+        if (Seq.SequenceID == SequenceID)
         {
-            OnQuestShouldStart.Broadcast(Tree.QuestToStartOnComplete);
+            return Seq.bHasBeenPlayed;
         }
-        EndDialogue();
+    }
+    return false;
+}
+
+void UNarr_DialogueManagerComponent::RegisterSequence(const FNarr_DialogueSequence& Sequence)
+{
+    for (FNarr_DialogueSequence& Existing : DialogueLibrary)
+    {
+        if (Existing.SequenceID == Sequence.SequenceID)
+        {
+            Existing = Sequence;
+            return;
+        }
+    }
+    DialogueLibrary.Add(Sequence);
+}
+
+FNarr_DialogueLine UNarr_DialogueManagerComponent::GetCurrentLine() const
+{
+    return ActiveLine;
+}
+
+void UNarr_DialogueManagerComponent::InitializeDefaultDialogues()
+{
+    // TRex Territory Warning
+    {
+        FNarr_DialogueSequence TRexWarning;
+        TRexWarning.SequenceID = FName("TRexTerritoryWarning");
+        TRexWarning.bCanReplay = false;
+
+        FNarr_DialogueLine Line1;
+        Line1.LineText = TEXT("The T-Rex has been spotted near the eastern ridge. Stay low.");
+        Line1.Speaker = ENarr_SpeakerRole::TribeElder;
+        Line1.DialogueType = ENarr_DialogueType::Warning;
+        Line1.DisplayDuration = 4.5f;
+        TRexWarning.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.LineText = TEXT("Move through the tall grass. Do not run until you reach the river.");
+        Line2.Speaker = ENarr_SpeakerRole::TribeElder;
+        Line2.DialogueType = ENarr_DialogueType::Warning;
+        Line2.DisplayDuration = 4.0f;
+        TRexWarning.Lines.Add(Line2);
+
+        FNarr_DialogueLine Line3;
+        Line3.LineText = TEXT("Running triggers the hunt response. Walk. Breathe. Survive.");
+        Line3.Speaker = ENarr_SpeakerRole::TribeElder;
+        Line3.DialogueType = ENarr_DialogueType::Warning;
+        Line3.DisplayDuration = 4.0f;
+        TRexWarning.Lines.Add(Line3);
+
+        DialogueLibrary.Add(TRexWarning);
+    }
+
+    // River Crossing Discovery
+    {
+        FNarr_DialogueSequence RiverCrossing;
+        RiverCrossing.SequenceID = FName("RiverCrossingDiscovery");
+        RiverCrossing.bCanReplay = false;
+
+        FNarr_DialogueLine Line1;
+        Line1.LineText = TEXT("We found flint near the river crossing.");
+        Line1.Speaker = ENarr_SpeakerRole::Scout;
+        Line1.DialogueType = ENarr_DialogueType::Discovery;
+        Line1.DisplayDuration = 3.5f;
+        RiverCrossing.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.LineText = TEXT("Craft your axe before the raptors return at dusk. Three stones, two branches.");
+        Line2.Speaker = ENarr_SpeakerRole::Scout;
+        Line2.DialogueType = ENarr_DialogueType::QuestGiver;
+        Line2.DisplayDuration = 5.0f;
+        RiverCrossing.Lines.Add(Line2);
+
+        DialogueLibrary.Add(RiverCrossing);
+    }
+
+    // Tribe Camp Welcome
+    {
+        FNarr_DialogueSequence CampWelcome;
+        CampWelcome.SequenceID = FName("TribeCampWelcome");
+        CampWelcome.bCanReplay = false;
+
+        FNarr_DialogueLine Line1;
+        Line1.LineText = TEXT("You made it back. The herd moved north — we have until morning.");
+        Line1.Speaker = ENarr_SpeakerRole::Hunter;
+        Line1.DialogueType = ENarr_DialogueType::Environmental;
+        Line1.DisplayDuration = 4.0f;
+        CampWelcome.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.LineText = TEXT("Rest. Eat. Tomorrow we hunt.");
+        Line2.Speaker = ENarr_SpeakerRole::TribeElder;
+        Line2.DialogueType = ENarr_DialogueType::Environmental;
+        Line2.DisplayDuration = 3.0f;
+        CampWelcome.Lines.Add(Line2);
+
+        DialogueLibrary.Add(CampWelcome);
+    }
+
+    // Flint Deposit Discovery
+    {
+        FNarr_DialogueSequence FlintDiscovery;
+        FlintDiscovery.SequenceID = FName("FlintDepositDiscovery");
+        FlintDiscovery.bCanReplay = false;
+
+        FNarr_DialogueLine Line1;
+        Line1.LineText = TEXT("Flint. Good quality. This vein will last the season.");
+        Line1.Speaker = ENarr_SpeakerRole::PlayerInternal;
+        Line1.DialogueType = ENarr_DialogueType::Discovery;
+        Line1.DisplayDuration = 3.5f;
+        FlintDiscovery.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.LineText = TEXT("Gather what you can carry. The weight will slow you — choose wisely.");
+        Line2.Speaker = ENarr_SpeakerRole::Narrator;
+        Line2.DialogueType = ENarr_DialogueType::Discovery;
+        Line2.DisplayDuration = 4.5f;
+        FlintDiscovery.Lines.Add(Line2);
+
+        DialogueLibrary.Add(FlintDiscovery);
     }
 }
 
-void UDialogueManager::EndDialogue()
+// ============================================================
+// ANarr_DialogueTriggerActor
+// ============================================================
+
+ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
 {
-    if (!bDialogueActive)
+    PrimaryActorTick.bCanEverTick = true;
+    TriggerRadius = 400.0f;
+    bOneShot = true;
+    bHasTriggered = false;
+    bPlayerInRange = false;
+    TriggerSequenceID = NAME_None;
+}
+
+void ANarr_DialogueTriggerActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void ANarr_DialogueTriggerActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bOneShot && bHasTriggered)
     {
         return;
     }
 
-    FName EndedID = ActiveDialogueID;
-    bDialogueActive = false;
-    ActiveDialogueID = NAME_None;
-    ActiveNodeIndex = 0;
-
-    OnDialogueEnded.Broadcast(EndedID);
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Dialogue '%s' ended"), *EndedID.ToString());
-}
-
-bool UDialogueManager::IsDialogueActive() const
-{
-    return bDialogueActive;
-}
-
-FNarr_DialogueTree UDialogueManager::GetDialogueTree(FName DialogueID) const
-{
-    if (DialogueDatabase.Contains(DialogueID))
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        return DialogueDatabase[DialogueID];
+        return;
     }
-    return FNarr_DialogueTree();
+
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(World, 0);
+    if (!Player)
+    {
+        return;
+    }
+
+    float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    bool bCurrentlyInRange = Distance <= TriggerRadius;
+
+    if (bCurrentlyInRange && !bPlayerInRange)
+    {
+        bPlayerInRange = true;
+        OnPlayerEnterZone();
+    }
+    else if (!bCurrentlyInRange && bPlayerInRange)
+    {
+        bPlayerInRange = false;
+    }
 }
 
-TArray<FName> UDialogueManager::GetAllDialogueIDs() const
+void ANarr_DialogueTriggerActor::OnPlayerEnterZone()
 {
-    TArray<FName> Keys;
-    DialogueDatabase.GetKeys(Keys);
-    return Keys;
-}
+    if (bOneShot && bHasTriggered)
+    {
+        return;
+    }
 
-FName UDialogueManager::GetActiveDialogueID() const
-{
-    return ActiveDialogueID;
+    bHasTriggered = true;
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(World, 0);
+    if (!Player)
+    {
+        return;
+    }
+
+    UNarr_DialogueManagerComponent* DialogueMgr = Player->FindComponentByClass<UNarr_DialogueManagerComponent>();
+    if (DialogueMgr && TriggerSequenceID != NAME_None)
+    {
+        DialogueMgr->PlaySequence(TriggerSequenceID);
+    }
 }
