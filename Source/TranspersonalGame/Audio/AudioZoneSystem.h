@@ -6,16 +6,33 @@
 #include "Components/AudioComponent.h"
 #include "AudioZoneSystem.generated.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio Agent #16 — AudioZoneSystem.h
+// Proximity-based ambient audio zone system for prehistoric survival game.
+// Each zone plays looping ambient audio when the player is within radius.
+// Supports crossfade blending between zones and intensity scaling by distance.
+// ─────────────────────────────────────────────────────────────────────────────
+
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    RaptorTension   UMETA(DisplayName = "Raptor Tension"),
-    HerdAmbient     UMETA(DisplayName = "Herd Ambient"),
-    ScoutStinger    UMETA(DisplayName = "Scout Stinger"),
-    CampfireLoop    UMETA(DisplayName = "Campfire Loop"),
-    DangerAlert     UMETA(DisplayName = "Danger Alert"),
-    SafeZone        UMETA(DisplayName = "Safe Zone")
+    Campfire        UMETA(DisplayName = "Campfire"),
+    RaptorValley    UMETA(DisplayName = "Raptor Valley"),
+    RiverCrossing   UMETA(DisplayName = "River Crossing"),
+    VolcanicCave    UMETA(DisplayName = "Volcanic Cave"),
+    OpenPlains      UMETA(DisplayName = "Open Plains"),
+    TRexTerritory   UMETA(DisplayName = "T-Rex Territory"),
+    Forest          UMETA(DisplayName = "Forest"),
+    Custom          UMETA(DisplayName = "Custom")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DangerLevel : uint8
+{
+    Safe        UMETA(DisplayName = "Safe"),
+    Caution     UMETA(DisplayName = "Caution"),
+    Dangerous   UMETA(DisplayName = "Dangerous"),
+    Lethal      UMETA(DisplayName = "Lethal")
 };
 
 USTRUCT(BlueprintType)
@@ -24,89 +41,134 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::None;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float TriggerRadius = 600.0f;
+    EAudio_DangerLevel DangerLevel = EAudio_DangerLevel::Safe;
+
+    /** Radius in cm within which ambient audio plays at full volume */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FullVolumeRadius = 400.0f;
+
+    /** Outer radius — audio fades to zero at this distance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeRadius = 800.0f;
+
+    /** Volume multiplier for this zone (0.0 - 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VolumeMultiplier = 1.0f;
+
+    /** Crossfade blend time in seconds when entering/leaving zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float BlendTime = 2.0f;
+
+    /** If true, plays creature vocalisations at random intervals */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bPlayCreatureVocalisations = false;
+
+    /** Min/max interval in seconds between creature vocalisation events */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float VocalisationIntervalMin = 8.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeInDuration = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeOutDuration = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float MaxVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bOneShot = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float CooldownSeconds = 30.0f;
+    float VocalisationIntervalMax = 25.0f;
 };
 
-/**
- * AAudio_ZoneActor — proximity-based audio zone that triggers ambient sounds,
- * tension stingers, or looping ambience when the player enters its radius.
- * Wires directly to ANarr_DialogueTrigger zones placed by Agent #15.
- */
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
+USTRUCT(BlueprintType)
+struct FAudio_SoundReference
+{
+    GENERATED_BODY()
+
+    /** Freesound.org asset ID for reference */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Reference")
+    int32 FreesoundID = 0;
+
+    /** Human-readable description of the sound */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Reference")
+    FString Description;
+
+    /** Preview URL from Freesound */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Reference")
+    FString PreviewURL;
+
+    /** Duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Reference")
+    float Duration = 0.0f;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AAudio_AmbientZone — proximity-triggered ambient audio zone actor
+// ─────────────────────────────────────────────────────────────────────────────
+UCLASS(ClassGroup = (Audio), meta = (DisplayName = "Ambient Audio Zone"))
+class TRANSPERSONALGAME_API AAudio_AmbientZone : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AAudio_ZoneActor();
+    AAudio_AmbientZone();
 
+protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // ── Zone configuration ─────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
-              meta = (AllowPrivateAccess = "true"))
-    USphereComponent* TriggerSphere;
+    /** Sound asset to loop when player is in zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    USoundBase* AmbientSound = nullptr;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
-              meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* AudioComponent;
+    /** Optional creature vocalisation sound (one-shot) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    USoundBase* CreatureVocalisationSound = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void SetZoneType(EAudio_ZoneType NewType);
+    // ── Freesound references (for asset pipeline) ──────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio References")
+    TArray<FAudio_SoundReference> SoundReferences;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
+    // ── Runtime state ──────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone", meta = (AllowPrivateAccess = "true"))
+    bool bPlayerInZone = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    bool IsPlayerInside() const { return bPlayerInside; }
-
-    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
-    void OnPlayerEnterZone(EAudio_ZoneType ZoneType);
-
-    UFUNCTION(BlueprintNativeEvent, Category = "Audio Zone")
-    void OnPlayerExitZone(EAudio_ZoneType ZoneType);
-
-protected:
-    UFUNCTION()
-    void HandleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                            UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-                            bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void HandleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                          UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    void FadeInAudio();
-    void FadeOutAudio();
-    void ResetCooldown();
-
-private:
-    bool bPlayerInside = false;
-    bool bOnCooldown = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone", meta = (AllowPrivateAccess = "true"))
     float CurrentVolume = 0.0f;
 
-    FTimerHandle FadeInHandle;
-    FTimerHandle FadeOutHandle;
-    FTimerHandle CooldownHandle;
+    // ── Functions ──────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetZoneActive(bool bActive);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    EAudio_DangerLevel GetDangerLevel() const;
+
+    UFUNCTION(BlueprintPure, Category = "Audio Zone")
+    bool IsPlayerInZone() const { return bPlayerInZone; }
+
+private:
+    UPROPERTY(VisibleAnywhere, Category = "Components")
+    USphereComponent* TriggerSphere = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Components")
+    UAudioComponent* AudioComp = nullptr;
+
+    float VocalisationTimer = 0.0f;
+    float NextVocalisationTime = 0.0f;
+
+    UFUNCTION()
+    void OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    void UpdateVolumeByDistance(float DeltaTime);
+    void ScheduleNextVocalisation();
 };
