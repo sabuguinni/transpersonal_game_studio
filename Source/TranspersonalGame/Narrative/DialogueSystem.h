@@ -2,33 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
 #include "DialogueSystem.generated.h"
 
-// ============================================================
-// Narrative & Dialogue Agent #15 — DialogueSystem
-// Prehistoric survival dialogue — no spiritual content
-// ============================================================
-
 UENUM(BlueprintType)
-enum class ENarr_DialogueState : uint8
+enum class ENarr_DialogueTone : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Greeting    UMETA(DisplayName = "Greeting"),
-    Warning     UMETA(DisplayName = "Warning"),
-    QuestGive   UMETA(DisplayName = "QuestGive"),
-    QuestDone   UMETA(DisplayName = "QuestDone"),
-    Farewell    UMETA(DisplayName = "Farewell")
-};
-
-UENUM(BlueprintType)
-enum class ENarr_NPCRole : uint8
-{
-    TribalElder     UMETA(DisplayName = "TribalElder"),
-    ScoutHunter     UMETA(DisplayName = "ScoutHunter"),
-    Gatherer        UMETA(DisplayName = "Gatherer"),
-    TribalLeader    UMETA(DisplayName = "TribalLeader"),
-    Survivor        UMETA(DisplayName = "Survivor")
+    Urgent      UMETA(DisplayName = "Urgent"),
+    Cautious    UMETA(DisplayName = "Cautious"),
+    Informative UMETA(DisplayName = "Informative"),
+    Warning     UMETA(DisplayName = "Warning")
 };
 
 USTRUCT(BlueprintType)
@@ -43,7 +25,7 @@ struct FNarr_DialogueLine
     FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState TriggerState;
+    ENarr_DialogueTone Tone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DisplayDuration;
@@ -51,108 +33,70 @@ struct FNarr_DialogueLine
     FNarr_DialogueLine()
         : SpeakerID(TEXT("Unknown"))
         , LineText(TEXT(""))
-        , TriggerState(ENarr_DialogueState::Idle)
-        , DisplayDuration(3.0f)
+        , Tone(ENarr_DialogueTone::Informative)
+        , DisplayDuration(4.0f)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueTree
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString TreeID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCRole NPCRole;
+    FName SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
-    FNarr_DialogueTree()
-        : TreeID(TEXT(""))
-        , NPCRole(ENarr_NPCRole::Survivor)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsTriggered;
+
+    FNarr_DialogueSequence()
+        : SequenceID(NAME_None)
+        , bIsTriggered(false)
     {}
 };
 
-/**
- * UNarr_DialogueComponent
- * Attach to any NPC actor to give it dialogue capability.
- * Manages state machine for prehistoric survival conversations.
- */
-UCLASS(ClassGroup = "Narrative", meta = (BlueprintSpawnableComponent), DisplayName = "Dialogue Component")
-class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
+UCLASS(ClassGroup=(Narrative), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueComponent();
+    UDialogueSystem();
 
-    // Current dialogue state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
-    ENarr_DialogueState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueSequence> DialogueLibrary;
 
-    // NPC role determines available dialogue trees
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCRole NPCRole;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    bool bIsDialogueActive;
 
-    // Dialogue trees loaded for this NPC
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueTree> DialogueTrees;
-
-    // Interaction radius — player must be within this range
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative", meta = (ClampMin = "50.0", ClampMax = "500.0"))
-    float InteractionRadius;
-
-    // Whether NPC is currently in dialogue with player
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
-    bool bIsInDialogue;
-
-    // Index of current line being displayed
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
     int32 CurrentLineIndex;
 
-    // Begin dialogue interaction
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void BeginDialogue(ENarr_DialogueState InitialState);
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void StartDialogueSequence(FName SequenceID);
 
-    // Advance to next dialogue line
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool AdvanceDialogue();
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void AdvanceLine();
 
-    // End dialogue
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
     void EndDialogue();
 
-    // Get current line text
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
-    FString GetCurrentLineText() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    FNarr_DialogueLine GetCurrentLine() const;
 
-    // Get current speaker ID
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
-    FString GetCurrentSpeakerID() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    bool HasMoreLines() const;
 
-    // Transition to a new state
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetDialogueState(ENarr_DialogueState NewState);
-
-    // Load default lines for this NPC role
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void LoadDefaultDialogueForRole();
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void RegisterSequence(FNarr_DialogueSequence NewSequence);
 
 protected:
     virtual void BeginPlay() override;
 
 private:
-    // Active tree being played
-    FNarr_DialogueTree* ActiveTree;
-
-    // Find tree matching current state
-    FNarr_DialogueTree* FindTreeForState(ENarr_DialogueState State);
-
-    // Build default dialogue lines per role
-    void BuildElderDialogue();
-    void BuildScoutDialogue();
-    void BuildGathererDialogue();
+    FNarr_DialogueSequence* ActiveSequence;
+    void InitializeDefaultDialogues();
 };
