@@ -1,26 +1,33 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
+#include "Components/ActorComponent.h"
 #include "AudioZoneSystem.generated.h"
 
 // ============================================================
-// Audio Agent #16 — AudioZoneSystem
-// Ambient audio zones for prehistoric world soundscape.
-// Triggers MetaSounds/audio cues when player enters radius.
+// Audio Zone System — Agent #16 Audio Agent
+// Spatial audio management for MinPlayableMap zones
+// Integrates with DialogueSystem (Agent #15) tone enum
 // ============================================================
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Campfire        UMETA(DisplayName = "Campfire"),
-    JungleAmbience  UMETA(DisplayName = "Jungle Ambience"),
-    DinoRoar        UMETA(DisplayName = "Dinosaur Roar"),
-    WaterHole       UMETA(DisplayName = "Water Hole"),
-    WindCorridor    UMETA(DisplayName = "Wind Corridor"),
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    Safe        UMETA(DisplayName = "Safe Zone"),       // Camp, shelter — calm ambience
+    Caution     UMETA(DisplayName = "Caution Zone"),    // Canyon, ridge — tense, wind
+    Danger      UMETA(DisplayName = "Danger Zone"),     // Dino nest — rumble, heavy breathing
+    Water       UMETA(DisplayName = "Water Zone"),      // Riverbed — flowing water, insects
+    Open        UMETA(DisplayName = "Open Plains"),     // Grassland — wind, distant calls
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DangerLevel : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Critical    UMETA(DisplayName = "Critical"),
 };
 
 USTRUCT(BlueprintType)
@@ -29,145 +36,141 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::JungleAmbience;
+    FName ZoneID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float TriggerRadius = 1000.0f;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Open;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float FadeInTime = 2.0f;
+    EAudio_DangerLevel DangerLevel = EAudio_DangerLevel::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float FadeOutTime = 3.0f;
+    float AmbientVolume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float MaxVolume = 1.0f;
+    float MusicIntensity = 0.0f;  // 0=silent, 1=full danger music
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bLooping = true;
+    float BlendRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bRandomizeInterval = false;
-
-    // Seconds between random one-shot triggers (e.g. distant dino calls)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float RandomIntervalMin = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float RandomIntervalMax = 30.0f;
+    bool bLoopAmbient = true;
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_FreesoundRef
+struct FAudio_ScreenShakeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    int32 FreesoundID = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    FString SoundName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Duration = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    FString PreviewURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Falloff = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Reference")
-    float DurationSeconds = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float TriggerRadius = 800.0f;  // Distance at which shake triggers
 };
 
-/**
- * AAudio_ZoneActor
- * Placed in the world to define an ambient audio zone.
- * When the player enters the sphere trigger, audio fades in.
- * When the player exits, audio fades out.
- */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone Actor"))
-class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
+class TRANSPERSONALGAME_API UAudioZoneSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_ZoneActor();
+    UAudioZoneSystem();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    // Freesound reference for the audio designer to import
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_FreesoundRef FreesoundReference;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
-        meta = (AllowPrivateAccess = "true"))
-    USphereComponent* TriggerSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* AudioComponent;
+    // Zone management
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void RegisterZone(const FAudio_ZoneConfig& ZoneConfig);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void FadeInAudio();
+    void EnterZone(FName ZoneID);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void FadeOutAudio();
+    void ExitZone(FName ZoneID);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    bool IsPlayerInside() const;
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    EAudio_ZoneType GetCurrentZoneType() const { return CurrentZoneType; }
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    EAudio_ZoneType GetZoneType() const;
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    EAudio_DangerLevel GetCurrentDangerLevel() const { return CurrentDangerLevel; }
 
-protected:
-    UFUNCTION()
-    void OnPlayerEnter(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    float GetCurrentMusicIntensity() const { return CurrentMusicIntensity; }
 
-    UFUNCTION()
-    void OnPlayerExit(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    // Screen shake (T-Rex proximity, damage)
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerScreenShake(const FAudio_ScreenShakeConfig& ShakeConfig);
 
-private:
-    bool bPlayerInside = false;
-    float CurrentVolume = 0.0f;
-    float RandomTriggerTimer = 0.0f;
-};
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerDamageFlash(float Intensity = 1.0f);
 
-/**
- * UAudio_ZoneManager
- * World subsystem that tracks all audio zones and manages
- * global audio state (e.g. danger level affects music intensity).
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UAudio_ZoneManager : public UObject
-{
-    GENERATED_BODY()
+    // Footstep system
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footstep")
+    void PlayFootstep(bool bIsRunning, bool bIsHeavyCreature);
 
-public:
-    UAudio_ZoneManager();
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footstep")
+    void SetSurfaceType(FName SurfaceType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    void RegisterZone(AAudio_ZoneActor* Zone);
+    // Day/night audio adaptation
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    void UpdateTimeOfDay(float NormalizedTimeOfDay);  // 0=midnight, 0.5=noon, 1=midnight
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    void UnregisterZone(AAudio_ZoneActor* Zone);
+    UFUNCTION(BlueprintPure, Category = "Audio|DayNight")
+    bool IsNighttime() const { return bIsNighttime; }
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    int32 GetActiveZoneCount() const;
+    // Freesound asset references (populated from search results)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    FString CampfireAmbientURL = "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3";
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    TArray<AAudio_ZoneActor*> GetZonesOfType(EAudio_ZoneType ZoneType) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    FString CampfireNightURL = "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3";
 
-    // 0.0 = calm, 1.0 = maximum danger (affects music layer intensity)
-    UPROPERTY(BlueprintReadWrite, Category = "Audio|Manager")
-    float GlobalDangerLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    int32 CampfireSoundID_1 = 681366;  // Freesound ID
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    void SetDangerLevel(float NewLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    int32 CampfireSoundID_2 = 688994;  // Freesound ID with crickets
 
 private:
     UPROPERTY()
-    TArray<AAudio_ZoneActor*> RegisteredZones;
+    TArray<FAudio_ZoneConfig> RegisteredZones;
+
+    UPROPERTY()
+    TArray<FName> ActiveZoneIDs;
+
+    UPROPERTY()
+    EAudio_ZoneType CurrentZoneType = EAudio_ZoneType::Open;
+
+    UPROPERTY()
+    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::None;
+
+    UPROPERTY()
+    float CurrentMusicIntensity = 0.0f;
+
+    UPROPERTY()
+    float TargetMusicIntensity = 0.0f;
+
+    UPROPERTY()
+    float MusicBlendSpeed = 2.0f;
+
+    UPROPERTY()
+    FName CurrentSurfaceType = FName("Dirt");
+
+    UPROPERTY()
+    bool bIsNighttime = false;
+
+    UPROPERTY()
+    float TimeOfDay = 0.5f;  // 0.5 = noon
+
+    void RecalculateZoneState();
+    void BlendMusicIntensity(float DeltaTime);
+    void InitializeDefaultZones();
 };
