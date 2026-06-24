@@ -1,204 +1,193 @@
 #include "BiomeManager.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Atmosphere/AtmosphericFog.h"
 
 ABiomeManager::ABiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 1.0f; // Check biome every second, not every frame
 
-    // Default biome definitions for prehistoric world
-    FEng_BiomeData Forest;
-    Forest.BiomeType = EEng_BiomeType::Forest;
-    Forest.BiomeName = TEXT("Prehistoric Forest");
-    Forest.Temperature = 22.0f;
-    Forest.Humidity = 0.75f;
-    Forest.VegetationDensity = 0.9f;
-    Forest.DinosaurSpawnWeight = 1.2f;
-    Forest.FogColor = FLinearColor(0.3f, 0.5f, 0.3f, 1.0f);
-    Forest.FogDensity = 0.03f;
-    BiomeDefinitions.Add(Forest);
-
-    FEng_BiomeData Plains;
-    Plains.BiomeType = EEng_BiomeType::Plains;
-    Plains.BiomeName = TEXT("Open Plains");
-    Plains.Temperature = 28.0f;
-    Plains.Humidity = 0.35f;
-    Plains.VegetationDensity = 0.4f;
-    Plains.DinosaurSpawnWeight = 1.5f;
-    Plains.FogColor = FLinearColor(0.6f, 0.65f, 0.5f, 1.0f);
-    Plains.FogDensity = 0.01f;
-    BiomeDefinitions.Add(Plains);
-
-    FEng_BiomeData Swamp;
-    Swamp.BiomeType = EEng_BiomeType::Swamp;
-    Swamp.BiomeName = TEXT("Prehistoric Swamp");
-    Swamp.Temperature = 30.0f;
-    Swamp.Humidity = 0.95f;
-    Swamp.VegetationDensity = 0.8f;
-    Swamp.DinosaurSpawnWeight = 0.8f;
-    Swamp.FogColor = FLinearColor(0.4f, 0.5f, 0.3f, 1.0f);
-    Swamp.FogDensity = 0.06f;
-    BiomeDefinitions.Add(Swamp);
-
-    FEng_BiomeData Volcanic;
-    Volcanic.BiomeType = EEng_BiomeType::Volcanic;
-    Volcanic.BiomeName = TEXT("Volcanic Badlands");
-    Volcanic.Temperature = 55.0f;
-    Volcanic.Humidity = 0.1f;
-    Volcanic.VegetationDensity = 0.05f;
-    Volcanic.DinosaurSpawnWeight = 0.3f;
-    Volcanic.FogColor = FLinearColor(0.7f, 0.4f, 0.2f, 1.0f);
-    Volcanic.FogDensity = 0.08f;
-    BiomeDefinitions.Add(Volcanic);
-
-    FEng_BiomeData Jungle;
-    Jungle.BiomeType = EEng_BiomeType::Jungle;
-    Jungle.BiomeName = TEXT("Dense Jungle");
-    Jungle.Temperature = 35.0f;
-    Jungle.Humidity = 0.9f;
-    Jungle.VegetationDensity = 1.0f;
-    Jungle.DinosaurSpawnWeight = 1.8f;
-    Jungle.FogColor = FLinearColor(0.2f, 0.45f, 0.2f, 1.0f);
-    Jungle.FogDensity = 0.04f;
-    BiomeDefinitions.Add(Jungle);
+    InitializeDefaultBiomes();
 }
 
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome definitions"), BiomeTable.Num());
 }
 
 void ABiomeManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    // Biome transition logic runs at reduced frequency (TickInterval = 1.0s)
 }
 
-FEng_BiomeData ABiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Check registered zones first (explicit designer-placed zones)
-    float BestWeight = -1.0f;
-    int32 BestZoneIdx = -1;
+    // Simple noise-based biome assignment based on world coordinates
+    // In production this would use a biome map texture or PCG graph
+    float nx = WorldLocation.X / BiomeCellSize;
+    float ny = WorldLocation.Y / BiomeCellSize;
 
-    for (int32 i = 0; i < RegisteredZones.Num(); ++i)
+    // Deterministic pseudo-noise using sine waves
+    float noise = FMath::Sin(nx * 1.3f) * FMath::Cos(ny * 0.9f)
+                + FMath::Sin(nx * 0.7f + ny * 1.1f) * 0.5f;
+
+    // Map noise [-1.5, 1.5] to biome enum
+    if (noise > 1.0f)  return EEng_BiomeType::Jungle;
+    if (noise > 0.5f)  return EEng_BiomeType::Forest;
+    if (noise > 0.0f)  return EEng_BiomeType::Savanna;
+    if (noise > -0.5f) return EEng_BiomeType::Swamp;
+    if (noise > -1.0f) return EEng_BiomeType::Coastal;
+    return EEng_BiomeType::Volcanic;
+}
+
+FEng_BiomeData ABiomeManager::GetBiomeData(EEng_BiomeType BiomeType) const
+{
+    for (const FEng_BiomeData& Data : BiomeTable)
     {
-        const FBiomeZone& Zone = RegisteredZones[i];
-        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
-        if (Dist <= Zone.Radius)
+        if (Data.BiomeType == BiomeType)
         {
-            // Weight by inverse distance (closer = stronger influence)
-            float Weight = 1.0f - (Dist / Zone.Radius);
-            if (Weight > BestWeight)
-            {
-                BestWeight = Weight;
-                BestZoneIdx = i;
-            }
+            return Data;
         }
     }
-
-    if (BestZoneIdx >= 0)
-    {
-        return RegisteredZones[BestZoneIdx].Data;
-    }
-
-    // Fallback: noise-based procedural biome
-    float NoiseX = WorldLocation.X / BiomeScale;
-    float NoiseY = WorldLocation.Y / BiomeScale;
-    float TempNoise = SampleNoise(NoiseX, NoiseY);
-    float HumidNoise = SampleNoise(NoiseX + 100.0f, NoiseY + 100.0f);
-
-    float Temperature = FMath::Lerp(5.0f, 55.0f, TempNoise);
-    float Humidity = FMath::Lerp(0.0f, 1.0f, HumidNoise);
-
-    EEng_BiomeType Type = ClassifyBiome(Temperature, Humidity);
-
-    // Find matching biome definition
-    for (const FEng_BiomeData& Def : BiomeDefinitions)
-    {
-        if (Def.BiomeType == Type)
-        {
-            return Def;
-        }
-    }
-
-    // Return default plains if no match
+    // Return default jungle data if not found
     FEng_BiomeData Default;
-    Default.BiomeType = DefaultBiome;
-    Default.BiomeName = TEXT("Default Plains");
-    Default.Temperature = Temperature;
-    Default.Humidity = Humidity;
+    Default.BiomeType = BiomeType;
     return Default;
 }
 
-EEng_BiomeType ABiomeManager::GetBiomeTypeAtLocation(FVector WorldLocation) const
+void ABiomeManager::ApplyBiomeFogSettings(EEng_BiomeType BiomeType)
 {
-    return GetBiomeAtLocation(WorldLocation).BiomeType;
+    if (!GetWorld()) return;
+
+    FEng_BiomeData Data = GetBiomeData(BiomeType);
+
+    // Find ExponentialHeightFog in the world and update its settings
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FogActors);
+
+    for (AActor* FogActor : FogActors)
+    {
+        AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActor);
+        if (Fog && Fog->GetComponent())
+        {
+            UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
+            FogComp->SetFogInscatteringColor(Data.FogColor);
+            FogComp->SetFogDensity(Data.FogDensity);
+            UE_LOG(LogTemp, Log, TEXT("BiomeManager: Applied fog for biome %d — density=%.3f"),
+                (int32)BiomeType, Data.FogDensity);
+        }
+        break; // Only apply to first fog actor
+    }
 }
 
-float ABiomeManager::GetTemperatureAtLocation(FVector WorldLocation) const
+void ABiomeManager::DebugDrawBiomeBounds()
 {
-    return GetBiomeAtLocation(WorldLocation).Temperature;
+    if (!GetWorld()) return;
+
+    // Draw a grid of biome colors for debugging
+    const int32 GridSize = 10;
+    const float CellSize = BiomeCellSize;
+
+    for (int32 x = -GridSize/2; x < GridSize/2; x++)
+    {
+        for (int32 y = -GridSize/2; y < GridSize/2; y++)
+        {
+            FVector Center(x * CellSize + CellSize * 0.5f, y * CellSize + CellSize * 0.5f, 100.0f);
+            EEng_BiomeType Biome = GetBiomeAtLocation(Center);
+
+            FColor DebugColor;
+            switch (Biome)
+            {
+                case EEng_BiomeType::Jungle:   DebugColor = FColor::Green;  break;
+                case EEng_BiomeType::Savanna:  DebugColor = FColor::Yellow; break;
+                case EEng_BiomeType::Swamp:    DebugColor = FColor::Cyan;   break;
+                case EEng_BiomeType::Volcanic: DebugColor = FColor::Red;    break;
+                case EEng_BiomeType::Coastal:  DebugColor = FColor::Blue;   break;
+                case EEng_BiomeType::Forest:   DebugColor = FColor(0, 128, 0); break;
+                default:                       DebugColor = FColor::White;  break;
+            }
+
+            DrawDebugBox(GetWorld(), Center, FVector(CellSize * 0.45f, CellSize * 0.45f, 50.0f),
+                DebugColor, false, 10.0f, 0, 5.0f);
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Debug draw complete — %d cells"), GridSize * GridSize);
 }
 
-float ABiomeManager::GetHumidityAtLocation(FVector WorldLocation) const
+void ABiomeManager::InitializeDefaultBiomes()
 {
-    return GetBiomeAtLocation(WorldLocation).Humidity;
+    BiomeTable.Empty();
+
+    // Cretaceous Jungle — hot, humid, dense
+    FEng_BiomeData Jungle;
+    Jungle.BiomeType = EEng_BiomeType::Jungle;
+    Jungle.Temperature = 32.0f;
+    Jungle.Humidity = 0.90f;
+    Jungle.VegetationDensity = 1.0f;
+    Jungle.FogColor = FLinearColor(0.5f, 0.75f, 0.4f, 1.0f);
+    Jungle.FogDensity = 0.025f;
+    BiomeTable.Add(Jungle);
+
+    // Open Savanna — warm, dry, sparse
+    FEng_BiomeData Savanna;
+    Savanna.BiomeType = EEng_BiomeType::Savanna;
+    Savanna.Temperature = 28.0f;
+    Savanna.Humidity = 0.35f;
+    Savanna.VegetationDensity = 0.3f;
+    Savanna.FogColor = FLinearColor(0.85f, 0.75f, 0.5f, 1.0f);
+    Savanna.FogDensity = 0.008f;
+    BiomeTable.Add(Savanna);
+
+    // Prehistoric Swamp — hot, very humid, murky
+    FEng_BiomeData Swamp;
+    Swamp.BiomeType = EEng_BiomeType::Swamp;
+    Swamp.Temperature = 30.0f;
+    Swamp.Humidity = 0.95f;
+    Swamp.VegetationDensity = 0.7f;
+    Swamp.FogColor = FLinearColor(0.4f, 0.55f, 0.3f, 1.0f);
+    Swamp.FogDensity = 0.045f;
+    BiomeTable.Add(Swamp);
+
+    // Volcanic Badlands — extreme heat, toxic, barren
+    FEng_BiomeData Volcanic;
+    Volcanic.BiomeType = EEng_BiomeType::Volcanic;
+    Volcanic.Temperature = 55.0f;
+    Volcanic.Humidity = 0.05f;
+    Volcanic.VegetationDensity = 0.0f;
+    Volcanic.FogColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
+    Volcanic.FogDensity = 0.035f;
+    BiomeTable.Add(Volcanic);
+
+    // Coastal Flats — moderate, breezy
+    FEng_BiomeData Coastal;
+    Coastal.BiomeType = EEng_BiomeType::Coastal;
+    Coastal.Temperature = 24.0f;
+    Coastal.Humidity = 0.60f;
+    Coastal.VegetationDensity = 0.4f;
+    Coastal.FogColor = FLinearColor(0.6f, 0.75f, 0.85f, 1.0f);
+    Coastal.FogDensity = 0.015f;
+    BiomeTable.Add(Coastal);
+
+    // Conifer Forest — cool, moderate humidity
+    FEng_BiomeData Forest;
+    Forest.BiomeType = EEng_BiomeType::Forest;
+    Forest.Temperature = 18.0f;
+    Forest.Humidity = 0.55f;
+    Forest.VegetationDensity = 0.8f;
+    Forest.FogColor = FLinearColor(0.55f, 0.65f, 0.5f, 1.0f);
+    Forest.FogDensity = 0.018f;
+    BiomeTable.Add(Forest);
 }
 
-void ABiomeManager::RegisterBiomeZone(FVector Center, float Radius, FEng_BiomeData BiomeData)
+float ABiomeManager::SampleNoiseAtLocation(const FVector& Location, float Scale) const
 {
-    FBiomeZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = FMath::Max(Radius, 100.0f); // Minimum 1m radius
-    NewZone.Data = BiomeData;
-    RegisteredZones.Add(NewZone);
-}
-
-int32 ABiomeManager::GetBiomeZoneCount() const
-{
-    return RegisteredZones.Num();
-}
-
-float ABiomeManager::SampleNoise(float X, float Y) const
-{
-    // Simple deterministic pseudo-noise based on seed
-    // Uses sin-based approximation for lightweight noise without external dependencies
-    float S = static_cast<float>(BiomeSeed);
-    float Val = FMath::Sin(X * 127.1f + S) * 43758.5453f;
-    Val = Val - FMath::FloorToFloat(Val);
-    float Val2 = FMath::Sin(Y * 311.7f + S + Val) * 43758.5453f;
-    Val2 = Val2 - FMath::FloorToFloat(Val2);
-    return FMath::Clamp((Val + Val2) * 0.5f, 0.0f, 1.0f);
-}
-
-EEng_BiomeType ABiomeManager::ClassifyBiome(float Temperature, float Humidity) const
-{
-    // Whittaker biome classification adapted for prehistoric world
-    if (Temperature > 45.0f)
-    {
-        return EEng_BiomeType::Volcanic;
-    }
-    if (Temperature > 30.0f && Humidity > 0.7f)
-    {
-        return EEng_BiomeType::Jungle;
-    }
-    if (Temperature > 25.0f && Humidity > 0.5f)
-    {
-        return EEng_BiomeType::Swamp;
-    }
-    if (Temperature > 20.0f && Humidity > 0.6f)
-    {
-        return EEng_BiomeType::Forest;
-    }
-    if (Humidity < 0.2f)
-    {
-        return EEng_BiomeType::Desert;
-    }
-    if (Temperature < 10.0f)
-    {
-        return EEng_BiomeType::Tundra;
-    }
-    if (Humidity > 0.4f && Temperature > 15.0f)
-    {
-        return EEng_BiomeType::Coastal;
-    }
-    return EEng_BiomeType::Plains;
+    float nx = Location.X * Scale;
+    float ny = Location.Y * Scale;
+    // Simple deterministic noise — replace with FMath::PerlinNoise2D in production
+    return FMath::Sin(nx) * FMath::Cos(ny) + FMath::Sin(nx * 2.3f + ny * 1.7f) * 0.5f;
 }
