@@ -1,286 +1,133 @@
 #include "AudioZoneManager.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
+#include "Components/BoxComponent.h"
+#include "Components/AudioComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 
-// ============================================================
-// UAudio_ZoneComponent
-// ============================================================
-
-UAudio_ZoneComponent::UAudio_ZoneComponent()
+AAudio_ZoneManager::AAudio_ZoneManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for audio blending
+    PrimaryActorTick.bCanEverTick = true;
+
+    TriggerVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerVolume"));
+    TriggerVolume->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+    TriggerVolume->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerVolume;
+
+    AmbienceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceAudio"));
+    AmbienceAudioComponent->SetupAttachment(RootComponent);
+    AmbienceAudioComponent->bAutoActivate = false;
+    AmbienceAudioComponent->VolumeMultiplier = 0.0f;
 }
 
-void UAudio_ZoneComponent::BeginPlay()
+void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    ZoneState.ZoneName = ZoneConfig.ZoneName;
-    ZoneState.CurrentVolume = 0.0f;
-    ZoneState.bPlayerInside = false;
+    TriggerVolume->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnTriggerBeginOverlap);
+    TriggerVolume->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnTriggerEndOverlap);
 
-    // Cache player pawn reference
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC)
+    ActiveMusicLayer = ZoneConfig.MusicLayer;
+}
+
+void AAudio_ZoneManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Smooth fade in/out of ambience volume
+    if (bZoneActive && CurrentFadeAlpha < 1.0f)
     {
-        CachedPlayerPawn = PC->GetPawn();
+        float FadeRate = (ZoneConfig.FadeInTime > 0.0f) ? (DeltaTime / ZoneConfig.FadeInTime) : 1.0f;
+        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha + FadeRate, 0.0f, 1.0f);
+        AmbienceAudioComponent->SetVolumeMultiplier(CurrentFadeAlpha * ZoneConfig.AmbienceVolume);
     }
-
-    // Register with subsystem
-    if (UWorld* World = GetWorld())
+    else if (!bZoneActive && CurrentFadeAlpha > 0.0f)
     {
-        if (UAudio_ZoneManagerSubsystem* Mgr = World->GetSubsystem<UAudio_ZoneManagerSubsystem>())
+        float FadeRate = (ZoneConfig.FadeOutTime > 0.0f) ? (DeltaTime / ZoneConfig.FadeOutTime) : 1.0f;
+        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha - FadeRate, 0.0f, 1.0f);
+        AmbienceAudioComponent->SetVolumeMultiplier(CurrentFadeAlpha * ZoneConfig.AmbienceVolume);
+
+        if (CurrentFadeAlpha <= 0.0f)
         {
-            Mgr->RegisterZone(this);
+            AmbienceAudioComponent->Stop();
         }
     }
 }
 
-void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudio_ZoneManager::ActivateZone(AActor* PlayerActor)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    if (!PlayerActor) return;
+    if (ZoneConfig.bTriggerOnce && bHasTriggeredOnce) return;
 
-    // Refresh player pawn if lost
-    if (!CachedPlayerPawn)
+    bZoneActive = true;
+    bHasTriggeredOnce = true;
+
+    if (!AmbienceAudioComponent->IsPlaying())
     {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-        if (PC)
-        {
-            CachedPlayerPawn = PC->GetPawn();
-        }
+        AmbienceAudioComponent->Play();
     }
 
-    if (!CachedPlayerPawn || !GetOwner())
+    // Fire tension/dread stings based on zone type
+    switch (ZoneConfig.ZoneType)
     {
-        return;
-    }
-
-    // Compute distance from zone origin to player
-    FVector ZoneOrigin = GetOwner()->GetActorLocation();
-    FVector PlayerLoc = CachedPlayerPawn->GetActorLocation();
-    float Distance = FVector::Dist(ZoneOrigin, PlayerLoc);
-
-    ZoneState.PlayerDistance = Distance;
-    ZoneState.bPlayerInside = (Distance <= ZoneConfig.OuterRadius);
-
-    // Compute target volume
-    TargetVolume = ComputeVolumeForDistance(Distance) * ZoneConfig.MasterVolume;
-
-    // Interpolate current volume toward target
-    float InterpDelta = VolumeInterpSpeed * DeltaTime;
-    ZoneState.CurrentVolume = FMath::FInterpTo(ZoneState.CurrentVolume, TargetVolume, DeltaTime, VolumeInterpSpeed);
-
-    // Apply volume to audio components
-    if (PrimaryAudioComponent)
-    {
-        PrimaryAudioComponent->SetVolumeMultiplier(ZoneState.CurrentVolume);
-        if (ZoneState.CurrentVolume > 0.01f && !PrimaryAudioComponent->IsPlaying())
-        {
-            PrimaryAudioComponent->Play();
-        }
-        else if (ZoneState.CurrentVolume <= 0.01f && PrimaryAudioComponent->IsPlaying())
-        {
-            PrimaryAudioComponent->Stop();
-        }
-    }
-
-    if (SecondaryAudioComponent)
-    {
-        // Secondary plays at half volume of primary
-        SecondaryAudioComponent->SetVolumeMultiplier(ZoneState.CurrentVolume * 0.5f);
-        if (ZoneState.CurrentVolume > 0.01f && !SecondaryAudioComponent->IsPlaying())
-        {
-            SecondaryAudioComponent->Play();
-        }
-        else if (ZoneState.CurrentVolume <= 0.01f && SecondaryAudioComponent->IsPlaying())
-        {
-            SecondaryAudioComponent->Stop();
-        }
-    }
-}
-
-float UAudio_ZoneComponent::ComputeVolumeForDistance(float Distance) const
-{
-    if (Distance <= ZoneConfig.InnerRadius)
-    {
-        return 1.0f;
-    }
-    if (Distance >= ZoneConfig.OuterRadius)
-    {
-        return 0.0f;
-    }
-
-    // Linear falloff between inner and outer radius
-    float Range = ZoneConfig.OuterRadius - ZoneConfig.InnerRadius;
-    float Alpha = (Distance - ZoneConfig.InnerRadius) / Range;
-    return FMath::Clamp(1.0f - Alpha, 0.0f, 1.0f);
-}
-
-void UAudio_ZoneComponent::ForceVolume(float Volume)
-{
-    ZoneState.CurrentVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    TargetVolume = ZoneState.CurrentVolume;
-
-    if (PrimaryAudioComponent)
-    {
-        PrimaryAudioComponent->SetVolumeMultiplier(ZoneState.CurrentVolume);
-    }
-    if (SecondaryAudioComponent)
-    {
-        SecondaryAudioComponent->SetVolumeMultiplier(ZoneState.CurrentVolume * 0.5f);
-    }
-}
-
-// ============================================================
-// AAudio_ZoneActor
-// ============================================================
-
-AAudio_ZoneActor::AAudio_ZoneActor()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Create audio zone component
-    AudioZoneComponent = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("AudioZoneComponent"));
-    SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("RootScene")));
-
-    // Create audio components
-    PrimarySound = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimarySound"));
-    PrimarySound->SetupAttachment(GetRootComponent());
-    PrimarySound->bAutoActivate = false;
-
-    SecondarySound = CreateDefaultSubobject<UAudioComponent>(TEXT("SecondarySound"));
-    SecondarySound->SetupAttachment(GetRootComponent());
-    SecondarySound->bAutoActivate = false;
-}
-
-void AAudio_ZoneActor::BeginPlay()
-{
-    Super::BeginPlay();
-
-    // Wire audio components into the zone component
-    if (AudioZoneComponent)
-    {
-        AudioZoneComponent->PrimaryAudioComponent = PrimarySound;
-        AudioZoneComponent->SecondaryAudioComponent = SecondarySound;
-    }
-}
-
-void AAudio_ZoneActor::SetZoneType(EAudio_ZoneType NewType)
-{
-    if (AudioZoneComponent)
-    {
-        AudioZoneComponent->ZoneConfig.ZoneType = NewType;
-
-        // Apply zone-type-specific defaults
-        switch (NewType)
-        {
-        case EAudio_ZoneType::TRexTerritory:
-            AudioZoneComponent->ZoneConfig.ZoneName = TEXT("TRex Territory");
-            AudioZoneComponent->ZoneConfig.InnerRadius = 1200.0f;
-            AudioZoneComponent->ZoneConfig.OuterRadius = 3500.0f;
-            AudioZoneComponent->ZoneConfig.bDominant = true;
+        case EAudio_ZoneType::Tension:
+            TriggerTensionSting();
             break;
-
-        case EAudio_ZoneType::RiverCrossing:
-            AudioZoneComponent->ZoneConfig.ZoneName = TEXT("River Crossing");
-            AudioZoneComponent->ZoneConfig.InnerRadius = 600.0f;
-            AudioZoneComponent->ZoneConfig.OuterRadius = 2000.0f;
-            AudioZoneComponent->ZoneConfig.bDominant = false;
+        case EAudio_ZoneType::Dread:
+            TriggerDreadSting();
             break;
-
-        case EAudio_ZoneType::TribeCamp:
-            AudioZoneComponent->ZoneConfig.ZoneName = TEXT("Tribe Camp");
-            AudioZoneComponent->ZoneConfig.InnerRadius = 500.0f;
-            AudioZoneComponent->ZoneConfig.OuterRadius = 1800.0f;
-            AudioZoneComponent->ZoneConfig.bDominant = false;
-            break;
-
-        case EAudio_ZoneType::FlintDeposit:
-            AudioZoneComponent->ZoneConfig.ZoneName = TEXT("Flint Deposit");
-            AudioZoneComponent->ZoneConfig.InnerRadius = 300.0f;
-            AudioZoneComponent->ZoneConfig.OuterRadius = 1000.0f;
-            AudioZoneComponent->ZoneConfig.bDominant = false;
-            break;
-
         default:
             break;
-        }
     }
 }
 
-EAudio_ZoneType AAudio_ZoneActor::GetZoneType() const
+void AAudio_ZoneManager::DeactivateZone(AActor* PlayerActor)
 {
-    if (AudioZoneComponent)
+    if (!PlayerActor) return;
+    bZoneActive = false;
+}
+
+float AAudio_ZoneManager::GetCurrentAmbienceVolume() const
+{
+    return CurrentFadeAlpha * ZoneConfig.AmbienceVolume;
+}
+
+void AAudio_ZoneManager::SetMusicLayer(EAudio_MusicLayer NewLayer)
+{
+    ActiveMusicLayer = NewLayer;
+}
+
+void AAudio_ZoneManager::TriggerTensionSting()
+{
+    // Blueprint-implementable: plays a one-shot tension sting cue
+    // In full implementation, this calls into MetaSounds parameter bus
+    UE_LOG(LogTemp, Log, TEXT("AudioZone[%s]: TENSION_STING triggered"), *GetActorLabel());
+}
+
+void AAudio_ZoneManager::TriggerDreadSting()
+{
+    // Blueprint-implementable: plays a one-shot dread sting cue
+    UE_LOG(LogTemp, Log, TEXT("AudioZone[%s]: DREAD_STING triggered"), *GetActorLabel());
+}
+
+void AAudio_ZoneManager::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar)
     {
-        return AudioZoneComponent->ZoneConfig.ZoneType;
+        ActivateZone(OtherActor);
     }
-    return EAudio_ZoneType::Custom;
 }
 
-bool AAudio_ZoneActor::IsPlayerInside() const
+void AAudio_ZoneManager::OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    if (AudioZoneComponent)
+    if (!OtherActor) return;
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar)
     {
-        return AudioZoneComponent->ZoneState.bPlayerInside;
+        DeactivateZone(OtherActor);
     }
-    return false;
-}
-
-// ============================================================
-// UAudio_ZoneManagerSubsystem
-// ============================================================
-
-void UAudio_ZoneManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    RegisteredZones.Empty();
-    UE_LOG(LogTemp, Log, TEXT("[AudioZoneManager] Subsystem initialized."));
-}
-
-void UAudio_ZoneManagerSubsystem::Deinitialize()
-{
-    RegisteredZones.Empty();
-    Super::Deinitialize();
-}
-
-void UAudio_ZoneManagerSubsystem::RegisterZone(UAudio_ZoneComponent* Zone)
-{
-    if (Zone && !RegisteredZones.Contains(Zone))
-    {
-        RegisteredZones.Add(Zone);
-        UE_LOG(LogTemp, Log, TEXT("[AudioZoneManager] Registered zone: %s"), *Zone->ZoneConfig.ZoneName);
-    }
-}
-
-void UAudio_ZoneManagerSubsystem::UnregisterZone(UAudio_ZoneComponent* Zone)
-{
-    RegisteredZones.Remove(Zone);
-}
-
-TArray<FAudio_ZoneState> UAudio_ZoneManagerSubsystem::GetAllZoneStates() const
-{
-    TArray<FAudio_ZoneState> States;
-    for (const UAudio_ZoneComponent* Zone : RegisteredZones)
-    {
-        if (Zone)
-        {
-            States.Add(Zone->ZoneState);
-        }
-    }
-    return States;
-}
-
-bool UAudio_ZoneManagerSubsystem::HasDominantZoneActive() const
-{
-    for (const UAudio_ZoneComponent* Zone : RegisteredZones)
-    {
-        if (Zone && Zone->ZoneConfig.bDominant && Zone->ZoneState.bPlayerInside)
-        {
-            return true;
-        }
-    }
-    return false;
 }
