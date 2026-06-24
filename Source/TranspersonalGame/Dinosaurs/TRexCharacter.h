@@ -1,91 +1,131 @@
 // TRexCharacter.h
-// Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260624_001
-// Tyrannosaurus Rex — apex predator subclass of ADinosaurBase.
-// Sets species stats in BeginPlay; exposes Blueprint-overridable roar event.
+// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260624_001
+// Tyrannosaurus Rex — apex predator dinosaur character
+// Derives from ACharacter (UE5 standard) — no custom movement system
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Dinosaurs/DinosaurBase.h"
+#include "GameFramework/Character.h"
 #include "TRexCharacter.generated.h"
 
-/**
- * ATRexCharacter
- * Concrete Tyrannosaurus Rex actor.
- * Inherits all survival stats, behavior state machine, and AI perception
- * from ADinosaurBase. Overrides BeginPlay to lock species to TyrannosaurusRex
- * so ApplySpeciesStats() sets correct values (health=1500, speed=600, aggression=0.9).
- *
- * Blueprint subclass: BP_TRex (recommended for mesh/animation assignment).
- */
-UCLASS(Blueprintable, BlueprintType, ClassGroup = "Dinosaurs",
-       meta = (DisplayName = "T-Rex Character"))
-class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
+UENUM(BlueprintType)
+enum class EWorld_TRexState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Sleeping    UMETA(DisplayName = "Sleeping"),
+    Roaring     UMETA(DisplayName = "Roaring"),
+};
+
+USTRUCT(BlueprintType)
+struct FWorld_TRexStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float Health = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float MaxHealth = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float Hunger = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float AttackDamage = 350.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float DetectionRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float AttackRadius = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float WalkSpeed = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float RunSpeed = 900.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float StompDamageRadius = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float StompDamage = 150.0f;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ATRexCharacter : public ACharacter
 {
     GENERATED_BODY()
 
 public:
     ATRexCharacter();
 
-protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-public:
-    // ── Roar ──────────────────────────────────────────────────────────────────
-    /** Trigger the T-Rex roar — plays sound, applies fear radius to nearby pawns. */
-    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Behavior")
-    void PerformRoar();
-    virtual void PerformRoar_Implementation();
-
-    // ── Fear radius ───────────────────────────────────────────────────────────
-    /** Radius (cm) in which the roar applies fear to other actors. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior",
-              meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float RoarFearRadius = 2000.0f;
-
-    /** Fear intensity applied to pawns caught in the roar radius (0-1). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior",
-              meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float RoarFearIntensity = 0.85f;
-
-    // ── Stomp ─────────────────────────────────────────────────────────────────
-    /** Stomp attack — deals area damage and applies knockback. */
-    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Combat")
-    void PerformStomp();
-    virtual void PerformStomp_Implementation();
-
-    /** Stomp damage radius (cm). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-              meta = (ClampMin = "50.0", ClampMax = "1000.0"))
-    float StompRadius = 400.0f;
-
-    /** Stomp base damage. Multiplied by AttackDamage from base class. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-              meta = (ClampMin = "0.0", ClampMax = "500.0"))
-    float StompDamageMultiplier = 1.5f;
-
-    // ── Bite ──────────────────────────────────────────────────────────────────
-    /** Bite attack — single-target high damage. */
-    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Combat")
+    // ── Combat ──────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
     void PerformBite();
-    virtual void PerformBite_Implementation();
 
-    /** Bite range (cm). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-              meta = (ClampMin = "50.0", ClampMax = "500.0"))
-    float BiteRange = 250.0f;
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void PerformStomp();
 
-    // ── Territory ─────────────────────────────────────────────────────────────
-    /** Whether this T-Rex is currently defending a territory. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory")
-    bool bIsDefendingTerritory = false;
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void Roar();
 
-    /** Territory center (world space). Set automatically on BeginPlay from spawn location. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Territory")
-    FVector TerritoryCenter = FVector::ZeroVector;
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    float ApplyDamage(float DamageAmount);
 
-    /** Territory radius (cm). T-Rex will return to this area when chasing prey too far. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory",
-              meta = (ClampMin = "500.0", ClampMax = "50000.0"))
-    float TerritoryRadius = 15000.0f;
+    // ── State ────────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "TRex|State")
+    void SetBehaviourState(EWorld_TRexState NewState);
+
+    UFUNCTION(BlueprintPure, Category = "TRex|State")
+    EWorld_TRexState GetBehaviourState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintPure, Category = "TRex|State")
+    bool IsAlive() const { return Stats.Health > 0.0f; }
+
+    UFUNCTION(BlueprintPure, Category = "TRex|State")
+    bool IsHunting() const { return CurrentState == EWorld_TRexState::Hunting; }
+
+    // ── Detection ────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "TRex|AI")
+    AActor* FindNearestPrey() const;
+
+    UFUNCTION(BlueprintCallable, Category = "TRex|AI")
+    bool CanSeeActor(AActor* Target) const;
+
+    // ── Stats ────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    FWorld_TRexStats Stats;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
+              meta = (AllowPrivateAccess = "true"))
+    EWorld_TRexState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float PatrolRadius = 8000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float HungerDecayRate = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    bool bIsAlpha = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float RoarCooldown = 30.0f;
+
+private:
+    float LastRoarTime = 0.0f;
+    float StateTimer = 0.0f;
+
+    void UpdateHunger(float DeltaTime);
+    void UpdateBehaviour(float DeltaTime);
+    void TransitionToHunting();
 };
