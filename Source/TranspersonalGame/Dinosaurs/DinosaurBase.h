@@ -1,83 +1,48 @@
 // DinosaurBase.h
-// Core Systems Programmer — Agent #3
-// Base pawn class for all dinosaur species in the prehistoric survival game.
-// Provides: health, territory radius, aggro state, attack damage, movement speed.
-// All dinosaur species (TRex, Raptor, Brachiosaurus, etc.) inherit from this class.
+// Engine Architect #02 — PROD_CYCLE_AUTO_20260624_001
+// Base class for ALL dinosaur species in the prehistoric survival game.
+// Provides: species stats, behavior state machine, survival stats, damage system.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Components/SphereComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "TimerManager.h"
 #include "DinosaurBase.generated.h"
 
-// Aggro state enum — drives behavior tree transitions
+// ── Enums (global scope — RULE 1) ─────────────────────────────────────────────
+
 UENUM(BlueprintType)
-enum class ECore_DinoAggroState : uint8
+enum class EDinosaurSpecies : uint8
+{
+    TyrannosaurusRex    UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Raptor              UMETA(DisplayName = "Velociraptor"),
+    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
+    Stegosaurus         UMETA(DisplayName = "Stegosaurus"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
+    Unknown             UMETA(DisplayName = "Unknown")
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurBehavior : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Patrolling  UMETA(DisplayName = "Patrolling"),
-    Alerted     UMETA(DisplayName = "Alerted"),
-    Chasing     UMETA(DisplayName = "Chasing"),
+    Hunting     UMETA(DisplayName = "Hunting"),
     Attacking   UMETA(DisplayName = "Attacking"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
-    Dead        UMETA(DisplayName = "Dead"),
+    Running     UMETA(DisplayName = "Running"),
+    Migrating   UMETA(DisplayName = "Migrating"),
+    Dead        UMETA(DisplayName = "Dead")
 };
 
-// Diet type — determines prey/predator relationships
-UENUM(BlueprintType)
-enum class ECore_DinoDiet : uint8
-{
-    Carnivore   UMETA(DisplayName = "Carnivore"),
-    Herbivore   UMETA(DisplayName = "Herbivore"),
-    Omnivore    UMETA(DisplayName = "Omnivore"),
-};
+// ── Forward declarations ──────────────────────────────────────────────────────
+class UAIPerceptionStimuliSourceComponent;
 
-// Struct for dinosaur base stats — used for data-driven species configuration
-USTRUCT(BlueprintType)
-struct FCore_DinoStats
-{
-    GENERATED_BODY()
+// ── DinosaurBase ──────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float MaxHealth = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float AttackDamage = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float WalkSpeed = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float RunSpeed = 700.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float TerritoryRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float AggroRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float AttackRange = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float AttackCooldown = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    ECore_DinoDiet Diet = ECore_DinoDiet::Carnivore;
-};
-
-/**
- * ADinosaurBase
- *
- * Base ACharacter subclass for all dinosaur species.
- * Provides health/damage system, territory/aggro detection via sphere components,
- * and state machine (ECore_DinoAggroState) for behavior tree integration.
- *
- * Usage: Subclass this for each species (ATRex, ARaptor, ABrachiosaurus, etc.)
- * and override OnAttack(), OnDeath(), and GetSpeciesName().
- */
-UCLASS(Abstract, BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
+UCLASS(Abstract, BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurBase : public ACharacter
 {
     GENERATED_BODY()
@@ -85,107 +50,106 @@ class TRANSPERSONALGAME_API ADinosaurBase : public ACharacter
 public:
     ADinosaurBase();
 
+protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void Tick(float DeltaTime) override;
+    virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+        AController* EventInstigator, AActor* DamageCauser) override;
 
-    // --- Health System ---
+    // ── Species ───────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    EDinosaurSpecies DinosaurSpecies;
 
-    /** Current health. Reaches 0 → triggers OnDeath(). */
+    // ── Health ────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Health")
+    float MaxHealth;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Health")
     float CurrentHealth;
 
-    /** Apply damage to this dinosaur. Returns actual damage dealt. */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Health")
-    virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-                             AController* EventInstigator, AActor* DamageCauser) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Health")
+    bool bIsDead;
 
-    /** Heal the dinosaur by the given amount (clamped to MaxHealth). */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Health")
-    void HealDinosaur(float HealAmount);
+    // ── Combat ────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float AttackDamage;
 
-    /** Returns true if the dinosaur is alive. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float AttackRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    bool bIsAggressive;
+
+    // ── Perception ────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|AI")
+    float DetectionRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|AI")
+    float ChaseRange;
+
+    // ── Movement speeds ───────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Movement")
+    float WalkSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Movement")
+    float RunSpeed;
+
+    // ── Behavior ──────────────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
+    EDinosaurBehavior CurrentBehaviorState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
+    bool bIsHunting;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
+    bool bIsFleeing;
+
+    // ── Territory ─────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Territory")
+    float TerritoryRadius;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Territory")
+    FVector TerritoryCenter;
+
+    // ── Survival stats ────────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Survival")
+    float HungerLevel;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Survival")
+    float ThirstLevel;
+
+    // ── Components ────────────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Components",
+        meta = (AllowPrivateAccess = "true"))
+    UAIPerceptionStimuliSourceComponent* PerceptionStimuliSource;
+
+    // ── Blueprint-callable methods ────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|AI")
+    void SetBehaviorState(EDinosaurBehavior NewState);
+
+    UFUNCTION(BlueprintPure, Category = "Dinosaur|Health")
+    float GetHealthPercent() const;
+
     UFUNCTION(BlueprintPure, Category = "Dinosaur|Health")
     bool IsAlive() const;
 
-    // --- Species Configuration ---
-
-    /** Data-driven stats for this species. Set per-species in Blueprint defaults. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
-    FCore_DinoStats DinoStats;
-
-    /** Human-readable species name (e.g., "Tyrannosaurus Rex"). */
-    UFUNCTION(BlueprintPure, Category = "Dinosaur|Species")
-    virtual FString GetSpeciesName() const;
-
-    // --- Aggro State Machine ---
-
-    /** Current behavioral state. Drives animation and AI. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
-    ECore_DinoAggroState AggroState;
-
-    /** Set a new aggro state and broadcast the change. */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|AI")
-    void SetAggroState(ECore_DinoAggroState NewState);
-
-    /** The actor this dinosaur is currently targeting (player or other prey). */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
-    AActor* CurrentTarget;
-
-    /** Home position — center of territory. Set on BeginPlay from spawn location. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI")
-    FVector TerritoryCenter;
-
-    // --- Attack System ---
-
-    /** Execute a melee attack on CurrentTarget. Called by behavior tree. */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
-    virtual void PerformAttack();
-
-    /** Returns true if attack cooldown has elapsed and attack is ready. */
-    UFUNCTION(BlueprintPure, Category = "Dinosaur|Combat")
-    bool CanAttack() const;
-
-    // --- Blueprint Events ---
-
-    /** Called when this dinosaur dies. Override in Blueprint for death FX/ragdoll. */
     UFUNCTION(BlueprintNativeEvent, Category = "Dinosaur|Events")
-    void OnDeath(AActor* Killer);
-    virtual void OnDeath_Implementation(AActor* Killer);
-
-    /** Called when aggro state changes. Override in Blueprint for audio/animation. */
-    UFUNCTION(BlueprintNativeEvent, Category = "Dinosaur|Events")
-    void OnAggroStateChanged(ECore_DinoAggroState OldState, ECore_DinoAggroState NewState);
-    virtual void OnAggroStateChanged_Implementation(ECore_DinoAggroState OldState, ECore_DinoAggroState NewState);
+    void OnDinosaurDied();
+    virtual void OnDinosaurDied_Implementation();
 
 protected:
-    /** Sphere component for territory detection (patrol boundary). */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Components",
-              meta = (AllowPrivateAccess = "true"))
-    USphereComponent* TerritoryVolume;
+    // ── Internal methods ──────────────────────────────────────────────────────
+    void ApplySpeciesStats();
+    void Die();
 
-    /** Sphere component for aggro detection (triggers chase). */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Components",
-              meta = (AllowPrivateAccess = "true"))
-    USphereComponent* AggroVolume;
-
-    /** Timer handle for attack cooldown tracking. */
-    FTimerHandle AttackCooldownTimer;
-
-    /** True when attack is on cooldown. */
-    bool bAttackOnCooldown;
-
-    /** Called when a pawn enters the aggro sphere. */
     UFUNCTION()
-    void OnAggroVolumeBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                   UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-                                   bool bFromSweep, const FHitResult& SweepResult);
+    void UpdateBehaviorState();
 
-    /** Called when a pawn leaves the aggro sphere. */
     UFUNCTION()
-    void OnAggroVolumeEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+    void UpdateSurvivalStats();
 
-    /** Reset attack cooldown flag. */
-    UFUNCTION()
-    void ResetAttackCooldown();
+    FTimerHandle SurvivalTimerHandle;
+    FTimerHandle BehaviorTimerHandle;
 };
