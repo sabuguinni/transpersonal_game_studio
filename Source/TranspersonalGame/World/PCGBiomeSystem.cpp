@@ -1,156 +1,298 @@
+// PCGBiomeSystem.cpp
+// Agent #05 — Procedural World Generator
+// Biome classification and environmental data system for Cretaceous world
+
 #include "PCGBiomeSystem.h"
-#include "DrawDebugHelpers.h"
+#include "Math/UnrealMathUtility.h"
+
+// ─── Constructor ─────────────────────────────────────────────────────────────
 
 APCGBiomeSystem::APCGBiomeSystem()
 {
     PrimaryActorTick.bCanEverTick = false;
-    InitializeDefaultZones();
+
+    // Initialize with default Cretaceous biomes at construction
+    // (full initialization happens in BeginPlay or via InitializeDefaultBiomes)
 }
+
+// ─── BeginPlay ────────────────────────────────────────────────────────────────
 
 void APCGBiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
-    // Zones already initialized in constructor — nothing else needed at runtime
+
+    if (BiomeZones.Num() == 0)
+    {
+        InitializeDefaultBiomes();
+    }
 }
 
-void APCGBiomeSystem::InitializeDefaultZones()
+// ─── InitializeDefaultBiomes ─────────────────────────────────────────────────
+
+void APCGBiomeSystem::InitializeDefaultBiomes()
 {
     BiomeZones.Empty();
 
-    // --- Forest — NW quadrant ---
-    FWorld_BiomeZone Forest;
-    Forest.BiomeType = EWorld_BiomeType::Forest;
-    Forest.Center = FVector(-2000.0f, -2000.0f, 0.0f);
-    Forest.Radius = 2500.0f;
-    Forest.AmbientTemperature = 22.0f;
-    Forest.Humidity = 0.85f;
-    Forest.DangerLevel = 0.4f;
-    Forest.FoliageDensity = 2.0f;
-    BiomeZones.Add(Forest);
+    // ── Forest Biome (center-north) ──────────────────────────────────────────
+    {
+        FWorld_BiomeData Forest;
+        Forest.BiomeType        = EWorld_BiomeType::Forest;
+        Forest.BiomeName        = TEXT("Cretaceous Forest");
+        Forest.MinTemperature   = 22.0f;
+        Forest.MaxTemperature   = 32.0f;
+        Forest.Humidity         = 0.85f;
+        Forest.VegetationDensity = 0.95f;
+        Forest.FogDensity       = 0.35f;
+        Forest.FogColor         = FLinearColor(0.4f, 0.7f, 0.4f, 1.0f);
+        Forest.AmbientColor     = FLinearColor(0.2f, 0.4f, 0.2f, 1.0f);
+        Forest.DangerLevel      = 0.6f;
+        Forest.ResourceRichness = 0.9f;
+        Forest.ZoneCenter       = FVector(0.0f, 0.0f, 0.0f);
+        Forest.ZoneRadius       = 6000.0f;
+        BiomeZones.Add(Forest);
+    }
 
-    // --- Plains — NE quadrant ---
-    FWorld_BiomeZone Plains;
-    Plains.BiomeType = EWorld_BiomeType::Plains;
-    Plains.Center = FVector(2000.0f, -2000.0f, 0.0f);
-    Plains.Radius = 2500.0f;
-    Plains.AmbientTemperature = 32.0f;
-    Plains.Humidity = 0.25f;
-    Plains.DangerLevel = 0.6f;   // Open ground = more predator exposure
-    Plains.FoliageDensity = 0.5f;
-    BiomeZones.Add(Plains);
+    // ── Savanna Biome (east) ─────────────────────────────────────────────────
+    {
+        FWorld_BiomeData Savanna;
+        Savanna.BiomeType        = EWorld_BiomeType::Savanna;
+        Savanna.BiomeName        = TEXT("Open Savanna");
+        Savanna.MinTemperature   = 28.0f;
+        Savanna.MaxTemperature   = 42.0f;
+        Savanna.Humidity         = 0.30f;
+        Savanna.VegetationDensity = 0.35f;
+        Savanna.FogDensity       = 0.05f;
+        Savanna.FogColor         = FLinearColor(0.8f, 0.7f, 0.4f, 1.0f);
+        Savanna.AmbientColor     = FLinearColor(0.6f, 0.5f, 0.2f, 1.0f);
+        Savanna.DangerLevel      = 0.75f;
+        Savanna.ResourceRichness = 0.5f;
+        Savanna.ZoneCenter       = FVector(3000.0f, 0.0f, 0.0f);
+        Savanna.ZoneRadius       = 5000.0f;
+        BiomeZones.Add(Savanna);
+    }
 
-    // --- Highlands — SE quadrant ---
-    FWorld_BiomeZone Highlands;
-    Highlands.BiomeType = EWorld_BiomeType::Highlands;
-    Highlands.Center = FVector(2000.0f, 2000.0f, 0.0f);
-    Highlands.Radius = 2500.0f;
-    Highlands.AmbientTemperature = 15.0f;
-    Highlands.Humidity = 0.30f;
-    Highlands.DangerLevel = 0.5f;
-    Highlands.FoliageDensity = 0.3f;
-    BiomeZones.Add(Highlands);
+    // ── Swamp Biome (south) ──────────────────────────────────────────────────
+    {
+        FWorld_BiomeData Swamp;
+        Swamp.BiomeType        = EWorld_BiomeType::Swamp;
+        Swamp.BiomeName        = TEXT("Coastal Swamp");
+        Swamp.MinTemperature   = 24.0f;
+        Swamp.MaxTemperature   = 30.0f;
+        Swamp.Humidity         = 0.95f;
+        Swamp.VegetationDensity = 0.70f;
+        Swamp.FogDensity       = 0.55f;
+        Swamp.FogColor         = FLinearColor(0.3f, 0.5f, 0.35f, 1.0f);
+        Swamp.AmbientColor     = FLinearColor(0.15f, 0.3f, 0.2f, 1.0f);
+        Swamp.DangerLevel      = 0.65f;
+        Swamp.ResourceRichness = 0.75f;
+        Swamp.ZoneCenter       = FVector(0.0f, 3000.0f, 0.0f);
+        Swamp.ZoneRadius       = 4500.0f;
+        BiomeZones.Add(Swamp);
+    }
 
-    // --- Wetlands — SW quadrant ---
-    FWorld_BiomeZone Wetlands;
-    Wetlands.BiomeType = EWorld_BiomeType::Wetlands;
-    Wetlands.Center = FVector(-2000.0f, 2000.0f, 0.0f);
-    Wetlands.Radius = 2500.0f;
-    Wetlands.AmbientTemperature = 28.0f;
-    Wetlands.Humidity = 0.95f;
-    Wetlands.DangerLevel = 0.35f;
-    Wetlands.FoliageDensity = 1.5f;
-    BiomeZones.Add(Wetlands);
+    // ── Rocky Highlands (west) ───────────────────────────────────────────────
+    {
+        FWorld_BiomeData Rocky;
+        Rocky.BiomeType        = EWorld_BiomeType::Rocky;
+        Rocky.BiomeName        = TEXT("Rocky Highlands");
+        Rocky.MinTemperature   = 15.0f;
+        Rocky.MaxTemperature   = 28.0f;
+        Rocky.Humidity         = 0.25f;
+        Rocky.VegetationDensity = 0.20f;
+        Rocky.FogDensity       = 0.10f;
+        Rocky.FogColor         = FLinearColor(0.6f, 0.55f, 0.45f, 1.0f);
+        Rocky.AmbientColor     = FLinearColor(0.4f, 0.35f, 0.25f, 1.0f);
+        Rocky.DangerLevel      = 0.50f;
+        Rocky.ResourceRichness = 0.60f;
+        Rocky.ZoneCenter       = FVector(-2000.0f, 1500.0f, 500.0f);
+        Rocky.ZoneRadius       = 4000.0f;
+        BiomeZones.Add(Rocky);
+    }
+
+    // ── Volcanic Badlands (south-east) ───────────────────────────────────────
+    {
+        FWorld_BiomeData Volcanic;
+        Volcanic.BiomeType        = EWorld_BiomeType::Volcanic;
+        Volcanic.BiomeName        = TEXT("Volcanic Badlands");
+        Volcanic.MinTemperature   = 35.0f;
+        Volcanic.MaxTemperature   = 60.0f;
+        Volcanic.Humidity         = 0.15f;
+        Volcanic.VegetationDensity = 0.05f;
+        Volcanic.FogDensity       = 0.40f;
+        Volcanic.FogColor         = FLinearColor(0.7f, 0.3f, 0.1f, 1.0f);
+        Volcanic.AmbientColor     = FLinearColor(0.5f, 0.15f, 0.05f, 1.0f);
+        Volcanic.DangerLevel      = 0.95f;
+        Volcanic.ResourceRichness = 0.30f;
+        Volcanic.ZoneCenter       = FVector(2000.0f, -2000.0f, 0.0f);
+        Volcanic.ZoneRadius       = 3500.0f;
+        BiomeZones.Add(Volcanic);
+    }
+
+    // ── River Delta (center) ─────────────────────────────────────────────────
+    {
+        FWorld_BiomeData River;
+        River.BiomeType        = EWorld_BiomeType::River;
+        River.BiomeName        = TEXT("River Delta");
+        River.MinTemperature   = 20.0f;
+        River.MaxTemperature   = 28.0f;
+        River.Humidity         = 0.90f;
+        River.VegetationDensity = 0.80f;
+        River.FogDensity       = 0.25f;
+        River.FogColor         = FLinearColor(0.4f, 0.6f, 0.7f, 1.0f);
+        River.AmbientColor     = FLinearColor(0.2f, 0.4f, 0.5f, 1.0f);
+        River.DangerLevel      = 0.45f;
+        River.ResourceRichness = 0.95f;
+        River.ZoneCenter       = FVector(1000.0f, 1000.0f, 0.0f);
+        River.ZoneRadius       = 2500.0f;
+        BiomeZones.Add(River);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PCGBiomeSystem: Initialized %d Cretaceous biome zones"), BiomeZones.Num());
 }
 
-EWorld_BiomeType APCGBiomeSystem::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    float BestDist = MAX_FLT;
-    EWorld_BiomeType BestBiome = EWorld_BiomeType::Undefined;
+// ─── ComputeBlendWeight ───────────────────────────────────────────────────────
 
-    for (const FWorld_BiomeZone& Zone : BiomeZones)
+float APCGBiomeSystem::ComputeBlendWeight(float Distance, float ZoneRadius) const
+{
+    if (Distance >= ZoneRadius) return 0.0f;
+    if (Distance <= 0.0f) return 1.0f;
+
+    // Smooth falloff using cosine interpolation
+    const float NormalizedDist = Distance / ZoneRadius;
+    return FMath::Clamp(0.5f * (1.0f + FMath::Cos(NormalizedDist * PI)), 0.0f, 1.0f);
+}
+
+// ─── FindTwoClosestBiomes ─────────────────────────────────────────────────────
+
+void APCGBiomeSystem::FindTwoClosestBiomes(const FVector& Location, int32& OutPrimary, int32& OutSecondary, float& OutBlend) const
+{
+    OutPrimary   = 0;
+    OutSecondary = 0;
+    OutBlend     = 0.0f;
+
+    if (BiomeZones.Num() == 0) return;
+
+    float BestWeight  = -1.0f;
+    float SecondWeight = -1.0f;
+
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
     {
-        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
-        if (Dist <= Zone.Radius && Dist < BestDist)
+        const float Dist   = FVector::Dist(Location, BiomeZones[i].ZoneCenter);
+        const float Weight = ComputeBlendWeight(Dist, BiomeZones[i].ZoneRadius);
+
+        if (Weight > BestWeight)
         {
-            BestDist = Dist;
-            BestBiome = Zone.BiomeType;
+            SecondWeight = BestWeight;
+            OutSecondary = OutPrimary;
+            BestWeight   = Weight;
+            OutPrimary   = i;
+        }
+        else if (Weight > SecondWeight)
+        {
+            SecondWeight = Weight;
+            OutSecondary = i;
         }
     }
 
-    return BestBiome;
+    const float TotalWeight = BestWeight + SecondWeight;
+    OutBlend = (TotalWeight > KINDA_SMALL_NUMBER) ? (SecondWeight / TotalWeight) : 0.0f;
 }
 
-FWorld_BiomeZone APCGBiomeSystem::GetBiomeZoneAtLocation(const FVector& WorldLocation) const
-{
-    float BestDist = MAX_FLT;
-    const FWorld_BiomeZone* BestZone = nullptr;
+// ─── FindNearestBiomeIndex ────────────────────────────────────────────────────
 
-    for (const FWorld_BiomeZone& Zone : BiomeZones)
+int32 APCGBiomeSystem::FindNearestBiomeIndex(const FVector& WorldLocation) const
+{
+    int32 NearestIndex = 0;
+    float NearestDist  = TNumericLimits<float>::Max();
+
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
     {
-        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
-        if (Dist <= Zone.Radius && Dist < BestDist)
+        const float Dist = FVector::Dist(WorldLocation, BiomeZones[i].ZoneCenter);
+        if (Dist < NearestDist)
         {
-            BestDist = Dist;
-            BestZone = &Zone;
+            NearestDist  = Dist;
+            NearestIndex = i;
         }
     }
 
-    return BestZone ? *BestZone : FWorld_BiomeZone();
+    return NearestIndex;
 }
 
-EWorld_BiomeType APCGBiomeSystem::GetNearestBiome(const FVector& WorldLocation) const
-{
-    float BestDist = MAX_FLT;
-    EWorld_BiomeType BestBiome = EWorld_BiomeType::Undefined;
+// ─── QueryBiomeAtLocation ─────────────────────────────────────────────────────
 
-    for (const FWorld_BiomeZone& Zone : BiomeZones)
+FWorld_BiomeQueryResult APCGBiomeSystem::QueryBiomeAtLocation(const FVector& WorldLocation) const
+{
+    FWorld_BiomeQueryResult Result;
+
+    if (BiomeZones.Num() == 0)
     {
-        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
-        if (Dist < BestDist)
-        {
-            BestDist = Dist;
-            BestBiome = Zone.BiomeType;
-        }
+        Result.bIsValid = false;
+        return Result;
     }
 
-    return BestBiome;
+    int32 PrimaryIdx   = 0;
+    int32 SecondaryIdx = 0;
+    float BlendFactor  = 0.0f;
+    FindTwoClosestBiomes(WorldLocation, PrimaryIdx, SecondaryIdx, BlendFactor);
+
+    const FWorld_BiomeData& Primary   = BiomeZones[PrimaryIdx];
+    const FWorld_BiomeData& Secondary = BiomeZones[SecondaryIdx];
+
+    Result.PrimaryBiome   = Primary.BiomeType;
+    Result.SecondaryBiome = Secondary.BiomeType;
+    Result.BlendFactor    = BlendFactor;
+
+    // Blend environmental values
+    const float PrimaryWeight   = 1.0f - BlendFactor;
+    const float SecondaryWeight = BlendFactor;
+
+    const float MidTemp = (Primary.MinTemperature + Primary.MaxTemperature) * 0.5f;
+    const float SecMidTemp = (Secondary.MinTemperature + Secondary.MaxTemperature) * 0.5f;
+    Result.Temperature  = MidTemp * PrimaryWeight + SecMidTemp * SecondaryWeight;
+    Result.Humidity     = Primary.Humidity * PrimaryWeight + Secondary.Humidity * SecondaryWeight;
+    Result.DangerLevel  = Primary.DangerLevel * PrimaryWeight + Secondary.DangerLevel * SecondaryWeight;
+    Result.bIsValid     = true;
+
+    return Result;
 }
 
-void APCGBiomeSystem::DrawBiomeDebug()
+// ─── GetBiomeTypeAtLocation ───────────────────────────────────────────────────
+
+EWorld_BiomeType APCGBiomeSystem::GetBiomeTypeAtLocation(const FVector& WorldLocation) const
 {
-#if WITH_EDITOR
-    UWorld* World = GetWorld();
-    if (!World) return;
+    if (BiomeZones.Num() == 0) return EWorld_BiomeType::Plains;
+    const int32 Idx = FindNearestBiomeIndex(WorldLocation);
+    return BiomeZones[Idx].BiomeType;
+}
 
-    const TMap<EWorld_BiomeType, FColor> BiomeColors = {
-        { EWorld_BiomeType::Forest,    FColor::Green  },
-        { EWorld_BiomeType::Plains,    FColor::Yellow },
-        { EWorld_BiomeType::Highlands, FColor(139, 90, 43) },  // Brown
-        { EWorld_BiomeType::Wetlands,  FColor::Blue   },
-    };
+// ─── GetTemperatureAtLocation ─────────────────────────────────────────────────
 
-    for (const FWorld_BiomeZone& Zone : BiomeZones)
-    {
-        const FColor* ColorPtr = BiomeColors.Find(Zone.BiomeType);
-        FColor Color = ColorPtr ? *ColorPtr : FColor::White;
+float APCGBiomeSystem::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    const FWorld_BiomeQueryResult Result = QueryBiomeAtLocation(WorldLocation);
+    return Result.bIsValid ? Result.Temperature : 28.0f;
+}
 
-        // Draw circle at ground level
-        DrawDebugCircle(
-            World,
-            Zone.Center,
-            Zone.Radius,
-            64,
-            Color,
-            true,   // persistent
-            -1.0f,  // lifetime
-            0,
-            50.0f,  // thickness
-            FVector(1, 0, 0),
-            FVector(0, 1, 0)
-        );
+// ─── GetDangerLevelAtLocation ─────────────────────────────────────────────────
 
-        // Draw label sphere at center
-        DrawDebugSphere(World, Zone.Center + FVector(0, 0, 200), 100.0f, 8, Color, true);
-    }
-#endif
+float APCGBiomeSystem::GetDangerLevelAtLocation(const FVector& WorldLocation) const
+{
+    const FWorld_BiomeQueryResult Result = QueryBiomeAtLocation(WorldLocation);
+    return Result.bIsValid ? Result.DangerLevel : 0.3f;
+}
+
+// ─── GetVegetationDensityAtLocation ──────────────────────────────────────────
+
+float APCGBiomeSystem::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
+{
+    if (BiomeZones.Num() == 0) return 0.5f;
+
+    int32 PrimaryIdx   = 0;
+    int32 SecondaryIdx = 0;
+    float BlendFactor  = 0.0f;
+    FindTwoClosestBiomes(WorldLocation, PrimaryIdx, SecondaryIdx, BlendFactor);
+
+    const float PrimaryDensity   = BiomeZones[PrimaryIdx].VegetationDensity;
+    const float SecondaryDensity = BiomeZones[SecondaryIdx].VegetationDensity;
+    return FMath::Lerp(PrimaryDensity, SecondaryDensity, BlendFactor);
 }
