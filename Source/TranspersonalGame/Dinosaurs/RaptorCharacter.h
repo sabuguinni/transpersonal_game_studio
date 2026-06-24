@@ -1,7 +1,6 @@
 // RaptorCharacter.h
-// Performance Optimizer #04 | PROD_CYCLE_AUTO_20260622_002
-// Velociraptor species — pack hunter, fast, low HP, high attack rate
-// Inherits ADinosaurBase for full behaviour state machine
+// Performance Optimizer #04 — Cycle PROD_CYCLE_AUTO_20260624_001
+// Velociraptor pack-hunter subclass of ADinosaurBase
 
 #pragma once
 
@@ -9,7 +8,14 @@
 #include "Dinosaurs/DinosaurBase.h"
 #include "RaptorCharacter.generated.h"
 
-UCLASS(BlueprintType, Blueprintable)
+/**
+ * ARaptorCharacter
+ * Pack-hunter dinosaur. Lower health than T-Rex, higher speed.
+ * Emits a pack call that alerts nearby raptors to converge on the target.
+ * Designed for Agent #12 (Combat AI) to wire into Behavior Tree blackboard.
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs",
+       meta = (DisplayName = "Raptor Character"))
 class TRANSPERSONALGAME_API ARaptorCharacter : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -21,115 +27,78 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    // ── Pack Hunting ──────────────────────────────────────────────────────────
+    // ── Pack System ──────────────────────────────────────────────────────────
 
-    /** Radius to detect pack members (same species) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    float PackDetectionRadius = 1200.0f;
+    /** Radius within which other raptors hear the pack call (cm). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
+              meta = (ClampMin = "100.0", ClampMax = "10000.0"))
+    float PackCallRadius;
 
-    /** Damage bonus per additional pack member nearby (additive) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    float PackDamageBonus = 8.0f;
+    /** Cooldown between pack calls (seconds). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
+              meta = (ClampMin = "1.0", ClampMax = "60.0"))
+    float PackCallCooldown;
 
-    /** Max pack members that contribute to damage bonus */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    int32 MaxPackBonusMembers = 4;
+    /** Time of last pack call — used to enforce cooldown. */
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
+    float LastPackCallTime;
 
-    /** Current pack size (updated each tick via overlap) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Pack")
-    int32 CurrentPackSize = 0;
+    /** Maximum number of raptors that respond to a single pack call. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
+              meta = (ClampMin = "1", ClampMax = "8"))
+    int32 MaxPackResponders;
 
-    /** True when flanking manoeuvre is active */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Pack")
-    bool bIsFlankingTarget = false;
+    // ── Pounce Attack ────────────────────────────────────────────────────────
 
-    // ── Combat ────────────────────────────────────────────────────────────────
+    /** Pounce launch speed (cm/s). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
+              meta = (ClampMin = "100.0", ClampMax = "3000.0"))
+    float PounceSpeed;
 
-    /** Base bite damage (low — compensated by attack rate and pack bonus) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float BaseBiteDamage = 45.0f;
+    /** Damage dealt by a successful pounce. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
+              meta = (ClampMin = "0.0", ClampMax = "500.0"))
+    float PounceDamage;
 
-    /** Claw slash damage — secondary attack */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float ClawDamage = 28.0f;
+    /** Maximum horizontal distance from which a pounce can be initiated (cm). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
+              meta = (ClampMin = "50.0", ClampMax = "800.0"))
+    float PounceRange;
 
-    /** Attack rate: attacks per second */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float AttackRate = 1.8f;
+    // ── Actions ──────────────────────────────────────────────────────────────
 
-    /** Leap attack range — raptor jumps onto target */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapAttackRange = 400.0f;
+    /**
+     * Emit a pack call: alerts all ARaptorCharacter actors within PackCallRadius
+     * to set their attack target to this raptor's current target.
+     * Respects PackCallCooldown.
+     */
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Pack")
+    void PerformPackCall();
+    virtual void PerformPackCall_Implementation();
 
-    /** Leap attack cooldown in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapCooldown = 6.0f;
+    /**
+     * Launch a pounce attack toward the target location.
+     * Applies PounceDamage on hit via line-trace at apex.
+     */
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Combat")
+    void PerformPounce(AActor* Target);
+    virtual void PerformPounce_Implementation(AActor* Target);
 
-    /** True while leap attack is in progress */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Combat")
-    bool bIsLeaping = false;
-
-    // ── Movement ──────────────────────────────────────────────────────────────
-
-    /** Sprint speed — raptors are fast (UU/s) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    float SprintSpeed = 1100.0f;
-
-    /** Walk speed — stalking prey */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    float WalkSpeed = 420.0f;
-
-    /** Jump Z velocity — raptors can jump over obstacles */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    float JumpVelocity = 550.0f;
-
-    // ── Biology ───────────────────────────────────────────────────────────────
-
-    /** Body mass in kg (Velociraptor mongoliensis ~15kg) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Biology")
-    float BodyMassKg = 15.0f;
-
-    /** Max HP — fragile but agile */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Biology")
-    float MaxHP = 180.0f;
-
-    /** Territory radius (smaller than T-Rex — pack shares territory) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Biology")
-    float TerritoryRadius = 3500.0f;
-
-    // ── Actions ───────────────────────────────────────────────────────────────
-
-    /** Perform bite attack — fast, low damage, high rate */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void PerformBite();
-
-    /** Perform claw slash — close range secondary */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
+    /**
+     * Claw slash — short-range melee, faster than bite.
+     * Damage = 0.6 * AttackDamage (from DinosaurBase).
+     */
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Combat")
     void PerformClawSlash();
+    virtual void PerformClawSlash_Implementation();
 
-    /** Leap onto target — closes distance, pins target briefly */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void PerformLeapAttack(AActor* Target);
+    // ── Utility ──────────────────────────────────────────────────────────────
 
-    /** Emit pack call — alerts nearby raptors to converge on target */
+    /** Returns true if the pack call cooldown has elapsed. */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Raptor|Pack")
+    bool CanPerformPackCall() const;
+
+    /** Returns all ARaptorCharacter actors within PackCallRadius of this raptor. */
     UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void EmitPackCall(AActor* Target);
-
-    /** Update pack size by scanning nearby raptors */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void UpdatePackSize();
-
-    /** Calculate total damage including pack bonus */
-    UFUNCTION(BlueprintPure, Category = "Raptor|Combat")
-    float GetTotalBiteDamage() const;
-
-protected:
-    /** Apply raptor-specific stats to CharacterMovementComponent */
-    void ApplyRaptorStats();
-
-    /** Timer handle for leap cooldown */
-    FTimerHandle LeapCooldownTimer;
-
-    /** Timer handle for pack size update (runs every 2s) */
-    FTimerHandle PackUpdateTimer;
+    TArray<ARaptorCharacter*> GetNearbyPackMembers() const;
 };
