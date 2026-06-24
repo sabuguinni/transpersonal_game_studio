@@ -2,25 +2,29 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/BoxComponent.h"
 #include "Components/AudioComponent.h"
 #include "AudioZoneManager.generated.h"
-
-// ============================================================
-// Audio Agent #16 — AudioZoneManager
-// Manages proximity-based ambient audio zones tied to narrative
-// trigger locations. Each zone blends in/out based on player
-// distance using a linear attenuation model.
-// ============================================================
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    TRexTerritory   UMETA(DisplayName = "TRex Territory"),
-    RiverCrossing   UMETA(DisplayName = "River Crossing"),
-    TribeCamp       UMETA(DisplayName = "Tribe Camp"),
-    FlintDeposit    UMETA(DisplayName = "Flint Deposit"),
-    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
-    Custom          UMETA(DisplayName = "Custom")
+    Baseline        UMETA(DisplayName = "Baseline Forest"),
+    Tension         UMETA(DisplayName = "Tension / Threat Near"),
+    Dread           UMETA(DisplayName = "Dread / Discovery"),
+    River           UMETA(DisplayName = "River Ambience"),
+    Combat          UMETA(DisplayName = "Active Combat"),
+    Night           UMETA(DisplayName = "Night Ambience"),
+};
+
+UENUM(BlueprintType)
+enum class EAudio_MusicLayer : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    Percussion      UMETA(DisplayName = "Primitive Percussion"),
+    Strings         UMETA(DisplayName = "Tension Strings"),
+    Drone           UMETA(DisplayName = "Dread Drone"),
+    Silence         UMETA(DisplayName = "Oppressive Silence"),
 };
 
 USTRUCT(BlueprintType)
@@ -29,154 +33,115 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Custom;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Baseline;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString ZoneName = TEXT("DefaultZone");
+    EAudio_MusicLayer MusicLayer = EAudio_MusicLayer::None;
 
-    /** Radius in cm at which audio begins fading in */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float InnerRadius = 800.0f;
+    float AmbienceVolume = 1.0f;
 
-    /** Radius in cm at which audio is fully silent */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float OuterRadius = 2400.0f;
+    float MusicVolume = 0.6f;
 
-    /** Master volume for this zone (0.0 - 1.0) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float MasterVolume = 1.0f;
+    float FadeInTime = 2.0f;
 
-    /** Low-pass filter frequency when player is at outer edge (Hz) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float DistanceLPFHz = 4000.0f;
+    float FadeOutTime = 3.0f;
 
-    /** Whether this zone suppresses other zones when active */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bDominant = false;
+    bool bTriggerOnce = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    FString LinkedNarrativeTrigger = "";
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ZoneState
+struct FAudio_DinosaurSoundProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    FString ZoneName = TEXT("");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    FName DinosaurSpecies = NAME_None;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    float CurrentVolume = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float FootstepShakeRadius = 800.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    float PlayerDistance = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float FootstepShakeMagnitude = 0.4f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    bool bPlayerInside = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float RoarAudibleRadius = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float BreathingRadius = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    bool bTriggersMusicTension = true;
 };
 
-// ============================================================
-// UAudio_ZoneComponent — attaches to any actor to define an
-// audio zone. Handles volume interpolation per tick.
-// ============================================================
-UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Audio Zone Component")
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
+/**
+ * AAudio_ZoneManager
+ * Placed in the level to define an audio zone with ambience + music layer.
+ * Overlapping the BoxComponent triggers zone transitions via the AudioSubsystem.
+ * Integrates with ANarrDialogueTrigger zones from Agent #15.
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone Manager"))
+class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneComponent();
+    AAudio_ZoneManager();
 
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
     FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    FAudio_ZoneState ZoneState;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone",
+        meta = (AllowPrivateAccess = "true"))
+    UBoxComponent* TriggerVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    UAudioComponent* PrimaryAudioComponent = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    UAudioComponent* SecondaryAudioComponent = nullptr;
-
-    /** Volume interpolation speed (units/sec) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float VolumeInterpSpeed = 2.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone",
+        meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* AmbienceAudioComponent;
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    float ComputeVolumeForDistance(float Distance) const;
+    void ActivateZone(AActor* PlayerActor);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    FAudio_ZoneState GetCurrentState() const { return ZoneState; }
+    void DeactivateZone(AActor* PlayerActor);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void ForceVolume(float Volume);
+    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    float GetCurrentAmbienceVolume() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void SetMusicLayer(EAudio_MusicLayer NewLayer);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void TriggerTensionSting();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void TriggerDreadSting();
 
 private:
-    float TargetVolume = 0.0f;
-    APawn* CachedPlayerPawn = nullptr;
-};
+    UFUNCTION()
+    void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
 
-// ============================================================
-// AAudio_ZoneActor — standalone actor that owns a ZoneComponent
-// and can be placed directly in the level.
-// ============================================================
-UCLASS(BlueprintType, Blueprintable, DisplayName = "Audio Zone Actor")
-class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
-{
-    GENERATED_BODY()
+    UFUNCTION()
+    void OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
-public:
-    AAudio_ZoneActor();
-
-    virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
-    UAudio_ZoneComponent* AudioZoneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* PrimarySound;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* SecondarySound;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetZoneType(EAudio_ZoneType NewType);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    EAudio_ZoneType GetZoneType() const;
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    bool IsPlayerInside() const;
-};
-
-// ============================================================
-// UAudio_ZoneManagerSubsystem — world subsystem that tracks
-// all active audio zones and resolves priority/dominance.
-// ============================================================
-UCLASS(DisplayName = "Audio Zone Manager Subsystem")
-class TRANSPERSONALGAME_API UAudio_ZoneManagerSubsystem : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void RegisterZone(UAudio_ZoneComponent* Zone);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void UnregisterZone(UAudio_ZoneComponent* Zone);
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    TArray<FAudio_ZoneState> GetAllZoneStates() const;
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
-    bool HasDominantZoneActive() const;
-
-private:
-    UPROPERTY()
-    TArray<UAudio_ZoneComponent*> RegisteredZones;
+    bool bZoneActive = false;
+    bool bHasTriggeredOnce = false;
+    float CurrentFadeAlpha = 0.0f;
+    EAudio_MusicLayer ActiveMusicLayer = EAudio_MusicLayer::None;
 };
