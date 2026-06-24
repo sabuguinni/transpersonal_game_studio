@@ -1,102 +1,124 @@
+// PerformanceConfig.h
+// Performance Optimizer #04 — PROD_CYCLE_AUTO_20260624_008
+// Defines performance budgets, LOD thresholds, and scalability targets.
+// All types prefixed with Perf_ to avoid collisions (RULE 2).
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "PerformanceConfig.generated.h"
 
-/**
- * Performance budget tiers for Transpersonal Game Studio
- * Target: 60fps PC (RTX 3070+), 30fps Console (PS5/XSX)
- * Agent #04 — Performance Optimizer
- */
+// ── ENUMS ────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
-enum class EPerf_QualityTier : uint8
+enum class EPerf_TargetPlatform : uint8
 {
-    Ultra       UMETA(DisplayName = "Ultra (PC High-End)"),
-    High        UMETA(DisplayName = "High (PC Mid-Range)"),
-    Medium      UMETA(DisplayName = "Medium (Console)"),
-    Low         UMETA(DisplayName = "Low (PC Low-End)")
+    PC_High     UMETA(DisplayName = "PC High-End (60fps)"),
+    PC_Mid      UMETA(DisplayName = "PC Mid-Range (45fps)"),
+    Console     UMETA(DisplayName = "Console (30fps)"),
+    Mobile      UMETA(DisplayName = "Mobile (30fps)")
 };
 
+UENUM(BlueprintType)
+enum class EPerf_LODLevel : uint8
+{
+    LOD0_Full       UMETA(DisplayName = "LOD0 — Full Detail (<1500cm)"),
+    LOD1_Half       UMETA(DisplayName = "LOD1 — 50% Tris (1500-4000cm)"),
+    LOD2_Impostor   UMETA(DisplayName = "LOD2 — Impostor (>4000cm)"),
+    LOD3_Culled     UMETA(DisplayName = "LOD3 — Culled (>8000cm)")
+};
+
+UENUM(BlueprintType)
+enum class EPerf_DinoSizeClass : uint8
+{
+    Large   UMETA(DisplayName = "Large (T-Rex, Brachiosaurus) — cull 8000cm"),
+    Medium  UMETA(DisplayName = "Medium (Triceratops) — cull 6000cm"),
+    Small   UMETA(DisplayName = "Small (Raptor, Protoceratops) — cull 5000cm")
+};
+
+// ── STRUCTS ──────────────────────────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODSettings
+struct FPerf_LODThresholds
 {
     GENERATED_BODY()
 
-    /** Distance at which LOD0 transitions to LOD1 (units) */
+    /** Distance (cm) at which LOD0→LOD1 transition occurs */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float LOD0Distance = 1500.0f;
+    float LOD0_To_LOD1 = 1500.0f;
 
-    /** Distance at which LOD1 transitions to LOD2 */
+    /** Distance (cm) at which LOD1→LOD2 transition occurs */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float LOD1Distance = 3000.0f;
+    float LOD1_To_LOD2 = 4000.0f;
 
-    /** Distance at which LOD2 transitions to LOD3 */
+    /** Distance (cm) at which LOD2→Culled transition occurs */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float LOD2Distance = 6000.0f;
-
-    /** Distance beyond which the mesh is culled entirely */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float CullDistance = 8000.0f;
+    float LOD2_To_Culled = 8000.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_TickBudget
+struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    /** Tick interval for hero dinos (< 1500 units from player) in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
-    float HeroTickInterval = 0.016f; // ~60fps
+    /** Target platform for this budget */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    EPerf_TargetPlatform Platform = EPerf_TargetPlatform::PC_High;
 
-    /** Tick interval for mid-range dinos (1500-3000 units) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
-    float MidRangeTickInterval = 0.033f; // ~30fps
+    /** Target frames per second */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float TargetFPS = 60.0f;
 
-    /** Tick interval for distant dinos (3000-6000 units) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
-    float DistantTickInterval = 0.1f; // 10fps
+    /** Max frame time in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MaxFrameTimeMS = 16.67f;
 
-    /** Distance beyond which AI tick is paused entirely */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
-    float AITickPauseDistance = 6000.0f;
+    /** Max simultaneous active AI controllers */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxActiveAIControllers = 20;
+
+    /** Max simultaneous skeletal mesh actors with full animation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxAnimatedSkeletalMeshes = 20;
+
+    /** Max dynamic shadow casting lights */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxDynamicShadowLights = 4;
+
+    /** Texture streaming pool size in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 TextureStreamingPoolMB = 1024;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_FrameBudget
+struct FPerf_DinoLODConfig
 {
     GENERATED_BODY()
 
-    /** Target frame time in ms (16.6 = 60fps, 33.3 = 30fps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float TargetFrameTimeMs = 16.6f;
+    /** Size class determines cull distance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    EPerf_DinoSizeClass SizeClass = EPerf_DinoSizeClass::Medium;
 
-    /** Max GPU time allocated to dinosaur rendering (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float DinoGPUBudgetMs = 4.0f;
+    /** LOD transition distances */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    FPerf_LODThresholds LODThresholds;
 
-    /** Max GPU time allocated to foliage rendering (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float FoliageGPUBudgetMs = 3.0f;
+    /** Enable animation Update Rate Optimization (URO) for distant dinos */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    bool bEnableURO = true;
 
-    /** Max GPU time allocated to lighting/shadows (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float LightingGPUBudgetMs = 5.0f;
+    /** URO max interpolation frames (higher = more performance, less smooth) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    int32 URO_MaxInterpolation = 4;
 
-    /** Max simultaneous skeletal mesh actors in scene */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxSkeletalMeshActors = 20;
-
-    /** Max simultaneous static mesh actors in scene */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    int32 MaxStaticMeshActors = 150;
+    /** Disable cloth simulation (no cloth on dinos) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    bool bDisableCloth = true;
 };
 
-/**
- * UPerf_PerformanceConfig — Data asset holding all performance budgets.
- * Referenced by the PerformanceManager at runtime to enforce frame budgets.
- */
+// ── PERFORMANCE MANAGER UOBJECT ───────────────────────────────────────────────
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPerf_PerformanceConfig : public UObject
 {
@@ -105,26 +127,63 @@ class TRANSPERSONALGAME_API UPerf_PerformanceConfig : public UObject
 public:
     UPerf_PerformanceConfig();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
+    // ── Frame Budgets ──────────────────────────────────────────────────────
 
+    /** PC High-End budget (60fps target) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budgets")
+    FPerf_FrameBudget PCHighBudget;
+
+    /** Console budget (30fps target) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budgets")
+    FPerf_FrameBudget ConsoleBudget;
+
+    // ── LOD Configuration ─────────────────────────────────────────────────
+
+    /** LOD config for large dinosaurs (T-Rex, Brachiosaurus) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    FPerf_LODSettings DinoLODSettings;
+    FPerf_DinoLODConfig LargeDinoLOD;
 
+    /** LOD config for medium dinosaurs (Triceratops, Ankylosaurus) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    FPerf_LODSettings FoliageLODSettings;
+    FPerf_DinoLODConfig MediumDinoLOD;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
-    FPerf_TickBudget TickBudget;
+    /** LOD config for small dinosaurs (Raptor, Protoceratops) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_DinoLODConfig SmallDinoLOD;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget FrameBudget;
+    // ── Scalability CVars ─────────────────────────────────────────────────
 
-    /** Apply CVars matching the selected quality tier */
+    /** Shadow quality (0-3) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CVars", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 ShadowQuality = 3;
+
+    /** Volumetric fog grid pixel size (larger = faster, less detail) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CVars", meta = (ClampMin = "4", ClampMax = "16"))
+    int32 VolumetricFogGridPixelSize = 8;
+
+    /** Foliage density scale (1.0 = full, 0.5 = half) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CVars", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float FoliageDensityScale = 1.0f;
+
+    /** Grass density scale */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CVars", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float GrassDensityScale = 1.0f;
+
+    // ── Methods ───────────────────────────────────────────────────────────
+
+    /** Apply PC High-End settings via console commands */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyQualityTierCVars();
+    void ApplyPCHighSettings();
 
-    /** Get LOD settings for a given actor based on distance from player */
+    /** Apply Console settings via console commands */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetTickIntervalForDistance(float DistanceFromPlayer) const;
+    void ApplyConsoleSettings();
+
+    /** Get the LOD config for a given dino size class */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_DinoLODConfig GetDinoLODConfig(EPerf_DinoSizeClass SizeClass) const;
+
+    /** Check if current actor count is within budget */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsWithinActorBudget(int32 CurrentActorCount, EPerf_TargetPlatform Platform) const;
 };
