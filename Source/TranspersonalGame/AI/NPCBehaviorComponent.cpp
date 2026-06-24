@@ -7,55 +7,31 @@
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    CurrentHealth = MaxHealth;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for performance
 }
 
 void UNPCBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentHealth = MaxHealth;
-    SetBehaviorState(ENPC_BehaviorState::Idle);
+    CurrentState = ENPC_BehaviorState::Patrolling;
+    AlertLevel = 0.0f;
+    bPlayerDetected = false;
 }
 
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (CurrentState == ENPC_BehaviorState::Dead)
+    UpdateDetection(DeltaTime);
+    DecayAlert(DeltaTime);
+
+    if (CurrentState == ENPC_BehaviorState::Patrolling)
     {
-        return;
+        UpdatePatrol(DeltaTime);
     }
 
-    // Update memory timers
-    if (Memory.bHasSeenPlayer)
-    {
-        Memory.TimeSinceLastPlayerSighting += DeltaTime;
-        // Forget player after 15 seconds of no sighting
-        if (Memory.TimeSinceLastPlayerSighting > 15.0f)
-        {
-            OnPlayerLost();
-        }
-    }
-
-    // Decay threat level over time
-    if (Memory.ThreatLevel > 0.0f)
-    {
-        Memory.ThreatLevel = FMath::Max(0.0f, Memory.ThreatLevel - DeltaTime * 0.1f);
-    }
-
-    // Tick current state
-    switch (CurrentState)
-    {
-        case ENPC_BehaviorState::Idle:   TickIdle(DeltaTime);   break;
-        case ENPC_BehaviorState::Patrol: TickPatrol(DeltaTime); break;
-        case ENPC_BehaviorState::Alert:  TickAlert(DeltaTime);  break;
-        case ENPC_BehaviorState::Chase:  TickChase(DeltaTime);  break;
-        case ENPC_BehaviorState::Attack: TickAttack(DeltaTime); break;
-        case ENPC_BehaviorState::Flee:   TickFlee(DeltaTime);   break;
-        default: break;
-    }
-
-    EvaluateStateTransitions();
+    // Forget old memories periodically
+    ForgetOldMemories(MemoryDuration);
 }
 
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
@@ -64,240 +40,127 @@ void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
     CurrentState = NewState;
 }
 
-void UNPCBehaviorComponent::OnPlayerDetected(const FVector& PlayerLocation)
+void UNPCBehaviorComponent::RecordThreat(FVector ThreatLocation, float ThreatLevel, bool bIsPlayer)
 {
-    Memory.LastKnownPlayerLocation = PlayerLocation;
-    Memory.TimeSinceLastPlayerSighting = 0.0f;
-    Memory.bHasSeenPlayer = true;
-    Memory.bIsAlerted = true;
+    FNPC_MemoryEntry Entry;
+    Entry.LastKnownLocation = ThreatLocation;
+    Entry.ThreatLevel = ThreatLevel;
+    Entry.bIsPlayerThreat = bIsPlayer;
 
-    // Personality-based reaction
-    switch (Personality)
+    UWorld* World = GetWorld();
+    if (World)
     {
-        case ENPC_DinoPersonality::TerritorialPatrol:
-            SetBehaviorState(ENPC_BehaviorState::Chase);
-            break;
-        case ENPC_DinoPersonality::PackHunter:
-            SetBehaviorState(ENPC_BehaviorState::Alert);
-            break;
-        case ENPC_DinoPersonality::GrazerDefensive:
-            SetBehaviorState(ENPC_BehaviorState::Alert);
-            break;
-        case ENPC_DinoPersonality::PassiveHerd:
-            SetBehaviorState(ENPC_BehaviorState::Flee);
-            break;
-        case ENPC_DinoPersonality::AlertFlee:
-            SetBehaviorState(ENPC_BehaviorState::Flee);
-            break;
-    }
-}
-
-void UNPCBehaviorComponent::OnPlayerLost()
-{
-    Memory.bHasSeenPlayer = false;
-    Memory.bIsAlerted = false;
-    Memory.TimeSinceLastPlayerSighting = 0.0f;
-
-    // Return to patrol or idle
-    if (PatrolData.WaypointLocations.Num() > 0)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
-    }
-    else
-    {
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-    }
-}
-
-void UNPCBehaviorComponent::OnTakeDamage(float DamageAmount)
-{
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
-    UpdateThreatLevel(DamageAmount * 0.1f);
-
-    if (CurrentHealth <= 0.0f)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Dead);
-        return;
+        Entry.TimeStamp = World->GetTimeSeconds();
     }
 
-    // Flee if health drops below threshold
-    float HealthRatio = CurrentHealth / MaxHealth;
-    if (HealthRatio <= FleeHealthThreshold)
+    MemoryEntries.Add(Entry);
+
+    // Increase alert level based on threat
+    AlertLevel = FMath::Clamp(AlertLevel + ThreatLevel * 0.5f, 0.0f, 1.0f);
+
+    if (bIsPlayer)
     {
-        if (Personality != ENPC_DinoPersonality::TerritorialPatrol)
+        bPlayerDetected = true;
+        if (AlertLevel > 0.7f)
         {
-            SetBehaviorState(ENPC_BehaviorState::Flee);
+            SetBehaviorState(ENPC_BehaviorState::Alerting);
         }
-    }
-    else if (CurrentState == ENPC_BehaviorState::Patrol || CurrentState == ENPC_BehaviorState::Idle)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Alert);
-    }
-}
-
-void UNPCBehaviorComponent::SetPatrolWaypoints(const TArray<FVector>& Waypoints)
-{
-    PatrolData.WaypointLocations = Waypoints;
-    PatrolData.CurrentWaypointIndex = 0;
-    if (Waypoints.Num() > 0)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Patrol);
-    }
-}
-
-FVector UNPCBehaviorComponent::GetNextWaypointLocation() const
-{
-    if (PatrolData.WaypointLocations.Num() == 0)
-    {
-        return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    }
-    int32 Idx = PatrolData.CurrentWaypointIndex % PatrolData.WaypointLocations.Num();
-    return PatrolData.WaypointLocations[Idx];
-}
-
-void UNPCBehaviorComponent::AdvanceToNextWaypoint()
-{
-    if (PatrolData.WaypointLocations.Num() == 0) return;
-    PatrolData.CurrentWaypointIndex = (PatrolData.CurrentWaypointIndex + 1) % PatrolData.WaypointLocations.Num();
-    bWaitingAtWaypoint = false;
-    WaypointWaitTimer = 0.0f;
-}
-
-void UNPCBehaviorComponent::UpdateThreatLevel(float Delta)
-{
-    Memory.ThreatLevel = FMath::Clamp(Memory.ThreatLevel + Delta, 0.0f, 10.0f);
-}
-
-// === Private tick methods ===
-
-void UNPCBehaviorComponent::TickIdle(float DeltaTime)
-{
-    // Idle: stand still, occasionally look around
-    // Transition to patrol if waypoints exist
-    if (PatrolData.WaypointLocations.Num() > 0)
-    {
-        WaypointWaitTimer += DeltaTime;
-        if (WaypointWaitTimer >= PatrolData.WaitTimeAtWaypoint)
+        else if (AlertLevel > 0.3f)
         {
-            WaypointWaitTimer = 0.0f;
-            SetBehaviorState(ENPC_BehaviorState::Patrol);
+            SetBehaviorState(ENPC_BehaviorState::Investigating);
         }
     }
 }
 
-void UNPCBehaviorComponent::TickPatrol(float DeltaTime)
+void UNPCBehaviorComponent::ForgetOldMemories(float MaxAge)
 {
-    if (PatrolData.WaypointLocations.Num() == 0) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    if (bWaitingAtWaypoint)
+    float CurrentTime = World->GetTimeSeconds();
+    MemoryEntries.RemoveAll([CurrentTime, MaxAge](const FNPC_MemoryEntry& Entry)
     {
-        WaypointWaitTimer += DeltaTime;
-        if (WaypointWaitTimer >= PatrolData.WaitTimeAtWaypoint)
+        return (CurrentTime - Entry.TimeStamp) > MaxAge;
+    });
+
+    // If no player-threat memories remain, reset detection
+    bool bStillDetectsPlayer = false;
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.bIsPlayerThreat)
         {
-            AdvanceToNextWaypoint();
+            bStillDetectsPlayer = true;
+            break;
         }
-        return;
     }
 
-    // Check if we reached the current waypoint
+    if (!bStillDetectsPlayer && bPlayerDetected)
+    {
+        bPlayerDetected = false;
+        if (CurrentState == ENPC_BehaviorState::Alerting || CurrentState == ENPC_BehaviorState::Investigating)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Patrolling);
+        }
+    }
+}
+
+void UNPCBehaviorComponent::UpdateDetection(float DeltaTime)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
     AActor* Owner = GetOwner();
     if (!Owner) return;
 
-    FVector CurrentWP = GetNextWaypointLocation();
-    float DistToWP = FVector::Dist2D(Owner->GetActorLocation(), CurrentWP);
-
-    if (DistToWP <= PatrolData.WaypointAcceptanceRadius)
-    {
-        bWaitingAtWaypoint = true;
-        WaypointWaitTimer = 0.0f;
-    }
-}
-
-void UNPCBehaviorComponent::TickAlert(float DeltaTime)
-{
-    // Alert: scan for player, decide whether to chase or flee
-    float DistToPlayer = GetDistanceToPlayer();
-
-    if (DistToPlayer <= AttackRadius)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Attack);
-    }
-    else if (DistToPlayer <= DetectionRadius)
-    {
-        // Aggressive personalities chase, passive ones flee
-        if (Personality == ENPC_DinoPersonality::TerritorialPatrol ||
-            Personality == ENPC_DinoPersonality::PackHunter ||
-            Personality == ENPC_DinoPersonality::GrazerDefensive)
-        {
-            SetBehaviorState(ENPC_BehaviorState::Chase);
-        }
-        else
-        {
-            SetBehaviorState(ENPC_BehaviorState::Flee);
-        }
-    }
-}
-
-void UNPCBehaviorComponent::TickChase(float DeltaTime)
-{
-    float DistToPlayer = GetDistanceToPlayer();
-
-    if (DistToPlayer <= AttackRadius)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Attack);
-    }
-    else if (DistToPlayer > DetectionRadius * 1.5f)
-    {
-        // Lost the player
-        OnPlayerLost();
-    }
-}
-
-void UNPCBehaviorComponent::TickAttack(float DeltaTime)
-{
-    float DistToPlayer = GetDistanceToPlayer();
-
-    if (DistToPlayer > AttackRadius * 1.5f)
-    {
-        // Player escaped attack range — chase again
-        SetBehaviorState(ENPC_BehaviorState::Chase);
-    }
-}
-
-void UNPCBehaviorComponent::TickFlee(float DeltaTime)
-{
-    float DistToPlayer = GetDistanceToPlayer();
-
-    // Stop fleeing when far enough
-    if (DistToPlayer > DetectionRadius * 2.0f)
-    {
-        Memory.bIsAlerted = false;
-        SetBehaviorState(ENPC_BehaviorState::Idle);
-    }
-}
-
-void UNPCBehaviorComponent::EvaluateStateTransitions()
-{
-    if (CurrentState == ENPC_BehaviorState::Dead) return;
-
-    // Passive herds never attack
-    if (Personality == ENPC_DinoPersonality::PassiveHerd &&
-        CurrentState == ENPC_BehaviorState::Attack)
-    {
-        SetBehaviorState(ENPC_BehaviorState::Flee);
-    }
-}
-
-float UNPCBehaviorComponent::GetDistanceToPlayer() const
-{
-    AActor* Owner = GetOwner();
-    if (!Owner) return TNumericLimits<float>::Max();
-
-    UWorld* World = Owner->GetWorld();
-    if (!World) return TNumericLimits<float>::Max();
-
+    // Find player pawn
     APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (!PlayerPawn) return TNumericLimits<float>::Max();
+    if (!PlayerPawn) return;
 
-    return FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
+    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
+
+    if (DistToPlayer <= DetectionRadius)
+    {
+        float ThreatLevel = 1.0f - (DistToPlayer / DetectionRadius);
+        RecordThreat(PlayerPawn->GetActorLocation(), ThreatLevel, true);
+
+        if (DistToPlayer <= AttackRadius)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Alerting);
+        }
+    }
+}
+
+void UNPCBehaviorComponent::UpdatePatrol(float DeltaTime)
+{
+    if (PatrolWaypoints.Num() == 0) return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    // Check if we should wait at current waypoint
+    if (PatrolWaitTimer > 0.0f)
+    {
+        PatrolWaitTimer -= DeltaTime;
+        return;
+    }
+
+    AActor* TargetWaypoint = PatrolWaypoints[CurrentWaypointIndex];
+    if (!TargetWaypoint) return;
+
+    float DistToWaypoint = FVector::Dist(Owner->GetActorLocation(), TargetWaypoint->GetActorLocation());
+
+    // If close enough to waypoint, advance to next
+    if (DistToWaypoint < 200.0f)
+    {
+        CurrentWaypointIndex = (CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
+        PatrolWaitTimer = PatrolWaitTime;
+    }
+}
+
+void UNPCBehaviorComponent::DecayAlert(float DeltaTime)
+{
+    if (AlertLevel > 0.0f && !bPlayerDetected)
+    {
+        AlertLevel = FMath::Max(0.0f, AlertLevel - DeltaTime * 0.05f);
+    }
 }
