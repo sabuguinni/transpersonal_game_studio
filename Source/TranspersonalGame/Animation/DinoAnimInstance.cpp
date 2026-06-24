@@ -6,14 +6,14 @@
 
 UDinoAnimInstance::UDinoAnimInstance()
 {
-    LocomotionState = EAnim_DinoLocomotionState::Idle;
     Speed = 0.0f;
     Direction = 0.0f;
+    bIsMoving = false;
     bIsAttacking = false;
     bIsDead = false;
-    bIsRoaring = false;
-    WalkSpeed = 200.0f;
-    RunSpeed = 600.0f;
+    LocomotionState = EAnim_DinoLocomotionState::Idle;
+    WalkSpeedThreshold = 50.0f;
+    RunSpeedThreshold = 300.0f;
     OwnerPawn = nullptr;
 }
 
@@ -33,14 +33,25 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         if (!OwnerPawn) return;
     }
 
-    // Get velocity-based speed
+    // Calculate speed from velocity
     FVector Velocity = OwnerPawn->GetVelocity();
-    Speed = Velocity.Size2D();
+    Speed = Velocity.Size();
+    bIsMoving = Speed > WalkSpeedThreshold;
 
-    // Calculate movement direction relative to actor forward
-    FRotator ActorRotation = OwnerPawn->GetActorRotation();
-    FVector LocalVelocity = ActorRotation.UnrotateVector(Velocity);
-    Direction = UKismetMathLibrary::DegAtan2(LocalVelocity.Y, LocalVelocity.X);
+    // Calculate direction relative to actor forward
+    if (bIsMoving)
+    {
+        FRotator ActorRotation = OwnerPawn->GetActorRotation();
+        FVector VelocityNorm = Velocity.GetSafeNormal();
+        Direction = UKismetMathLibrary::DegAtan2(
+            FVector::DotProduct(VelocityNorm, ActorRotation.RotateVector(FVector::RightVector)),
+            FVector::DotProduct(VelocityNorm, ActorRotation.RotateVector(FVector::ForwardVector))
+        );
+    }
+    else
+    {
+        Direction = 0.0f;
+    }
 
     // Determine locomotion state
     if (bIsDead)
@@ -51,15 +62,11 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     {
         LocomotionState = EAnim_DinoLocomotionState::Attack;
     }
-    else if (bIsRoaring)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Roar;
-    }
-    else if (Speed > RunSpeed * 0.5f)
+    else if (Speed >= RunSpeedThreshold)
     {
         LocomotionState = EAnim_DinoLocomotionState::Run;
     }
-    else if (Speed > 10.0f)
+    else if (Speed >= WalkSpeedThreshold)
     {
         LocomotionState = EAnim_DinoLocomotionState::Walk;
     }
