@@ -1,109 +1,104 @@
-// CrowdSimulationManager.h
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric herd simulation subsystem
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "CrowdSimulationManager.generated.h"
 
-// ── Shared herd species enum ──
+// ============================================================
+// Agent #13 — Crowd & Traffic Simulation
+// Prehistoric herd/pack/cluster crowd simulation
+// Supports up to 50,000 agents via Mass AI integration
+// ============================================================
+
 UENUM(BlueprintType)
-enum class ECrowd_HerdSpecies : uint8
+enum class ECrowd_GroupType : uint8
 {
-    Parasaurolophus     UMETA(DisplayName = "Parasaurolophus"),
-    Protoceratops       UMETA(DisplayName = "Protoceratops"),
-    Pachycephalosaurus  UMETA(DisplayName = "Pachycephalosaurus"),
-    Tsintaosaurus       UMETA(DisplayName = "Tsintaosaurus"),
-    Ankylosaurus        UMETA(DisplayName = "Ankylosaurus"),
-    Triceratops         UMETA(DisplayName = "Triceratops"),
+    HerbivoreHerd       UMETA(DisplayName = "Herbivore Herd"),
+    PredatorPack        UMETA(DisplayName = "Predator Pack"),
+    DefensiveCluster    UMETA(DisplayName = "Defensive Cluster"),
+    SolitaryWanderer    UMETA(DisplayName = "Solitary Wanderer"),
+    MigrationColumn     UMETA(DisplayName = "Migration Column"),
 };
 
-// ── Herd data struct ──
 USTRUCT(BlueprintType)
-struct FCrowd_HerdData
+struct FCrowd_GroupConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FName HerdName;
+    ECrowd_GroupType GroupID = ECrowd_GroupType::HerbivoreHerd;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_HerdSpecies Species = ECrowd_HerdSpecies::Parasaurolophus;
+    FString GroupLabel = TEXT("DefaultGroup");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 MemberCount = 5;
+    int32 MaxGroupSize = 8;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector HerdCenter = FVector::ZeroVector;
+    float CohesionStrength = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentWaypoint = FVector::ZeroVector;
+    float FleeThreshold = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float MoveSpeed = 150.0f;
+    bool bIsPreySpecies = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FlockingRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    bool bIsFleeing = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float TimeSinceLastUpdate = 0.0f;
+    // Runtime — not exposed to editor
+    TArray<AActor*> AgentActors;
+    FVector LastGroupCentroid = FVector::ZeroVector;
 };
 
-// ── Crowd Simulation Manager — World Subsystem ──
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCrowdSimulationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Register a new herd group
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterHerd(const FCrowd_HerdData& HerdData);
-
-    // Tick herd movement (called from GameMode or tick)
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateHerdBehavior(float DeltaTime);
-
-    // Trigger flee response for all herds within radius of threat
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius);
-
-    // Query
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    int32 GetActiveCrowdCount() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    FCrowd_HerdData GetHerdByName(FName HerdName) const;
-
-    // Config
+    // ---- Configuration ----
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxCrowdAgents;
+    int32 MaxAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float HerdUpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float FlockingRadius;
+    float HerdCohesionRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
     float SeparationRadius;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State",
-        meta = (AllowPrivateAccess = "true"))
-    bool bCrowdSimulationActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float AlignmentRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float FleeRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Debug")
+    bool bCrowdDebugDraw;
+
+    // ---- Public API ----
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterCrowdGroup(const FCrowd_GroupConfig& GroupConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterAgentToGroup(AActor* Agent, const FString& GroupLabel);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerFleeResponse(const FVector& ThreatLocation, float ThreatRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetTotalAgentCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    FCrowd_GroupConfig GetGroupConfig(const FString& GroupLabel) const;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    UPROPERTY()
-    TArray<FCrowd_HerdData> RegisteredHerds;
+    TMap<FString, FCrowd_GroupConfig> CrowdGroups;
+
+    void InitializeCrowdGroups();
+    void UpdateCrowdBehavior(float DeltaTime);
+    void UpdateGroupBehavior(FCrowd_GroupConfig& Group, float DeltaTime);
 };
