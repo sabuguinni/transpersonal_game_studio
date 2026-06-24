@@ -2,155 +2,109 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "Components/BoxComponent.h"
+#include "SharedTypes.h"
 #include "NarrativeDialogueSystem.generated.h"
 
 // ============================================================
 // Narrative & Dialogue System — Agent #15
-// Prehistoric survival game dialogue and quest narrative types
+// Prehistoric survival dialogue trigger and zone system.
+// Drives story beats via proximity triggers in the world.
 // ============================================================
 
+/** Tone of a dialogue line — affects subtitle colour and audio cue */
 UENUM(BlueprintType)
 enum class ENarr_DialogueTone : uint8
 {
-    Urgent       UMETA(DisplayName = "Urgent"),
-    Cautious     UMETA(DisplayName = "Cautious"),
-    Informative  UMETA(DisplayName = "Informative"),
-    Warning      UMETA(DisplayName = "Warning"),
-    Neutral      UMETA(DisplayName = "Neutral")
+    Neutral     UMETA(DisplayName = "Neutral"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Discovery   UMETA(DisplayName = "Discovery"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Calm        UMETA(DisplayName = "Calm"),
 };
 
-UENUM(BlueprintType)
-enum class ENarr_NPCRole : uint8
-{
-    TribalElder  UMETA(DisplayName = "Tribal Elder"),
-    Scout        UMETA(DisplayName = "Scout"),
-    Hunter       UMETA(DisplayName = "Hunter"),
-    Craftsman    UMETA(DisplayName = "Craftsman"),
-    Survivor     UMETA(DisplayName = "Survivor")
-};
-
+/** A single line of in-world dialogue */
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SpeakerID;
+    FText SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString LineText;
+    FText LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTone Tone;
+    ENarr_DialogueTone Tone = ENarr_DialogueTone::Neutral;
 
+    /** Seconds to display this line before advancing */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration;
-
-    FNarr_DialogueLine()
-        : SpeakerID(TEXT("Unknown"))
-        , LineText(TEXT(""))
-        , Tone(ENarr_DialogueTone::Neutral)
-        , DisplayDuration(4.0f)
-    {}
+    float DisplayDuration = 4.0f;
 };
 
+/** A complete dialogue sequence (multiple lines) */
 USTRUCT(BlueprintType)
 struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SequenceID;
+    FName SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
+    /** Can this sequence repeat if the player re-enters the zone? */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsRepeatable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString RequiredQuestState;
-
-    FNarr_DialogueSequence()
-        : SequenceID(TEXT(""))
-        , bIsRepeatable(false)
-        , RequiredQuestState(TEXT(""))
-    {}
+    bool bRepeatable = false;
 };
 
-USTRUCT(BlueprintType)
-struct FNarr_NPCProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NPCID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString DisplayName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCRole Role;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueSequence> DialogueTrees;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bHasBeenMet;
-
-    FNarr_NPCProfile()
-        : NPCID(TEXT(""))
-        , DisplayName(TEXT("Unknown"))
-        , Role(ENarr_NPCRole::Survivor)
-        , bHasBeenMet(false)
-    {}
-};
-
-// ============================================================
-// ANarr_DialogueTrigger — proximity-based dialogue trigger actor
-// ============================================================
+/**
+ * ANarr_DialogueTriggerActor
+ * Placed in the world. When the player enters the box volume,
+ * it fires the assigned dialogue sequence via the NarrativeManager.
+ */
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Narrative Dialogue Trigger"))
-class TRANSPERSONALGAME_API ANarr_DialogueTrigger : public AActor
+class TRANSPERSONALGAME_API ANarr_DialogueTriggerActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueTrigger();
+    ANarr_DialogueTriggerActor();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative",
-        meta = (AllowPrivateAccess = "true"))
-    USphereComponent* TriggerSphere;
-
+    /** The dialogue sequence to play when triggered */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_NPCProfile NPCProfile;
+    FNarr_DialogueSequence DialogueSequence;
 
+    /** Trigger volume radius (box half-extent in cm) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float InteractionRadius;
+    FVector TriggerExtent = FVector(300.f, 300.f, 200.f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bTriggerOnce;
+    /** Has this trigger already fired? */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
+    bool bHasFired = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bHasTriggered;
-
+    /** Activate the dialogue sequence manually (e.g. from Blueprint) */
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(AActor* Interactor);
+    void ActivateDialogue();
 
+    /** Reset so the trigger can fire again */
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetNextDialogueLine();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void ResetDialogue();
+    void ResetTrigger();
 
 protected:
     virtual void BeginPlay() override;
 
-private:
-    int32 CurrentLineIndex;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+              meta = (AllowPrivateAccess = "true"))
+    UBoxComponent* TriggerBox;
 
     UFUNCTION()
-    void OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+    void OnPlayerEntered(UPrimitiveComponent* OverlappedComp,
+                         AActor* OtherActor,
+                         UPrimitiveComponent* OtherComp,
+                         int32 OtherBodyIndex,
+                         bool bFromSweep,
+                         const FHitResult& SweepResult);
 };
