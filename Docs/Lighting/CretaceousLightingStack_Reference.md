@@ -1,111 +1,142 @@
 # Cretaceous Lighting Stack — Agent #08 Reference
-## Cycle: PROD_CYCLE_AUTO_20260624_003
+## PROD_CYCLE_AUTO_20260624_005
 
-### Overview
-Atomic lighting rebuild applied to `/Game/Maps/MinPlayableMap` every cycle.
-All components configured in a single `ue5_execute` Python script to prevent
-intermediate degenerate states.
+### Atomic Lighting Configuration (Applied Each Cycle)
+
+This document captures the complete Cretaceous lighting stack applied to `/Game/Maps/MinPlayableMap`.
 
 ---
 
-## Stack Components
+## 1. Lumen Global Illumination (15 Console Variables)
 
-### 1. Sanity Guard (runs first)
-| Check | Action |
-|-------|--------|
-| Sun pitch ≥ 0 | Force pitch = -45°, yaw = 45°, intensity = 10 |
-| Fog count = 0 | Spawn ExponentialHeightFog |
-| Fog count > 1 | Destroy extras, keep 1 |
-| Sky LUT | `r.SkyAtmosphere.FastSkyLUT 1` |
-
-### 2. Lumen GI Console Vars
 ```
 r.Lumen.Reflections.Allow 1
 r.Lumen.GlobalIllumination.Allow 1
-r.DynamicGlobalIlluminationMethod 1
-r.ReflectionMethod 1
 r.Lumen.HardwareRayTracing 0
 r.Lumen.TraceMeshSDFs 1
-r.Lumen.ScreenProbeGather.RadianceCache.NumProbesToTraceBudget 200
 r.Lumen.DiffuseIndirect.Allow 1
+r.Lumen.Reflections.ScreenSpaceReconstruction 1
+r.Lumen.GlobalIllumination.MaxTraceDistance 8000
+r.Lumen.Scene.SurfaceCacheResolution 1.0
+r.Lumen.GlobalIllumination.SmoothBias 0.2
 r.Lumen.Reflections.MaxRoughnessToTrace 0.4
-r.Lumen.TranslucencyReflections.FrontLayer.Allow 1
+r.Lumen.ScreenProbeGather.FullResolutionJitterWidth 1
+r.Lumen.ScreenProbeGather.TracingOctahedronResolution 8
 r.VolumetricFog 1
 r.VolumetricFog.GridPixelSize 8
 r.VolumetricFog.GridSizeZ 64
 ```
 
-### 3. DirectionalLight (Sun)
+---
+
+## 2. Directional Light (Sun)
+
 | Property | Value |
-|----------|-------|
+|---|---|
 | Pitch | -42° |
-| Yaw | 50° |
+| Yaw | 45° |
 | Intensity | 12.0 lux |
-| Color | RGB(1.0, 0.92, 0.78) — warm golden |
+| Color | RGB(255, 235, 180) — warm golden |
 | atmosphere_sun_light | True |
 | cast_shadows | True |
-| dynamic_shadow_distance_movable_light | 50,000 cm |
+| dynamic_shadow_distance_movable_light | 20000 cm |
+| shadow_amount | 0.85 |
 
-### 4. SkyAtmosphere
-- Spawned at origin if missing
-- Label: `SkyAtmosphere_Cretaceous`
-- Works with DirectionalLight atmosphere_sun_light=True
+**Artistic intent:** Cretaceous mid-afternoon golden light. Warm amber tones suggest dense humid atmosphere with high particulate content. Long shadows at -42° pitch create dramatic terrain definition.
 
-### 5. SkyLight
+---
+
+## 3. Sky Atmosphere
+
+- Actor: `SkyAtmosphere_Cretaceous`
+- Default UE5 SkyAtmosphere component
+- Paired with DirectionalLight (atmosphere_sun_light=True) for physically-based sky scattering
+
+---
+
+## 4. Sky Light
+
 | Property | Value |
-|----------|-------|
+|---|---|
 | Intensity | 1.2 |
 | real_time_capture | True |
-- Required for SkyAtmosphere to render correctly in SceneCapture2D
 
-### 6. ExponentialHeightFog
+**Note:** real_time_capture=True ensures SkyLight samples the SkyAtmosphere dynamically, preventing black sky in SceneCapture2D screenshots.
+
+---
+
+## 5. Exponential Height Fog
+
 | Property | Value |
-|----------|-------|
-| fog_density | 0.03 |
-| fog_inscattering_color | RGB(0.55, 0.72, 0.85) — blue-green atmospheric |
+|---|---|
+| fog_density | 0.04 |
 | fog_height_falloff | 0.2 |
-| start_distance | 200 cm |
+| fog_inscattering_color | LinearColor(0.45, 0.55, 0.7) — cool blue-grey |
 | fog_max_opacity | 0.85 |
+| start_distance | 200 cm |
+| fog_cutoff_distance | 60000 cm |
 | volumetric_fog | True |
-| volumetric_fog_scattering_distribution | 0.2 |
+| volumetric_fog_scattering_distribution | 0.3 |
+| volumetric_fog_albedo | LinearColor(0.75, 0.8, 0.85) |
 | volumetric_fog_extinction_scale | 1.0 |
+| volumetric_fog_distance | 6000 cm |
 
-### 7. PostProcessVolume
+**Artistic intent:** Dense Cretaceous atmosphere. Volumetric fog enables god rays from DirectionalLight. Blue-grey inscattering colour contrasts with warm sun for depth separation.
+
+---
+
+## 6. Post Process Volume (Global, Unbound)
+
 | Property | Value |
-|----------|-------|
-| infinite_extent | True |
+|---|---|
 | auto_exposure_method | AEM_MANUAL |
 | auto_exposure_bias | 1.0 |
+| auto_exposure_min_brightness | 0.5 |
+| auto_exposure_max_brightness | 2.0 |
 | bloom_intensity | 0.4 |
+| bloom_threshold | 1.0 |
 | ambient_occlusion_intensity | 0.6 |
-| color_saturation | (1.1, 1.05, 0.95, 1.0) — warm |
-| color_contrast | (1.05, 1.02, 0.98, 1.0) |
+| ambient_occlusion_radius | 120 cm |
+| color_saturation | Vector4(1.1, 1.05, 0.95, 1.0) |
+| color_contrast | Vector4(1.05, 1.0, 0.95, 1.0) |
+| color_gamma | Vector4(0.98, 0.97, 0.95, 1.0) |
+
+**Critical:** AEM_MANUAL prevents auto-exposure from darkening the scene. Fixed bias=1.0 ensures consistent brightness across all viewing conditions.
 
 ---
 
-## Ambient Audio References (Freesound)
+## 7. Sanity Guard (Runs Every Cycle)
 
-| ID | Name | Duration | Use |
-|----|------|----------|-----|
-| 749737 | denseforestwithbirds | 101s | Jungle layer A — dense canopy birds |
-| 583930 | jungle forest 02 | 121s | Jungle layer B — Mayan pyramid recording |
-
-Preview URLs:
-- https://cdn.freesound.org/previews/749/749737_16219462-hq.mp3
-- https://cdn.freesound.org/previews/583/583930_2978883-hq.mp3
+Invariants enforced before any lighting changes:
+1. **Sun pitch < 0** — DirectionalLight must point downward
+2. **Exactly 1 ExponentialHeightFog** — duplicates removed automatically
+3. **r.SkyAtmosphere.FastSkyLUT 1** — prevents render warnings
+4. **Map saved** after every modification
 
 ---
 
-## Known Issues
-- `generate_image` returning 401 (API key issue) — fallback to `search_sounds` applied
-- SceneCapture2D black screen: requires SkyLight with `real_time_capture=True` (see Brain Memory)
-- PostProcessVolume AEM_MANUAL critical to prevent auto-exposure blackout
+## Artistic Direction: Roger Deakins Principle
+
+> "Light doesn't illuminate — light means."
+
+The Cretaceous lighting palette communicates:
+- **Danger** — warm amber sun suggests heat, predator activity
+- **Scale** — atmospheric haze creates depth, makes dinosaurs feel massive
+- **Isolation** — blue-grey fog at distance separates player from horizon
+- **Authenticity** — physically-based atmosphere, not stylised
+
+The player should never consciously notice the lighting. They should feel the heat, the humidity, the weight of a world 65 million years before their time.
 
 ---
 
-## Handoff to Agent #09 (Character Artist)
-- Lighting stack is stable and Cretaceous-tuned
-- Warm golden sun at -42° pitch provides strong directional shadows for character rendering
-- Volumetric fog adds depth for character silhouettes
-- AO intensity 0.6 grounds characters to terrain naturally
-- SkyLight real_time_capture ensures characters lit correctly by sky dome
+## Dependency Chain
+
+```
+Agent #07 (Architecture) → Agent #08 (Lighting) → Agent #09 (Character Artist)
+```
+
+Agent #09 should note: character skin shaders will be lit by warm directional + cool skylight bounce. MetaHuman skin should be calibrated for this dual-tone lighting environment.
+
+---
+
+*Generated by Agent #08 — Lighting & Atmosphere | Transpersonal Game Studio*
