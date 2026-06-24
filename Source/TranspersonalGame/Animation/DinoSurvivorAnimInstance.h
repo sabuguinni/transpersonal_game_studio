@@ -6,93 +6,103 @@
 
 /**
  * Animation instance for the prehistoric survivor player character.
- * Drives locomotion blend space (idle/walk/run), jump, crouch, and combat states.
+ * Drives the animation state machine: Idle → Walk → Run → Crouch → Jump → Combat.
+ * Supports foot IK for uneven terrain adaptation.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivorAnimInstance : public UAnimInstance
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UDinoSurvivorAnimInstance();
+    UDinoSurvivorAnimInstance();
 
-	virtual void NativeInitializeAnimation() override;
-	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-	// ── Locomotion ──────────────────────────────────────────────────────────
+    // ── Locomotion State ──
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float GroundSpeed;
 
-	/** Ground speed (cm/s) — drives the locomotion blend space X axis */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	float GroundSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float GroundSpeedNormalized;
 
-	/** Direction offset (-180..180) relative to actor forward — blend space Y axis */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	float MovementDirection;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsMoving;
 
-	/** True when the character velocity has a meaningful horizontal component */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsMoving;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsFalling;
 
-	/** True when the character is in the air (falling or jumping) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsInAir;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsCrouching;
 
-	/** True when the character is crouching */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsCrouching;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsSprinting;
 
-	/** True when the character is sprinting (speed > SprintThreshold) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsSprinting;
+    // ── Direction ──
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Direction")
+    float MovementDirection;
 
-	// ── Survival State ───────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Direction")
+    float LeanAngle;
 
-	/** 0-100 stamina — affects animation speed scale when low */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	float Stamina;
+    // ── Survival State ──
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float StaminaNormalized;
 
-	/** 0-100 health — triggers limping additive layer below LimpThreshold */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	float Health;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    bool bIsExhausted;
 
-	/** True when health < LimpHealthThreshold — activates limp additive */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	bool bIsLimping;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    bool bIsInjured;
 
-	/** Fear level 0-100 — drives tremor additive at high values */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	float FearLevel;
+    // ── Combat State ──
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    bool bIsInCombat;
 
-	// ── Combat ───────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    bool bIsAiming;
 
-	/** True when the character is holding a weapon (spear, club, etc.) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat", meta = (AllowPrivateAccess = "true"))
-	bool bIsArmed;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    float AimPitch;
 
-	/** True during an active attack montage */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat", meta = (AllowPrivateAccess = "true"))
-	bool bIsAttacking;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    float AimYaw;
 
-	// ── Thresholds ───────────────────────────────────────────────────────────
+    // ── Foot IK ──
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector LeftFootIKLocation;
 
-	/** Speed above which bIsSprinting becomes true (cm/s) */
-	UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-	float SprintThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector RightFootIKLocation;
 
-	/** Health below which bIsLimping becomes true */
-	UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-	float LimpHealthThreshold;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FRotator LeftFootIKRotation;
 
-	/** Minimum speed to consider the character as moving */
-	UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-	float MinMoveSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FRotator RightFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    float IKAlpha;
+
+    // ── Speed thresholds ──
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float WalkSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float RunSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float SprintSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float IKTraceDistance;
 
 private:
-	/** Cached reference to the owning character movement component */
-	UPROPERTY()
-	class UCharacterMovementComponent* CachedMovementComp;
+    void UpdateLocomotion();
+    void UpdateFootIK();
+    void SolveFootIK(FName SocketName, FVector& OutLocation, FRotator& OutRotation);
 
-	/** Cached reference to the owning TranspersonalCharacter */
-	UPROPERTY()
-	class ATranspersonalCharacter* CachedCharacter;
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
 };
