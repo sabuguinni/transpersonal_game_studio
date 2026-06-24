@@ -1,208 +1,200 @@
-// NarrativeDialogueManager.cpp — Agent #15 Narrative & Dialogue
-// Implements dialogue trigger system for MinPlayableMap survival game
-
 #include "NarrativeDialogueManager.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
 ANarrativeDialogueManager::ANarrativeDialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    bDialogueActive = false;
-    CurrentLineIndex = 0;
-    ActiveSequenceID = NAME_None;
-    PlayerHungerThreshold = 30.0f;
-    PlayerDangerRadius = 800.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    bIsDialoguePlaying = false;
+    DialogueTimeRemaining = 0.0f;
+    ProximityCheckInterval = 0.5f;
+    TimeSinceLastProximityCheck = 0.0f;
+    CachedPlayerPawn = nullptr;
 }
 
 void ANarrativeDialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultDialogues();
+    InitializeDefaultZones();
+    CachedPlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
 }
 
 void ANarrativeDialogueManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-}
 
-void ANarrativeDialogueManager::InitializeDefaultDialogues()
-{
-    BuildCampDialogue();
-    BuildRiverDialogue();
-    BuildPredatorDialogue();
-}
+    // Update dialogue timer
+    UpdateDialogueTimer(DeltaTime);
 
-void ANarrativeDialogueManager::BuildCampDialogue()
-{
-    FNarr_DialogueSequence CampSeq;
-    CampSeq.SequenceID = FName("Camp_Arrival");
-    CampSeq.TriggerType = ENarr_DialogueTriggerType::Camp;
-    CampSeq.bHasPlayed = false;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Elder");
-    Line1.LineText = TEXT("You return. Good. The pack moved east — three kills since dawn.");
-    Line1.DisplayDuration = 4.0f;
-    Line1.TriggerContext = ENarr_DialogueTriggerType::Camp;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Elder");
-    Line2.LineText = TEXT("Eat. Rest. Tomorrow we track the herd before the raptors take the valley.");
-    Line2.DisplayDuration = 4.5f;
-    Line2.TriggerContext = ENarr_DialogueTriggerType::Camp;
-
-    FNarr_DialogueLine Line3;
-    Line3.SpeakerName = TEXT("Hunter");
-    Line3.LineText = TEXT("I found tracks near the river. Big ones. Bigger than the last season.");
-    Line3.DisplayDuration = 4.0f;
-    Line3.TriggerContext = ENarr_DialogueTriggerType::Camp;
-
-    CampSeq.Lines.Add(Line1);
-    CampSeq.Lines.Add(Line2);
-    CampSeq.Lines.Add(Line3);
-    DialogueLibrary.Add(CampSeq);
-}
-
-void ANarrativeDialogueManager::BuildRiverDialogue()
-{
-    FNarr_DialogueSequence RiverSeq;
-    RiverSeq.SequenceID = FName("River_Warning");
-    RiverSeq.TriggerType = ENarr_DialogueTriggerType::River;
-    RiverSeq.bHasPlayed = false;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Scout");
-    Line1.LineText = TEXT("Careful. The river crossing is exposed. Raptors hunt the banks at dusk.");
-    Line1.DisplayDuration = 4.0f;
-    Line1.TriggerContext = ENarr_DialogueTriggerType::River;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Scout");
-    Line2.LineText = TEXT("Cross fast. Stay low. Do not run — movement triggers the chase response.");
-    Line2.DisplayDuration = 4.5f;
-    Line2.TriggerContext = ENarr_DialogueTriggerType::River;
-
-    RiverSeq.Lines.Add(Line1);
-    RiverSeq.Lines.Add(Line2);
-    DialogueLibrary.Add(RiverSeq);
-}
-
-void ANarrativeDialogueManager::BuildPredatorDialogue()
-{
-    FNarr_DialogueSequence PredSeq;
-    PredSeq.SequenceID = FName("Predator_Territory");
-    PredSeq.TriggerType = ENarr_DialogueTriggerType::Predator;
-    PredSeq.bHasPlayed = false;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerName = TEXT("Elder");
-    Line1.LineText = TEXT("This is its territory. The large one. It has hunted here for three seasons.");
-    Line1.DisplayDuration = 5.0f;
-    Line1.TriggerContext = ENarr_DialogueTriggerType::Predator;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerName = TEXT("Elder");
-    Line2.LineText = TEXT("We do not fight it. We survive around it. Learn its patterns. Use them.");
-    Line2.DisplayDuration = 5.0f;
-    Line2.TriggerContext = ENarr_DialogueTriggerType::Predator;
-
-    FNarr_DialogueLine Line3;
-    Line3.SpeakerName = TEXT("Hunter");
-    Line3.LineText = TEXT("It feeds at the ridge at midday. That is our window. Move then, not before.");
-    Line3.DisplayDuration = 4.5f;
-    Line3.TriggerContext = ENarr_DialogueTriggerType::Predator;
-
-    PredSeq.Lines.Add(Line1);
-    PredSeq.Lines.Add(Line2);
-    PredSeq.Lines.Add(Line3);
-    DialogueLibrary.Add(PredSeq);
-}
-
-void ANarrativeDialogueManager::TriggerDialogueSequence(FName SequenceID)
-{
-    if (bDialogueActive)
+    // Proximity check at interval
+    TimeSinceLastProximityCheck += DeltaTime;
+    if (TimeSinceLastProximityCheck >= ProximityCheckInterval)
     {
-        return;
-    }
-
-    FNarr_DialogueSequence* Seq = FindSequenceByID(SequenceID);
-    if (!Seq || Seq->bHasPlayed || Seq->Lines.Num() == 0)
-    {
-        return;
-    }
-
-    bDialogueActive = true;
-    ActiveSequenceID = SequenceID;
-    CurrentLineIndex = 0;
-}
-
-void ANarrativeDialogueManager::AdvanceDialogue()
-{
-    if (!bDialogueActive)
-    {
-        return;
-    }
-
-    FNarr_DialogueSequence* Seq = FindSequenceByID(ActiveSequenceID);
-    if (!Seq)
-    {
-        EndDialogue();
-        return;
-    }
-
-    CurrentLineIndex++;
-    if (CurrentLineIndex >= Seq->Lines.Num())
-    {
-        EndDialogue();
-        Seq->bHasPlayed = true;
-    }
-}
-
-void ANarrativeDialogueManager::EndDialogue()
-{
-    bDialogueActive = false;
-    CurrentLineIndex = 0;
-    ActiveSequenceID = NAME_None;
-}
-
-FNarr_DialogueLine ANarrativeDialogueManager::GetCurrentLine() const
-{
-    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
-    {
-        if (Seq.SequenceID == ActiveSequenceID)
+        TimeSinceLastProximityCheck = 0.0f;
+        if (CachedPlayerPawn)
         {
-            if (CurrentLineIndex >= 0 && CurrentLineIndex < Seq.Lines.Num())
+            CheckProximityTriggers(CachedPlayerPawn->GetActorLocation());
+        }
+    }
+}
+
+void ANarrativeDialogueManager::TriggerDialogueLine(const FNarr_DialogueLine& Line)
+{
+    if (bIsDialoguePlaying && DialogueTimeRemaining > 1.0f)
+    {
+        // Don't interrupt current line unless it's nearly done
+        return;
+    }
+
+    CurrentActiveLine = Line;
+    bIsDialoguePlaying = true;
+    DialogueTimeRemaining = Line.DisplayDuration;
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] %s: %s"), *Line.CharacterName, *Line.LineText);
+}
+
+void ANarrativeDialogueManager::CheckProximityTriggers(FVector PlayerLocation)
+{
+    for (FNarr_DialogueZone& Zone : DialogueZones)
+    {
+        if (Zone.bOneShot && Zone.bHasTriggered)
+        {
+            continue;
+        }
+
+        float Distance = FVector::Dist(PlayerLocation, Zone.ZoneLocation);
+        if (Distance <= Zone.TriggerRadius && Zone.DialogueLines.Num() > 0)
+        {
+            // Pick first unplayed line or random
+            const FNarr_DialogueLine& Line = Zone.DialogueLines[0];
+            TriggerDialogueLine(Line);
+
+            if (Zone.bOneShot)
             {
-                return Seq.Lines[CurrentLineIndex];
+                Zone.bHasTriggered = true;
             }
         }
     }
-    return FNarr_DialogueLine();
 }
 
-bool ANarrativeDialogueManager::IsDialogueActive() const
+void ANarrativeDialogueManager::RegisterDialogueZone(const FNarr_DialogueZone& Zone)
 {
-    return bDialogueActive;
-}
-
-void ANarrativeDialogueManager::RegisterTriggerZone(ENarr_DialogueTriggerType TriggerType, FVector Location)
-{
-    // Trigger zone registration — Blueprint or C++ callers can register zones at runtime
-    // Maps TriggerType to world location for proximity checks
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered trigger zone type=%d at (%f,%f,%f)"),
-        (int32)TriggerType, Location.X, Location.Y, Location.Z);
-}
-
-FNarr_DialogueSequence* ANarrativeDialogueManager::FindSequenceByID(FName SequenceID)
-{
-    for (FNarr_DialogueSequence& Seq : DialogueLibrary)
+    // Check for duplicate zone ID
+    for (const FNarr_DialogueZone& Existing : DialogueZones)
     {
-        if (Seq.SequenceID == SequenceID)
+        if (Existing.ZoneID == Zone.ZoneID)
         {
-            return &Seq;
+            UE_LOG(LogTemp, Warning, TEXT("[Narrative] Zone %s already registered"), *Zone.ZoneID);
+            return;
         }
     }
-    return nullptr;
+    DialogueZones.Add(Zone);
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Registered zone: %s at %s"), *Zone.ZoneID, *Zone.ZoneLocation.ToString());
+}
+
+void ANarrativeDialogueManager::ClearActiveDialogue()
+{
+    bIsDialoguePlaying = false;
+    DialogueTimeRemaining = 0.0f;
+    CurrentActiveLine = FNarr_DialogueLine();
+}
+
+void ANarrativeDialogueManager::PopulateDefaultDialogueZones()
+{
+    DialogueZones.Empty();
+    InitializeDefaultZones();
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Populated %d default dialogue zones"), DialogueZones.Num());
+}
+
+void ANarrativeDialogueManager::InitializeDefaultZones()
+{
+    // === ZONE 1: T-Rex Valley — Tracker Elder warning ===
+    {
+        FNarr_DialogueZone Zone;
+        Zone.ZoneID = TEXT("TRex_Valley_Warning");
+        Zone.ZoneLocation = FVector(2000.0f, 2500.0f, 200.0f);
+        Zone.TriggerRadius = 800.0f;
+        Zone.bOneShot = true;
+
+        FNarr_DialogueLine Line;
+        Line.CharacterName = TEXT("Tracker Elder");
+        Line.LineText = TEXT("The great beast moves through the valley below. See how it pauses, lifts its head, tests the wind. It knows we are here. Stay low. Stay still. We hunt only when the moment is right — not before.");
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344157638_Tracker_Elder.mp3");
+        Line.DisplayDuration = 13.0f;
+        Line.TriggerType = ENarr_DialogueTriggerType::DinoEncounter;
+        Zone.DialogueLines.Add(Line);
+
+        DialogueZones.Add(Zone);
+    }
+
+    // === ZONE 2: Raptor River — Tribe Leader warning ===
+    {
+        FNarr_DialogueZone Zone;
+        Zone.ZoneID = TEXT("Raptor_River_Warning");
+        Zone.ZoneLocation = FVector(-1500.0f, 3000.0f, 200.0f);
+        Zone.TriggerRadius = 600.0f;
+        Zone.bOneShot = true;
+
+        FNarr_DialogueLine Line;
+        Line.CharacterName = TEXT("Tribe Leader Kael");
+        Line.LineText = TEXT("We lost two hunters at the river crossing. The raptors hunt in packs — they are smart, they flank, they wait. If you go alone, you die alone. We move together or we do not move at all.");
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344176100_Tribe_Leader_Kael.mp3");
+        Line.DisplayDuration = 13.0f;
+        Line.TriggerType = ENarr_DialogueTriggerType::DinoEncounter;
+        Zone.DialogueLines.Add(Line);
+
+        DialogueZones.Add(Zone);
+    }
+
+    // === ZONE 3: Camp Entrance — Elder narrator lore ===
+    {
+        FNarr_DialogueZone Zone;
+        Zone.ZoneID = TEXT("Camp_Entrance_Lore");
+        Zone.ZoneLocation = FVector(0.0f, 0.0f, 200.0f);
+        Zone.TriggerRadius = 500.0f;
+        Zone.bOneShot = true;
+
+        FNarr_DialogueLine Line;
+        Line.CharacterName = TEXT("Elder Narrator");
+        Line.LineText = TEXT("This place was not always safe. Before the great hunt, before we learned to read the signs — the prints in the mud, the broken branches, the silence of birds — many of our people did not return. The land teaches those who listen. The rest it buries.");
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344199704_Elder_Narrator.mp3");
+        Line.DisplayDuration = 17.0f;
+        Line.TriggerType = ENarr_DialogueTriggerType::ProximityEnter;
+        Zone.DialogueLines.Add(Line);
+
+        DialogueZones.Add(Zone);
+    }
+
+    // === ZONE 4: Escape Route — Scout Mira urgent ===
+    {
+        FNarr_DialogueZone Zone;
+        Zone.ZoneID = TEXT("TRex_Escape_Route");
+        Zone.ZoneLocation = FVector(1500.0f, 1000.0f, 200.0f);
+        Zone.TriggerRadius = 400.0f;
+        Zone.bOneShot = false; // Can retrigger — it's an escape route
+
+        FNarr_DialogueLine Line;
+        Line.CharacterName = TEXT("Scout Mira");
+        Line.LineText = TEXT("Move. Now. Do not look back. The T-Rex tracks scent, not sight — if we reach the river, the water breaks the trail. Run!");
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344208387_Scout_Mira.mp3");
+        Line.DisplayDuration = 8.0f;
+        Line.TriggerType = ENarr_DialogueTriggerType::DinoEncounter;
+        Zone.DialogueLines.Add(Line);
+
+        DialogueZones.Add(Zone);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Initialized %d dialogue zones"), DialogueZones.Num());
+}
+
+void ANarrativeDialogueManager::UpdateDialogueTimer(float DeltaTime)
+{
+    if (!bIsDialoguePlaying) return;
+
+    DialogueTimeRemaining -= DeltaTime;
+    if (DialogueTimeRemaining <= 0.0f)
+    {
+        ClearActiveDialogue();
+    }
 }
