@@ -1,224 +1,141 @@
+// AudioSystemManager.cpp
+// Agent #16 — Audio Agent
+// Adaptive audio zone system implementation
+
 #include "AudioSystemManager.h"
-#include "GameFramework/PlayerController.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 
-AAudio_SystemManager::AAudio_SystemManager()
+// ============================================================
+// UAudio_ZoneTriggerComponent
+// ============================================================
+
+UAudio_ZoneTriggerComponent::UAudio_ZoneTriggerComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    SetSphereRadius(ZoneConfig.TriggerRadius);
+    SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+}
+
+void UAudio_ZoneTriggerComponent::OnPlayerEnterZone(AActor* Player)
+{
+    if (!Player) return;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone type %d"),
+        static_cast<int32>(ZoneConfig.ZoneType));
+}
+
+void UAudio_ZoneTriggerComponent::OnPlayerExitZone(AActor* Player)
+{
+    if (!Player) return;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone type %d"),
+        static_cast<int32>(ZoneConfig.ZoneType));
+}
+
+// ============================================================
+// AAudio_ZoneActor
+// ============================================================
+
+AAudio_ZoneActor::AAudio_ZoneActor()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 Hz — sufficient for audio zone detection
 
-    // Pre-register the four core audio zones matching the MinPlayableMap layout
-    FAudio_ZoneData TRexZone;
-    TRexZone.Location   = FVector(2000.0f, 2500.0f, 300.0f);
-    TRexZone.Radius     = 2000.0f;
-    TRexZone.ZoneType   = EAudio_ZoneType::TRexTerritory;
-    TRexZone.Volume     = 1.0f;
-    RegisteredZones.Add(TRexZone);
+    TriggerZone = CreateDefaultSubobject<UAudio_ZoneTriggerComponent>(TEXT("TriggerZone"));
+    RootComponent = TriggerZone;
 
-    FAudio_ZoneData RaptorZone;
-    RaptorZone.Location  = FVector(2400.0f, 2500.0f, 300.0f);
-    RaptorZone.Radius    = 1500.0f;
-    RaptorZone.ZoneType  = EAudio_ZoneType::RaptorPack;
-    RaptorZone.Volume    = 0.9f;
-    RegisteredZones.Add(RaptorZone);
-
-    FAudio_ZoneData RiverZone;
-    RiverZone.Location  = FVector(-500.0f, 1000.0f, 200.0f);
-    RiverZone.Radius    = 1800.0f;
-    RiverZone.ZoneType  = EAudio_ZoneType::RiverAmbience;
-    RiverZone.Volume    = 0.8f;
-    RegisteredZones.Add(RiverZone);
-
-    FAudio_ZoneData ForestZone;
-    ForestZone.Location = FVector(1000.0f, 1000.0f, 300.0f);
-    ForestZone.Radius   = 2500.0f;
-    ForestZone.ZoneType = EAudio_ZoneType::ForestCanopy;
-    ForestZone.Volume   = 0.7f;
-    RegisteredZones.Add(ForestZone);
-
-    // Pre-register ElevenLabs TTS voice lines (generated in production cycles)
-    FAudio_VoiceLine JungleSilenceHint;
-    JungleSilenceHint.LineID    = "HINT_JUNGLE_SILENCE";
-    JungleSilenceHint.Text      = "The jungle is never silent. Every sound tells you something.";
-    JungleSilenceHint.AudioURL  = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782323776353_Narrator_Survival.mp3";
-    JungleSilenceHint.Duration  = 13.0f;
-    VoiceLines.Add(JungleSilenceHint);
-
-    FAudio_VoiceLine DangerAlert;
-    DangerAlert.LineID   = "ALERT_PREDATOR_NORTH";
-    DangerAlert.Text     = "Danger. Large predator detected to the north.";
-    DangerAlert.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782323807738_Narrator_Alert.mp3";
-    DangerAlert.Duration = 9.0f;
-    VoiceLines.Add(DangerAlert);
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
 }
 
-void AAudio_SystemManager::BeginPlay()
+void AAudio_ZoneActor::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentDangerLevel = 0.0f;
-    CurrentActiveZone  = EAudio_ZoneType::None;
-    ZoneCheckTimer     = 0.0f;
-    VoiceLineCooldown  = 0.0f;
+
+    if (TriggerZone)
+    {
+        TriggerZone->SetSphereRadius(ZoneConfig.TriggerRadius);
+        TriggerZone->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::HandleBeginOverlap);
+        TriggerZone->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::HandleEndOverlap);
+    }
 }
 
-void AAudio_SystemManager::Tick(float DeltaTime)
+void AAudio_ZoneActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateDangerDecay(DeltaTime);
-
-    ZoneCheckTimer += DeltaTime;
-    if (ZoneCheckTimer >= ZoneCheckInterval)
+    // Fade audio in/out based on player presence
+    if (AmbientAudioComponent && AmbientAudioComponent->IsActive())
     {
-        ZoneCheckTimer = 0.0f;
+        float TargetVolume = bPlayerInZone ? ZoneConfig.AmbientVolume : 0.0f;
+        float FadeSpeed = bPlayerInZone
+            ? (1.0f / FMath::Max(ZoneConfig.FadeInDuration, 0.01f))
+            : (1.0f / FMath::Max(ZoneConfig.FadeOutDuration, 0.01f));
 
-        APlayerController* PC = GetWorld()->GetFirstPlayerController();
-        if (PC && PC->GetPawn())
-        {
-            FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
-            UpdateZoneDetection(PlayerLoc);
-        }
-    }
-
-    if (VoiceLineCooldown > 0.0f)
-    {
-        VoiceLineCooldown -= DeltaTime;
+        CurrentFadeProgress = FMath::FInterpTo(CurrentFadeProgress, TargetVolume, DeltaTime, FadeSpeed * 2.0f);
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentFadeProgress);
     }
 }
 
-void AAudio_SystemManager::RegisterAudioZone(const FAudio_ZoneData& ZoneData)
+void AAudio_ZoneActor::SetZoneType(EAudio_ZoneType NewType)
 {
-    RegisteredZones.Add(ZoneData);
+    ZoneConfig.ZoneType = NewType;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Zone type set to %d"), static_cast<int32>(NewType));
 }
 
-EAudio_ZoneType AAudio_SystemManager::GetActiveZoneForLocation(const FVector& PlayerLocation) const
+void AAudio_ZoneActor::TriggerDangerAlert(float Intensity)
 {
-    float ClosestDist = MAX_FLT;
-    EAudio_ZoneType ClosestZone = EAudio_ZoneType::None;
+    if (!ZoneConfig.bTriggerScreenShake) return;
 
-    for (const FAudio_ZoneData& Zone : RegisteredZones)
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC) return;
+
+    // Screen shake via camera shake — intensity drives magnitude
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: DangerAlert triggered at intensity %.2f"), Intensity);
+}
+
+void AAudio_ZoneActor::HandleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    bPlayerInZone = true;
+
+    if (AmbientAudioComponent && !AmbientAudioComponent->IsActive())
     {
-        if (!Zone.bIsActive) { continue; }
-        float Dist = FVector::Dist(PlayerLocation, Zone.Location);
-        if (Dist <= Zone.Radius && Dist < ClosestDist)
-        {
-            ClosestDist  = Dist;
-            ClosestZone  = Zone.ZoneType;
-        }
-    }
-    return ClosestZone;
-}
-
-void AAudio_SystemManager::SetZoneActive(EAudio_ZoneType ZoneType, bool bActive)
-{
-    for (FAudio_ZoneData& Zone : RegisteredZones)
-    {
-        if (Zone.ZoneType == ZoneType)
-        {
-            Zone.bIsActive = bActive;
-        }
-    }
-}
-
-void AAudio_SystemManager::RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine)
-{
-    VoiceLines.Add(VoiceLine);
-}
-
-bool AAudio_SystemManager::TriggerVoiceLine(const FString& LineID)
-{
-    for (FAudio_VoiceLine& Line : VoiceLines)
-    {
-        if (Line.LineID == LineID && !Line.bHasBeenPlayed)
-        {
-            Line.bHasBeenPlayed = true;
-            VoiceLineCooldown   = VoiceLineCooldownDuration;
-            UE_LOG(LogTemp, Log, TEXT("AudioSystem: Playing voice line [%s] — %s"), *LineID, *Line.Text);
-            return true;
-        }
-    }
-    return false;
-}
-
-void AAudio_SystemManager::TriggerRandomSurvivalHint()
-{
-    if (VoiceLineCooldown > 0.0f) { return; }
-
-    TArray<FAudio_VoiceLine*> Available;
-    for (FAudio_VoiceLine& Line : VoiceLines)
-    {
-        if (!Line.bHasBeenPlayed)
-        {
-            Available.Add(&Line);
-        }
+        AmbientAudioComponent->Play();
     }
 
-    if (Available.Num() == 0) { return; }
-
-    int32 Idx = FMath::RandRange(0, Available.Num() - 1);
-    Available[Idx]->bHasBeenPlayed = true;
-    VoiceLineCooldown = VoiceLineCooldownDuration;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Random hint — %s"), *Available[Idx]->Text);
-}
-
-void AAudio_SystemManager::SetDangerLevel(float DangerLevel)
-{
-    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
-}
-
-void AAudio_SystemManager::OnDinosaurNearby(float DistanceMeters, bool bIsPredator)
-{
-    if (!bIsPredator) { return; }
-
-    // Danger increases as predator gets closer (inverse square falloff)
-    float MaxDangerDist = 500.0f;
-    float NormalizedDist = FMath::Clamp(DistanceMeters / MaxDangerDist, 0.0f, 1.0f);
-    float NewDanger = 1.0f - NormalizedDist;
-
-    if (NewDanger > CurrentDangerLevel)
+    if (TriggerZone)
     {
-        CurrentDangerLevel = NewDanger;
+        TriggerZone->OnPlayerEnterZone(OtherActor);
     }
 
-    // Auto-trigger danger alert if danger is high and cooldown allows
-    if (CurrentDangerLevel >= DangerThresholdHigh && VoiceLineCooldown <= 0.0f)
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s]: Player ENTERED — zone type %d"),
+        *GetActorLabel(), static_cast<int32>(ZoneConfig.ZoneType));
+}
+
+void AAudio_ZoneActor::HandleEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    bPlayerInZone = false;
+
+    if (TriggerZone)
     {
-        TriggerVoiceLine("ALERT_PREDATOR_NORTH");
+        TriggerZone->OnPlayerExitZone(OtherActor);
     }
-}
 
-void AAudio_SystemManager::TriggerFootstepShake(float Intensity)
-{
-    // Intensity 0-1: maps to camera shake magnitude
-    // Actual camera shake requires Blueprint or CameraShakeBase subclass
-    // Log for now — Blueprint will hook into this
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: FootstepShake intensity=%.2f"), Intensity);
-}
-
-void AAudio_SystemManager::TriggerDamageFlash()
-{
-    // Damage flash — red screen overlay
-    // Triggered via Blueprint UI layer; this is the C++ notification
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: DamageFlash triggered"));
-}
-
-void AAudio_SystemManager::UpdateZoneDetection(const FVector& PlayerLocation)
-{
-    EAudio_ZoneType NewZone = GetActiveZoneForLocation(PlayerLocation);
-    if (NewZone != CurrentActiveZone)
-    {
-        UE_LOG(LogTemp, Log, TEXT("AudioSystem: Zone changed %d -> %d"),
-            (int32)CurrentActiveZone, (int32)NewZone);
-        CurrentActiveZone = NewZone;
-    }
-}
-
-void AAudio_SystemManager::UpdateDangerDecay(float DeltaTime)
-{
-    if (CurrentDangerLevel > 0.0f)
-    {
-        CurrentDangerLevel = FMath::Max(0.0f, CurrentDangerLevel - DangerDecayRate * DeltaTime);
-    }
+    UE_LOG(LogTemp, Log, TEXT("AudioZone [%s]: Player EXITED — zone type %d"),
+        *GetActorLabel(), static_cast<int32>(ZoneConfig.ZoneType));
 }
