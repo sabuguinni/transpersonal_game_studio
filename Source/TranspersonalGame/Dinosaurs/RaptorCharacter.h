@@ -1,6 +1,7 @@
 // RaptorCharacter.h
-// Performance Optimizer #04 — Cycle PROD_CYCLE_AUTO_20260624_001
-// Velociraptor pack-hunter subclass of ADinosaurBase
+// Performance Optimizer #04 — PROD_CYCLE_AUTO_20260624_002
+// Pack-hunter Velociraptor subclass of ADinosaurBase
+// Species: Velociraptor | MaxHealth: 400 | AttackDamage: 60 | MaxWalkSpeed: 900
 
 #pragma once
 
@@ -8,14 +9,7 @@
 #include "Dinosaurs/DinosaurBase.h"
 #include "RaptorCharacter.generated.h"
 
-/**
- * ARaptorCharacter
- * Pack-hunter dinosaur. Lower health than T-Rex, higher speed.
- * Emits a pack call that alerts nearby raptors to converge on the target.
- * Designed for Agent #12 (Combat AI) to wire into Behavior Tree blackboard.
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs",
-       meta = (DisplayName = "Raptor Character"))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ARaptorCharacter : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -23,82 +17,65 @@ class TRANSPERSONALGAME_API ARaptorCharacter : public ADinosaurBase
 public:
     ARaptorCharacter();
 
-protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-public:
-    // ── Pack System ──────────────────────────────────────────────────────────
+    // ── Pack coordination ──────────────────────────────────────────────
+    /** Pointer to the pack leader (nullptr if this IS the leader) */
+    UPROPERTY(BlueprintReadWrite, Category = "Raptor|Pack")
+    ARaptorCharacter* PackLeader;
 
-    /** Radius within which other raptors hear the pack call (cm). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
-              meta = (ClampMin = "100.0", ClampMax = "10000.0"))
-    float PackCallRadius;
+    /** All pack members registered to this raptor (populated on leader only) */
+    UPROPERTY(BlueprintReadWrite, Category = "Raptor|Pack")
+    TArray<ARaptorCharacter*> PackMembers;
 
-    /** Cooldown between pack calls (seconds). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
-              meta = (ClampMin = "1.0", ClampMax = "60.0"))
-    float PackCallCooldown;
-
-    /** Time of last pack call — used to enforce cooldown. */
+    /** True when this raptor is executing a flank manoeuvre */
     UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
-    float LastPackCallTime;
+    bool bIsFlanking;
 
-    /** Maximum number of raptors that respond to a single pack call. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack",
-              meta = (ClampMin = "1", ClampMax = "8"))
-    int32 MaxPackResponders;
+    /** Flank offset angle relative to pack leader's facing (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack", meta = (ClampMin = "-180.0", ClampMax = "180.0"))
+    float FlankAngleDegrees;
 
-    // ── Pounce Attack ────────────────────────────────────────────────────────
+    /** Radius within which pack members coordinate (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    float PackCoordinationRadius;
 
-    /** Pounce launch speed (cm/s). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
-              meta = (ClampMin = "100.0", ClampMax = "3000.0"))
-    float PounceSpeed;
+    // ── Raptor abilities ───────────────────────────────────────────────
+    /** Leap attack — lunge forward and pin target */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
+    void PerformLeapAttack();
 
-    /** Damage dealt by a successful pounce. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
-              meta = (ClampMin = "0.0", ClampMax = "500.0"))
-    float PounceDamage;
+    /** Emit a pack-rally screech — alerts nearby raptors to converge */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
+    void EmitPackScreech();
 
-    /** Maximum horizontal distance from which a pounce can be initiated (cm). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat",
-              meta = (ClampMin = "50.0", ClampMax = "800.0"))
-    float PounceRange;
-
-    // ── Actions ──────────────────────────────────────────────────────────────
-
-    /**
-     * Emit a pack call: alerts all ARaptorCharacter actors within PackCallRadius
-     * to set their attack target to this raptor's current target.
-     * Respects PackCallCooldown.
-     */
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Pack")
-    void PerformPackCall();
-    virtual void PerformPackCall_Implementation();
-
-    /**
-     * Launch a pounce attack toward the target location.
-     * Applies PounceDamage on hit via line-trace at apex.
-     */
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Combat")
-    void PerformPounce(AActor* Target);
-    virtual void PerformPounce_Implementation(AActor* Target);
-
-    /**
-     * Claw slash — short-range melee, faster than bite.
-     * Damage = 0.6 * AttackDamage (from DinosaurBase).
-     */
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Raptor|Combat")
-    void PerformClawSlash();
-    virtual void PerformClawSlash_Implementation();
-
-    // ── Utility ──────────────────────────────────────────────────────────────
-
-    /** Returns true if the pack call cooldown has elapsed. */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Raptor|Pack")
-    bool CanPerformPackCall() const;
-
-    /** Returns all ARaptorCharacter actors within PackCallRadius of this raptor. */
+    /** Initiate flanking behaviour toward a target */
     UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    TArray<ARaptorCharacter*> GetNearbyPackMembers() const;
+    void BeginFlankManoeuvre(AActor* Target);
+
+    /** Register a new pack member under this leader */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    void RegisterPackMember(ARaptorCharacter* NewMember);
+
+    // ── State ──────────────────────────────────────────────────────────
+    /** Current pack-hunt target (shared across pack) */
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
+    AActor* PackHuntTarget;
+
+protected:
+    /** Timer for periodic pack-coordination checks */
+    FTimerHandle PackCoordTimerHandle;
+
+    /** Timer for leap attack cooldown */
+    FTimerHandle LeapCooldownHandle;
+
+    /** Whether leap is on cooldown */
+    bool bLeapOnCooldown;
+
+    /** Periodic pack coordination tick */
+    void CoordinatePack();
+
+    /** Broadcast hunt target to all pack members */
+    void BroadcastHuntTarget(AActor* Target);
 };
