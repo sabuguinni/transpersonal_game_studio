@@ -12,7 +12,6 @@ enum class EAnim_DinoLocomotionState : uint8
     Run         UMETA(DisplayName = "Run"),
     Attack      UMETA(DisplayName = "Attack"),
     Death       UMETA(DisplayName = "Death"),
-    Roar        UMETA(DisplayName = "Roar"),
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -26,29 +25,29 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    EAnim_DinoLocomotionState LocomotionState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
     float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
     float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Combat")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    bool bIsMoving;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsAttacking;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Combat")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsDead;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Behavior")
-    bool bIsRoaring;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    EAnim_DinoLocomotionState LocomotionState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    float WalkSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
+    float WalkSpeedThreshold;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    float RunSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
+    float RunSpeedThreshold;
 
 private:
     UPROPERTY()
