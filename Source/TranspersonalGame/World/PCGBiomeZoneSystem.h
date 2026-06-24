@@ -1,157 +1,145 @@
+// PCGBiomeZoneSystem.h
+// Agent #05 — Procedural World Generator
+// Biome zone classification and PCG rule dispatch for MinPlayableMap
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "PCGBiomeZoneSystem.generated.h"
 
-// ============================================================
-// PCGBiomeZoneSystem.h — Agent #05 Procedural World Generator
-// Biome zone definitions for the Cretaceous world.
-// Three zones: Savanna (open), Jungle (dense), Rocky (outcrop)
-// ============================================================
-
+// ── Biome Zone Types ──────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EWorld_BiomeZoneType : uint8
 {
-    Savanna     UMETA(DisplayName = "Open Savanna"),
-    Jungle      UMETA(DisplayName = "Dense Jungle"),
-    Rocky       UMETA(DisplayName = "Rocky Outcrop"),
-    Riverbank   UMETA(DisplayName = "Riverbank"),
-    Volcanic    UMETA(DisplayName = "Volcanic Field"),
-    Unknown     UMETA(DisplayName = "Unknown")
+    TropicalJungle   UMETA(DisplayName = "Tropical Jungle"),
+    VolcanicPlains   UMETA(DisplayName = "Volcanic Plains"),
+    RiverDelta       UMETA(DisplayName = "River Delta"),
+    OpenSavanna      UMETA(DisplayName = "Open Savanna"),
+    RockyHighlands   UMETA(DisplayName = "Rocky Highlands"),
+    COUNT            UMETA(Hidden)
 };
 
+// ── Per-zone PCG configuration ────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZoneData
+struct TRANSPERSONALGAME_API FWorld_BiomeZoneConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeZoneType ZoneType = EWorld_BiomeZoneType::Savanna;
+    EWorld_BiomeZoneType ZoneType = EWorld_BiomeZoneType::OpenSavanna;
 
+    /** World-space centre of this biome zone */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CentreLocation = FVector::ZeroVector;
+    FVector ZoneCenter = FVector::ZeroVector;
 
+    /** Radius in cm within which this biome rules apply */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float RadiusUnits = 4000.0f;
+    float ZoneRadius = 5000.f;
 
+    /** Foliage density multiplier (0=barren, 1=normal, 2=dense) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.5f;   // 0.0 = bare, 1.0 = dense
+    float FoliageDensity = 1.f;
 
+    /** Dominant vegetation asset path (skeletal or static mesh) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TerrainRoughness = 0.3f;    // 0.0 = flat, 1.0 = very rough
+    FString PrimaryVegetationPath = TEXT("");
 
+    /** Secondary vegetation asset path */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float AmbientTemperature = 28.0f; // Celsius
+    FString SecondaryVegetationPath = TEXT("");
 
+    /** Rock/debris density multiplier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bHasWaterSource = false;
+    float RockDensity = 0.5f;
 
+    /** Water body present in this zone */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor DebugColour = FLinearColor(0.5f, 0.8f, 0.2f, 1.0f);
+    bool bHasWater = false;
+
+    /** Ambient temperature in Celsius (affects survival stats) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float AmbientTemperatureCelsius = 28.f;
+
+    /** Humidity 0-1 (affects thirst drain rate) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float Humidity = 0.6f;
+
+    /** Dinosaur species tags that prefer this zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Fauna")
+    TArray<FName> PreferredDinoSpecies;
 };
 
-USTRUCT(BlueprintType)
-struct FWorld_TerrainHeightSample
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    FVector WorldLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    float HeightMetres = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    EWorld_BiomeZoneType BiomeAtLocation = EWorld_BiomeZoneType::Unknown;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    float SlopeAngleDegrees = 0.0f;
-};
-
-/**
- * UWorld_BiomeZoneManager
- * Manages biome zone definitions and provides query functions
- * for other systems (foliage placement, AI navigation, audio).
- */
-UCLASS(ClassGroup = "WorldGen", meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorld_BiomeZoneManager : public UActorComponent
+// ── Biome Zone Actor ──────────────────────────────────────────────────────────
+UCLASS(ClassGroup = "TranspersonalGame|World", meta = (DisplayName = "PCG Biome Zone System"))
+class TRANSPERSONALGAME_API APCGBiomeZoneSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorld_BiomeZoneManager();
+    APCGBiomeZoneSystem();
 
-    // Returns the biome type at a given world location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    // ── Zone registry ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zones")
+    TArray<FWorld_BiomeZoneConfig> BiomeZones;
+
+    // ── Runtime API ──────────────────────────────────────────────────────────
+
+    /**
+     * Returns the biome zone type at the given world location.
+     * If multiple zones overlap, the one with the smallest radius wins.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones")
     EWorld_BiomeZoneType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    // Returns full biome data for the zone containing the location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_BiomeZoneData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    /**
+     * Returns the full config for the biome zone at the given location.
+     * Returns nullptr if no zone covers that location.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones")
+    bool GetBiomeConfigAtLocation(const FVector& WorldLocation, FWorld_BiomeZoneConfig& OutConfig) const;
 
-    // Returns all zones of a given type
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FWorld_BiomeZoneData> GetZonesOfType(EWorld_BiomeZoneType ZoneType) const;
+    /**
+     * Returns foliage density multiplier at a world location.
+     * Used by FoliageManager to scale instance counts.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones")
+    float GetFoliageDensityAtLocation(const FVector& WorldLocation) const;
 
-    // Returns true if the location is within any registered zone
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool IsLocationInZone(const FVector& WorldLocation, EWorld_BiomeZoneType ZoneType) const;
+    /**
+     * Returns ambient temperature at a world location.
+     * Used by survival system to calculate heat/cold damage.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    // Registers a new biome zone at runtime
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterBiomeZone(const FWorld_BiomeZoneData& ZoneData);
+    /**
+     * Returns humidity at a world location.
+     * Used by survival system to scale thirst drain.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome Zones")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    // Returns vegetation density at a location (0.0 - 1.0)
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
+    /**
+     * Registers default biome zones for MinPlayableMap.
+     * Call this once at BeginPlay or from a Blueprint setup node.
+     */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome Zones")
+    void InitializeDefaultBiomeZones();
 
-    // Initialise default Cretaceous zones
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
-    void InitialiseDefaultCretaceousZones();
+    // ── Editor helpers ────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FWorld_BiomeZoneData> RegisteredZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bDrawDebugZones = false;
+    /** Draw debug spheres for all registered zones in the editor viewport */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome Zones|Debug")
+    void DrawDebugZones();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Returns squared distance from location to zone centre
-    float GetSquaredDistanceToZone(const FVector& Location, const FWorld_BiomeZoneData& Zone) const;
-};
+    /** Sorted zone cache (smallest radius first for priority lookup) */
+    TArray<FWorld_BiomeZoneConfig> SortedZoneCache;
 
-/**
- * AWorld_BiomeZoneActor
- * Placeable actor that defines a biome zone in the level.
- * Can be placed in the editor to mark zone boundaries.
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorld_BiomeZoneActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AWorld_BiomeZoneActor();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
-    FWorld_BiomeZoneData ZoneDefinition;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
-        meta = (AllowPrivateAccess = "true"))
-    UWorld_BiomeZoneManager* BiomeManager;
-
-    // Called when placed in editor — registers this zone with the world manager
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome Zone")
-    void RegisterZoneWithWorld();
-
-    virtual void BeginPlay() override;
-
-#if WITH_EDITOR
-    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
+    void RebuildSortedCache();
 };
