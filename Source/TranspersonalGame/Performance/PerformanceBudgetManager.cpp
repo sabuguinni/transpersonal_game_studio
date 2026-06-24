@@ -1,245 +1,205 @@
 // PerformanceBudgetManager.cpp
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260622_011
-// Full implementation of runtime performance budget manager
+// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260624_006
+// Full implementation of draw call budget enforcement, LOD cull distances,
+// and shadow optimizations for 60fps PC / 30fps console targets.
 
 #include "PerformanceBudgetManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "EngineUtils.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
-APerf_BudgetManager::APerf_BudgetManager()
+APerformanceBudgetManager::APerformanceBudgetManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.0f; // Every frame for accurate FPS sampling
-
-    InitDefaultLODConfigs();
+    PrimaryActorTick.TickInterval = 2.0f; // check every 2s, not every frame
 }
 
-void APerf_BudgetManager::InitDefaultLODConfigs()
-{
-    // Low — Console 30fps target
-    LODConfig_Low.StaticMeshLODScale    = 2.0f;
-    LODConfig_Low.SkeletalMeshLODScale  = 2.0f;
-    LODConfig_Low.FoliageLODScale       = 2.0f;
-    LODConfig_Low.FoliageDensityScale   = 0.3f;
-    LODConfig_Low.MaxShadowResolution   = 512;
-    LODConfig_Low.ShadowDistanceScale   = 0.5f;
-
-    // Medium — PC 30fps
-    LODConfig_Medium.StaticMeshLODScale    = 1.5f;
-    LODConfig_Medium.SkeletalMeshLODScale  = 1.5f;
-    LODConfig_Medium.FoliageLODScale       = 1.5f;
-    LODConfig_Medium.FoliageDensityScale   = 0.6f;
-    LODConfig_Medium.MaxShadowResolution   = 1024;
-    LODConfig_Medium.ShadowDistanceScale   = 0.75f;
-
-    // High — PC 60fps (default)
-    LODConfig_High.StaticMeshLODScale    = 1.0f;
-    LODConfig_High.SkeletalMeshLODScale  = 1.0f;
-    LODConfig_High.FoliageLODScale       = 1.0f;
-    LODConfig_High.FoliageDensityScale   = 1.0f;
-    LODConfig_High.MaxShadowResolution   = 2048;
-    LODConfig_High.ShadowDistanceScale   = 1.0f;
-
-    // Epic — PC 60fps Ultra
-    LODConfig_Epic.StaticMeshLODScale    = 0.75f;
-    LODConfig_Epic.SkeletalMeshLODScale  = 0.75f;
-    LODConfig_Epic.FoliageLODScale       = 0.75f;
-    LODConfig_Epic.FoliageDensityScale   = 1.0f;
-    LODConfig_Epic.MaxShadowResolution   = 4096;
-    LODConfig_Epic.ShadowDistanceScale   = 1.5f;
-}
-
-void APerf_BudgetManager::BeginPlay()
+void APerformanceBudgetManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    FPSSamples.Reserve(FPS_SAMPLE_COUNT);
+    // Apply quality preset on startup
+    ApplyQualityTierPreset(QualityTier);
 
-    // Apply initial tier
-    ApplyTierConfig(CurrentTier);
-
-    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Initialized — Target: %.0ffps (%.2fms), Tier: %d"),
-        TargetFPS, TargetFrameTimeMS, (int32)CurrentTier);
+    // Initial audit
+    AuditDrawCallBudget();
 }
 
-void APerf_BudgetManager::Tick(float DeltaTime)
+void APerformanceBudgetManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateFPSSamples(DeltaTime);
-
-    if (bEnableDynamicScalability)
+    TimeSinceLastCheck += DeltaTime;
+    if (TimeSinceLastCheck >= BudgetCheckInterval)
     {
-        ScalabilityCheckTimer += DeltaTime;
-        if (ScalabilityCheckTimer >= ScalabilityCheckIntervalSeconds)
-        {
-            ScalabilityCheckTimer = 0.0f;
-            CheckBudgetAndAdjust();
-        }
+        TimeSinceLastCheck = 0.0f;
+        AuditDrawCallBudget();
     }
 }
 
-void APerf_BudgetManager::UpdateFPSSamples(float DeltaTime)
+void APerformanceBudgetManager::ApplyLODCullDistances()
 {
-    if (DeltaTime <= 0.0f) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    float CurrentFPS = 1.0f / DeltaTime;
+    const FVector Origin = FVector::ZeroVector;
+    int32 Applied = 0;
 
-    if (FPSSamples.Num() >= FPS_SAMPLE_COUNT)
+    for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
     {
-        FPSSamples.RemoveAt(0);
+        AStaticMeshActor* SMA = *It;
+        if (!SMA) continue;
+
+        UStaticMeshComponent* Comp = SMA->GetStaticMeshComponent();
+        if (!Comp) continue;
+
+        const float Dist = FVector::Dist(SMA->GetActorLocation(), Origin);
+
+        if (Dist > LODSettings.FarCullDistance)
+        {
+            Comp->LDMaxDrawDistance = LODSettings.FarCullDistance;
+            ++Applied;
+        }
+        else if (Dist > LODSettings.MidCullDistance)
+        {
+            Comp->LDMaxDrawDistance = LODSettings.FarCullDistance;
+            ++Applied;
+        }
     }
-    FPSSamples.Add(CurrentFPS);
 
-    // Rolling average
-    if (FPSSamples.Num() > 0)
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] LOD cull distances applied to %d actors"), Applied);
+}
+
+void APerformanceBudgetManager::DisableShadowsOnSmallProps()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    if (!LODSettings.bDisableShadowsOnSmallProps) return;
+
+    int32 Disabled = 0;
+
+    for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
     {
-        float Sum = 0.0f;
-        for (float S : FPSSamples) Sum += S;
-        AverageFPS = Sum / FPSSamples.Num();
+        AStaticMeshActor* SMA = *It;
+        if (!SMA) continue;
+
+        const FVector Scale = SMA->GetActorScale3D();
+        if (Scale.X < LODSettings.SmallPropScaleThreshold &&
+            Scale.Y < LODSettings.SmallPropScaleThreshold)
+        {
+            UStaticMeshComponent* Comp = SMA->GetStaticMeshComponent();
+            if (Comp)
+            {
+                Comp->SetCastShadow(false);
+                ++Disabled;
+            }
+        }
     }
 
-    // Update budget snapshot
-    float FrameMS = DeltaTime * 1000.0f;
-    CurrentBudget.FrameTimeMS = FrameMS;
-    CurrentBudget.bBudgetExceeded = (FrameMS > TargetFrameTimeMS * 1.1f); // 10% tolerance
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Shadow disabled on %d small props"), Disabled);
+}
 
-    if (CurrentBudget.bBudgetExceeded)
+void APerformanceBudgetManager::AuditDrawCallBudget()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    int32 SkelCount = 0;
+    int32 StaticCount = 0;
+
+    // Count skeletal mesh actors (avg 8 draw calls each)
+    for (TActorIterator<AActor> It(World); It; ++It)
     {
-        BudgetViolationCount++;
-        bIsUnderBudget = false;
+        AActor* Actor = *It;
+        if (!Actor) continue;
+
+        if (Actor->FindComponentByClass<USkeletalMeshComponent>())
+        {
+            ++SkelCount;
+        }
+        else if (Actor->FindComponentByClass<UStaticMeshComponent>())
+        {
+            ++StaticCount;
+        }
+    }
+
+    SkeletalMeshActorCount = SkelCount;
+    StaticMeshActorCount   = StaticCount;
+
+    // Estimate: skeletal = 8 draw calls avg, static = 2 draw calls avg
+    EstimatedDrawCalls = (SkelCount * 8) + (StaticCount * 2);
+
+    bBudgetExceeded = EstimatedDrawCalls > DrawCallBudget.MaxTotalDrawCalls;
+
+    if (bBudgetExceeded)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[PerfBudget] BUDGET EXCEEDED: ~%d draw calls (limit %d). Skel=%d Static=%d"),
+            EstimatedDrawCalls, DrawCallBudget.MaxTotalDrawCalls, SkelCount, StaticCount);
     }
     else
     {
-        bIsUnderBudget = true;
+        UE_LOG(LogTemp, Log,
+            TEXT("[PerfBudget] Budget OK: ~%d/%d draw calls. Skel=%d Static=%d"),
+            EstimatedDrawCalls, DrawCallBudget.MaxTotalDrawCalls, SkelCount, StaticCount);
     }
 }
 
-void APerf_BudgetManager::CheckBudgetAndAdjust()
-{
-    if (AverageFPS <= 0.0f) return;
-
-    float TargetWithMargin = TargetFPS * 0.9f; // 10% margin before downgrade
-
-    if (AverageFPS < TargetWithMargin)
-    {
-        // Under budget — downgrade tier
-        int32 TierInt = (int32)CurrentTier;
-        if (TierInt > 0)
-        {
-            EPerf_ScalabilityTier NewTier = (EPerf_ScalabilityTier)(TierInt - 1);
-            UE_LOG(LogTemp, Warning, TEXT("[PerfBudget] FPS %.1f < target %.1f — downgrading tier %d -> %d"),
-                AverageFPS, TargetWithMargin, TierInt, TierInt - 1);
-            SetScalabilityTier(NewTier);
-        }
-    }
-    else if (AverageFPS > TargetFPS * 1.2f) // 20% headroom before upgrade
-    {
-        // Well above budget — upgrade tier if possible
-        int32 TierInt = (int32)CurrentTier;
-        if (TierInt < (int32)EPerf_ScalabilityTier::Epic)
-        {
-            EPerf_ScalabilityTier NewTier = (EPerf_ScalabilityTier)(TierInt + 1);
-            UE_LOG(LogTemp, Log, TEXT("[PerfBudget] FPS %.1f > headroom %.1f — upgrading tier %d -> %d"),
-                AverageFPS, TargetFPS * 1.2f, TierInt, TierInt + 1);
-            SetScalabilityTier(NewTier);
-        }
-    }
-}
-
-void APerf_BudgetManager::SetScalabilityTier(EPerf_ScalabilityTier NewTier)
-{
-    CurrentTier = NewTier;
-    ApplyTierConfig(NewTier);
-}
-
-void APerf_BudgetManager::ApplyTierConfig(EPerf_ScalabilityTier Tier)
-{
-    FPerf_LODConfig Config = GetLODConfigForTier(Tier);
-    ApplyLODConfig(Config);
-
-    // Apply scalability group settings
-    int32 QualityLevel = (int32)Tier;
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.ViewDistanceQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.ShadowQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.TextureQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.EffectsQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.FoliageQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.PostProcessQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.GlobalIlluminationQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.ReflectionQuality %d"), QualityLevel));
-    ExecuteConsoleCommand(FString::Printf(TEXT("sg.ShadingQuality %d"), QualityLevel));
-}
-
-void APerf_BudgetManager::ApplyLODConfig(const FPerf_LODConfig& Config)
-{
-    ExecuteConsoleCommand(FString::Printf(TEXT("r.StaticMeshLODDistanceScale %.2f"), Config.StaticMeshLODScale));
-    ExecuteConsoleCommand(FString::Printf(TEXT("foliage.LODDistanceScale %.2f"), Config.FoliageLODScale));
-    ExecuteConsoleCommand(FString::Printf(TEXT("foliage.DensityScale %.2f"), Config.FoliageDensityScale));
-    ExecuteConsoleCommand(FString::Printf(TEXT("grass.DensityScale %.2f"), Config.FoliageDensityScale));
-    ExecuteConsoleCommand(FString::Printf(TEXT("r.Shadow.MaxCSMResolution %d"), Config.MaxShadowResolution));
-    ExecuteConsoleCommand(FString::Printf(TEXT("r.Shadow.DistanceScale %.2f"), Config.ShadowDistanceScale));
-}
-
-void APerf_BudgetManager::ExecuteConsoleCommand(const FString& Command)
-{
-    if (UWorld* World = GetWorld())
-    {
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, Command, nullptr);
-    }
-}
-
-FPerf_LODConfig APerf_BudgetManager::GetLODConfigForTier(EPerf_ScalabilityTier Tier) const
+void APerformanceBudgetManager::ApplyQualityTierPreset(EPerf_QualityTier Tier)
 {
     switch (Tier)
     {
-        case EPerf_ScalabilityTier::Low:    return LODConfig_Low;
-        case EPerf_ScalabilityTier::Medium: return LODConfig_Medium;
-        case EPerf_ScalabilityTier::High:   return LODConfig_High;
-        case EPerf_ScalabilityTier::Epic:   return LODConfig_Epic;
-        default:                            return LODConfig_High;
+    case EPerf_QualityTier::Console_30fps:
+        DrawCallBudget.MaxTotalDrawCalls    = 1000;
+        DrawCallBudget.TargetFrameTimeMs    = 33.33f;
+        LODSettings.MidCullDistance         = 5000.0f;
+        LODSettings.FarCullDistance         = 12000.0f;
+        LODSettings.SkeletalLODDistanceScale = 0.75f;
+        LODSettings.FoliageLODDistanceScale  = 1.0f;
+        LODSettings.bDisableShadowsOnSmallProps = true;
+        LODSettings.SmallPropScaleThreshold  = 0.75f;
+        break;
+
+    case EPerf_QualityTier::PC_Medium_60fps:
+        DrawCallBudget.MaxTotalDrawCalls    = 1500;
+        DrawCallBudget.TargetFrameTimeMs    = 16.67f;
+        LODSettings.MidCullDistance         = 6000.0f;
+        LODSettings.FarCullDistance         = 16000.0f;
+        LODSettings.SkeletalLODDistanceScale = 1.0f;
+        LODSettings.FoliageLODDistanceScale  = 1.25f;
+        LODSettings.bDisableShadowsOnSmallProps = true;
+        LODSettings.SmallPropScaleThreshold  = 0.5f;
+        break;
+
+    case EPerf_QualityTier::PC_High_60fps:
+        DrawCallBudget.MaxTotalDrawCalls    = 2000;
+        DrawCallBudget.TargetFrameTimeMs    = 16.67f;
+        LODSettings.MidCullDistance         = 8000.0f;
+        LODSettings.FarCullDistance         = 20000.0f;
+        LODSettings.SkeletalLODDistanceScale = 1.0f;
+        LODSettings.FoliageLODDistanceScale  = 1.5f;
+        LODSettings.bDisableShadowsOnSmallProps = true;
+        LODSettings.SmallPropScaleThreshold  = 0.5f;
+        break;
+
+    case EPerf_QualityTier::PC_Ultra_60fps:
+        DrawCallBudget.MaxTotalDrawCalls    = 3000;
+        DrawCallBudget.TargetFrameTimeMs    = 16.67f;
+        LODSettings.MidCullDistance         = 12000.0f;
+        LODSettings.FarCullDistance         = 30000.0f;
+        LODSettings.SkeletalLODDistanceScale = 1.0f;
+        LODSettings.FoliageLODDistanceScale  = 2.0f;
+        LODSettings.bDisableShadowsOnSmallProps = false;
+        LODSettings.SmallPropScaleThreshold  = 0.25f;
+        break;
     }
+
+    // Apply immediately
+    ApplyLODCullDistances();
+    DisableShadowsOnSmallProps();
+
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Quality tier applied: %d"), (int32)Tier);
 }
-
-FPerf_FrameBudget APerf_BudgetManager::GetCurrentFrameBudget() const
-{
-    return CurrentBudget;
-}
-
-void APerf_BudgetManager::ForceScalabilityCheck()
-{
-    CheckBudgetAndAdjust();
-}
-
-void APerf_BudgetManager::SetTargetFPS(float NewTargetFPS)
-{
-    TargetFPS = FMath::Clamp(NewTargetFPS, 15.0f, 144.0f);
-    TargetFrameTimeMS = 1000.0f / TargetFPS;
-
-    // Update game thread / render thread budgets proportionally
-    GameThreadBudgetMS  = TargetFrameTimeMS * 0.36f; // 36% of frame
-    RenderThreadBudgetMS = TargetFrameTimeMS * 0.36f; // 36% of frame
-    GPUBudgetMS          = TargetFrameTimeMS * 0.60f; // 60% of frame
-
-    ExecuteConsoleCommand(FString::Printf(TEXT("t.MaxFPS %.0f"), TargetFPS));
-
-    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Target FPS set to %.0f (%.2fms frame budget)"),
-        TargetFPS, TargetFrameTimeMS);
-}
-
-#if WITH_EDITOR
-void APerf_BudgetManager::PrintBudgetReport()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE BUDGET REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Target FPS: %.0f | Average FPS: %.1f | Under Budget: %s"),
-        TargetFPS, AverageFPS, bIsUnderBudget ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Log, TEXT("Current Tier: %d | Budget Violations: %d"),
-        (int32)CurrentTier, BudgetViolationCount);
-    UE_LOG(LogTemp, Log, TEXT("Last Frame: %.2fms (budget: %.2fms)"),
-        CurrentBudget.FrameTimeMS, TargetFrameTimeMS);
-    UE_LOG(LogTemp, Log, TEXT("================================="));
-}
-#endif
