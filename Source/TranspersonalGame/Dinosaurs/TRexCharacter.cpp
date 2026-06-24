@@ -1,247 +1,174 @@
 // TRexCharacter.cpp
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Full implementation of ATRexCharacter.
-// All UFUNCTION() methods implemented here — no stubs, no #if 0.
+// Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260624_001
+// Tyrannosaurus Rex — full implementation.
 
 #include "Dinosaurs/TRexCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor
 // ─────────────────────────────────────────────────────────────────────────────
-
 ATRexCharacter::ATRexCharacter()
 {
-    // T-Rex capsule: tall and wide to match massive body
-    // Real T-Rex: ~4m hip height, ~12m length
-    // UE5 scale: capsule half-height 200, radius 90 (UU = cm)
-    GetCapsuleComponent()->InitCapsuleSize(90.0f, 200.0f);
+    // Lock species — ApplySpeciesStats() in BeginPlay will read this
+    DinosaurSpecies = EDinosaurSpecies::TyrannosaurusRex;
 
-    // Species identity — set before BeginPlay so DinosaurBase reads it
-    Species = EDinoSpecies::TRex;
+    // T-Rex capsule: large predator
+    GetCapsuleComponent()->SetCapsuleHalfHeight(200.0f);
+    GetCapsuleComponent()->SetCapsuleRadius(80.0f);
 
-    // Behaviour defaults — T-Rex is solitary, territorial, aggressive when hungry
-    bIsAggressive = false;         // Neutral until provoked or very hungry
-    TerritoryRadius = 8000.0f;     // Large exclusive zone
-
-    // Apply movement defaults in constructor
-    // (BeginPlay will also call ApplyTRexStats for runtime overrides)
-    if (GetCharacterMovement())
+    // Movement — heavy but fast in bursts
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
-        GetCharacterMovement()->MaxWalkSpeed = TRexWalkSpeed;
-        GetCharacterMovement()->JumpZVelocity = 0.0f;   // T-Rex cannot jump
-        GetCharacterMovement()->GravityScale = 1.5f;    // Heavy — falls fast
-        GetCharacterMovement()->Mass = 8000.0f;         // ~8 metric tons
-        GetCharacterMovement()->BrakingDecelerationWalking = 800.0f; // Slow to stop
+        MoveComp->MaxWalkSpeed = 600.0f;       // ~21 km/h — realistic T-Rex estimate
+        MoveComp->MaxAcceleration = 800.0f;
+        MoveComp->BrakingDecelerationWalking = 600.0f;
+        MoveComp->RotationRate = FRotator(0.0f, 90.0f, 0.0f);
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->Mass = 8000.0f;              // ~8 tonnes
+        MoveComp->GravityScale = 1.2f;         // heavier feel
     }
+
+    // Actor tag for AI queries
+    Tags.Add(FName("Dinosaur"));
+    Tags.Add(FName("Predator"));
+    Tags.Add(FName("TRex"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BeginPlay
 // ─────────────────────────────────────────────────────────────────────────────
-
 void ATRexCharacter::BeginPlay()
 {
-    // Call parent first — starts hunger/behaviour timers, caches TerritoryCenter
+    // Species must be set BEFORE Super::BeginPlay so ApplySpeciesStats() reads it
+    DinosaurSpecies = EDinosaurSpecies::TyrannosaurusRex;
+
     Super::BeginPlay();
 
-    // Override base class stats with T-Rex specific values
-    ApplyTRexStats();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ApplyTRexStats — push species values into base class properties
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::ApplyTRexStats()
-{
-    // Health
-    MaxHealth = TRexMaxHealth;
-    CurrentHealth = TRexMaxHealth;
-
-    // Hunger decay — overwrite base class rate
-    HungerDecayRate = TRexHungerDecayRate;
-
-    // Territory
-    TerritoryRadius = TRexTerritoryRadius;
-
-    // Movement
-    if (GetCharacterMovement())
-    {
-        GetCharacterMovement()->MaxWalkSpeed = TRexWalkSpeed;
-    }
+    // Record territory center at spawn
+    TerritoryCenter = GetActorLocation();
+    bIsDefendingTerritory = true;
 
     UE_LOG(LogTemp, Log,
-           TEXT("ATRexCharacter::ApplyTRexStats — Health=%.0f Walk=%.0f Sprint=%.0f Bite=%.0f"),
-           TRexMaxHealth, TRexWalkSpeed, TRexSprintSpeed, TRexBiteDamage);
+           TEXT("[TRex] %s spawned at (%.0f, %.0f, %.0f) | HP=%.0f SPD=%.0f AGG=%.2f"),
+           *GetActorLabel(),
+           TerritoryCenter.X, TerritoryCenter.Y, TerritoryCenter.Z,
+           CurrentHealth, MovementSpeed, AggressionLevel);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PerformAttack — override base class, use T-Rex bite stats
+// PerformRoar
 // ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::PerformAttack()
+void ATRexCharacter::PerformRoar_Implementation()
 {
-    if (CurrentBehaviourState == EDinoBehaviourState::Dead)
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s ROARS — fear radius=%.0f intensity=%.2f"),
+           *GetActorLabel(), RoarFearRadius, RoarFearIntensity);
+
+    // Debug sphere in editor
+#if WITH_EDITOR
+    DrawDebugSphere(World, GetActorLocation(), RoarFearRadius, 16,
+                    FColor::Orange, false, 2.0f);
+#endif
+
+    // Apply fear to all pawns in radius
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsWithTag(World, FName("Player"), OverlappingActors);
+
+    for (AActor* Actor : OverlappingActors)
     {
-        return;
-    }
-
-    // Sphere overlap at head position (forward + up offset from capsule centre)
-    const FVector HeadOffset = GetActorForwardVector() * TRexAttackRange
-                             + FVector(0.0f, 0.0f, 120.0f); // head is high up
-    const FVector AttackOrigin = GetActorLocation() + HeadOffset;
-
-    TArray<FOverlapResult> Overlaps;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-
-    const bool bHit = GetWorld()->OverlapMultiByChannel(
-        Overlaps,
-        AttackOrigin,
-        FQuat::Identity,
-        ECC_Pawn,
-        FCollisionShape::MakeSphere(TRexAttackRange),
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        for (const FOverlapResult& Overlap : Overlaps)
+        if (!Actor) continue;
+        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Dist <= RoarFearRadius)
         {
-            AActor* HitActor = Overlap.GetActor();
-            if (HitActor && HitActor != this)
-            {
-                // Apply bite damage
-                UGameplayStatics::ApplyDamage(
-                    HitActor,
-                    TRexBiteDamage,
-                    GetController(),
-                    this,
-                    UDamageType::StaticClass()
-                );
-
-                UE_LOG(LogTemp, Log,
-                       TEXT("ATRexCharacter: Bite hit %s for %.0f damage"),
-                       *HitActor->GetName(), TRexBiteDamage);
-            }
+            // Notify the actor — Blueprint/C++ can listen for this event
+            Actor->Tags.AddUnique(FName("Frightened"));
+            UE_LOG(LogTemp, Log, TEXT("[TRex] %s frightened by roar (dist=%.0f)"),
+                   *Actor->GetActorLabel(), Dist);
         }
     }
-
-    // Hunger satisfied slightly after a successful hunt attempt
-    if (bHit)
-    {
-        CurrentHunger = FMath::Min(CurrentHunger + 20.0f, MaxHunger);
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PerformRoar — intimidate nearby prey, announce territory
+// PerformStomp
 // ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::PerformRoar()
+void ATRexCharacter::PerformStomp_Implementation()
 {
-    if (bRoarOnCooldown || CurrentBehaviourState == EDinoBehaviourState::Dead)
-    {
-        return;
-    }
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    bIsRoaring = true;
-    bRoarOnCooldown = true;
+    float StompDamage = AttackDamage * StompDamageMultiplier;
 
-    // Find all pawns within intimidation radius
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s STOMPS — radius=%.0f dmg=%.0f"),
+           *GetActorLabel(), StompRadius, StompDamage);
 
-    for (AActor* Actor : NearbyActors)
-    {
-        if (!Actor || Actor == this) continue;
+#if WITH_EDITOR
+    DrawDebugSphere(World, GetActorLocation(), StompRadius, 12,
+                    FColor::Red, false, 1.5f);
+#endif
 
-        const float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist <= RoarIntimidationRadius)
-        {
-            // Broadcast roar event — Animation Agent (#10) and Audio Agent (#16)
-            // will bind to this via Blueprint event dispatcher
-            // For now: log the intimidation hit
-            UE_LOG(LogTemp, Log,
-                   TEXT("ATRexCharacter::PerformRoar — Intimidated %s at dist=%.0f"),
-                   *Actor->GetName(), Dist);
-        }
-    }
+    // Radial damage
+    TArray<AActor*> IgnoredActors;
+    IgnoredActors.Add(this);
 
-    // Start roar cooldown timer
-    GetWorldTimerManager().SetTimer(
-        RoarCooldownTimer,
-        this,
-        &ATRexCharacter::OnRoarFinished,
-        RoarCooldown,
-        false
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter::PerformRoar — Roar performed, cooldown=%.0fs"), RoarCooldown);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OnRoarFinished — reset roar state after animation completes
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::OnRoarFinished()
-{
-    bIsRoaring = false;
-    bRoarOnCooldown = false;
-    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter::OnRoarFinished — Roar cooldown expired"));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PerformStomp — radial damage + knockback for nearby small creatures
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::PerformStomp()
-{
-    if (CurrentBehaviourState == EDinoBehaviourState::Dead)
-    {
-        return;
-    }
-
-    const FVector StompOrigin = GetActorLocation();
-
-    // Radial damage — affects all actors within StompRadius
     UGameplayStatics::ApplyRadialDamage(
-        GetWorld(),
+        World,
         StompDamage,
-        StompOrigin,
+        GetActorLocation(),
         StompRadius,
         UDamageType::StaticClass(),
-        TArray<AActor*>{ this }, // ignore self
+        IgnoredActors,
         this,
-        GetController(),
-        false, // full damage (not fall-off)
-        ECC_Visibility
+        GetInstigatorController(),
+        true  // full damage at epicentre
     );
-
-    UE_LOG(LogTemp, Log,
-           TEXT("ATRexCharacter::PerformStomp — Radial damage %.0f in radius %.0f"),
-           StompDamage, StompRadius);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Die — T-Rex specific death sequence
+// PerformBite
 // ─────────────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::Die()
+void ATRexCharacter::PerformBite_Implementation()
 {
-    // Clear roar timer before calling parent die
-    GetWorldTimerManager().ClearTimer(RoarCooldownTimer);
-    bIsRoaring = false;
-    bRoarOnCooldown = false;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    UE_LOG(LogTemp, Warning,
-           TEXT("ATRexCharacter::Die — T-Rex %s has died"), *GetName());
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s BITES — range=%.0f dmg=%.0f"),
+           *GetActorLabel(), BiteRange, AttackDamage);
 
-    // Delegate remaining death logic (ragdoll, timer cleanup, state set) to base
-    Super::Die();
+    // Line trace from mouth (forward + slight down)
+    FVector Start = GetActorLocation() + FVector(0, 0, 150.0f); // approx mouth height
+    FVector End   = Start + GetActorForwardVector() * BiteRange;
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this);
+
+    bool bHit = World->LineTraceSingleByChannel(HitResult, Start, End,
+                                                ECC_Pawn, Params);
+
+#if WITH_EDITOR
+    DrawDebugLine(World, Start, End, bHit ? FColor::Red : FColor::Yellow,
+                  false, 1.0f, 0, 3.0f);
+#endif
+
+    if (bHit && HitResult.GetActor())
+    {
+        UGameplayStatics::ApplyPointDamage(
+            HitResult.GetActor(),
+            AttackDamage,
+            GetActorForwardVector(),
+            HitResult,
+            GetInstigatorController(),
+            this,
+            UDamageType::StaticClass()
+        );
+
+        UE_LOG(LogTemp, Log, TEXT("[TRex] Bite HIT %s for %.0f dmg"),
+               *HitResult.GetActor()->GetActorLabel(), AttackDamage);
+    }
 }
