@@ -1,133 +1,70 @@
-#include "AudioZoneManager.h"
-#include "Components/BoxComponent.h"
-#include "Components/AudioComponent.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
+// AudioZoneManager.cpp
+// Adaptive ambient audio zone system for prehistoric survival game
+// Agent #16 — Audio Agent — PROD_CYCLE_AUTO_20260624_004
 
-AAudio_ZoneManager::AAudio_ZoneManager()
+#include "AudioZoneManager.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "GameFramework/Actor.h"
+
+AAudioZoneManager::AAudioZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    TriggerVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerVolume"));
-    TriggerVolume->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
-    TriggerVolume->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerVolume;
-
-    AmbienceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbienceAudio"));
-    AmbienceAudioComponent->SetupAttachment(RootComponent);
-    AmbienceAudioComponent->bAutoActivate = false;
-    AmbienceAudioComponent->VolumeMultiplier = 0.0f;
+    PrimaryActorTick.TickInterval = 0.1f; // 10Hz tick — sufficient for audio fade
+    CurrentFadeAlpha = 0.0f;
+    bFadingIn = false;
 }
 
-void AAudio_ZoneManager::BeginPlay()
+void AAudioZoneManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    TriggerVolume->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnTriggerBeginOverlap);
-    TriggerVolume->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnTriggerEndOverlap);
-
-    ActiveMusicLayer = ZoneConfig.MusicLayer;
+    if (bIsActive)
+    {
+        bFadingIn = true;
+    }
 }
 
-void AAudio_ZoneManager::Tick(float DeltaTime)
+void AAudioZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Smooth fade in/out of ambience volume
-    if (bZoneActive && CurrentFadeAlpha < 1.0f)
+    if (!bIsActive)
     {
-        float FadeRate = (ZoneConfig.FadeInTime > 0.0f) ? (DeltaTime / ZoneConfig.FadeInTime) : 1.0f;
-        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha + FadeRate, 0.0f, 1.0f);
-        AmbienceAudioComponent->SetVolumeMultiplier(CurrentFadeAlpha * ZoneConfig.AmbienceVolume);
+        return;
     }
-    else if (!bZoneActive && CurrentFadeAlpha > 0.0f)
-    {
-        float FadeRate = (ZoneConfig.FadeOutTime > 0.0f) ? (DeltaTime / ZoneConfig.FadeOutTime) : 1.0f;
-        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha - FadeRate, 0.0f, 1.0f);
-        AmbienceAudioComponent->SetVolumeMultiplier(CurrentFadeAlpha * ZoneConfig.AmbienceVolume);
 
-        if (CurrentFadeAlpha <= 0.0f)
-        {
-            AmbienceAudioComponent->Stop();
-        }
+    // Fade in/out logic
+    if (bFadingIn && CurrentFadeAlpha < 1.0f)
+    {
+        float FadeSpeed = (ZoneConfig.FadeInTime > 0.0f) ? (1.0f / ZoneConfig.FadeInTime) : 1.0f;
+        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha + DeltaTime * FadeSpeed, 0.0f, 1.0f);
+    }
+    else if (!bFadingIn && CurrentFadeAlpha > 0.0f)
+    {
+        float FadeSpeed = (ZoneConfig.FadeOutTime > 0.0f) ? (1.0f / ZoneConfig.FadeOutTime) : 1.0f;
+        CurrentFadeAlpha = FMath::Clamp(CurrentFadeAlpha - DeltaTime * FadeSpeed, 0.0f, 1.0f);
     }
 }
 
-void AAudio_ZoneManager::ActivateZone(AActor* PlayerActor)
+void AAudioZoneManager::ActivateZone()
 {
-    if (!PlayerActor) return;
-    if (ZoneConfig.bTriggerOnce && bHasTriggeredOnce) return;
-
-    bZoneActive = true;
-    bHasTriggeredOnce = true;
-
-    if (!AmbienceAudioComponent->IsPlaying())
-    {
-        AmbienceAudioComponent->Play();
-    }
-
-    // Fire tension/dread stings based on zone type
-    switch (ZoneConfig.ZoneType)
-    {
-        case EAudio_ZoneType::Tension:
-            TriggerTensionSting();
-            break;
-        case EAudio_ZoneType::Dread:
-            TriggerDreadSting();
-            break;
-        default:
-            break;
-    }
+    bIsActive = true;
+    bFadingIn = true;
 }
 
-void AAudio_ZoneManager::DeactivateZone(AActor* PlayerActor)
+void AAudioZoneManager::DeactivateZone()
 {
-    if (!PlayerActor) return;
-    bZoneActive = false;
+    bIsActive = false;
+    bFadingIn = false;
 }
 
-float AAudio_ZoneManager::GetCurrentAmbienceVolume() const
+EAudio_ZoneType AAudioZoneManager::GetZoneType() const
 {
-    return CurrentFadeAlpha * ZoneConfig.AmbienceVolume;
+    return ZoneConfig.ZoneType;
 }
 
-void AAudio_ZoneManager::SetMusicLayer(EAudio_MusicLayer NewLayer)
+float AAudioZoneManager::GetMusicIntensity() const
 {
-    ActiveMusicLayer = NewLayer;
-}
-
-void AAudio_ZoneManager::TriggerTensionSting()
-{
-    // Blueprint-implementable: plays a one-shot tension sting cue
-    // In full implementation, this calls into MetaSounds parameter bus
-    UE_LOG(LogTemp, Log, TEXT("AudioZone[%s]: TENSION_STING triggered"), *GetActorLabel());
-}
-
-void AAudio_ZoneManager::TriggerDreadSting()
-{
-    // Blueprint-implementable: plays a one-shot dread sting cue
-    UE_LOG(LogTemp, Log, TEXT("AudioZone[%s]: DREAD_STING triggered"), *GetActorLabel());
-}
-
-void AAudio_ZoneManager::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!OtherActor) return;
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar)
-    {
-        ActivateZone(OtherActor);
-    }
-}
-
-void AAudio_ZoneManager::OnTriggerEndOverlap(UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor) return;
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar)
-    {
-        DeactivateZone(OtherActor);
-    }
+    return ZoneConfig.MusicIntensity * CurrentFadeAlpha;
 }
