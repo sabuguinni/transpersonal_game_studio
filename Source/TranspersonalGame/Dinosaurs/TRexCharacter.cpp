@@ -1,344 +1,136 @@
 // TRexCharacter.cpp
-// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260624_001
-// Tyrannosaurus Rex — full implementation
+// Core Systems Programmer #03 — Transpersonal Game Studio
 
-#include "TRexCharacter.h"
+#include "Dinosaurs/TRexCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 ATRexCharacter::ATRexCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Movement — T-Rex is massive, slow turn rate, high mass
-    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-    if (MoveComp)
-    {
-        MoveComp->MaxWalkSpeed = Stats.WalkSpeed;
-        MoveComp->RotationRate = FRotator(0.0f, 120.0f, 0.0f);
-        MoveComp->bOrientRotationToMovement = true;
-        MoveComp->Mass = 8000.0f;
-        MoveComp->JumpZVelocity = 0.0f;    // T-Rex cannot jump
-        MoveComp->AirControl = 0.0f;
-        MoveComp->GravityScale = 1.5f;     // Heavy — sticks to ground
-        MoveComp->MaxStepHeight = 120.0f;  // Can step over large obstacles
-        MoveComp->bCanWalkOffLedges = false;
-    }
+    // Species identity
+    Species = EDinoSpecies::TyrannosaurusRex;
 
-    CurrentState = EWorld_TRexState::Idle;
-    bUseControllerRotationYaw = false;
+    // Apex predator stats
+    MaxHealth       = 2000.0f;
+    CurrentHealth   = 2000.0f;
+    AttackDamage    = 150.0f;
+    AttackRange     = 350.0f;
+    DetectionRange  = 4000.0f;
+    MaxStamina      = 200.0f;
+    CurrentStamina  = 200.0f;
+
+    // TRex is large but not the fastest — burst speed
+    GetCharacterMovement()->MaxWalkSpeed        = 600.0f;
+    GetCharacterMovement()->MaxAcceleration     = 800.0f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 400.0f;
+    GetCharacterMovement()->JumpZVelocity       = 0.0f;   // TRex cannot jump
+    GetCharacterMovement()->bCanWalkOffLedges   = false;
+
+    // Scale — TRex is massive
+    SetActorScale3D(FVector(3.5f, 3.5f, 3.5f));
 }
 
 void ATRexCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Apply initial walk speed from stats
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-    {
-        MoveComp->MaxWalkSpeed = Stats.WalkSpeed;
-    }
-
-    // Alpha T-Rex gets a 20% stat bonus
-    if (bIsAlpha)
-    {
-        Stats.MaxHealth *= 1.2f;
-        Stats.Health = Stats.MaxHealth;
-        Stats.AttackDamage *= 1.2f;
-        Stats.DetectionRadius *= 1.3f;
-    }
-
-    SetBehaviourState(EWorld_TRexState::Patrolling);
+    // Schedule periodic roar every 15-25 seconds when hunting
+    GetWorldTimerManager().SetTimer(
+        RoarTimerHandle,
+        this,
+        &ATRexCharacter::MaybeRoar,
+        20.0f,
+        true,
+        10.0f  // First roar after 10s
+    );
 }
 
 void ATRexCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (!IsAlive()) return;
-
-    UpdateHunger(DeltaTime);
-    UpdateBehaviour(DeltaTime);
-    StateTimer += DeltaTime;
+    // TRex-specific tick logic can be added here
+    // Parent handles behavior state machine, stamina regen, combat
 }
 
-// ── Hunger ───────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::UpdateHunger(float DeltaTime)
+void ATRexCharacter::PerformRoar()
 {
-    Stats.Hunger = FMath::Max(0.0f, Stats.Hunger - HungerDecayRate * DeltaTime);
+    if (bIsRoaring || !IsAlive()) return;
 
-    // Hungry T-Rex actively hunts
-    if (Stats.Hunger < 30.0f && CurrentState == EWorld_TRexState::Patrolling)
+    bIsRoaring = true;
+
+    UE_LOG(LogTemp, Log, TEXT("TRex [%s] ROARS — radius %.0fcm"), *GetActorLabel(), RoarRadius);
+
+    // Find all actors in roar radius and apply fear
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
+
+    FVector MyLoc = GetActorLocation();
+    for (AActor* Actor : NearbyActors)
     {
-        TransitionToHunting();
-    }
-}
-
-// ── Behaviour State Machine ───────────────────────────────────────────────────
-
-void ATRexCharacter::UpdateBehaviour(float DeltaTime)
-{
-    switch (CurrentState)
-    {
-    case EWorld_TRexState::Idle:
-        // After 5s idle, start patrolling
-        if (StateTimer > 5.0f)
+        if (Actor == this) continue;
+        float Dist = FVector::Dist(MyLoc, Actor->GetActorLocation());
+        if (Dist <= RoarRadius)
         {
-            SetBehaviourState(EWorld_TRexState::Patrolling);
-        }
-        break;
-
-    case EWorld_TRexState::Patrolling:
-        // Check for prey every 2 seconds
-        if (StateTimer > 2.0f)
-        {
-            StateTimer = 0.0f;
-            AActor* Prey = FindNearestPrey();
-            if (Prey)
-            {
-                TransitionToHunting();
-            }
-        }
-        break;
-
-    case EWorld_TRexState::Hunting:
-    {
-        AActor* Prey = FindNearestPrey();
-        if (!Prey)
-        {
-            SetBehaviourState(EWorld_TRexState::Patrolling);
-            break;
-        }
-
-        float DistToPrey = FVector::Dist(GetActorLocation(), Prey->GetActorLocation());
-        if (DistToPrey <= Stats.AttackRadius)
-        {
-            SetBehaviourState(EWorld_TRexState::Attacking);
-        }
-        break;
-    }
-
-    case EWorld_TRexState::Attacking:
-        if (StateTimer > 1.5f)
-        {
-            PerformBite();
-            StateTimer = 0.0f;
-        }
-        break;
-
-    case EWorld_TRexState::Roaring:
-        if (StateTimer > 3.0f)
-        {
-            SetBehaviourState(EWorld_TRexState::Hunting);
-        }
-        break;
-
-    case EWorld_TRexState::Sleeping:
-        // Wake up when hungry
-        if (Stats.Hunger < 20.0f)
-        {
-            SetBehaviourState(EWorld_TRexState::Idle);
-        }
-        break;
-
-    default:
-        break;
-    }
-}
-
-void ATRexCharacter::SetBehaviourState(EWorld_TRexState NewState)
-{
-    if (CurrentState == NewState) return;
-
-    CurrentState = NewState;
-    StateTimer = 0.0f;
-
-    // Adjust movement speed based on state
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-    {
-        switch (NewState)
-        {
-        case EWorld_TRexState::Hunting:
-        case EWorld_TRexState::Attacking:
-            MoveComp->MaxWalkSpeed = Stats.RunSpeed;
-            break;
-        case EWorld_TRexState::Sleeping:
-            MoveComp->MaxWalkSpeed = 0.0f;
-            break;
-        default:
-            MoveComp->MaxWalkSpeed = Stats.WalkSpeed;
-            break;
-        }
-    }
-}
-
-void ATRexCharacter::TransitionToHunting()
-{
-    // Roar before hunting if cooldown allows
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    if (CurrentTime - LastRoarTime > RoarCooldown)
-    {
-        Roar();
-    }
-    else
-    {
-        SetBehaviourState(EWorld_TRexState::Hunting);
-    }
-}
-
-// ── Combat ────────────────────────────────────────────────────────────────────
-
-void ATRexCharacter::PerformBite()
-{
-    if (!GetWorld()) return;
-
-    // Sphere overlap in front of T-Rex for bite
-    FVector BiteOrigin = GetActorLocation() + GetActorForwardVector() * Stats.AttackRadius;
-    TArray<FOverlapResult> Overlaps;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
-
-    bool bHit = GetWorld()->OverlapMultiByChannel(
-        Overlaps,
-        BiteOrigin,
-        FQuat::Identity,
-        ECC_Pawn,
-        FCollisionShape::MakeSphere(Stats.AttackRadius * 0.5f),
-        Params
-    );
-
-    if (bHit)
-    {
-        for (const FOverlapResult& Overlap : Overlaps)
-        {
-            AActor* HitActor = Overlap.GetActor();
-            if (HitActor && HitActor != this)
-            {
-                UGameplayStatics::ApplyDamage(
-                    HitActor,
-                    Stats.AttackDamage,
-                    GetController(),
-                    this,
-                    UDamageType::StaticClass()
-                );
-            }
+            // Apply fear damage type — TranspersonalCharacter listens for this
+            UGameplayStatics::ApplyDamage(
+                Actor,
+                0.0f,  // No direct damage — fear effect only (handled by SurvivalComponent)
+                GetController(),
+                this,
+                UDamageType::StaticClass()
+            );
+            UE_LOG(LogTemp, Verbose, TEXT("TRex roar reached: %s (dist=%.0f)"), *Actor->GetActorLabel(), Dist);
         }
     }
 
-    // Feed on successful bite
-    Stats.Hunger = FMath::Min(100.0f, Stats.Hunger + 15.0f);
+    // Debug sphere in editor
+#if WITH_EDITOR
+    DrawDebugSphere(GetWorld(), MyLoc, RoarRadius, 16, FColor::Red, false, 3.0f);
+#endif
+
+    // Reset roar flag after animation would finish (~3s)
+    FTimerHandle ResetHandle;
+    GetWorldTimerManager().SetTimer(ResetHandle, [this]() { bIsRoaring = false; }, 3.0f, false);
 }
 
 void ATRexCharacter::PerformStomp()
 {
-    if (!GetWorld()) return;
+    if (!IsAlive()) return;
 
-    // Radial damage from stomp — affects area around feet
     FVector StompOrigin = GetActorLocation();
-    TArray<AActor*> IgnoredActors;
-    IgnoredActors.Add(this);
+    StompOrigin.Z -= 50.0f;  // Ground level
 
+    UE_LOG(LogTemp, Log, TEXT("TRex [%s] STOMPS — radius %.0fcm, damage %.0f"),
+        *GetActorLabel(), StompRadius, StompDamage);
+
+    // Radial damage at stomp point
     UGameplayStatics::ApplyRadialDamage(
         GetWorld(),
-        Stats.StompDamage,
+        StompDamage,
         StompOrigin,
-        Stats.StompDamageRadius,
+        StompRadius,
         UDamageType::StaticClass(),
-        IgnoredActors,
+        TArray<AActor*>(),  // Ignore list (empty = hit all)
         this,
         GetController(),
-        true,
-        ECC_Visibility
-    );
-}
-
-void ATRexCharacter::Roar()
-{
-    if (!GetWorld()) return;
-
-    LastRoarTime = GetWorld()->GetTimeSeconds();
-    SetBehaviourState(EWorld_TRexState::Roaring);
-
-    // Roar scares nearby prey — apply fear impulse (logged for AI to pick up)
-    UE_LOG(LogTemp, Warning, TEXT("TRex ROAR at location %s"), *GetActorLocation().ToString());
-}
-
-float ATRexCharacter::ApplyDamage(float DamageAmount)
-{
-    Stats.Health = FMath::Max(0.0f, Stats.Health - DamageAmount);
-
-    if (Stats.Health <= 0.0f)
-    {
-        // Death — ragdoll
-        if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-        {
-            MoveComp->DisableMovement();
-        }
-        SetActorEnableCollision(false);
-        UE_LOG(LogTemp, Warning, TEXT("TRex %s has died!"), *GetActorLabel());
-    }
-    else if (Stats.Health < Stats.MaxHealth * 0.3f && CurrentState != EWorld_TRexState::Fleeing)
-    {
-        // Flee when critically wounded
-        SetBehaviourState(EWorld_TRexState::Fleeing);
-    }
-
-    return Stats.Health;
-}
-
-// ── Detection ─────────────────────────────────────────────────────────────────
-
-AActor* ATRexCharacter::FindNearestPrey() const
-{
-    if (!GetWorld()) return nullptr;
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), AllActors);
-
-    AActor* NearestPrey = nullptr;
-    float NearestDist = Stats.DetectionRadius;
-
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor == this) continue;
-
-        // Skip other T-Rex instances
-        if (Actor->IsA(ATRexCharacter::StaticClass())) continue;
-
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < NearestDist && CanSeeActor(Actor))
-        {
-            NearestDist = Dist;
-            NearestPrey = Actor;
-        }
-    }
-
-    return NearestPrey;
-}
-
-bool ATRexCharacter::CanSeeActor(AActor* Target) const
-{
-    if (!Target || !GetWorld()) return false;
-
-    // Line-of-sight check
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
-    Params.AddIgnoredActor(Target);
-
-    FVector EyeLocation = GetActorLocation() + FVector(0, 0, 200.0f); // Eye height
-    FVector TargetLocation = Target->GetActorLocation();
-
-    bool bBlocked = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        EyeLocation,
-        TargetLocation,
-        ECC_Visibility,
-        Params
+        true  // Do full damage at center, falloff toward edge
     );
 
-    return !bBlocked;
+#if WITH_EDITOR
+    DrawDebugSphere(GetWorld(), StompOrigin, StompRadius, 12, FColor::Orange, false, 2.0f);
+#endif
+}
+
+void ATRexCharacter::MaybeRoar()
+{
+    // Only roar when hunting or in combat
+    if (CurrentState == EDinoState::Hunting || CurrentState == EDinoState::Attacking)
+    {
+        PerformRoar();
+    }
 }
