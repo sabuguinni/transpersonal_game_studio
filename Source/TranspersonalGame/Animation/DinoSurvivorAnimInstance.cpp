@@ -2,47 +2,22 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
 UDinoSurvivorAnimInstance::UDinoSurvivorAnimInstance()
 {
-    GroundSpeed = 0.0f;
-    GroundSpeedNormalized = 0.0f;
-    bIsMoving = false;
-    bIsFalling = false;
-    bIsCrouching = false;
-    bIsSprinting = false;
-
-    MovementDirection = 0.0f;
-    LeanAngle = 0.0f;
-
-    StaminaNormalized = 1.0f;
-    bIsExhausted = false;
-    bIsInjured = false;
-
-    bIsInCombat = false;
-    bIsAiming = false;
-    AimPitch = 0.0f;
-    AimYaw = 0.0f;
-
-    LeftFootIKLocation = FVector::ZeroVector;
-    RightFootIKLocation = FVector::ZeroVector;
-    LeftFootIKRotation = FRotator::ZeroRotator;
-    RightFootIKRotation = FRotator::ZeroRotator;
-    IKAlpha = 1.0f;
-
-    WalkSpeedThreshold = 10.0f;
-    RunSpeedThreshold = 150.0f;
-    SprintSpeedThreshold = 400.0f;
-    IKTraceDistance = 80.0f;
-
-    OwnerCharacter = nullptr;
 }
 
 void UDinoSurvivorAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+
+    APawn* Pawn = TryGetPawnOwner();
+    if (Pawn)
+    {
+        OwnerCharacter = Cast<ACharacter>(Pawn);
+    }
 }
 
 void UDinoSurvivorAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
@@ -51,102 +26,110 @@ void UDinoSurvivorAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
     if (!OwnerCharacter)
     {
-        OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+        APawn* Pawn = TryGetPawnOwner();
+        if (Pawn)
+        {
+            OwnerCharacter = Cast<ACharacter>(Pawn);
+        }
         if (!OwnerCharacter) return;
     }
-
-    UpdateLocomotion();
-    UpdateFootIK();
-}
-
-void UDinoSurvivorAnimInstance::UpdateLocomotion()
-{
-    if (!OwnerCharacter) return;
 
     UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
     if (!MovComp) return;
 
-    // Ground speed (horizontal only)
+    // ── Locomotion ──────────────────────────────────────────────────────────
+
     FVector Velocity = OwnerCharacter->GetVelocity();
-    FVector HorizontalVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-    GroundSpeed = HorizontalVelocity.Size();
+    Velocity.Z = 0.f;
+    GroundSpeed = Velocity.Size();
 
-    // Normalize 0-1 over sprint range
-    GroundSpeedNormalized = FMath::Clamp(GroundSpeed / SprintSpeedThreshold, 0.0f, 1.0f);
+    // Strafe direction: project velocity onto right vector
+    FVector RightVec = OwnerCharacter->GetActorRightVector();
+    float Dot = FVector::DotProduct(Velocity.GetSafeNormal(), RightVec);
+    StrafeDirection = Dot; // -1=left, 0=forward, 1=right
 
-    bIsMoving = GroundSpeed > WalkSpeedThreshold;
-    bIsFalling = MovComp->IsFalling();
-    bIsCrouching = MovComp->IsCrouching();
-    bIsSprinting = GroundSpeed >= SprintSpeedThreshold;
+    bIsInAir = MovComp->IsFalling();
+    bIsCrouching = OwnerCharacter->bIsCrouched;
+    bIsSprinting = (GroundSpeed > 350.f) && !bIsInAir;
+    bIsClimbing = (MovComp->MovementMode == MOVE_Custom);
 
-    // IK alpha — disable during fall, reduce when exhausted
-    IKAlpha = bIsFalling ? 0.0f : (bIsExhausted ? 0.5f : 1.0f);
+    // ── Survival State ───────────────────────────────────────────────────────
+    // These will be driven by TranspersonalCharacter survival stats
+    // For now, default to full health/stamina unless character exposes them
+    bIsLimping = (HealthRatio < 0.3f);
 
-    // Movement direction relative to actor forward
-    if (bIsMoving)
+    // ── Aim Offset ──────────────────────────────────────────────────────────
+    AController* Controller = OwnerCharacter->GetController();
+    if (Controller)
     {
+        FRotator ControlRot = Controller->GetControlRotation();
         FRotator ActorRot = OwnerCharacter->GetActorRotation();
-        FRotator VelocityRot = HorizontalVelocity.Rotation();
-        FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot);
-        MovementDirection = DeltaRot.Yaw;
+        FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, ActorRot);
 
-        // Lean — proportional to speed and direction change
-        LeanAngle = FMath::Clamp(DeltaRot.Yaw * 0.1f, -15.0f, 15.0f);
+        AimPitch = FMath::ClampAngle(DeltaRot.Pitch, -90.f, 90.f);
+        AimYaw = FMath::ClampAngle(DeltaRot.Yaw, -90.f, 90.f);
+    }
+
+    // ── Foot IK ──────────────────────────────────────────────────────────────
+    if (!bIsInAir)
+    {
+        UpdateFootIK();
     }
     else
     {
-        MovementDirection = 0.0f;
-        LeanAngle = FMath::FInterpTo(LeanAngle, 0.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
+        // Reset IK when airborne
+        LeftFootIKTarget = FVector::ZeroVector;
+        RightFootIKTarget = FVector::ZeroVector;
+        PelvisOffset = 0.f;
     }
 }
 
 void UDinoSurvivorAnimInstance::UpdateFootIK()
 {
-    if (!OwnerCharacter || bIsFalling) return;
-
-    SolveFootIK(FName("foot_l"), LeftFootIKLocation, LeftFootIKRotation);
-    SolveFootIK(FName("foot_r"), RightFootIKLocation, RightFootIKRotation);
-}
-
-void UDinoSurvivorAnimInstance::SolveFootIK(FName SocketName, FVector& OutLocation, FRotator& OutRotation)
-{
     if (!OwnerCharacter) return;
 
-    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-    if (!Mesh) return;
+    UWorld* World = OwnerCharacter->GetWorld();
+    if (!World) return;
 
-    // Get foot socket world location
-    FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
-
-    // Trace downward from foot
-    FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, IKTraceDistance);
-    FVector TraceEnd   = SocketLocation - FVector(0.0f, 0.0f, IKTraceDistance);
-
-    FHitResult HitResult;
+    const float TraceLength = 80.f;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerCharacter);
 
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECollisionChannel::ECC_Visibility,
+    // Left foot socket approximate offset
+    FVector LeftFootBase = OwnerCharacter->GetActorLocation() + OwnerCharacter->GetActorRightVector() * -25.f;
+    FVector RightFootBase = OwnerCharacter->GetActorLocation() + OwnerCharacter->GetActorRightVector() * 25.f;
+
+    FHitResult LeftHit, RightHit;
+
+    // Left foot trace
+    bool bLeftHit = World->LineTraceSingleByChannel(
+        LeftHit,
+        LeftFootBase + FVector(0, 0, TraceLength),
+        LeftFootBase - FVector(0, 0, TraceLength),
+        ECC_Visibility,
         Params
     );
 
-    if (bHit)
-    {
-        OutLocation = HitResult.ImpactPoint;
+    // Right foot trace
+    bool bRightHit = World->LineTraceSingleByChannel(
+        RightHit,
+        RightFootBase + FVector(0, 0, TraceLength),
+        RightFootBase - FVector(0, 0, TraceLength),
+        ECC_Visibility,
+        Params
+    );
 
-        // Compute foot rotation from surface normal
-        FVector Normal = HitResult.ImpactNormal;
-        FRotator SurfaceRot = UKismetMathLibrary::MakeRotFromZX(Normal, OwnerCharacter->GetActorForwardVector());
-        OutRotation = SurfaceRot;
-    }
-    else
-    {
-        // No hit — use default foot position
-        OutLocation = SocketLocation;
-        OutRotation = FRotator::ZeroRotator;
-    }
+    FVector TargetLeft = bLeftHit ? LeftHit.ImpactPoint : LeftFootBase;
+    FVector TargetRight = bRightHit ? RightHit.ImpactPoint : RightFootBase;
+
+    // Smooth interpolation
+    float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+    LeftFootIKTarget = FMath::VInterpTo(LeftFootIKTarget, TargetLeft, DeltaTime, IKInterpSpeed);
+    RightFootIKTarget = FMath::VInterpTo(RightFootIKTarget, TargetRight, DeltaTime, IKInterpSpeed);
+
+    // Pelvis offset: lower pelvis to accommodate the lower foot
+    float LeftDelta = TargetLeft.Z - OwnerCharacter->GetActorLocation().Z;
+    float RightDelta = TargetRight.Z - OwnerCharacter->GetActorLocation().Z;
+    float TargetPelvis = FMath::Min(LeftDelta, RightDelta);
+    PelvisOffset = FMath::FInterpTo(PelvisOffset, TargetPelvis, DeltaTime, IKInterpSpeed);
 }
