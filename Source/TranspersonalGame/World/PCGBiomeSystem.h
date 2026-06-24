@@ -1,119 +1,83 @@
 // PCGBiomeSystem.h
-// Agent #05 — Procedural World Generator
-// Biome classification and environmental data system for Cretaceous world
+// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260624_006
+// Biome data system: defines biome zones, river paths, terrain variation
+// Integrates with UE5 PCG framework for procedural world population
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Components/PointLightComponent.h"
 #include "PCGBiomeSystem.generated.h"
 
-// ─── Biome Types ────────────────────────────────────────────────────────────
-
+// ── Biome type enum ──────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Cretaceous Forest"),
-    Savanna     UMETA(DisplayName = "Open Savanna"),
-    Swamp       UMETA(DisplayName = "Coastal Swamp"),
-    Rocky       UMETA(DisplayName = "Rocky Highlands"),
-    Volcanic    UMETA(DisplayName = "Volcanic Badlands"),
-    River       UMETA(DisplayName = "River Delta"),
-    Plains      UMETA(DisplayName = "Open Plains"),
-    COUNT       UMETA(Hidden)
+    None            UMETA(DisplayName = "None"),
+    DenseForest     UMETA(DisplayName = "Dense Forest"),
+    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
+    RockyHighland   UMETA(DisplayName = "Rocky Highland"),
+    RiverValley     UMETA(DisplayName = "River Valley"),
+    CoastalShore    UMETA(DisplayName = "Coastal Shore"),
+    VolcanicPlains  UMETA(DisplayName = "Volcanic Plains"),
 };
 
-// ─── Biome Environmental Data ────────────────────────────────────────────────
-
+// ── Biome zone definition ────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData : public FTableRowBase
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown Biome");
+    FVector CenterLocation = FVector::ZeroVector;
 
-    // Temperature range (Celsius)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float MinTemperature = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float MaxTemperature = 35.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 1.0f;
 
-    // Humidity 0-1
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float Humidity = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float RockDensity = 0.5f;
 
-    // Vegetation density 0-1
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float VegetationDensity = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float WaterPresence = 0.0f;
 
-    // Fog density 0-1
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float FogDensity = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor BiomeDebugColor = FLinearColor::White;
 
-    // Fog color tint
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor = FLinearColor(0.6f, 0.8f, 0.6f, 1.0f);
-
-    // Ambient light color
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor AmbientColor = FLinearColor(0.4f, 0.5f, 0.3f, 1.0f);
-
-    // Danger level 0-1 (affects dinosaur aggression)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    float DangerLevel = 0.5f;
-
-    // Resource richness 0-1
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    float ResourceRichness = 0.5f;
-
-    // World-space center of this biome zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    FVector ZoneCenter = FVector::ZeroVector;
-
-    // Radius of biome influence (Unreal units)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float ZoneRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName = TEXT("Unknown");
 };
 
-// ─── Biome Query Result ──────────────────────────────────────────────────────
-
+// ── River segment definition ─────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeQueryResult
+struct FWorld_RiverSegment
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EWorld_BiomeType PrimaryBiome = EWorld_BiomeType::Plains;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector StartPoint = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    EWorld_BiomeType SecondaryBiome = EWorld_BiomeType::Plains;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector EndPoint = FVector(0, 1000, 0);
 
-    // Blend factor 0=primary only, 1=secondary only
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float BlendFactor = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Width = 300.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float Temperature = 28.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Depth = 50.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float Humidity = 0.5f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float DangerLevel = 0.3f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    bool bIsValid = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float FlowSpeed = 100.0f;
 };
 
-// ─── PCGBiomeSystem Actor ────────────────────────────────────────────────────
-
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "World")
+// ── PCG Biome System Actor ───────────────────────────────────────────────────
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome System"))
 class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
     GENERATED_BODY()
@@ -121,50 +85,63 @@ class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 public:
     APCGBiomeSystem();
 
-    // ── Biome Zones ──────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zones")
-    TArray<FWorld_BiomeData> BiomeZones;
-
-    // ── Query API ────────────────────────────────────────────────────────────
-
-    /** Query the biome at a world-space location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_BiomeQueryResult QueryBiomeAtLocation(const FVector& WorldLocation) const;
-
-    /** Get the dominant biome type at a location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWorld_BiomeType GetBiomeTypeAtLocation(const FVector& WorldLocation) const;
-
-    /** Get temperature at location (blended between biomes) */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
-
-    /** Get danger level at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
-
-    /** Get vegetation density at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
-
-    // ── Initialization ───────────────────────────────────────────────────────
-
-    /** Initialize default Cretaceous biome zones */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
-    void InitializeDefaultBiomes();
-
-    /** Find nearest biome zone to a location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    int32 FindNearestBiomeIndex(const FVector& WorldLocation) const;
-
 protected:
     virtual void BeginPlay() override;
 
-private:
-    /** Compute blend weight for a biome zone at a given distance */
-    float ComputeBlendWeight(float Distance, float ZoneRadius) const;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    /** Find the two closest biome zones for blending */
-    void FindTwoClosestBiomes(const FVector& Location, int32& OutPrimary, int32& OutSecondary, float& OutBlend) const;
+    // ── Biome zones ──────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biomes")
+    TArray<FWorld_BiomeZone> BiomeZones;
+
+    // ── River network ────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Rivers")
+    TArray<FWorld_RiverSegment> RiverSegments;
+
+    // ── PCG settings ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    float GlobalVegetationScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    int32 RandomSeed = 42;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|PCG")
+    bool bAutoGenerateOnBeginPlay = false;
+
+    // ── Debug ─────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Debug")
+    bool bDrawBiomeDebugSpheres = false;
+
+    // ── Blueprint-callable functions ─────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
+    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
+    FWorld_BiomeZone GetBiomeZoneAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
+    float GetVegetationDensityAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "World|Rivers")
+    bool IsLocationNearRiver(FVector WorldLocation, float SearchRadius = 500.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
+    void RegisterDefaultBiomes();
+
+    UFUNCTION(CallInEditor, Category = "World|PCG")
+    void GenerateWorld();
+
+    UFUNCTION(CallInEditor, Category = "World|PCG")
+    void ClearGeneratedActors();
+
+private:
+    // ── Debug light component ─────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+              meta = (AllowPrivateAccess = "true"))
+    UPointLightComponent* DebugLight;
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+    float CalculateDistanceToBiomeCenter(FVector Location, const FWorld_BiomeZone& Zone) const;
+    void InitializeDefaultRiverPath();
 };
