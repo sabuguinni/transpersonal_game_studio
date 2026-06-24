@@ -2,22 +2,35 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 #include "AudioZoneSystem.generated.h"
 
-// === AUDIO ZONE SYSTEM — Agent #16 ===
-// Hooks into ANarr_DialogueTriggerActor tone system.
-// Each zone plays adaptive audio based on ENarr_DialogueTone proximity.
+// ============================================================
+// Audio Zone System — Agent #16
+// Wired to ANarr_DialogueTriggerActor (Agent #15)
+// ENarr_DialogueTriggerType drives audio state machine
+// ============================================================
 
 UENUM(BlueprintType)
-enum class EAudio_ZoneTone : uint8
+enum class EAudio_ZoneState : uint8
 {
-    Neutral     UMETA(DisplayName = "Neutral"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Discovery   UMETA(DisplayName = "Discovery"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Calm        UMETA(DisplayName = "Calm")
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Playing         UMETA(DisplayName = "Playing"),
+    FadingOut       UMETA(DisplayName = "FadingOut"),
+    Completed       UMETA(DisplayName = "Completed")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_NarrativeHook : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    ElderWarning    UMETA(DisplayName = "Elder Warning — Stampede Rumble"),
+    StampedeApproach UMETA(DisplayName = "Stampede Approach — Low Rumble"),
+    UrgencyMid      UMETA(DisplayName = "Urgency Mid — Heartbeat Drums"),
+    UrgencyFinal    UMETA(DisplayName = "Urgency Final — Accelerating Drums"),
+    Victory         UMETA(DisplayName = "Victory — Wind and Birds"),
+    Failure         UMETA(DisplayName = "Failure — Crackling Fire")
 };
 
 USTRUCT(BlueprintType)
@@ -25,20 +38,26 @@ struct FAudio_ZoneConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneTone Tone = EAudio_ZoneTone::Neutral;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    EAudio_NarrativeHook HookType = EAudio_NarrativeHook::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float BlendRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float TriggerRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float MaxVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeInDuration = 1.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeOutDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float BaseVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     bool bLooping = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString ZoneDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bScaleWithUrgency = false;
 };
 
 USTRUCT(BlueprintType)
@@ -46,138 +65,161 @@ struct FAudio_ScreenShakeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
     float TriggerRadius = 1200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
-    float ShakeIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float MaxShakeIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
-    float ShakeDuration = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float ShakeFrequency = 2.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
-    float ShakeFrequency = 8.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    float ShakeDuration = 0.3f;
 };
 
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
+// ============================================================
+// AAudio_NarrativeZone — proximity-triggered ambient audio
+// wired to narrative dialogue trigger positions from Agent #15
+// ============================================================
+UCLASS(ClassGroup = (Audio), meta = (DisplayName = "Audio Narrative Zone"))
+class TRANSPERSONALGAME_API AAudio_NarrativeZone : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone", meta = (AllowPrivateAccess = "true"))
-    bool bPlayerInZone = false;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void OnPlayerEnterZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void OnPlayerExitZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    EAudio_ZoneTone GetCurrentTone() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    float GetVolumeForDistance(float Distance) const;
+    AAudio_NarrativeZone();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-private:
-    float CurrentVolume = 0.0f;
-    float TargetVolume = 0.0f;
-    static constexpr float VolumeBlendSpeed = 2.0f;
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
-{
-    GENERATED_BODY()
+    virtual void Tick(float DeltaTime) override;
 
 public:
-    AAudio_ZoneActor();
+    // Zone configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone")
-    USphereComponent* ZoneSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone")
+    // Audio component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
+        meta = (AllowPrivateAccess = "true"))
     UAudioComponent* AudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Zone")
-    UAudio_ZoneComponent* AudioZoneComponent;
+    // Current state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone")
+    EAudio_ZoneState CurrentState = EAudio_ZoneState::Inactive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
+    // Urgency scalar [0..1] — driven by quest timer from Agent #14
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float UrgencyScalar = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void ActivateZone();
+    // Blueprint events — wire to ANarr_DialogueTriggerActor.OnDialogueStarted
+    UFUNCTION(BlueprintImplementableEvent, Category = "Audio Zone")
+    void OnNarrativeHookTriggered(EAudio_NarrativeHook HookType);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void DeactivateZone();
+    UFUNCTION(BlueprintImplementableEvent, Category = "Audio Zone")
+    void OnUrgencyUpdated(float NewUrgency);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    bool IsPlayerInRange() const;
+    // Called by quest manager when urgency changes
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetUrgencyScalar(float NewUrgency);
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // Manually trigger this zone's audio hook
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void TriggerAudioHook(EAudio_NarrativeHook Hook);
+
+    // Fade out and stop
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void StopAudioZone();
 
 private:
-    UFUNCTION()
-    void OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+    bool bPlayerInRange = false;
+    float CurrentVolume = 0.0f;
+    FTimerHandle FadeTimerHandle;
 
-    UFUNCTION()
-    void OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    bool bIsActive = false;
+    bool IsPlayerInRange() const;
+    void UpdateVolumeForUrgency();
 };
 
-UCLASS()
-class TRANSPERSONALGAME_API AAudio_TRexProximityActor : public AActor
+// ============================================================
+// AAudio_TRexShakeSource — screen shake + proximity rumble
+// when T-Rex is within range of the player
+// ============================================================
+UCLASS(ClassGroup = (Audio), meta = (DisplayName = "Audio TRex Shake Source"))
+class TRANSPERSONALGAME_API AAudio_TRexShakeSource : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AAudio_TRexProximityActor();
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|TRex")
-    USphereComponent* ProximitySphere;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TRex")
-    FAudio_ScreenShakeConfig ShakeConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TRex")
-    float FootstepInterval = 1.8f;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|TRex")
-    void TriggerFootstepShake();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|TRex")
-    void TriggerRoarShake();
+    AAudio_TRexShakeSource();
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
+    FAudio_ScreenShakeConfig ShakeConfig;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Screen Shake")
+    UAudioComponent* RumbleAudioComponent;
+
+    // Blueprint event — fire camera shake from Blueprint
+    UFUNCTION(BlueprintImplementableEvent, Category = "Screen Shake")
+    void OnTRexShakeTriggered(float Intensity);
+
+    // Query current distance to player (0..1 normalized, 0=far, 1=close)
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Screen Shake")
+    float GetProximityToPlayer() const;
+
 private:
-    float FootstepTimer = 0.0f;
-    bool bPlayerInRange = false;
+    float LastShakeTime = 0.0f;
+    float ShakeCooldown = 0.25f;
+};
 
-    UFUNCTION()
-    void OnProximityBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+// ============================================================
+// AAudio_DayNightAmbience — ambient audio that transitions
+// with the day/night cycle (driven by DirectionalLight pitch)
+// ============================================================
+UCLASS(ClassGroup = (Audio), meta = (DisplayName = "Audio Day Night Ambience"))
+class TRANSPERSONALGAME_API AAudio_DayNightAmbience : public AActor
+{
+    GENERATED_BODY()
 
-    UFUNCTION()
-    void OnProximityEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+public:
+    AAudio_DayNightAmbience();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+public:
+    // Day ambience volume [0..1]
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Audio")
+    float DayAmbienceVolume = 1.0f;
+
+    // Night ambience volume [0..1]
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Audio")
+    float NightAmbienceVolume = 1.0f;
+
+    // Current time of day [0..1] — 0=midnight, 0.5=noon, 1=midnight
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Day Night Audio")
+    float TimeOfDay = 0.5f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Day Night Audio")
+    UAudioComponent* DayAudioComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Day Night Audio")
+    UAudioComponent* NightAudioComponent;
+
+    // Blueprint event — fires when crossing day/night threshold
+    UFUNCTION(BlueprintImplementableEvent, Category = "Day Night Audio")
+    void OnDayNightTransition(bool bIsDay);
+
+    // Update time of day (called by lighting system)
+    UFUNCTION(BlueprintCallable, Category = "Day Night Audio")
+    void SetTimeOfDay(float NewTimeOfDay);
+
+private:
+    bool bIsCurrentlyDay = true;
+    void BlendAmbienceVolumes();
 };
