@@ -1,15 +1,7 @@
 // TRexCharacter.h
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Tyrannosaurus Rex — apex predator species implementation.
-// Inherits ADinosaurBase; overrides capsule, speed, attack, and territory values
-// to match T-Rex biology: massive body, short sprint bursts, devastating bite.
-//
-// Compilation rules:
-//   - All USTRUCT/UENUM at global scope (Rule 1)
-//   - Unique type prefix "TRex_" (Rule 2)
-//   - .generated.h LAST include (Rule 4)
-//   - No escaped quotes (Rule 5)
-//   - TRANSPERSONALGAME_API on exported class (Validation Rule 6)
+// Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260624_001
+// Tyrannosaurus Rex — apex predator subclass of ADinosaurBase.
+// Sets species stats in BeginPlay; exposes Blueprint-overridable roar event.
 
 #pragma once
 
@@ -19,16 +11,12 @@
 
 /**
  * ATRexCharacter
+ * Concrete Tyrannosaurus Rex actor.
+ * Inherits all survival stats, behavior state machine, and AI perception
+ * from ADinosaurBase. Overrides BeginPlay to lock species to TyrannosaurusRex
+ * so ApplySpeciesStats() sets correct values (health=1500, speed=600, aggression=0.9).
  *
- * Concrete Tyrannosaurus Rex implementation.
- * Stats tuned to real T-Rex biology:
- *   - Mass: ~8,000 kg → high knockback on attack
- *   - Sprint speed: ~28 km/h (780 UU/s) — fast for its size, not sustainable
- *   - Bite force: ~57,000 N → highest single-hit damage of all species
- *   - Territory radius: 5,000 UU (~50 m) — large exclusive zone
- *   - Hunger decay: slow (apex predator, large meals last longer)
- *
- * Blueprint subclassable for mesh/animation assignment without C++ changes.
+ * Blueprint subclass: BP_TRex (recommended for mesh/animation assignment).
  */
 UCLASS(Blueprintable, BlueprintType, ClassGroup = "Dinosaurs",
        meta = (DisplayName = "T-Rex Character"))
@@ -39,102 +27,65 @@ class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 public:
     ATRexCharacter();
 
-    // ─── Species Overrides ────────────────────────────────────────────────
-
-    /** Maximum health pool — T-Rex is extremely resilient */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats",
-              meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float TRexMaxHealth = 2500.0f;
-
-    /** Base walk speed (UU/s) — lumbering gait */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats",
-              meta = (ClampMin = "50.0", ClampMax = "400.0"))
-    float TRexWalkSpeed = 220.0f;
-
-    /** Sprint speed (UU/s) — short burst charge */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats",
-              meta = (ClampMin = "200.0", ClampMax = "900.0"))
-    float TRexSprintSpeed = 780.0f;
-
-    /** Bite damage per hit */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats",
-              meta = (ClampMin = "10.0", ClampMax = "1000.0"))
-    float TRexBiteDamage = 350.0f;
-
-    /** Attack range — long reach due to massive head */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats",
-              meta = (ClampMin = "100.0", ClampMax = "600.0"))
-    float TRexAttackRange = 280.0f;
-
-    /** Territory radius — apex predators need large exclusive zones */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory",
-              meta = (ClampMin = "1000.0", ClampMax = "20000.0"))
-    float TRexTerritoryRadius = 8000.0f;
-
-    /** Hunger decay rate per tick — slower than smaller species */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Survival",
-              meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float TRexHungerDecayRate = 0.8f;
-
-    // ─── Roar System ──────────────────────────────────────────────────────
-
-    /** Whether the T-Rex is currently roaring (triggers animation + audio) */
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|Behaviour",
-              meta = (AllowPrivateAccess = "true"))
-    bool bIsRoaring = false;
-
-    /** Cooldown between roars (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour",
-              meta = (ClampMin = "5.0", ClampMax = "120.0"))
-    float RoarCooldown = 30.0f;
-
-    /** Radius within which the roar intimidates prey (causes fear stat increase) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour",
-              meta = (ClampMin = "500.0", ClampMax = "5000.0"))
-    float RoarIntimidationRadius = 2500.0f;
-
-    /** Trigger a roar — intimidates nearby prey, announces territory */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behaviour")
-    void PerformRoar();
-
-    /** Called when roar animation finishes */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behaviour")
-    void OnRoarFinished();
-
-    // ─── Stomp System ─────────────────────────────────────────────────────
-
-    /** Radius of ground stomp shockwave (knocks back small creatures) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-              meta = (ClampMin = "100.0", ClampMax = "1000.0"))
-    float StompRadius = 400.0f;
-
-    /** Damage dealt by stomp shockwave */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-              meta = (ClampMin = "0.0", ClampMax = "500.0"))
-    float StompDamage = 80.0f;
-
-    /** Execute a ground stomp — radial damage + knockback */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void PerformStomp();
-
-    // ─── Overrides ────────────────────────────────────────────────────────
-
+protected:
     virtual void BeginPlay() override;
 
-    /** Override base attack to use TRexBiteDamage and TRexAttackRange */
-    virtual void PerformAttack() override;
+public:
+    // ── Roar ──────────────────────────────────────────────────────────────────
+    /** Trigger the T-Rex roar — plays sound, applies fear radius to nearby pawns. */
+    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Behavior")
+    void PerformRoar();
+    virtual void PerformRoar_Implementation();
 
-    /** Override die to play species-specific death sequence */
-    virtual void Die() override;
+    // ── Fear radius ───────────────────────────────────────────────────────────
+    /** Radius (cm) in which the roar applies fear to other actors. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior",
+              meta = (ClampMin = "100.0", ClampMax = "5000.0"))
+    float RoarFearRadius = 2000.0f;
 
-protected:
-    /** Apply T-Rex specific stats to base class properties */
-    void ApplyTRexStats();
+    /** Fear intensity applied to pawns caught in the roar radius (0-1). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float RoarFearIntensity = 0.85f;
 
-private:
-    /** Timer handle for roar cooldown */
-    FTimerHandle RoarCooldownTimer;
+    // ── Stomp ─────────────────────────────────────────────────────────────────
+    /** Stomp attack — deals area damage and applies knockback. */
+    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Combat")
+    void PerformStomp();
+    virtual void PerformStomp_Implementation();
 
-    /** Whether roar is currently on cooldown */
-    bool bRoarOnCooldown = false;
+    /** Stomp damage radius (cm). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
+              meta = (ClampMin = "50.0", ClampMax = "1000.0"))
+    float StompRadius = 400.0f;
+
+    /** Stomp base damage. Multiplied by AttackDamage from base class. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
+              meta = (ClampMin = "0.0", ClampMax = "500.0"))
+    float StompDamageMultiplier = 1.5f;
+
+    // ── Bite ──────────────────────────────────────────────────────────────────
+    /** Bite attack — single-target high damage. */
+    UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "TRex|Combat")
+    void PerformBite();
+    virtual void PerformBite_Implementation();
+
+    /** Bite range (cm). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
+              meta = (ClampMin = "50.0", ClampMax = "500.0"))
+    float BiteRange = 250.0f;
+
+    // ── Territory ─────────────────────────────────────────────────────────────
+    /** Whether this T-Rex is currently defending a territory. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory")
+    bool bIsDefendingTerritory = false;
+
+    /** Territory center (world space). Set automatically on BeginPlay from spawn location. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Territory")
+    FVector TerritoryCenter = FVector::ZeroVector;
+
+    /** Territory radius (cm). T-Rex will return to this area when chasing prey too far. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory",
+              meta = (ClampMin = "500.0", ClampMax = "50000.0"))
+    float TerritoryRadius = 15000.0f;
 };
