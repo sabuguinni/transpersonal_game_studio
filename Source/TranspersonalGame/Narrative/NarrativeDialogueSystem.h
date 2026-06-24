@@ -2,70 +2,59 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/BoxComponent.h"
-#include "SharedTypes.h"
 #include "NarrativeDialogueSystem.generated.h"
 
 // ============================================================
 // Narrative & Dialogue System — Agent #15
-// Prehistoric survival dialogue trigger and zone system.
-// Drives story beats via proximity triggers in the world.
+// Stampede Quest dialogue triggers, Elder NPC lines,
+// urgency callbacks bound to QuestStampedeManager timer.
 // ============================================================
 
-/** Tone of a dialogue line — affects subtitle colour and audio cue */
 UENUM(BlueprintType)
-enum class ENarr_DialogueTone : uint8
+enum class ENarr_DialogueState : uint8
 {
-    Neutral     UMETA(DisplayName = "Neutral"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Discovery   UMETA(DisplayName = "Discovery"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Calm        UMETA(DisplayName = "Calm"),
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Playing         UMETA(DisplayName = "Playing"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Interrupted     UMETA(DisplayName = "Interrupted")
 };
 
-/** A single line of in-world dialogue */
+UENUM(BlueprintType)
+enum class ENarr_DialogueTriggerType : uint8
+{
+    QuestStart      UMETA(DisplayName = "Quest Start — Elder Warning"),
+    UrgencyMid      UMETA(DisplayName = "Urgency Mid — Hurry"),
+    UrgencyFinal    UMETA(DisplayName = "Urgency Final — Almost There"),
+    Victory         UMETA(DisplayName = "Victory — Survived"),
+    Failure         UMETA(DisplayName = "Failure — Caught in Stampede")
+};
+
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText SpeakerName;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText LineText;
+    FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTone Tone = ENarr_DialogueTone::Neutral;
+    float DisplayDuration;
 
-    /** Seconds to display this line before advancing */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration = 4.0f;
+    ENarr_DialogueTriggerType TriggerType;
+
+    FNarr_DialogueLine()
+        : SpeakerName(TEXT("Elder"))
+        , LineText(TEXT(""))
+        , DisplayDuration(4.0f)
+        , TriggerType(ENarr_DialogueTriggerType::QuestStart)
+    {}
 };
 
-/** A complete dialogue sequence (multiple lines) */
-USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueLine> Lines;
-
-    /** Can this sequence repeat if the player re-enters the zone? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bRepeatable = false;
-};
-
-/**
- * ANarr_DialogueTriggerActor
- * Placed in the world. When the player enters the box volume,
- * it fires the assigned dialogue sequence via the NarrativeManager.
- */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Narrative Dialogue Trigger"))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ANarr_DialogueTriggerActor : public AActor
 {
     GENERATED_BODY()
@@ -73,38 +62,122 @@ class TRANSPERSONALGAME_API ANarr_DialogueTriggerActor : public AActor
 public:
     ANarr_DialogueTriggerActor();
 
-    /** The dialogue sequence to play when triggered */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FNarr_DialogueSequence DialogueSequence;
+    // ---- Configuration ----
 
-    /** Trigger volume radius (box half-extent in cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FVector TriggerExtent = FVector(300.f, 300.f, 200.f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    ENarr_DialogueTriggerType TriggerType;
 
-    /** Has this trigger already fired? */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
-    bool bHasFired = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    /** Activate the dialogue sequence manually (e.g. from Blueprint) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float ActivationRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    bool bOneShot;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float QuestTimerThreshold;
+
+    // ---- State ----
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    ENarr_DialogueState CurrentState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    bool bHasTriggered;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    int32 CurrentLineIndex;
+
+    // ---- Interface ----
+
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void ActivateDialogue();
+    void TriggerDialogue();
 
-    /** Reset so the trigger can fire again */
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceLine();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void InterruptDialogue();
+
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     void ResetTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsPlayerInRange() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetCurrentLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueActive() const;
+
+    // ---- Events (override in Blueprint) ----
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnDialogueStarted(const FNarr_DialogueLine& FirstLine);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnLineAdvanced(const FNarr_DialogueLine& NewLine);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
+    void OnDialogueCompleted();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+private:
+    FTimerHandle LineAdvanceTimer;
+    void AdvanceLineInternal();
+    void PopulateDefaultLines();
+};
+
+// ============================================================
+// Narrative Manager — singleton-style actor that coordinates
+// all dialogue triggers for the Stampede Quest arc.
+// ============================================================
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ANarr_StampedeNarrativeManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_StampedeNarrativeManager();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Manager")
+    TArray<ANarr_DialogueTriggerActor*> RegisteredTriggers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Manager")
+    float UrgencyMidThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Manager")
+    float UrgencyFinalThreshold;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void OnQuestStarted();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void OnQuestTimerUpdated(float NormalizedTimeRemaining);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void OnQuestSucceeded();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void OnQuestFailed();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void RegisterTrigger(ANarr_DialogueTriggerActor* Trigger);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Manager")
+    void FireTriggerByType(ENarr_DialogueTriggerType Type);
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
-              meta = (AllowPrivateAccess = "true"))
-    UBoxComponent* TriggerBox;
-
-    UFUNCTION()
-    void OnPlayerEntered(UPrimitiveComponent* OverlappedComp,
-                         AActor* OtherActor,
-                         UPrimitiveComponent* OtherComp,
-                         int32 OtherBodyIndex,
-                         bool bFromSweep,
-                         const FHitResult& SweepResult);
+private:
+    bool bMidUrgencyFired;
+    bool bFinalUrgencyFired;
 };
