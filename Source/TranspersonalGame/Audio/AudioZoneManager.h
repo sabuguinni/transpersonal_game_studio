@@ -2,17 +2,18 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/AudioComponent.h"
+#include "Components/SphereComponent.h"
 #include "AudioZoneManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    River       UMETA(DisplayName = "River"),
-    Plains      UMETA(DisplayName = "Plains"),
-    Cave        UMETA(DisplayName = "Cave"),
+    Ambient     UMETA(DisplayName = "Ambient"),
     Danger      UMETA(DisplayName = "Danger"),
-    Camp        UMETA(DisplayName = "Camp")
+    Dialogue    UMETA(DisplayName = "Dialogue"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Safe        UMETA(DisplayName = "Safe")
 };
 
 USTRUCT(BlueprintType)
@@ -21,25 +22,28 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Ambient;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float AmbientVolume = 1.0f;
+    float TriggerRadius = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float MusicIntensity = 0.5f;
+    float VolumeMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bDangerZone = false;
+    FString VoiceLineURL;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInTime = 2.0f;
+    FString LinkedQuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 3.0f;
+    bool bOneShot = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping = true;
 };
 
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AAudioZoneManager : public AActor
 {
     GENERATED_BODY()
@@ -47,14 +51,19 @@ class TRANSPERSONALGAME_API AAudioZoneManager : public AActor
 public:
     AAudioZoneManager();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio",
+        meta = (AllowPrivateAccess = "true"))
+    USphereComponent* TriggerSphere;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio",
+        meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* AudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float ZoneRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bIsActive = true;
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
     void ActivateZone();
@@ -63,16 +72,27 @@ public:
     void DeactivateZone();
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetVolumeMultiplier(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    bool IsPlayerInZone() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
     EAudio_ZoneType GetZoneType() const;
 
     UFUNCTION(BlueprintCallable, Category = "Audio")
-    float GetMusicIntensity() const;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    FString GetLinkedVoiceURL() const;
 
 private:
-    float CurrentFadeAlpha = 0.0f;
-    bool bFadingIn = false;
+    UFUNCTION()
+    void OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    bool bPlayerInZone = false;
+    bool bHasPlayedOneShot = false;
 };
