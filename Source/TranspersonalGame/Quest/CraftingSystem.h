@@ -1,37 +1,38 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "CraftingSystem.generated.h"
 
-// Resource type enum — prefix Quest_ to avoid collisions
+// -------------------------------------------------------
+// CraftingSystem — Agent #14 Quest & Mission Designer
+// Implements 3 core recipes: Stone Axe, Campfire, Water Container
+// Press C to open crafting menu (Blueprint-bindable)
+// -------------------------------------------------------
+
 UENUM(BlueprintType)
 enum class EQuest_ResourceType : uint8
 {
-    None        UMETA(DisplayName = "None"),
     Rock        UMETA(DisplayName = "Rock"),
     Stick       UMETA(DisplayName = "Stick"),
     Leaf        UMETA(DisplayName = "Leaf"),
     Bone        UMETA(DisplayName = "Bone"),
     Hide        UMETA(DisplayName = "Hide"),
-    Flint       UMETA(DisplayName = "Flint"),
+    None        UMETA(DisplayName = "None")
 };
 
-// Crafted item enum
 UENUM(BlueprintType)
 enum class EQuest_CraftedItem : uint8
 {
-    None            UMETA(DisplayName = "None"),
     StoneAxe        UMETA(DisplayName = "Stone Axe"),
     Campfire        UMETA(DisplayName = "Campfire"),
     WaterContainer  UMETA(DisplayName = "Water Container"),
-    Spear           UMETA(DisplayName = "Spear"),
-    Shelter         UMETA(DisplayName = "Shelter"),
+    SpearHead       UMETA(DisplayName = "Spear Head"),
+    None            UMETA(DisplayName = "None")
 };
 
-// Recipe ingredient
 USTRUCT(BlueprintType)
-struct FQuest_RecipeIngredient
+struct TRANSPERSONALGAME_API FQuest_ResourceStack
 {
     GENERATED_BODY()
 
@@ -39,48 +40,27 @@ struct FQuest_RecipeIngredient
     EQuest_ResourceType ResourceType = EQuest_ResourceType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    int32 Quantity = 1;
+    int32 Quantity = 0;
 };
 
-// Full recipe definition
 USTRUCT(BlueprintType)
-struct FQuest_CraftingRecipe
+struct TRANSPERSONALGAME_API FQuest_CraftingRecipe
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    EQuest_CraftedItem ResultItem = EQuest_CraftedItem::None;
+    EQuest_CraftedItem OutputItem = EQuest_CraftedItem::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    FString RecipeName = TEXT("Unknown Recipe");
+    FString DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    FString Description = TEXT("");
+    TArray<FQuest_ResourceStack> RequiredIngredients;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    TArray<FQuest_RecipeIngredient> Ingredients;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    float CraftingTime = 2.0f;
+    float CraftingTimeSeconds = 2.0f;
 };
 
-// Player inventory slot
-USTRUCT(BlueprintType)
-struct FQuest_InventorySlot
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    EQuest_ResourceType ResourceType = EQuest_ResourceType::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Count = 0;
-};
-
-/**
- * UCraftingSystem — manages crafting recipes and player inventory
- * Agent #14 Quest & Mission Designer
- */
 UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCraftingSystem : public UActorComponent
 {
@@ -89,81 +69,60 @@ class TRANSPERSONALGAME_API UCraftingSystem : public UActorComponent
 public:
     UCraftingSystem();
 
+    // Player inventory — current resource counts
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    TMap<EQuest_ResourceType, int32> PlayerInventory;
+
     // All available recipes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     TArray<FQuest_CraftingRecipe> Recipes;
 
-    // Player inventory
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    TArray<FQuest_InventorySlot> Inventory;
-
     // Whether crafting menu is open
-    UPROPERTY(BlueprintReadOnly, Category = "Crafting")
+    UPROPERTY(BlueprintReadOnly, Category = "Crafting", meta = (AllowPrivateAccess = "true"))
     bool bCraftingMenuOpen = false;
 
-    // Add resource to inventory
+    // Add a resource to inventory (called when player picks up a resource actor)
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void AddResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
+    void PickupResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
 
-    // Remove resource from inventory (returns false if not enough)
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool RemoveResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
-
-    // Get count of a resource in inventory
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    int32 GetResourceCount(EQuest_ResourceType ResourceType) const;
-
-    // Check if player can craft a given item
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool CanCraft(EQuest_CraftedItem Item) const;
-
-    // Attempt to craft an item — consumes ingredients on success
+    // Attempt to craft an item — returns true if ingredients met and crafting started
     UFUNCTION(BlueprintCallable, Category = "Crafting")
     bool TryCraft(EQuest_CraftedItem Item);
 
-    // Toggle crafting menu (bound to C key)
+    // Toggle crafting menu (bound to C key in Blueprint)
     UFUNCTION(BlueprintCallable, Category = "Crafting")
     void ToggleCraftingMenu();
 
-    // Get recipe for item
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    bool GetRecipe(EQuest_CraftedItem Item, FQuest_CraftingRecipe& OutRecipe) const;
+    // Check if player has enough ingredients for a recipe
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting")
+    bool CanCraft(EQuest_CraftedItem Item) const;
 
-    // Initialize default recipes
-    UFUNCTION(BlueprintCallable, Category = "Crafting")
-    void InitializeDefaultRecipes();
+    // Get current count of a resource in inventory
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting")
+    int32 GetResourceCount(EQuest_ResourceType ResourceType) const;
 
-protected:
-    virtual void BeginPlay() override;
-};
+    // Debug: log all inventory and recipes
+    UFUNCTION(CallInEditor, Category = "Crafting")
+    void LogInventoryState() const;
 
-/**
- * AResourcePickup — a pickup actor that adds resources to player inventory
- */
-UCLASS()
-class TRANSPERSONALGAME_API AResourcePickup : public AActor
-{
-    GENERATED_BODY()
+    // Delegate for Blueprint UI updates
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCraftingMenuToggled, bool, bIsOpen);
+    UPROPERTY(BlueprintAssignable, Category = "Crafting")
+    FOnCraftingMenuToggled OnCraftingMenuToggled;
 
-public:
-    AResourcePickup();
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnItemCrafted, EQuest_CraftedItem, CraftedItem);
+    UPROPERTY(BlueprintAssignable, Category = "Crafting")
+    FOnItemCrafted OnItemCrafted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
-    EQuest_ResourceType ResourceType = EQuest_ResourceType::Rock;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
-    int32 ResourceAmount = 1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
-    bool bHasBeenPickedUp = false;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource")
-    TObjectPtr<UStaticMeshComponent> MeshComponent;
-
-    // Called when player overlaps this actor
-    UFUNCTION(BlueprintCallable, Category = "Resource")
-    void OnPickup(AActor* PickingActor);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnResourcePickedUp, EQuest_ResourceType, ResourceType, int32, NewTotal);
+    UPROPERTY(BlueprintAssignable, Category = "Crafting")
+    FOnResourcePickedUp OnResourcePickedUp;
 
 protected:
     virtual void BeginPlay() override;
+
+private:
+    void InitializeRecipes();
+    const FQuest_CraftingRecipe* FindRecipe(EQuest_CraftedItem Item) const;
+    void ConsumeIngredients(const FQuest_CraftingRecipe& Recipe);
 };
