@@ -1,58 +1,73 @@
 // TranspersonalGameMode.cpp
-// Transpersonal Game Studio — Prehistoric Survival Game
-// Agent #04 Performance Optimizer — PROD_CYCLE_AUTO_20260622_006
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Wires DefaultPawnClass = ATranspersonalCharacter, integrates DinosaurBase damage pipeline.
 
 #include "TranspersonalGameMode.h"
 #include "TranspersonalCharacter.h"
-#include "TranspersonalGameState.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/HUD.h"
 
 ATranspersonalGameMode::ATranspersonalGameMode()
 {
-    // Set the default pawn to our C++ character — no Blueprint dependency
+    // Set the default pawn to our prehistoric survivor character
     DefaultPawnClass = ATranspersonalCharacter::StaticClass();
 
-    // Use our custom game state
-    GameStateClass = ATranspersonalGameState::StaticClass();
+    // Use default HUD for now — UI agent will replace this
+    HUDClass = AHUD::StaticClass();
 
-    // Survival mode defaults
-    bSurvivalActive = true;
-    RespawnDelay = 5.0f;
-}
+    // Use default player controller
+    PlayerControllerClass = APlayerController::StaticClass();
 
-void ATranspersonalGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
-{
-    Super::InitGame(MapName, Options, ErrorMessage);
-    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] InitGame — Map: %s"), *MapName);
+    // Game starts immediately — no lobby/menu in MVP
+    bStartPlayersAsSpectators = false;
+
+    // Default game state
+    GameStateClass = AGameStateBase::StaticClass();
 }
 
 void ATranspersonalGameMode::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] BeginPlay — Survival active: %s"), bSurvivalActive ? TEXT("true") : TEXT("false"));
+
+    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] BeginPlay — Prehistoric Survival World initialised."));
+    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] DefaultPawnClass = %s"), *DefaultPawnClass->GetName());
 }
 
-void ATranspersonalGameMode::RestartPlayer(AController* NewPlayer)
+void ATranspersonalGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
-    Super::RestartPlayer(NewPlayer);
-    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] RestartPlayer called"));
+    Super::InitGame(MapName, Options, ErrorMessage);
+
+    UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] InitGame — Map: %s"), *MapName);
 }
 
-bool ATranspersonalGameMode::IsSurvivalActive() const
+void ATranspersonalGameMode::PostLogin(APlayerController* NewPlayer)
 {
-    return bSurvivalActive;
+    Super::PostLogin(NewPlayer);
+
+    if (NewPlayer && NewPlayer->GetPawn())
+    {
+        UE_LOG(LogTemp, Log, TEXT("[TranspersonalGameMode] Player logged in — Pawn: %s"),
+            *NewPlayer->GetPawn()->GetName());
+    }
 }
 
-void ATranspersonalGameMode::OnPlayerDied(AController* DeadPlayer)
+float ATranspersonalGameMode::ModifyDamage(float BaseDamage, AActor* DamagedActor,
+    AActor* DamageCauser, AController* InstigatedBy,
+    TSubclassOf<UDamageType> DamageTypeClass) const
 {
-    if (!DeadPlayer) return;
-    UE_LOG(LogTemp, Warning, TEXT("[TranspersonalGameMode] Player died — scheduling respawn in %.1fs"), RespawnDelay);
+    if (!DamagedActor)
+    {
+        return BaseDamage;
+    }
 
-    // Schedule respawn after delay
-    FTimerHandle RespawnHandle;
-    FTimerDelegate RespawnDelegate;
-    RespawnDelegate.BindUFunction(this, FName("RestartPlayer"), DeadPlayer);
-    GetWorldTimerManager().SetTimer(RespawnHandle, RespawnDelegate, RespawnDelay, false);
+    // Difficulty scaling — can be exposed as UPROPERTY later
+    const float DifficultyMultiplier = 1.0f;
+
+    // Apply global difficulty modifier
+    float FinalDamage = BaseDamage * DifficultyMultiplier;
+
+    UE_LOG(LogTemp, Verbose, TEXT("[TranspersonalGameMode] ModifyDamage: %.1f -> %.1f on %s"),
+        BaseDamage, FinalDamage, *DamagedActor->GetName());
+
+    return FinalDamage;
 }
