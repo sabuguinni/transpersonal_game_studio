@@ -1,84 +1,39 @@
-// NarrativeDialogueSystem.cpp
-// Narrative & Dialogue Agent #15 — Transpersonal Game Studio
-// Prehistoric survival game dialogue trigger implementation
-
 #include "NarrativeDialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "GameFramework/Actor.h"
+#include "Components/BoxComponent.h"
+#include "GameFramework/Character.h"
+#include "Engine/World.h"
 
 // ============================================================
-// ANarr_DialogueTrigger — Constructor
+// ANarr_DialogueTriggerActor — Implementation
+// Agent #15 — Narrative & Dialogue System
 // ============================================================
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+
+ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    RootComponent = TriggerSphere;
-
-    InteractionRadius = 300.0f;
-    bTriggerOnce = true;
-    bHasTriggered = false;
-    CurrentLineIndex = 0;
-
-    TriggerSphere->SetSphereRadius(InteractionRadius);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnSphereOverlap);
-
-    // Default NPC profile — Tribal Elder
-    NPCProfile.NPCID = TEXT("elder_default");
-    NPCProfile.DisplayName = TEXT("Tribal Elder");
-    NPCProfile.Role = ENarr_NPCRole::TribalElder;
-    NPCProfile.bHasBeenMet = false;
-
-    // Default dialogue sequence
-    FNarr_DialogueSequence DefaultSeq;
-    DefaultSeq.SequenceID = TEXT("elder_intro");
-    DefaultSeq.bIsRepeatable = false;
-
-    FNarr_DialogueLine Line1;
-    Line1.SpeakerID = TEXT("elder_default");
-    Line1.LineText = TEXT("The eastern valley belongs to the raptors now. Three of our hunters went in at dawn. None came back.");
-    Line1.Tone = ENarr_DialogueTone::Warning;
-    Line1.DisplayDuration = 5.0f;
-
-    FNarr_DialogueLine Line2;
-    Line2.SpeakerID = TEXT("elder_default");
-    Line2.LineText = TEXT("If you want those supplies, you will need to be smarter than they were. Watch the shadows. Raptors flank.");
-    Line2.Tone = ENarr_DialogueTone::Cautious;
-    Line2.DisplayDuration = 5.5f;
-
-    FNarr_DialogueLine Line3;
-    Line3.SpeakerID = TEXT("elder_default");
-    Line3.LineText = TEXT("The river crossing is safer. Follow the herbivore herd south — predators avoid the open water.");
-    Line3.Tone = ENarr_DialogueTone::Informative;
-    Line3.DisplayDuration = 5.0f;
-
-    DefaultSeq.Lines.Add(Line1);
-    DefaultSeq.Lines.Add(Line2);
-    DefaultSeq.Lines.Add(Line3);
-
-    NPCProfile.DialogueTrees.Add(DefaultSeq);
+    // Root trigger box
+    TriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerBox"));
+    TriggerBox->SetBoxExtent(TriggerExtent);
+    TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
+    TriggerBox->SetGenerateOverlapEvents(true);
+    RootComponent = TriggerBox;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-void ANarr_DialogueTrigger::BeginPlay()
+void ANarr_DialogueTriggerActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Update sphere radius from property
-    if (TriggerSphere)
+    // Apply configured extent
+    if (TriggerBox)
     {
-        TriggerSphere->SetSphereRadius(InteractionRadius);
+        TriggerBox->SetBoxExtent(TriggerExtent);
+        TriggerBox->OnComponentBeginOverlap.AddDynamic(
+            this, &ANarr_DialogueTriggerActor::OnPlayerEntered);
     }
 }
 
-// ============================================================
-// OnSphereOverlap — auto-trigger dialogue on player proximity
-// ============================================================
-void ANarr_DialogueTrigger::OnSphereOverlap(
+void ANarr_DialogueTriggerActor::OnPlayerEntered(
     UPrimitiveComponent* OverlappedComp,
     AActor* OtherActor,
     UPrimitiveComponent* OtherComp,
@@ -86,69 +41,66 @@ void ANarr_DialogueTrigger::OnSphereOverlap(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    if (!OtherActor) return;
-
-    // Only trigger for player-controlled pawns
-    APawn* Pawn = Cast<APawn>(OtherActor);
-    if (!Pawn || !Pawn->IsPlayerControlled()) return;
-
-    if (bTriggerOnce && bHasTriggered) return;
-
-    TriggerDialogue(OtherActor);
-}
-
-// ============================================================
-// TriggerDialogue — begin dialogue sequence
-// ============================================================
-void ANarr_DialogueTrigger::TriggerDialogue(AActor* Interactor)
-{
-    if (!Interactor) return;
-
-    bHasTriggered = true;
-    CurrentLineIndex = 0;
-    NPCProfile.bHasBeenMet = true;
-
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue triggered: NPC=%s Interactor=%s"),
-        *NPCProfile.DisplayName,
-        *Interactor->GetName());
-}
-
-// ============================================================
-// GetNextDialogueLine — returns next line in active sequence
-// ============================================================
-FNarr_DialogueLine ANarr_DialogueTrigger::GetNextDialogueLine()
-{
-    if (NPCProfile.DialogueTrees.Num() == 0)
+    if (!OtherActor)
     {
-        return FNarr_DialogueLine();
+        return;
     }
 
-    const FNarr_DialogueSequence& ActiveSeq = NPCProfile.DialogueTrees[0];
-
-    if (CurrentLineIndex >= ActiveSeq.Lines.Num())
+    // Only trigger for player characters
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar)
     {
-        // Sequence complete — return empty line
-        return FNarr_DialogueLine();
+        return;
     }
 
-    FNarr_DialogueLine Line = ActiveSeq.Lines[CurrentLineIndex];
-    CurrentLineIndex++;
+    // Respect one-shot flag
+    if (bHasFired && !DialogueSequence.bRepeatable)
+    {
+        return;
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Line %d/%d: %s"),
-        CurrentLineIndex,
-        ActiveSeq.Lines.Num(),
-        *Line.LineText);
-
-    return Line;
+    ActivateDialogue();
 }
 
-// ============================================================
-// ResetDialogue — allow re-triggering
-// ============================================================
-void ANarr_DialogueTrigger::ResetDialogue()
+void ANarr_DialogueTriggerActor::ActivateDialogue()
 {
-    bHasTriggered = false;
-    CurrentLineIndex = 0;
+    if (DialogueSequence.Lines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning,
+               TEXT("NarrDialogue: Trigger '%s' has no dialogue lines configured."),
+               *GetActorLabel());
+        return;
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue reset: NPC=%s"), *NPCProfile.DisplayName);
+    bHasFired = true;
+
+    // Log each line for now — Audio Agent (#16) will hook into this
+    UE_LOG(LogTemp, Log,
+           TEXT("NarrDialogue: Sequence '%s' started (%d lines)"),
+           *DialogueSequence.SequenceID.ToString(),
+           DialogueSequence.Lines.Num());
+
+    for (int32 i = 0; i < DialogueSequence.Lines.Num(); ++i)
+    {
+        const FNarr_DialogueLine& Line = DialogueSequence.Lines[i];
+        UE_LOG(LogTemp, Log,
+               TEXT("  [%d] %s: \"%s\" (Tone=%d, Duration=%.1fs)"),
+               i,
+               *Line.SpeakerName.ToString(),
+               *Line.LineText.ToString(),
+               (int32)Line.Tone,
+               Line.DisplayDuration);
+    }
+
+    // Broadcast to Blueprint / UI layer via Actor event
+    // (Blueprint subclass can override and show subtitles)
+    OnActorBeginOverlap.Broadcast(this, this);
+}
+
+void ANarr_DialogueTriggerActor::ResetTrigger()
+{
+    bHasFired = false;
+    UE_LOG(LogTemp, Log,
+           TEXT("NarrDialogue: Trigger '%s' reset — ready to fire again."),
+           *GetActorLabel());
 }
