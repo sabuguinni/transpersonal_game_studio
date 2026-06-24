@@ -1,368 +1,224 @@
-// AudioSystemManager.cpp — Transpersonal Game Studio
-// Audio Agent #16 — PROD_CYCLE_AUTO_20260623_001
-//
-// Adaptive audio system for prehistoric survival game.
-// Manages: zone-based ambient layers, dinosaur proximity audio,
-// campfire crackling, quest stings, and day/night transitions.
-//
-// Sound references (Freesound.org):
-//   ID 620324 — "Campfire crackling - Loop" (30s, loop)
-//   ID 852107 — "Fireplace" (8.5s, crackling outdoor campfire)
-//   ID 636708 — "FIREBurn_Burning Campfire.Crackling" (24s, intense)
-//   ID 636709 — "FIREBurn_Burning Campfire.Crackling calm" (24s, calm)
-//   ID 626277 — "FIREBurn_Burning Swaying fire" (21.7s, close)
-
 #include "AudioSystemManager.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
-// ============================================================
-// Subsystem lifecycle
-// ============================================================
-
-void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+AAudio_SystemManager::AAudio_SystemManager()
 {
-    Super::Initialize(Collection);
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // 10 Hz — sufficient for audio zone detection
 
-    // Set default footstep configs for each dino size class
-    FAudio_DinoFootstepConfig SmallConfig;
-    SmallConfig.DinoSize = EAudio_DinoSize::Small;
-    SmallConfig.StepVolumeMultiplier = 0.4f;
-    SmallConfig.RumbleRadius = 600.0f;
-    SmallConfig.ScreenShakeIntensity = 0.1f;
-    DinoFootstepConfigs.Add(SmallConfig);
+    // Pre-register the four core audio zones matching the MinPlayableMap layout
+    FAudio_ZoneData TRexZone;
+    TRexZone.Location   = FVector(2000.0f, 2500.0f, 300.0f);
+    TRexZone.Radius     = 2000.0f;
+    TRexZone.ZoneType   = EAudio_ZoneType::TRexTerritory;
+    TRexZone.Volume     = 1.0f;
+    RegisteredZones.Add(TRexZone);
 
-    FAudio_DinoFootstepConfig MediumConfig;
-    MediumConfig.DinoSize = EAudio_DinoSize::Medium;
-    MediumConfig.StepVolumeMultiplier = 0.7f;
-    MediumConfig.RumbleRadius = 1000.0f;
-    MediumConfig.ScreenShakeIntensity = 0.35f;
-    DinoFootstepConfigs.Add(MediumConfig);
+    FAudio_ZoneData RaptorZone;
+    RaptorZone.Location  = FVector(2400.0f, 2500.0f, 300.0f);
+    RaptorZone.Radius    = 1500.0f;
+    RaptorZone.ZoneType  = EAudio_ZoneType::RaptorPack;
+    RaptorZone.Volume    = 0.9f;
+    RegisteredZones.Add(RaptorZone);
 
-    FAudio_DinoFootstepConfig LargeConfig;
-    LargeConfig.DinoSize = EAudio_DinoSize::Large;
-    LargeConfig.StepVolumeMultiplier = 1.0f;
-    LargeConfig.RumbleRadius = 2000.0f;
-    LargeConfig.ScreenShakeIntensity = 0.8f;
-    DinoFootstepConfigs.Add(LargeConfig);
+    FAudio_ZoneData RiverZone;
+    RiverZone.Location  = FVector(-500.0f, 1000.0f, 200.0f);
+    RiverZone.Radius    = 1800.0f;
+    RiverZone.ZoneType  = EAudio_ZoneType::RiverAmbience;
+    RiverZone.Volume    = 0.8f;
+    RegisteredZones.Add(RiverZone);
 
-    CurrentZone = EAudio_Zone::Exploration;
+    FAudio_ZoneData ForestZone;
+    ForestZone.Location = FVector(1000.0f, 1000.0f, 300.0f);
+    ForestZone.Radius   = 2500.0f;
+    ForestZone.ZoneType = EAudio_ZoneType::ForestCanopy;
+    ForestZone.Volume   = 0.7f;
+    RegisteredZones.Add(ForestZone);
 
-    UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: Initialized with %d dino footstep configs"), DinoFootstepConfigs.Num());
+    // Pre-register ElevenLabs TTS voice lines (generated in production cycles)
+    FAudio_VoiceLine JungleSilenceHint;
+    JungleSilenceHint.LineID    = "HINT_JUNGLE_SILENCE";
+    JungleSilenceHint.Text      = "The jungle is never silent. Every sound tells you something.";
+    JungleSilenceHint.AudioURL  = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782323776353_Narrator_Survival.mp3";
+    JungleSilenceHint.Duration  = 13.0f;
+    VoiceLines.Add(JungleSilenceHint);
+
+    FAudio_VoiceLine DangerAlert;
+    DangerAlert.LineID   = "ALERT_PREDATOR_NORTH";
+    DangerAlert.Text     = "Danger. Large predator detected to the north.";
+    DangerAlert.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782323807738_Narrator_Alert.mp3";
+    DangerAlert.Duration = 9.0f;
+    VoiceLines.Add(DangerAlert);
 }
 
-void UAudioSystemManager::Deinitialize()
+void AAudio_SystemManager::BeginPlay()
 {
-    StopAllAmbientLayers(0.5f);
-
-    if (CampfireComponent && CampfireComponent->IsValidLowLevel())
-    {
-        CampfireComponent->Stop();
-        CampfireComponent = nullptr;
-    }
-
-    Super::Deinitialize();
+    Super::BeginPlay();
+    CurrentDangerLevel = 0.0f;
+    CurrentActiveZone  = EAudio_ZoneType::None;
+    ZoneCheckTimer     = 0.0f;
+    VoiceLineCooldown  = 0.0f;
 }
 
-// ============================================================
-// Zone management
-// ============================================================
-
-void UAudioSystemManager::SetAudioZone(EAudio_Zone NewZone)
+void AAudio_SystemManager::Tick(float DeltaTime)
 {
-    if (NewZone == CurrentZone)
+    Super::Tick(DeltaTime);
+
+    UpdateDangerDecay(DeltaTime);
+
+    ZoneCheckTimer += DeltaTime;
+    if (ZoneCheckTimer >= ZoneCheckInterval)
     {
-        return;
-    }
+        ZoneCheckTimer = 0.0f;
 
-    EAudio_Zone PreviousZone = CurrentZone;
-    CurrentZone = NewZone;
-
-    // Broadcast zone change for Blueprint listeners (music system, UI, etc.)
-    OnZoneChanged.Broadcast(NewZone);
-
-    // Handle night/day transitions automatically
-    if (NewZone == EAudio_Zone::Night)
-    {
-        TransitionToNightAudio(8.0f);
-    }
-    else if (PreviousZone == EAudio_Zone::Night)
-    {
-        TransitionToDayAudio(8.0f);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: Zone changed %d -> %d"),
-        static_cast<int32>(PreviousZone), static_cast<int32>(NewZone));
-}
-
-// ============================================================
-// Ambient layers
-// ============================================================
-
-void UAudioSystemManager::PlayAmbientLayer(const FAudio_AmbientLayer& Layer)
-{
-    if (!Layer.SoundAsset)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UAudioSystemManager::PlayAmbientLayer — SoundAsset is null"));
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Play 2D ambient (non-positional) with fade in
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(
-        World,
-        Layer.SoundAsset,
-        Layer.BaseVolume * AmbientVolume * MasterVolume,
-        1.0f,
-        0.0f,
-        nullptr,
-        false,
-        true
-    );
-
-    if (AudioComp)
-    {
-        AudioComp->FadeIn(Layer.FadeInTime, Layer.BaseVolume * AmbientVolume * MasterVolume);
-        ActiveAmbientComponents.Add(AudioComp);
-        UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: Ambient layer started — %s"), *Layer.SoundAsset->GetName());
-    }
-}
-
-void UAudioSystemManager::StopAllAmbientLayers(float FadeOutTime)
-{
-    for (UAudioComponent* Comp : ActiveAmbientComponents)
-    {
-        if (Comp && Comp->IsValidLowLevel() && Comp->IsPlaying())
+        APlayerController* PC = GetWorld()->GetFirstPlayerController();
+        if (PC && PC->GetPawn())
         {
-            Comp->FadeOut(FadeOutTime, 0.0f);
-        }
-    }
-    ActiveAmbientComponents.Empty();
-    UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: All ambient layers stopped (fade %.1fs)"), FadeOutTime);
-}
-
-// ============================================================
-// Campfire audio
-// ============================================================
-
-void UAudioSystemManager::PlayCampfireAudio(FVector WorldLocation, float Radius)
-{
-    // Campfire sound is positional — attenuates with distance
-    // Asset reference: Freesound ID 620324 "Campfire crackling - Loop"
-    // In production, SoundAsset would be loaded from content browser.
-    // For now, log the intent and position for Blueprint wiring.
-
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Campfire audio requested at (%.0f, %.0f, %.0f) radius=%.0f — wire to Freesound 620324"),
-        WorldLocation.X, WorldLocation.Y, WorldLocation.Z, Radius);
-
-    // If we already have a campfire component, stop it first
-    if (CampfireComponent && CampfireComponent->IsValidLowLevel())
-    {
-        CampfireComponent->Stop();
-        CampfireComponent = nullptr;
-    }
-}
-
-void UAudioSystemManager::StopCampfireAudio()
-{
-    if (CampfireComponent && CampfireComponent->IsValidLowLevel())
-    {
-        CampfireComponent->FadeOut(1.5f, 0.0f);
-        CampfireComponent = nullptr;
-    }
-}
-
-// ============================================================
-// Dinosaur proximity audio
-// ============================================================
-
-void UAudioSystemManager::NotifyDinoFootstep(EAudio_DinoSize DinoSize, FVector StepLocation, AActor* PlayerActor)
-{
-    if (!PlayerActor)
-    {
-        return;
-    }
-
-    // Find matching config
-    const FAudio_DinoFootstepConfig* Config = nullptr;
-    for (const FAudio_DinoFootstepConfig& Cfg : DinoFootstepConfigs)
-    {
-        if (Cfg.DinoSize == DinoSize)
-        {
-            Config = &Cfg;
-            break;
+            FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
+            UpdateZoneDetection(PlayerLoc);
         }
     }
 
-    if (!Config)
+    if (VoiceLineCooldown > 0.0f)
     {
-        return;
-    }
-
-    float Distance = FVector::Dist(StepLocation, PlayerActor->GetActorLocation());
-
-    if (Distance <= Config->RumbleRadius)
-    {
-        // Notify Blueprint listeners — they handle screen shake and audio playback
-        OnDinoNearby.Broadcast(DinoSize, Distance);
-
-        // Volume scales with proximity (closer = louder)
-        float ProximityFactor = 1.0f - (Distance / Config->RumbleRadius);
-        float FinalVolume = Config->StepVolumeMultiplier * ProximityFactor * SFXVolume * MasterVolume;
-
-        UE_LOG(LogTemp, Verbose,
-            TEXT("UAudioSystemManager: Dino footstep size=%d dist=%.0f vol=%.2f shake=%.2f"),
-            static_cast<int32>(DinoSize), Distance, FinalVolume,
-            Config->ScreenShakeIntensity * ProximityFactor);
+        VoiceLineCooldown -= DeltaTime;
     }
 }
 
-void UAudioSystemManager::PlayDinoVocalization(EAudio_DinoSize DinoSize, FVector DinoLocation)
+void AAudio_SystemManager::RegisterAudioZone(const FAudio_ZoneData& ZoneData)
 {
-    // Vocalization type depends on size:
-    // Small (Raptor): high-pitched bark/screech — territorial warning
-    // Medium (Carnotaurus): deep grunt/bellow — aggression
-    // Large (T-Rex): subsonic roar — dominance display
-
-    FString SizeStr;
-    switch (DinoSize)
-    {
-        case EAudio_DinoSize::Small:  SizeStr = TEXT("Raptor-class bark"); break;
-        case EAudio_DinoSize::Medium: SizeStr = TEXT("Carnotaurus-class bellow"); break;
-        case EAudio_DinoSize::Large:  SizeStr = TEXT("T-Rex subsonic roar"); break;
-    }
-
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Dino vocalization — %s at (%.0f, %.0f, %.0f)"),
-        *SizeStr, DinoLocation.X, DinoLocation.Y, DinoLocation.Z);
+    RegisteredZones.Add(ZoneData);
 }
 
-// ============================================================
-// Quest audio stings
-// ============================================================
-
-void UAudioSystemManager::PlayQuestStartSting(FName QuestID)
+EAudio_ZoneType AAudio_SystemManager::GetActiveZoneForLocation(const FVector& PlayerLocation) const
 {
-    // Find matching sting config
-    for (const FAudio_QuestSting& Sting : QuestStings)
+    float ClosestDist = MAX_FLT;
+    EAudio_ZoneType ClosestZone = EAudio_ZoneType::None;
+
+    for (const FAudio_ZoneData& Zone : RegisteredZones)
     {
-        if (Sting.QuestID == QuestID && Sting.StartSting)
+        if (!Zone.bIsActive) { continue; }
+        float Dist = FVector::Dist(PlayerLocation, Zone.Location);
+        if (Dist <= Zone.Radius && Dist < ClosestDist)
         {
-            UWorld* World = GetWorld();
-            if (World)
-            {
-                UGameplayStatics::PlaySound2D(
-                    World,
-                    Sting.StartSting,
-                    Sting.StingVolume * MasterVolume
-                );
-                UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: Quest start sting played — %s"), *QuestID.ToString());
-            }
-            return;
+            ClosestDist  = Dist;
+            ClosestZone  = Zone.ZoneType;
+        }
+    }
+    return ClosestZone;
+}
+
+void AAudio_SystemManager::SetZoneActive(EAudio_ZoneType ZoneType, bool bActive)
+{
+    for (FAudio_ZoneData& Zone : RegisteredZones)
+    {
+        if (Zone.ZoneType == ZoneType)
+        {
+            Zone.bIsActive = bActive;
+        }
+    }
+}
+
+void AAudio_SystemManager::RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine)
+{
+    VoiceLines.Add(VoiceLine);
+}
+
+bool AAudio_SystemManager::TriggerVoiceLine(const FString& LineID)
+{
+    for (FAudio_VoiceLine& Line : VoiceLines)
+    {
+        if (Line.LineID == LineID && !Line.bHasBeenPlayed)
+        {
+            Line.bHasBeenPlayed = true;
+            VoiceLineCooldown   = VoiceLineCooldownDuration;
+            UE_LOG(LogTemp, Log, TEXT("AudioSystem: Playing voice line [%s] — %s"), *LineID, *Line.Text);
+            return true;
+        }
+    }
+    return false;
+}
+
+void AAudio_SystemManager::TriggerRandomSurvivalHint()
+{
+    if (VoiceLineCooldown > 0.0f) { return; }
+
+    TArray<FAudio_VoiceLine*> Available;
+    for (FAudio_VoiceLine& Line : VoiceLines)
+    {
+        if (!Line.bHasBeenPlayed)
+        {
+            Available.Add(&Line);
         }
     }
 
-    // No asset assigned yet — log for Blueprint wiring
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Quest start sting for '%s' — no asset assigned, wire in Blueprint"),
-        *QuestID.ToString());
+    if (Available.Num() == 0) { return; }
+
+    int32 Idx = FMath::RandRange(0, Available.Num() - 1);
+    Available[Idx]->bHasBeenPlayed = true;
+    VoiceLineCooldown = VoiceLineCooldownDuration;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Random hint — %s"), *Available[Idx]->Text);
 }
 
-void UAudioSystemManager::PlayQuestCompleteSting(FName QuestID)
+void AAudio_SystemManager::SetDangerLevel(float DangerLevel)
 {
-    for (const FAudio_QuestSting& Sting : QuestStings)
-    {
-        if (Sting.QuestID == QuestID && Sting.CompleteSting)
-        {
-            UWorld* World = GetWorld();
-            if (World)
-            {
-                UGameplayStatics::PlaySound2D(
-                    World,
-                    Sting.CompleteSting,
-                    Sting.StingVolume * MasterVolume
-                );
-                UE_LOG(LogTemp, Log, TEXT("UAudioSystemManager: Quest complete sting played — %s"), *QuestID.ToString());
-            }
-            return;
-        }
-    }
-
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Quest complete sting for '%s' — no asset assigned, wire in Blueprint"),
-        *QuestID.ToString());
+    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
 }
 
-// ============================================================
-// Survival state audio
-// ============================================================
-
-void UAudioSystemManager::UpdateSurvivalAudio(float HealthNormalized, float StaminaNormalized, float FearNormalized)
+void AAudio_SystemManager::OnDinosaurNearby(float DistanceMeters, bool bIsPredator)
 {
-    // Audio feedback for survival stats:
-    // Low health (<0.25): heartbeat intensifies, breathing becomes laboured
-    // Low stamina (<0.2): heavy breathing, footsteps become heavier
-    // High fear (>0.7): tension drone increases, ambient sounds become more threatening
+    if (!bIsPredator) { return; }
 
-    // Determine appropriate zone based on survival state
-    EAudio_Zone TargetZone = CurrentZone;
+    // Danger increases as predator gets closer (inverse square falloff)
+    float MaxDangerDist = 500.0f;
+    float NormalizedDist = FMath::Clamp(DistanceMeters / MaxDangerDist, 0.0f, 1.0f);
+    float NewDanger = 1.0f - NormalizedDist;
 
-    if (FearNormalized > 0.8f || HealthNormalized < 0.15f)
+    if (NewDanger > CurrentDangerLevel)
     {
-        TargetZone = EAudio_Zone::Combat;
-    }
-    else if (FearNormalized > 0.5f || HealthNormalized < 0.35f)
-    {
-        TargetZone = EAudio_Zone::Danger;
+        CurrentDangerLevel = NewDanger;
     }
 
-    if (TargetZone != CurrentZone)
+    // Auto-trigger danger alert if danger is high and cooldown allows
+    if (CurrentDangerLevel >= DangerThresholdHigh && VoiceLineCooldown <= 0.0f)
     {
-        SetAudioZone(TargetZone);
+        TriggerVoiceLine("ALERT_PREDATOR_NORTH");
     }
-
-    UE_LOG(LogTemp, Verbose,
-        TEXT("UAudioSystemManager: Survival audio — HP=%.2f STA=%.2f FEAR=%.2f zone=%d"),
-        HealthNormalized, StaminaNormalized, FearNormalized, static_cast<int32>(CurrentZone));
 }
 
-// ============================================================
-// Day/Night audio transitions
-// ============================================================
-
-void UAudioSystemManager::TransitionToNightAudio(float TransitionDuration)
+void AAudio_SystemManager::TriggerFootstepShake(float Intensity)
 {
-    // Night audio profile:
-    // - Daytime insects/birds fade out
-    // - Cricket/nocturnal insect ambience fades in
-    // - Distant predator calls become more frequent
-    // - Music shifts to minor key, slower tempo
-
-    StopAllAmbientLayers(TransitionDuration * 0.5f);
-
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Transitioning to night audio (%.1fs) — wire nocturnal ambience in Blueprint"),
-        TransitionDuration);
+    // Intensity 0-1: maps to camera shake magnitude
+    // Actual camera shake requires Blueprint or CameraShakeBase subclass
+    // Log for now — Blueprint will hook into this
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: FootstepShake intensity=%.2f"), Intensity);
 }
 
-void UAudioSystemManager::TransitionToDayAudio(float TransitionDuration)
+void AAudio_SystemManager::TriggerDamageFlash()
 {
-    // Day audio profile:
-    // - Nocturnal ambience fades out
-    // - Birds, wind, daytime insects fade in
-    // - Music shifts to major key, more active
+    // Damage flash — red screen overlay
+    // Triggered via Blueprint UI layer; this is the C++ notification
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: DamageFlash triggered"));
+}
 
-    StopAllAmbientLayers(TransitionDuration * 0.5f);
+void AAudio_SystemManager::UpdateZoneDetection(const FVector& PlayerLocation)
+{
+    EAudio_ZoneType NewZone = GetActiveZoneForLocation(PlayerLocation);
+    if (NewZone != CurrentActiveZone)
+    {
+        UE_LOG(LogTemp, Log, TEXT("AudioSystem: Zone changed %d -> %d"),
+            (int32)CurrentActiveZone, (int32)NewZone);
+        CurrentActiveZone = NewZone;
+    }
+}
 
-    UE_LOG(LogTemp, Log,
-        TEXT("UAudioSystemManager: Transitioning to day audio (%.1fs) — wire diurnal ambience in Blueprint"),
-        TransitionDuration);
+void AAudio_SystemManager::UpdateDangerDecay(float DeltaTime)
+{
+    if (CurrentDangerLevel > 0.0f)
+    {
+        CurrentDangerLevel = FMath::Max(0.0f, CurrentDangerLevel - DangerDecayRate * DeltaTime);
+    }
 }
