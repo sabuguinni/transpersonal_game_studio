@@ -33,36 +33,37 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         if (!OwnerPawn) return;
     }
 
-    // Calculate speed from velocity
     FVector Velocity = OwnerPawn->GetVelocity();
-    Speed = Velocity.Size();
+    Speed = Velocity.Size2D();
     bIsMoving = Speed > WalkSpeedThreshold;
 
-    // Calculate direction relative to actor forward
     if (bIsMoving)
     {
-        FRotator ActorRotation = OwnerPawn->GetActorRotation();
-        FVector VelocityNorm = Velocity.GetSafeNormal();
-        Direction = UKismetMathLibrary::DegAtan2(
-            FVector::DotProduct(VelocityNorm, ActorRotation.RotateVector(FVector::RightVector)),
-            FVector::DotProduct(VelocityNorm, ActorRotation.RotateVector(FVector::ForwardVector))
-        );
+        FRotator ActorRot = OwnerPawn->GetActorRotation();
+        FRotator VelRot = Velocity.Rotation();
+        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot).Yaw;
     }
     else
     {
         Direction = 0.0f;
     }
 
-    // Determine locomotion state
+    UpdateLocomotionState();
+}
+
+void UDinoAnimInstance::UpdateLocomotionState()
+{
     if (bIsDead)
     {
         LocomotionState = EAnim_DinoLocomotionState::Death;
+        return;
     }
-    else if (bIsAttacking)
+    if (bIsAttacking)
     {
         LocomotionState = EAnim_DinoLocomotionState::Attack;
+        return;
     }
-    else if (Speed >= RunSpeedThreshold)
+    if (Speed >= RunSpeedThreshold)
     {
         LocomotionState = EAnim_DinoLocomotionState::Run;
     }
@@ -74,4 +75,14 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     {
         LocomotionState = EAnim_DinoLocomotionState::Idle;
     }
+}
+
+void UDinoAnimInstance::SetAttacking(bool bAttacking)
+{
+    bIsAttacking = bAttacking;
+}
+
+void UDinoAnimInstance::SetDead(bool bDead)
+{
+    bIsDead = bDead;
 }
