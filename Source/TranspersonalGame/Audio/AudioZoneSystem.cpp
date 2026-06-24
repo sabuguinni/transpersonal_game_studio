@@ -1,283 +1,253 @@
 #include "AudioZoneSystem.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Components/AudioComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 // ============================================================
-// UAudio_ZoneComponent
+// AAudio_NarrativeZone
 // ============================================================
 
-UAudio_ZoneComponent::UAudio_ZoneComponent()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-}
-
-void UAudio_ZoneComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    CurrentVolume = 0.0f;
-    TargetVolume = 0.0f;
-}
-
-void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Smooth volume blend
-    if (!FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.001f))
-    {
-        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, VolumeBlendSpeed);
-    }
-}
-
-void UAudio_ZoneComponent::OnPlayerEnterZone()
-{
-    bPlayerInZone = true;
-    TargetVolume = ZoneConfig.MaxVolume;
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone [%s] tone=%d"),
-        *ZoneConfig.ZoneDescription, (int32)ZoneConfig.Tone);
-}
-
-void UAudio_ZoneComponent::OnPlayerExitZone()
-{
-    bPlayerInZone = false;
-    TargetVolume = 0.0f;
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone [%s]"),
-        *ZoneConfig.ZoneDescription);
-}
-
-EAudio_ZoneTone UAudio_ZoneComponent::GetCurrentTone() const
-{
-    return ZoneConfig.Tone;
-}
-
-float UAudio_ZoneComponent::GetVolumeForDistance(float Distance) const
-{
-    if (Distance <= 0.0f) return ZoneConfig.MaxVolume;
-    if (Distance >= ZoneConfig.BlendRadius) return 0.0f;
-    // Linear falloff from center to edge
-    float Alpha = 1.0f - (Distance / ZoneConfig.BlendRadius);
-    return FMath::Clamp(Alpha * ZoneConfig.MaxVolume, 0.0f, ZoneConfig.MaxVolume);
-}
-
-// ============================================================
-// AAudio_ZoneActor
-// ============================================================
-
-AAudio_ZoneActor::AAudio_ZoneActor()
+AAudio_NarrativeZone::AAudio_NarrativeZone()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    ZoneSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneSphere"));
-    ZoneSphere->SetSphereRadius(800.0f);
-    ZoneSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = ZoneSphere;
 
     AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
     AudioComponent->SetupAttachment(RootComponent);
     AudioComponent->bAutoActivate = false;
+    AudioComponent->bIsUISound = false;
 
-    AudioZoneComponent = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("AudioZoneComponent"));
+    ZoneConfig.TriggerRadius = 500.0f;
+    ZoneConfig.FadeInDuration = 1.5f;
+    ZoneConfig.FadeOutDuration = 2.0f;
+    ZoneConfig.BaseVolume = 1.0f;
+    ZoneConfig.bLooping = true;
+    ZoneConfig.bScaleWithUrgency = false;
 }
 
-void AAudio_ZoneActor::BeginPlay()
+void AAudio_NarrativeZone::BeginPlay()
 {
     Super::BeginPlay();
-
-    ZoneSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
-    ZoneSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
-
-    // Sync zone config to component
-    if (AudioZoneComponent)
-    {
-        AudioZoneComponent->ZoneConfig = ZoneConfig;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("AAudio_ZoneActor: BeginPlay — zone [%s] tone=%d radius=%.0f"),
-        *ZoneConfig.ZoneDescription, (int32)ZoneConfig.Tone, ZoneConfig.BlendRadius);
+    CurrentState = EAudio_ZoneState::Inactive;
+    CurrentVolume = 0.0f;
 }
 
-void AAudio_ZoneActor::Tick(float DeltaTime)
+void AAudio_NarrativeZone::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
+    bool bNowInRange = IsPlayerInRange();
+
+    if (bNowInRange && !bPlayerInRange)
+    {
+        // Player entered range — start audio
+        bPlayerInRange = true;
+        if (AudioComponent && AudioComponent->Sound)
+        {
+            AudioComponent->SetVolumeMultiplier(0.0f);
+            AudioComponent->Play();
+            CurrentState = EAudio_ZoneState::Playing;
+        }
+        OnNarrativeHookTriggered(ZoneConfig.HookType);
+    }
+    else if (!bNowInRange && bPlayerInRange)
+    {
+        // Player left range — fade out
+        bPlayerInRange = false;
+        StopAudioZone();
+    }
+
+    // Fade in/out volume
+    if (CurrentState == EAudio_ZoneState::Playing && AudioComponent)
+    {
+        float TargetVolume = ZoneConfig.BaseVolume;
+        if (ZoneConfig.bScaleWithUrgency)
+        {
+            TargetVolume *= (0.5f + UrgencyScalar * 0.5f);
+        }
+        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, 1.0f / FMath::Max(ZoneConfig.FadeInDuration, 0.01f));
+        AudioComponent->SetVolumeMultiplier(CurrentVolume);
+    }
+    else if (CurrentState == EAudio_ZoneState::FadingOut && AudioComponent)
+    {
+        CurrentVolume = FMath::FInterpTo(CurrentVolume, 0.0f, DeltaTime, 1.0f / FMath::Max(ZoneConfig.FadeOutDuration, 0.01f));
+        AudioComponent->SetVolumeMultiplier(CurrentVolume);
+        if (CurrentVolume < 0.01f)
+        {
+            AudioComponent->Stop();
+            CurrentState = EAudio_ZoneState::Completed;
+        }
+    }
 }
 
-void AAudio_ZoneActor::ActivateZone()
+void AAudio_NarrativeZone::SetUrgencyScalar(float NewUrgency)
 {
-    bIsActive = true;
-    if (AudioComponent && !AudioComponent->IsPlaying())
+    UrgencyScalar = FMath::Clamp(NewUrgency, 0.0f, 1.0f);
+    OnUrgencyUpdated(UrgencyScalar);
+    UpdateVolumeForUrgency();
+}
+
+void AAudio_NarrativeZone::TriggerAudioHook(EAudio_NarrativeHook Hook)
+{
+    ZoneConfig.HookType = Hook;
+    if (AudioComponent && AudioComponent->Sound)
     {
+        AudioComponent->SetVolumeMultiplier(0.0f);
         AudioComponent->Play();
+        CurrentState = EAudio_ZoneState::Playing;
     }
+    OnNarrativeHookTriggered(Hook);
 }
 
-void AAudio_ZoneActor::DeactivateZone()
+void AAudio_NarrativeZone::StopAudioZone()
 {
-    bIsActive = false;
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
+    CurrentState = EAudio_ZoneState::FadingOut;
 }
 
-bool AAudio_ZoneActor::IsPlayerInRange() const
+bool AAudio_NarrativeZone::IsPlayerInRange() const
 {
-    return AudioZoneComponent ? AudioZoneComponent->bPlayerInZone : false;
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (!Player) return false;
+    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    return Dist <= ZoneConfig.TriggerRadius;
 }
 
-void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void AAudio_NarrativeZone::UpdateVolumeForUrgency()
 {
-    if (!OtherActor) return;
-    ACharacter* Char = Cast<ACharacter>(OtherActor);
-    if (!Char) return;
-
-    APlayerController* PC = Cast<APlayerController>(Char->GetController());
-    if (!PC) return;
-
-    if (AudioZoneComponent)
-    {
-        AudioZoneComponent->OnPlayerEnterZone();
-    }
-    ActivateZone();
-}
-
-void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor) return;
-    ACharacter* Char = Cast<ACharacter>(OtherActor);
-    if (!Char) return;
-
-    APlayerController* PC = Cast<APlayerController>(Char->GetController());
-    if (!PC) return;
-
-    if (AudioZoneComponent)
-    {
-        AudioZoneComponent->OnPlayerExitZone();
-    }
-    DeactivateZone();
+    if (!ZoneConfig.bScaleWithUrgency) return;
+    if (!AudioComponent) return;
+    float TargetVolume = ZoneConfig.BaseVolume * (0.5f + UrgencyScalar * 0.5f);
+    AudioComponent->SetVolumeMultiplier(TargetVolume);
 }
 
 // ============================================================
-// AAudio_TRexProximityActor
+// AAudio_TRexShakeSource
 // ============================================================
 
-AAudio_TRexProximityActor::AAudio_TRexProximityActor()
+AAudio_TRexShakeSource::AAudio_TRexShakeSource()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    ProximitySphere = CreateDefaultSubobject<USphereComponent>(TEXT("ProximitySphere"));
-    ProximitySphere->SetSphereRadius(1200.0f);
-    ProximitySphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = ProximitySphere;
+    RumbleAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RumbleAudioComponent"));
+    RumbleAudioComponent->SetupAttachment(RootComponent);
+    RumbleAudioComponent->bAutoActivate = false;
+
+    ShakeConfig.TriggerRadius = 1200.0f;
+    ShakeConfig.MaxShakeIntensity = 1.0f;
+    ShakeConfig.ShakeFrequency = 2.5f;
+    ShakeConfig.ShakeDuration = 0.3f;
 }
 
-void AAudio_TRexProximityActor::BeginPlay()
+void AAudio_TRexShakeSource::BeginPlay()
 {
     Super::BeginPlay();
-
-    ProximitySphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_TRexProximityActor::OnProximityBeginOverlap);
-    ProximitySphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_TRexProximityActor::OnProximityEndOverlap);
-
-    FootstepTimer = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("AAudio_TRexProximityActor: BeginPlay — shake radius=%.0f interval=%.1fs"),
-        ShakeConfig.TriggerRadius, FootstepInterval);
 }
 
-void AAudio_TRexProximityActor::Tick(float DeltaTime)
+void AAudio_TRexShakeSource::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!bPlayerInRange) return;
+    float Proximity = GetProximityToPlayer();
+    if (Proximity <= 0.0f) return;
 
-    FootstepTimer += DeltaTime;
-    if (FootstepTimer >= FootstepInterval)
+    // Scale rumble volume with proximity
+    if (RumbleAudioComponent && RumbleAudioComponent->Sound)
     {
-        FootstepTimer = 0.0f;
-        TriggerFootstepShake();
+        if (!RumbleAudioComponent->IsPlaying())
+        {
+            RumbleAudioComponent->Play();
+        }
+        RumbleAudioComponent->SetVolumeMultiplier(Proximity);
+    }
+
+    // Trigger screen shake at intervals scaled by proximity
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float DynamicCooldown = FMath::Lerp(0.5f, ShakeCooldown, Proximity);
+    if (CurrentTime - LastShakeTime >= DynamicCooldown)
+    {
+        LastShakeTime = CurrentTime;
+        OnTRexShakeTriggered(Proximity * ShakeConfig.MaxShakeIntensity);
     }
 }
 
-void AAudio_TRexProximityActor::TriggerFootstepShake()
+float AAudio_TRexShakeSource::GetProximityToPlayer() const
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    // Camera shake via console command — Blueprint-friendly fallback
-    // In full implementation: PC->ClientStartCameraShake(ShakeClass, ShakeConfig.ShakeIntensity)
-    UE_LOG(LogTemp, Log, TEXT("TRexProximity: FOOTSTEP SHAKE — intensity=%.2f duration=%.2f freq=%.1f"),
-        ShakeConfig.ShakeIntensity, ShakeConfig.ShakeDuration, ShakeConfig.ShakeFrequency);
-
-    // Apply shake via console command as fallback
-    UGameplayStatics::PlayWorldCameraShake(
-        World,
-        nullptr, // ShakeClass — assigned in Blueprint
-        GetActorLocation(),
-        0.0f,
-        ShakeConfig.TriggerRadius,
-        ShakeConfig.ShakeIntensity
-    );
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (!Player) return 0.0f;
+    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    if (Dist >= ShakeConfig.TriggerRadius) return 0.0f;
+    return 1.0f - (Dist / ShakeConfig.TriggerRadius);
 }
 
-void AAudio_TRexProximityActor::TriggerRoarShake()
+// ============================================================
+// AAudio_DayNightAmbience
+// ============================================================
+
+AAudio_DayNightAmbience::AAudio_DayNightAmbience()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    PrimaryActorTick.bCanEverTick = true;
 
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
+    DayAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DayAudioComponent"));
+    DayAudioComponent->SetupAttachment(RootComponent);
+    DayAudioComponent->bAutoActivate = false;
 
-    UE_LOG(LogTemp, Log, TEXT("TRexProximity: ROAR SHAKE — intensity=%.2f (x3 footstep)"),
-        ShakeConfig.ShakeIntensity * 3.0f);
+    NightAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NightAudioComponent"));
+    NightAudioComponent->SetupAttachment(RootComponent);
+    NightAudioComponent->bAutoActivate = false;
 
-    UGameplayStatics::PlayWorldCameraShake(
-        World,
-        nullptr,
-        GetActorLocation(),
-        0.0f,
-        ShakeConfig.TriggerRadius * 1.5f,
-        ShakeConfig.ShakeIntensity * 3.0f
-    );
+    TimeOfDay = 0.5f;
+    bIsCurrentlyDay = true;
 }
 
-void AAudio_TRexProximityActor::OnProximityBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void AAudio_DayNightAmbience::BeginPlay()
 {
-    if (!OtherActor) return;
-    ACharacter* Char = Cast<ACharacter>(OtherActor);
-    if (!Char) return;
-
-    APlayerController* PC = Cast<APlayerController>(Char->GetController());
-    if (!PC) return;
-
-    bPlayerInRange = true;
-    FootstepTimer = 0.0f;
-    UE_LOG(LogTemp, Warning, TEXT("TRexProximity: Player entered T-Rex zone — screen shake ACTIVE"));
-
-    // Immediate roar shake on entry
-    TriggerRoarShake();
+    Super::BeginPlay();
+    BlendAmbienceVolumes();
 }
 
-void AAudio_TRexProximityActor::OnProximityEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void AAudio_DayNightAmbience::Tick(float DeltaTime)
 {
-    if (!OtherActor) return;
-    ACharacter* Char = Cast<ACharacter>(OtherActor);
-    if (!Char) return;
+    Super::Tick(DeltaTime);
+    BlendAmbienceVolumes();
+}
 
-    APlayerController* PC = Cast<APlayerController>(Char->GetController());
-    if (!PC) return;
+void AAudio_DayNightAmbience::SetTimeOfDay(float NewTimeOfDay)
+{
+    TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 1.0f);
 
-    bPlayerInRange = false;
-    FootstepTimer = 0.0f;
-    UE_LOG(LogTemp, Log, TEXT("TRexProximity: Player exited T-Rex zone — screen shake DEACTIVATED"));
+    // 0.25..0.75 = day, outside = night
+    bool bNewIsDay = (TimeOfDay >= 0.25f && TimeOfDay <= 0.75f);
+    if (bNewIsDay != bIsCurrentlyDay)
+    {
+        bIsCurrentlyDay = bNewIsDay;
+        OnDayNightTransition(bIsCurrentlyDay);
+    }
+}
+
+void AAudio_DayNightAmbience::BlendAmbienceVolumes()
+{
+    // Day volume: peaks at noon (0.5), zero at midnight (0.0/1.0)
+    float DayBlend = 0.0f;
+    if (TimeOfDay >= 0.25f && TimeOfDay <= 0.75f)
+    {
+        // Smooth bell curve peaking at 0.5
+        float t = (TimeOfDay - 0.25f) / 0.5f; // 0..1
+        DayBlend = FMath::Sin(t * PI);
+    }
+    float NightBlend = 1.0f - DayBlend;
+
+    if (DayAudioComponent)
+    {
+        if (!DayAudioComponent->IsPlaying() && DayBlend > 0.01f && DayAudioComponent->Sound)
+            DayAudioComponent->Play();
+        DayAudioComponent->SetVolumeMultiplier(DayAmbienceVolume * DayBlend);
+    }
+
+    if (NightAudioComponent)
+    {
+        if (!NightAudioComponent->IsPlaying() && NightBlend > 0.01f && NightAudioComponent->Sound)
+            NightAudioComponent->Play();
+        NightAudioComponent->SetVolumeMultiplier(NightAmbienceVolume * NightBlend);
+    }
 }
