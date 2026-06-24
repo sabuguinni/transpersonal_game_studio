@@ -25,22 +25,22 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsMoving;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsAttacking;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsDead;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     EAnim_DinoLocomotionState LocomotionState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
@@ -49,7 +49,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
     float RunSpeedThreshold;
 
+    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
+    void SetAttacking(bool bAttacking);
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
+    void SetDead(bool bDead);
+
 private:
     UPROPERTY()
     class APawn* OwnerPawn;
+
+    void UpdateLocomotionState();
 };
