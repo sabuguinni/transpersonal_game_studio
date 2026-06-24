@@ -1,250 +1,413 @@
 // TRexCharacter.cpp
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// T-Rex species implementation: apex predator stats, charge attack, roar ability
+// Performance Optimizer #04 — Agent #04
+// T-Rex apex predator implementation
 
 #include "TRexCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 ATRexCharacter::ATRexCharacter()
 {
-    // Species identity
-    SpeciesName = FName("Tyrannosaurus Rex");
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Apex predator combat stats
-    MaxHealth       = 2000.0f;
-    CurrentHealth   = 2000.0f;
-    AttackDamage    = 150.0f;
-    AttackRange     = 300.0f;
-    AttackCooldown  = 2.5f;
+    // T-Rex physical scale — large apex predator
+    GetCapsuleComponent()->InitCapsuleSize(80.0f, 200.0f);
 
-    // Movement — T-Rex is powerful but not fast
-    PatrolSpeed     = 200.0f;
-    ChaseSpeed      = 550.0f;
-    TerritoryRadius = 3500.0f;
-    ThreatDetectRadius = 2500.0f;
+    // Movement tuning — heavy but fast in short bursts
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = 600.0f;          // ~22 km/h patrol speed
+        MoveComp->MaxAcceleration = 800.0f;
+        MoveComp->BrakingDecelerationWalking = 600.0f;
+        MoveComp->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->Mass = 8000.0f;                 // 8 tonnes
+        MoveComp->GravityScale = 1.2f;            // Heavier gravity feel
+    }
 
-    // Charge attack parameters
-    bIsCharging         = false;
-    ChargeSpeed         = 900.0f;
-    ChargeDamage        = 300.0f;
-    ChargeCooldown      = 12.0f;
-    ChargeRange         = 1800.0f;
-    bChargeReady        = true;
+    // T-Rex specific defaults
+    CurrentPhase = ETRexPhase::Idle;
+    ChargeData.ChargeSpeed = 1400.0f;
+    ChargeData.ChargeDuration = 3.0f;
+    ChargeData.ChargeImpactRadius = 150.0f;
+    ChargeData.ChargeImpactForce = 5000.0f;
+    ChargeData.bIsCharging = false;
+    ChargeData.ChargeTarget = nullptr;
 
-    // Roar parameters
-    RoarRadius          = 2000.0f;
-    RoarFearDuration    = 5.0f;
-    RoarCooldown        = 20.0f;
-    bRoarReady          = true;
+    RoarData.RoarRadius = 2000.0f;
+    RoarData.RoarFearMultiplier = 2.5f;
+    RoarData.RoarCooldown = 15.0f;
+    RoarData.bIsRoaring = false;
+    RoarData.LastRoarTime = -999.0f;
 
-    // Capsule — T-Rex is enormous
-    GetCapsuleComponent()->SetCapsuleHalfHeight(200.0f);
-    GetCapsuleComponent()->SetCapsuleRadius(80.0f);
+    TerritoryRadius = 5000.0f;
+    TerritoryCenter = FVector::ZeroVector;
+    bTerritoryInitialized = false;
 
-    // Movement component
-    GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
-    GetCharacterMovement()->MaxAcceleration = 800.0f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 1200.0f;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
-    GetCharacterMovement()->bOrientRotationToMovement = true;
+    // Override base class survival stats for apex predator
+    MaxHealth = 2000.0f;
+    CurrentHealth = 2000.0f;
+    AttackDamage = 250.0f;
+    DetectionRange = 3000.0f;
+    AttackRange = 300.0f;
 }
 
 void ATRexCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Start roar cooldown timer on spawn (don't roar immediately)
-    GetWorldTimerManager().SetTimer(
-        RoarCooldownHandle,
-        this,
-        &ATRexCharacter::OnRoarCooldownExpired,
-        RoarCooldown,
-        false
-    );
-    bRoarReady = false;
+    // Set territory center to spawn location
+    if (!bTerritoryInitialized)
+    {
+        TerritoryCenter = GetActorLocation();
+        bTerritoryInitialized = true;
+    }
+
+    // Start in idle phase
+    SetCombatPhase(ETRexPhase::Idle);
 }
 
 void ATRexCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // During charge, apply extra forward force
-    if (bIsCharging)
+    // Update charge state
+    if (ChargeData.bIsCharging)
     {
-        FVector Forward = GetActorForwardVector();
-        AddMovementInput(Forward, 1.0f);
+        UpdateCharge(DeltaTime);
+    }
+
+    // Evaluate combat behaviour every 0.5s (performance: not every frame)
+    static float BehaviourTimer = 0.0f;
+    BehaviourTimer += DeltaTime;
+    if (BehaviourTimer >= 0.5f)
+    {
+        BehaviourTimer = 0.0f;
+        EvaluateCombatBehaviour();
     }
 }
 
-void ATRexCharacter::PerformAttack()
+void ATRexCharacter::BeginCharge(AActor* Target)
 {
-    // Override: T-Rex checks for charge opportunity before normal attack
-    if (bChargeReady)
+    if (!Target || ChargeData.bIsCharging)
     {
-        APawn* Target = GetCurrentTarget();
-        if (Target)
-        {
-            float DistToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-            if (DistToTarget > AttackRange && DistToTarget <= ChargeRange)
-            {
-                StartCharge(Target);
-                return;
-            }
-        }
+        return;
     }
 
-    // Fall back to base attack
-    Super::PerformAttack();
+    ChargeData.bIsCharging = true;
+    ChargeData.ChargeTarget = Target;
+    ChargeData.ChargeStartTime = GetWorld()->GetTimeSeconds();
+
+    // Boost movement speed during charge
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = ChargeData.ChargeSpeed;
+    }
+
+    SetCombatPhase(ETRexPhase::Charging);
+    OnChargeBegin.Broadcast(Target);
 }
 
-void ATRexCharacter::StartCharge(APawn* Target)
+void ATRexCharacter::UpdateCharge(float DeltaTime)
 {
-    if (!Target || bIsCharging) return;
+    if (!ChargeData.ChargeTarget)
+    {
+        EndCharge();
+        return;
+    }
 
-    bIsCharging   = true;
-    bChargeReady  = false;
+    float ElapsedTime = GetWorld()->GetTimeSeconds() - ChargeData.ChargeStartTime;
+    if (ElapsedTime >= ChargeData.ChargeDuration)
+    {
+        EndCharge();
+        return;
+    }
 
-    // Face the target
-    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    FRotator LookAt  = ToTarget.Rotation();
-    SetActorRotation(LookAt);
-
-    // Boost movement speed for charge
-    GetCharacterMovement()->MaxWalkSpeed = ChargeSpeed;
-
-    // Apply damage at end of charge (3 seconds)
-    FTimerHandle ChargeEndHandle;
-    GetWorldTimerManager().SetTimer(
-        ChargeEndHandle,
-        this,
-        &ATRexCharacter::EndCharge,
-        3.0f,
-        false
-    );
-
-    // Charge cooldown
-    GetWorldTimerManager().SetTimer(
-        ChargeCooldownHandle,
-        this,
-        &ATRexCharacter::OnChargeCooldownExpired,
-        ChargeCooldown,
-        false
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("TRex [%s] CHARGING at %s"), *GetName(), *Target->GetName());
+    // Check for impact
+    float DistToTarget = FVector::Dist(GetActorLocation(), ChargeData.ChargeTarget->GetActorLocation());
+    if (DistToTarget <= ChargeData.ChargeImpactRadius)
+    {
+        OnChargeImpact(ChargeData.ChargeTarget);
+        EndCharge();
+    }
 }
 
 void ATRexCharacter::EndCharge()
 {
-    bIsCharging = false;
+    ChargeData.bIsCharging = false;
+    ChargeData.ChargeTarget = nullptr;
 
-    // Restore normal chase speed
-    GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
-
-    // Deal charge damage to anything in melee range
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
-
-    for (AActor* Actor : NearbyActors)
+    // Restore normal speed
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
     {
-        if (Actor == this) continue;
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist <= AttackRange * 1.5f)
-        {
-            UGameplayStatics::ApplyDamage(
-                Actor,
-                ChargeDamage,
-                GetController(),
-                this,
-                UDamageType::StaticClass()
-            );
-            UE_LOG(LogTemp, Log, TEXT("TRex CHARGE HIT: %s for %.0f dmg"), *Actor->GetName(), ChargeDamage);
-        }
+        MoveComp->MaxWalkSpeed = 600.0f;
     }
+
+    if (CurrentPhase == ETRexPhase::Charging)
+    {
+        SetCombatPhase(ETRexPhase::Attacking);
+    }
+}
+
+void ATRexCharacter::OnChargeImpact(AActor* ImpactTarget)
+{
+    if (!ImpactTarget)
+    {
+        return;
+    }
+
+    // Apply knockback
+    ApplyKnockback(ImpactTarget, ChargeData.ChargeImpactForce);
+
+    // Apply damage
+    UGameplayStatics::ApplyDamage(
+        ImpactTarget,
+        AttackDamage * 1.5f,  // Charge deals 150% damage
+        GetController(),
+        this,
+        UDamageType::StaticClass()
+    );
+
+    OnChargeImpactEvent.Broadcast(ImpactTarget);
 }
 
 void ATRexCharacter::PerformRoar()
 {
-    if (!bRoarReady) return;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (!CanRoar())
+    {
+        return;
+    }
 
-    bRoarReady = false;
+    RoarData.bIsRoaring = true;
+    RoarData.LastRoarTime = CurrentTime;
 
-    // Apply fear to all pawns in roar radius
+    // Find all actors in roar radius and apply fear
     TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
 
-    int32 FearCount = 0;
-    for (AActor* Actor : NearbyActors)
+    int32 FrightenedCount = 0;
+    for (AActor* NearbyActor : NearbyActors)
     {
-        if (Actor == this) continue;
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist <= RoarRadius)
+        if (!NearbyActor || NearbyActor == this)
         {
-            // Tag the actor as feared (gameplay tag or simple property set)
-            // For now, apply a small stun via velocity knockback
-            APawn* Pawn = Cast<APawn>(Actor);
-            if (Pawn && Pawn->GetMovementComponent())
+            continue;
+        }
+
+        float Dist = FVector::Dist(GetActorLocation(), NearbyActor->GetActorLocation());
+        if (Dist <= RoarData.RoarRadius)
+        {
+            // Apply fear to DinosaurBase subclasses
+            ADinosaurBase* DinoActor = Cast<ADinosaurBase>(NearbyActor);
+            if (DinoActor && DinoActor != this)
             {
-                FVector AwayDir = (Pawn->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-                Pawn->GetMovementComponent()->Velocity += AwayDir * 600.0f;
+                DinoActor->FearLevel = FMath::Min(DinoActor->FearLevel + RoarData.RoarFearMultiplier * 20.0f, 100.0f);
+                FrightenedCount++;
             }
-            FearCount++;
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("TRex ROAR: feared %d pawns within %.0f units"), FearCount, RoarRadius);
+    OnRoarPerformed.Broadcast(RoarData.RoarRadius);
 
-    // Restart roar cooldown
-    GetWorldTimerManager().SetTimer(
-        RoarCooldownHandle,
-        this,
-        &ATRexCharacter::OnRoarCooldownExpired,
-        RoarCooldown,
-        false
-    );
-}
-
-void ATRexCharacter::OnChargeCooldownExpired()
-{
-    bChargeReady = true;
-    UE_LOG(LogTemp, Log, TEXT("TRex [%s] charge READY"), *GetName());
-}
-
-void ATRexCharacter::OnRoarCooldownExpired()
-{
-    bRoarReady = true;
-    // Immediately roar when cooldown expires if in combat
-    PerformRoar();
-}
-
-APawn* ATRexCharacter::GetCurrentTarget() const
-{
-    // Delegate to base class threat detection
-    // The base class tracks the current chase target via its AI state
-    // We expose it here for charge logic
-    TArray<AActor*> NearbyPawns;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyPawns);
-
-    APawn* Closest = nullptr;
-    float  MinDist = ThreatDetectRadius;
-
-    for (AActor* Actor : NearbyPawns)
+    // Roar animation ends after 2s
+    FTimerHandle RoarTimer;
+    GetWorld()->GetTimerManager().SetTimer(RoarTimer, [this]()
     {
-        if (Actor == this) continue;
-        // Skip other dinosaurs (T-Rex only attacks player/prey)
-        if (Actor->IsA(ADinosaurBase::StaticClass())) continue;
+        RoarData.bIsRoaring = false;
+    }, 2.0f, false);
+}
 
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < MinDist)
+bool ATRexCharacter::IsCharging() const
+{
+    return ChargeData.bIsCharging;
+}
+
+bool ATRexCharacter::CanRoar() const
+{
+    if (RoarData.bIsRoaring)
+    {
+        return false;
+    }
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    return (CurrentTime - RoarData.LastRoarTime) >= RoarData.RoarCooldown;
+}
+
+void ATRexCharacter::SetTerritoryCenter(FVector NewCenter)
+{
+    TerritoryCenter = NewCenter;
+    bTerritoryInitialized = true;
+}
+
+bool ATRexCharacter::IsInTerritory(FVector Location) const
+{
+    return FVector::Dist(Location, TerritoryCenter) <= TerritoryRadius;
+}
+
+void ATRexCharacter::SetCombatPhase(ETRexPhase NewPhase)
+{
+    if (CurrentPhase == NewPhase)
+    {
+        return;
+    }
+
+    ETRexPhase OldPhase = CurrentPhase;
+    CurrentPhase = NewPhase;
+    OnPhaseChanged.Broadcast(OldPhase, NewPhase);
+
+    // Apply phase-specific movement modifiers
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (!MoveComp)
+    {
+        return;
+    }
+
+    switch (NewPhase)
+    {
+        case ETRexPhase::Idle:
+            MoveComp->MaxWalkSpeed = 0.0f;
+            break;
+        case ETRexPhase::Patrolling:
+            MoveComp->MaxWalkSpeed = 300.0f;
+            break;
+        case ETRexPhase::Hunting:
+            MoveComp->MaxWalkSpeed = 700.0f;
+            break;
+        case ETRexPhase::Attacking:
+            MoveComp->MaxWalkSpeed = 800.0f;
+            break;
+        case ETRexPhase::Charging:
+            MoveComp->MaxWalkSpeed = ChargeData.ChargeSpeed;
+            break;
+        case ETRexPhase::Roaring:
+            MoveComp->MaxWalkSpeed = 0.0f;
+            break;
+        case ETRexPhase::Retreating:
+            MoveComp->MaxWalkSpeed = 500.0f;
+            break;
+        case ETRexPhase::Feeding:
+            MoveComp->MaxWalkSpeed = 0.0f;
+            break;
+    }
+}
+
+void ATRexCharacter::EvaluateCombatBehaviour()
+{
+    // Health-based phase transitions
+    float HealthPct = CurrentHealth / MaxHealth;
+
+    if (HealthPct < 0.2f && CurrentPhase != ETRexPhase::Retreating)
+    {
+        // Critical health — retreat
+        SetCombatPhase(ETRexPhase::Retreating);
+        return;
+    }
+
+    // Threat detection — use base class sphere check
+    AActor* Threat = DetectNearestThreat();
+    if (Threat)
+    {
+        float ThreatDist = FVector::Dist(GetActorLocation(), Threat->GetActorLocation());
+
+        if (ThreatDist <= AttackRange)
         {
-            MinDist = Dist;
-            Closest = Cast<APawn>(Actor);
+            if (CurrentPhase != ETRexPhase::Attacking && CurrentPhase != ETRexPhase::Charging)
+            {
+                // Close range — attack or charge
+                if (CanRoar() && FMath::RandBool())
+                {
+                    SetCombatPhase(ETRexPhase::Roaring);
+                    PerformRoar();
+                }
+                else
+                {
+                    BeginCharge(Threat);
+                }
+            }
+        }
+        else if (ThreatDist <= DetectionRange)
+        {
+            if (CurrentPhase == ETRexPhase::Idle || CurrentPhase == ETRexPhase::Patrolling)
+            {
+                SetCombatPhase(ETRexPhase::Hunting);
+            }
+        }
+    }
+    else
+    {
+        // No threat — return to patrol if not already
+        if (CurrentPhase == ETRexPhase::Hunting || CurrentPhase == ETRexPhase::Attacking)
+        {
+            SetCombatPhase(ETRexPhase::Patrolling);
+        }
+    }
+}
+
+void ATRexCharacter::ApplyKnockback(AActor* Target, float Force)
+{
+    if (!Target)
+    {
+        return;
+    }
+
+    ACharacter* TargetChar = Cast<ACharacter>(Target);
+    if (TargetChar)
+    {
+        FVector KnockbackDir = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+        KnockbackDir.Z = 0.4f;  // Slight upward component
+        KnockbackDir.Normalize();
+
+        UCharacterMovementComponent* TargetMove = TargetChar->GetCharacterMovement();
+        if (TargetMove)
+        {
+            TargetMove->AddImpulse(KnockbackDir * Force, true);
+        }
+    }
+}
+
+AActor* ATRexCharacter::DetectNearestThreat()
+{
+    // Simple sphere overlap — Agent #11 will replace with UAIPerceptionComponent
+    TArray<FOverlapResult> Overlaps;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    bool bHit = GetWorld()->OverlapMultiByChannel(
+        Overlaps,
+        GetActorLocation(),
+        FQuat::Identity,
+        ECollisionChannel::ECC_Pawn,
+        FCollisionShape::MakeSphere(DetectionRange),
+        QueryParams
+    );
+
+    AActor* NearestThreat = nullptr;
+    float NearestDist = FLT_MAX;
+
+    for (const FOverlapResult& Overlap : Overlaps)
+    {
+        AActor* OtherActor = Overlap.GetActor();
+        if (!OtherActor || OtherActor == this)
+        {
+            continue;
+        }
+
+        // Treat player characters as threats
+        ACharacter* OtherChar = Cast<ACharacter>(OtherActor);
+        if (OtherChar && !Cast<ADinosaurBase>(OtherChar))
+        {
+            float Dist = FVector::Dist(GetActorLocation(), OtherActor->GetActorLocation());
+            if (Dist < NearestDist)
+            {
+                NearestDist = Dist;
+                NearestThreat = OtherActor;
+            }
         }
     }
 
-    return Closest;
+    return NearestThreat;
 }
