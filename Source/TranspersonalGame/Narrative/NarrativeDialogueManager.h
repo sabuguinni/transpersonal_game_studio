@@ -4,16 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "NarrativeDialogueManager.generated.h"
 
-// Narr_ prefix — unique across project per UE5 C++ rules
-
 UENUM(BlueprintType)
 enum class ENarr_DialogueTriggerType : uint8
 {
-    Camp        UMETA(DisplayName = "Camp Entrance"),
-    River       UMETA(DisplayName = "River Crossing"),
-    Predator    UMETA(DisplayName = "Predator Zone"),
-    Discovery   UMETA(DisplayName = "Discovery Point"),
-    Combat      UMETA(DisplayName = "Combat Zone")
+    ProximityEnter   UMETA(DisplayName = "Proximity Enter"),
+    ProximityExit    UMETA(DisplayName = "Proximity Exit"),
+    QuestStart       UMETA(DisplayName = "Quest Start"),
+    QuestComplete    UMETA(DisplayName = "Quest Complete"),
+    DinoEncounter    UMETA(DisplayName = "Dino Encounter"),
+    PlayerDeath      UMETA(DisplayName = "Player Death"),
+    SurvivalCritical UMETA(DisplayName = "Survival Critical")
 };
 
 USTRUCT(BlueprintType)
@@ -22,55 +22,68 @@ struct FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SpeakerName;
+    FString CharacterName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString AudioURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DisplayDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTriggerType TriggerContext;
-
-    FNarr_DialogueLine()
-        : SpeakerName(TEXT("Unknown"))
-        , LineText(TEXT(""))
-        , DisplayDuration(3.0f)
-        , TriggerContext(ENarr_DialogueTriggerType::Camp)
-    {}
-};
-
-USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueLine> Lines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bHasPlayed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     ENarr_DialogueTriggerType TriggerType;
 
-    FNarr_DialogueSequence()
-        : SequenceID(NAME_None)
-        , bHasPlayed(false)
-        , TriggerType(ENarr_DialogueTriggerType::Camp)
+    FNarr_DialogueLine()
+        : CharacterName(TEXT("Unknown"))
+        , LineText(TEXT(""))
+        , AudioURL(TEXT(""))
+        , DisplayDuration(5.0f)
+        , TriggerType(ENarr_DialogueTriggerType::ProximityEnter)
+    {}
+};
+
+USTRUCT(BlueprintType)
+struct FNarr_DialogueZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString ZoneID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FVector ZoneLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float TriggerRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueLine> DialogueLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bOneShot;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bHasTriggered;
+
+    FNarr_DialogueZone()
+        : ZoneID(TEXT(""))
+        , ZoneLocation(FVector::ZeroVector)
+        , TriggerRadius(500.0f)
+        , bOneShot(true)
+        , bHasTriggered(false)
     {}
 };
 
 /**
  * ANarrativeDialogueManager
- * Manages dialogue sequences, trigger zones, and narrative progression.
- * Placed in MinPlayableMap — responds to player proximity triggers.
+ * Manages all narrative dialogue zones, voice line playback triggers,
+ * and character narration for the prehistoric survival world.
+ * Placed once in the level — handles proximity-based dialogue delivery.
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Narrative Dialogue Manager"))
 class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 {
     GENERATED_BODY()
@@ -78,60 +91,59 @@ class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 public:
     ANarrativeDialogueManager();
 
-protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // --- Dialogue Data ---
+    // === DIALOGUE ZONES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Zones")
+    TArray<FNarr_DialogueZone> DialogueZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueSequence> DialogueLibrary;
+    // === ACTIVE STATE ===
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    FNarr_DialogueLine CurrentActiveLine;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
-    bool bDialogueActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    bool bIsDialoguePlaying;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
-    int32 CurrentLineIndex;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    float DialogueTimeRemaining;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|State")
-    FName ActiveSequenceID;
+    // === CHARACTERS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Characters")
+    TMap<FString, FString> CharacterVoiceURLs;
 
-    // --- Survival Context ---
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Survival")
-    float PlayerHungerThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Survival")
-    float PlayerDangerRadius;
-
-    // --- Methods ---
+    // === FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogueLine(const FNarr_DialogueLine& Line);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogueSequence(FName SequenceID);
+    void CheckProximityTriggers(FVector PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceDialogue();
+    void RegisterDialogueZone(const FNarr_DialogueZone& Zone);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
+    void ClearActiveDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetCurrentLine() const;
+    bool IsDialoguePlaying() const { return bIsDialoguePlaying; }
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsDialogueActive() const;
+    FNarr_DialogueLine GetCurrentLine() const { return CurrentActiveLine; }
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterTriggerZone(ENarr_DialogueTriggerType TriggerType, FVector Location);
+    UFUNCTION(CallInEditor, Category = "Narrative|Debug")
+    void PopulateDefaultDialogueZones();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void InitializeDefaultDialogues();
+protected:
+    void InitializeDefaultZones();
+    void UpdateDialogueTimer(float DeltaTime);
 
 private:
-    FNarr_DialogueSequence* FindSequenceByID(FName SequenceID);
-    void BuildCampDialogue();
-    void BuildRiverDialogue();
-    void BuildPredatorDialogue();
+    UPROPERTY()
+    float ProximityCheckInterval;
+
+    UPROPERTY()
+    float TimeSinceLastProximityCheck;
+
+    APawn* CachedPlayerPawn;
 };
