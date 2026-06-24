@@ -1,88 +1,152 @@
 #include "DinoSurvivorAnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "../TranspersonalCharacter.h"
+#include "DrawDebugHelpers.h"
 
 UDinoSurvivorAnimInstance::UDinoSurvivorAnimInstance()
 {
-	// Locomotion defaults
-	GroundSpeed        = 0.f;
-	MovementDirection  = 0.f;
-	bIsMoving          = false;
-	bIsInAir           = false;
-	bIsCrouching       = false;
-	bIsSprinting       = false;
+    GroundSpeed = 0.0f;
+    GroundSpeedNormalized = 0.0f;
+    bIsMoving = false;
+    bIsFalling = false;
+    bIsCrouching = false;
+    bIsSprinting = false;
 
-	// Survival defaults
-	Stamina            = 100.f;
-	Health             = 100.f;
-	bIsLimping         = false;
-	FearLevel          = 0.f;
+    MovementDirection = 0.0f;
+    LeanAngle = 0.0f;
 
-	// Combat defaults
-	bIsArmed           = false;
-	bIsAttacking       = false;
+    StaminaNormalized = 1.0f;
+    bIsExhausted = false;
+    bIsInjured = false;
 
-	// Config thresholds
-	SprintThreshold    = 450.f;   // cm/s — above walk speed (300)
-	LimpHealthThreshold = 25.f;
-	MinMoveSpeed       = 10.f;
+    bIsInCombat = false;
+    bIsAiming = false;
+    AimPitch = 0.0f;
+    AimYaw = 0.0f;
 
-	CachedMovementComp = nullptr;
-	CachedCharacter    = nullptr;
+    LeftFootIKLocation = FVector::ZeroVector;
+    RightFootIKLocation = FVector::ZeroVector;
+    LeftFootIKRotation = FRotator::ZeroRotator;
+    RightFootIKRotation = FRotator::ZeroRotator;
+    IKAlpha = 1.0f;
+
+    WalkSpeedThreshold = 10.0f;
+    RunSpeedThreshold = 150.0f;
+    SprintSpeedThreshold = 400.0f;
+    IKTraceDistance = 80.0f;
+
+    OwnerCharacter = nullptr;
 }
 
 void UDinoSurvivorAnimInstance::NativeInitializeAnimation()
 {
-	Super::NativeInitializeAnimation();
-
-	APawn* Owner = TryGetPawnOwner();
-	if (!Owner) return;
-
-	CachedCharacter    = Cast<ATranspersonalCharacter>(Owner);
-	CachedMovementComp = Cast<UCharacterMovementComponent>(
-		Owner->GetMovementComponent());
+    Super::NativeInitializeAnimation();
+    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
 }
 
 void UDinoSurvivorAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-	Super::NativeUpdateAnimation(DeltaSeconds);
+    Super::NativeUpdateAnimation(DeltaSeconds);
 
-	if (!CachedMovementComp || !CachedCharacter) return;
+    if (!OwnerCharacter)
+    {
+        OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+        if (!OwnerCharacter) return;
+    }
 
-	// ── Locomotion ──────────────────────────────────────────────────────────
-	const FVector Velocity    = CachedMovementComp->Velocity;
-	const FVector HorizVel    = FVector(Velocity.X, Velocity.Y, 0.f);
-	GroundSpeed               = HorizVel.Size();
-	bIsMoving                 = GroundSpeed > MinMoveSpeed;
-	bIsInAir                  = CachedMovementComp->IsFalling();
-	bIsCrouching              = CachedCharacter->bIsCrouched;
-	bIsSprinting              = GroundSpeed > SprintThreshold;
+    UpdateLocomotion();
+    UpdateFootIK();
+}
 
-	// Movement direction relative to actor forward (-180..180)
-	if (bIsMoving)
-	{
-		const FRotator ActorRot   = CachedCharacter->GetActorRotation();
-		const FRotator VelRot     = UKismetMathLibrary::MakeRotFromX(HorizVel);
-		const FRotator DeltaRot   = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot);
-		MovementDirection         = FMath::Clamp(DeltaRot.Yaw, -180.f, 180.f);
-	}
-	else
-	{
-		MovementDirection = 0.f;
-	}
+void UDinoSurvivorAnimInstance::UpdateLocomotion()
+{
+    if (!OwnerCharacter) return;
 
-	// ── Survival State ───────────────────────────────────────────────────────
-	// Read survival stats from TranspersonalCharacter if available
-	// Properties are exposed as UPROPERTY floats on the character
-	Health    = CachedCharacter->GetHealth();
-	Stamina   = CachedCharacter->GetStamina();
-	FearLevel = CachedCharacter->GetFear();
+    UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovComp) return;
 
-	bIsLimping = Health < LimpHealthThreshold;
+    // Ground speed (horizontal only)
+    FVector Velocity = OwnerCharacter->GetVelocity();
+    FVector HorizontalVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
+    GroundSpeed = HorizontalVelocity.Size();
 
-	// ── Combat ───────────────────────────────────────────────────────────────
-	// bIsArmed and bIsAttacking are set externally by the combat system
-	// via Blueprint or C++ calls — no polling needed here
+    // Normalize 0-1 over sprint range
+    GroundSpeedNormalized = FMath::Clamp(GroundSpeed / SprintSpeedThreshold, 0.0f, 1.0f);
+
+    bIsMoving = GroundSpeed > WalkSpeedThreshold;
+    bIsFalling = MovComp->IsFalling();
+    bIsCrouching = MovComp->IsCrouching();
+    bIsSprinting = GroundSpeed >= SprintSpeedThreshold;
+
+    // IK alpha — disable during fall, reduce when exhausted
+    IKAlpha = bIsFalling ? 0.0f : (bIsExhausted ? 0.5f : 1.0f);
+
+    // Movement direction relative to actor forward
+    if (bIsMoving)
+    {
+        FRotator ActorRot = OwnerCharacter->GetActorRotation();
+        FRotator VelocityRot = HorizontalVelocity.Rotation();
+        FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot);
+        MovementDirection = DeltaRot.Yaw;
+
+        // Lean — proportional to speed and direction change
+        LeanAngle = FMath::Clamp(DeltaRot.Yaw * 0.1f, -15.0f, 15.0f);
+    }
+    else
+    {
+        MovementDirection = 0.0f;
+        LeanAngle = FMath::FInterpTo(LeanAngle, 0.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
+    }
+}
+
+void UDinoSurvivorAnimInstance::UpdateFootIK()
+{
+    if (!OwnerCharacter || bIsFalling) return;
+
+    SolveFootIK(FName("foot_l"), LeftFootIKLocation, LeftFootIKRotation);
+    SolveFootIK(FName("foot_r"), RightFootIKLocation, RightFootIKRotation);
+}
+
+void UDinoSurvivorAnimInstance::SolveFootIK(FName SocketName, FVector& OutLocation, FRotator& OutRotation)
+{
+    if (!OwnerCharacter) return;
+
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh) return;
+
+    // Get foot socket world location
+    FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
+
+    // Trace downward from foot
+    FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, IKTraceDistance);
+    FVector TraceEnd   = SocketLocation - FVector(0.0f, 0.0f, IKTraceDistance);
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECollisionChannel::ECC_Visibility,
+        Params
+    );
+
+    if (bHit)
+    {
+        OutLocation = HitResult.ImpactPoint;
+
+        // Compute foot rotation from surface normal
+        FVector Normal = HitResult.ImpactNormal;
+        FRotator SurfaceRot = UKismetMathLibrary::MakeRotFromZX(Normal, OwnerCharacter->GetActorForwardVector());
+        OutRotation = SurfaceRot;
+    }
+    else
+    {
+        // No hit — use default foot position
+        OutLocation = SocketLocation;
+        OutRotation = FRotator::ZeroRotator;
+    }
 }
