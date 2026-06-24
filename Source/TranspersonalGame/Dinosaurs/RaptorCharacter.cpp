@@ -1,232 +1,276 @@
 // RaptorCharacter.cpp
-// Performance Optimizer #04 — PROD_CYCLE_AUTO_20260624_002
-// Full implementation of ARaptorCharacter — pack-hunter Velociraptor
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Velociraptor — pack hunter implementation
 
-#include "Dinosaurs/RaptorCharacter.h"
+#include "RaptorCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
-#include "TimerManager.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Perception/AIPerceptionStimuliSourceComponent.h"
+#include "Perception/AISense_Sight.h"
+#include "Perception/AISense_Hearing.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────────────────────
 ARaptorCharacter::ARaptorCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ── Species stats ──────────────────────────────────────────────────
-    Species         = EPerf_DinosaurSpecies::Velociraptor;
-    MaxHealth       = 400.0f;
-    CurrentHealth   = 400.0f;
-    AttackDamage    = 60.0f;
-    DetectionRange  = 2500.0f;
-    AttackRange     = 180.0f;
+    // --- Capsule — raptors are smaller than T-Rex ---
+    GetCapsuleComponent()->SetCapsuleHalfHeight(80.0f);
+    GetCapsuleComponent()->SetCapsuleRadius(35.0f);
 
-    // ── Movement — fast pack hunter ────────────────────────────────────
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
-    {
-        Move->MaxWalkSpeed          = 900.0f;   // Sprint speed
-        Move->MaxAcceleration       = 2400.0f;
-        Move->BrakingDecelerationWalking = 1800.0f;
-        Move->JumpZVelocity         = 620.0f;   // Raptors can leap
-        Move->AirControl            = 0.35f;
-        Move->NavAgentProps.bCanJump = true;
-    }
+    // --- Movement — fast and agile ---
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    MoveComp->MaxWalkSpeed = RaptorSprintSpeed;
+    MoveComp->MaxAcceleration = 2000.0f;
+    MoveComp->BrakingDecelerationWalking = 1200.0f;
+    MoveComp->RotationRate = FRotator(0.0f, 360.0f, 0.0f);
+    MoveComp->bOrientRotationToMovement = true;
+    MoveComp->GravityScale = 1.1f;
+    MoveComp->JumpZVelocity = 600.0f;
+    MoveComp->AirControl = 0.3f;
 
-    // ── Pack defaults ──────────────────────────────────────────────────
-    PackLeader              = nullptr;
-    PackHuntTarget          = nullptr;
-    bIsFlanking             = false;
-    FlankAngleDegrees       = 45.0f;
-    PackCoordinationRadius  = 3000.0f;
-    bLeapOnCooldown         = false;
+    // --- Perception source ---
+    PerceptionSource = CreateDefaultSubobject<UAIPerceptionStimuliSourceComponent>(TEXT("PerceptionSource"));
+    PerceptionSource->RegisterForSense(TSubclassOf<UAISense>(UAISense_Sight::StaticClass()));
+    PerceptionSource->RegisterForSense(TSubclassOf<UAISense>(UAISense_Hearing::StaticClass()));
+    PerceptionSource->bAutoRegister = true;
+
+    // --- Default stats ---
+    CurrentHealth = MaxHealth;
+    CurrentHunger = MaxHunger * 0.6f;
+    bIsAlive = true;
+    bIsAggressive = false;  // Raptors are cautious alone, aggressive in packs
+    CurrentBehaviorState = ECore_DinoState::Patrolling;
+
+    // --- Species identity ---
+    DinosaurSpecies = ECore_DinosaurSpecies::Velociraptor;
+    DinosaurName = TEXT("Velociraptor");
+    bIsCarnivore = true;
+    TerritoryRadius = 2500.0f;
+    DetectionRange = 2000.0f;
+    AttackRange = 150.0f;
+
+    // --- Pack behaviour defaults ---
+    PackRole = ECore_RaptorPackRole::Scout;
+    PackID = -1;  // -1 = no pack assigned yet
+    bIsPackLeader = false;
+    FlankOffset = FVector::ZeroVector;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
 void ARaptorCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Start pack coordination timer (every 2 seconds)
+    HomeLocation = GetActorLocation();
+
+    // Hunger drain
+    GetWorldTimerManager().SetTimer(
+        HungerTimerHandle,
+        this,
+        &ARaptorCharacter::DrainHunger,
+        HungerDrainInterval,
+        true
+    );
+
+    // Pack coordination pulse (raptors check in with pack)
     GetWorldTimerManager().SetTimer(
         PackCoordTimerHandle,
         this,
-        &ARaptorCharacter::CoordinatePack,
-        2.0f,
+        &ARaptorCharacter::CoordinateWithPack,
+        PackCoordInterval,
         true
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tick
-// ─────────────────────────────────────────────────────────────────────────────
 void ARaptorCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // If flanking, visualise flank vector in debug
-#if WITH_EDITOR
-    if (bIsFlanking && PackHuntTarget)
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (!MoveComp) return;
+
+    // Speed varies by state and pack role
+    switch (CurrentBehaviorState)
     {
-        DrawDebugLine(
-            GetWorld(),
-            GetActorLocation(),
-            PackHuntTarget->GetActorLocation(),
-            FColor::Orange,
-            false, 0.1f, 0, 2.0f
-        );
+        case ECore_DinoState::Chasing:
+            MoveComp->MaxWalkSpeed = RaptorSprintSpeed;
+            break;
+        case ECore_DinoState::Attacking:
+            MoveComp->MaxWalkSpeed = RaptorSprintSpeed * 0.8f;
+            break;
+        case ECore_DinoState::Patrolling:
+            MoveComp->MaxWalkSpeed = RaptorWalkSpeed;
+            break;
+        case ECore_DinoState::Fleeing:
+            MoveComp->MaxWalkSpeed = RaptorSprintSpeed * 1.1f;  // Fear boost
+            break;
+        default:
+            MoveComp->MaxWalkSpeed = RaptorWalkSpeed * 0.4f;
+            break;
     }
-#endif
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PerformLeapAttack
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::PerformLeapAttack()
+float ARaptorCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+    AController* EventInstigator, AActor* DamageCauser)
 {
-    if (bLeapOnCooldown || !PackHuntTarget) return;
+    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 
-    // Compute launch vector toward target
-    FVector ToTarget = (PackHuntTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    FVector LaunchVel = ToTarget * 1200.0f + FVector(0.0f, 0.0f, 500.0f);
-    LaunchCharacter(LaunchVel, true, true);
+    if (!bIsAlive) return 0.0f;
 
-    // Apply damage at end of leap (simplified: immediate radial)
-    UGameplayStatics::ApplyRadialDamage(
-        GetWorld(),
-        AttackDamage,
-        PackHuntTarget->GetActorLocation(),
-        AttackRange,
-        nullptr,
-        TArray<AActor*>(),
-        this,
-        GetInstigatorController(),
-        true
-    );
+    CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, MaxHealth);
 
-#if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), PackHuntTarget->GetActorLocation(), AttackRange, 12, FColor::Red, false, 1.5f);
-#endif
+    if (CurrentHealth <= 0.0f)
+    {
+        Die();
+    }
+    else if (CurrentHealth < MaxHealth * 0.4f)
+    {
+        // Raptors flee when badly wounded (survival instinct)
+        CurrentBehaviorState = ECore_DinoState::Fleeing;
+        AlertPackmates(DamageCauser ? DamageCauser->GetActorLocation() : GetActorLocation());
+    }
 
-    // Cooldown 4 seconds
-    bLeapOnCooldown = true;
-    GetWorldTimerManager().SetTimer(
-        LeapCooldownHandle,
-        [this]() { bLeapOnCooldown = false; },
-        4.0f,
-        false
-    );
+    return ActualDamage;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EmitPackScreech
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::EmitPackScreech()
+void ARaptorCharacter::Die()
 {
-    // Find all raptors within PackCoordinationRadius and alert them
+    bIsAlive = false;
+    CurrentBehaviorState = ECore_DinoState::Dead;
+
+    GetWorldTimerManager().ClearTimer(HungerTimerHandle);
+    GetWorldTimerManager().ClearTimer(PackCoordTimerHandle);
+
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    GetCharacterMovement()->DisableMovement();
+
+    // Ragdoll death
+    GetMesh()->SetSimulatePhysics(true);
+    GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+    // If pack leader dies, alert pack
+    if (bIsPackLeader)
+    {
+        AlertPackmates(GetActorLocation());
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Raptor [%s] Pack:%d Role:%d has died."),
+        *GetActorLabel(), PackID, (int32)PackRole);
+}
+
+void ARaptorCharacter::DrainHunger()
+{
+    if (!bIsAlive) return;
+
+    CurrentHunger = FMath::Clamp(CurrentHunger - HungerDrainRate, 0.0f, MaxHunger);
+
+    if (CurrentHunger < MaxHunger * 0.25f)
+    {
+        bIsAggressive = true;
+        if (CurrentBehaviorState == ECore_DinoState::Idle ||
+            CurrentBehaviorState == ECore_DinoState::Resting)
+        {
+            CurrentBehaviorState = ECore_DinoState::Patrolling;
+        }
+    }
+}
+
+void ARaptorCharacter::CoordinateWithPack()
+{
+    if (!bIsAlive || PackID < 0) return;
+
+    // Find other raptors in the same pack within coordination range
     TArray<AActor*> NearbyActors;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARaptorCharacter::StaticClass(), NearbyActors);
 
-    int32 AlertCount = 0;
+    PackMates.Empty();
     for (AActor* Actor : NearbyActors)
     {
-        if (Actor == this) continue;
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist <= PackCoordinationRadius)
+        ARaptorCharacter* OtherRaptor = Cast<ARaptorCharacter>(Actor);
+        if (OtherRaptor && OtherRaptor != this &&
+            OtherRaptor->PackID == PackID &&
+            OtherRaptor->bIsAlive)
         {
-            ARaptorCharacter* Raptor = Cast<ARaptorCharacter>(Actor);
-            if (Raptor && PackHuntTarget)
+            float Dist = FVector::Dist(GetActorLocation(), OtherRaptor->GetActorLocation());
+            if (Dist <= PackCoordRange)
             {
-                Raptor->PackHuntTarget = PackHuntTarget;
-                Raptor->PackLeader = this;
-                AlertCount++;
+                PackMates.Add(OtherRaptor);
             }
         }
     }
 
-#if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), GetActorLocation(), PackCoordinationRadius, 16, FColor::Yellow, false, 2.0f);
-    UE_LOG(LogTemp, Log, TEXT("RaptorScreech: Alerted %d pack members"), AlertCount);
-#endif
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginFlankManoeuvre
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::BeginFlankManoeuvre(AActor* Target)
-{
-    if (!Target) return;
-
-    PackHuntTarget = Target;
-    bIsFlanking = true;
-
-    // Compute flank position: rotate FlankAngleDegrees around target
-    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    FVector FlankDir = ToTarget.RotateAngleAxis(FlankAngleDegrees, FVector::UpVector);
-    FVector FlankPos = Target->GetActorLocation() - FlankDir * AttackRange * 1.5f;
-
-    // Move toward flank position (AI controller would handle this in full impl)
-    // Here we set a debug marker
-#if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), FlankPos, 60.0f, 8, FColor::Cyan, false, 3.0f);
-    UE_LOG(LogTemp, Log, TEXT("Raptor %s flanking at angle %.1f deg"), *GetActorLabel(), FlankAngleDegrees);
-#endif
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RegisterPackMember
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::RegisterPackMember(ARaptorCharacter* NewMember)
-{
-    if (!NewMember || NewMember == this) return;
-    if (!PackMembers.Contains(NewMember))
+    // Pack aggression scales with pack size
+    if (PackMates.Num() >= 2)
     {
-        PackMembers.Add(NewMember);
-        NewMember->PackLeader = this;
-        UE_LOG(LogTemp, Log, TEXT("Pack registered: %s -> leader %s"), *NewMember->GetActorLabel(), *GetActorLabel());
+        bIsAggressive = true;
+    }
+    else
+    {
+        // Alone — be cautious
+        if (CurrentBehaviorState == ECore_DinoState::Chasing)
+        {
+            CurrentBehaviorState = ECore_DinoState::Patrolling;
+        }
+        bIsAggressive = (CurrentHunger < MaxHunger * 0.3f);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CoordinatePack (timer callback)
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::CoordinatePack()
+void ARaptorCharacter::AlertPackmates(const FVector& ThreatLocation)
 {
-    // Only the leader coordinates
-    if (PackLeader != nullptr) return;
-    if (!PackHuntTarget) return;
-
-    BroadcastHuntTarget(PackHuntTarget);
-
-    // Assign flank angles to members
-    int32 MemberCount = PackMembers.Num();
-    for (int32 i = 0; i < MemberCount; ++i)
+    for (ARaptorCharacter* Mate : PackMates)
     {
-        if (PackMembers[i])
+        if (Mate && Mate->bIsAlive)
         {
-            float Angle = (MemberCount > 1)
-                ? FMath::Lerp(-90.0f, 90.0f, (float)i / (float)(MemberCount - 1))
-                : 0.0f;
-            PackMembers[i]->FlankAngleDegrees = Angle;
-            PackMembers[i]->BeginFlankManoeuvre(PackHuntTarget);
+            Mate->ReceivePackAlert(ThreatLocation, this);
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BroadcastHuntTarget
-// ─────────────────────────────────────────────────────────────────────────────
-void ARaptorCharacter::BroadcastHuntTarget(AActor* Target)
+void ARaptorCharacter::ReceivePackAlert(const FVector& ThreatLocation, ARaptorCharacter* AlertSource)
 {
-    for (ARaptorCharacter* Member : PackMembers)
+    if (!bIsAlive) return;
+
+    // React based on role
+    switch (PackRole)
     {
-        if (Member)
-        {
-            Member->PackHuntTarget = Target;
-        }
+        case ECore_RaptorPackRole::Alpha:
+            // Alpha coordinates the response
+            CurrentBehaviorState = ECore_DinoState::Chasing;
+            bIsAggressive = true;
+            break;
+        case ECore_RaptorPackRole::Flanker:
+            // Flankers move to encircle
+            CurrentBehaviorState = ECore_DinoState::Chasing;
+            FlankOffset = FVector(
+                FMath::RandRange(-500.0f, 500.0f),
+                FMath::RandRange(-500.0f, 500.0f),
+                0.0f
+            );
+            break;
+        case ECore_RaptorPackRole::Scout:
+            // Scouts alert others and approach cautiously
+            CurrentBehaviorState = ECore_DinoState::Patrolling;
+            break;
+        default:
+            CurrentBehaviorState = ECore_DinoState::Chasing;
+            break;
     }
+}
+
+bool ARaptorCharacter::IsInTerritory(const FVector& Location) const
+{
+    return FVector::Dist(Location, HomeLocation) <= TerritoryRadius;
+}
+
+float ARaptorCharacter::GetHealthPercent() const
+{
+    return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
+}
+
+float ARaptorCharacter::GetHungerPercent() const
+{
+    return (MaxHunger > 0.0f) ? (CurrentHunger / MaxHunger) : 0.0f;
 }
