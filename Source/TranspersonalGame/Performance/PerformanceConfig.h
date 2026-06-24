@@ -1,118 +1,130 @@
-// PerformanceConfig.h
-// Performance Optimizer #04 — PROD_CYCLE_AUTO_20260620_007
-// Central performance constants and budget definitions for the prehistoric survival game.
-// All systems must stay within these budgets to guarantee 60fps PC / 30fps console.
-
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "PerformanceConfig.generated.h"
 
-// ============================================================
-// FRAME BUDGET (milliseconds per frame)
-// ============================================================
-// PC High-End target: 60fps = 16.67ms total
-//   CPU game thread:   6.0ms
-//   CPU render thread: 5.0ms
-//   GPU:               5.5ms
-//   Overhead/swap:     0.17ms
-//
-// Console target: 30fps = 33.33ms total
-//   CPU game thread:  10.0ms
-//   CPU render thread: 8.0ms
-//   GPU:              14.0ms
-//   Overhead/swap:     1.33ms
-// ============================================================
+/**
+ * Performance budget tiers for Transpersonal Game Studio
+ * Target: 60fps PC (RTX 3070+), 30fps Console (PS5/XSX)
+ * Agent #04 — Performance Optimizer
+ */
 
-namespace Perf
+UENUM(BlueprintType)
+enum class EPerf_QualityTier : uint8
 {
-    // --- Frame budgets (ms) ---
-    constexpr float PC_FRAME_BUDGET_MS          = 16.67f;
-    constexpr float CONSOLE_FRAME_BUDGET_MS     = 33.33f;
-    constexpr float PC_CPU_GAME_BUDGET_MS       = 6.0f;
-    constexpr float PC_CPU_RENDER_BUDGET_MS     = 5.0f;
-    constexpr float PC_GPU_BUDGET_MS            = 5.5f;
+    Ultra       UMETA(DisplayName = "Ultra (PC High-End)"),
+    High        UMETA(DisplayName = "High (PC Mid-Range)"),
+    Medium      UMETA(DisplayName = "Medium (Console)"),
+    Low         UMETA(DisplayName = "Low (PC Low-End)")
+};
 
-    // --- Actor count caps ---
-    constexpr int32 MAX_ACTORS_IN_WORLD         = 500;    // Hard cap — above this GetAllActorsOfClass degrades
-    constexpr int32 MAX_DINOSAURS_ACTIVE        = 20;     // Simultaneous active dino AI agents
-    constexpr int32 MAX_RAPTORS_PER_PACK        = 8;      // Per-pack cap — pack AI scales O(n^2)
-    constexpr int32 MAX_PHYSICS_BODIES          = 64;     // Rigid body simulation cap
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_LODSettings
+{
+    GENERATED_BODY()
 
-    // --- Spatial query radii (cm) ---
-    // Use SphereOverlapActors() with these radii instead of GetAllActorsOfClass()
-    constexpr float RAPTOR_PACK_SCAN_RADIUS_CM  = 3000.0f;  // 30m — replaces O(n) world scan in CallPack()
-    constexpr float DINO_PERCEPTION_RADIUS_CM   = 5000.0f;  // 50m — AI perception sphere
-    constexpr float CROWD_CULL_RADIUS_CM        = 15000.0f; // 150m — beyond this, crowd agents are culled
+    /** Distance at which LOD0 transitions to LOD1 (units) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD0Distance = 1500.0f;
 
-    // --- LOD distances (cm) ---
-    constexpr float LOD0_MAX_DISTANCE_CM        = 1500.0f;  // Full detail — within 15m
-    constexpr float LOD1_MAX_DISTANCE_CM        = 4000.0f;  // Medium detail — 15-40m
-    constexpr float LOD2_MAX_DISTANCE_CM        = 8000.0f;  // Low detail — 40-80m
-    constexpr float LOD3_MAX_DISTANCE_CM        = 15000.0f; // Impostor/billboard — 80-150m
-    constexpr float CULL_DISTANCE_CM            = 20000.0f; // Invisible beyond 200m
+    /** Distance at which LOD1 transitions to LOD2 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD1Distance = 3000.0f;
 
-    // --- Texture streaming ---
-    constexpr int32 TEXTURE_POOL_SIZE_MB        = 1000;
-    constexpr int32 TEXTURE_TEMP_MEM_MB         = 50;
+    /** Distance at which LOD2 transitions to LOD3 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD2Distance = 6000.0f;
 
-    // --- Shadow quality ---
-    constexpr int32 SHADOW_MAX_RESOLUTION       = 1024;
-    constexpr float SHADOW_RADIUS_THRESHOLD     = 0.03f;
-    constexpr float SHADOW_DISTANCE_SCALE       = 0.8f;
+    /** Distance beyond which the mesh is culled entirely */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float CullDistance = 8000.0f;
+};
 
-    // --- Lumen (Global Illumination) ---
-    // Hardware ray tracing disabled — SW Lumen saves 3-5ms/frame on mid-range GPUs
-    constexpr bool  LUMEN_HARDWARE_RT_ENABLED   = false;
-    constexpr bool  LUMEN_REFLECTIONS_ENABLED   = true;
-    constexpr bool  LUMEN_DIFFUSE_INDIRECT      = true;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_TickBudget
+{
+    GENERATED_BODY()
 
-    // --- Nanite ---
-    constexpr float NANITE_MAX_PIXELS_PER_EDGE  = 1.0f;
-    constexpr float NANITE_PROXY_TRI_PERCENT    = 100.0f;
-}
+    /** Tick interval for hero dinos (< 1500 units from player) in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float HeroTickInterval = 0.016f; // ~60fps
 
-// ============================================================
-// PERFORMANCE RECOMMENDATIONS (for other agents)
-// ============================================================
-//
-// AGENT #03 (Core Systems / RaptorCharacter):
-//   ISSUE: CallPack() uses GetAllActorsOfClass() — O(n) over ALL world actors.
-//   FIX:   Replace with UKismetSystemLibrary::SphereOverlapActors():
-//
-//     TArray<AActor*> OverlappingActors;
-//     UKismetSystemLibrary::SphereOverlapActors(
-//         GetWorld(),
-//         GetActorLocation(),
-//         Perf::RAPTOR_PACK_SCAN_RADIUS_CM,
-//         TArray<TEnumAsByte<EObjectTypeQuery>>(),
-//         ARaptorCharacter::StaticClass(),
-//         TArray<AActor*>{ this },
-//         OverlappingActors
-//     );
-//
-//   IMPACT: Reduces scan from O(500 actors) to O(5-10 raptors in radius) — 50-100x faster.
-//
-// AGENT #05 (World Generator):
-//   - Use World Partition streaming — never load >500 actors simultaneously
-//   - Set cull distances on all foliage: Perf::CULL_DISTANCE_CM
-//   - Nanite for landscape and large rocks; impostor billboards for distant trees
-//
-// AGENT #06 (Environment Artist):
-//   - Max 3 LOD levels per mesh (LOD0/LOD1/LOD2 + cull)
-//   - Texture atlasing for foliage — max 1 draw call per foliage type
-//   - No more than 4 dynamic lights in any 50m radius
-//
-// AGENT #08 (Lighting):
-//   - SW Lumen only (no hardware RT) — saves 3-5ms/frame
-//   - Max 1 directional light (sun) + 1 sky light
-//   - Dynamic point lights: max 4 per 50m radius, shadow-casting: max 2
-//
-// AGENT #12 (Combat AI):
-//   - Dinosaur AI tick rate: 0.1s (10Hz) for non-combat, 0.033s (30Hz) for combat
-//   - Use EQS (Environment Query System) for spatial decisions, not per-frame traces
-//   - Cap simultaneous combat AI: Perf::MAX_DINOSAURS_ACTIVE
-//
-// AGENT #13 (Crowd):
-//   - Mass AI agents beyond 50m: LOD2 (position-only update, no animation)
-//   - Mass AI agents beyond 150m: culled entirely
-//   - Max 50,000 agents but only 200 fully simulated at once
+    /** Tick interval for mid-range dinos (1500-3000 units) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float MidRangeTickInterval = 0.033f; // ~30fps
+
+    /** Tick interval for distant dinos (3000-6000 units) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float DistantTickInterval = 0.1f; // 10fps
+
+    /** Distance beyond which AI tick is paused entirely */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float AITickPauseDistance = 6000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_FrameBudget
+{
+    GENERATED_BODY()
+
+    /** Target frame time in ms (16.6 = 60fps, 33.3 = 30fps) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float TargetFrameTimeMs = 16.6f;
+
+    /** Max GPU time allocated to dinosaur rendering (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float DinoGPUBudgetMs = 4.0f;
+
+    /** Max GPU time allocated to foliage rendering (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float FoliageGPUBudgetMs = 3.0f;
+
+    /** Max GPU time allocated to lighting/shadows (ms) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float LightingGPUBudgetMs = 5.0f;
+
+    /** Max simultaneous skeletal mesh actors in scene */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxSkeletalMeshActors = 20;
+
+    /** Max simultaneous static mesh actors in scene */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxStaticMeshActors = 150;
+};
+
+/**
+ * UPerf_PerformanceConfig — Data asset holding all performance budgets.
+ * Referenced by the PerformanceManager at runtime to enforce frame budgets.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UPerf_PerformanceConfig : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UPerf_PerformanceConfig();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODSettings DinoLODSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODSettings FoliageLODSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    FPerf_TickBudget TickBudget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget FrameBudget;
+
+    /** Apply CVars matching the selected quality tier */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyQualityTierCVars();
+
+    /** Get LOD settings for a given actor based on distance from player */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetTickIntervalForDistance(float DistanceFromPlayer) const;
+};
