@@ -1,177 +1,109 @@
+// CrowdSimulationManager.h
+// Agent #13 — Crowd & Traffic Simulation
+// Prehistoric herd simulation subsystem
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
 
+// ── Shared herd species enum ──
 UENUM(BlueprintType)
-enum class ECrowd_ZoneType : uint8
+enum class ECrowd_HerdSpecies : uint8
 {
-    WateringHole    UMETA(DisplayName = "Watering Hole"),
-    ForestEdge      UMETA(DisplayName = "Forest Edge"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    HuntingGround   UMETA(DisplayName = "Hunting Ground"),
-    MigrationPath   UMETA(DisplayName = "Migration Path")
+    Parasaurolophus     UMETA(DisplayName = "Parasaurolophus"),
+    Protoceratops       UMETA(DisplayName = "Protoceratops"),
+    Pachycephalosaurus  UMETA(DisplayName = "Pachycephalosaurus"),
+    Tsintaosaurus       UMETA(DisplayName = "Tsintaosaurus"),
+    Ankylosaurus        UMETA(DisplayName = "Ankylosaurus"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
 };
 
-UENUM(BlueprintType)
-enum class ECrowd_AgentState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Grazing     UMETA(DisplayName = "Grazing"),
-    Wandering   UMETA(DisplayName = "Wandering"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Migrating   UMETA(DisplayName = "Migrating"),
-    Drinking    UMETA(DisplayName = "Drinking")
-};
-
+// ── Herd data struct ──
 USTRUCT(BlueprintType)
-struct FCrowd_WaypointData
+struct FCrowd_HerdData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Location = FVector::ZeroVector;
+    FName HerdName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float Radius = 500.0f;
+    ECrowd_HerdSpecies Species = ECrowd_HerdSpecies::Parasaurolophus;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_ZoneType ZoneType = ECrowd_ZoneType::OpenPlains;
+    int32 MemberCount = 5;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 MaxAgentsInZone = 20;
-};
-
-USTRUCT(BlueprintType)
-struct FCrowd_AgentData
-{
-    GENERATED_BODY()
+    FVector HerdCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector CurrentLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentState State = ECrowd_AgentState::Idle;
+    FVector CurrentWaypoint = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
     float MoveSpeed = 150.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FleeRadius = 800.0f;
+    float FlockingRadius = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 AgentID = -1;
+    bool bIsFleeing = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float TimeSinceLastUpdate = 0.0f;
 };
 
-UCLASS(ClassGroup = (Crowd), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCrowdZoneComponent : public UActorComponent
+// ── Crowd Simulation Manager — World Subsystem ──
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UCrowdZoneComponent();
+    UCrowdSimulationManager();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zone")
-    ECrowd_ZoneType ZoneType = ECrowd_ZoneType::OpenPlains;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zone")
-    float ZoneRadius = 1000.0f;
+    // Register a new herd group
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void RegisterHerd(const FCrowd_HerdData& HerdData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zone")
-    int32 MaxAgents = 30;
+    // Tick herd movement (called from GameMode or tick)
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void UpdateHerdBehavior(float DeltaTime);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zone")
-    float AgentSpawnInterval = 2.0f;
+    // Trigger flee response for all herds within radius of threat
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerFleeResponse(FVector ThreatLocation, float ThreatRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Zone")
-    bool IsLocationInZone(const FVector& TestLocation) const;
+    // Query
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
+    int32 GetActiveCrowdCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Zone")
-    FVector GetRandomLocationInZone() const;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
+    FCrowd_HerdData GetHerdByName(FName HerdName) const;
 
-    UFUNCTION(BlueprintPure, Category = "Crowd|Zone")
-    int32 GetCurrentAgentCount() const { return CurrentAgentCount; }
+    // Config
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 MaxCrowdAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float HerdUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float FlockingRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float SeparationRadius;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State",
+        meta = (AllowPrivateAccess = "true"))
+    bool bCrowdSimulationActive;
 
 private:
     UPROPERTY()
-    int32 CurrentAgentCount = 0;
-};
-
-UCLASS(Blueprintable, BlueprintType)
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    ACrowdSimulationManager();
-
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // ── Zone Configuration ──────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zones")
-    TArray<FCrowd_WaypointData> CrowdZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zones")
-    int32 MaxTotalAgents = 500;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zones")
-    float LOD_NearDistance = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Zones")
-    float LOD_FarDistance = 8000.0f;
-
-    // ── Herd Behaviour ──────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float HerdCohesionRadius = 600.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float HerdSeparationRadius = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float PredatorFleeRadius = 1200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float MigrationTriggerInterval = 300.0f;
-
-    // ── Runtime State ───────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State", meta = (AllowPrivateAccess = "true"))
-    int32 ActiveAgentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State", meta = (AllowPrivateAccess = "true"))
-    float TimeSinceLastMigration = 0.0f;
-
-    // ── Public API ───────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterCrowdZone(const FCrowd_WaypointData& ZoneData);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerHerdFlee(FVector PredatorLocation, float FleeRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerMigration(FVector MigrationTarget);
-
-    UFUNCTION(BlueprintPure, Category = "Crowd")
-    int32 GetActiveAgentCount() const { return ActiveAgentCount; }
-
-    UFUNCTION(BlueprintPure, Category = "Crowd")
-    FCrowd_WaypointData GetNearestZone(const FVector& FromLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void SetLODDistances(float NearDist, float FarDist);
-
-    UFUNCTION(CallInEditor, Category = "Crowd|Debug")
-    void DebugDrawZones();
-
-private:
-    void UpdateAgentLOD(float DeltaTime);
-    void UpdateHerdBehaviour(float DeltaTime);
-    void CheckMigrationCycle(float DeltaTime);
-
-    UPROPERTY()
-    TArray<FCrowd_AgentData> AgentPool;
+    TArray<FCrowd_HerdData> RegisteredHerds;
 };
