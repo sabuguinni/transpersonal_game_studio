@@ -2,173 +2,220 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 UTranspersonalAnimInstance::UTranspersonalAnimInstance()
 {
-	RunThreshold = 300.0f;
-	SprintThreshold = 500.0f;
-	FootIKTraceDistance = 50.0f;
+    // Default thresholds — tuned for prehistoric human movement feel
+    WalkThreshold = 10.0f;
+    RunThreshold = 300.0f;
+    FootTraceDistance = 50.0f;
+    bEnableFootIK = true;
 }
 
 void UTranspersonalAnimInstance::NativeInitializeAnimation()
 {
-	Super::NativeInitializeAnimation();
+    Super::NativeInitializeAnimation();
 
-	// Cache owner references — safe to call here, world exists at this point
-	APawn* OwnerPawn = TryGetPawnOwner();
-	if (OwnerPawn)
-	{
-		OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-		if (OwnerCharacter)
-		{
-			MovementComponent = OwnerCharacter->GetCharacterMovement();
-		}
-	}
+    // Cache owner character reference
+    APawn* OwnerPawn = TryGetPawnOwner();
+    if (OwnerPawn)
+    {
+        OwnerCharacter = Cast<ACharacter>(OwnerPawn);
+    }
 }
 
 void UTranspersonalAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-	Super::NativeUpdateAnimation(DeltaSeconds);
+    Super::NativeUpdateAnimation(DeltaSeconds);
 
-	if (!OwnerCharacter || !MovementComponent)
-	{
-		// Re-attempt cache in case of late initialization
-		APawn* OwnerPawn = TryGetPawnOwner();
-		if (OwnerPawn)
-		{
-			OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-			if (OwnerCharacter)
-			{
-				MovementComponent = OwnerCharacter->GetCharacterMovement();
-			}
-		}
-		return;
-	}
+    if (!OwnerCharacter)
+    {
+        APawn* OwnerPawn = TryGetPawnOwner();
+        if (OwnerPawn)
+        {
+            OwnerCharacter = Cast<ACharacter>(OwnerPawn);
+        }
+        return;
+    }
 
-	// ── Velocity & Speed ────────────────────────────────────────────────────
-	const FVector Velocity = MovementComponent->Velocity;
-	Speed = Velocity.Size2D(); // Horizontal speed only
+    UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovComp)
+    {
+        return;
+    }
 
-	// ── Direction (for strafe blending) ─────────────────────────────────────
-	if (Speed > 1.0f)
-	{
-		const FRotator ActorRotation = OwnerCharacter->GetActorRotation();
-		Direction = UKismetMathLibrary::NormalizedDeltaRotator(
-			Velocity.Rotation(),
-			ActorRotation
-		).Yaw;
-	}
-	else
-	{
-		Direction = 0.0f;
-	}
+    // ── Update Locomotion Variables ───────────────────────────────────────
 
-	// ── Air State ────────────────────────────────────────────────────────────
-	bIsInAir = MovementComponent->IsFalling();
+    // Speed — horizontal velocity magnitude
+    FVector Velocity = MovComp->Velocity;
+    Speed = FVector(Velocity.X, Velocity.Y, 0.0f).Size();
 
-	// ── Acceleration ─────────────────────────────────────────────────────────
-	bIsAccelerating = MovementComponent->GetCurrentAcceleration().SizeSquared() > 0.0f;
+    // Direction — angle between character forward and velocity direction
+    if (Speed > WalkThreshold)
+    {
+        FRotator AimRotation = OwnerCharacter->GetActorRotation();
+        FRotator MovementRotation = UKismetMathLibrary::MakeRotFromX(Velocity);
+        Direction = UKismetMathLibrary::NormalizedDeltaRotator(MovementRotation, AimRotation).Yaw;
+    }
+    else
+    {
+        Direction = 0.0f;
+    }
 
-	// ── Crouch ───────────────────────────────────────────────────────────────
-	bIsCrouching = OwnerCharacter->bIsCrouched;
+    // Airborne state
+    bool bCurrentlyInAir = MovComp->IsFalling();
 
-	// ── Sprint detection ─────────────────────────────────────────────────────
-	bIsSprinting = Speed >= SprintThreshold;
+    // Landing detection
+    if (bWasInAir && !bCurrentlyInAir)
+    {
+        OnLanded();
+    }
 
-	// ── Foot IK (only when grounded) ─────────────────────────────────────────
-	if (!bIsInAir)
-	{
-		UpdateFootIK(DeltaSeconds);
-	}
-	else
-	{
-		// Smoothly disable IK while airborne
-		LeftFootIKAlpha  = InterpFootIKAlpha(LeftFootIKAlpha,  0.0f, DeltaSeconds);
-		RightFootIKAlpha = InterpFootIKAlpha(RightFootIKAlpha, 0.0f, DeltaSeconds);
-	}
+    bWasInAir = bCurrentlyInAir;
+    bIsInAir = bCurrentlyInAir;
+
+    // Crouch state
+    bIsCrouching = MovComp->IsCrouching();
+
+    // Sprint detection
+    bIsSprinting = (Speed >= RunThreshold);
+
+    // ── Compute Animation State ───────────────────────────────────────────
+    CurrentState = ComputeAnimState();
+
+    // ── Foot IK ───────────────────────────────────────────────────────────
+    if (bEnableFootIK && !bIsInAir)
+    {
+        UpdateFootIK(DeltaSeconds);
+    }
+    else
+    {
+        // Reset IK when airborne
+        FootIKData.LeftFootAlpha = FMath::FInterpTo(FootIKData.LeftFootAlpha, 0.0f, DeltaSeconds, 10.0f);
+        FootIKData.RightFootAlpha = FMath::FInterpTo(FootIKData.RightFootAlpha, 0.0f, DeltaSeconds, 10.0f);
+        FootIKData.PelvisOffset = FMath::FInterpTo(FootIKData.PelvisOffset, 0.0f, DeltaSeconds, 10.0f);
+    }
+}
+
+EAnim_CharacterState UTranspersonalAnimInstance::ComputeAnimState() const
+{
+    if (bIsInAir)
+    {
+        // Distinguish jump (upward velocity) from fall (downward)
+        if (OwnerCharacter && OwnerCharacter->GetVelocity().Z > 0.0f)
+        {
+            return EAnim_CharacterState::Jump;
+        }
+        return EAnim_CharacterState::Fall;
+    }
+
+    if (bIsCrouching)
+    {
+        return EAnim_CharacterState::Crouch;
+    }
+
+    if (Speed >= RunThreshold)
+    {
+        return EAnim_CharacterState::Run;
+    }
+
+    if (Speed >= WalkThreshold)
+    {
+        return EAnim_CharacterState::Walk;
+    }
+
+    return EAnim_CharacterState::Idle;
 }
 
 void UTranspersonalAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-	if (!OwnerCharacter)
-	{
-		return;
-	}
+    if (!OwnerCharacter)
+    {
+        return;
+    }
 
-	// Left foot
-	FVector LeftHit;
-	bool bLeftHit = TraceFootIK(FName("foot_l"), LeftHit);
-	if (bLeftHit)
-	{
-		LeftFootIKLocation = LeftHit;
-		LeftFootIKAlpha = InterpFootIKAlpha(LeftFootIKAlpha, 1.0f, DeltaSeconds);
-	}
-	else
-	{
-		LeftFootIKAlpha = InterpFootIKAlpha(LeftFootIKAlpha, 0.0f, DeltaSeconds);
-	}
+    UWorld* World = OwnerCharacter->GetWorld();
+    if (!World)
+    {
+        return;
+    }
 
-	// Right foot
-	FVector RightHit;
-	bool bRightHit = TraceFootIK(FName("foot_r"), RightHit);
-	if (bRightHit)
-	{
-		RightFootIKLocation = RightHit;
-		RightFootIKAlpha = InterpFootIKAlpha(RightFootIKAlpha, 1.0f, DeltaSeconds);
-	}
-	else
-	{
-		RightFootIKAlpha = InterpFootIKAlpha(RightFootIKAlpha, 0.0f, DeltaSeconds);
-	}
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh)
+    {
+        return;
+    }
+
+    // Bone names — adjust to match the actual skeletal mesh rig
+    const FName LeftFootBone  = TEXT("foot_l");
+    const FName RightFootBone = TEXT("foot_r");
+
+    auto TraceFootIK = [&](const FName& BoneName, FVector& OutTarget, float& OutAlpha) -> void
+    {
+        FVector BoneLocation = Mesh->GetBoneLocation(BoneName, EBoneSpaces::WorldSpace);
+        if (BoneLocation.IsZero())
+        {
+            OutAlpha = 0.0f;
+            return;
+        }
+
+        FVector TraceStart = BoneLocation + FVector(0.0f, 0.0f, FootTraceDistance);
+        FVector TraceEnd   = BoneLocation - FVector(0.0f, 0.0f, FootTraceDistance * 2.0f);
+
+        FHitResult HitResult;
+        FCollisionQueryParams Params;
+        Params.AddIgnoredActor(OwnerCharacter);
+
+        bool bHit = World->LineTraceSingleByChannel(
+            HitResult,
+            TraceStart,
+            TraceEnd,
+            ECC_Visibility,
+            Params
+        );
+
+        if (bHit)
+        {
+            OutTarget = HitResult.ImpactPoint;
+            OutAlpha  = FMath::FInterpTo(OutAlpha, 1.0f, DeltaSeconds, 15.0f);
+
+            // Compute pelvis offset from foot height difference
+            float HeightDiff = BoneLocation.Z - HitResult.ImpactPoint.Z;
+            TargetPelvisOffset = FMath::Min(TargetPelvisOffset, -HeightDiff);
+        }
+        else
+        {
+            OutAlpha = FMath::FInterpTo(OutAlpha, 0.0f, DeltaSeconds, 10.0f);
+        }
+    };
+
+    // Reset pelvis offset each frame, let foot traces accumulate it
+    TargetPelvisOffset = 0.0f;
+
+    TraceFootIK(LeftFootBone,  FootIKData.LeftFootTarget,  FootIKData.LeftFootAlpha);
+    TraceFootIK(RightFootBone, FootIKData.RightFootTarget, FootIKData.RightFootAlpha);
+
+    // Smooth pelvis offset
+    FootIKData.PelvisOffset = FMath::FInterpTo(
+        FootIKData.PelvisOffset,
+        TargetPelvisOffset,
+        DeltaSeconds,
+        10.0f
+    );
 }
 
-bool UTranspersonalAnimInstance::TraceFootIK(FName SocketName, FVector& OutLocation)
+void UTranspersonalAnimInstance::TriggerAttackMontage()
 {
-	if (!OwnerCharacter)
-	{
-		return false;
-	}
-
-	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-	if (!Mesh)
-	{
-		return false;
-	}
-
-	const FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
-	const FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, FootIKTraceDistance);
-	const FVector TraceEnd   = SocketLocation - FVector(0.0f, 0.0f, FootIKTraceDistance);
-
-	FHitResult HitResult;
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(OwnerCharacter);
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	bool bHit = World->LineTraceSingleByChannel(
-		HitResult,
-		TraceStart,
-		TraceEnd,
-		ECC_Visibility,
-		QueryParams
-	);
-
-	if (bHit)
-	{
-		OutLocation = HitResult.ImpactPoint;
-		return true;
-	}
-
-	return false;
+    // Attack montage is played via Blueprint — this C++ function
+    // sets the state so the Blueprint state machine can react.
+    // The actual UAnimMontage::Play() call happens in Blueprint
+    // after the montage asset is assigned in the editor.
+    CurrentState = EAnim_CharacterState::Attack;
 }
 
-float UTranspersonalAnimInstance::InterpFootIKAlpha(float Current, float Target, float DeltaSeconds, float Speed)
+bool UTranspersonalAnimInstance::IsMovingOnGround() const
 {
-	return FMath::FInterpTo(Current, Target, DeltaSeconds, Speed);
+    return !bIsInAir && Speed > WalkThreshold;
 }
