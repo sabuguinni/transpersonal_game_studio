@@ -5,11 +5,11 @@
 #include "DinoSurvivorAnimInstance.generated.h"
 
 /**
- * Animation instance for the prehistoric survivor player character.
- * Drives the animation state machine: Idle → Walk → Run → Crouch → Jump → Combat.
- * Supports foot IK for uneven terrain adaptation.
+ * Animation instance for the prehistoric human survivor character.
+ * Drives blend spaces for locomotion (idle/walk/run/crouch/jump)
+ * and montage slots for attacks, interactions, and reactions.
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UDinoSurvivorAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -20,89 +20,88 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion State ──
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float GroundSpeed;
+    // ── Locomotion ──────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float GroundSpeedNormalized;
+    /** Ground speed (0=Idle, 150=Walk, 400=Run) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float GroundSpeed = 0.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsMoving;
+    /** Lateral strafe direction (-1 left, 0 straight, 1 right) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float StrafeDirection = 0.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsFalling;
+    /** Character is in the air (jump / fall) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsInAir = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsCrouching;
+    /** Character is crouching */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsCrouching = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsSprinting;
+    /** Character is sprinting */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsSprinting = false;
 
-    // ── Direction ──
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Direction")
-    float MovementDirection;
+    /** Character is climbing a surface */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsClimbing = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Direction")
-    float LeanAngle;
+    // ── Combat ──────────────────────────────────────────────────────────────
 
-    // ── Survival State ──
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float StaminaNormalized;
+    /** Currently in a melee attack montage */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsAttacking = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    bool bIsExhausted;
+    /** Weapon type (0=Unarmed, 1=Spear, 2=Club, 3=Bow) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    int32 WeaponType = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    bool bIsInjured;
+    // ── Survival State ───────────────────────────────────────────────────────
 
-    // ── Combat State ──
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
-    bool bIsInCombat;
+    /** Stamina ratio 0-1 — affects animation blend weight for exhaustion */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    float StaminaRatio = 1.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
-    bool bIsAiming;
+    /** Health ratio 0-1 — below 0.3 triggers limping blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    float HealthRatio = 1.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
-    float AimPitch;
+    /** Character is limping (HealthRatio < 0.3) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    bool bIsLimping = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
-    float AimYaw;
+    // ── IK ──────────────────────────────────────────────────────────────────
 
-    // ── Foot IK ──
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector LeftFootIKLocation;
+    /** Left foot IK target world position */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftFootIKTarget = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector RightFootIKLocation;
+    /** Right foot IK target world position */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightFootIKTarget = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FRotator LeftFootIKRotation;
+    /** Pelvis offset for foot IK correction */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float PelvisOffset = 0.f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FRotator RightFootIKRotation;
+    // ── Aim Offset ──────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    float IKAlpha;
+    /** Aim pitch (-90 to 90) for upper body aim offset */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
+    float AimPitch = 0.f;
 
-    // ── Speed thresholds ──
-    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
-    float WalkSpeedThreshold;
+    /** Aim yaw (-90 to 90) for upper body aim offset */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset")
+    float AimYaw = 0.f;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
-    float RunSpeedThreshold;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
-    float SprintSpeedThreshold;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
-    float IKTraceDistance;
-
-private:
-    void UpdateLocomotion();
-    void UpdateFootIK();
-    void SolveFootIK(FName SocketName, FVector& OutLocation, FRotator& OutRotation);
-
+protected:
+    /** Cached owning pawn */
     UPROPERTY()
-    class ACharacter* OwnerCharacter;
+    class ACharacter* OwnerCharacter = nullptr;
+
+    /** Update foot IK targets via line traces */
+    void UpdateFootIK();
+
+    /** Smooth interpolation speed for IK targets */
+    float IKInterpSpeed = 15.f;
 };
