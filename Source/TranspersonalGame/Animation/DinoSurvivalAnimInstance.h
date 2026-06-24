@@ -5,9 +5,8 @@
 #include "DinoSurvivalAnimInstance.generated.h"
 
 /**
- * Animation Instance for the prehistoric survivor player character.
- * Drives idle/walk/run/sprint/crouch/jump states based on character velocity and state.
- * Designed for use with UE5 Motion Matching and Foot IK.
+ * Animation Instance for the player character in the prehistoric survival game.
+ * Drives idle/walk/run/jump blend states based on movement velocity and physics state.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivalAnimInstance : public UAnimInstance
@@ -20,98 +19,80 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion State ──────────────────────────────────────────────────────
+    // ── Movement State ──────────────────────────────────────────────────────
 
-    /** Current movement speed (cm/s) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Speed;
+    /** Current ground speed (cm/s) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    float GroundSpeed;
 
-    /** Lateral movement direction (-1 left, 0 forward, 1 right) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Direction;
+    /** True when the character has velocity > 10 cm/s */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    bool bIsMoving;
 
     /** True when character is in the air */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     bool bIsInAir;
 
-    /** True when character is crouching */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsCrouching;
-
     /** True when character is sprinting (speed > RunThreshold) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
     bool bIsSprinting;
 
-    /** True when character is walking (speed > 0 but below RunThreshold) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsWalking;
+    /** True when character is crouching */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    bool bIsCrouching;
 
-    /** True when character is completely still */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsIdle;
+    /** Direction of movement relative to character facing (-180 to 180) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    float MovementDirection;
 
-    // ── Survival State ────────────────────────────────────────────────────────
+    /** Vertical velocity — used to drive jump/fall blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    float VerticalVelocity;
 
-    /** Fear level 0-1 — affects animation urgency and trembling */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-    float FearLevel;
+    // ── Survival State ───────────────────────────────────────────────────────
 
-    /** Stamina level 0-1 — affects movement animation weight */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-    float StaminaLevel;
+    /** 0-100 health — drives injury/limp animations */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float Health;
 
-    /** True when character is exhausted (stamina < 0.1) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-    bool bIsExhausted;
+    /** 0-100 stamina — drives exhaustion blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float Stamina;
 
-    /** True when character is injured (health < 0.3) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    /** True when health < 30 — triggers limp additive layer */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
     bool bIsInjured;
 
-    // ── Foot IK ───────────────────────────────────────────────────────────────
+    /** True when stamina < 20 — triggers exhaustion pose */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    bool bIsExhausted;
 
-    /** Left foot IK target location in world space */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+    // ── IK ───────────────────────────────────────────────────────────────────
+
+    /** Left foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
     FVector LeftFootIKLocation;
 
-    /** Right foot IK target location in world space */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+    /** Right foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
     FVector RightFootIKLocation;
 
-    /** Left foot IK alpha (0 = no IK, 1 = full IK) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    float LeftFootIKAlpha;
-
-    /** Right foot IK alpha */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    float RightFootIKAlpha;
-
-    /** Pelvis offset Z for foot IK ground adaptation */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+    /** Pelvis offset to keep character grounded on slopes */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
     float PelvisOffset;
 
-    // ── Thresholds ────────────────────────────────────────────────────────────
-
-    /** Speed above which character is considered walking */
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float WalkThreshold;
-
-    /** Speed above which character is considered running */
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float RunThreshold;
+    // ── Thresholds ───────────────────────────────────────────────────────────
 
     /** Speed above which character is considered sprinting */
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
-    float SprintThreshold;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
+    float RunThreshold;
 
-    // ── Utility ───────────────────────────────────────────────────────────────
+    /** Speed below which idle animation plays */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
+    float IdleThreshold;
 
-    /** Perform foot IK trace for given socket name, returns world hit location */
-    UFUNCTION(BlueprintCallable, Category = "Anim|FootIK")
-    FVector TraceFootIK(FName SocketName, float& OutAlpha);
-
-private:
-    /** Cached owner character */
+protected:
+    /** Cached reference to owning character */
     UPROPERTY()
     class ACharacter* OwnerCharacter;
 
@@ -119,12 +100,9 @@ private:
     UPROPERTY()
     class UCharacterMovementComponent* MovementComponent;
 
-    /** Update foot IK targets via line traces */
+    /** Update foot IK positions via line traces */
     void UpdateFootIK();
 
-    /** Update locomotion state from velocity */
-    void UpdateLocomotionState();
-
-    /** Update survival state from character properties */
-    void UpdateSurvivalState();
+    /** Compute pelvis offset from foot IK delta */
+    void UpdatePelvisOffset();
 };
