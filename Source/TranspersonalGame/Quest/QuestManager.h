@@ -1,20 +1,19 @@
-// QuestManager.h
-// Agent #14 — Quest & Mission Designer
-// PROD_CYCLE_AUTO_20260624_009
-// Quest system: 3 active quests tied to crowd simulation herds
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "QuestManager.generated.h"
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ============================================================
+// Quest & Mission Designer — Agent #14
+// QuestManager.h — Quest system for prehistoric survival game
+// ============================================================
 
 UENUM(BlueprintType)
-enum class EQuest_State : uint8
+enum class EQuest_Status : uint8
 {
-    Inactive    UMETA(DisplayName = "Inactive"),
+    Locked      UMETA(DisplayName = "Locked"),
+    Available   UMETA(DisplayName = "Available"),
     Active      UMETA(DisplayName = "Active"),
     Completed   UMETA(DisplayName = "Completed"),
     Failed      UMETA(DisplayName = "Failed")
@@ -23,15 +22,28 @@ enum class EQuest_State : uint8
 UENUM(BlueprintType)
 enum class EQuest_Type : uint8
 {
-    Hunt        UMETA(DisplayName = "Hunt"),
-    Explore     UMETA(DisplayName = "Explore"),
-    Defend      UMETA(DisplayName = "Defend"),
-    Gather      UMETA(DisplayName = "Gather"),
-    Rescue      UMETA(DisplayName = "Rescue"),
-    Track       UMETA(DisplayName = "Track")
+    MainStory       UMETA(DisplayName = "Main Story"),
+    Survival        UMETA(DisplayName = "Survival"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Exploration     UMETA(DisplayName = "Exploration"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Defense         UMETA(DisplayName = "Defense"),
+    Rescue          UMETA(DisplayName = "Rescue"),
+    Migration       UMETA(DisplayName = "Migration")
 };
 
-// ─── Structs ──────────────────────────────────────────────────────────────────
+UENUM(BlueprintType)
+enum class EQuest_ObjectiveType : uint8
+{
+    ReachLocation   UMETA(DisplayName = "Reach Location"),
+    KillTarget      UMETA(DisplayName = "Kill Target"),
+    CollectItem     UMETA(DisplayName = "Collect Item"),
+    CraftItem       UMETA(DisplayName = "Craft Item"),
+    ObserveTarget   UMETA(DisplayName = "Observe Target"),
+    EscapeZone      UMETA(DisplayName = "Escape Zone"),
+    ProtectTarget   UMETA(DisplayName = "Protect Target"),
+    FollowTarget    UMETA(DisplayName = "Follow Target")
+};
 
 USTRUCT(BlueprintType)
 struct FQuest_Objective
@@ -45,13 +57,31 @@ struct FQuest_Objective
     FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bCompleted = false;
+    EQuest_ObjectiveType ObjectiveType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredCount = 1;
+    FVector TargetLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentCount = 0;
+    float TriggerRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RequiredCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
+
+    FQuest_Objective()
+        : ObjectiveType(EQuest_ObjectiveType::ReachLocation)
+        , TargetLocation(FVector::ZeroVector)
+        , TriggerRadius(300.f)
+        , RequiredCount(1)
+        , CurrentCount(0)
+        , bIsCompleted(false)
+    {}
 };
 
 USTRUCT(BlueprintType)
@@ -63,58 +93,60 @@ struct FQuest_Data
     FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestTitle;
+    FString QuestName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestDescription;
+    FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Type QuestType = EQuest_Type::Explore;
+    EQuest_Type QuestType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_State QuestState = EQuest_State::Inactive;
+    EQuest_Status Status;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_Objective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TriggerLocation = FVector::ZeroVector;
+    FString RewardDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TriggerRadius = 400.0f;
+    bool bIsMainQuest;
 
-    // Reward data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Reward")
-    int32 RewardXP = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Reward")
-    FString RewardItemID;
+    FQuest_Data()
+        : QuestType(EQuest_Type::Survival)
+        , Status(EQuest_Status::Locked)
+        , bIsMainQuest(false)
+    {}
 };
 
-// ─── QuestManager ─────────────────────────────────────────────────────────────
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UQuestManager : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuestManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuestManager();
+    AQuestManager();
 
-    // UWorldSubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    // All registered quests
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FQuest_Data> AllQuests;
 
-    // ── Quest lifecycle ──────────────────────────────────────────────────────
+    // Currently active quest IDs
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
+    TArray<FString> ActiveQuestIDs;
+
+    // Completed quest IDs
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
+    TArray<FString> CompletedQuestIDs;
+
+    // === QUEST MANAGEMENT ===
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void RegisterQuest(const FQuest_Data& QuestData);
+    void InitializeQuests();
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool ActivateQuest(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
+    bool StartQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
     bool CompleteQuest(const FString& QuestID);
@@ -122,33 +154,44 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest")
     bool FailQuest(const FString& QuestID);
 
-    // ── Query ────────────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 ProgressDelta);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    EQuest_State GetQuestState(const FString& QuestID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    FQuest_Data GetQuestData(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    TArray<FQuest_Data> GetActiveQuests() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    int32 GetActiveQuestCount() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
+    UFUNCTION(BlueprintCallable, Category = "Quest")
     bool IsQuestActive(const FString& QuestID) const;
 
-    // ── Proximity check (called each tick by player) ─────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestCompleted(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CheckProximityTriggers(const FVector& PlayerLocation);
+    TArray<FQuest_Data> GetActiveQuests() const;
 
-    // ── Built-in quest definitions ────────────────────────────────────────────
+    // === TRIGGER DETECTION ===
 
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    void RegisterDefaultQuests();
+    void CheckLocationTriggers(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void OnPlayerCollectedItem(const FString& ItemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void OnPlayerCraftedItem(const FString& ItemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void OnDinosaurKilled(const FString& DinoSpecies);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void OnPlayerEnteredDangerZone(const FString& ZoneName);
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    UPROPERTY()
-    TMap<FString, FQuest_Data> QuestRegistry;
-
-    void LogQuestEvent(const FString& Event, const FString& QuestID) const;
+    void BuildDefaultQuests();
+    FQuest_Data* FindQuestByID(const FString& QuestID);
+    bool CheckObjectivesComplete(const FQuest_Data& Quest) const;
 };
