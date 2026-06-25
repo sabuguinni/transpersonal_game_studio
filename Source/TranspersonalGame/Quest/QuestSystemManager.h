@@ -2,33 +2,32 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/TriggerBox.h"
 #include "QuestSystemManager.generated.h"
 
-// ============================================================
-// Quest System Manager — Agent #14 Quest & Mission Designer
-// PROD_CYCLE_AUTO_20260625_004
-// ============================================================
-
+// ── Quest State Enum ──────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EQuest_State : uint8
 {
     Inactive    UMETA(DisplayName = "Inactive"),
     Active      UMETA(DisplayName = "Active"),
     Completed   UMETA(DisplayName = "Completed"),
-    Failed      UMETA(DisplayName = "Failed")
+    Failed      UMETA(DisplayName = "Failed"),
 };
 
+// ── Quest Type Enum ───────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EQuest_Type : uint8
 {
     Hunt        UMETA(DisplayName = "Hunt"),
-    Track       UMETA(DisplayName = "Track"),
-    Rescue      UMETA(DisplayName = "Rescue"),
-    Survive     UMETA(DisplayName = "Survive"),
     Gather      UMETA(DisplayName = "Gather"),
-    Explore     UMETA(DisplayName = "Explore")
+    Defend      UMETA(DisplayName = "Defend"),
+    Explore     UMETA(DisplayName = "Explore"),
+    Rescue      UMETA(DisplayName = "Rescue"),
+    Craft       UMETA(DisplayName = "Craft"),
 };
 
+// ── Quest Objective Struct ────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
 struct FQuest_Objective
 {
@@ -41,29 +40,18 @@ struct FQuest_Objective
     FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector WorldLocation;
+    int32 RequiredCount = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsCompleted;
+    int32 CurrentCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentCount;
-
-    FQuest_Objective()
-        : ObjectiveID(TEXT(""))
-        , Description(TEXT(""))
-        , WorldLocation(FVector::ZeroVector)
-        , bIsCompleted(false)
-        , RequiredCount(1)
-        , CurrentCount(0)
-    {}
+    UPROPERTY(BlueprintReadOnly, Category = "Quest")
+    bool bCompleted = false;
 };
 
+// ── Quest Data Struct ─────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FQuest_Definition
+struct FQuest_Data
 {
     GENERATED_BODY()
 
@@ -71,95 +59,107 @@ struct FQuest_Definition
     FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestTitle;
+    FString QuestName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestDescription;
+    FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Type QuestType;
+    EQuest_Type QuestType = EQuest_Type::Hunt;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_State QuestState;
+    EQuest_State QuestState = EQuest_State::Inactive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_Objective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit;
+    FString QuestGiverNPCID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bHasTimeLimit;
+    FVector QuestZoneLocation = FVector::ZeroVector;
 
-    FQuest_Definition()
-        : QuestID(TEXT(""))
-        , QuestTitle(TEXT(""))
-        , QuestDescription(TEXT(""))
-        , QuestType(EQuest_Type::Explore)
-        , QuestState(EQuest_State::Inactive)
-        , TimeLimit(0.0f)
-        , bHasTimeLimit(false)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float QuestZoneRadius = 1000.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RewardXP = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> RewardItems;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQuestSystemManager : public UActorComponent
+// ── Quest System Manager Actor ────────────────────────────────────────────────
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuestSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuestSystemManager();
-
-    // Active quests
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FQuest_Definition> ActiveQuests;
-
-    // Completed quests
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TArray<FString> CompletedQuestIDs;
-
-    // Max concurrent active quests
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 MaxActiveQuests;
-
-    // Activate a quest by ID
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool ActivateQuest(const FString& QuestID);
-
-    // Complete an objective within a quest
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
-
-    // Fail a quest
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void FailQuest(const FString& QuestID);
-
-    // Check if all objectives are done → auto-complete quest
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CheckQuestCompletion(const FString& QuestID);
-
-    // Get quest state
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    EQuest_State GetQuestState(const FString& QuestID) const;
-
-    // Register a new quest definition
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void RegisterQuest(const FQuest_Definition& QuestDef);
-
-    // Initialize default quests (Track Herd, Rescue Hunters, Stampede Survival)
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest")
-    void InitializeDefaultQuests();
-
-    // Tick for time-limited quests
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    AQuestSystemManager();
 
 protected:
     virtual void BeginPlay() override;
 
-private:
-    // Find quest index by ID
-    int32 FindQuestIndex(const FString& QuestID) const;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    // Elapsed time tracker for time-limited quests
-    TMap<FString, float> QuestElapsedTimes;
+    // ── Quest Registry ────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Registry")
+    TArray<FQuest_Data> AllQuests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
+    TArray<FQuest_Data> ActiveQuests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
+    TArray<FQuest_Data> CompletedQuests;
+
+    // ── Quest Operations ──────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool StartQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID, int32 Count = 1);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool FailQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    FQuest_Data GetQuestData(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    EQuest_State GetQuestState(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestActive(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestCompleted(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    TArray<FQuest_Data> GetActiveQuests() const;
+
+    // ── Quest Initialization ──────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest|Debug")
+    void InitializeDefaultQuests();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Debug")
+    void PrintQuestStatus();
+
+    // ── Events (Blueprint-implementable) ─────────────────────────────────────
+    UFUNCTION(BlueprintImplementableEvent, Category = "Quest|Events")
+    void OnQuestStarted(const FQuest_Data& Quest);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Quest|Events")
+    void OnQuestCompleted(const FQuest_Data& Quest);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Quest|Events")
+    void OnObjectiveCompleted(const FQuest_Data& Quest, const FQuest_Objective& Objective);
+
+private:
+    FQuest_Data* FindQuestByID(const FString& QuestID);
+    void BuildDefaultQuestLibrary();
 };
