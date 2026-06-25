@@ -2,11 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "QuestManager.generated.h"
 
-// ── Quest state enum ──────────────────────────────────────────────────────
+// ============================================================
+// Quest enums and structs — Quest_ prefix for uniqueness
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EQuest_State : uint8
+enum class EQuest_Status : uint8
 {
     Inactive    UMETA(DisplayName = "Inactive"),
     Active      UMETA(DisplayName = "Active"),
@@ -14,7 +18,18 @@ enum class EQuest_State : uint8
     Failed      UMETA(DisplayName = "Failed")
 };
 
-// ── Quest objective struct ────────────────────────────────────────────────
+UENUM(BlueprintType)
+enum class EQuest_ObjectiveType : uint8
+{
+    Hunt        UMETA(DisplayName = "Hunt"),
+    Gather      UMETA(DisplayName = "Gather"),
+    Explore     UMETA(DisplayName = "Explore"),
+    Defend      UMETA(DisplayName = "Defend"),
+    Rescue      UMETA(DisplayName = "Rescue"),
+    Craft       UMETA(DisplayName = "Craft"),
+    Survive     UMETA(DisplayName = "Survive")
+};
+
 USTRUCT(BlueprintType)
 struct FQuest_Objective
 {
@@ -27,16 +42,52 @@ struct FQuest_Objective
     FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredCount = 1;
+    EQuest_ObjectiveType ObjectiveType;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Quest")
-    int32 CurrentCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RequiredCount;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Quest")
-    bool bCompleted = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
+
+    FQuest_Objective()
+        : ObjectiveID(TEXT(""))
+        , Description(TEXT(""))
+        , ObjectiveType(EQuest_ObjectiveType::Hunt)
+        , RequiredCount(1)
+        , CurrentCount(0)
+        , bIsCompleted(false)
+    {}
 };
 
-// ── Quest data struct ─────────────────────────────────────────────────────
+USTRUCT(BlueprintType)
+struct FQuest_Reward
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ResourceRocks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ResourceSticks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ResourceFood;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float HealthBonus;
+
+    FQuest_Reward()
+        : ResourceRocks(0)
+        , ResourceSticks(0)
+        , ResourceFood(0)
+        , HealthBonus(0.0f)
+    {}
+};
+
 USTRUCT(BlueprintType)
 struct FQuest_Data
 {
@@ -52,22 +103,34 @@ struct FQuest_Data
     FString QuestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_State State = EQuest_State::Inactive;
+    EQuest_Status Status;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_Objective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float RewardFood = 0.f;
+    FQuest_Reward Reward;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float RewardReputation = 0.f;
+    FString GiverNPCLabel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString GiverActorLabel;
+    bool bIsMainQuest;
+
+    FQuest_Data()
+        : QuestID(TEXT(""))
+        , QuestTitle(TEXT(""))
+        , QuestDescription(TEXT(""))
+        , Status(EQuest_Status::Inactive)
+        , GiverNPCLabel(TEXT(""))
+        , bIsMainQuest(false)
+    {}
 };
 
-// ── QuestManager actor ────────────────────────────────────────────────────
+// ============================================================
+// AQuestManager — placed in level, manages all active quests
+// ============================================================
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AQuestManager : public AActor
 {
@@ -76,61 +139,48 @@ class TRANSPERSONALGAME_API AQuestManager : public AActor
 public:
     AQuestManager();
 
+    // All quests defined in the game
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Database")
+    TArray<FQuest_Data> QuestDatabase;
+
+    // Currently active quests (subset of database)
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Active",
+        meta = (AllowPrivateAccess = "true"))
+    TArray<FQuest_Data> ActiveQuests;
+
+    // Start a quest by ID
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool StartQuest(const FString& QuestID);
+
+    // Advance objective progress
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void AdvanceObjective(const FString& QuestID, const FString& ObjectiveID, int32 Amount = 1);
+
+    // Complete a quest and grant rewards
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteQuest(const FString& QuestID);
+
+    // Fail a quest
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void FailQuest(const FString& QuestID);
+
+    // Get quest data by ID
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool GetQuestData(const FString& QuestID, FQuest_Data& OutData);
+
+    // Check if quest is active
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestActive(const FString& QuestID) const;
+
+    // Initialize default quests
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest|Setup")
+    void InitializeDefaultQuests();
+
+protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // ── Quest registry ────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Registry")
-    TArray<FQuest_Data> AllQuests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
-    TArray<FString> ActiveQuestIDs;
-
-    // ── Core API ──────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool ActivateQuest(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID, int32 Count = 1);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool FailQuest(const FString& QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FQuest_Data GetQuestData(const FString& QuestID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    EQuest_State GetQuestState(const FString& QuestID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    TArray<FQuest_Data> GetActiveQuests() const;
-
-    // ── Crowd integration ─────────────────────────────────────────────────
-    /** Called when crowd flee event fires — fails "Protect the Camp" if triggered */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crowd")
-    void OnCrowdFleeEvent(float FearLevel);
-
-    /** Called when player enters a quest trigger volume */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Trigger")
-    void OnQuestTriggerEntered(const FString& TriggerID);
-
-    // ── Survival quest helpers ────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
-    void OnDinosaurKilled(const FString& DinoSpecies);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
-    void OnResourceCollected(const FString& ResourceType, int32 Amount);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
-    void OnPlayerReachedLocation(const FString& LocationTag);
 
 private:
-    void RegisterDefaultQuests();
-    void CheckQuestCompletion(FQuest_Data& Quest);
+    // Find quest index in database
     int32 FindQuestIndex(const FString& QuestID) const;
-
-    UPROPERTY()
-    float TimeSinceLastTick = 0.f;
-
-    static constexpr float QuestTickInterval = 0.5f;
+    int32 FindActiveQuestIndex(const FString& QuestID) const;
 };
