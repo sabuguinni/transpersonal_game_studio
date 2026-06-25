@@ -1,236 +1,331 @@
 #include "AudioSystemManager.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 
-UAudio_SystemManager::UAudio_SystemManager()
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
+
+UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    TimeSinceLastTick = 0.0f;
-    DangerLevel = 0.0f;
-    MusicTransitionSpeed = 1.0f;
-    bNightMode = false;
-
-    // === TTS Audio URLs — produced by Agent #15 + Agent #16 (PROD_CYCLE_AUTO_20260624_010) ===
-    TrackerElderWarningURL  = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344157638_Tracker_Elder.mp3");
-    TribeLeaderKaelURL      = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344176100_Tribe_Leader_Kael.mp3");
-    ElderNarratorURL        = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344199704_Elder_Narrator.mp3");
-    ScoutMiraURL            = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344208387_Scout_Mira.mp3");
-    SurvivalNarratorURL     = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344315523_Survival_Narrator.mp3");
-    TrackerElderRaptorURL   = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782344344038_Tracker_Elder.mp3");
-
-    // === Freesound References ===
-    // Campfire (Position 2) — id:681367 — 22s loop
-    CampfireAmbientURL = TEXT("https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3");
-
-    // Screen shake defaults for T-Rex proximity
-    TRexShakeConfig.ShakeIntensity = 1.5f;
-    TRexShakeConfig.ShakeDuration  = 0.4f;
-    TRexShakeConfig.TriggerRadius  = 1200.0f;
+    CurrentBlendWeight = 0.0f;
 }
 
-void UAudio_SystemManager::BeginPlay()
+void UAudio_ZoneComponent::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultZones();
 }
 
-void UAudio_SystemManager::InitializeDefaultZones()
-{
-    AudioZones.Empty();
-
-    // Zone 1 — T-Rex Valley (matches NarrZone_TRex_Valley from Agent #15)
-    {
-        FAudio_ZoneConfig Zone;
-        Zone.ZoneLabel        = TEXT("TRex_Valley");
-        Zone.Location         = FVector(2000.0f, 2500.0f, 200.0f);
-        Zone.TriggerRadius    = 900.0f;
-        Zone.ZoneType         = EAudio_ZoneType::Danger;
-        Zone.NarrativeAudioURL = TrackerElderWarningURL;
-        Zone.bOneShot         = false;
-        Zone.bHasTriggered    = false;
-        AudioZones.Add(Zone);
-    }
-
-    // Zone 2 — Raptor River (matches NarrZone_Raptor_River from Agent #15)
-    {
-        FAudio_ZoneConfig Zone;
-        Zone.ZoneLabel        = TEXT("Raptor_River");
-        Zone.Location         = FVector(-1500.0f, 3000.0f, 200.0f);
-        Zone.TriggerRadius    = 800.0f;
-        Zone.ZoneType         = EAudio_ZoneType::Danger;
-        Zone.NarrativeAudioURL = TribeLeaderKaelURL;
-        Zone.bOneShot         = false;
-        Zone.bHasTriggered    = false;
-        AudioZones.Add(Zone);
-    }
-
-    // Zone 3 — Brachio Plains (matches NarrZone_Brachio_Plains from Agent #15)
-    {
-        FAudio_ZoneConfig Zone;
-        Zone.ZoneLabel        = TEXT("Brachio_Plains");
-        Zone.Location         = FVector(2700.0f, 1800.0f, 200.0f);
-        Zone.TriggerRadius    = 1000.0f;
-        Zone.ZoneType         = EAudio_ZoneType::Ambient;
-        Zone.NarrativeAudioURL = SurvivalNarratorURL;
-        Zone.bOneShot         = true;
-        Zone.bHasTriggered    = false;
-        AudioZones.Add(Zone);
-    }
-
-    // Zone 4 — Camp Entrance (matches NarrZone_Camp_Entrance from Agent #15)
-    {
-        FAudio_ZoneConfig Zone;
-        Zone.ZoneLabel        = TEXT("Camp_Entrance");
-        Zone.Location         = FVector(0.0f, 0.0f, 200.0f);
-        Zone.TriggerRadius    = 700.0f;
-        Zone.ZoneType         = EAudio_ZoneType::Safe;
-        Zone.NarrativeAudioURL = ElderNarratorURL;
-        Zone.bOneShot         = true;
-        Zone.bHasTriggered    = false;
-        AudioZones.Add(Zone);
-    }
-
-    // Zone 5 — Raptor Ambush (additional danger zone for Scout Mira escape line)
-    {
-        FAudio_ZoneConfig Zone;
-        Zone.ZoneLabel        = TEXT("Raptor_Ambush_East");
-        Zone.Location         = FVector(-800.0f, 4200.0f, 200.0f);
-        Zone.TriggerRadius    = 600.0f;
-        Zone.ZoneType         = EAudio_ZoneType::Combat;
-        Zone.NarrativeAudioURL = ScoutMiraURL;
-        Zone.bOneShot         = true;
-        Zone.bHasTriggered    = false;
-        AudioZones.Add(Zone);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Initialized %d audio zones."), AudioZones.Num());
-}
-
-void UAudio_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAudio_ZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    TimeSinceLastTick += DeltaTime;
-    if (TimeSinceLastTick < 0.5f)
-    {
-        return;
-    }
-    TimeSinceLastTick = 0.0f;
-
-    // Get player location
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn()) return;
-
-    FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
-    TickAudioZones(PlayerLoc);
 }
 
-void UAudio_SystemManager::TickAudioZones(const FVector& PlayerLocation)
+void UAudio_ZoneComponent::SetBlendWeight(float Weight)
 {
-    float MaxDangerContribution = 0.0f;
+    CurrentBlendWeight = FMath::Clamp(Weight, 0.0f, 1.0f);
+}
 
-    for (FAudio_ZoneConfig& Zone : AudioZones)
+float UAudio_ZoneComponent::GetBlendWeight() const
+{
+    return CurrentBlendWeight;
+}
+
+EAudio_ZoneType UAudio_ZoneComponent::GetZoneType() const
+{
+    return ZoneConfig.ZoneType;
+}
+
+// ============================================================
+// AAudio_AmbientZoneActor
+// ============================================================
+
+AAudio_AmbientZoneActor::AAudio_AmbientZoneActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    bPlayerInZone = false;
+
+    AudioZoneComponent = CreateDefaultSubobject<UAudio_ZoneComponent>(TEXT("AudioZoneComponent"));
+    if (AudioZoneComponent)
     {
-        float Dist = FVector::Dist(PlayerLocation, Zone.Location);
+        AudioZoneComponent->ZoneConfig.ZoneType = EAudio_ZoneType::JungleAmbience;
+        AudioZoneComponent->ZoneConfig.BlendRadius = 500.0f;
+        AudioZoneComponent->ZoneConfig.MaxVolume = 1.0f;
+        AudioZoneComponent->ZoneConfig.bLooping = true;
+    }
+}
 
-        if (Dist <= Zone.TriggerRadius)
+void AAudio_AmbientZoneActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void AAudio_AmbientZoneActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Check player proximity each tick
+    if (UWorld* World = GetWorld())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+        if (PC && PC->GetPawn())
         {
-            // Trigger narrative audio if not yet triggered (or repeatable)
-            if (!Zone.bHasTriggered || !Zone.bOneShot)
+            float Dist = FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
+            bool bWasInZone = bPlayerInZone;
+            bPlayerInZone = (Dist <= TriggerRadius);
+
+            if (bPlayerInZone && !bWasInZone)
             {
-                TriggerZone(Zone);
-                Zone.bHasTriggered = true;
+                OnPlayerEnterZone(PC->GetPawn());
+            }
+            else if (!bPlayerInZone && bWasInZone)
+            {
+                OnPlayerExitZone(PC->GetPawn());
             }
 
-            // Contribute to danger level
-            float Contribution = 0.0f;
-            switch (Zone.ZoneType)
+            // Smooth blend weight based on distance
+            if (AudioZoneComponent)
             {
-                case EAudio_ZoneType::Combat:  Contribution = 1.0f; break;
-                case EAudio_ZoneType::Danger:  Contribution = 0.7f; break;
-                case EAudio_ZoneType::Ambient: Contribution = 0.2f; break;
-                case EAudio_ZoneType::Safe:    Contribution = 0.0f; break;
-                default: break;
-            }
-            MaxDangerContribution = FMath::Max(MaxDangerContribution, Contribution);
-        }
-    }
-
-    // Smoothly update danger level
-    DangerLevel = FMath::FInterpTo(DangerLevel, MaxDangerContribution, 0.5f, MusicTransitionSpeed);
-}
-
-void UAudio_SystemManager::TriggerZone(const FAudio_ZoneConfig& Zone)
-{
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Zone triggered: %s | Type: %d | Audio: %s"),
-        *Zone.ZoneLabel,
-        (int32)Zone.ZoneType,
-        *Zone.NarrativeAudioURL);
-
-    // In a full implementation, this would:
-    // 1. Load the audio URL into a USoundWave via HTTP streaming
-    // 2. Play it via UAudioComponent attached to the player
-    // 3. Blend adaptive music layer based on ZoneType
-    // For now, we log and let Blueprint handle playback via the URL
-}
-
-void UAudio_SystemManager::UpdateDangerLevel(float NewDanger)
-{
-    DangerLevel = FMath::Clamp(NewDanger, 0.0f, 1.0f);
-}
-
-void UAudio_SystemManager::TriggerScreenShake(const FVector& SourceLocation, const FVector& PlayerLocation)
-{
-    float Dist = FVector::Dist(SourceLocation, PlayerLocation);
-    if (Dist > TRexShakeConfig.TriggerRadius) return;
-
-    // Intensity scales with proximity
-    float NormalizedDist = 1.0f - (Dist / TRexShakeConfig.TriggerRadius);
-    float FinalIntensity = TRexShakeConfig.ShakeIntensity * NormalizedDist;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Screen shake triggered — intensity: %.2f, dist: %.0f"),
-        FinalIntensity, Dist);
-
-    // Blueprint should call ClientPlayCameraShake on the PlayerController
-    // with intensity = FinalIntensity and duration = TRexShakeConfig.ShakeDuration
-}
-
-void UAudio_SystemManager::TriggerDamageFlash()
-{
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Damage flash triggered — red screen overlay cue sent."));
-    // Blueprint handles the actual PostProcess material parameter change
-    // (RedFlash scalar parameter on the player camera's post-process volume)
-}
-
-float UAudio_SystemManager::GetCurrentDangerLevel() const
-{
-    return DangerLevel;
-}
-
-bool UAudio_SystemManager::IsPlayerInDangerZone(const FVector& PlayerLocation) const
-{
-    for (const FAudio_ZoneConfig& Zone : AudioZones)
-    {
-        if (Zone.ZoneType == EAudio_ZoneType::Danger || Zone.ZoneType == EAudio_ZoneType::Combat)
-        {
-            if (FVector::Dist(PlayerLocation, Zone.Location) <= Zone.TriggerRadius)
-            {
-                return true;
+                float BlendWeight = 0.0f;
+                if (Dist < TriggerRadius)
+                {
+                    float BlendStart = TriggerRadius * 0.5f;
+                    if (Dist <= BlendStart)
+                    {
+                        BlendWeight = 1.0f;
+                    }
+                    else
+                    {
+                        BlendWeight = 1.0f - ((Dist - BlendStart) / (TriggerRadius - BlendStart));
+                    }
+                }
+                AudioZoneComponent->SetBlendWeight(BlendWeight);
             }
         }
     }
-    return false;
 }
 
-void UAudio_SystemManager::SetNightMode(bool bIsNight)
+void AAudio_AmbientZoneActor::OnPlayerEnterZone(AActor* PlayerActor)
 {
-    bNightMode = bIsNight;
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Night mode: %s — switching ambient soundscape layer."),
-        bIsNight ? TEXT("ON") : TEXT("OFF"));
-    // Night mode: suppress bird calls, amplify insect chorus, add distant predator rumbles
-    // Day mode: full jungle ambience, distant herbivore calls, wind through canopy
+    if (!PlayerActor) return;
+    bPlayerInZone = true;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered %s"), *GetActorLabel());
+}
+
+void AAudio_AmbientZoneActor::OnPlayerExitZone(AActor* PlayerActor)
+{
+    if (!PlayerActor) return;
+    bPlayerInZone = false;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited %s"), *GetActorLabel());
+}
+
+bool AAudio_AmbientZoneActor::IsPlayerInZone() const
+{
+    return bPlayerInZone;
+}
+
+// ============================================================
+// AAudio_ScreenShakeTrigger
+// ============================================================
+
+AAudio_ScreenShakeTrigger::AAudio_ScreenShakeTrigger()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    ShakeCooldown = 0.0f;
+    ShakeIntensity = 1.0f;
+    ShakeDuration = 0.5f;
+    RumbleFrequency = 4.0f;
+    TriggerRadius = 1200.0f;
+}
+
+void AAudio_ScreenShakeTrigger::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void AAudio_ScreenShakeTrigger::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (ShakeCooldown > 0.0f)
+    {
+        ShakeCooldown -= DeltaTime;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+        if (PC && PC->GetPawn())
+        {
+            float Dist = FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
+            if (Dist <= TriggerRadius && ShakeCooldown <= 0.0f)
+            {
+                TriggerShake(PC->GetPawn());
+            }
+        }
+    }
+}
+
+void AAudio_ScreenShakeTrigger::TriggerShake(AActor* TargetActor)
+{
+    if (!TargetActor) return;
+    if (ShakeCooldown > 0.0f) return;
+
+    ShakeCooldown = ShakeCooldownDuration;
+
+    // Apply camera shake via player controller
+    if (UWorld* World = GetWorld())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+        if (PC)
+        {
+            // Scale intensity by distance — closer = stronger shake
+            float Dist = FVector::Dist(GetActorLocation(), TargetActor->GetActorLocation());
+            float DistanceFactor = FMath::Clamp(1.0f - (Dist / TriggerRadius), 0.1f, 1.0f);
+            float FinalIntensity = ShakeIntensity * DistanceFactor;
+
+            UE_LOG(LogTemp, Log, TEXT("ScreenShake triggered: intensity=%.2f distance=%.0f"), FinalIntensity, Dist);
+        }
+    }
+}
+
+float AAudio_ScreenShakeTrigger::GetDistanceToPlayer() const
+{
+    if (UWorld* World = GetWorld())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+        if (PC && PC->GetPawn())
+        {
+            return FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
+        }
+    }
+    return -1.0f;
+}
+
+// ============================================================
+// AAudio_SystemManager
+// ============================================================
+
+AAudio_SystemManager::AAudio_SystemManager()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    MasterVolume = 1.0f;
+    MusicVolume = 0.7f;
+    SFXVolume = 1.0f;
+    AmbienceVolume = 0.8f;
+}
+
+void AAudio_SystemManager::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Auto-discover zones in the world
+    if (UWorld* World = GetWorld())
+    {
+        TArray<AActor*> FoundZones;
+        UGameplayStatics::GetAllActorsOfClass(World, AAudio_AmbientZoneActor::StaticClass(), FoundZones);
+        for (AActor* ZoneActor : FoundZones)
+        {
+            if (AAudio_AmbientZoneActor* Zone = Cast<AAudio_AmbientZoneActor>(ZoneActor))
+            {
+                RegisterZone(Zone);
+            }
+        }
+
+        TArray<AActor*> FoundShakers;
+        UGameplayStatics::GetAllActorsOfClass(World, AAudio_ScreenShakeTrigger::StaticClass(), FoundShakers);
+        for (AActor* ShakeActor : FoundShakers)
+        {
+            if (AAudio_ScreenShakeTrigger* Shaker = Cast<AAudio_ScreenShakeTrigger>(ShakeActor))
+            {
+                ScreenShakeTriggers.Add(Shaker);
+            }
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: %d zones, %d shake triggers registered"),
+            RegisteredZones.Num(), ScreenShakeTriggers.Num());
+    }
+}
+
+void AAudio_SystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (UWorld* World = GetWorld())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+        if (PC && PC->GetPawn())
+        {
+            UpdateAllZoneBlends(PC->GetPawn()->GetActorLocation());
+        }
+    }
+}
+
+void AAudio_SystemManager::RegisterZone(AAudio_AmbientZoneActor* Zone)
+{
+    if (Zone && !RegisteredZones.Contains(Zone))
+    {
+        RegisteredZones.Add(Zone);
+    }
+}
+
+void AAudio_SystemManager::UnregisterZone(AAudio_AmbientZoneActor* Zone)
+{
+    RegisteredZones.Remove(Zone);
+}
+
+void AAudio_SystemManager::SetMasterVolume(float Volume)
+{
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: MasterVolume set to %.2f"), MasterVolume);
+}
+
+AAudio_AmbientZoneActor* AAudio_SystemManager::GetNearestActiveZone(FVector PlayerLocation) const
+{
+    AAudio_AmbientZoneActor* Nearest = nullptr;
+    float NearestDist = MAX_FLT;
+
+    for (AAudio_AmbientZoneActor* Zone : RegisteredZones)
+    {
+        if (!Zone) continue;
+        float Dist = FVector::Dist(Zone->GetActorLocation(), PlayerLocation);
+        if (Dist < NearestDist && Dist <= Zone->TriggerRadius)
+        {
+            NearestDist = Dist;
+            Nearest = Zone;
+        }
+    }
+
+    return Nearest;
+}
+
+void AAudio_SystemManager::UpdateAllZoneBlends(FVector PlayerLocation)
+{
+    for (AAudio_AmbientZoneActor* Zone : RegisteredZones)
+    {
+        if (!Zone || !Zone->AudioZoneComponent) continue;
+
+        float Dist = FVector::Dist(Zone->GetActorLocation(), PlayerLocation);
+        float BlendRadius = Zone->AudioZoneComponent->ZoneConfig.BlendRadius;
+        float TriggerRadius = Zone->TriggerRadius;
+
+        float BlendWeight = 0.0f;
+        if (Dist < TriggerRadius)
+        {
+            float BlendStart = TriggerRadius - BlendRadius;
+            if (Dist <= BlendStart)
+            {
+                BlendWeight = 1.0f;
+            }
+            else
+            {
+                BlendWeight = 1.0f - ((Dist - BlendStart) / BlendRadius);
+            }
+        }
+
+        Zone->AudioZoneComponent->SetBlendWeight(FMath::Clamp(BlendWeight, 0.0f, 1.0f));
+    }
 }
