@@ -1,253 +1,272 @@
 #include "AudioZoneSystem.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
+#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
 // ============================================================
-// AAudio_NarrativeZone
+// AAudio_ZoneActor
 // ============================================================
 
-AAudio_NarrativeZone::AAudio_NarrativeZone()
+AAudio_ZoneActor::AAudio_ZoneActor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
-    AudioComponent->SetupAttachment(RootComponent);
-    AudioComponent->bAutoActivate = false;
-    AudioComponent->bIsUISound = false;
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(1500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
 
-    ZoneConfig.TriggerRadius = 500.0f;
-    ZoneConfig.FadeInDuration = 1.5f;
-    ZoneConfig.FadeOutDuration = 2.0f;
-    ZoneConfig.BaseVolume = 1.0f;
-    ZoneConfig.bLooping = true;
-    ZoneConfig.bScaleWithUrgency = false;
-}
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
 
-void AAudio_NarrativeZone::BeginPlay()
-{
-    Super::BeginPlay();
-    CurrentState = EAudio_ZoneState::Inactive;
+    PlayerDistance = 99999.0f;
     CurrentVolume = 0.0f;
+    bPlayerInZone = false;
+    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
 }
 
-void AAudio_NarrativeZone::Tick(float DeltaTime)
+void AAudio_ZoneActor::BeginPlay()
+{
+    Super::BeginPlay();
+
+    if (ZoneConfig.bActive && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+        AmbientAudioComponent->Play();
+    }
+}
+
+void AAudio_ZoneActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    bool bNowInRange = IsPlayerInRange();
-
-    if (bNowInRange && !bPlayerInRange)
+    // Update player distance
+    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (PlayerChar)
     {
-        // Player entered range — start audio
-        bPlayerInRange = true;
-        if (AudioComponent && AudioComponent->Sound)
-        {
-            AudioComponent->SetVolumeMultiplier(0.0f);
-            AudioComponent->Play();
-            CurrentState = EAudio_ZoneState::Playing;
-        }
-        OnNarrativeHookTriggered(ZoneConfig.HookType);
-    }
-    else if (!bNowInRange && bPlayerInRange)
-    {
-        // Player left range — fade out
-        bPlayerInRange = false;
-        StopAudioZone();
+        PlayerDistance = FVector::Dist(GetActorLocation(), PlayerChar->GetActorLocation());
     }
 
-    // Fade in/out volume
-    if (CurrentState == EAudio_ZoneState::Playing && AudioComponent)
+    UpdateAudioBlend(DeltaTime);
+}
+
+void AAudio_ZoneActor::UpdateAudioBlend(float DeltaTime)
+{
+    if (!AmbientAudioComponent || !ZoneConfig.bActive)
     {
-        float TargetVolume = ZoneConfig.BaseVolume;
-        if (ZoneConfig.bScaleWithUrgency)
-        {
-            TargetVolume *= (0.5f + UrgencyScalar * 0.5f);
-        }
-        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, 1.0f / FMath::Max(ZoneConfig.FadeInDuration, 0.01f));
-        AudioComponent->SetVolumeMultiplier(CurrentVolume);
+        return;
     }
-    else if (CurrentState == EAudio_ZoneState::FadingOut && AudioComponent)
+
+    float TargetVolume = 0.0f;
+    float BlendRadius = ZoneConfig.BlendRadius;
+
+    if (PlayerDistance < BlendRadius)
     {
-        CurrentVolume = FMath::FInterpTo(CurrentVolume, 0.0f, DeltaTime, 1.0f / FMath::Max(ZoneConfig.FadeOutDuration, 0.01f));
-        AudioComponent->SetVolumeMultiplier(CurrentVolume);
-        if (CurrentVolume < 0.01f)
-        {
-            AudioComponent->Stop();
-            CurrentState = EAudio_ZoneState::Completed;
-        }
+        float Alpha = 1.0f - (PlayerDistance / BlendRadius);
+        Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
+
+        float TimeVolume = (CurrentTimeOfDay == EAudio_TimeOfDay::Night || CurrentTimeOfDay == EAudio_TimeOfDay::Dawn)
+            ? ZoneConfig.NightVolume
+            : ZoneConfig.DayVolume;
+
+        TargetVolume = Alpha * TimeVolume * ZoneConfig.MaxVolume;
+        bPlayerInZone = true;
+    }
+    else
+    {
+        bPlayerInZone = false;
+    }
+
+    // Smooth blend
+    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, 2.0f);
+    AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+}
+
+void AAudio_ZoneActor::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
+{
+    CurrentTimeOfDay = NewTimeOfDay;
+}
+
+void AAudio_ZoneActor::SetPlayerDistance(float Distance)
+{
+    PlayerDistance = Distance;
+}
+
+float AAudio_ZoneActor::GetBlendedVolume() const
+{
+    return CurrentVolume;
+}
+
+void AAudio_ZoneActor::ActivateZone()
+{
+    ZoneConfig.bActive = true;
+    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
+    {
+        AmbientAudioComponent->Play();
     }
 }
 
-void AAudio_NarrativeZone::SetUrgencyScalar(float NewUrgency)
+void AAudio_ZoneActor::DeactivateZone()
 {
-    UrgencyScalar = FMath::Clamp(NewUrgency, 0.0f, 1.0f);
-    OnUrgencyUpdated(UrgencyScalar);
-    UpdateVolumeForUrgency();
-}
-
-void AAudio_NarrativeZone::TriggerAudioHook(EAudio_NarrativeHook Hook)
-{
-    ZoneConfig.HookType = Hook;
-    if (AudioComponent && AudioComponent->Sound)
+    ZoneConfig.bActive = false;
+    if (AmbientAudioComponent)
     {
-        AudioComponent->SetVolumeMultiplier(0.0f);
-        AudioComponent->Play();
-        CurrentState = EAudio_ZoneState::Playing;
+        AmbientAudioComponent->FadeOut(2.0f, 0.0f);
     }
-    OnNarrativeHookTriggered(Hook);
-}
-
-void AAudio_NarrativeZone::StopAudioZone()
-{
-    CurrentState = EAudio_ZoneState::FadingOut;
-}
-
-bool AAudio_NarrativeZone::IsPlayerInRange() const
-{
-    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (!Player) return false;
-    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    return Dist <= ZoneConfig.TriggerRadius;
-}
-
-void AAudio_NarrativeZone::UpdateVolumeForUrgency()
-{
-    if (!ZoneConfig.bScaleWithUrgency) return;
-    if (!AudioComponent) return;
-    float TargetVolume = ZoneConfig.BaseVolume * (0.5f + UrgencyScalar * 0.5f);
-    AudioComponent->SetVolumeMultiplier(TargetVolume);
 }
 
 // ============================================================
-// AAudio_TRexShakeSource
+// AAudio_ScreenShakeTrigger
 // ============================================================
 
-AAudio_TRexShakeSource::AAudio_TRexShakeSource()
+AAudio_ScreenShakeTrigger::AAudio_ScreenShakeTrigger()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    RumbleAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RumbleAudioComponent"));
-    RumbleAudioComponent->SetupAttachment(RootComponent);
-    RumbleAudioComponent->bAutoActivate = false;
+    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
+    DetectionSphere->SetSphereRadius(800.0f);
+    DetectionSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = DetectionSphere;
 
-    ShakeConfig.TriggerRadius = 1200.0f;
-    ShakeConfig.MaxShakeIntensity = 1.0f;
-    ShakeConfig.ShakeFrequency = 2.5f;
-    ShakeConfig.ShakeDuration = 0.3f;
+    bPlayerCurrentlyInRange = false;
+    LastShakeTime = 0.0f;
+    ShakeCooldown = 1.5f;
 }
 
-void AAudio_TRexShakeSource::BeginPlay()
+void AAudio_ScreenShakeTrigger::BeginPlay()
 {
     Super::BeginPlay();
+    DetectionSphere->SetSphereRadius(ShakeConfig.TriggerRadius);
 }
 
-void AAudio_TRexShakeSource::Tick(float DeltaTime)
+void AAudio_ScreenShakeTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    CheckPlayerProximity();
+}
 
-    float Proximity = GetProximityToPlayer();
-    if (Proximity <= 0.0f) return;
-
-    // Scale rumble volume with proximity
-    if (RumbleAudioComponent && RumbleAudioComponent->Sound)
+void AAudio_ScreenShakeTrigger::CheckPlayerProximity()
+{
+    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (!PlayerChar)
     {
-        if (!RumbleAudioComponent->IsPlaying())
+        return;
+    }
+
+    float Dist = FVector::Dist(GetActorLocation(), PlayerChar->GetActorLocation());
+    bool bInRange = Dist < ShakeConfig.TriggerRadius;
+
+    if (bInRange && !bPlayerCurrentlyInRange)
+    {
+        // Player just entered range — trigger shake
+        float Now = GetWorld()->GetTimeSeconds();
+        if (Now - LastShakeTime > ShakeCooldown)
         {
-            RumbleAudioComponent->Play();
+            TriggerShake(ShakeConfig.ShakeIntensity);
+            LastShakeTime = Now;
         }
-        RumbleAudioComponent->SetVolumeMultiplier(Proximity);
     }
 
-    // Trigger screen shake at intervals scaled by proximity
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float DynamicCooldown = FMath::Lerp(0.5f, ShakeCooldown, Proximity);
-    if (CurrentTime - LastShakeTime >= DynamicCooldown)
+    bPlayerCurrentlyInRange = bInRange;
+}
+
+void AAudio_ScreenShakeTrigger::TriggerShake(float Intensity)
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC)
     {
-        LastShakeTime = CurrentTime;
-        OnTRexShakeTriggered(Proximity * ShakeConfig.MaxShakeIntensity);
+        // Screen shake via client camera shake
+        // Parameters: scale, play space
+        PC->ClientStartCameraShake(
+            nullptr, // Camera shake class — set in Blueprint
+            Intensity
+        );
     }
 }
 
-float AAudio_TRexShakeSource::GetProximityToPlayer() const
+bool AAudio_ScreenShakeTrigger::IsPlayerInRange() const
 {
-    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (!Player) return 0.0f;
-    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    if (Dist >= ShakeConfig.TriggerRadius) return 0.0f;
-    return 1.0f - (Dist / ShakeConfig.TriggerRadius);
+    return bPlayerCurrentlyInRange;
 }
 
 // ============================================================
-// AAudio_DayNightAmbience
+// UAudio_DayNightManager
 // ============================================================
 
-AAudio_DayNightAmbience::AAudio_DayNightAmbience()
+UAudio_DayNightManager::UAudio_DayNightManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    DayAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DayAudioComponent"));
-    DayAudioComponent->SetupAttachment(RootComponent);
-    DayAudioComponent->bAutoActivate = false;
-
-    NightAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NightAudioComponent"));
-    NightAudioComponent->SetupAttachment(RootComponent);
-    NightAudioComponent->bAutoActivate = false;
-
-    TimeOfDay = 0.5f;
-    bIsCurrentlyDay = true;
+    DayDurationSeconds = 600.0f;
+    NightDurationSeconds = 300.0f;
+    CurrentTimeNormalized = 0.5f;
+    CurrentPhase = EAudio_TimeOfDay::Day;
+    ElapsedSeconds = 0.0f;
+    TotalCycleDuration = DayDurationSeconds + NightDurationSeconds;
 }
 
-void AAudio_DayNightAmbience::BeginPlay()
+void UAudio_DayNightManager::AdvanceTime(float DeltaSeconds)
 {
-    Super::BeginPlay();
-    BlendAmbienceVolumes();
-}
+    ElapsedSeconds += DeltaSeconds;
+    TotalCycleDuration = DayDurationSeconds + NightDurationSeconds;
 
-void AAudio_DayNightAmbience::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    BlendAmbienceVolumes();
-}
-
-void AAudio_DayNightAmbience::SetTimeOfDay(float NewTimeOfDay)
-{
-    TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 1.0f);
-
-    // 0.25..0.75 = day, outside = night
-    bool bNewIsDay = (TimeOfDay >= 0.25f && TimeOfDay <= 0.75f);
-    if (bNewIsDay != bIsCurrentlyDay)
+    if (ElapsedSeconds >= TotalCycleDuration)
     {
-        bIsCurrentlyDay = bNewIsDay;
-        OnDayNightTransition(bIsCurrentlyDay);
+        ElapsedSeconds -= TotalCycleDuration;
+    }
+
+    CurrentTimeNormalized = ElapsedSeconds / TotalCycleDuration;
+
+    // Determine phase
+    float DayFraction = DayDurationSeconds / TotalCycleDuration;
+    float DawnFraction = 0.05f;
+    float DuskFraction = DayFraction - 0.05f;
+
+    if (CurrentTimeNormalized < DawnFraction)
+    {
+        CurrentPhase = EAudio_TimeOfDay::Dawn;
+    }
+    else if (CurrentTimeNormalized < DuskFraction)
+    {
+        CurrentPhase = EAudio_TimeOfDay::Day;
+    }
+    else if (CurrentTimeNormalized < DayFraction)
+    {
+        CurrentPhase = EAudio_TimeOfDay::Dusk;
+    }
+    else
+    {
+        CurrentPhase = EAudio_TimeOfDay::Night;
     }
 }
 
-void AAudio_DayNightAmbience::BlendAmbienceVolumes()
+EAudio_TimeOfDay UAudio_DayNightManager::GetCurrentPhase() const
 {
-    // Day volume: peaks at noon (0.5), zero at midnight (0.0/1.0)
-    float DayBlend = 0.0f;
-    if (TimeOfDay >= 0.25f && TimeOfDay <= 0.75f)
-    {
-        // Smooth bell curve peaking at 0.5
-        float t = (TimeOfDay - 0.25f) / 0.5f; // 0..1
-        DayBlend = FMath::Sin(t * PI);
-    }
-    float NightBlend = 1.0f - DayBlend;
+    return CurrentPhase;
+}
 
-    if (DayAudioComponent)
-    {
-        if (!DayAudioComponent->IsPlaying() && DayBlend > 0.01f && DayAudioComponent->Sound)
-            DayAudioComponent->Play();
-        DayAudioComponent->SetVolumeMultiplier(DayAmbienceVolume * DayBlend);
-    }
+float UAudio_DayNightManager::GetSunPitch() const
+{
+    // Map normalized time to sun pitch: -90 (midnight) to +90 (noon) to -90 (midnight)
+    float Angle = CurrentTimeNormalized * 360.0f - 90.0f;
+    return FMath::Sin(FMath::DegreesToRadians(Angle)) * 90.0f;
+}
 
-    if (NightAudioComponent)
+FLinearColor UAudio_DayNightManager::GetAmbientColor() const
+{
+    switch (CurrentPhase)
     {
-        if (!NightAudioComponent->IsPlaying() && NightBlend > 0.01f && NightAudioComponent->Sound)
-            NightAudioComponent->Play();
-        NightAudioComponent->SetVolumeMultiplier(NightAmbienceVolume * NightBlend);
+    case EAudio_TimeOfDay::Dawn:
+        return FLinearColor(1.0f, 0.6f, 0.3f, 1.0f); // Warm orange dawn
+    case EAudio_TimeOfDay::Day:
+        return FLinearColor(1.0f, 0.95f, 0.85f, 1.0f); // Bright daylight
+    case EAudio_TimeOfDay::Dusk:
+        return FLinearColor(1.0f, 0.4f, 0.1f, 1.0f); // Deep red dusk
+    case EAudio_TimeOfDay::Night:
+        return FLinearColor(0.05f, 0.05f, 0.2f, 1.0f); // Dark blue night
+    default:
+        return FLinearColor::White;
     }
 }
