@@ -4,15 +4,9 @@
 #include "GameFramework/Actor.h"
 #include "QuestManager.generated.h"
 
-// ============================================================
-// Quest & Mission Designer — Agent #14
-// QuestManager.h — Core quest system for dinosaur survival game
-// Three quests: Track the Herd, Observe Without Disturbing,
-//               Survive the Ambush
-// ============================================================
-
+// ── Quest state enum ──────────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class EQuest_Status : uint8
+enum class EQuest_State : uint8
 {
     Inactive    UMETA(DisplayName = "Inactive"),
     Active      UMETA(DisplayName = "Active"),
@@ -20,15 +14,7 @@ enum class EQuest_Status : uint8
     Failed      UMETA(DisplayName = "Failed")
 };
 
-UENUM(BlueprintType)
-enum class EQuest_ID : uint8
-{
-    None                    UMETA(DisplayName = "None"),
-    TrackTheHerd            UMETA(DisplayName = "Track The Herd"),
-    ObserveWithoutDisturbing UMETA(DisplayName = "Observe Without Disturbing"),
-    SurviveTheAmbush        UMETA(DisplayName = "Survive The Ambush")
-};
-
+// ── Quest objective struct ────────────────────────────────────────────────
 USTRUCT(BlueprintType)
 struct FQuest_Objective
 {
@@ -41,46 +27,48 @@ struct FQuest_Objective
     FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RequiredCount = 1;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Quest")
+    int32 CurrentCount = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Quest")
     bool bCompleted = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TriggerLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TriggerRadius = 500.0f;
 };
 
+// ── Quest data struct ─────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
 struct FQuest_Data
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_ID QuestID = EQuest_ID::None;
+    FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestName;
+    FString QuestTitle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString Description;
+    FString QuestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Status Status = EQuest_Status::Inactive;
+    EQuest_State State = EQuest_State::Inactive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_Objective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 CurrentObjectiveIndex = 0;
+    float RewardFood = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float RewardHungerBonus = 0.0f;
+    float RewardReputation = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float RewardStaminaBonus = 0.0f;
+    FString GiverActorLabel;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+// ── QuestManager actor ────────────────────────────────────────────────────
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AQuestManager : public AActor
 {
     GENERATED_BODY()
@@ -91,76 +79,58 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ---- Quest Activation ----
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void ActivateQuest(EQuest_ID QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CompleteCurrentObjective(EQuest_ID QuestID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void FailQuest(EQuest_ID QuestID);
-
-    // ---- Quest State Queries ----
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    EQuest_Status GetQuestStatus(EQuest_ID QuestID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    int32 GetActiveQuestCount() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    FString GetCurrentObjectiveDescription(EQuest_ID QuestID) const;
-
-    // ---- Proximity Check (called each tick) ----
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CheckPlayerProximityToTriggers(FVector PlayerLocation);
-
-    // ---- Quest Definitions ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Data")
+    // ── Quest registry ────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Registry")
     TArray<FQuest_Data> AllQuests;
 
-    // ---- Config ----
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
+    TArray<FString> ActiveQuestIDs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float ProximityCheckInterval = 0.5f;
+    // ── Core API ──────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool ActivateQuest(const FString& QuestID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    bool bAutoActivateOnProximity = true;
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID, int32 Count = 1);
 
-    // ---- Raptor Ambush Config ----
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool FailQuest(const FString& QuestID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Ambush")
-    FVector AmbushZoneCenter = FVector(2500.0f, 1500.0f, 400.0f);
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    FQuest_Data GetQuestData(const FString& QuestID) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Ambush")
-    float AmbushZoneRadius = 1200.0f;
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    EQuest_State GetQuestState(const FString& QuestID) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Ambush")
-    FVector AmbushEscapePoint = FVector(2700.0f, 1200.0f, 400.0f);
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    TArray<FQuest_Data> GetActiveQuests() const;
 
-    // ---- Trike Observe Config ----
+    // ── Crowd integration ─────────────────────────────────────────────────
+    /** Called when crowd flee event fires — fails "Protect the Camp" if triggered */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Crowd")
+    void OnCrowdFleeEvent(float FearLevel);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Observe")
-    FVector ObserveZoneCenter = FVector(3200.0f, 2050.0f, 400.0f);
+    /** Called when player enters a quest trigger volume */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Trigger")
+    void OnQuestTriggerEntered(const FString& TriggerID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Observe")
-    float ObserveZoneRadius = 1500.0f;
+    // ── Survival quest helpers ────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnDinosaurKilled(const FString& DinoSpecies);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Observe")
-    float ObserveDisturbanceRadius = 600.0f;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnResourceCollected(const FString& ResourceType, int32 Amount);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Observe")
-    float ObserveRequiredSeconds = 10.0f;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnPlayerReachedLocation(const FString& LocationTag);
 
 private:
-    float ProximityCheckTimer = 0.0f;
-    float ObserveAccumulatedTime = 0.0f;
+    void RegisterDefaultQuests();
+    void CheckQuestCompletion(FQuest_Data& Quest);
+    int32 FindQuestIndex(const FString& QuestID) const;
 
-    void InitializeQuestDefinitions();
-    FQuest_Data* FindQuestByID(EQuest_ID QuestID);
-    const FQuest_Data* FindQuestByIDConst(EQuest_ID QuestID) const;
+    UPROPERTY()
+    float TimeSinceLastTick = 0.f;
+
+    static constexpr float QuestTickInterval = 0.5f;
 };
