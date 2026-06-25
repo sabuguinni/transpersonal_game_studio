@@ -1,205 +1,187 @@
 // PerformanceConfig.cpp
-// Performance Optimizer — Agent #04
-// WorldSubsystem that applies quality presets and tracks frame budget.
-// Targets: 60fps PC High / 30fps Console.
+// Performance Optimizer — Agent #4
+// Targets: 60fps high-end PC / 30fps console
+// Prehistoric survival game — NO spiritual content
 
 #include "PerformanceConfig.h"
-#include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "HAL/IConsoleManager.h"
+#include "Kismet/KismetSystemLibrary.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// USubsystem interface
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UPerformanceConfig::Initialize(FSubsystemCollectionBase& Collection)
+UPerf_PerformanceConfig::UPerf_PerformanceConfig()
 {
-    Super::Initialize(Collection);
+    // ── PC High-End Budget (target 60fps) ─────────────────────────────────────
+    PCHighEndBudget.TargetFrameTimeMs  = 16.67f;
+    PCHighEndBudget.GPUBudgetMs        = 11.67f;
+    PCHighEndBudget.CPUGameThreadMs    = 8.0f;
+    PCHighEndBudget.CPURenderThreadMs  = 10.0f;
+    PCHighEndBudget.MaxDrawCalls       = 2000;
+    PCHighEndBudget.MaxTrianglesMillion = 8.0f;
 
-    // Default to PC High (60fps) on startup
-    ApplyQualityPreset(EPerf_QualityPreset::PCHigh);
+    // ── Console Budget (target 30fps) ─────────────────────────────────────────
+    ConsoleBudget.TargetFrameTimeMs  = 33.33f;
+    ConsoleBudget.GPUBudgetMs        = 23.33f;
+    ConsoleBudget.CPUGameThreadMs    = 16.0f;
+    ConsoleBudget.CPURenderThreadMs  = 20.0f;
+    ConsoleBudget.MaxDrawCalls       = 1200;
+    ConsoleBudget.MaxTrianglesMillion = 5.0f;
 
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceConfig] Initialized — preset PCHigh applied."));
+    // ── Large Dino LOD (T-Rex scale ~3.0, Brachiosaurus scale ~2.5) ──────────
+    LargeDinoLOD.LOD0Distance  = 2000.0f;
+    LargeDinoLOD.LOD1Distance  = 4000.0f;
+    LargeDinoLOD.LOD2Distance  = 8000.0f;
+    LargeDinoLOD.CullDistance  = 18000.0f;
+    LargeDinoLOD.LODBias       = 0;
+    LargeDinoLOD.bUseScreenSizeLOD = true;
+
+    // ── Medium Dino LOD (Raptor scale ~1.5, Triceratops scale ~2.0) ──────────
+    MediumDinoLOD.LOD0Distance  = 1500.0f;
+    MediumDinoLOD.LOD1Distance  = 3000.0f;
+    MediumDinoLOD.LOD2Distance  = 6000.0f;
+    MediumDinoLOD.CullDistance  = 12000.0f;
+    MediumDinoLOD.LODBias       = 0;
+    MediumDinoLOD.bUseScreenSizeLOD = true;
+
+    // ── Foliage LOD ───────────────────────────────────────────────────────────
+    FoliageLOD.LOD0Distance  = 800.0f;
+    FoliageLOD.LOD1Distance  = 2000.0f;
+    FoliageLOD.LOD2Distance  = 4000.0f;
+    FoliageLOD.CullDistance  = 8000.0f;
+    FoliageLOD.LODBias       = 1;   // Foliage uses lower LOD sooner
+    FoliageLOD.bUseScreenSizeLOD = true;
+
+    // ── Dinosaur Visibility Budget ────────────────────────────────────────────
+    DinosaurBudget.MaxLargeDinosVisible      = 4;
+    DinosaurBudget.MaxMediumDinosVisible     = 8;
+    DinosaurBudget.MaxSmallDinosVisible      = 16;
+    DinosaurBudget.AnimTickHalfRateDistance  = 4000.0f;
+    DinosaurBudget.AnimTickPauseDistance     = 8000.0f;
 }
 
-void UPerformanceConfig::Deinitialize()
+FPerf_FrameBudget UPerf_PerformanceConfig::GetActiveBudget() const
 {
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceConfig] Deinitialized."));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ApplyQualityPreset
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UPerformanceConfig::ApplyQualityPreset(EPerf_QualityPreset Preset)
-{
-    CurrentPreset = Preset;
-    CurrentLOD    = BuildLODSettings(Preset);
-    CurrentBudget = BuildFrameBudget(Preset);
-
-    ForceApplyConsoleCommands();
-
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceConfig] Preset applied: %d"), static_cast<int32>(Preset));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ForceApplyConsoleCommands — apply all CVars for the current preset
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UPerformanceConfig::ForceApplyConsoleCommands()
-{
-    const FPerf_LODSettings& L = CurrentLOD;
-
-    // Skeletal mesh LOD
-    ExecCmd(FString::Printf(TEXT("r.SkeletalMeshLODBias %d"), L.SkeletalLODBias));
-
-    // Static mesh LOD distance
-    ExecCmd(FString::Printf(TEXT("r.StaticMesh.LODDistanceScale %.2f"), L.StaticLODDistanceScale));
-
-    // Foliage density
-    ExecCmd(FString::Printf(TEXT("r.Foliage.DensityScale %.2f"), L.FoliageDensityScale));
-
-    // Shadow cascades
-    ExecCmd(FString::Printf(TEXT("r.Shadow.CSM.MaxCascades %d"), L.ShadowCascades));
-
-    // Shadow distance scale
-    ExecCmd(FString::Printf(TEXT("r.Shadow.DistanceScale %.2f"), L.ShadowDistanceScale));
-
-    // Anisotropy
-    ExecCmd(FString::Printf(TEXT("r.MaxAnisotropy %d"), L.MaxAnisotropy));
-
-    // Texture streaming pool
-    ExecCmd(FString::Printf(TEXT("r.Streaming.PoolSize %d"), L.TextureStreamingPoolMB));
-
-    // Always-on performance settings (preset-independent)
-    ExecCmd(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-    ExecCmd(TEXT("r.HZBOcclusion 1"));
-    ExecCmd(TEXT("r.OcclusionCullingEnabled 1"));
-    ExecCmd(TEXT("r.EyeAdaptation.MethodOverride 1"));
-    ExecCmd(TEXT("r.DynamicGlobalIlluminationMethod 1"));   // Lumen GI
-    ExecCmd(TEXT("r.ReflectionMethod 1"));                  // Lumen reflections
-    ExecCmd(TEXT("r.Nanite.MaxPixelsPerEdge 1.0"));
-
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceConfig] Console commands applied for preset %d."),
-           static_cast<int32>(CurrentPreset));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BuildLODSettings — preset-specific LOD parameters
-// ─────────────────────────────────────────────────────────────────────────────
-
-FPerf_LODSettings UPerformanceConfig::BuildLODSettings(EPerf_QualityPreset Preset) const
-{
-    FPerf_LODSettings S;
-
-    switch (Preset)
+    switch (ActiveQualityTier)
     {
-    case EPerf_QualityPreset::Console:
-        S.SkeletalLODBias          = 1;
-        S.StaticLODDistanceScale   = 0.7f;
-        S.FoliageDensityScale      = 0.5f;
-        S.ShadowCascades           = 2;
-        S.ShadowDistanceScale      = 0.5f;
-        S.MaxAnisotropy            = 4;
-        S.TextureStreamingPoolMB   = 512;
-        break;
+        case EPerf_QualityTier::Low:
+        case EPerf_QualityTier::Medium:
+            return ConsoleBudget;
 
-    case EPerf_QualityPreset::PCMid:
-        S.SkeletalLODBias          = 0;
-        S.StaticLODDistanceScale   = 0.85f;
-        S.FoliageDensityScale      = 0.7f;
-        S.ShadowCascades           = 3;
-        S.ShadowDistanceScale      = 0.7f;
-        S.MaxAnisotropy            = 8;
-        S.TextureStreamingPoolMB   = 1024;
-        break;
+        case EPerf_QualityTier::High:
+        case EPerf_QualityTier::Epic:
+        case EPerf_QualityTier::Cinematic:
+        default:
+            return PCHighEndBudget;
+    }
+}
 
-    case EPerf_QualityPreset::PCHigh:
-        S.SkeletalLODBias          = 0;
-        S.StaticLODDistanceScale   = 1.0f;
-        S.FoliageDensityScale      = 0.85f;
-        S.ShadowCascades           = 3;
-        S.ShadowDistanceScale      = 0.85f;
-        S.MaxAnisotropy            = 8;
-        S.TextureStreamingPoolMB   = 2048;
-        break;
+bool UPerf_PerformanceConfig::IsWithinDinosaurBudget(int32 LargeCount, int32 MediumCount, int32 SmallCount) const
+{
+    return (LargeCount  <= DinosaurBudget.MaxLargeDinosVisible)
+        && (MediumCount <= DinosaurBudget.MaxMediumDinosVisible)
+        && (SmallCount  <= DinosaurBudget.MaxSmallDinosVisible);
+}
 
-    case EPerf_QualityPreset::PCUltra:
-        S.SkeletalLODBias          = 0;
-        S.StaticLODDistanceScale   = 1.2f;
-        S.FoliageDensityScale      = 1.0f;
-        S.ShadowCascades           = 4;
-        S.ShadowDistanceScale      = 1.0f;
-        S.MaxAnisotropy            = 16;
-        S.TextureStreamingPoolMB   = 4096;
-        break;
+void UPerf_PerformanceConfig::ApplyQualityTierToConsole()
+{
+    // Build a world context object for ExecuteConsoleCommand
+    // In editor context, pass nullptr — the command is applied globally
+    UWorld* World = nullptr;
+
+    // Find any valid world
+    for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+    {
+        if (Ctx.World())
+        {
+            World = Ctx.World();
+            break;
+        }
     }
 
-    return S;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BuildFrameBudget — ms budget per preset
-// ─────────────────────────────────────────────────────────────────────────────
-
-FPerf_FrameBudget UPerformanceConfig::BuildFrameBudget(EPerf_QualityPreset Preset) const
-{
-    FPerf_FrameBudget B;
-
-    switch (Preset)
+    if (!GEngine || !World)
     {
-    case EPerf_QualityPreset::Console:
-        B.TotalBudgetMs   = 33.3f;
-        B.GPURenderMs     = 22.0f;
-        B.CPUGameThreadMs = 7.0f;
-        B.AIBudgetMs      = 3.0f;
-        B.PhysicsBudgetMs = 1.3f;
-        break;
-
-    case EPerf_QualityPreset::PCMid:
-        B.TotalBudgetMs   = 22.2f;  // ~45fps
-        B.GPURenderMs     = 14.0f;
-        B.CPUGameThreadMs = 5.0f;
-        B.AIBudgetMs      = 2.0f;
-        B.PhysicsBudgetMs = 1.2f;
-        break;
-
-    case EPerf_QualityPreset::PCHigh:
-        B.TotalBudgetMs   = 16.6f;  // 60fps
-        B.GPURenderMs     = 10.0f;
-        B.CPUGameThreadMs = 4.0f;
-        B.AIBudgetMs      = 1.5f;
-        B.PhysicsBudgetMs = 1.1f;
-        break;
-
-    case EPerf_QualityPreset::PCUltra:
-        B.TotalBudgetMs   = 16.6f;  // still targeting 60fps
-        B.GPURenderMs     = 11.0f;
-        B.CPUGameThreadMs = 3.5f;
-        B.AIBudgetMs      = 1.0f;
-        B.PhysicsBudgetMs = 1.1f;
-        break;
-    }
-
-    return B;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ExecCmd — helper to execute a console command in the current world
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UPerformanceConfig::ExecCmd(const FString& Cmd) const
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PerformanceConfig] ExecCmd — no world: %s"), *Cmd);
         return;
     }
 
-    if (GEngine)
+    auto Exec = [&](const FString& Cmd)
     {
         GEngine->Exec(World, *Cmd);
+    };
+
+    switch (ActiveQualityTier)
+    {
+        case EPerf_QualityTier::Low:
+            Exec(TEXT("sg.ResolutionQuality 50"));
+            Exec(TEXT("sg.ViewDistanceQuality 0"));
+            Exec(TEXT("sg.AntiAliasingQuality 0"));
+            Exec(TEXT("sg.ShadowQuality 0"));
+            Exec(TEXT("sg.GlobalIlluminationQuality 0"));
+            Exec(TEXT("sg.ReflectionQuality 0"));
+            Exec(TEXT("sg.PostProcessQuality 0"));
+            Exec(TEXT("sg.TextureQuality 0"));
+            Exec(TEXT("sg.EffectsQuality 0"));
+            Exec(TEXT("sg.FoliageQuality 0"));
+            Exec(TEXT("sg.ShadingQuality 0"));
+            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
+            break;
+
+        case EPerf_QualityTier::Medium:
+            Exec(TEXT("sg.ResolutionQuality 75"));
+            Exec(TEXT("sg.ViewDistanceQuality 1"));
+            Exec(TEXT("sg.AntiAliasingQuality 1"));
+            Exec(TEXT("sg.ShadowQuality 1"));
+            Exec(TEXT("sg.GlobalIlluminationQuality 1"));
+            Exec(TEXT("sg.ReflectionQuality 1"));
+            Exec(TEXT("sg.PostProcessQuality 1"));
+            Exec(TEXT("sg.TextureQuality 1"));
+            Exec(TEXT("sg.EffectsQuality 1"));
+            Exec(TEXT("sg.FoliageQuality 1"));
+            Exec(TEXT("sg.ShadingQuality 1"));
+            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
+            break;
+
+        case EPerf_QualityTier::High:
+            Exec(TEXT("sg.ResolutionQuality 90"));
+            Exec(TEXT("sg.ViewDistanceQuality 2"));
+            Exec(TEXT("sg.AntiAliasingQuality 2"));
+            Exec(TEXT("sg.ShadowQuality 2"));
+            Exec(TEXT("sg.GlobalIlluminationQuality 2"));
+            Exec(TEXT("sg.ReflectionQuality 2"));
+            Exec(TEXT("sg.PostProcessQuality 2"));
+            Exec(TEXT("sg.TextureQuality 2"));
+            Exec(TEXT("sg.EffectsQuality 2"));
+            Exec(TEXT("sg.FoliageQuality 2"));
+            Exec(TEXT("sg.ShadingQuality 2"));
+            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
+            break;
+
+        case EPerf_QualityTier::Epic:
+        case EPerf_QualityTier::Cinematic:
+        default:
+            Exec(TEXT("sg.ResolutionQuality 100"));
+            Exec(TEXT("sg.ViewDistanceQuality 3"));
+            Exec(TEXT("sg.AntiAliasingQuality 3"));
+            Exec(TEXT("sg.ShadowQuality 3"));
+            Exec(TEXT("sg.GlobalIlluminationQuality 3"));
+            Exec(TEXT("sg.ReflectionQuality 3"));
+            Exec(TEXT("sg.PostProcessQuality 3"));
+            Exec(TEXT("sg.TextureQuality 3"));
+            Exec(TEXT("sg.EffectsQuality 3"));
+            Exec(TEXT("sg.FoliageQuality 3"));
+            Exec(TEXT("sg.ShadingQuality 3"));
+            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
+            break;
     }
+}
+
+FPerf_LODConfig UPerf_PerformanceConfig::GetLODConfigForScale(float DinoScale) const
+{
+    // Large: scale >= 2.5 (T-Rex at 3.0, Brachiosaurus at 2.5)
+    if (DinoScale >= 2.5f)
+    {
+        return LargeDinoLOD;
+    }
+    // Medium: scale 1.0 - 2.5 (Raptor at 1.5, Triceratops at 2.0)
+    return MediumDinoLOD;
 }
