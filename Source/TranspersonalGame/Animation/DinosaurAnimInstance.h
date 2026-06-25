@@ -11,22 +11,8 @@ enum class EAnim_DinoLocomotionState : uint8
     Walk        UMETA(DisplayName = "Walk"),
     Run         UMETA(DisplayName = "Run"),
     Attack      UMETA(DisplayName = "Attack"),
-    Eat         UMETA(DisplayName = "Eat"),
-    Sleep       UMETA(DisplayName = "Sleep"),
     Roar        UMETA(DisplayName = "Roar"),
     Death       UMETA(DisplayName = "Death"),
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinoSpecies : uint8
-{
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Generic         UMETA(DisplayName = "Generic"),
 };
 
 USTRUCT(BlueprintType)
@@ -38,27 +24,21 @@ struct FAnim_DinoLocomotionData
     float Speed = 0.0f;
 
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Animation")
     bool bIsAttacking = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    bool bIsEating = false;
+    bool bIsRoaring = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
     bool bIsDead = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
-    float TurnRate = 0.0f;
+    EAnim_DinoLocomotionState LocomotionState = EAnim_DinoLocomotionState::Idle;
 };
 
 /**
- * Animation Instance for all dinosaur species.
- * Drives locomotion blend spaces, attack montages, and IK foot placement.
+ * Animation Instance for dinosaur characters.
+ * Drives locomotion blend space (Idle/Walk/Run) and action states (Attack, Roar, Death).
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
@@ -71,71 +51,40 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // Current locomotion state
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    EAnim_DinoLocomotionState LocomotionState;
-
-    // Species type for species-specific anim logic
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Species")
-    EAnim_DinoSpecies DinoSpecies;
-
-    // Locomotion data updated every frame
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    /** Current locomotion data updated every frame */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Dinosaur", meta = (AllowPrivateAccess = "true"))
     FAnim_DinoLocomotionData LocomotionData;
 
-    // Ground speed (magnitude of velocity XY)
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float GroundSpeed = 0.0f;
+    /** Current movement speed (0 = idle, >0 = moving) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Dinosaur", meta = (AllowPrivateAccess = "true"))
+    float CurrentSpeed = 0.0f;
 
-    // Walk/Run threshold — species-specific
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
-    float WalkSpeedThreshold = 150.0f;
+    /** Current locomotion state for state machine */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Dinosaur", meta = (AllowPrivateAccess = "true"))
+    EAnim_DinoLocomotionState CurrentState = EAnim_DinoLocomotionState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
-    float RunSpeedThreshold = 400.0f;
+    /** Walk speed threshold — below this is idle */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float WalkSpeedThreshold = 50.0f;
 
-    // Foot IK enabled flag
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK")
-    bool bEnableFootIK = true;
+    /** Run speed threshold — above this is running */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float RunSpeedThreshold = 300.0f;
 
-    // IK foot trace distance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK")
-    float FootIKTraceDistance = 100.0f;
+    /** Trigger an attack montage */
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void TriggerAttack();
 
-    // Left foot IK target
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector LeftFootIKTarget = FVector::ZeroVector;
+    /** Trigger a roar montage */
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void TriggerRoar();
 
-    // Right foot IK target
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector RightFootIKTarget = FVector::ZeroVector;
-
-    // IK alpha (0=off, 1=full)
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    float FootIKAlpha = 1.0f;
-
-    // Roar trigger (set by AI, consumed by anim)
-    UPROPERTY(BlueprintReadWrite, Category = "Animation|Events")
-    bool bTriggerRoar = false;
-
-    // Attack trigger
-    UPROPERTY(BlueprintReadWrite, Category = "Animation|Events")
-    bool bTriggerAttack = false;
-
-protected:
-    // Update locomotion state from pawn velocity
-    void UpdateLocomotionState();
-
-    // Update foot IK targets via line traces
-    void UpdateFootIK(float DeltaSeconds);
-
-    // Resolve locomotion enum from speed
-    EAnim_DinoLocomotionState ResolveLocomotionState(float Speed, bool bAttacking, bool bEating, bool bDead) const;
+    /** Set the dinosaur as dead */
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void SetDead(bool bDead);
 
 private:
-    // Cached owner pawn
+    /** Cached owner pawn */
+    UPROPERTY()
     class APawn* OwnerPawn = nullptr;
-
-    // Smooth foot IK alpha
-    float FootIKAlphaTarget = 1.0f;
 };
