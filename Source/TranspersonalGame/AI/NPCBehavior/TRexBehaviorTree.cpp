@@ -1,209 +1,376 @@
 #include "TRexBehaviorTree.h"
+#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "NavigationSystem.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
-ATRexAIController::ATRexAIController()
+// ============================================================
+// UNPC_BTTask_TRexPatrol
+// ============================================================
+
+UNPC_BTTask_TRexPatrol::UNPC_BTTask_TRexPatrol()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    CurrentAIState = 0; // Start in patrol
-
-    // Set up AI Perception
-    PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
-    SetPerceptionComponent(*PerceptionComponent);
-
-    // Sight config
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = SightRadius;
-    SightConfig->LoseSightRadius = SightLoseSightRadius;
-    SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-    SightConfig->SetMaxAge(5.0f);
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-    PerceptionComponent->ConfigureSense(*SightConfig);
-
-    // Hearing config
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = HearingRadius;
-    HearingConfig->SetMaxAge(3.0f);
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    PerceptionComponent->ConfigureSense(*HearingConfig);
-
-    PerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+    NodeName = TEXT("TRex Patrol");
+    bNotifyTick = false;
 }
 
-void ATRexAIController::BeginPlay()
+EBTNodeResult::Type UNPC_BTTask_TRexPatrol::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-    Super::BeginPlay();
-
-    // Store patrol origin at spawn location
-    if (GetPawn())
+    AAIController* AIController = OwnerComp.GetAIOwner();
+    if (!AIController)
     {
-        PatrolOrigin = GetPawn()->GetActorLocation();
+        return EBTNodeResult::Failed;
     }
 
-    // Bind perception callback
-    if (PerceptionComponent)
+    APawn* ControlledPawn = AIController->GetPawn();
+    if (!ControlledPawn)
     {
-        PerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ATRexAIController::OnTargetPerceptionUpdated);
+        return EBTNodeResult::Failed;
     }
 
-    // Start behavior tree if assigned
-    if (TRexBehaviorTreeAsset)
+    UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+    if (!Blackboard)
     {
-        RunBehaviorTree(TRexBehaviorTreeAsset);
-
-        // Set blackboard defaults
-        if (BlackboardComp)
-        {
-            BlackboardComp->SetValueAsVector(BlackboardKey_PatrolOrigin, PatrolOrigin);
-            BlackboardComp->SetValueAsFloat(BlackboardKey_PatrolRadius, PatrolRadius);
-            BlackboardComp->SetValueAsInt(BlackboardKey_AIState, 0);
-        }
+        return EBTNodeResult::Failed;
     }
-}
 
-void ATRexAIController::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // State-based behavior fallback (when no BT asset assigned)
-    if (!TRexBehaviorTreeAsset)
+    UWorld* World = ControlledPawn->GetWorld();
+    if (!World)
     {
-        APawn* ControlledPawn = GetPawn();
-        if (!ControlledPawn) return;
+        return EBTNodeResult::Failed;
+    }
 
-        ACharacter* PlayerChar = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-        if (!PlayerChar) return;
+    // Get home location from blackboard (set at spawn time)
+    FVector HomeLocation = Blackboard->GetValueAsVector(HomeLocationKey.SelectedKeyName);
+    if (HomeLocation.IsZero())
+    {
+        HomeLocation = ControlledPawn->GetActorLocation();
+        Blackboard->SetValueAsVector(HomeLocationKey.SelectedKeyName, HomeLocation);
+    }
 
-        float DistToPlayer = FVector::Dist(ControlledPawn->GetActorLocation(), PlayerChar->GetActorLocation());
+    // Find a random reachable point within patrol radius
+    UNavigationSystemV1* NavSystem = UNavigationSystemV1::GetCurrent(World);
+    if (!NavSystem)
+    {
+        return EBTNodeResult::Failed;
+    }
 
-        if (DistToPlayer <= AttackRadius)
+    FNavLocation RandomNavLocation;
+    bool bFoundLocation = false;
+
+    // Try up to 5 times to find a valid patrol point far enough from current position
+    for (int32 Attempt = 0; Attempt < 5; ++Attempt)
+    {
+        if (NavSystem->GetRandomReachablePointInRadius(HomeLocation, PatrolRadius, RandomNavLocation))
         {
-            // Attack state
-            if (CurrentAIState != 3)
+            float DistFromCurrent = FVector::Dist(ControlledPawn->GetActorLocation(), RandomNavLocation.Location);
+            if (DistFromCurrent >= MinPatrolStepDistance)
             {
-                SetAIState(3);
-            }
-            // Face player
-            FVector Dir = (PlayerChar->GetActorLocation() - ControlledPawn->GetActorLocation()).GetSafeNormal();
-            FRotator LookRot = Dir.Rotation();
-            ControlledPawn->SetActorRotation(FRotator(0, LookRot.Yaw, 0));
-        }
-        else if (DistToPlayer <= SightRadius)
-        {
-            // Chase state
-            if (CurrentAIState != 2)
-            {
-                SetAIState(2);
-            }
-            MoveToActor(PlayerChar, AttackRadius * 0.8f);
-        }
-        else
-        {
-            // Patrol state
-            if (CurrentAIState != 0)
-            {
-                SetAIState(0);
-            }
-
-            // Wander within patrol radius
-            float DistFromOrigin = FVector::Dist(ControlledPawn->GetActorLocation(), PatrolOrigin);
-            if (DistFromOrigin > PatrolRadius)
-            {
-                MoveToLocation(PatrolOrigin);
+                bFoundLocation = true;
+                break;
             }
         }
     }
-}
 
-void ATRexAIController::OnPossess(APawn* InPawn)
-{
-    Super::OnPossess(InPawn);
-    PatrolOrigin = InPawn->GetActorLocation();
-}
-
-void ATRexAIController::SetAIState(int32 NewState)
-{
-    CurrentAIState = NewState;
-    if (BlackboardComp)
+    if (!bFoundLocation)
     {
-        BlackboardComp->SetValueAsInt(BlackboardKey_AIState, NewState);
+        // Fallback: pick a point directly away from current heading
+        FVector ForwardDir = ControlledPawn->GetActorForwardVector();
+        FVector FallbackPoint = HomeLocation + ForwardDir * (PatrolRadius * 0.5f);
+        Blackboard->SetValueAsVector(PatrolDestinationKey.SelectedKeyName, FallbackPoint);
+        return EBTNodeResult::Succeeded;
     }
+
+    Blackboard->SetValueAsVector(PatrolDestinationKey.SelectedKeyName, RandomNavLocation.Location);
+
+#if WITH_EDITOR
+    // Debug: draw patrol destination in editor
+    DrawDebugSphere(World, RandomNavLocation.Location, 120.0f, 8, FColor::Green, false, 3.0f);
+#endif
+
+    return EBTNodeResult::Succeeded;
 }
 
-bool ATRexAIController::IsPlayerInAttackRange() const
+FString UNPC_BTTask_TRexPatrol::GetStaticDescription() const
 {
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return false;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-    if (!PlayerChar) return false;
-
-    return FVector::Dist(ControlledPawn->GetActorLocation(), PlayerChar->GetActorLocation()) <= AttackRadius;
+    return FString::Printf(TEXT("T-Rex patrols within %.0f units of home.\nMin step: %.0f units."),
+        PatrolRadius, MinPatrolStepDistance);
 }
 
-bool ATRexAIController::IsPlayerInChaseRange() const
+// ============================================================
+// UNPC_BTTask_TRexChasePlayer
+// ============================================================
+
+UNPC_BTTask_TRexChasePlayer::UNPC_BTTask_TRexChasePlayer()
 {
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return false;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-    if (!PlayerChar) return false;
-
-    return FVector::Dist(ControlledPawn->GetActorLocation(), PlayerChar->GetActorLocation()) <= SightRadius;
+    NodeName = TEXT("TRex Chase Player");
+    bNotifyTick = false;
 }
 
-void ATRexAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+EBTNodeResult::Type UNPC_BTTask_TRexChasePlayer::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-    if (!Actor) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(Actor);
-    if (!PlayerChar) return;
-
-    if (Stimulus.WasSuccessfullySensed())
+    AAIController* AIController = OwnerComp.GetAIOwner();
+    if (!AIController)
     {
-        UpdateBlackboardFromPerception(PlayerChar);
+        return EBTNodeResult::Failed;
     }
-    else
+
+    UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+    if (!Blackboard)
     {
-        // Lost sight — return to patrol after delay
-        if (BlackboardComp)
+        return EBTNodeResult::Failed;
+    }
+
+    // Get target from blackboard
+    AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TargetActorKey.SelectedKeyName));
+    if (!TargetActor)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    APawn* ControlledPawn = AIController->GetPawn();
+    if (!ControlledPawn)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    // Check if target is still within give-up range
+    float DistToTarget = FVector::Dist(ControlledPawn->GetActorLocation(), TargetActor->GetActorLocation());
+    if (DistToTarget > GiveUpDistance)
+    {
+        // Lost the target — clear blackboard target and return failed to trigger patrol
+        Blackboard->ClearValue(TargetActorKey.SelectedKeyName);
+        return EBTNodeResult::Failed;
+    }
+
+    // Update last known player location
+    Blackboard->SetValueAsVector(LastKnownPlayerLocationKey.SelectedKeyName, TargetActor->GetActorLocation());
+
+    // Boost movement speed for chase
+    ACharacter* TRexCharacter = Cast<ACharacter>(ControlledPawn);
+    if (TRexCharacter && TRexCharacter->GetCharacterMovement())
+    {
+        float BaseSpeed = 600.0f; // T-Rex base walk speed
+        TRexCharacter->GetCharacterMovement()->MaxWalkSpeed = BaseSpeed * ChaseSpeedMultiplier;
+    }
+
+    // Move to target
+    EPathFollowingRequestResult::Type MoveResult = AIController->MoveToActor(
+        TargetActor,
+        /*AcceptanceRadius=*/ 300.0f,
+        /*bStopOnOverlap=*/ true,
+        /*bUsePathfinding=*/ true,
+        /*bCanStrafe=*/ false
+    );
+
+    if (MoveResult == EPathFollowingRequestResult::Failed)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+#if WITH_EDITOR
+    DrawDebugLine(ControlledPawn->GetWorld(),
+        ControlledPawn->GetActorLocation(),
+        TargetActor->GetActorLocation(),
+        FColor::Red, false, 0.5f, 0, 8.0f);
+#endif
+
+    return EBTNodeResult::Succeeded;
+}
+
+FString UNPC_BTTask_TRexChasePlayer::GetStaticDescription() const
+{
+    return FString::Printf(TEXT("T-Rex chases player at %.1fx speed.\nGives up at %.0f units."),
+        ChaseSpeedMultiplier, GiveUpDistance);
+}
+
+// ============================================================
+// UNPC_BTTask_TRexAttack
+// ============================================================
+
+UNPC_BTTask_TRexAttack::UNPC_BTTask_TRexAttack()
+{
+    NodeName = TEXT("TRex Attack");
+    bNotifyTick = false;
+}
+
+EBTNodeResult::Type UNPC_BTTask_TRexAttack::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
+{
+    AAIController* AIController = OwnerComp.GetAIOwner();
+    if (!AIController)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+    if (!Blackboard)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    APawn* ControlledPawn = AIController->GetPawn();
+    if (!ControlledPawn)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TargetActorKey.SelectedKeyName));
+    if (!TargetActor)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    // Check attack range
+    float DistToTarget = FVector::Dist(ControlledPawn->GetActorLocation(), TargetActor->GetActorLocation());
+    if (DistToTarget > AttackRange)
+    {
+        // Not close enough — return failed so BT switches to chase
+        return EBTNodeResult::Failed;
+    }
+
+    // Check attack cooldown
+    UWorld* World = ControlledPawn->GetWorld();
+    if (!World)
+    {
+        return EBTNodeResult::Failed;
+    }
+
+    float CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastAttackTime < AttackCooldown)
+    {
+        // Still on cooldown — succeed without dealing damage (animation continues)
+        return EBTNodeResult::Succeeded;
+    }
+
+    LastAttackTime = CurrentTime;
+
+    // Apply damage to target
+    UGameplayStatics::ApplyDamage(
+        TargetActor,
+        BiteDamage,
+        AIController,
+        ControlledPawn,
+        UDamageType::StaticClass()
+    );
+
+#if WITH_EDITOR
+    DrawDebugSphere(World, TargetActor->GetActorLocation(), 80.0f, 8, FColor::Red, false, 1.0f);
+    UE_LOG(LogTemp, Warning, TEXT("TRex BITE: %.0f damage to %s"), BiteDamage, *TargetActor->GetName());
+#endif
+
+    return EBTNodeResult::Succeeded;
+}
+
+FString UNPC_BTTask_TRexAttack::GetStaticDescription() const
+{
+    return FString::Printf(TEXT("T-Rex bites for %.0f damage.\nRange: %.0f units. Cooldown: %.1fs."),
+        BiteDamage, AttackRange, AttackCooldown);
+}
+
+// ============================================================
+// UNPC_BTDecorator_TRexSensePlayer
+// ============================================================
+
+UNPC_BTDecorator_TRexSensePlayer::UNPC_BTDecorator_TRexSensePlayer()
+{
+    NodeName = TEXT("TRex Sense Player");
+    bNotifyBecomeRelevant = true;
+    bNotifyCeaseRelevant = false;
+}
+
+bool UNPC_BTDecorator_TRexSensePlayer::CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const
+{
+    AAIController* AIController = OwnerComp.GetAIOwner();
+    if (!AIController)
+    {
+        return false;
+    }
+
+    APawn* ControlledPawn = AIController->GetPawn();
+    if (!ControlledPawn)
+    {
+        return false;
+    }
+
+    UWorld* World = ControlledPawn->GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Get the player character
+    ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(World, 0);
+    if (!PlayerCharacter)
+    {
+        return false;
+    }
+
+    FVector TRexLocation = ControlledPawn->GetActorLocation();
+    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
+    float DistToPlayer = FVector::Dist(TRexLocation, PlayerLocation);
+
+    // Sound detection — player within sound radius (movement-based)
+    if (DistToPlayer <= SoundRadius)
+    {
+        UCharacterMovementComponent* PlayerMovement = PlayerCharacter->GetCharacterMovement();
+        if (PlayerMovement && PlayerMovement->Velocity.SizeSquared() > 10000.0f) // Moving faster than ~100 cm/s
         {
-            BlackboardComp->ClearValue(BlackboardKey_TargetActor);
-            BlackboardComp->SetValueAsInt(BlackboardKey_AIState, 1); // Alert state
+            // Write target to blackboard
+            UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+            if (Blackboard)
+            {
+                Blackboard->SetValueAsObject(TargetActorKey.SelectedKeyName, PlayerCharacter);
+            }
+            return true;
         }
-        SetAIState(1);
     }
+
+    // Sight detection — player within sight radius AND in vision cone
+    if (DistToPlayer <= SightRadius)
+    {
+        FVector TRexForward = ControlledPawn->GetActorForwardVector();
+        FVector ToPlayer = (PlayerLocation - TRexLocation).GetSafeNormal();
+        float DotProduct = FVector::DotProduct(TRexForward, ToPlayer);
+        float AngleToPlayer = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+
+        if (AngleToPlayer <= VisionConeHalfAngle)
+        {
+            // Line-of-sight check
+            FHitResult HitResult;
+            FCollisionQueryParams QueryParams;
+            QueryParams.AddIgnoredActor(ControlledPawn);
+
+            bool bBlocked = World->LineTraceSingleByChannel(
+                HitResult,
+                TRexLocation + FVector(0, 0, 100), // Eye height
+                PlayerLocation,
+                ECC_Visibility,
+                QueryParams
+            );
+
+            if (!bBlocked || HitResult.GetActor() == PlayerCharacter)
+            {
+                // Clear line of sight — T-Rex sees the player
+                UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+                if (Blackboard)
+                {
+                    Blackboard->SetValueAsObject(TargetActorKey.SelectedKeyName, PlayerCharacter);
+                }
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
-void ATRexAIController::UpdateBlackboardFromPerception(AActor* PlayerActor)
+FString UNPC_BTDecorator_TRexSensePlayer::GetStaticDescription() const
 {
-    if (!BlackboardComp || !PlayerActor) return;
-
-    BlackboardComp->SetValueAsObject(BlackboardKey_TargetActor, PlayerActor);
-
-    float Dist = 0.0f;
-    if (GetPawn())
-    {
-        Dist = FVector::Dist(GetPawn()->GetActorLocation(), PlayerActor->GetActorLocation());
-    }
-
-    if (Dist <= AttackRadius)
-    {
-        BlackboardComp->SetValueAsInt(BlackboardKey_AIState, 3); // Attack
-        SetAIState(3);
-    }
-    else
-    {
-        BlackboardComp->SetValueAsInt(BlackboardKey_AIState, 2); // Chase
-        SetAIState(2);
-    }
+    return FString::Printf(TEXT("T-Rex detects player.\nSight: %.0f units / %.0f° cone.\nSound: %.0f units."),
+        SightRadius, VisionConeHalfAngle, SoundRadius);
 }
