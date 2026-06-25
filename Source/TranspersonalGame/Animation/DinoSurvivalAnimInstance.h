@@ -5,8 +5,9 @@
 #include "DinoSurvivalAnimInstance.generated.h"
 
 /**
- * Animation Instance for the player character in the prehistoric survival game.
- * Drives idle/walk/run/jump blend states based on movement velocity and physics state.
+ * Animation Instance for the prehistoric survivor player character.
+ * Drives idle/walk/run/sprint/jump/crouch state machine via blend spaces.
+ * Agent #10 — Animation Agent
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoSurvivalAnimInstance : public UAnimInstance
@@ -19,77 +20,87 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Movement State ──────────────────────────────────────────────────────
+    // ── Locomotion ──────────────────────────────────────────────────────────
 
-    /** Current ground speed (cm/s) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    float GroundSpeed;
+    /** Current movement speed (cm/s) — drives blend space */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Speed;
 
-    /** True when the character has velocity > 10 cm/s */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsMoving;
+    /** Lateral strafe direction (-1 left, 0 forward, +1 right) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Direction;
 
     /** True when character is in the air */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsInAir;
 
-    /** True when character is sprinting (speed > RunThreshold) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsSprinting;
-
     /** True when character is crouching */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsCrouching;
 
-    /** Direction of movement relative to character facing (-180 to 180) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    float MovementDirection;
+    /** True when character is sprinting (speed > SprintThreshold) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsSprinting;
 
-    /** Vertical velocity — used to drive jump/fall blend */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    float VerticalVelocity;
+    /** True when character is moving (speed > MovingThreshold) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsMoving;
 
-    // ── Survival State ───────────────────────────────────────────────────────
+    // ── Survival Stats ───────────────────────────────────────────────────────
 
-    /** 0-100 health — drives injury/limp animations */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float Health;
-
-    /** 0-100 stamina — drives exhaustion blend */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    /** Stamina 0-100 — affects animation weight/fatigue blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
     float Stamina;
 
-    /** True when health < 30 — triggers limp additive layer */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    bool bIsInjured;
+    /** Fear level 0-100 — triggers fear locomotion blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    float FearLevel;
 
-    /** True when stamina < 20 — triggers exhaustion pose */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    bool bIsExhausted;
+    /** True when near a predator (triggers alert idle) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    bool bIsThreatened;
+
+    // ── Combat ───────────────────────────────────────────────────────────────
+
+    /** True when character is in combat stance */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsInCombat;
+
+    /** True when attacking — triggers attack montage */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsAttacking;
+
+    /** True when carrying a tool/weapon */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsArmed;
 
     // ── IK ───────────────────────────────────────────────────────────────────
 
     /** Left foot IK target world location */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector LeftFootIKLocation;
 
     /** Right foot IK target world location */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector RightFootIKLocation;
 
-    /** Pelvis offset to keep character grounded on slopes */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    /** Pelvis offset for foot IK adjustment */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     float PelvisOffset;
 
     // ── Thresholds ───────────────────────────────────────────────────────────
 
-    /** Speed above which character is considered sprinting */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
-    float RunThreshold;
+    /** Speed above which character is considered moving */
+    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
+    float MovingThreshold;
 
-    /** Speed below which idle animation plays */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation|Config")
-    float IdleThreshold;
+    /** Speed above which character is considered sprinting */
+    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
+    float SprintThreshold;
+
+    /** Fear level above which bIsThreatened is true */
+    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
+    float ThreatFearThreshold;
 
 protected:
     /** Cached reference to owning character */
@@ -100,9 +111,9 @@ protected:
     UPROPERTY()
     class UCharacterMovementComponent* MovementComponent;
 
-    /** Update foot IK positions via line traces */
-    void UpdateFootIK();
+    /** Update foot IK traces */
+    void UpdateFootIK(float DeltaSeconds);
 
-    /** Compute pelvis offset from foot IK delta */
-    void UpdatePelvisOffset();
+    /** Perform a line trace for foot placement */
+    bool TraceFootIK(const FName& FootSocketName, FVector& OutLocation);
 };
