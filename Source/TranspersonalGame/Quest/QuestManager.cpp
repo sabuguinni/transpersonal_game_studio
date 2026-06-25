@@ -1,308 +1,253 @@
 #include "QuestManager.h"
 #include "Engine/World.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// AQuestManager — Implementation
+// ============================================================
+
 AQuestManager::AQuestManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = QuestTickInterval;
+    PrimaryActorTick.bCanEverTick = false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void AQuestManager::BeginPlay()
 {
     Super::BeginPlay();
-    RegisterDefaultQuests();
+    InitializeDefaultQuests();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::Tick(float DeltaTime)
+void AQuestManager::InitializeDefaultQuests()
 {
-    Super::Tick(DeltaTime);
-    // Tick is intentionally lightweight — quest state is event-driven
-}
+    QuestDatabase.Empty();
 
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::RegisterDefaultQuests()
-{
-    // ── Q1: Protect the Camp ─────────────────────────────────────────────
+    // -------------------------------------------------------
+    // QUEST 1: "First Blood" — Hunt a Velociraptor
+    // -------------------------------------------------------
     {
         FQuest_Data Q;
-        Q.QuestID          = "Q_ProtectCamp";
-        Q.QuestTitle       = "Protect the Camp";
-        Q.QuestDescription = "A T-Rex has been spotted near the camp. Keep the predator away until the tribe is safe.";
-        Q.GiverActorLabel  = "CrowdNPC_Elder_001";
-        Q.RewardFood       = 30.f;
-        Q.RewardReputation = 20.f;
+        Q.QuestID = TEXT("QUEST_HUNT_RAPTOR_01");
+        Q.QuestTitle = TEXT("First Blood");
+        Q.QuestDescription = TEXT("A pack of Velociraptors has been raiding the camp's food stores. Hunt one down to drive the pack away.");
+        Q.Status = EQuest_Status::Inactive;
+        Q.bIsMainQuest = false;
+        Q.GiverNPCLabel = TEXT("TribeElder_QuestGiver");
 
         FQuest_Objective Obj1;
-        Obj1.ObjectiveID    = "OBJ_DriveAwayTRex";
-        Obj1.Description    = "Drive the T-Rex away from the camp";
-        Obj1.RequiredCount  = 1;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_Objective Obj2;
-        Obj2.ObjectiveID    = "OBJ_KeepCrowdSafe";
-        Obj2.Description    = "Keep all tribe members alive";
-        Obj2.RequiredCount  = 1;
-        Q.Objectives.Add(Obj2);
-
-        AllQuests.Add(Q);
-    }
-
-    // ── Q2: Track the Raptors ────────────────────────────────────────────
-    {
-        FQuest_Data Q;
-        Q.QuestID          = "Q_TrackRaptors";
-        Q.QuestTitle       = "Track the Raptors";
-        Q.QuestDescription = "A raptor pack is circling the hunting grounds. Track them and drive them away before they attack.";
-        Q.GiverActorLabel  = "CrowdNPC_Hunter_001";
-        Q.RewardFood       = 20.f;
-        Q.RewardReputation = 15.f;
-
-        FQuest_Objective Obj1;
-        Obj1.ObjectiveID   = "OBJ_FindRaptorPack";
-        Obj1.Description   = "Locate the raptor pack";
+        Obj1.ObjectiveID = TEXT("OBJ_KILL_RAPTOR");
+        Obj1.Description = TEXT("Kill a Velociraptor (0/1)");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::Hunt;
         Obj1.RequiredCount = 1;
+        Obj1.CurrentCount = 0;
+        Obj1.bIsCompleted = false;
         Q.Objectives.Add(Obj1);
 
         FQuest_Objective Obj2;
-        Obj2.ObjectiveID   = "OBJ_DriveRaptors";
-        Obj2.Description   = "Drive away or kill 3 raptors";
-        Obj2.RequiredCount = 3;
-        Q.Objectives.Add(Obj2);
-
-        AllQuests.Add(Q);
-    }
-
-    // ── Q3: Gather Supplies ──────────────────────────────────────────────
-    {
-        FQuest_Data Q;
-        Q.QuestID          = "Q_GatherSupplies";
-        Q.QuestTitle       = "Gather Supplies";
-        Q.QuestDescription = "The tribe is running low on food. Gather berries and hunt small game before nightfall.";
-        Q.GiverActorLabel  = "CrowdNPC_Gatherer_001";
-        Q.RewardFood       = 10.f;
-        Q.RewardReputation = 10.f;
-
-        FQuest_Objective Obj1;
-        Obj1.ObjectiveID   = "OBJ_GatherBerries";
-        Obj1.Description   = "Gather 5 berry clusters";
-        Obj1.RequiredCount = 5;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_Objective Obj2;
-        Obj2.ObjectiveID   = "OBJ_HuntSmallGame";
-        Obj2.Description   = "Hunt 2 small animals";
-        Obj2.RequiredCount = 2;
-        Q.Objectives.Add(Obj2);
-
-        AllQuests.Add(Q);
-    }
-
-    // ── Q4: Scout the Territory ──────────────────────────────────────────
-    {
-        FQuest_Data Q;
-        Q.QuestID          = "Q_ScoutTerritory";
-        Q.QuestTitle       = "Scout the Territory";
-        Q.QuestDescription = "We need to know what lies beyond the ridge. Scout three key locations and report back.";
-        Q.GiverActorLabel  = "CrowdNPC_Scout_001";
-        Q.RewardFood       = 15.f;
-        Q.RewardReputation = 25.f;
-
-        FQuest_Objective Obj1;
-        Obj1.ObjectiveID   = "OBJ_ReachRidge";
-        Obj1.Description   = "Reach the eastern ridge";
-        Obj1.RequiredCount = 1;
-        Q.Objectives.Add(Obj1);
-
-        FQuest_Objective Obj2;
-        Obj2.ObjectiveID   = "OBJ_ReachRiver";
-        Obj2.Description   = "Find the river crossing";
+        Obj2.ObjectiveID = TEXT("OBJ_RETURN_CAMP");
+        Obj2.Description = TEXT("Return to camp");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::Explore;
         Obj2.RequiredCount = 1;
+        Obj2.CurrentCount = 0;
+        Obj2.bIsCompleted = false;
+        Q.Objectives.Add(Obj2);
+
+        Q.Reward.ResourceFood = 5;
+        Q.Reward.ResourceRocks = 2;
+        Q.Reward.HealthBonus = 20.0f;
+
+        QuestDatabase.Add(Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 2: "Stone Tools" — Gather crafting materials
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_CRAFT_STONE_AXE");
+        Q.QuestTitle = TEXT("Stone Tools");
+        Q.QuestDescription = TEXT("Craft a stone axe to improve your chances of survival. Gather rocks and sticks from the forest floor.");
+        Q.Status = EQuest_Status::Inactive;
+        Q.bIsMainQuest = true;
+        Q.GiverNPCLabel = TEXT("TribeElder_QuestGiver");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_GATHER_ROCKS");
+        Obj1.Description = TEXT("Gather rocks (0/2)");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::Gather;
+        Obj1.RequiredCount = 2;
+        Obj1.CurrentCount = 0;
+        Obj1.bIsCompleted = false;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_GATHER_STICKS");
+        Obj2.Description = TEXT("Gather sticks (0/1)");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::Gather;
+        Obj2.RequiredCount = 1;
+        Obj2.CurrentCount = 0;
+        Obj2.bIsCompleted = false;
         Q.Objectives.Add(Obj2);
 
         FQuest_Objective Obj3;
-        Obj3.ObjectiveID   = "OBJ_ReturnToElder";
-        Obj3.Description   = "Return to the Elder with your report";
+        Obj3.ObjectiveID = TEXT("OBJ_CRAFT_AXE");
+        Obj3.Description = TEXT("Craft a Stone Axe at the crafting stone");
+        Obj3.ObjectiveType = EQuest_ObjectiveType::Craft;
         Obj3.RequiredCount = 1;
+        Obj3.CurrentCount = 0;
+        Obj3.bIsCompleted = false;
         Q.Objectives.Add(Obj3);
 
-        AllQuests.Add(Q);
+        Q.Reward.ResourceRocks = 3;
+        Q.Reward.ResourceSticks = 2;
+        Q.Reward.HealthBonus = 10.0f;
+
+        QuestDatabase.Add(Q);
     }
+
+    // -------------------------------------------------------
+    // QUEST 3: "River Crossing" — Explore the eastern valley
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_EXPLORE_RIVER");
+        Q.QuestTitle = TEXT("River Crossing");
+        Q.QuestDescription = TEXT("The tribe needs to know what lies beyond the eastern river. Scout the valley and return alive.");
+        Q.Status = EQuest_Status::Inactive;
+        Q.bIsMainQuest = true;
+        Q.GiverNPCLabel = TEXT("Scout_NPC_QuestLine");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_REACH_RIVER");
+        Obj1.Description = TEXT("Reach the eastern river");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::Explore;
+        Obj1.RequiredCount = 1;
+        Obj1.CurrentCount = 0;
+        Obj1.bIsCompleted = false;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_CROSS_RIVER");
+        Obj2.Description = TEXT("Cross the river without being detected by the T-Rex");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::Survive;
+        Obj2.RequiredCount = 1;
+        Obj2.CurrentCount = 0;
+        Obj2.bIsCompleted = false;
+        Q.Objectives.Add(Obj2);
+
+        FQuest_Objective Obj3;
+        Obj3.ObjectiveID = TEXT("OBJ_SCOUT_VALLEY");
+        Obj3.Description = TEXT("Scout the eastern valley (0/3 areas)");
+        Obj3.ObjectiveType = EQuest_ObjectiveType::Explore;
+        Obj3.RequiredCount = 3;
+        Obj3.CurrentCount = 0;
+        Obj3.bIsCompleted = false;
+        Q.Objectives.Add(Obj3);
+
+        FQuest_Objective Obj4;
+        Obj4.ObjectiveID = TEXT("OBJ_RETURN_ALIVE");
+        Obj4.Description = TEXT("Return to camp alive");
+        Obj4.ObjectiveType = EQuest_ObjectiveType::Survive;
+        Obj4.RequiredCount = 1;
+        Obj4.CurrentCount = 0;
+        Obj4.bIsCompleted = false;
+        Q.Objectives.Add(Obj4);
+
+        Q.Reward.ResourceFood = 8;
+        Q.Reward.ResourceRocks = 4;
+        Q.Reward.ResourceSticks = 3;
+        Q.Reward.HealthBonus = 30.0f;
+
+        QuestDatabase.Add(Q);
+    }
+
+    // -------------------------------------------------------
+    // QUEST 4: "Defend the Camp" — Survive a predator attack
+    // -------------------------------------------------------
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_DEFEND_CAMP");
+        Q.QuestTitle = TEXT("Defend the Camp");
+        Q.QuestDescription = TEXT("A Triceratops is charging toward the camp. Drive it away before it destroys the food stores.");
+        Q.Status = EQuest_Status::Inactive;
+        Q.bIsMainQuest = false;
+        Q.GiverNPCLabel = TEXT("TribeElder_QuestGiver");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_DRIVE_TRIKE");
+        Obj1.Description = TEXT("Drive away the Triceratops");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::Defend;
+        Obj1.RequiredCount = 1;
+        Obj1.CurrentCount = 0;
+        Obj1.bIsCompleted = false;
+        Q.Objectives.Add(Obj1);
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_PROTECT_STORES");
+        Obj2.Description = TEXT("Keep food stores above 50% health");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::Defend;
+        Obj2.RequiredCount = 1;
+        Obj2.CurrentCount = 0;
+        Obj2.bIsCompleted = false;
+        Q.Objectives.Add(Obj2);
+
+        Q.Reward.ResourceFood = 10;
+        Q.Reward.HealthBonus = 25.0f;
+
+        QuestDatabase.Add(Q);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Initialized %d quests"), QuestDatabase.Num());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-bool AQuestManager::ActivateQuest(const FString& QuestID)
+bool AQuestManager::StartQuest(const FString& QuestID)
 {
     int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE) return false;
+    if (Idx == INDEX_NONE)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest not found: %s"), *QuestID);
+        return false;
+    }
 
-    FQuest_Data& Q = AllQuests[Idx];
-    if (Q.State != EQuest_State::Inactive) return false;
+    if (QuestDatabase[Idx].Status != EQuest_Status::Inactive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest already started or finished: %s"), *QuestID);
+        return false;
+    }
 
-    Q.State = EQuest_State::Active;
-    ActiveQuestIDs.AddUnique(QuestID);
-    UE_LOG(LogTemp, Log, TEXT("[QuestManager] Quest ACTIVATED: %s"), *Q.QuestTitle);
+    QuestDatabase[Idx].Status = EQuest_Status::Active;
+    ActiveQuests.Add(QuestDatabase[Idx]);
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Started quest: %s"), *QuestDatabase[Idx].QuestTitle);
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-bool AQuestManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID, int32 Count)
+void AQuestManager::AdvanceObjective(const FString& QuestID, const FString& ObjectiveID, int32 Amount)
 {
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE) return false;
-
-    FQuest_Data& Q = AllQuests[Idx];
-    if (Q.State != EQuest_State::Active) return false;
-
-    for (FQuest_Objective& Obj : Q.Objectives)
+    int32 ActiveIdx = FindActiveQuestIndex(QuestID);
+    if (ActiveIdx == INDEX_NONE)
     {
-        if (Obj.ObjectiveID == ObjectiveID && !Obj.bCompleted)
+        return;
+    }
+
+    FQuest_Data& Quest = ActiveQuests[ActiveIdx];
+    for (FQuest_Objective& Obj : Quest.Objectives)
+    {
+        if (Obj.ObjectiveID == ObjectiveID && !Obj.bIsCompleted)
         {
-            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + Count, Obj.RequiredCount);
+            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + Amount, Obj.RequiredCount);
             if (Obj.CurrentCount >= Obj.RequiredCount)
             {
-                Obj.bCompleted = true;
-                UE_LOG(LogTemp, Log, TEXT("[QuestManager] Objective DONE: %s / %s"), *QuestID, *ObjectiveID);
+                Obj.bIsCompleted = true;
+                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective completed: %s"), *Obj.Description);
             }
-            CheckQuestCompletion(Q);
-            return true;
+            break;
         }
     }
-    return false;
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-bool AQuestManager::FailQuest(const FString& QuestID)
-{
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE) return false;
-
-    FQuest_Data& Q = AllQuests[Idx];
-    if (Q.State != EQuest_State::Active) return false;
-
-    Q.State = EQuest_State::Failed;
-    ActiveQuestIDs.Remove(QuestID);
-    UE_LOG(LogTemp, Warning, TEXT("[QuestManager] Quest FAILED: %s"), *Q.QuestTitle);
-    return true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-FQuest_Data AQuestManager::GetQuestData(const FString& QuestID) const
-{
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx != INDEX_NONE) return AllQuests[Idx];
-    return FQuest_Data();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-EQuest_State AQuestManager::GetQuestState(const FString& QuestID) const
-{
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx != INDEX_NONE) return AllQuests[Idx].State;
-    return EQuest_State::Inactive;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-TArray<FQuest_Data> AQuestManager::GetActiveQuests() const
-{
-    TArray<FQuest_Data> Result;
-    for (const FQuest_Data& Q : AllQuests)
-    {
-        if (Q.State == EQuest_State::Active)
-        {
-            Result.Add(Q);
-        }
-    }
-    return Result;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::OnCrowdFleeEvent(float FearLevel)
-{
-    // High fear (>0.8) during "Protect the Camp" = quest failure condition
-    if (FearLevel > 0.8f)
-    {
-        int32 Idx = FindQuestIndex("Q_ProtectCamp");
-        if (Idx != INDEX_NONE && AllQuests[Idx].State == EQuest_State::Active)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("[QuestManager] Crowd panic! Fear=%.2f — Q_ProtectCamp at risk"), FearLevel);
-            // Fail if fear stays critical — gameplay loop handles timing
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::OnQuestTriggerEntered(const FString& TriggerID)
-{
-    if (TriggerID == "QuestTrigger_ProtectCamp")
-    {
-        ActivateQuest("Q_ProtectCamp");
-    }
-    else if (TriggerID == "QuestTrigger_TrackRaptors")
-    {
-        ActivateQuest("Q_TrackRaptors");
-        CompleteObjective("Q_TrackRaptors", "OBJ_FindRaptorPack", 1);
-    }
-    else if (TriggerID == "QuestTrigger_GatherSupplies")
-    {
-        ActivateQuest("Q_GatherSupplies");
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::OnDinosaurKilled(const FString& DinoSpecies)
-{
-    if (DinoSpecies.Contains("Raptor"))
-    {
-        CompleteObjective("Q_TrackRaptors", "OBJ_DriveRaptors", 1);
-    }
-    else if (DinoSpecies.Contains("TRex") || DinoSpecies.Contains("Trex"))
-    {
-        CompleteObjective("Q_ProtectCamp", "OBJ_DriveAwayTRex", 1);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::OnResourceCollected(const FString& ResourceType, int32 Amount)
-{
-    if (ResourceType.Contains("Berry") || ResourceType.Contains("berry"))
-    {
-        CompleteObjective("Q_GatherSupplies", "OBJ_GatherBerries", Amount);
-    }
-    else if (ResourceType.Contains("SmallGame") || ResourceType.Contains("Animal"))
-    {
-        CompleteObjective("Q_GatherSupplies", "OBJ_HuntSmallGame", Amount);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::OnPlayerReachedLocation(const FString& LocationTag)
-{
-    if (LocationTag == "EasternRidge")
-    {
-        CompleteObjective("Q_ScoutTerritory", "OBJ_ReachRidge", 1);
-    }
-    else if (LocationTag == "RiverCrossing")
-    {
-        CompleteObjective("Q_ScoutTerritory", "OBJ_ReachRiver", 1);
-    }
-    else if (LocationTag == "ElderCamp")
-    {
-        CompleteObjective("Q_ScoutTerritory", "OBJ_ReturnToElder", 1);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-void AQuestManager::CheckQuestCompletion(FQuest_Data& Quest)
-{
-    if (Quest.State != EQuest_State::Active) return;
-
+    // Check if all objectives done
     bool bAllDone = true;
     for (const FQuest_Objective& Obj : Quest.Objectives)
     {
-        if (!Obj.bCompleted)
+        if (!Obj.bIsCompleted)
         {
             bAllDone = false;
             break;
@@ -311,19 +256,86 @@ void AQuestManager::CheckQuestCompletion(FQuest_Data& Quest)
 
     if (bAllDone)
     {
-        Quest.State = EQuest_State::Completed;
-        ActiveQuestIDs.Remove(Quest.QuestID);
-        UE_LOG(LogTemp, Log, TEXT("[QuestManager] Quest COMPLETED: %s | Reward Food=%.0f Rep=%.0f"),
-            *Quest.QuestTitle, Quest.RewardFood, Quest.RewardReputation);
+        CompleteQuest(QuestID);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+bool AQuestManager::CompleteQuest(const FString& QuestID)
+{
+    int32 ActiveIdx = FindActiveQuestIndex(QuestID);
+    if (ActiveIdx == INDEX_NONE)
+    {
+        return false;
+    }
+
+    ActiveQuests[ActiveIdx].Status = EQuest_Status::Completed;
+
+    // Sync back to database
+    int32 DbIdx = FindQuestIndex(QuestID);
+    if (DbIdx != INDEX_NONE)
+    {
+        QuestDatabase[DbIdx].Status = EQuest_Status::Completed;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest completed: %s"), *ActiveQuests[ActiveIdx].QuestTitle);
+    return true;
+}
+
+void AQuestManager::FailQuest(const FString& QuestID)
+{
+    int32 ActiveIdx = FindActiveQuestIndex(QuestID);
+    if (ActiveIdx == INDEX_NONE)
+    {
+        return;
+    }
+
+    ActiveQuests[ActiveIdx].Status = EQuest_Status::Failed;
+
+    int32 DbIdx = FindQuestIndex(QuestID);
+    if (DbIdx != INDEX_NONE)
+    {
+        QuestDatabase[DbIdx].Status = EQuest_Status::Failed;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest failed: %s"), *ActiveQuests[ActiveIdx].QuestTitle);
+}
+
+bool AQuestManager::GetQuestData(const FString& QuestID, FQuest_Data& OutData)
+{
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
+    {
+        return false;
+    }
+    OutData = QuestDatabase[Idx];
+    return true;
+}
+
+bool AQuestManager::IsQuestActive(const FString& QuestID) const
+{
+    return FindActiveQuestIndex(QuestID) != INDEX_NONE;
+}
+
 int32 AQuestManager::FindQuestIndex(const FString& QuestID) const
 {
-    for (int32 i = 0; i < AllQuests.Num(); ++i)
+    for (int32 i = 0; i < QuestDatabase.Num(); ++i)
     {
-        if (AllQuests[i].QuestID == QuestID) return i;
+        if (QuestDatabase[i].QuestID == QuestID)
+        {
+            return i;
+        }
+    }
+    return INDEX_NONE;
+}
+
+int32 AQuestManager::FindActiveQuestIndex(const FString& QuestID) const
+{
+    for (int32 i = 0; i < ActiveQuests.Num(); ++i)
+    {
+        if (ActiveQuests[i].QuestID == QuestID)
+        {
+            return i;
+        }
     }
     return INDEX_NONE;
 }
