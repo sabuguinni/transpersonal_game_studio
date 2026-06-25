@@ -11,44 +11,10 @@ enum class EAnim_DinoLocomotionState : uint8
     Walk        UMETA(DisplayName = "Walk"),
     Run         UMETA(DisplayName = "Run"),
     Attack      UMETA(DisplayName = "Attack"),
-    Roar        UMETA(DisplayName = "Roar"),
     Death       UMETA(DisplayName = "Death"),
-    Eat         UMETA(DisplayName = "Eat"),
-    Sleep       UMETA(DisplayName = "Sleep"),
+    Roar        UMETA(DisplayName = "Roar"),
 };
 
-USTRUCT(BlueprintType)
-struct FAnim_DinoLocomotionData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    bool bIsMoving = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    bool bIsAttacking = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    bool bIsRoaring = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    bool bIsDead = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Dinosaur Animation")
-    EAnim_DinoLocomotionState CurrentState = EAnim_DinoLocomotionState::Idle;
-};
-
-/**
- * UDinosaurAnimInstance
- * Animation instance for all dinosaur species.
- * Drives locomotion blend spaces, attack montages, and IK foot placement.
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
 {
@@ -60,57 +26,69 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // --- Locomotion Data ---
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    FAnim_DinoLocomotionData LocomotionData;
+    // ── Locomotion State ──
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    EAnim_DinoLocomotionState LocomotionState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    float GroundSpeed = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    bool bIsMoving = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    bool bIsInAir = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsMoving;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    EAnim_DinoLocomotionState LocomotionState = EAnim_DinoLocomotionState::Idle;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsAttacking;
 
-    // --- IK Foot Placement ---
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector LeftFootIKLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsDead;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector RightFootIKLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsRoaring;
 
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float IKFootBlendWeight = 1.0f;
+    // ── IK Foot Placement ──
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftFootIKLocation;
 
-    // --- Blend Weights ---
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    float WalkRunBlend = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightFootIKLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Animation")
-    float AttackBlendWeight = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float IKFootTraceDistance;
 
-    // --- Functions ---
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Animation")
-    void SetLocomotionState(EAnim_DinoLocomotionState NewState);
+    // ── Blend weights ──
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
+    float WalkRunBlend;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Animation")
-    void TriggerAttack();
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
+    float AttackBlendWeight;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Animation")
-    void TriggerRoar();
+    // ── Speed thresholds ──
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    float WalkSpeedThreshold;
 
-    UFUNCTION(BlueprintPure, Category = "Dinosaur Animation")
-    bool IsInAttackState() const;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    float RunSpeedThreshold;
+
+    // ── Foot IK update ──
+    UFUNCTION(BlueprintCallable, Category = "Anim|IK")
+    void UpdateFootIK();
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
+    void SetAttacking(bool bAttacking);
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
+    void SetDead(bool bDead);
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
+    void SetRoaring(bool bRoaring);
 
 private:
-    void UpdateLocomotionData(float DeltaSeconds);
-    void UpdateIKFootPlacement();
-    void UpdateBlendWeights(float DeltaSeconds);
+    void UpdateLocomotionState();
+    void UpdateWalkRunBlend();
+    void TraceFootIK(FName FootSocketName, FVector& OutIKLocation);
 
-    float AttackCooldown = 0.0f;
-    float RoarCooldown = 0.0f;
+    APawn* OwnerPawn;
 };
