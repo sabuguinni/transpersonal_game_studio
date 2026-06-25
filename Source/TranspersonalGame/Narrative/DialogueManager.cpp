@@ -1,267 +1,471 @@
 #include "DialogueManager.h"
 #include "Engine/World.h"
 
+// ============================================================
+// Constructor
+// ============================================================
+
 ADialogueManager::ADialogueManager()
 {
     PrimaryActorTick.bCanEverTick = false;
-    ActiveTreeID = TEXT("");
-    ActiveLineID = TEXT("");
+    CurrentState = ENarr_DialogueState::Idle;
+    ActiveLineIndex = 0;
 }
+
+// ============================================================
+// BeginPlay — register all built-in NPC dialogue trees
+// ============================================================
 
 void ADialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultDialogueTrees();
+    InitialiseBuiltInDialogueTrees();
 }
 
-void ADialogueManager::InitializeDefaultDialogueTrees()
+// ============================================================
+// InitialiseBuiltInDialogueTrees
+// ============================================================
+
+void ADialogueManager::InitialiseBuiltInDialogueTrees()
 {
-    // ============================================================
-    // TREE 1: Hunter NPC — Quest QUEST_HUNT_RAPTOR_001
-    // Trigger zone: DialogueTrigger_Hunter_001 at (1500, 1000, 250)
-    // Voice: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328316758_QuestGiver_Hunter.mp3
-    // ============================================================
-    {
-        FNarr_DialogueTree HunterTree;
-        HunterTree.TreeID = TEXT("TREE_HUNTER_001");
-        HunterTree.NPCName = TEXT("Kael — Hunter");
-        HunterTree.FirstLineID = TEXT("H001_L1");
-        HunterTree.State = ENarr_DialogueState::Idle;
-
-        FNarr_DialogueLine L1;
-        L1.LineID = TEXT("H001_L1");
-        L1.SpeakerName = TEXT("Kael");
-        L1.LineText = TEXT("The hunting ground is dangerous. Three raptors were spotted near the river crossing at dawn. Gather your spear and follow the eastern trail.");
-        L1.LineType = ENarr_DialogueType::QuestGive;
-        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328316758_QuestGiver_Hunter.mp3");
-        L1.DisplayDuration = 6.0f;
-        L1.NextLineID = TEXT("H001_L2");
-        L1.TriggersQuestID = TEXT("QUEST_HUNT_RAPTOR_001");
-        HunterTree.Lines.Add(L1);
-
-        FNarr_DialogueLine L2;
-        L2.LineID = TEXT("H001_L2");
-        L2.SpeakerName = TEXT("Kael");
-        L2.LineText = TEXT("Stay low and listen. The raptors hunt in packs. One circles wide, two come from the front. If you hear the clicking sound — run. Use the rocks for cover.");
-        L2.LineType = ENarr_DialogueType::Warning;
-        L2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328450652_HunterNPC_Dialogue.mp3");
-        L2.DisplayDuration = 7.0f;
-        L2.NextLineID = TEXT("");
-        L2.TriggersQuestID = TEXT("");
-        HunterTree.Lines.Add(L2);
-
-        DialogueTrees.Add(HunterTree);
-    }
-
-    // ============================================================
-    // TREE 2: Tutorial NPC — Stone Axe crafting tutorial
-    // Trigger zone: DialogueTrigger_Gather_001 at (-800, 600, 250)
-    // Voice: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328472201_TutorialNPC_Crafting.mp3
-    // ============================================================
-    {
-        FNarr_DialogueTree CraftTree;
-        CraftTree.TreeID = TEXT("TREE_CRAFT_001");
-        CraftTree.NPCName = TEXT("Mira — Elder");
-        CraftTree.FirstLineID = TEXT("C001_L1");
-        CraftTree.State = ENarr_DialogueState::Idle;
-
-        FNarr_DialogueLine L1;
-        L1.LineID = TEXT("C001_L1");
-        L1.SpeakerName = TEXT("Mira");
-        L1.LineText = TEXT("The stone axe. Two rocks, one stick. Bind them tight with vine. It will not last long — but long enough to crack a skull. Watch me. Now you try.");
-        L1.LineType = ENarr_DialogueType::Tutorial;
-        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328472201_TutorialNPC_Crafting.mp3");
-        L1.DisplayDuration = 6.0f;
-        L1.NextLineID = TEXT("C001_L2");
-        L1.TriggersQuestID = TEXT("QUEST_GATHER_AXEMAT_001");
-        CraftTree.Lines.Add(L1);
-
-        FNarr_DialogueLine L2;
-        L2.LineID = TEXT("C001_L2");
-        L2.SpeakerName = TEXT("Mira");
-        L2.LineText = TEXT("Rocks are everywhere near the river. Sticks from dead branches only — green wood bends, it will not hold. Bring me what you find.");
-        L2.LineType = ENarr_DialogueType::Tutorial;
-        L2.AudioURL = TEXT("");
-        L2.DisplayDuration = 5.0f;
-        L2.NextLineID = TEXT("");
-        L2.TriggersQuestID = TEXT("");
-        CraftTree.Lines.Add(L2);
-
-        DialogueTrees.Add(CraftTree);
-    }
-
-    // ============================================================
-    // TREE 3: Scout NPC — Night raid warning
-    // Trigger zone: DialogueTrigger_Defend_001 at (200, -900, 250)
-    // Voice: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328337821_QuestGiver_Scout.mp3
-    // ============================================================
-    {
-        FNarr_DialogueTree DefendTree;
-        DefendTree.TreeID = TEXT("TREE_DEFEND_001");
-        DefendTree.NPCName = TEXT("Ryn — Scout");
-        DefendTree.FirstLineID = TEXT("D001_L1");
-        DefendTree.State = ENarr_DialogueState::Idle;
-
-        FNarr_DialogueLine L1;
-        L1.LineID = TEXT("D001_L1");
-        L1.SpeakerName = TEXT("Ryn");
-        L1.LineText = TEXT("You found the nest. Five eggs, still warm. Take them carefully — the mother cannot be far. Move fast and stay low.");
-        L1.LineType = ENarr_DialogueType::QuestGive;
-        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782328337821_QuestGiver_Scout.mp3");
-        L1.DisplayDuration = 5.0f;
-        L1.NextLineID = TEXT("D001_L2");
-        L1.TriggersQuestID = TEXT("QUEST_DEFEND_CAMP_001");
-        DefendTree.Lines.Add(L1);
-
-        FNarr_DialogueLine L2;
-        L2.LineID = TEXT("D001_L2");
-        L2.SpeakerName = TEXT("Ryn");
-        L2.LineText = TEXT("They come at night when the fire dies. Five of them, maybe more. Keep the torches burning. If one gets inside the camp perimeter, we lose people. Hold the line.");
-        L2.LineType = ENarr_DialogueType::Warning;
-        L2.AudioURL = TEXT("");
-        L2.DisplayDuration = 7.0f;
-        L2.NextLineID = TEXT("");
-        L2.TriggersQuestID = TEXT("");
-        DefendTree.Lines.Add(L2);
-
-        DialogueTrees.Add(DefendTree);
-    }
+    BuildElderKaelTree();
+    BuildScoutMiraTree();
 }
+
+// ============================================================
+// Elder Kael — Tribe Elder NPC
+// Quest links: QUEST_EXPLORE_RIVER, QUEST_DEFEND_CAMP
+// Audio: ElevenLabs TTS generated in PROD_CYCLE_AUTO_20260625_009
+// ============================================================
+
+void ADialogueManager::BuildElderKaelTree()
+{
+    FNarr_DialogueTree Tree;
+    Tree.TreeID = TEXT("DIALOGUE_ELDER_KAEL");
+    Tree.NPCID  = TEXT("TribeElder_QuestGiver");
+    Tree.RootNodeID = TEXT("KAEL_GREETING");
+    Tree.LinkedQuestID = TEXT("QUEST_EXPLORE_RIVER");
+
+    // ---- Node: KAEL_GREETING ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_GREETING");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Elder Kael");
+        L1.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L1.LineText = TEXT("You survived the night. Good. Most do not, their first time alone in the dark.");
+        L1.DisplayDuration = 4.5f;
+        L1.AnimationHint = TEXT("nod_slow");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueLine L2;
+        L2.SpeakerID = TEXT("Elder Kael");
+        L2.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L2.LineText = TEXT("The T-Rex does not hunt by sight alone. It hunts by sound. By smell. By the trembling of the earth beneath your feet. Stand still. Breathe slow.");
+        L2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393319087_Elder_Kael_Lore.mp3");
+        L2.DisplayDuration = 12.0f;
+        L2.AnimationHint = TEXT("gesture_east");
+        Node.Lines.Add(L2);
+
+        FNarr_DialogueChoice C1;
+        C1.ChoiceText = TEXT("Tell me about the river valley.");
+        C1.NextNodeID = TEXT("KAEL_RIVER_QUEST");
+        Node.Choices.Add(C1);
+
+        FNarr_DialogueChoice C2;
+        C2.ChoiceText = TEXT("What happened to the tribe that was here before?");
+        C2.NextNodeID = TEXT("KAEL_LORE_VALLEY");
+        Node.Choices.Add(C2);
+
+        FNarr_DialogueChoice C3;
+        C3.ChoiceText = TEXT("I need to go.");
+        C3.NextNodeID = TEXT("KAEL_FAREWELL");
+        Node.Choices.Add(C3);
+
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: KAEL_RIVER_QUEST ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_RIVER_QUEST");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Elder Kael");
+        L1.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L1.LineText = TEXT("The eastern hunting grounds are dangerous. A Tyrannosaurus has claimed the river valley as its territory. If you go, go at dusk — it feeds at dawn.");
+        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393159346_TribeElder_QuestGiver.mp3");
+        L1.DisplayDuration = 10.0f;
+        L1.AnimationHint = TEXT("point_east");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueLine L2;
+        L2.SpeakerID = TEXT("Elder Kael");
+        L2.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L2.LineText = TEXT("You want to cross the river? Then you need to know when the Triceratops herd drinks. They come at dusk, from the north. While they drink, the T-Rex stays west. That is your window. Maybe ten minutes. Do not waste it.");
+        L2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393343233_TribeElder_QuestGiver_Dialogue.mp3");
+        L2.DisplayDuration = 15.0f;
+        L2.AnimationHint = TEXT("crouch_point");
+        Node.Lines.Add(L2);
+
+        FNarr_DialogueChoice C1;
+        C1.ChoiceText = TEXT("I will scout the valley.");
+        C1.NextNodeID = TEXT("KAEL_QUEST_ACCEPT");
+        C1.bUnlocksQuest = true;
+        C1.UnlockedQuestID = TEXT("QUEST_EXPLORE_RIVER");
+        Node.Choices.Add(C1);
+
+        FNarr_DialogueChoice C2;
+        C2.ChoiceText = TEXT("That sounds too dangerous.");
+        C2.NextNodeID = TEXT("KAEL_QUEST_DECLINE");
+        Node.Choices.Add(C2);
+
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: KAEL_LORE_VALLEY ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_LORE_VALLEY");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Narrator");
+        L1.SpeakerRole = ENarr_SpeakerRole::Narrator;
+        L1.LineText = TEXT("We call this place the Valley of Teeth. Not because of the rocks. The first tribe that camped here — forty strong — was gone by morning. Only the fire remained. We do not camp here.");
+        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393328297_Narrator_GameBible.mp3");
+        L1.DisplayDuration = 13.0f;
+        L1.AnimationHint = TEXT("look_around_fearful");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueLine L2;
+        L2.SpeakerID = TEXT("Elder Kael");
+        L2.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L2.LineText = TEXT("My father's father saw the great lizards bring down a mammoth at the river bend. Three of them. Working together. They are not animals. They think. They plan. Never forget that.");
+        L2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393326193_Scout_Mira_Lore.mp3");
+        L2.DisplayDuration = 12.0f;
+        L2.AnimationHint = TEXT("gesture_wide");
+        Node.Lines.Add(L2);
+
+        Node.AutoNextNodeID = TEXT("KAEL_GREETING");
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: KAEL_QUEST_ACCEPT ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_QUEST_ACCEPT");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Elder Kael");
+        L1.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L1.LineText = TEXT("Then go. And come back alive. The tribe needs scouts more than it needs heroes.");
+        L1.DisplayDuration = 5.0f;
+        L1.AnimationHint = TEXT("nod_firm");
+        Node.Lines.Add(L1);
+
+        Node.bIsEndNode = true;
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: KAEL_QUEST_DECLINE ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_QUEST_DECLINE");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Elder Kael");
+        L1.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L1.LineText = TEXT("Caution is not cowardice. Come back when you are ready.");
+        L1.DisplayDuration = 4.0f;
+        L1.AnimationHint = TEXT("nod_slow");
+        Node.Lines.Add(L1);
+
+        Node.bIsEndNode = true;
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: KAEL_FAREWELL ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("KAEL_FAREWELL");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Elder Kael");
+        L1.SpeakerRole = ENarr_SpeakerRole::TribeElder;
+        L1.LineText = TEXT("Stay close to the tree line. And watch the sky — when the birds go silent, something big is moving.");
+        L1.DisplayDuration = 5.0f;
+        L1.AnimationHint = TEXT("look_up");
+        Node.Lines.Add(L1);
+
+        Node.bIsEndNode = true;
+        Tree.Nodes.Add(Node);
+    }
+
+    DialogueTrees.Add(Tree);
+}
+
+// ============================================================
+// Scout Mira — Scout NPC
+// Quest links: QUEST_HUNT_RAPTOR_01, QUEST_CRAFT_STONE_AXE
+// ============================================================
+
+void ADialogueManager::BuildScoutMiraTree()
+{
+    FNarr_DialogueTree Tree;
+    Tree.TreeID = TEXT("DIALOGUE_SCOUT_MIRA");
+    Tree.NPCID  = TEXT("Scout_NPC_QuestLine");
+    Tree.RootNodeID = TEXT("MIRA_GREETING");
+    Tree.LinkedQuestID = TEXT("QUEST_HUNT_RAPTOR_01");
+
+    // ---- Node: MIRA_GREETING ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("MIRA_GREETING");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Scout Mira");
+        L1.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L1.LineText = TEXT("You found the raptor nest. Three eggs remain. Take one — it will feed your tribe for days. But be swift. The mother is never far.");
+        L1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782393175487_Scout_NPC_QuestLine.mp3");
+        L1.DisplayDuration = 10.0f;
+        L1.AnimationHint = TEXT("crouch_whisper");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueChoice C1;
+        C1.ChoiceText = TEXT("Tell me about the raptors.");
+        C1.NextNodeID = TEXT("MIRA_RAPTOR_LORE");
+        Node.Choices.Add(C1);
+
+        FNarr_DialogueChoice C2;
+        C2.ChoiceText = TEXT("I need a stone axe. Where do I find the right rocks?");
+        C2.NextNodeID = TEXT("MIRA_CRAFTING_QUEST");
+        Node.Choices.Add(C2);
+
+        FNarr_DialogueChoice C3;
+        C3.ChoiceText = TEXT("I will hunt a raptor alone.");
+        C3.NextNodeID = TEXT("MIRA_HUNT_QUEST");
+        C3.bUnlocksQuest = true;
+        C3.UnlockedQuestID = TEXT("QUEST_HUNT_RAPTOR_01");
+        Node.Choices.Add(C3);
+
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: MIRA_RAPTOR_LORE ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("MIRA_RAPTOR_LORE");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Scout Mira");
+        L1.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L1.LineText = TEXT("Velociraptors hunt in threes. One drives you toward the others. If you see one, assume two more are already flanking you. Stop moving. Back against a tree. Make yourself unpredictable.");
+        L1.DisplayDuration = 11.0f;
+        L1.AnimationHint = TEXT("gesture_surround");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueLine L2;
+        L2.SpeakerID = TEXT("Scout Mira");
+        L2.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L2.LineText = TEXT("They are fast. Faster than you. But they are not patient. Make them wait. Make them come to you on your terms.");
+        L2.DisplayDuration = 7.0f;
+        L2.AnimationHint = TEXT("crouch_ready");
+        Node.Lines.Add(L2);
+
+        Node.AutoNextNodeID = TEXT("MIRA_GREETING");
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: MIRA_CRAFTING_QUEST ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("MIRA_CRAFTING_QUEST");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Scout Mira");
+        L1.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L1.LineText = TEXT("The grey rocks near the river bend — flint. Hard and sharp when struck right. Gather three pieces and find a straight branch. I will show you how to bind them.");
+        L1.DisplayDuration = 9.0f;
+        L1.AnimationHint = TEXT("point_river");
+        Node.Lines.Add(L1);
+
+        FNarr_DialogueChoice C1;
+        C1.ChoiceText = TEXT("I will gather the materials.");
+        C1.NextNodeID = TEXT("MIRA_CRAFT_ACCEPT");
+        C1.bUnlocksQuest = true;
+        C1.UnlockedQuestID = TEXT("QUEST_CRAFT_STONE_AXE");
+        Node.Choices.Add(C1);
+
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: MIRA_HUNT_QUEST ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("MIRA_HUNT_QUEST");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Scout Mira");
+        L1.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L1.LineText = TEXT("Alone? You are either very brave or very stupid. I have not decided which. There is a lone raptor that patrols the eastern ridge at midday. Separated from its pack. That is your best chance.");
+        L1.DisplayDuration = 11.0f;
+        L1.AnimationHint = TEXT("arms_crossed_skeptical");
+        Node.Lines.Add(L1);
+
+        Node.bIsEndNode = true;
+        Tree.Nodes.Add(Node);
+    }
+
+    // ---- Node: MIRA_CRAFT_ACCEPT ----
+    {
+        FNarr_DialogueNode Node;
+        Node.NodeID = TEXT("MIRA_CRAFT_ACCEPT");
+
+        FNarr_DialogueLine L1;
+        L1.SpeakerID = TEXT("Scout Mira");
+        L1.SpeakerRole = ENarr_SpeakerRole::Scout;
+        L1.LineText = TEXT("Good. Come back before dark. I will be at the camp fire.");
+        L1.DisplayDuration = 4.0f;
+        L1.AnimationHint = TEXT("nod_firm");
+        Node.Lines.Add(L1);
+
+        Node.bIsEndNode = true;
+        Tree.Nodes.Add(Node);
+    }
+
+    DialogueTrees.Add(Tree);
+}
+
+// ============================================================
+// Public API implementations
+// ============================================================
 
 bool ADialogueManager::StartDialogue(const FString& TreeID)
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == TreeID)
-        {
-            if (Tree.State == ENarr_DialogueState::Completed || Tree.State == ENarr_DialogueState::Locked)
-            {
-                return false;
-            }
-            ActiveTreeID = TreeID;
-            ActiveLineID = Tree.FirstLineID;
-            Tree.State = ENarr_DialogueState::Active;
-            return true;
-        }
-    }
-    return false;
+    FNarr_DialogueTree* Tree = FindTree(TreeID);
+    if (!Tree) return false;
+
+    CurrentState = ENarr_DialogueState::Active;
+    ActiveTreeID = TreeID;
+    ActiveNodeID = Tree->RootNodeID;
+    ActiveLineIndex = 0;
+    return true;
 }
 
-bool ADialogueManager::AdvanceDialogue()
+bool ADialogueManager::AdvanceLine()
 {
-    if (ActiveTreeID.IsEmpty() || ActiveLineID.IsEmpty())
-    {
-        return false;
-    }
+    if (CurrentState != ENarr_DialogueState::Active) return false;
 
-    FNarr_DialogueLine* CurrentLine = FindLine(ActiveTreeID, ActiveLineID);
-    if (!CurrentLine)
-    {
-        EndDialogue();
-        return false;
-    }
+    FNarr_DialogueNode* Node = FindNode(ActiveTreeID, ActiveNodeID);
+    if (!Node) return false;
 
-    if (CurrentLine->NextLineID.IsEmpty())
-    {
-        EndDialogue();
-        return false;
-    }
+    ActiveLineIndex++;
 
-    ActiveLineID = CurrentLine->NextLineID;
+    if (ActiveLineIndex >= Node->Lines.Num())
+    {
+        // All lines in this node exhausted
+        if (Node->Choices.Num() > 0)
+        {
+            CurrentState = ENarr_DialogueState::Waiting;
+            return true;
+        }
+        else if (!Node->AutoNextNodeID.IsEmpty())
+        {
+            ActiveNodeID = Node->AutoNextNodeID;
+            ActiveLineIndex = 0;
+            return true;
+        }
+        else if (Node->bIsEndNode)
+        {
+            EndDialogue();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ADialogueManager::MakeChoice(int32 ChoiceIndex)
+{
+    if (CurrentState != ENarr_DialogueState::Waiting) return false;
+
+    FNarr_DialogueNode* Node = FindNode(ActiveTreeID, ActiveNodeID);
+    if (!Node || !Node->Choices.IsValidIndex(ChoiceIndex)) return false;
+
+    const FNarr_DialogueChoice& Choice = Node->Choices[ChoiceIndex];
+    ActiveNodeID = Choice.NextNodeID;
+    ActiveLineIndex = 0;
+    CurrentState = ENarr_DialogueState::Active;
     return true;
 }
 
 void ADialogueManager::EndDialogue()
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == ActiveTreeID)
-        {
-            Tree.State = ENarr_DialogueState::Completed;
-            break;
-        }
-    }
-    ActiveTreeID = TEXT("");
-    ActiveLineID = TEXT("");
+    CurrentState = ENarr_DialogueState::Completed;
+    ActiveTreeID.Empty();
+    ActiveNodeID.Empty();
+    ActiveLineIndex = 0;
 }
 
 FNarr_DialogueLine ADialogueManager::GetCurrentLine() const
 {
-    if (ActiveTreeID.IsEmpty() || ActiveLineID.IsEmpty())
+    // const_cast is safe here — FindNode is logically const
+    FNarr_DialogueNode* Node = const_cast<ADialogueManager*>(this)->FindNode(ActiveTreeID, ActiveNodeID);
+    if (!Node || !Node->Lines.IsValidIndex(ActiveLineIndex))
     {
         return FNarr_DialogueLine();
     }
-
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == ActiveTreeID)
-        {
-            for (const FNarr_DialogueLine& Line : Tree.Lines)
-            {
-                if (Line.LineID == ActiveLineID)
-                {
-                    return Line;
-                }
-            }
-        }
-    }
-    return FNarr_DialogueLine();
+    return Node->Lines[ActiveLineIndex];
 }
 
-bool ADialogueManager::GetDialogueTree(const FString& TreeID, FNarr_DialogueTree& OutTree) const
+TArray<FNarr_DialogueChoice> ADialogueManager::GetCurrentChoices() const
 {
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == TreeID)
-        {
-            OutTree = Tree;
-            return true;
-        }
-    }
-    return false;
+    FNarr_DialogueNode* Node = const_cast<ADialogueManager*>(this)->FindNode(ActiveTreeID, ActiveNodeID);
+    if (!Node) return TArray<FNarr_DialogueChoice>();
+    return Node->Choices;
+}
+
+bool ADialogueManager::IsDialogueActive() const
+{
+    return CurrentState == ENarr_DialogueState::Active ||
+           CurrentState == ENarr_DialogueState::Waiting;
 }
 
 void ADialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& Tree)
 {
     // Remove existing tree with same ID if present
-    DialogueTrees.RemoveAll([&Tree](const FNarr_DialogueTree& Existing)
+    for (int32 i = DialogueTrees.Num() - 1; i >= 0; --i)
     {
-        return Existing.TreeID == Tree.TreeID;
-    });
+        if (DialogueTrees[i].TreeID == Tree.TreeID)
+        {
+            DialogueTrees.RemoveAt(i);
+            break;
+        }
+    }
     DialogueTrees.Add(Tree);
 }
 
-void ADialogueManager::MarkTreeCompleted(const FString& TreeID)
+// ============================================================
+// Private helpers
+// ============================================================
+
+FNarr_DialogueNode* ADialogueManager::FindNode(const FString& TreeID, const FString& NodeID)
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    FNarr_DialogueTree* Tree = FindTree(TreeID);
+    if (!Tree) return nullptr;
+
+    for (FNarr_DialogueNode& Node : Tree->Nodes)
     {
-        if (Tree.TreeID == TreeID)
-        {
-            Tree.State = ENarr_DialogueState::Completed;
-            return;
-        }
+        if (Node.NodeID == NodeID) return &Node;
     }
+    return nullptr;
 }
 
-bool ADialogueManager::IsDialogueActive() const
-{
-    return !ActiveTreeID.IsEmpty();
-}
-
-FNarr_DialogueLine* ADialogueManager::FindLine(const FString& TreeID, const FString& LineID)
+FNarr_DialogueTree* ADialogueManager::FindTree(const FString& TreeID)
 {
     for (FNarr_DialogueTree& Tree : DialogueTrees)
     {
-        if (Tree.TreeID == TreeID)
-        {
-            for (FNarr_DialogueLine& Line : Tree.Lines)
-            {
-                if (Line.LineID == LineID)
-                {
-                    return &Line;
-                }
-            }
-        }
+        if (Tree.TreeID == TreeID) return &Tree;
     }
     return nullptr;
 }
