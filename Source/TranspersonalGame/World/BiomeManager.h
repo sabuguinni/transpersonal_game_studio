@@ -1,187 +1,101 @@
+// BiomeManager.h
+// Agent #5 — Procedural World Generator
+// Manages biome zones: Forest, Savanna, Rocky, River, Lake
+// Each zone has environmental multipliers for survival stats
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Engine/EngineTypes.h"
+#include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// ECore_BiomeType — 6 prehistoric biome types
-// RULE: USTRUCT/UENUM at global scope only
-// ============================================================
 UENUM(BlueprintType)
-enum class ECore_BiomeType : uint8
+enum class EWorld_BiomeType : uint8
 {
-    Jungle      UMETA(DisplayName = "Cretaceous Jungle"),
-    Savanna     UMETA(DisplayName = "Open Savanna"),
-    Forest      UMETA(DisplayName = "Conifer Forest"),
-    Swamp       UMETA(DisplayName = "Primordial Swamp"),
-    Mountain    UMETA(DisplayName = "Rocky Highlands"),
-    Coastal     UMETA(DisplayName = "Coastal Shore"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Rocky       UMETA(DisplayName = "Rocky"),
+    River       UMETA(DisplayName = "River"),
+    Lake        UMETA(DisplayName = "Lake"),
+    Unknown     UMETA(DisplayName = "Unknown")
 };
 
-// ============================================================
-// FCore_BiomeData — runtime data for a single biome
-// ============================================================
 USTRUCT(BlueprintType)
-struct FCore_BiomeData
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    ECore_BiomeType BiomeType = ECore_BiomeType::Jungle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FText DisplayName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector Centre = FVector::ZeroVector;
 
-    /** Ambient temperature in Celsius */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Environment")
-    float BaseTemperature = 28.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 3000.0f;
 
-    /** 0.0 = arid, 1.0 = saturated */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Environment")
-    float Humidity = 0.5f;
+    // Survival stat multipliers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float ThirstDrainMultiplier = 1.0f;
 
-    /** 0.0 = safe, 1.0 = extremely dangerous */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Survival")
-    float DangerRating = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float HungerDrainMultiplier = 1.0f;
 
-    /** Foliage density multiplier for PCG */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Foliage")
-    float FoliageDensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float TemperatureOffset = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Dinosaurs")
-    bool bAllowsLargeHerbivores = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
+    float FearMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Dinosaurs")
-    bool bAllowsCarnivores = true;
+    // Visual identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor FogTint = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
 
-    /** Primary fog tint for this biome */
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Atmosphere")
-    FLinearColor PrimaryFogColor = FLinearColor(0.05f, 0.1f, 0.05f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    float FogDensity = 0.03f;
 };
 
-// ============================================================
-// UBiomeManager — World Subsystem (auto-created per world)
-// Manages biome state, transitions, and survival queries
-// ============================================================
-UCLASS(BlueprintType, meta = (DisplayName = "Biome Manager"))
-class TRANSPERSONALGAME_API UBiomeManager : public UWorldSubsystem, public FTickableGameObject
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBiomeManager();
+    ABiomeManager();
 
-    // UWorldSubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // FTickableGameObject interface
-    virtual void Tick(float DeltaTime) override;
-    virtual bool IsTickable() const override;
-    virtual TStatId GetStatId() const override;
-
-    // --------------------------------------------------------
-    // Biome Query
-    // --------------------------------------------------------
-
-    /** Returns the current active biome */
+    // Returns the biome type at a given world location
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    ECore_BiomeType GetCurrentBiome() const;
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns the biome type at a given world location (height-based) */
+    // Returns the full biome zone data at a given world location
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    ECore_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+    FWorld_BiomeZone GetBiomeZoneAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns full data struct for a biome type */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FCore_BiomeData GetBiomeData(ECore_BiomeType BiomeType) const;
-
-    // --------------------------------------------------------
-    // Biome Transition
-    // --------------------------------------------------------
-
-    /** Begin a smooth transition to a new biome over Duration seconds */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Transition")
-    void TransitionToBiome(ECore_BiomeType NewBiome, float Duration = 5.0f);
-
-    /** Immediately switch biome with no transition */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Transition")
-    void SetBiomeImmediate(ECore_BiomeType NewBiome);
-
-    // --------------------------------------------------------
-    // Survival Queries
-    // --------------------------------------------------------
-
-    /** Temperature at location in Celsius (altitude-adjusted) */
+    // Returns thirst drain multiplier for a location (used by SurvivalComponent)
     UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetTemperatureAtLocation(FVector WorldLocation) const;
+    float GetThirstMultiplierAt(const FVector& WorldLocation) const;
 
-    /** Humidity 0-1 at location */
+    // Returns hunger drain multiplier for a location
     UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetHumidityAtLocation(FVector WorldLocation) const;
+    float GetHungerMultiplierAt(const FVector& WorldLocation) const;
 
-    /** Danger level 0-1 at location */
+    // Returns fear multiplier for a location (proximity to predator zones)
     UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetDangerLevelAtLocation(FVector WorldLocation) const;
+    float GetFearMultiplierAt(const FVector& WorldLocation) const;
 
-    /** Returns true if danger < 0.5 */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    bool IsLocationSafeForPlayer(FVector WorldLocation) const;
+    // Registered biome zones
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FWorld_BiomeZone> BiomeZones;
 
-    // --------------------------------------------------------
-    // Dinosaur Spawning Rules
-    // --------------------------------------------------------
+    // Default zone returned when no biome matches
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FWorld_BiomeZone DefaultZone;
 
-    /** Returns true if a dinosaur of given type can spawn in this biome */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Dinosaurs")
-    bool CanSpawnDinosaurInBiome(ECore_BiomeType BiomeType, bool bIsLargeHerbivore, bool bIsCarnivore) const;
-
-    /** Returns valid spawn positions within a biome (line-traced to ground) */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Dinosaurs")
-    TArray<FVector> GetValidSpawnLocationsInBiome(ECore_BiomeType BiomeType, int32 Count, float SearchRadius = 5000.0f) const;
-
-    // --------------------------------------------------------
-    // Delegates
-    // --------------------------------------------------------
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeChanged, ECore_BiomeType, NewBiome);
-
-    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
-    FOnBiomeChanged OnBiomeChanged;
-
-    // --------------------------------------------------------
-    // State (read-only from Blueprint)
-    // --------------------------------------------------------
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|State", meta = (AllowPrivateAccess = "true"))
-    ECore_BiomeType CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
-    ECore_BiomeType TargetBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
-    float TransitionBlend;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
-    bool bBiomeTransitionActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Environment")
-    float TemperatureBase;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Environment")
-    float HumidityBase;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome|Survival")
-    float DangerLevel;
+protected:
+    virtual void BeginPlay() override;
 
 private:
-    void ApplyBiomeEnvironment(ECore_BiomeType BiomeType);
-
-    float BiomeTransitionDuration;
-    float BiomeTransitionElapsed;
-
-    /** Cached biome data (populated on first query) */
-    mutable TMap<ECore_BiomeType, FCore_BiomeData> BiomeDataMap;
+    // Initialise default biome zones matching MinPlayableMap layout
+    void InitialiseDefaultZones();
 };
