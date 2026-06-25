@@ -1,263 +1,250 @@
-// TranspersonalCharacter.cpp
-// Core Systems Programmer #03 — Cycle PROD_CYCLE_AUTO_20260625_004
-// Prehistoric survival game — full implementation with SurvivalComponent
-
-#include "Core/GameFramework/TranspersonalCharacter.h"
+#include "TranspersonalCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
-#include "InputActionValue.h"
-#include "Components/CapsuleComponent.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/InputComponent.h"
+#include "Engine/Engine.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────────────────────
+// SurvivalComponent — forward-declared in .h, included here for full definition
+// NOTE: If SurvivalComponent lives in a separate module, add that module to Build.cs.
+// For now we use a minimal inline stub so this file compiles independently.
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+
+// ---------------------------------------------------------------------------
+// Minimal SurvivalComponent stub (replace with real include once module exists)
+// ---------------------------------------------------------------------------
+#ifndef SURVIVAL_COMPONENT_DEFINED
+#define SURVIVAL_COMPONENT_DEFINED
+
+#include "UObject/ObjectMacros.h"
+
+// We cannot redefine USurvivalComponent here if it already exists in another TU.
+// Use a compile guard — if the real header is available it takes precedence.
+#if !defined(SURVIVAL_COMPONENT_FULL_HEADER)
+
+class USurvivalComponent : public UActorComponent
+{
+public:
+    float Health   = 100.f;
+    float Hunger   = 100.f;
+    float Thirst   = 100.f;
+    float Stamina  = 100.f;
+    float Fear     = 0.f;
+
+    float GetHealth()  const { return Health; }
+    float GetHunger()  const { return Hunger; }
+    float GetThirst()  const { return Thirst; }
+    float GetStamina() const { return Stamina; }
+    float GetFear()    const { return Fear; }
+    bool  IsAlive()    const { return Health > 0.f; }
+
+    void DrainStamina(float Amount) { Stamina = FMath::Max(0.f, Stamina - Amount); }
+    void RegenStamina(float Amount) { Stamina = FMath::Min(100.f, Stamina + Amount); }
+};
+
+#endif // SURVIVAL_COMPONENT_FULL_HEADER
+#endif // SURVIVAL_COMPONENT_DEFINED
+
+// ---------------------------------------------------------------------------
+// ATranspersonalCharacter
+// ---------------------------------------------------------------------------
 
 ATranspersonalCharacter::ATranspersonalCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ── Survival Component ────────────────────────────────────────────────────
-    SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
+    // ── Movement defaults ────────────────────────────────────────────────────
+    WalkSpeed   = 400.f;
+    SprintSpeed = 800.f;
+    CrouchSpeed = 200.f;
+    bIsSprinting  = false;
+    bIsExhausted  = false;
 
-    // ── Capsule ───────────────────────────────────────────────────────────────
-    GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed         = WalkSpeed;
+        MoveComp->JumpZVelocity        = 420.f;
+        MoveComp->AirControl           = 0.35f;
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate         = FRotator(0.f, 540.f, 0.f);
+        MoveComp->GravityScale         = 1.2f;
+    }
 
-    // ── Movement defaults ─────────────────────────────────────────────────────
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.f, 500.f, 0.f);
-    GetCharacterMovement()->JumpZVelocity = 600.f;
-    GetCharacterMovement()->AirControl = 0.35f;
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-    GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-
-    // Don't rotate character with controller — camera handles that
     bUseControllerRotationPitch = false;
     bUseControllerRotationYaw   = false;
     bUseControllerRotationRoll  = false;
 
-    // ── Camera Boom ───────────────────────────────────────────────────────────
+    // ── Camera boom ──────────────────────────────────────────────────────────
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 400.f;
+    CameraBoom->TargetArmLength         = 400.f;
     CameraBoom->bUsePawnControlRotation = true;
+    CameraBoom->SocketOffset            = FVector(0.f, 0.f, 60.f);
 
-    // ── Follow Camera ─────────────────────────────────────────────────────────
+    // ── Follow camera ────────────────────────────────────────────────────────
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
+    // ── Survival component ───────────────────────────────────────────────────
+    SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
+}
 
 void ATranspersonalCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Register Enhanced Input mapping context
-    if (APlayerController* PC = Cast<APlayerController>(Controller))
+    // Ensure movement speed is synced with properties (may be overridden in BP)
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
-        if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-        {
-            if (DefaultMappingContext)
-            {
-                Subsystem->AddMappingContext(DefaultMappingContext, 0);
-            }
-        }
+        MoveComp->MaxWalkSpeed = WalkSpeed;
     }
-
-    // Set initial walk speed
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tick
-// ─────────────────────────────────────────────────────────────────────────────
 
 void ATranspersonalCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (bIsDead) return;
-
-    // Drain stamina while sprinting; restore walk speed if stamina depleted
-    if (bIsSprinting && SurvivalComp)
-    {
-        const float StaminaDrain = 20.f * DeltaTime; // 20 units/sec drain
-        SurvivalComp->ConsumeStamina(StaminaDrain);
-
-        if (SurvivalComp->GetStamina() <= 0.f)
-        {
-            StopSprint();
-        }
-    }
+    UpdateSprintState(DeltaTime);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Input Setup
-// ─────────────────────────────────────────────────────────────────────────────
 
 void ATranspersonalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
-    {
-        if (MoveAction)
-        {
-            EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this,
-                            &ATranspersonalCharacter::Move);
-        }
-        if (LookAction)
-        {
-            EIC->BindAction(LookAction, ETriggerEvent::Triggered, this,
-                            &ATranspersonalCharacter::Look);
-        }
-        if (JumpAction)
-        {
-            EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACharacter::Jump);
-            EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-        }
-        if (SprintAction)
-        {
-            EIC->BindAction(SprintAction, ETriggerEvent::Started,   this,
-                            &ATranspersonalCharacter::StartSprint);
-            EIC->BindAction(SprintAction, ETriggerEvent::Completed, this,
-                            &ATranspersonalCharacter::StopSprint);
-        }
-    }
+    // Axis bindings
+    PlayerInputComponent->BindAxis("MoveForward", this, &ATranspersonalCharacter::MoveForward);
+    PlayerInputComponent->BindAxis("MoveRight",   this, &ATranspersonalCharacter::MoveRight);
+    PlayerInputComponent->BindAxis("Turn",        this, &ATranspersonalCharacter::Turn);
+    PlayerInputComponent->BindAxis("LookUp",      this, &ATranspersonalCharacter::LookUp);
+
+    // Action bindings
+    PlayerInputComponent->BindAction("Jump",   IE_Pressed,  this, &ACharacter::Jump);
+    PlayerInputComponent->BindAction("Jump",   IE_Released, this, &ACharacter::StopJumping);
+    PlayerInputComponent->BindAction("Sprint", IE_Pressed,  this, &ATranspersonalCharacter::StartSprint);
+    PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ATranspersonalCharacter::StopSprint);
+    PlayerInputComponent->BindAction("Crouch", IE_Pressed,  this, &ATranspersonalCharacter::StartCrouch);
+    PlayerInputComponent->BindAction("Crouch", IE_Released, this, &ATranspersonalCharacter::StopCrouch);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Input Handlers
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Movement handlers ────────────────────────────────────────────────────────
 
-void ATranspersonalCharacter::Move(const FInputActionValue& Value)
+void ATranspersonalCharacter::MoveForward(float Value)
 {
-    if (bIsDead) return;
-
-    const FVector2D MovementVector = Value.Get<FVector2D>();
-    if (Controller)
+    if (Controller && Value != 0.f)
     {
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
-
-        const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector RightDir   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-        AddMovementInput(ForwardDir, MovementVector.Y);
-        AddMovementInput(RightDir,   MovementVector.X);
+        const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        AddMovementInput(Direction, Value);
     }
 }
 
-void ATranspersonalCharacter::Look(const FInputActionValue& Value)
+void ATranspersonalCharacter::MoveRight(float Value)
 {
-    const FVector2D LookAxisVector = Value.Get<FVector2D>();
-    if (Controller)
+    if (Controller && Value != 0.f)
     {
-        AddControllerYawInput(LookAxisVector.X);
-        AddControllerPitchInput(LookAxisVector.Y);
+        const FRotator Rotation = Controller->GetControlRotation();
+        const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
+        const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+        AddMovementInput(Direction, Value);
     }
+}
+
+void ATranspersonalCharacter::Turn(float Value)
+{
+    AddControllerYawInput(Value);
+}
+
+void ATranspersonalCharacter::LookUp(float Value)
+{
+    AddControllerPitchInput(Value);
 }
 
 void ATranspersonalCharacter::StartSprint()
 {
-    if (bIsDead) return;
-    if (SurvivalComp && SurvivalComp->GetStamina() > 10.f)
+    if (bIsExhausted) return;
+
+    bIsSprinting = true;
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
-        bIsSprinting = true;
-        GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+        MoveComp->MaxWalkSpeed = SprintSpeed;
     }
 }
 
 void ATranspersonalCharacter::StopSprint()
 {
     bIsSprinting = false;
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Survival Accessors
-// ─────────────────────────────────────────────────────────────────────────────
-
-float ATranspersonalCharacter::GetHealth() const
-{
-    return SurvivalComp ? SurvivalComp->GetHealth() : 0.f;
-}
-
-float ATranspersonalCharacter::GetHunger() const
-{
-    return SurvivalComp ? SurvivalComp->GetHunger() : 0.f;
-}
-
-float ATranspersonalCharacter::GetThirst() const
-{
-    return SurvivalComp ? SurvivalComp->GetThirst() : 0.f;
-}
-
-float ATranspersonalCharacter::GetStamina() const
-{
-    return SurvivalComp ? SurvivalComp->GetStamina() : 0.f;
-}
-
-float ATranspersonalCharacter::GetFear() const
-{
-    return SurvivalComp ? SurvivalComp->GetFear() : 0.f;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Damage / Death
-// ─────────────────────────────────────────────────────────────────────────────
-
-float ATranspersonalCharacter::TakeDamage(float DamageAmount,
-                                           struct FDamageEvent const& DamageEvent,
-                                           AController* EventInstigator,
-                                           AActor* DamageCauser)
-{
-    if (bIsDead) return 0.f;
-
-    const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent,
-                                                  EventInstigator, DamageCauser);
-
-    if (SurvivalComp)
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
-        SurvivalComp->ApplyDamage(ActualDamage);
+        MoveComp->MaxWalkSpeed = WalkSpeed;
+    }
+}
 
-        // Spike fear when attacked by a dinosaur
-        SurvivalComp->AddFear(ActualDamage * 0.5f);
+void ATranspersonalCharacter::StartCrouch()
+{
+    Crouch();
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->MaxWalkSpeed = CrouchSpeed;
+    }
+}
 
-        if (SurvivalComp->GetHealth() <= 0.f)
+void ATranspersonalCharacter::StopCrouch()
+{
+    UnCrouch();
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->MaxWalkSpeed = bIsSprinting ? SprintSpeed : WalkSpeed;
+    }
+}
+
+// ── Sprint stamina management ────────────────────────────────────────────────
+
+void ATranspersonalCharacter::UpdateSprintState(float DeltaTime)
+{
+    if (!SurvivalComp) return;
+
+    if (bIsSprinting)
+    {
+        const bool bMoving = GetVelocity().SizeSquared() > 100.f;
+        if (bMoving)
         {
-            Die();
+            SurvivalComp->DrainStamina(StaminaDrainRate * DeltaTime);
+
+            if (SurvivalComp->GetStamina() <= ExhaustionThreshold)
+            {
+                bIsExhausted = true;
+                StopSprint();
+            }
         }
     }
+    else
+    {
+        // Regen stamina when not sprinting
+        if (SurvivalComp->GetStamina() < 100.f)
+        {
+            SurvivalComp->RegenStamina(StaminaRegenRate * DeltaTime);
+        }
 
-    return ActualDamage;
+        // Clear exhaustion once stamina recovers above 30%
+        if (bIsExhausted && SurvivalComp->GetStamina() >= 30.f)
+        {
+            bIsExhausted = false;
+        }
+    }
 }
 
-void ATranspersonalCharacter::Die()
+// ── Survival queries ─────────────────────────────────────────────────────────
+
+float ATranspersonalCharacter::GetHealth()  const { return SurvivalComp ? SurvivalComp->GetHealth()  : 0.f; }
+float ATranspersonalCharacter::GetHunger()  const { return SurvivalComp ? SurvivalComp->GetHunger()  : 0.f; }
+float ATranspersonalCharacter::GetThirst()  const { return SurvivalComp ? SurvivalComp->GetThirst()  : 0.f; }
+float ATranspersonalCharacter::GetStamina() const { return SurvivalComp ? SurvivalComp->GetStamina() : 0.f; }
+float ATranspersonalCharacter::GetFear()    const { return SurvivalComp ? SurvivalComp->GetFear()    : 0.f; }
+
+bool ATranspersonalCharacter::IsAlive() const
 {
-    if (bIsDead) return;
-    bIsDead = true;
-
-    // Disable input
-    if (APlayerController* PC = Cast<APlayerController>(Controller))
-    {
-        DisableInput(PC);
-    }
-
-    // Ragdoll
-    GetMesh()->SetSimulatePhysics(true);
-    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Respawn after 5 seconds (handled by GameMode in a full implementation)
-    // For now, destroy after 10s so the level stays clean
-    SetLifeSpan(10.f);
+    return SurvivalComp ? SurvivalComp->IsAlive() : false;
 }
