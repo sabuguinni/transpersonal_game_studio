@@ -1,181 +1,343 @@
+// CrowdSimulationManager.cpp
+// Agent #13 — Crowd & Traffic Simulation
+// Prehistoric tribe + dinosaur herd crowd simulation using UE5 Mass AI patterns
+
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Actor.h"
+#include "NavigationSystem.h"
+#include "NavigationPath.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
-ACrowdSimulationManager::ACrowdSimulationManager()
+UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // update at 2Hz for performance
-
-    MaxActiveAgents     = 50;
-    CrowdUpdateInterval = 1.0f;
-    ActiveAgentCount    = 0;
-    TimeSinceLastUpdate = 0.f;
-
-    // Seed default groups matching the MinPlayableMap population
-    // Triceratops herd — grazing near (3200, 2000)
-    FCrowd_DinoGroup TrikeHerd;
-    TrikeHerd.GroupID       = TEXT("TrikeHerd_North");
-    TrikeHerd.Role          = ECrowd_DinoRole::HerdMember;
-    TrikeHerd.HomeLocation  = FVector(3200.f, 2000.f, 400.f);
-    TrikeHerd.WanderRadius  = 1500.f;
-    TrikeHerd.GroupSize     = 4;
-    TrikeHerd.bIsActive     = true;
-    RegisteredGroups.Add(TrikeHerd);
-
-    // Brachiosaurus pair — slow wanderers near (4200, 2350)
-    FCrowd_DinoGroup BrachioGroup;
-    BrachioGroup.GroupID      = TEXT("BrachioGroup_East");
-    BrachioGroup.Role         = ECrowd_DinoRole::SolitaryWanderer;
-    BrachioGroup.HomeLocation = FVector(4200.f, 2350.f, 400.f);
-    BrachioGroup.WanderRadius = 2000.f;
-    BrachioGroup.GroupSize    = 2;
-    BrachioGroup.bIsActive    = true;
-    RegisteredGroups.Add(BrachioGroup);
-
-    // Parasaurolophus herd — near (2800, 3300)
-    FCrowd_DinoGroup ParaHerd;
-    ParaHerd.GroupID      = TEXT("ParaHerd_South");
-    ParaHerd.Role         = ECrowd_DinoRole::HerdMember;
-    ParaHerd.HomeLocation = FVector(2800.f, 3300.f, 400.f);
-    ParaHerd.WanderRadius = 1200.f;
-    ParaHerd.GroupSize    = 3;
-    ParaHerd.bIsActive    = true;
-    RegisteredGroups.Add(ParaHerd);
-
-    // Raptor pack — predators near (1900, 3650)
-    FCrowd_DinoGroup RaptorPack;
-    RaptorPack.GroupID      = TEXT("RaptorPack_West");
-    RaptorPack.Role         = ECrowd_DinoRole::PackPredator;
-    RaptorPack.HomeLocation = FVector(1900.f, 3650.f, 400.f);
-    RaptorPack.WanderRadius = 3000.f;
-    RaptorPack.GroupSize    = 4;
-    RaptorPack.bIsActive    = true;
-    RegisteredGroups.Add(RaptorPack);
-
-    // Protoceratops herd — small background crowd near (1000, 4150)
-    FCrowd_DinoGroup ProtoHerd;
-    ProtoHerd.GroupID      = TEXT("ProtoHerd_Far");
-    ProtoHerd.Role         = ECrowd_DinoRole::HerdMember;
-    ProtoHerd.HomeLocation = FVector(1000.f, 4150.f, 400.f);
-    ProtoHerd.WanderRadius = 800.f;
-    ProtoHerd.GroupSize    = 4;
-    ProtoHerd.bIsActive    = true;
-    RegisteredGroups.Add(ProtoHerd);
+    MaxAgents = 200;
+    HerdCohesionRadius = 800.0f;
+    FlockSeparationRadius = 150.0f;
+    AgentMoveSpeed = 300.0f;
+    bSimulationActive = false;
+    SimulationTickInterval = 0.5f;
+    AccumulatedTime = 0.0f;
 }
 
-void ACrowdSimulationManager::BeginPlay()
+void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    // Count initial active agents
-    ActiveAgentCount = 0;
-    for (const FCrowd_DinoGroup& Group : RegisteredGroups)
-    {
-        if (Group.bIsActive)
-        {
-            ActiveAgentCount += Group.GroupSize;
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSimMgr] Initialized — %d groups, %d agents"),
-           RegisteredGroups.Num(), ActiveAgentCount);
+    Super::Initialize(Collection);
+    bSimulationActive = true;
+    RegisteredAgents.Reserve(MaxAgents);
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized — max agents: %d"), MaxAgents);
 }
 
-void ACrowdSimulationManager::Tick(float DeltaTime)
+void UCrowdSimulationManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    bSimulationActive = false;
+    RegisteredAgents.Empty();
+    ActiveHerds.Empty();
+    Super::Deinitialize();
+}
 
-    TimeSinceLastUpdate += DeltaTime;
-    if (TimeSinceLastUpdate < CrowdUpdateInterval)
+void UCrowdSimulationManager::Tick(float DeltaTime)
+{
+    if (!bSimulationActive) return;
+
+    AccumulatedTime += DeltaTime;
+    if (AccumulatedTime < SimulationTickInterval) return;
+    AccumulatedTime = 0.0f;
+
+    TickHerdBehavior(SimulationTickInterval);
+    TickTribeBehavior(SimulationTickInterval);
+    TickFleeResponse(SimulationTickInterval);
+}
+
+bool UCrowdSimulationManager::IsTickable() const
+{
+    return bSimulationActive;
+}
+
+TStatId UCrowdSimulationManager::GetStatId() const
+{
+    RETURN_QUICK_DECLARE_CYCLE_STAT(UCrowdSimulationManager, STATGROUP_Tickables);
+}
+
+void UCrowdSimulationManager::RegisterCrowdAgent(AActor* Agent, ECrowd_AgentRole Role)
+{
+    if (!Agent) return;
+    if (RegisteredAgents.Num() >= MaxAgents)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Max agents reached (%d)"), MaxAgents);
         return;
     }
-    TimeSinceLastUpdate = 0.f;
 
-    // LOD budget enforcement: deactivate groups beyond MaxActiveAgents
-    int32 RunningCount = 0;
-    for (FCrowd_DinoGroup& Group : RegisteredGroups)
+    FCrowd_AgentData Data;
+    Data.AgentActor = Agent;
+    Data.Role = Role;
+    Data.HomeLocation = Agent->GetActorLocation();
+    Data.CurrentState = ECrowd_AgentState::Idle;
+    Data.bIsFleeing = false;
+    Data.FleeTimer = 0.0f;
+
+    RegisteredAgents.Add(Data);
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Registered agent: %s (Role=%d)"), *Agent->GetName(), (int32)Role);
+}
+
+void UCrowdSimulationManager::UnregisterCrowdAgent(AActor* Agent)
+{
+    if (!Agent) return;
+    RegisteredAgents.RemoveAll([Agent](const FCrowd_AgentData& D) {
+        return D.AgentActor == Agent;
+    });
+}
+
+void UCrowdSimulationManager::RegisterHerd(const TArray<AActor*>& HerdMembers, ECrowd_DinoSpecies Species)
+{
+    FCrowd_HerdData Herd;
+    Herd.Species = Species;
+    Herd.bIsMigrating = false;
+    Herd.MigrationProgress = 0.0f;
+
+    for (AActor* Member : HerdMembers)
     {
-        if (!Group.bIsActive) continue;
-        RunningCount += Group.GroupSize;
-        if (RunningCount > MaxActiveAgents)
+        if (Member)
         {
-            Group.bIsActive = false;
-            UE_LOG(LogTemp, Warning, TEXT("[CrowdSimMgr] LOD budget exceeded — deactivating group: %s"),
-                   *Group.GroupID);
+            FCrowd_AgentData AgentData;
+            AgentData.AgentActor = Member;
+            AgentData.Role = ECrowd_AgentRole::DinoHerdMember;
+            AgentData.HomeLocation = Member->GetActorLocation();
+            AgentData.CurrentState = ECrowd_AgentState::Grazing;
+            AgentData.bIsFleeing = false;
+            AgentData.FleeTimer = 0.0f;
+            Herd.Members.Add(AgentData);
         }
     }
 
-    ActiveAgentCount = FMath::Min(RunningCount, MaxActiveAgents);
+    if (Herd.Members.Num() > 0)
+    {
+        Herd.HerdCenter = CalculateHerdCenter(Herd);
+        ActiveHerds.Add(Herd);
+        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd registered: Species=%d, Members=%d"), (int32)Species, Herd.Members.Num());
+    }
 }
 
-void ACrowdSimulationManager::RegisterGroup(const FCrowd_DinoGroup& NewGroup)
+void UCrowdSimulationManager::TriggerFleeEvent(FVector ThreatLocation, float ThreatRadius)
 {
-    // Prevent duplicate IDs
-    for (const FCrowd_DinoGroup& Existing : RegisteredGroups)
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Flee event triggered at %s, radius=%.0f"), *ThreatLocation.ToString(), ThreatRadius);
+
+    // Trigger flee on registered tribe agents
+    for (FCrowd_AgentData& Agent : RegisteredAgents)
     {
-        if (Existing.GroupID == NewGroup.GroupID)
+        if (!Agent.AgentActor) continue;
+        float Dist = FVector::Dist(Agent.AgentActor->GetActorLocation(), ThreatLocation);
+        if (Dist <= ThreatRadius)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[CrowdSimMgr] Group already registered: %s"), *NewGroup.GroupID);
-            return;
+            Agent.bIsFleeing = true;
+            Agent.FleeTimer = 8.0f; // flee for 8 seconds
+            Agent.CurrentState = ECrowd_AgentState::Fleeing;
+
+            // Calculate flee direction (away from threat)
+            FVector FleeDir = (Agent.AgentActor->GetActorLocation() - ThreatLocation).GetSafeNormal();
+            Agent.FleeDestination = Agent.AgentActor->GetActorLocation() + FleeDir * 2000.0f;
         }
     }
-    RegisteredGroups.Add(NewGroup);
-    if (NewGroup.bIsActive)
-    {
-        ActiveAgentCount += NewGroup.GroupSize;
-    }
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSimMgr] Registered group: %s (size=%d)"),
-           *NewGroup.GroupID, NewGroup.GroupSize);
-}
 
-void ACrowdSimulationManager::UnregisterGroup(const FString& GroupID)
-{
-    for (int32 i = RegisteredGroups.Num() - 1; i >= 0; --i)
+    // Trigger flee on herds
+    for (FCrowd_HerdData& Herd : ActiveHerds)
     {
-        if (RegisteredGroups[i].GroupID == GroupID)
+        float HerdDist = FVector::Dist(Herd.HerdCenter, ThreatLocation);
+        if (HerdDist <= ThreatRadius * 1.5f) // herds have wider awareness
         {
-            if (RegisteredGroups[i].bIsActive)
+            for (FCrowd_AgentData& Member : Herd.Members)
             {
-                ActiveAgentCount -= RegisteredGroups[i].GroupSize;
-                ActiveAgentCount  = FMath::Max(0, ActiveAgentCount);
+                if (!Member.AgentActor) continue;
+                Member.bIsFleeing = true;
+                Member.FleeTimer = 12.0f;
+                Member.CurrentState = ECrowd_AgentState::Fleeing;
+                FVector FleeDir = (Member.AgentActor->GetActorLocation() - ThreatLocation).GetSafeNormal();
+                Member.FleeDestination = Member.AgentActor->GetActorLocation() + FleeDir * 3000.0f;
             }
-            RegisteredGroups.RemoveAt(i);
-            UE_LOG(LogTemp, Log, TEXT("[CrowdSimMgr] Unregistered group: %s"), *GroupID);
-            return;
         }
     }
-    UE_LOG(LogTemp, Warning, TEXT("[CrowdSimMgr] Group not found for removal: %s"), *GroupID);
 }
 
-TArray<FCrowd_DinoGroup> ACrowdSimulationManager::GetGroupsByRole(ECrowd_DinoRole Role) const
+void UCrowdSimulationManager::StartHerdMigration(int32 HerdIndex, FVector Destination)
 {
-    TArray<FCrowd_DinoGroup> Result;
-    for (const FCrowd_DinoGroup& Group : RegisteredGroups)
+    if (!ActiveHerds.IsValidIndex(HerdIndex)) return;
+
+    FCrowd_HerdData& Herd = ActiveHerds[HerdIndex];
+    Herd.bIsMigrating = true;
+    Herd.MigrationDestination = Destination;
+    Herd.MigrationProgress = 0.0f;
+
+    for (FCrowd_AgentData& Member : Herd.Members)
     {
-        if (Group.Role == Role)
-        {
-            Result.Add(Group);
-        }
+        Member.CurrentState = ECrowd_AgentState::Migrating;
     }
-    return Result;
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd %d started migration to %s"), HerdIndex, *Destination.ToString());
 }
 
-void ACrowdSimulationManager::TriggerHerdPanic(const FVector& ThreatLocation, float PanicRadius)
+int32 UCrowdSimulationManager::GetActiveAgentCount() const
 {
-    for (FCrowd_DinoGroup& Group : RegisteredGroups)
+    int32 Total = RegisteredAgents.Num();
+    for (const FCrowd_HerdData& Herd : ActiveHerds)
     {
-        if (!Group.bIsActive) continue;
-        if (Group.Role == ECrowd_DinoRole::PackPredator) continue; // predators don't panic
+        Total += Herd.Members.Num();
+    }
+    return Total;
+}
 
-        float Distance = FVector::Dist(Group.HomeLocation, ThreatLocation);
-        if (Distance <= PanicRadius)
+// --- Private Tick Methods ---
+
+void UCrowdSimulationManager::TickHerdBehavior(float DeltaTime)
+{
+    for (FCrowd_HerdData& Herd : ActiveHerds)
+    {
+        // Update herd center
+        Herd.HerdCenter = CalculateHerdCenter(Herd);
+
+        if (Herd.bIsMigrating)
         {
-            // Expand wander radius — herd scatters
-            Group.WanderRadius *= 2.f;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdSimMgr] PANIC triggered for group %s (dist=%.0f, radius=%.0f)"),
-                   *Group.GroupID, Distance, PanicRadius);
+            // Move herd members toward migration destination
+            float StepSize = AgentMoveSpeed * DeltaTime;
+            Herd.MigrationProgress = FMath::Min(1.0f, Herd.MigrationProgress + DeltaTime * 0.01f);
+
+            for (FCrowd_AgentData& Member : Herd.Members)
+            {
+                if (!Member.AgentActor) continue;
+                if (Member.bIsFleeing) continue;
+
+                // Flocking: move toward herd center + separation from neighbors
+                FVector ToCenter = (Herd.HerdCenter - Member.AgentActor->GetActorLocation()).GetSafeNormal();
+                FVector ToDestination = (Herd.MigrationDestination - Member.AgentActor->GetActorLocation()).GetSafeNormal();
+                FVector MoveDir = (ToCenter * 0.3f + ToDestination * 0.7f).GetSafeNormal();
+
+                FVector NewLoc = Member.AgentActor->GetActorLocation() + MoveDir * StepSize;
+                Member.AgentActor->SetActorLocation(NewLoc, true);
+            }
+
+            if (Herd.MigrationProgress >= 1.0f)
+            {
+                Herd.bIsMigrating = false;
+                for (FCrowd_AgentData& Member : Herd.Members)
+                {
+                    Member.CurrentState = ECrowd_AgentState::Grazing;
+                    Member.HomeLocation = Member.AgentActor ? Member.AgentActor->GetActorLocation() : Member.HomeLocation;
+                }
+                UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd migration complete"));
+            }
         }
     }
+}
+
+void UCrowdSimulationManager::TickTribeBehavior(float DeltaTime)
+{
+    for (FCrowd_AgentData& Agent : RegisteredAgents)
+    {
+        if (!Agent.AgentActor) continue;
+        if (Agent.bIsFleeing) continue;
+
+        switch (Agent.CurrentState)
+        {
+        case ECrowd_AgentState::Idle:
+            // Occasionally wander
+            if (FMath::RandRange(0, 100) < 5)
+            {
+                FVector WanderOffset = FVector(
+                    FMath::RandRange(-300.0f, 300.0f),
+                    FMath::RandRange(-300.0f, 300.0f),
+                    0.0f
+                );
+                Agent.WanderTarget = Agent.HomeLocation + WanderOffset;
+                Agent.CurrentState = ECrowd_AgentState::Wandering;
+            }
+            break;
+
+        case ECrowd_AgentState::Wandering:
+        {
+            FVector ToTarget = Agent.WanderTarget - Agent.AgentActor->GetActorLocation();
+            float Dist = ToTarget.Size();
+            if (Dist < 50.0f)
+            {
+                Agent.CurrentState = ECrowd_AgentState::Idle;
+            }
+            else
+            {
+                FVector MoveDir = ToTarget.GetSafeNormal();
+                FVector NewLoc = Agent.AgentActor->GetActorLocation() + MoveDir * AgentMoveSpeed * 0.5f * DeltaTime;
+                Agent.AgentActor->SetActorLocation(NewLoc, true);
+            }
+            break;
+        }
+
+        default:
+            break;
+        }
+    }
+}
+
+void UCrowdSimulationManager::TickFleeResponse(float DeltaTime)
+{
+    // Process fleeing agents
+    for (FCrowd_AgentData& Agent : RegisteredAgents)
+    {
+        if (!Agent.AgentActor || !Agent.bIsFleeing) continue;
+
+        Agent.FleeTimer -= DeltaTime;
+        if (Agent.FleeTimer <= 0.0f)
+        {
+            Agent.bIsFleeing = false;
+            Agent.CurrentState = ECrowd_AgentState::Idle;
+            continue;
+        }
+
+        FVector ToFlee = Agent.FleeDestination - Agent.AgentActor->GetActorLocation();
+        if (ToFlee.Size() > 100.0f)
+        {
+            FVector MoveDir = ToFlee.GetSafeNormal();
+            FVector NewLoc = Agent.AgentActor->GetActorLocation() + MoveDir * AgentMoveSpeed * 2.0f * DeltaTime;
+            Agent.AgentActor->SetActorLocation(NewLoc, true);
+        }
+    }
+
+    // Process fleeing herd members
+    for (FCrowd_HerdData& Herd : ActiveHerds)
+    {
+        for (FCrowd_AgentData& Member : Herd.Members)
+        {
+            if (!Member.AgentActor || !Member.bIsFleeing) continue;
+
+            Member.FleeTimer -= DeltaTime;
+            if (Member.FleeTimer <= 0.0f)
+            {
+                Member.bIsFleeing = false;
+                Member.CurrentState = Herd.bIsMigrating ? ECrowd_AgentState::Migrating : ECrowd_AgentState::Grazing;
+                continue;
+            }
+
+            FVector ToFlee = Member.FleeDestination - Member.AgentActor->GetActorLocation();
+            if (ToFlee.Size() > 100.0f)
+            {
+                FVector MoveDir = ToFlee.GetSafeNormal();
+                FVector NewLoc = Member.AgentActor->GetActorLocation() + MoveDir * AgentMoveSpeed * 3.0f * DeltaTime;
+                Member.AgentActor->SetActorLocation(NewLoc, true);
+            }
+        }
+    }
+}
+
+FVector UCrowdSimulationManager::CalculateHerdCenter(const FCrowd_HerdData& Herd) const
+{
+    if (Herd.Members.Num() == 0) return FVector::ZeroVector;
+
+    FVector Sum = FVector::ZeroVector;
+    int32 ValidCount = 0;
+    for (const FCrowd_AgentData& Member : Herd.Members)
+    {
+        if (Member.AgentActor)
+        {
+            Sum += Member.AgentActor->GetActorLocation();
+            ValidCount++;
+        }
+    }
+    return ValidCount > 0 ? Sum / (float)ValidCount : FVector::ZeroVector;
 }
