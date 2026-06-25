@@ -4,25 +4,22 @@
 #include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
 UDinosaurAnimInstance::UDinosaurAnimInstance()
 {
-    LocomotionState      = EAnim_DinoLocomotionState::Idle;
-    Speed                = 0.0f;
-    Direction            = 0.0f;
-    bIsMoving            = false;
-    bIsAttacking         = false;
-    bIsDead              = false;
-    bIsRoaring           = false;
-    WalkRunBlend         = 0.0f;
-    AttackBlendWeight    = 0.0f;
-    IKFootTraceDistance  = 80.0f;
-    WalkSpeedThreshold   = 150.0f;
-    RunSpeedThreshold    = 400.0f;
-    LeftFootIKLocation   = FVector::ZeroVector;
-    RightFootIKLocation  = FVector::ZeroVector;
-    OwnerPawn            = nullptr;
+    GroundSpeed = 0.0f;
+    bIsMoving = false;
+    bIsAttacking = false;
+    bIsDead = false;
+    LocomotionState = EAnim_DinoLocomotionState::Idle;
+    MovementDirection = 0.0f;
+    WalkSpeedThreshold = 50.0f;
+    RunSpeedThreshold = 300.0f;
+    OwnerPawn = nullptr;
+    LeftFootIKLocation = FVector::ZeroVector;
+    RightFootIKLocation = FVector::ZeroVector;
 }
 
 void UDinosaurAnimInstance::NativeInitializeAnimation()
@@ -35,42 +32,38 @@ void UDinosaurAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    OwnerPawn = TryGetPawnOwner();
     if (!OwnerPawn)
     {
-        return;
+        OwnerPawn = TryGetPawnOwner();
+        if (!OwnerPawn) return;
     }
 
-    // ── Velocity & Speed ──
+    // Compute ground speed (horizontal velocity only)
     FVector Velocity = OwnerPawn->GetVelocity();
-    Speed = Velocity.Size2D();
-    bIsMoving = Speed > 10.0f;
+    Velocity.Z = 0.0f;
+    GroundSpeed = Velocity.Size();
+    bIsMoving = GroundSpeed > WalkSpeedThreshold;
 
-    // ── Direction (for strafe blending) ──
+    // Movement direction relative to actor forward
     if (bIsMoving)
     {
-        FRotator ActorRot = OwnerPawn->GetActorRotation();
-        FRotator VelocityRot = Velocity.Rotation();
-        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot).Yaw;
+        FVector Forward = OwnerPawn->GetActorForwardVector();
+        FVector VelNorm = Velocity.GetSafeNormal();
+        MovementDirection = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(Forward, VelNorm)));
+        // Determine sign (left/right)
+        FVector Right = OwnerPawn->GetActorRightVector();
+        if (FVector::DotProduct(Right, VelNorm) < 0.0f)
+        {
+            MovementDirection *= -1.0f;
+        }
     }
     else
     {
-        Direction = 0.0f;
+        MovementDirection = 0.0f;
     }
 
-    // ── State machine update ──
     UpdateLocomotionState();
-    UpdateWalkRunBlend();
-
-    // ── IK foot placement ──
-    if (bIsMoving || LocomotionState == EAnim_DinoLocomotionState::Idle)
-    {
-        UpdateFootIK();
-    }
-
-    // ── Attack blend weight ──
-    float TargetAttackWeight = bIsAttacking ? 1.0f : 0.0f;
-    AttackBlendWeight = FMath::FInterpTo(AttackBlendWeight, TargetAttackWeight, DeltaSeconds, 8.0f);
+    UpdateFootIK();
 }
 
 void UDinosaurAnimInstance::UpdateLocomotionState()
@@ -85,16 +78,11 @@ void UDinosaurAnimInstance::UpdateLocomotionState()
         LocomotionState = EAnim_DinoLocomotionState::Attack;
         return;
     }
-    if (bIsRoaring)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Roar;
-        return;
-    }
-    if (Speed >= RunSpeedThreshold)
+    if (GroundSpeed >= RunSpeedThreshold)
     {
         LocomotionState = EAnim_DinoLocomotionState::Run;
     }
-    else if (Speed >= WalkSpeedThreshold)
+    else if (GroundSpeed >= WalkSpeedThreshold)
     {
         LocomotionState = EAnim_DinoLocomotionState::Walk;
     }
@@ -104,80 +92,42 @@ void UDinosaurAnimInstance::UpdateLocomotionState()
     }
 }
 
-void UDinosaurAnimInstance::UpdateWalkRunBlend()
-{
-    // 0.0 = Walk, 1.0 = Run — used in BlendSpace
-    float SpeedRange = RunSpeedThreshold - WalkSpeedThreshold;
-    if (SpeedRange > 0.0f && Speed > WalkSpeedThreshold)
-    {
-        WalkRunBlend = FMath::Clamp((Speed - WalkSpeedThreshold) / SpeedRange, 0.0f, 1.0f);
-    }
-    else
-    {
-        WalkRunBlend = 0.0f;
-    }
-}
-
 void UDinosaurAnimInstance::UpdateFootIK()
 {
-    TraceFootIK(FName("foot_l"), LeftFootIKLocation);
-    TraceFootIK(FName("foot_r"), RightFootIKLocation);
+    if (!OwnerPawn) return;
+
+    USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+    if (!Mesh) return;
+
+    // Only update IK when not running (performance optimization)
+    if (LocomotionState == EAnim_DinoLocomotionState::Run) return;
+
+    LeftFootIKLocation = ComputeFootIKLocation(FName("foot_l"));
+    RightFootIKLocation = ComputeFootIKLocation(FName("foot_r"));
 }
 
-void UDinosaurAnimInstance::TraceFootIK(FName FootSocketName, FVector& OutIKLocation)
+FVector UDinosaurAnimInstance::ComputeFootIKLocation(FName SocketName) const
 {
-    USkeletalMeshComponent* MeshComp = GetSkelMeshComponent();
-    if (!MeshComp || !OwnerPawn)
-    {
-        return;
-    }
-
-    // Get foot socket world location
-    FVector SocketLocation = MeshComp->GetSocketLocation(FootSocketName);
-
-    // Trace downward to find ground
-    FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, IKFootTraceDistance);
-    FVector TraceEnd   = SocketLocation - FVector(0.0f, 0.0f, IKFootTraceDistance * 2.0f);
-
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerPawn);
+    USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
+    if (!Mesh || !OwnerPawn) return FVector::ZeroVector;
 
     UWorld* World = OwnerPawn->GetWorld();
-    if (!World)
+    if (!World) return FVector::ZeroVector;
+
+    FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
+
+    // Raycast downward to find ground
+    FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, 100.0f);
+    FVector TraceEnd = SocketLocation - FVector(0.0f, 0.0f, 200.0f);
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerPawn);
+
+    if (World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, Params))
     {
-        return;
+        return HitResult.ImpactPoint;
     }
 
-    bool bHit = World->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        OutIKLocation = HitResult.ImpactPoint;
-    }
-    else
-    {
-        OutIKLocation = SocketLocation;
-    }
-}
-
-void UDinosaurAnimInstance::SetAttacking(bool bAttacking)
-{
-    bIsAttacking = bAttacking;
-}
-
-void UDinosaurAnimInstance::SetDead(bool bDead)
-{
-    bIsDead = bDead;
-}
-
-void UDinosaurAnimInstance::SetRoaring(bool bRoaring)
-{
-    bIsRoaring = bRoaring;
+    return SocketLocation;
 }
