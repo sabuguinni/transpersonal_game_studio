@@ -1,130 +1,134 @@
 #include "DialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/BillboardComponent.h"
-#include "GameFramework/Character.h"
-#include "DrawDebugHelpers.h"
+#include "GameFramework/Actor.h"
 
-ANarr_DialogueZone::ANarr_DialogueZone()
+// ============================================================
+// UNarr_DialogueComponent
+// ============================================================
+
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = false;
 
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(400.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
-
-    EditorIcon = CreateDefaultSubobject<UBillboardComponent>(TEXT("EditorIcon"));
-    EditorIcon->SetupAttachment(RootComponent);
-
-    // Default dialogue sequence — river crossing warning
-    DialogueSequence.SequenceID = TEXT("DefaultDialogue");
-    DialogueSequence.TriggerType = ENarr_DialogueTriggerType::ProximityEnter;
-    DialogueSequence.bPlayOnce = true;
-    DialogueSequence.bHasPlayed = false;
-
-    FNarr_DialogueLine DefaultLine;
-    DefaultLine.SpeakerName = TEXT("Tribal Leader");
-    DefaultLine.SpeakerRole = ENarr_SpeakerRole::TribalLeader;
-    DefaultLine.DialogueText = TEXT("The river crossing is flooded. Move west.");
-    DefaultLine.DisplayDuration = 5.0f;
-    DefaultLine.bBlockPlayerMovement = false;
-    DialogueSequence.Lines.Add(DefaultLine);
+    NPCName = TEXT("NPC");
+    InteractionRadius = 300.0f;
+    bPlayerInRange = false;
+    CurrentSequenceIndex = -1;
+    CurrentLineIndex = 0;
+    bDialogueActive = false;
 }
 
-void ANarr_DialogueZone::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (TriggerSphere)
-    {
-        TriggerSphere->SetSphereRadius(TriggerRadius);
-        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueZone::OnSphereBeginOverlap);
-    }
 }
 
-void ANarr_DialogueZone::Tick(float DeltaTime)
+void UNarr_DialogueComponent::TriggerDialogue(const FString& SequenceID)
 {
-    Super::Tick(DeltaTime);
-
-    // Debug sphere visualization in editor
-    if (bShowDebugSphere)
+    for (int32 i = 0; i < DialogueSequences.Num(); ++i)
     {
-        DrawDebugSphere(GetWorld(), GetActorLocation(), TriggerRadius, 16,
-            FColor::Yellow, false, -1.0f, 0, 2.0f);
-    }
-
-    // Advance dialogue line timer
-    if (bIsPlaying && DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
-    {
-        LineTimer += DeltaTime;
-        float Duration = DialogueSequence.Lines[CurrentLineIndex].DisplayDuration;
-        if (LineTimer >= Duration)
+        if (DialogueSequences[i].SequenceID == SequenceID)
         {
-            LineTimer = 0.0f;
-            CurrentLineIndex++;
-            if (CurrentLineIndex >= DialogueSequence.Lines.Num())
+            // If already triggered once and flagged, skip
+            if (DialogueSequences[i].bTriggeredOnce)
             {
-                bIsPlaying = false;
-                DialogueSequence.bHasPlayed = true;
-                CurrentLineIndex = 0;
+                return;
             }
+            CurrentSequenceIndex = i;
+            CurrentLineIndex = 0;
+            bDialogueActive = true;
+            DialogueSequences[i].bTriggeredOnce = true;
+            UE_LOG(LogTemp, Log, TEXT("[Dialogue] Triggered sequence '%s' for NPC '%s'"),
+                *SequenceID, *NPCName);
+            return;
         }
     }
+    UE_LOG(LogTemp, Warning, TEXT("[Dialogue] Sequence '%s' not found for NPC '%s'"),
+        *SequenceID, *NPCName);
 }
 
-void ANarr_DialogueZone::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void UNarr_DialogueComponent::SetPlayerInRange(bool bInRange)
 {
-    if (!OtherActor) return;
-
-    // Only trigger for player character
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    TriggerDialogue();
+    bPlayerInRange = bInRange;
 }
 
-void ANarr_DialogueZone::TriggerDialogue()
+FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
 {
-    // Respect play-once flag
-    if (DialogueSequence.bPlayOnce && DialogueSequence.bHasPlayed) return;
-    if (DialogueSequence.Lines.Num() == 0) return;
-    if (bIsPlaying) return;
-
-    bIsPlaying = true;
-    CurrentLineIndex = 0;
-    LineTimer = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("[DialogueZone] Triggered: %s — Speaker: %s — Lines: %d"),
-        *DialogueSequence.SequenceID,
-        *GetCurrentSpeakerName(),
-        DialogueSequence.Lines.Num());
-}
-
-bool ANarr_DialogueZone::HasPlayerEntered() const
-{
-    return bIsPlaying || DialogueSequence.bHasPlayed;
-}
-
-void ANarr_DialogueZone::ResetDialogue()
-{
-    DialogueSequence.bHasPlayed = false;
-    bIsPlaying = false;
-    CurrentLineIndex = 0;
-    LineTimer = 0.0f;
-}
-
-FString ANarr_DialogueZone::GetCurrentSpeakerName() const
-{
-    if (DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
+    if (!bDialogueActive || CurrentSequenceIndex < 0 ||
+        CurrentSequenceIndex >= DialogueSequences.Num())
     {
-        return DialogueSequence.Lines[CurrentLineIndex].SpeakerName;
+        return FNarr_DialogueLine();
     }
-    return TEXT("Unknown");
+
+    const FNarr_DialogueSequence& Seq = DialogueSequences[CurrentSequenceIndex];
+    if (CurrentLineIndex < Seq.Lines.Num())
+    {
+        return Seq.Lines[CurrentLineIndex];
+    }
+    return FNarr_DialogueLine();
 }
 
-int32 ANarr_DialogueZone::GetLineCount() const
+void UNarr_DialogueComponent::AdvanceLine()
 {
-    return DialogueSequence.Lines.Num();
+    if (!bDialogueActive || CurrentSequenceIndex < 0 ||
+        CurrentSequenceIndex >= DialogueSequences.Num())
+    {
+        return;
+    }
+
+    const FNarr_DialogueSequence& Seq = DialogueSequences[CurrentSequenceIndex];
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= Seq.Lines.Num())
+    {
+        // End of sequence
+        bDialogueActive = false;
+        CurrentSequenceIndex = -1;
+        CurrentLineIndex = 0;
+        UE_LOG(LogTemp, Log, TEXT("[Dialogue] Sequence ended for NPC '%s'"), *NPCName);
+    }
+}
+
+bool UNarr_DialogueComponent::HasActiveDialogue() const
+{
+    return bDialogueActive;
+}
+
+// ============================================================
+// ANarr_DialogueTriggerActor
+// ============================================================
+
+ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueComponent>(
+        TEXT("DialogueComponent"));
+
+    TriggerDialogueID = TEXT("DefaultDialogue");
+}
+
+void ANarr_DialogueTriggerActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void ANarr_DialogueTriggerActor::OnPlayerEnterRange()
+{
+    if (DialogueComponent)
+    {
+        DialogueComponent->SetPlayerInRange(true);
+        DialogueComponent->TriggerDialogue(TriggerDialogueID);
+        UE_LOG(LogTemp, Log, TEXT("[DialogueTrigger] Player entered range of '%s'"),
+            *GetActorLabel());
+    }
+}
+
+void ANarr_DialogueTriggerActor::OnPlayerExitRange()
+{
+    if (DialogueComponent)
+    {
+        DialogueComponent->SetPlayerInRange(false);
+        UE_LOG(LogTemp, Log, TEXT("[DialogueTrigger] Player exited range of '%s'"),
+            *GetActorLabel());
+    }
 }
