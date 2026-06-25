@@ -1,270 +1,244 @@
 // DialogueSystem.cpp
 // Agent #15 — Narrative & Dialogue Agent
-// Cycle: PROD_CYCLE_AUTO_20260625_010
-// Quest NPC dialogue, branching conversations, proximity detection
+// Cycle: PROD_CYCLE_AUTO_20260625_011
 
 #include "DialogueSystem.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
 
-// ============================================================
-// ANarr_DialogueNPC — Implementation
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────
 
-ANarr_DialogueNPC::ANarr_DialogueNPC()
+ANarr_DialogueActor::ANarr_DialogueActor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    NPCName = TEXT("Unknown NPC");
-    NPCRole = ENarr_NPCRole::Survivor;
-    CurrentState = ENarr_DialogueState::Idle;
+    // Interaction sphere — player proximity detection
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetSphereRadius(300.0f);
+    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = InteractionSphere;
+
+    // Defaults
     InteractionRadius = 300.0f;
-    bPlayerInRange = false;
-    CurrentLineIndex = 0;
-    ActiveLineArray = nullptr;
+    bIsPlayerInRange = false;
+    CurrentDialogueIndex = 0;
 }
 
-void ANarr_DialogueNPC::BeginPlay()
+// ─────────────────────────────────────────────────────────────
+// BeginPlay
+// ─────────────────────────────────────────────────────────────
+
+void ANarr_DialogueActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Default: populate Elder Kael quest dialogue if no data set
-    if (QuestDialogue.QuestID.IsEmpty())
+    // Bind overlap events
+    InteractionSphere->OnComponentBeginOverlap.AddDynamic(
+        this, &ANarr_DialogueActor::OnPlayerEnterRange);
+    InteractionSphere->OnComponentEndOverlap.AddDynamic(
+        this, &ANarr_DialogueActor::OnPlayerExitRange);
+
+    // Populate default dialogue if none set in editor
+    if (NPCData.DialogueLines.Num() == 0)
     {
-        QuestDialogue.QuestID = TEXT("QUEST_CRAFT_SPEAR");
-
-        // Greeting
-        FNarr_DialogueLine Greeting;
-        Greeting.SpeakerName = NPCName;
-        Greeting.LineText = TEXT("You survived the night. Good. Most do not.");
-        Greeting.TriggerState = ENarr_DialogueState::Greeting;
-        Greeting.DisplayDuration = 4.0f;
-        QuestDialogue.GreetingLines.Add(Greeting);
-
-        // Quest offer
-        FNarr_DialogueLine Offer;
-        Offer.SpeakerName = NPCName;
-        Offer.LineText = TEXT("The hunting grounds to the north are rich with prey. Gather three flint stones and two branches. Craft yourself a spear before nightfall.");
-        Offer.TriggerState = ENarr_DialogueState::QuestOffer;
-        Offer.DisplayDuration = 6.0f;
-        QuestDialogue.QuestOfferLines.Add(Offer);
-
-        // Quest active
-        FNarr_DialogueLine Active;
-        Active.SpeakerName = NPCName;
-        Active.LineText = TEXT("You still need the spear. Flint near the dry riverbed. Branches from fallen trees. Do not come back empty-handed.");
-        Active.TriggerState = ENarr_DialogueState::QuestActive;
-        Active.DisplayDuration = 5.0f;
-        QuestDialogue.QuestActiveLines.Add(Active);
-
-        // Quest complete
-        FNarr_DialogueLine Complete;
-        Complete.SpeakerName = NPCName;
-        Complete.LineText = TEXT("You made it. The tribe sees you now. You are no longer a stranger — you are one of us.");
-        Complete.TriggerState = ENarr_DialogueState::QuestComplete;
-        Complete.DisplayDuration = 5.0f;
-        QuestDialogue.QuestCompleteLines.Add(Complete);
+        InitialiseDefaultDialogue();
     }
 }
 
-void ANarr_DialogueNPC::Tick(float DeltaTime)
+// ─────────────────────────────────────────────────────────────
+// Tick
+// ─────────────────────────────────────────────────────────────
+
+void ANarr_DialogueActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    UpdatePlayerProximity();
+    // Tick reserved for future dialogue timing logic
 }
 
-void ANarr_DialogueNPC::BeginDialogue()
-{
-    CurrentLineIndex = 0;
-    CurrentState = ENarr_DialogueState::Greeting;
-    ActiveLineArray = &QuestDialogue.GreetingLines;
-}
+// ─────────────────────────────────────────────────────────────
+// Dialogue Logic
+// ─────────────────────────────────────────────────────────────
 
-void ANarr_DialogueNPC::AdvanceDialogue()
+void ANarr_DialogueActor::TriggerDialogue(ENarr_DialogueTrigger Trigger)
 {
-    if (!ActiveLineArray || ActiveLineArray->Num() == 0)
+    if (NPCData.DialogueLines.Num() == 0)
     {
-        EndDialogue();
         return;
     }
 
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= ActiveLineArray->Num())
+    // Find first line matching this trigger
+    for (int32 i = 0; i < NPCData.DialogueLines.Num(); ++i)
     {
-        // Move to next state
-        switch (CurrentState)
+        if (NPCData.DialogueLines[i].TriggerCondition == Trigger)
         {
-        case ENarr_DialogueState::Greeting:
-            CurrentState = ENarr_DialogueState::QuestOffer;
-            ActiveLineArray = &QuestDialogue.QuestOfferLines;
-            CurrentLineIndex = 0;
-            break;
+            CurrentDialogueIndex = i;
+            NPCData.bHasBeenSpokenTo = true;
+            return;
+        }
+    }
 
-        case ENarr_DialogueState::QuestOffer:
-            CurrentState = ENarr_DialogueState::QuestActive;
-            ActiveLineArray = &QuestDialogue.QuestActiveLines;
-            CurrentLineIndex = 0;
-            break;
+    // Fallback: start from beginning
+    CurrentDialogueIndex = 0;
+    NPCData.bHasBeenSpokenTo = true;
+}
 
-        case ENarr_DialogueState::QuestActive:
-        case ENarr_DialogueState::QuestComplete:
+FNarr_DialogueLine ANarr_DialogueActor::GetCurrentDialogueLine() const
+{
+    if (NPCData.DialogueLines.IsValidIndex(CurrentDialogueIndex))
+    {
+        return NPCData.DialogueLines[CurrentDialogueIndex];
+    }
+    return FNarr_DialogueLine();
+}
+
+void ANarr_DialogueActor::AdvanceDialogue()
+{
+    if (CurrentDialogueIndex < NPCData.DialogueLines.Num() - 1)
+    {
+        ++CurrentDialogueIndex;
+    }
+}
+
+bool ANarr_DialogueActor::HasMoreDialogue() const
+{
+    return CurrentDialogueIndex < NPCData.DialogueLines.Num() - 1;
+}
+
+void ANarr_DialogueActor::ResetDialogue()
+{
+    CurrentDialogueIndex = 0;
+}
+
+FString ANarr_DialogueActor::GetNPCName() const
+{
+    return NPCData.NPCName;
+}
+
+ENarr_NPCRole ANarr_DialogueActor::GetNPCRole() const
+{
+    return NPCData.Role;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Overlap Callbacks
+// ─────────────────────────────────────────────────────────────
+
+void ANarr_DialogueActor::OnPlayerEnterRange(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        bIsPlayerInRange = true;
+        TriggerDialogue(ENarr_DialogueTrigger::Proximity);
+    }
+}
+
+void ANarr_DialogueActor::OnPlayerExitRange(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor->IsA<ACharacter>())
+    {
+        bIsPlayerInRange = false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Default Dialogue Initialisation
+// Hardcoded survival-focused lines for the three core NPCs
+// ─────────────────────────────────────────────────────────────
+
+void ANarr_DialogueActor::InitialiseDefaultDialogue()
+{
+    // Determine which NPC this is by role and populate accordingly
+    switch (NPCData.Role)
+    {
+        case ENarr_NPCRole::Elder:
+        {
+            NPCData.NPCName = TEXT("Elder Kael");
+
+            FNarr_DialogueLine Line1;
+            Line1.SpeakerName = TEXT("Elder Kael");
+            Line1.LineText = TEXT("The river crossing is safe at dawn. The great lizards sleep until the sun warms them. Cross fast, stay silent.");
+            Line1.TriggerCondition = ENarr_DialogueTrigger::Proximity;
+            Line1.DisplayDuration = 5.0f;
+            NPCData.DialogueLines.Add(Line1);
+
+            FNarr_DialogueLine Line2;
+            Line2.SpeakerName = TEXT("Elder Kael");
+            Line2.LineText = TEXT("Build your shelter before you build your weapons. Survival is not about strength. It is about preparation.");
+            Line2.TriggerCondition = ENarr_DialogueTrigger::NightFall;
+            Line2.DisplayDuration = 5.0f;
+            NPCData.DialogueLines.Add(Line2);
+
+            FNarr_DialogueLine Line3;
+            Line3.SpeakerName = TEXT("Elder Kael");
+            Line3.LineText = TEXT("We found the bones of twelve hunters near the northern ridge. Not killed by beasts — killed by cold.");
+            Line3.TriggerCondition = ENarr_DialogueTrigger::PlayerLowHealth;
+            Line3.DisplayDuration = 5.0f;
+            NPCData.DialogueLines.Add(Line3);
+            break;
+        }
+
+        case ENarr_NPCRole::Scout:
+        {
+            NPCData.NPCName = TEXT("Scout Mira");
+
+            FNarr_DialogueLine Line1;
+            Line1.SpeakerName = TEXT("Scout Mira");
+            Line1.LineText = TEXT("Stay low. The pack hunts together — three raptors, maybe four. They will circle from the east while the big one drives you toward them.");
+            Line1.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
+            Line1.DisplayDuration = 6.0f;
+            NPCData.DialogueLines.Add(Line1);
+
+            FNarr_DialogueLine Line2;
+            Line2.SpeakerName = TEXT("Scout Mira");
+            Line2.LineText = TEXT("Do not run. Find high ground, use the rocks. A spear through the throat will stop even the largest one, but only if your aim is true.");
+            Line2.TriggerCondition = ENarr_DialogueTrigger::Proximity;
+            Line2.DisplayDuration = 5.0f;
+            NPCData.DialogueLines.Add(Line2);
+            break;
+        }
+
+        case ENarr_NPCRole::Hunter:
+        {
+            NPCData.NPCName = TEXT("Hunter Brak");
+
+            FNarr_DialogueLine Line1;
+            Line1.SpeakerName = TEXT("Hunter Brak");
+            Line1.LineText = TEXT("I tracked the Triceratops herd for three days. The young ones stay in the center, the big bulls on the outside. You cannot take one from the herd.");
+            Line1.TriggerCondition = ENarr_DialogueTrigger::Proximity;
+            Line1.DisplayDuration = 6.0f;
+            NPCData.DialogueLines.Add(Line1);
+
+            FNarr_DialogueLine Line2;
+            Line2.SpeakerName = TEXT("Hunter Brak");
+            Line2.LineText = TEXT("Wait for a straggler, an injured one, or drive one away from the group using fire and noise. Patience is the hunter's greatest weapon.");
+            Line2.TriggerCondition = ENarr_DialogueTrigger::QuestStart;
+            Line2.DisplayDuration = 5.0f;
+            NPCData.DialogueLines.Add(Line2);
+            break;
+        }
+
         default:
-            EndDialogue();
+        {
+            FNarr_DialogueLine DefaultLine;
+            DefaultLine.SpeakerName = TEXT("Tribesperson");
+            DefaultLine.LineText = TEXT("Stay alert. The dinosaurs are active today.");
+            DefaultLine.TriggerCondition = ENarr_DialogueTrigger::Proximity;
+            DefaultLine.DisplayDuration = 3.0f;
+            NPCData.DialogueLines.Add(DefaultLine);
             break;
         }
     }
-}
-
-void ANarr_DialogueNPC::EndDialogue()
-{
-    CurrentState = ENarr_DialogueState::Farewell;
-    CurrentLineIndex = 0;
-    ActiveLineArray = nullptr;
-}
-
-void ANarr_DialogueNPC::SetQuestState(ENarr_DialogueState NewState)
-{
-    CurrentState = NewState;
-    CurrentLineIndex = 0;
-
-    switch (NewState)
-    {
-    case ENarr_DialogueState::Greeting:
-        ActiveLineArray = &QuestDialogue.GreetingLines;
-        break;
-    case ENarr_DialogueState::QuestOffer:
-        ActiveLineArray = &QuestDialogue.QuestOfferLines;
-        break;
-    case ENarr_DialogueState::QuestActive:
-        ActiveLineArray = &QuestDialogue.QuestActiveLines;
-        break;
-    case ENarr_DialogueState::QuestComplete:
-        ActiveLineArray = &QuestDialogue.QuestCompleteLines;
-        break;
-    default:
-        ActiveLineArray = nullptr;
-        break;
-    }
-}
-
-FNarr_DialogueLine ANarr_DialogueNPC::GetCurrentLine() const
-{
-    if (ActiveLineArray && ActiveLineArray->IsValidIndex(CurrentLineIndex))
-    {
-        return (*ActiveLineArray)[CurrentLineIndex];
-    }
-
-    // Return empty line
-    FNarr_DialogueLine Empty;
-    Empty.SpeakerName = NPCName;
-    Empty.LineText = TEXT("...");
-    Empty.DisplayDuration = 2.0f;
-    return Empty;
-}
-
-bool ANarr_DialogueNPC::IsPlayerInRange() const
-{
-    return bPlayerInRange;
-}
-
-void ANarr_DialogueNPC::UpdatePlayerProximity()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    float Distance = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
-    bPlayerInRange = (Distance <= InteractionRadius);
-}
-
-// ============================================================
-// UNarr_DialogueManagerComponent — Implementation
-// ============================================================
-
-UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-
-    ActiveNPC = nullptr;
-    bDialogueActive = false;
-    LineTimer = 0.0f;
-}
-
-void UNarr_DialogueManagerComponent::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-void UNarr_DialogueManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bDialogueActive || !ActiveNPC) return;
-
-    // Auto-advance dialogue after line duration
-    LineTimer -= DeltaTime;
-    if (LineTimer <= 0.0f)
-    {
-        FNarr_DialogueLine Line = ActiveNPC->GetCurrentLine();
-        ActiveNPC->AdvanceDialogue();
-
-        // Check if dialogue ended
-        if (ActiveNPC->CurrentState == ENarr_DialogueState::Farewell)
-        {
-            StopDialogue();
-        }
-        else
-        {
-            CurrentDisplayLine = ActiveNPC->GetCurrentLine();
-            LineTimer = CurrentDisplayLine.DisplayDuration;
-        }
-    }
-}
-
-void UNarr_DialogueManagerComponent::StartDialogueWithNPC(ANarr_DialogueNPC* NPC)
-{
-    if (!NPC) return;
-
-    ActiveNPC = NPC;
-    bDialogueActive = true;
-
-    ActiveNPC->BeginDialogue();
-    CurrentDisplayLine = ActiveNPC->GetCurrentLine();
-    LineTimer = CurrentDisplayLine.DisplayDuration;
-}
-
-void UNarr_DialogueManagerComponent::AdvanceCurrentDialogue()
-{
-    if (!bDialogueActive || !ActiveNPC) return;
-
-    ActiveNPC->AdvanceDialogue();
-
-    if (ActiveNPC->CurrentState == ENarr_DialogueState::Farewell)
-    {
-        StopDialogue();
-        return;
-    }
-
-    CurrentDisplayLine = ActiveNPC->GetCurrentLine();
-    LineTimer = CurrentDisplayLine.DisplayDuration;
-}
-
-void UNarr_DialogueManagerComponent::StopDialogue()
-{
-    bDialogueActive = false;
-    ActiveNPC = nullptr;
-    LineTimer = 0.0f;
-}
-
-bool UNarr_DialogueManagerComponent::HasActiveDialogue() const
-{
-    return bDialogueActive && (ActiveNPC != nullptr);
 }
