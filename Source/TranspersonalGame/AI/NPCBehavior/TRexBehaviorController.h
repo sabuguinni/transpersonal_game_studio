@@ -7,14 +7,41 @@
 UENUM(BlueprintType)
 enum class ENPC_TRexState : uint8
 {
-    Patrolling   UMETA(DisplayName = "Patrolling"),
-    Investigating UMETA(DisplayName = "Investigating"),
-    Chasing      UMETA(DisplayName = "Chasing"),
-    Attacking    UMETA(DisplayName = "Attacking"),
-    Resting      UMETA(DisplayName = "Resting")
+    Patrol     UMETA(DisplayName = "Patrol"),
+    Alert      UMETA(DisplayName = "Alert"),
+    Chase      UMETA(DisplayName = "Chase"),
+    Attack     UMETA(DisplayName = "Attack"),
+    Rest       UMETA(DisplayName = "Rest"),
 };
 
-UCLASS(ClassGroup = "NPCBehavior", meta = (DisplayName = "T-Rex Behavior Controller"))
+USTRUCT(BlueprintType)
+struct FNPC_TRexPatrolData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float PatrolRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float ChaseDetectionRange = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float AttackRange = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float PatrolSpeed = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float ChaseSpeed = 700.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float AttackDamage = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    float AttackCooldown = 2.5f;
+};
+
+UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ATRexBehaviorController : public AAIController
 {
     GENERATED_BODY()
@@ -27,56 +54,34 @@ public:
     virtual void OnPossess(APawn* InPawn) override;
 
     UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
+    void SetBehaviorState(ENPC_TRexState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
+    ENPC_TRexState GetCurrentState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
     void StartPatrol();
 
     UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
     void ChaseTarget(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    void AttackTarget(AActor* Target);
+    void ExecuteAttack();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    ENPC_TRexState GetCurrentState() const { return CurrentState; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    FNPC_TRexPatrolData PatrolData;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    float GetDetectionRange() const { return DetectionRange; }
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    float GetAttackRange() const { return AttackRange; }
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Config")
-    float DetectionRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Config")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Config")
-    float PatrolRadius = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Config")
-    float ChaseSpeed = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Config")
-    float PatrolSpeed = 300.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|TRex|State", meta = (AllowPrivateAccess = "true"))
-    ENPC_TRexState CurrentState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|TRex|State", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<AActor> CurrentTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex|Patrol")
-    TArray<TObjectPtr<AActor>> PatrolWaypoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|TRex|Patrol", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentWaypointIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    FVector PatrolCenter;
 
 private:
-    void UpdateBehavior(float DeltaTime);
+    ENPC_TRexState CurrentState;
+    AActor* CurrentTarget;
+    float TimeSinceLastAttack;
+    FVector CurrentPatrolDestination;
+
+    void UpdatePatrol(float DeltaTime);
+    void UpdateChase(float DeltaTime);
     void ScanForPlayer();
-    void MoveToNextWaypoint();
-    bool IsPlayerInRange(float Range) const;
-    float TimeSinceLastAttack = 0.0f;
-    float AttackCooldown = 2.5f;
+    FVector GetRandomPatrolPoint() const;
 };
