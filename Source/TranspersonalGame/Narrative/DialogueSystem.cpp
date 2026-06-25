@@ -1,134 +1,124 @@
 #include "DialogueSystem.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
-// ============================================================
-// UNarr_DialogueComponent
-// ============================================================
-
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+ANarr_DialogueActor::ANarr_DialogueActor()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    NPCName = TEXT("NPC");
-    InteractionRadius = 300.0f;
-    bPlayerInRange = false;
-    CurrentSequenceIndex = -1;
+    NPCName = TEXT("Unknown NPC");
+    NPCRole = TEXT("Survivor");
     CurrentLineIndex = 0;
     bDialogueActive = false;
+    TriggerRadius = 300.0f;
+    DialogueTimer = 0.0f;
+
+    // ── Pre-populate Elder Kael dialogue as default example ──
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder Kael");
+    Line1.LineText = TEXT("The T-Rex moves at dawn. Three days ago it took two hunters near the northern river.");
+    Line1.Tone = ENarr_DialogueTone::Warning;
+    Line1.DisplayDuration = 5.0f;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder Kael");
+    Line2.LineText = TEXT("We tracked its path — it circles the valley before striking. If you go east, go in groups. Never alone.");
+    Line2.Tone = ENarr_DialogueTone::Tactical;
+    Line2.DisplayDuration = 6.0f;
+
+    DialogueLines.Add(Line1);
+    DialogueLines.Add(Line2);
+
+    // Audio URLs from ElevenLabs TTS (generated this cycle)
+    AudioURLs.Add(TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782387317497_Elder_Kael.mp3"));
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void ANarr_DialogueActor::BeginPlay()
 {
     Super::BeginPlay();
+    CurrentLineIndex = 0;
+    bDialogueActive = false;
+    DialogueTimer = 0.0f;
 }
 
-void UNarr_DialogueComponent::TriggerDialogue(const FString& SequenceID)
+void ANarr_DialogueActor::Tick(float DeltaTime)
 {
-    for (int32 i = 0; i < DialogueSequences.Num(); ++i)
+    Super::Tick(DeltaTime);
+
+    if (!bDialogueActive) return;
+
+    DialogueTimer += DeltaTime;
+
+    if (DialogueLines.IsValidIndex(CurrentLineIndex))
     {
-        if (DialogueSequences[i].SequenceID == SequenceID)
+        const FNarr_DialogueLine& CurrentLine = DialogueLines[CurrentLineIndex];
+        if (DialogueTimer >= CurrentLine.DisplayDuration)
         {
-            // If already triggered once and flagged, skip
-            if (DialogueSequences[i].bTriggeredOnce)
-            {
-                return;
-            }
-            CurrentSequenceIndex = i;
-            CurrentLineIndex = 0;
-            bDialogueActive = true;
-            DialogueSequences[i].bTriggeredOnce = true;
-            UE_LOG(LogTemp, Log, TEXT("[Dialogue] Triggered sequence '%s' for NPC '%s'"),
-                *SequenceID, *NPCName);
-            return;
+            DialogueTimer = 0.0f;
+            AdvanceDialogue();
         }
     }
-    UE_LOG(LogTemp, Warning, TEXT("[Dialogue] Sequence '%s' not found for NPC '%s'"),
-        *SequenceID, *NPCName);
 }
 
-void UNarr_DialogueComponent::SetPlayerInRange(bool bInRange)
+void ANarr_DialogueActor::StartDialogue()
 {
-    bPlayerInRange = bInRange;
+    if (DialogueLines.Num() == 0) return;
+
+    CurrentLineIndex = 0;
+    bDialogueActive = true;
+    DialogueTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue started: %s — %s"),
+        *NPCName, *DialogueLines[0].LineText);
 }
 
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
+void ANarr_DialogueActor::AdvanceDialogue()
 {
-    if (!bDialogueActive || CurrentSequenceIndex < 0 ||
-        CurrentSequenceIndex >= DialogueSequences.Num())
+    if (!bDialogueActive) return;
+
+    CurrentLineIndex++;
+
+    if (!HasMoreLines())
     {
-        return FNarr_DialogueLine();
+        EndDialogue();
+        return;
     }
 
-    const FNarr_DialogueSequence& Seq = DialogueSequences[CurrentSequenceIndex];
-    if (CurrentLineIndex < Seq.Lines.Num())
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Line %d: %s — %s"),
+        CurrentLineIndex,
+        *DialogueLines[CurrentLineIndex].SpeakerName,
+        *DialogueLines[CurrentLineIndex].LineText);
+}
+
+void ANarr_DialogueActor::EndDialogue()
+{
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue ended: %s"), *NPCName);
+}
+
+FNarr_DialogueLine ANarr_DialogueActor::GetCurrentLine() const
+{
+    if (DialogueLines.IsValidIndex(CurrentLineIndex))
     {
-        return Seq.Lines[CurrentLineIndex];
+        return DialogueLines[CurrentLineIndex];
     }
     return FNarr_DialogueLine();
 }
 
-void UNarr_DialogueComponent::AdvanceLine()
+bool ANarr_DialogueActor::HasMoreLines() const
 {
-    if (!bDialogueActive || CurrentSequenceIndex < 0 ||
-        CurrentSequenceIndex >= DialogueSequences.Num())
-    {
-        return;
-    }
-
-    const FNarr_DialogueSequence& Seq = DialogueSequences[CurrentSequenceIndex];
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= Seq.Lines.Num())
-    {
-        // End of sequence
-        bDialogueActive = false;
-        CurrentSequenceIndex = -1;
-        CurrentLineIndex = 0;
-        UE_LOG(LogTemp, Log, TEXT("[Dialogue] Sequence ended for NPC '%s'"), *NPCName);
-    }
+    return DialogueLines.IsValidIndex(CurrentLineIndex);
 }
 
-bool UNarr_DialogueComponent::HasActiveDialogue() const
+void ANarr_DialogueActor::AddDialogueLine(const FString& Speaker, const FString& Text, ENarr_DialogueTone Tone, float Duration)
 {
-    return bDialogueActive;
-}
-
-// ============================================================
-// ANarr_DialogueTriggerActor
-// ============================================================
-
-ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueComponent>(
-        TEXT("DialogueComponent"));
-
-    TriggerDialogueID = TEXT("DefaultDialogue");
-}
-
-void ANarr_DialogueTriggerActor::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-void ANarr_DialogueTriggerActor::OnPlayerEnterRange()
-{
-    if (DialogueComponent)
-    {
-        DialogueComponent->SetPlayerInRange(true);
-        DialogueComponent->TriggerDialogue(TriggerDialogueID);
-        UE_LOG(LogTemp, Log, TEXT("[DialogueTrigger] Player entered range of '%s'"),
-            *GetActorLabel());
-    }
-}
-
-void ANarr_DialogueTriggerActor::OnPlayerExitRange()
-{
-    if (DialogueComponent)
-    {
-        DialogueComponent->SetPlayerInRange(false);
-        UE_LOG(LogTemp, Log, TEXT("[DialogueTrigger] Player exited range of '%s'"),
-            *GetActorLabel());
-    }
+    FNarr_DialogueLine NewLine;
+    NewLine.SpeakerName = Speaker;
+    NewLine.LineText = Text;
+    NewLine.Tone = Tone;
+    NewLine.DisplayDuration = Duration;
+    DialogueLines.Add(NewLine);
 }
