@@ -1,0 +1,62 @@
+{
+  "map": "MinPlayableMap",
+  "cycle": "PROD_CYCLE_AUTO_20260625_004",
+  "agent": "05_WorldGenerator",
+  "biome_zones": [
+    {
+      "id": "jungle_core",
+      "name": "Cretaceous Jungle Core",
+      "center": { "x": 2000, "y": 2500, "z": 400 },
+      "radius": 3000,
+      "description": "Dense tropical jungle — primary dino habitat. T-Rex territory.",
+      "vegetation_density": 0.85,
+      "dino_species": ["TRex", "Velociraptor", "Parasaurolophus"],
+      "terrain_height_variation": 600,
+      "assets_placed": [
+        "TRex_Main_001",
+        "Raptor_Pack_001",
+        "Raptor_Pack_002",
+        "Para_Herd_001"
+      ]
+    },
+    {
+      "id": "open_savanna",
+      "name": "Cretaceous Savanna",
+      "center": { "x": 4000, "y": 4000, "z": 200 },
+      "radius": 4000,
+      "description": "Open plains with scattered cycads. Herbivore grazing grounds.",
+      "vegetation_density": 0.35,
+      "dino_species": ["Triceratops", "Brachiosaurus", "Pachycephalo"],
+      "terrain_height_variation": 200,
+      "assets_placed": [
+        "Trike_Herd_001",
+        "Brachio_001"
+      ]
+    },
+    {
+      "id": "volcanic_highlands",
+      "name": "Volcanic Highlands",
+      "center": { "x": 6000, "y": 2000, "z": 1200 },
+      "radius": 2500,
+      "description": "Rocky volcanic terrain with steam vents. Dangerous predator zone.",
+      "vegetation_density": 0.15,
+      "dino_species": ["Ankylosaurus", "Protoceratops"],
+      "terrain_height_variation": 1500,
+      "assets_placed": []
+    },
+    {
+      "id": "river_delta",
+      "name": "River Delta Wetlands",
+      "center": { "x": 1000, "y": 5000, "z": 100 },
+      "radius": 2000,
+      "description": "Wetland area with shallow water. Amphibious dino territory.",
+      "vegetation_density": 0.70,
+      "dino_species": ["Tsintaosaurus", "Parasaurolophus"],
+      "terrain_height_variation": 100,
+      "assets_placed": []
+    }
+  ],
+  "sphere_domos_removed": true,
+  "landscape_status": "pending_creation",
+  "notes": "Sphere domos removed this cycle. Dinos spawned with correct SKM paths. Next cycle: create UE5 Landscape with height variation replacing flat plane terrain."
+}
