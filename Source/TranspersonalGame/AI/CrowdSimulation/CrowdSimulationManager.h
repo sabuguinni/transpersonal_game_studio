@@ -4,43 +4,21 @@
 #include "Components/ActorComponent.h"
 #include "CrowdSimulationManager.generated.h"
 
-// ============================================================
-// ENUMS — global scope (RULE 1: USTRUCT/UENUM at global scope)
-// ============================================================
-
+// ECrowd_HerdBehaviour — state machine for individual herd agents
 UENUM(BlueprintType)
-enum class ECrowd_AgentState : uint8
+enum class ECrowd_HerdBehaviour : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Wandering   UMETA(DisplayName = "Wandering"),
+    Grazing     UMETA(DisplayName = "Grazing"),
+    Migrating   UMETA(DisplayName = "Migrating"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Working     UMETA(DisplayName = "Working")
+    Returning   UMETA(DisplayName = "Returning"),
+    Drinking    UMETA(DisplayName = "Drinking"),
+    Resting     UMETA(DisplayName = "Resting")
 };
 
-UENUM(BlueprintType)
-enum class ECrowd_AgentLOD : uint8
-{
-    Full        UMETA(DisplayName = "Full (< 2000uu)"),
-    Mid         UMETA(DisplayName = "Mid (2000-5000uu)"),
-    Distant     UMETA(DisplayName = "Distant (> 5000uu)")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_ZoneType : uint8
-{
-    Village     UMETA(DisplayName = "Village"),
-    Waterhole   UMETA(DisplayName = "Waterhole"),
-    Hunting     UMETA(DisplayName = "Hunting Ground"),
-    Migration   UMETA(DisplayName = "Migration Path")
-};
-
-// ============================================================
-// STRUCTS — global scope
-// ============================================================
-
+// FCrowd_AgentState — per-agent runtime state
 USTRUCT(BlueprintType)
-struct FCrowd_AgentData
+struct FCrowd_AgentState
 {
     GENERATED_BODY()
 
@@ -48,53 +26,28 @@ struct FCrowd_AgentData
     AActor* AgentActor = nullptr;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector AgentLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
     FVector HomeLocation = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector TargetLocation = FVector::ZeroVector;
+    FVector ThreatLocation = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentState AgentState = ECrowd_AgentState::Idle;
+    ECrowd_HerdBehaviour CurrentBehaviour = ECrowd_HerdBehaviour::Grazing;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentLOD LODLevel = ECrowd_AgentLOD::Full;
+    float AlertLevel = 0.0f;
 
     UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float MoveSpeed = 150.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float FearLevel = 0.0f;
+    bool bIsLeader = false;
 };
 
-USTRUCT(BlueprintType)
-struct FCrowd_ZoneData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    FVector ZoneCenter = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    float ZoneRadius = 800.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    ECrowd_ZoneType ZoneType = ECrowd_ZoneType::Village;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    int32 MaxAgentsInZone = 20;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
-    int32 CurrentAgentCount = 0;
-};
-
-// ============================================================
-// UCLASS
-// ============================================================
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+/**
+ * UCrowdSimulationManager
+ * Manages prehistoric herd behaviour for up to 50 agents.
+ * Supports grazing clusters, migration lines, watering groups, and flee propagation.
+ * Agent #13 — Crowd & Traffic Simulation
+ */
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
 class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -102,60 +55,42 @@ class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
 public:
     UCrowdSimulationManager();
 
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     // --- Configuration ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
     int32 MaxCrowdAgents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float FleeRadius;
+    float HerdUpdateRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float CrowdGatherRadius;
+    bool bCrowdSystemActive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LODDistanceFar;
+    float WalkSpeed = 120.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float LODDistanceMid;
+    float FleeSpeed = 480.0f;
 
     // --- Runtime State ---
 
     UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    bool bCrowdFleeActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    FVector FleeOrigin;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_AgentData> ActiveAgents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_ZoneData> RegisteredZones;
+    TArray<FCrowd_AgentState> ManagedAgents;
 
     // --- Public API ---
 
+    /** Trigger a flee response in all agents within AlertRadius of ThreatLocation */
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerCrowdFlee(FVector DinosaurLocation, float DinosaurThreatRadius);
+    void TriggerHerdFlee(FVector ThreatLocation, float AlertRadius = 2000.0f);
 
+    /** Returns number of currently active (non-null) agents */
     UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ResetCrowdFlee();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    int32 GetActiveCrowdCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    TArray<FCrowd_AgentData> GetAgentsInRadius(FVector Center, float Radius) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    ECrowd_AgentLOD GetAgentLODLevel(FVector AgentLocation, FVector PlayerLocation);
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    int32 GetActiveAgentCount() const;
 
 private:
-    void InitializeCrowdZones();
-    void UpdateFleeingAgents(float DeltaTime);
-    void UpdateIdleAgents(float DeltaTime);
+    void UpdateAgentBehaviour(FCrowd_AgentState& Agent, float DeltaTime);
+    void PropagateAlert(const FCrowd_AgentState& SourceAgent, FVector ThreatLocation, float PropagationRadius);
 };
