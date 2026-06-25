@@ -5,53 +5,62 @@
 #include "TRexDinosaur.generated.h"
 
 /**
- * ATRexDinosaur — Tyrannosaurus Rex species implementation.
- *
- * Inherits from AEng_DinosaurBase and overrides stats with T-Rex specific values:
- * - High health (1200), high damage (150), slow speed (400 walk / 700 sprint)
- * - Large detection radius (3000 cm), long attack range (350 cm)
- * - Apex predator: hunts all prey, flees nothing
- * - Roar ability on aggro (audio cue + screen shake placeholder)
- *
- * Placed in MinPlayableMap as the primary apex threat.
+ * ATRexDinosaur
+ * Apex predator — Tyrannosaurus Rex subclass of ADinosaurBase.
+ * Stats: MaxHealth=5000, AttackDamage=400, MoveSpeed=800, Mass=12000, DetectionRadius=3500.
+ * Solitary hunter with massive territory radius and devastating bite attack.
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "T-Rex Dinosaur"))
-class TRANSPERSONALGAME_API ATRexDinosaur : public AEng_DinosaurBase
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
+class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
 
 public:
     ATRexDinosaur();
 
-    // Override — T-Rex roars when entering hunt state
-    virtual void BeginPlay() override;
-
-    // Override — stomp attack deals AoE damage in a radius
-    virtual void PerformAttack() override;
-
-    // Roar: plays sound + applies fear to nearby TranspersonalCharacters
+    /** Roar ability — stuns nearby prey for 2 seconds, triggers Aggressive state */
     UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-    void Roar();
+    void PerformRoar();
 
-    // Stomp radius for AoE damage (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadius;
+    /** Stomp attack — area damage in 600-unit radius, used when prey is directly underfoot */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void PerformStomp();
 
-    // Fear intensity applied to player on roar (0-1 range, fed into SurvivalComponent)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarFearIntensity;
-
-    // Cooldown between roars (seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarCooldown;
+    /** Override: T-Rex charges at target when in Hunting state beyond 1500 units */
+    virtual void UpdateBehavior() override;
 
 protected:
-    // Timer handle for roar cooldown
+    virtual void BeginPlay() override;
+
+    /** Radius of stomp area damage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompRadius = 600.f;
+
+    /** Stomp damage (separate from bite damage) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompDamage = 200.f;
+
+    /** Roar stun duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarStunDuration = 2.0f;
+
+    /** Charge speed multiplier when hunting at distance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
+    float ChargeSpeedMultiplier = 1.8f;
+
+    /** Minimum distance to target before switching from charge to bite */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float ChargeSwitchDistance = 400.f;
+
+private:
+    /** Timer handle for roar cooldown */
     FTimerHandle RoarCooldownHandle;
 
-    // Whether roar is currently on cooldown
-    bool bRoarOnCooldown;
+    /** Whether roar is currently on cooldown */
+    bool bRoarOnCooldown = false;
 
-    // Called when behavior state changes to Hunting — triggers roar
-    void OnEnterHuntState();
+    /** Roar cooldown duration */
+    float RoarCooldownDuration = 15.0f;
+
+    void ResetRoarCooldown();
 };
