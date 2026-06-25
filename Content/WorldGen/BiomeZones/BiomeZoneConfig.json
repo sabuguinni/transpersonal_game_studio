@@ -1,0 +1,112 @@
+{
+  "world_gen_version": "1.3.0",
+  "cycle": "PROD_CYCLE_AUTO_20260625_001",
+  "agent": "05_WorldGenerator",
+  "map": "/Game/Maps/MinPlayableMap",
+  "world_center": [2000, 2000, 0],
+  "world_radius_uu": 5000,
+
+  "biome_zones": [
+    {
+      "id": "jungle_core",
+      "name": "Dense Jungle Core",
+      "center": [2000, 2000, 0],
+      "radius_uu": 2000,
+      "height_range": [0, 600],
+      "vegetation_density": 0.85,
+      "primary_assets": [
+        "/Game/Tropical_Jungle_Pack/Trees/",
+        "/Game/Tropical_Jungle_Pack/Ferns/",
+        "/Game/Tropical_Jungle_Pack/GroundCover/"
+      ],
+      "terrain_features": ["mounds", "river_bed", "dense_canopy"],
+      "ambient_sound_tag": "biome.jungle.dense",
+      "fog_density": 0.04,
+      "fog_color": [0.08, 0.18, 0.06]
+    },
+    {
+      "id": "savanna_east",
+      "name": "Open Savanna",
+      "center": [3500, 2000, 0],
+      "radius_uu": 1500,
+      "height_range": [0, 200],
+      "vegetation_density": 0.25,
+      "primary_assets": [
+        "/Game/Tropical_Jungle_Pack/Grass/",
+        "/Game/Tropical_Jungle_Pack/SmallPlants/"
+      ],
+      "terrain_features": ["flat_plains", "scattered_rocks", "dry_riverbed"],
+      "ambient_sound_tag": "biome.savanna.open",
+      "fog_density": 0.01,
+      "fog_color": [0.22, 0.18, 0.08]
+    },
+    {
+      "id": "volcanic_highlands",
+      "name": "Volcanic Rocky Highlands",
+      "center": [800, 2000, 0],
+      "radius_uu": 1200,
+      "height_range": [200, 1200],
+      "vegetation_density": 0.15,
+      "primary_assets": [
+        "/Game/Rocks/Volcanic/",
+        "/Engine/BasicShapes/Cube"
+      ],
+      "terrain_features": ["rocky_ridges", "basalt_columns", "ash_plains"],
+      "ambient_sound_tag": "biome.volcanic.highland",
+      "fog_density": 0.06,
+      "fog_color": [0.18, 0.10, 0.06]
+    },
+    {
+      "id": "river_valley",
+      "name": "River Valley",
+      "center": [2000, 1200, 0],
+      "radius_uu": 800,
+      "height_range": [-100, 100],
+      "vegetation_density": 0.60,
+      "primary_assets": [
+        "/Game/Tropical_Jungle_Pack/WaterPlants/",
+        "/Game/Tropical_Jungle_Pack/Reeds/"
+      ],
+      "terrain_features": ["river_channel", "muddy_banks", "shallow_pools"],
+      "ambient_sound_tag": "biome.river.valley",
+      "fog_density": 0.05,
+      "fog_color": [0.06, 0.14, 0.18]
+    }
+  ],
+
+  "terrain_hills": [
+    { "label": "Hill_BG_NW",  "location": [500,  1000, -200], "scale": [30.0, 25.0, 4.0] },
+    { "label": "Hill_BG_NE",  "location": [3500, 800,  -200], "scale": [28.0, 22.0, 5.0] },
+    { "label": "Hill_BG_SW",  "location": [500,  3500, -200], "scale": [25.0, 30.0, 3.5] },
+    { "label": "Hill_BG_SE",  "location": [3500, 3200, -200], "scale": [32.0, 20.0, 4.5] },
+    { "label": "Mound_C_01",  "location": [1200, 1500, -100], "scale": [15.0, 12.0, 2.5] },
+    { "label": "Mound_C_02",  "location": [2800, 1600, -100], "scale": [18.0, 14.0, 3.0] },
+    { "label": "Mound_C_03",  "location": [1500, 2800, -100], "scale": [14.0, 16.0, 2.0] },
+    { "label": "Mound_C_04",  "location": [2600, 2900, -100], "scale": [16.0, 13.0, 2.8] },
+    { "label": "Ridge_W",     "location": [800,  2000, -150], "scale": [8.0,  40.0, 3.5] },
+    { "label": "Ridge_E",     "location": [3200, 2000, -150], "scale": [8.0,  38.0, 4.0] },
+    { "label": "Bump_01",     "location": [1800, 2200, 0],    "scale": [6.0,  8.0,  1.5] },
+    { "label": "Bump_02",     "location": [2200, 2400, 0],    "scale": [7.0,  6.0,  1.8] },
+    { "label": "Bump_03",     "location": [2500, 1900, 0],    "scale": [5.0,  7.0,  1.2] }
+  ],
+
+  "dinosaur_placements": [
+    { "label": "TRex_Savana_001",   "mesh": "/Game/Dinosaur_Pack/Trex/Mesh/SKM_Trex_Skin",                         "location": [2000, 2500, 400], "scale": 3.0, "biome": "jungle_core"   },
+    { "label": "Raptor_Savana_001", "mesh": "/Game/Dinosaur_Pack/Velociraptor/Mesh/SKM_Velociraptor_Skin",         "location": [2400, 2500, 400], "scale": 1.5, "biome": "jungle_core"   },
+    { "label": "Trike_Savana_001",  "mesh": "/Game/Dinosaur_Pack/Triceratops/Mesh/SKM_Triceratops",                "location": [1600, 2800, 400], "scale": 2.5, "biome": "savanna_east"  },
+    { "label": "Brachio_Savana_001","mesh": "/Game/Dinosaur_Pack/Brachiosaurus/Mesh/SKM_Brachiosaurus",            "location": [2700, 1800, 400], "scale": 4.0, "biome": "savanna_east"  },
+    { "label": "Ankylo_Savana_001", "mesh": "/Game/Dinosaur_Pack/Ankylosaurus/Mesh/SKM_Ankylo_Mesh",              "location": [1400, 2000, 400], "scale": 2.0, "biome": "jungle_core"   }
+  ],
+
+  "pcg_rules": {
+    "max_foliage_actors": 200,
+    "min_distance_between_trees_uu": 300,
+    "min_distance_dino_to_tree_uu": 500,
+    "terrain_height_variation_target_uu": 600,
+    "sphere_domos_allowed": false,
+    "flat_plane_max_scale_uu": 5000,
+    "actor_budget_total": 150
+  },
+
+  "notes": "Sphere domos removed this cycle. 13 terrain hills spawned for height variation. 5 dinos placed with correct mesh paths. generate_image API 401 — fallback to ue5_execute procedural terrain."
+}
