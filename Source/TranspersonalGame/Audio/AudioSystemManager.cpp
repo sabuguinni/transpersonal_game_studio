@@ -1,293 +1,305 @@
 #include "AudioSystemManager.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+
+// ── Constructor ───────────────────────────────────────────────────────────────
 
 AAudio_SystemManager::AAudio_SystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Root component
-    USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("AudioRoot"));
-    SetRootComponent(Root);
+    CurrentZone = EAudio_AmbientZone::None;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    ScreenShakeIntensity = 1.0f;
+    TRexShakeRadius = 3000.0f;
+    ZoneTransitionSpeed = 1.0f;
+    ThreatTransitionTimer = 0.0f;
+    ZoneTransitionTimer = 0.0f;
 
-    // Ambient audio component — jungle/environment layer
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(Root);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->VolumeMultiplier = 1.0f;
-
-    // Music audio component — adaptive score layer
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
-    MusicAudioComponent->SetupAttachment(Root);
-    MusicAudioComponent->bAutoActivate = false;
-    MusicAudioComponent->VolumeMultiplier = 0.6f;
-
-    // Campfire audio component — positional fire crackle
-    CampfireAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("CampfireAudio"));
-    CampfireAudioComponent->SetupAttachment(Root);
-    CampfireAudioComponent->bAutoActivate = false;
-    CampfireAudioComponent->VolumeMultiplier = 0.8f;
-
-    // Narrator audio component — voice lines
-    NarratorAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarratorAudio"));
-    NarratorAudioComponent->SetupAttachment(Root);
-    NarratorAudioComponent->bAutoActivate = false;
-    NarratorAudioComponent->VolumeMultiplier = 1.0f;
-
-    // Default zone configs
-    FAudio_ZoneConfig SafeConfig;
-    SafeConfig.ZoneType = EAudio_ZoneType::Safe;
-    SafeConfig.AmbientVolume = 1.0f;
-    SafeConfig.MusicVolume = 0.4f;
-    SafeConfig.CrossfadeDuration = 4.0f;
-    SafeConfig.bPlayDinoDistantCalls = false;
-    ZoneConfigs.Add(SafeConfig);
-
-    FAudio_ZoneConfig DangerConfig;
-    DangerConfig.ZoneType = EAudio_ZoneType::Danger;
-    DangerConfig.AmbientVolume = 0.3f;
-    DangerConfig.MusicVolume = 1.0f;
-    DangerConfig.CrossfadeDuration = 1.5f;
-    DangerConfig.bPlayDinoDistantCalls = true;
-    ZoneConfigs.Add(DangerConfig);
-
-    FAudio_ZoneConfig CombatConfig;
-    CombatConfig.ZoneType = EAudio_ZoneType::Combat;
-    CombatConfig.AmbientVolume = 0.1f;
-    CombatConfig.MusicVolume = 1.0f;
-    CombatConfig.CrossfadeDuration = 0.5f;
-    CombatConfig.bPlayDinoDistantCalls = false;
-    ZoneConfigs.Add(CombatConfig);
-
-    FAudio_ZoneConfig ExploreConfig;
-    ExploreConfig.ZoneType = EAudio_ZoneType::Exploration;
-    ExploreConfig.AmbientVolume = 0.9f;
-    ExploreConfig.MusicVolume = 0.5f;
-    ExploreConfig.CrossfadeDuration = 3.0f;
-    ExploreConfig.bPlayDinoDistantCalls = true;
-    ZoneConfigs.Add(ExploreConfig);
-
-    FAudio_ZoneConfig NightConfig;
-    NightConfig.ZoneType = EAudio_ZoneType::Night;
-    NightConfig.AmbientVolume = 0.7f;
-    NightConfig.MusicVolume = 0.3f;
-    NightConfig.CrossfadeDuration = 5.0f;
-    NightConfig.bPlayDinoDistantCalls = true;
-    ZoneConfigs.Add(NightConfig);
-
-    // Register narrator lines with ElevenLabs-generated audio URLs
-    FAudio_NarratorLine JungleLine;
-    JungleLine.LineID = TEXT("JUNGLE_DANGER_001");
-    JungleLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782381191549_Survivor_Narrator.mp3");
-    JungleLine.Duration = 11.0f;
-    JungleLine.TriggerThreatLevel = EAudio_DinoThreatLevel::Near;
-    RegisteredNarratorLines.Add(JungleLine);
-
-    FAudio_NarratorLine AlertLine;
-    AlertLine.LineID = TEXT("TREX_RUN_001");
-    AlertLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782381197900_Survivor_Narrator_Alert.mp3");
-    AlertLine.Duration = 8.0f;
-    AlertLine.TriggerThreatLevel = EAudio_DinoThreatLevel::Imminent;
-    RegisteredNarratorLines.Add(AlertLine);
+    // Create main music audio component
+    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
+    MusicComponent->SetupAttachment(RootComponent);
+    MusicComponent->bAutoActivate = false;
+    MusicComponent->bIsUISound = false;
 }
+
+// ── BeginPlay ─────────────────────────────────────────────────────────────────
 
 void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Start with safe zone ambient audio
-    SetAudioZone(EAudio_ZoneType::Safe);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: BeginPlay — zone=Safe, threat=None"));
+    // Register default narrative lines from ElevenLabs TTS (generated this cycle)
+    FAudio_NarrativeLine TRexLine;
+    TRexLine.CharacterName = TEXT("Narrator");
+    TRexLine.AudioURL = TTS_NarratorTRexProximity;
+    TRexLine.SubtitleText = TEXT("Something is moving through the trees. Heavy. Slow. The ground shakes with every step. T-Rex. Do not move. Do not breathe. Wait for it to pass.");
+    TRexLine.DisplayDuration = 10.0f;
+    NarrativeLines.Add(TRexLine);
+
+    FAudio_NarrativeLine WaterLine;
+    WaterLine.CharacterName = TEXT("Scout Mira");
+    WaterLine.AudioURL = TTS_ScoutMiraWater;
+    WaterLine.SubtitleText = TEXT("Water. Fresh water, fifty paces east. Fill your skins now — the dry season comes fast in this valley. And watch the banks. Crocodiles nest near still pools.");
+    WaterLine.DisplayDuration = 11.0f;
+    NarrativeLines.Add(WaterLine);
+
+    // Register default dino sound profiles (sounds assigned via Blueprint or data asset)
+    FAudio_DinoSoundProfile TRexProfile;
+    TRexProfile.DinoSpecies = TEXT("TRex");
+    TRexProfile.RoarRadius = 6000.0f;
+    TRexProfile.FootstepRadius = 3000.0f;
+    DinoSoundProfiles.Add(TRexProfile);
+
+    FAudio_DinoSoundProfile RaptorProfile;
+    RaptorProfile.DinoSpecies = TEXT("Velociraptor");
+    RaptorProfile.RoarRadius = 2500.0f;
+    RaptorProfile.FootstepRadius = 800.0f;
+    DinoSoundProfiles.Add(RaptorProfile);
+
+    FAudio_DinoSoundProfile TrikeProfile;
+    TrikeProfile.DinoSpecies = TEXT("Triceratops");
+    TrikeProfile.RoarRadius = 3500.0f;
+    TrikeProfile.FootstepRadius = 2000.0f;
+    DinoSoundProfiles.Add(TrikeProfile);
+
+    // Start in jungle ambient zone by default
+    SetAmbientZone(EAudio_AmbientZone::Jungle);
 }
+
+// ── Tick ──────────────────────────────────────────────────────────────────────
 
 void AAudio_SystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Update threat cooldown
-    if (ThreatUpdateCooldown > 0.0f)
-    {
-        ThreatUpdateCooldown -= DeltaTime;
-    }
-
-    // Update ambient volumes based on current zone
     UpdateAmbientVolumes(DeltaTime);
+    UpdateMusicTransition(DeltaTime);
 }
 
-void AAudio_SystemManager::SetAudioZone(EAudio_ZoneType NewZone)
-{
-    if (CurrentZone == NewZone) return;
+// ── Ambient Zone System ───────────────────────────────────────────────────────
 
-    const FAudio_ZoneConfig* Config = FindZoneConfig(NewZone);
-    if (!Config) return;
+void AAudio_SystemManager::SetAmbientZone(EAudio_AmbientZone NewZone)
+{
+    if (CurrentZone == NewZone)
+    {
+        return;
+    }
 
     CurrentZone = NewZone;
-
-    // Apply volume changes immediately
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->SetVolumeMultiplier(Config->AmbientVolume * MasterVolume);
-    }
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(Config->MusicVolume * MasterVolume);
-    }
+    ZoneTransitionTimer = 0.0f;
 
     UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Zone changed to %d"), (int32)NewZone);
 }
 
-void AAudio_SystemManager::CrossfadeToZone(EAudio_ZoneType TargetZone, float Duration)
+void AAudio_SystemManager::UpdateAmbientVolumes(float DeltaTime)
 {
-    // Queue crossfade — simplified: set zone directly with duration hint
-    CrossfadeTimer = Duration;
-    SetAudioZone(TargetZone);
+    ZoneTransitionTimer += DeltaTime * ZoneTransitionSpeed;
+
+    // Fade ambient components based on current zone
+    for (int32 i = 0; i < AmbientComponents.Num(); i++)
+    {
+        if (!AmbientComponents.IsValidIndex(i) || !AmbientComponents[i])
+        {
+            continue;
+        }
+
+        UAudioComponent* Comp = AmbientComponents[i];
+        if (!AmbientLayers.IsValidIndex(i))
+        {
+            continue;
+        }
+
+        const FAudio_AmbientLayer& Layer = AmbientLayers[i];
+        float TargetVolume = (Layer.Zone == CurrentZone) ? Layer.BaseVolume : 0.0f;
+        float CurrentVolume = Comp->VolumeMultiplier;
+        float FadeSpeed = (TargetVolume > CurrentVolume) ? (1.0f / FMath::Max(Layer.FadeInTime, 0.01f)) : (1.0f / FMath::Max(Layer.FadeOutTime, 0.01f));
+        float NewVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
+        Comp->SetVolumeMultiplier(NewVolume);
+    }
 }
 
-void AAudio_SystemManager::UpdateDinoThreatLevel(EAudio_DinoThreatLevel NewThreat)
+// ── Threat Level Music System ─────────────────────────────────────────────────
+
+void AAudio_SystemManager::SetThreatLevel(EAudio_ThreatLevel NewLevel)
 {
-    if (ThreatUpdateCooldown > 0.0f) return;
-    if (CurrentThreatLevel == NewThreat) return;
-
-    CurrentThreatLevel = NewThreat;
-    ThreatUpdateCooldown = 2.0f; // Prevent rapid switching
-
-    // Map threat to zone
-    switch (NewThreat)
+    if (CurrentThreatLevel == NewLevel)
     {
-        case EAudio_DinoThreatLevel::None:
-            CrossfadeToZone(EAudio_ZoneType::Safe, 4.0f);
-            break;
-        case EAudio_DinoThreatLevel::Distant:
-            CrossfadeToZone(EAudio_ZoneType::Exploration, 3.0f);
-            break;
-        case EAudio_DinoThreatLevel::Near:
-            CrossfadeToZone(EAudio_ZoneType::Danger, 2.0f);
-            break;
-        case EAudio_DinoThreatLevel::Imminent:
-            CrossfadeToZone(EAudio_ZoneType::Combat, 0.5f);
-            break;
+        return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat level = %d"), (int32)NewThreat);
+    CurrentThreatLevel = NewLevel;
+    ThreatTransitionTimer = 0.0f;
+
+    // Select music track based on threat level
+    USoundBase* TargetMusic = nullptr;
+    switch (NewLevel)
+    {
+        case EAudio_ThreatLevel::Safe:     TargetMusic = MusicSafe;     break;
+        case EAudio_ThreatLevel::Aware:    TargetMusic = MusicAware;    break;
+        case EAudio_ThreatLevel::Danger:   TargetMusic = MusicDanger;   break;
+        case EAudio_ThreatLevel::Critical: TargetMusic = MusicCritical; break;
+        default: break;
+    }
+
+    if (MusicComponent && TargetMusic)
+    {
+        MusicComponent->FadeOut(2.0f, 0.0f);
+        MusicComponent->SetSound(TargetMusic);
+        MusicComponent->FadeIn(2.0f, 1.0f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: ThreatLevel changed to %d"), (int32)NewLevel);
 }
 
-void AAudio_SystemManager::PlayNarratorLine(const FString& LineID)
+void AAudio_SystemManager::UpdateMusicTransition(float DeltaTime)
 {
-    for (const FAudio_NarratorLine& Line : RegisteredNarratorLines)
+    ThreatTransitionTimer += DeltaTime;
+}
+
+// ── Narrative Audio ───────────────────────────────────────────────────────────
+
+void AAudio_SystemManager::PlayNarrativeLine(int32 LineIndex)
+{
+    if (!NarrativeLines.IsValidIndex(LineIndex))
     {
-        if (Line.LineID == LineID)
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Invalid narrative line index %d"), LineIndex);
+        return;
+    }
+
+    const FAudio_NarrativeLine& Line = NarrativeLines[LineIndex];
+
+    // Play the sound asset if assigned
+    if (Line.SoundAsset)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), Line.SoundAsset, 1.0f, 1.0f, 0.0f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing narrative line %d — %s: %s"),
+        LineIndex,
+        *Line.CharacterName,
+        *Line.SubtitleText);
+}
+
+void AAudio_SystemManager::AddNarrativeLine(const FAudio_NarrativeLine& Line)
+{
+    NarrativeLines.Add(Line);
+}
+
+// ── Dino Sound Profiles ───────────────────────────────────────────────────────
+
+void AAudio_SystemManager::PlayDinoRoar(const FString& DinoSpecies, FVector Location)
+{
+    for (const FAudio_DinoSoundProfile& Profile : DinoSoundProfiles)
+    {
+        if (Profile.DinoSpecies == DinoSpecies && Profile.RoarSound)
         {
-            // In production: load audio from URL and play via NarratorAudioComponent
-            // For now: log the play event
-            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing narrator line '%s' (%.1fs) from %s"),
-                *LineID, Line.Duration, *Line.AudioURL);
+            UGameplayStatics::PlaySoundAtLocation(
+                GetWorld(),
+                Profile.RoarSound,
+                Location,
+                1.0f,
+                1.0f,
+                0.0f
+            );
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Dino roar — %s at %s"), *DinoSpecies, *Location.ToString());
             return;
         }
     }
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narrator line '%s' not found"), *LineID);
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No roar sound for species %s"), *DinoSpecies);
 }
 
-void AAudio_SystemManager::RegisterNarratorLine(const FAudio_NarratorLine& Line)
+void AAudio_SystemManager::PlayDinoFootstep(const FString& DinoSpecies, FVector Location)
 {
-    // Remove existing line with same ID if present
-    RegisteredNarratorLines.RemoveAll([&Line](const FAudio_NarratorLine& Existing)
+    for (const FAudio_DinoSoundProfile& Profile : DinoSoundProfiles)
     {
-        return Existing.LineID == Line.LineID;
+        if (Profile.DinoSpecies == DinoSpecies && Profile.FootstepSound)
+        {
+            UGameplayStatics::PlaySoundAtLocation(
+                GetWorld(),
+                Profile.FootstepSound,
+                Location,
+                1.0f,
+                1.0f,
+                0.0f
+            );
+            return;
+        }
+    }
+}
+
+void AAudio_SystemManager::RegisterDinoProfile(const FAudio_DinoSoundProfile& Profile)
+{
+    // Remove existing profile for this species if present
+    DinoSoundProfiles.RemoveAll([&Profile](const FAudio_DinoSoundProfile& Existing)
+    {
+        return Existing.DinoSpecies == Profile.DinoSpecies;
     });
-    RegisteredNarratorLines.Add(Line);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered narrator line '%s'"), *Line.LineID);
+    DinoSoundProfiles.Add(Profile);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered dino sound profile for %s"), *Profile.DinoSpecies);
 }
 
-void AAudio_SystemManager::TriggerTRexFootstepShake(float Distance)
+// ── Screen Feedback ───────────────────────────────────────────────────────────
+
+void AAudio_SystemManager::TriggerTRexProximityShake(FVector TRexLocation)
 {
-    if (Distance > TRexFootstepShakeRadius) return;
-
-    // Scale shake intensity by inverse distance
-    float Intensity = FMath::Clamp(1.0f - (Distance / TRexFootstepShakeRadius), 0.0f, 1.0f);
-
-    // Apply camera shake via player controller
-    APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-    if (PC)
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
     {
-        // Shake magnitude proportional to T-Rex proximity
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: T-Rex footstep shake — distance=%.0f intensity=%.2f"),
-            Distance, Intensity);
+        return;
+    }
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn)
+    {
+        return;
+    }
+
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), TRexLocation);
+    if (Distance > TRexShakeRadius)
+    {
+        return;
+    }
+
+    // Scale shake intensity by proximity (closer = stronger)
+    float ProximityFactor = 1.0f - (Distance / TRexShakeRadius);
+    float FinalIntensity = ScreenShakeIntensity * ProximityFactor;
+
+    // Footstep audio feedback — low frequency rumble cue
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: T-Rex proximity shake — distance=%.0f, intensity=%.2f"), Distance, FinalIntensity);
+
+    // Elevate threat level when T-Rex is very close
+    if (Distance < TRexShakeRadius * 0.3f)
+    {
+        SetThreatLevel(EAudio_ThreatLevel::Critical);
+    }
+    else if (Distance < TRexShakeRadius * 0.6f)
+    {
+        SetThreatLevel(EAudio_ThreatLevel::Danger);
+    }
+    else
+    {
+        SetThreatLevel(EAudio_ThreatLevel::Aware);
     }
 }
 
 void AAudio_SystemManager::TriggerDamageAudioFeedback(float DamageAmount)
 {
-    // Play damage grunt/impact sound
-    float Volume = FMath::Clamp(DamageAmount / 100.0f, 0.2f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Damage audio feedback — damage=%.1f volume=%.2f"),
-        DamageAmount, Volume);
-}
+    // Clamp damage to 0-100 range for intensity calculation
+    float ClampedDamage = FMath::Clamp(DamageAmount, 0.0f, 100.0f);
+    float FeedbackIntensity = ClampedDamage / 100.0f;
 
-void AAudio_SystemManager::SetCampfireActive(bool bActive)
-{
-    bCampfireActive = bActive;
-    if (CampfireAudioComponent)
+    // Escalate threat level on significant damage
+    if (FeedbackIntensity > 0.5f)
     {
-        if (bActive)
-        {
-            CampfireAudioComponent->Activate(true);
-            CampfireAudioComponent->SetVolumeMultiplier(0.8f * MasterVolume);
-        }
-        else
-        {
-            CampfireAudioComponent->Deactivate();
-        }
+        SetThreatLevel(EAudio_ThreatLevel::Critical);
     }
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Campfire audio %s"), bActive ? TEXT("ON") : TEXT("OFF"));
-}
-
-void AAudio_SystemManager::OnDayBegin()
-{
-    // Day: birds, insects, distant dino calls — full ambient
-    CrossfadeToZone(EAudio_ZoneType::Exploration, 8.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Day audio layer activated"));
-}
-
-void AAudio_SystemManager::OnNightBegin()
-{
-    // Night: crickets, distant roars, tension
-    CrossfadeToZone(EAudio_ZoneType::Night, 10.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Night audio layer activated"));
-}
-
-void AAudio_SystemManager::OnDawnBegin()
-{
-    // Dawn: birds starting, soft music swell
-    CrossfadeToZone(EAudio_ZoneType::Safe, 6.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Dawn audio layer activated"));
-}
-
-void AAudio_SystemManager::OnDuskBegin()
-{
-    // Dusk: ambient fading, danger rising
-    CrossfadeToZone(EAudio_ZoneType::Danger, 5.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Dusk audio layer activated"));
-}
-
-void AAudio_SystemManager::UpdateAmbientVolumes(float DeltaTime)
-{
-    // Smooth volume transitions
-    if (CrossfadeTimer > 0.0f)
+    else if (FeedbackIntensity > 0.25f)
     {
-        CrossfadeTimer -= DeltaTime;
+        SetThreatLevel(EAudio_ThreatLevel::Danger);
     }
-}
 
-const FAudio_ZoneConfig* AAudio_SystemManager::FindZoneConfig(EAudio_ZoneType ZoneType) const
-{
-    for (const FAudio_ZoneConfig& Config : ZoneConfigs)
-    {
-        if (Config.ZoneType == ZoneType)
-        {
-            return &Config;
-        }
-    }
-    return nullptr;
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Damage audio feedback — damage=%.1f, intensity=%.2f"), DamageAmount, FeedbackIntensity);
 }
