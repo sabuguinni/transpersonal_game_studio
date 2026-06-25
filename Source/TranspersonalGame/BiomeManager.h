@@ -5,49 +5,79 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Jungle        UMETA(DisplayName = "Jungle"),
-    Savanna       UMETA(DisplayName = "Savanna"),
-    Swamp         UMETA(DisplayName = "Swamp"),
-    Volcanic      UMETA(DisplayName = "Volcanic"),
-    Coastal       UMETA(DisplayName = "Coastal"),
-    Forest        UMETA(DisplayName = "Forest"),
-    Unknown       UMETA(DisplayName = "Unknown")
-};
-
+/**
+ * FBiomeZone — defines a single biome region in the world.
+ * Placed at global scope per RULE 1 (USTRUCT at global scope only).
+ */
 USTRUCT(BlueprintType)
-struct FEng_BiomeData
+struct TRANSPERSONALGAME_API FBiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EEng_BiomeType BiomeType = EEng_BiomeType::Unknown;
+    EBiomeType BiomeType = EBiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
+    FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    float Radius = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.5f;
+    float TemperatureBase = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DangerLevel = 0.3f;
+    float HumidityBase = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogColor = FLinearColor(0.4f, 0.6f, 0.4f, 1.0f);
+    float DangerLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FogDensity = 0.02f;
+    TArray<EDinosaurSpecies> InhabitingSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FString> DinosaurSpecies;
+    FBiomeZone()
+        : BiomeType(EBiomeType::Forest)
+        , CenterLocation(FVector::ZeroVector)
+        , Radius(3000.0f)
+        , TemperatureBase(25.0f)
+        , HumidityBase(0.5f)
+        , DangerLevel(0.5f)
+    {}
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+/**
+ * FBiomeTransition — blending data between two adjacent biomes.
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBiomeTransition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeA = EBiomeType::Forest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeB = EBiomeType::Savanna;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float BlendAlpha = 0.0f;
+
+    FBiomeTransition()
+        : BiomeA(EBiomeType::Forest)
+        , BiomeB(EBiomeType::Savanna)
+        , BlendAlpha(0.0f)
+    {}
+};
+
+/**
+ * ABiomeManager — World Actor that manages all biome zones.
+ * P1 Priority system. Placed once in the level; queried by all other systems.
+ *
+ * Usage:
+ *   ABiomeManager* BM = ABiomeManager::GetInstance(GetWorld());
+ *   EBiomeType Biome = BM->GetBiomeAtLocation(PlayerLocation);
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -55,64 +85,62 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
+    // --- Static accessor ---
+    UFUNCTION(BlueprintCallable, Category = "Biome", meta = (WorldContext = "WorldContextObject"))
+    static ABiomeManager* GetInstance(UObject* WorldContextObject);
+
+    // --- Biome query ---
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FBiomeZone GetBiomeZoneAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FBiomeTransition GetTransitionAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+
+    // --- Zone management ---
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void RegisterBiomeZone(const FBiomeZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void ClearAllZones();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    int32 GetZoneCount() const;
+
+    // --- Default world setup ---
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
+    void InitializeDefaultBiomes();
+
+    // --- Debug ---
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void DrawBiomeDebugSpheres();
+
+protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    /** Returns the biome type at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EEng_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
-
-    /** Returns full biome data at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeData GetBiomeDataAtLocation(FVector WorldLocation) const;
-
-    /** Returns the name of a biome type as string */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FString GetBiomeName(EEng_BiomeType BiomeType) const;
-
-    /** Returns danger level at location (0.0 = safe, 1.0 = lethal) */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetDangerLevelAtLocation(FVector WorldLocation) const;
-
-    /** Returns temperature at location in Celsius */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetTemperatureAtLocation(FVector WorldLocation) const;
-
-    /** Returns list of dinosaur species that spawn in this biome */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FString> GetDinosaurSpeciesForBiome(EEng_BiomeType BiomeType) const;
-
-    /** World size for biome sampling (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float WorldSize = 200000.0f;
-
-    /** Number of biome zones */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    int32 BiomeZoneCount = 6;
-
-    /** Noise scale for biome blending */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float NoiseScale = 0.00005f;
-
-    /** Current active biome (updated each tick based on player position) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Runtime")
-    EEng_BiomeType CurrentPlayerBiome = EEng_BiomeType::Unknown;
-
-    /** All biome definitions */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Data")
-    TArray<FEng_BiomeData> BiomeDefinitions;
-
-protected:
-    void InitializeBiomeDefinitions();
-    float SampleNoise(float X, float Y, float Frequency) const;
-    EEng_BiomeType ClassifyBiomeFromNoise(float NoiseValue, float AltitudeValue) const;
-    FEng_BiomeData* FindBiomeData(EEng_BiomeType Type);
-    const FEng_BiomeData* FindBiomeDataConst(EEng_BiomeType Type) const;
-
 private:
-    UPROPERTY()
-    TObjectPtr<AActor> PlayerRef;
+    UPROPERTY(EditAnywhere, Category = "Biome", meta = (AllowPrivateAccess = "true"))
+    TArray<FBiomeZone> BiomeZones;
 
-    float TimeSinceLastBiomeUpdate = 0.0f;
-    static constexpr float BiomeUpdateInterval = 2.0f;
+    UPROPERTY(EditAnywhere, Category = "Biome", meta = (AllowPrivateAccess = "true"))
+    float TransitionBlendRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Biome", meta = (AllowPrivateAccess = "true"))
+    bool bDrawDebugVisuals = false;
+
+    // Internal helpers
+    const FBiomeZone* FindNearestZone(const FVector& Location) const;
+    float GetBlendWeight(const FVector& Location, const FBiomeZone& Zone) const;
 };
