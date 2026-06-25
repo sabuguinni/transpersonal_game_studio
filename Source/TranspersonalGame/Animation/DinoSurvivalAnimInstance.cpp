@@ -1,5 +1,4 @@
 #include "DinoSurvivalAnimInstance.h"
-
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -7,31 +6,35 @@
 
 UDinoSurvivalAnimInstance::UDinoSurvivalAnimInstance()
 {
-    // Movement defaults
-    GroundSpeed        = 0.f;
-    bIsMoving          = false;
-    bIsInAir           = false;
-    bIsSprinting       = false;
-    bIsCrouching       = false;
-    MovementDirection  = 0.f;
-    VerticalVelocity   = 0.f;
+    // Locomotion defaults
+    Speed = 0.0f;
+    Direction = 0.0f;
+    bIsInAir = false;
+    bIsCrouching = false;
+    bIsSprinting = false;
+    bIsMoving = false;
 
     // Survival defaults
-    Health             = 100.f;
-    Stamina            = 100.f;
-    bIsInjured         = false;
-    bIsExhausted       = false;
+    Stamina = 100.0f;
+    FearLevel = 0.0f;
+    bIsThreatened = false;
+
+    // Combat defaults
+    bIsInCombat = false;
+    bIsAttacking = false;
+    bIsArmed = false;
 
     // IK defaults
-    LeftFootIKLocation  = FVector::ZeroVector;
+    LeftFootIKLocation = FVector::ZeroVector;
     RightFootIKLocation = FVector::ZeroVector;
-    PelvisOffset        = 0.f;
+    PelvisOffset = 0.0f;
 
-    // Config defaults
-    RunThreshold  = 375.f;   // cm/s — roughly 3.75 m/s
-    IdleThreshold = 10.f;
+    // Thresholds
+    MovingThreshold = 10.0f;
+    SprintThreshold = 400.0f;
+    ThreatFearThreshold = 60.0f;
 
-    OwnerCharacter    = nullptr;
+    OwnerCharacter = nullptr;
     MovementComponent = nullptr;
 }
 
@@ -52,109 +55,127 @@ void UDinoSurvivalAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
     if (!OwnerCharacter || !MovementComponent)
     {
-        // Re-attempt cache in case character was late-spawned
-        OwnerCharacter    = Cast<ACharacter>(GetOwningActor());
-        MovementComponent = OwnerCharacter ? OwnerCharacter->GetCharacterMovement() : nullptr;
         return;
     }
 
-    // ── Velocity ─────────────────────────────────────────────────────────────
+    // ── Locomotion ──────────────────────────────────────────────────────────
+
     const FVector Velocity = MovementComponent->Velocity;
-    GroundSpeed            = Velocity.Size2D();   // horizontal speed only
-    VerticalVelocity       = Velocity.Z;
+    Speed = Velocity.Size2D();
+    bIsMoving = Speed > MovingThreshold;
+    bIsSprinting = Speed > SprintThreshold;
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = OwnerCharacter->bIsCrouched;
 
-    // ── Boolean states ────────────────────────────────────────────────────────
-    bIsMoving    = GroundSpeed > IdleThreshold;
-    bIsInAir     = MovementComponent->IsFalling();
-    bIsSprinting = GroundSpeed > RunThreshold;
-    bIsCrouching = MovementComponent->IsCrouching();
-
-    // ── Movement direction (strafe angle) ─────────────────────────────────────
+    // Direction: angle between actor forward and velocity direction
     if (bIsMoving)
     {
-        const FRotator ActorRot  = OwnerCharacter->GetActorRotation();
-        const FRotator VelRot    = UKismetMathLibrary::MakeRotFromX(Velocity);
-        const FRotator DeltaRot  = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot);
-        MovementDirection        = DeltaRot.Yaw;
+        const FRotator ActorRotation = OwnerCharacter->GetActorRotation();
+        const FRotator VelocityRotation = Velocity.Rotation();
+        const FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRotation, ActorRotation);
+        Direction = DeltaRot.Yaw;
     }
     else
     {
-        MovementDirection = 0.f;
+        Direction = 0.0f;
     }
 
-    // ── Survival stats (read from character if it exposes them) ───────────────
-    // We use a soft interface — if the character doesn't expose these, defaults hold
-    if (OwnerCharacter->GetClass()->ImplementsInterface(UInterface::StaticClass()))
+    // ── Survival Stats ───────────────────────────────────────────────────────
+    // These are read from the character's survival component if available.
+    // For now we use direct property access with a soft interface.
+    // The TranspersonalCharacter exposes these as public floats.
     {
-        // Placeholder: survival stats will be wired when TranspersonalCharacter
-        // exposes Health/Stamina as BlueprintReadOnly properties.
-        // For now, keep at defaults (100/100) so animations play normally.
+        // Try to read survival stats via reflection (safe — no hard dependency)
+        UObject* CharObj = Cast<UObject>(OwnerCharacter);
+        if (CharObj)
+        {
+            // Stamina
+            FFloatProperty* StaminaProp = FindFProperty<FFloatProperty>(CharObj->GetClass(), TEXT("Stamina"));
+            if (StaminaProp)
+            {
+                Stamina = StaminaProp->GetPropertyValue_InContainer(CharObj);
+            }
+
+            // Fear
+            FFloatProperty* FearProp = FindFProperty<FFloatProperty>(CharObj->GetClass(), TEXT("Fear"));
+            if (FearProp)
+            {
+                FearLevel = FearProp->GetPropertyValue_InContainer(CharObj);
+            }
+        }
     }
 
-    bIsInjured   = Health < 30.f;
-    bIsExhausted = Stamina < 20.f;
+    bIsThreatened = FearLevel >= ThreatFearThreshold;
 
-    // ── Foot IK ───────────────────────────────────────────────────────────────
+    // ── Foot IK ──────────────────────────────────────────────────────────────
     if (!bIsInAir)
     {
-        UpdateFootIK();
-        UpdatePelvisOffset();
+        UpdateFootIK(DeltaSeconds);
     }
     else
     {
-        // Reset IK when airborne
-        LeftFootIKLocation  = FVector::ZeroVector;
+        // Reset IK while airborne
+        LeftFootIKLocation = FVector::ZeroVector;
         RightFootIKLocation = FVector::ZeroVector;
-        PelvisOffset        = 0.f;
+        PelvisOffset = 0.0f;
     }
 }
 
-void UDinoSurvivalAnimInstance::UpdateFootIK()
+void UDinoSurvivalAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-    if (!OwnerCharacter) return;
+    bool bLeftHit = TraceFootIK(TEXT("foot_l"), LeftFootIKLocation);
+    bool bRightHit = TraceFootIK(TEXT("foot_r"), RightFootIKLocation);
 
-    UWorld* World = OwnerCharacter->GetWorld();
-    if (!World) return;
+    // Pelvis offset: lower pelvis to the lowest foot so both can reach ground
+    if (bLeftHit && bRightHit)
+    {
+        const float LeftZ = LeftFootIKLocation.Z;
+        const float RightZ = RightFootIKLocation.Z;
+        const float LowestFoot = FMath::Min(LeftZ, RightZ);
+        const FVector CharLoc = OwnerCharacter->GetActorLocation();
+        PelvisOffset = FMath::FInterpTo(PelvisOffset, LowestFoot - CharLoc.Z, DeltaSeconds, 10.0f);
+    }
+    else
+    {
+        PelvisOffset = FMath::FInterpTo(PelvisOffset, 0.0f, DeltaSeconds, 10.0f);
+    }
+}
 
-    const FVector ActorLoc = OwnerCharacter->GetActorLocation();
-    const float   TraceUp  = 50.f;
-    const float   TraceDown = 100.f;
+bool UDinoSurvivalAnimInstance::TraceFootIK(const FName& FootSocketName, FVector& OutLocation)
+{
+    if (!OwnerCharacter)
+    {
+        return false;
+    }
 
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh)
+    {
+        return false;
+    }
+
+    const FVector SocketLocation = Mesh->GetSocketLocation(FootSocketName);
+    const FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f, 50.0f);
+    const FVector TraceEnd = SocketLocation - FVector(0.0f, 0.0f, 75.0f);
+
+    FHitResult HitResult;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerCharacter);
 
-    // Left foot — offset relative to character root (approximate socket positions)
-    const FVector LeftStart  = ActorLoc + FVector(-20.f, -15.f, TraceUp);
-    const FVector LeftEnd    = ActorLoc + FVector(-20.f, -15.f, -TraceDown);
+    const bool bHit = OwnerCharacter->GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_Visibility,
+        Params
+    );
 
-    FHitResult LeftHit;
-    if (World->LineTraceSingleByChannel(LeftHit, LeftStart, LeftEnd, ECC_WorldStatic, Params))
+    if (bHit)
     {
-        LeftFootIKLocation = LeftHit.ImpactPoint;
+        OutLocation = HitResult.ImpactPoint;
+        return true;
     }
 
-    // Right foot
-    const FVector RightStart = ActorLoc + FVector(-20.f,  15.f, TraceUp);
-    const FVector RightEnd   = ActorLoc + FVector(-20.f,  15.f, -TraceDown);
-
-    FHitResult RightHit;
-    if (World->LineTraceSingleByChannel(RightHit, RightStart, RightEnd, ECC_WorldStatic, Params))
-    {
-        RightFootIKLocation = RightHit.ImpactPoint;
-    }
-}
-
-void UDinoSurvivalAnimInstance::UpdatePelvisOffset()
-{
-    if (LeftFootIKLocation.IsZero() || RightFootIKLocation.IsZero())
-    {
-        PelvisOffset = 0.f;
-        return;
-    }
-
-    // Pelvis drops to the lower of the two feet so both can reach the ground
-    const float LeftDelta  = LeftFootIKLocation.Z  - OwnerCharacter->GetActorLocation().Z;
-    const float RightDelta = RightFootIKLocation.Z - OwnerCharacter->GetActorLocation().Z;
-    PelvisOffset = FMath::Min(LeftDelta, RightDelta);
-    PelvisOffset = FMath::Clamp(PelvisOffset, -30.f, 0.f);
+    OutLocation = SocketLocation;
+    return false;
 }
