@@ -1,199 +1,175 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Implements Mass AI crowd simulation for up to 50,000 agents
-// Prehistoric survival game — primitive human herds and migration patterns
+// Implements prehistoric herd behaviour: grazing clusters, migration lines, watering groups
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "NavigationSystem.h"
-#include "NavMesh/NavMeshBoundsVolume.h"
-#include "GameFramework/Actor.h"
+#include "Engine/SkeletalMeshActor.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz update for crowd
+    PrimaryComponentTick.TickInterval = 0.5f; // Update every 0.5s for performance
 
-    MaxCrowdAgents = 200;
-    FleeRadius = 1500.0f;
-    CrowdGatherRadius = 800.0f;
-    LODDistanceFar = 5000.0f;
-    LODDistanceMid = 2000.0f;
-    bCrowdFleeActive = false;
-    FleeOrigin = FVector::ZeroVector;
+    MaxCrowdAgents = 50;
+    HerdUpdateRadius = 5000.0f;
+    bCrowdSystemActive = true;
 }
 
 void UCrowdSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeCrowdZones();
+
+    if (bCrowdSystemActive)
+    {
+        // Register all Crowd_ labelled actors as managed agents
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && Actor->GetActorLabel().StartsWith(TEXT("Crowd_")))
+            {
+                FCrowd_AgentState NewAgent;
+                NewAgent.AgentActor = Actor;
+                NewAgent.HomeLocation = Actor->GetActorLocation();
+                NewAgent.CurrentBehaviour = ECrowd_HerdBehaviour::Grazing;
+                NewAgent.AlertLevel = 0.0f;
+                NewAgent.bIsLeader = (ManagedAgents.Num() % 5 == 0); // Every 5th is a leader
+
+                ManagedAgents.Add(NewAgent);
+            }
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Registered %d crowd agents"), ManagedAgents.Num());
+    }
 }
 
 void UCrowdSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (bCrowdFleeActive)
+    if (!bCrowdSystemActive) return;
+
+    // Update each agent's behaviour state
+    for (FCrowd_AgentState& Agent : ManagedAgents)
     {
-        UpdateFleeingAgents(DeltaTime);
-    }
-    else
-    {
-        UpdateIdleAgents(DeltaTime);
-    }
-}
+        if (!Agent.AgentActor) continue;
 
-void UCrowdSimulationManager::InitializeCrowdZones()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Register all crowd zones in the level
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsWithTag(World, FName("CrowdZone"), FoundActors);
-
-    for (AActor* Actor : FoundActors)
-    {
-        if (Actor)
-        {
-            FCrowd_ZoneData ZoneData;
-            ZoneData.ZoneCenter = Actor->GetActorLocation();
-            ZoneData.ZoneRadius = CrowdGatherRadius;
-            ZoneData.ZoneType = ECrowd_ZoneType::Village;
-            ZoneData.MaxAgentsInZone = 20;
-            ZoneData.CurrentAgentCount = 0;
-            RegisteredZones.Add(ZoneData);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized %d crowd zones"), RegisteredZones.Num());
-}
-
-void UCrowdSimulationManager::TriggerCrowdFlee(FVector DinosaurLocation, float DinosaurThreatRadius)
-{
-    bCrowdFleeActive = true;
-    FleeOrigin = DinosaurLocation;
-    FleeRadius = DinosaurThreatRadius;
-
-    UE_LOG(LogTemp, Warning, TEXT("CROWD_FLEE_TRIGGERED: Dinosaur at (%.0f, %.0f, %.0f) radius=%.0f"),
-        DinosaurLocation.X, DinosaurLocation.Y, DinosaurLocation.Z, DinosaurThreatRadius);
-
-    // Notify all agents in range to flee
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        float DistToDino = FVector::Dist(Agent.AgentLocation, DinosaurLocation);
-        if (DistToDino < DinosaurThreatRadius * 1.5f)
-        {
-            Agent.AgentState = ECrowd_AgentState::Fleeing;
-            // Calculate flee direction (away from dinosaur)
-            FVector FleeDir = (Agent.AgentLocation - DinosaurLocation).GetSafeNormal();
-            Agent.TargetLocation = Agent.AgentLocation + FleeDir * 2000.0f;
-        }
+        UpdateAgentBehaviour(Agent, DeltaTime);
     }
 }
 
-void UCrowdSimulationManager::ResetCrowdFlee()
+void UCrowdSimulationManager::UpdateAgentBehaviour(FCrowd_AgentState& Agent, float DeltaTime)
 {
-    bCrowdFleeActive = false;
-    FleeOrigin = FVector::ZeroVector;
-
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    // Simple state machine: Grazing → Alert → Flee → Return
+    switch (Agent.CurrentBehaviour)
     {
-        if (Agent.AgentState == ECrowd_AgentState::Fleeing)
+        case ECrowd_HerdBehaviour::Grazing:
         {
-            Agent.AgentState = ECrowd_AgentState::Idle;
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CROWD_FLEE_RESET: Agents returning to normal behavior"));
-}
-
-void UCrowdSimulationManager::UpdateFleeingAgents(float DeltaTime)
-{
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (Agent.AgentState == ECrowd_AgentState::Fleeing && Agent.AgentActor)
-        {
+            // Slowly drift within home radius
             FVector CurrentLoc = Agent.AgentActor->GetActorLocation();
-            FVector Direction = (Agent.TargetLocation - CurrentLoc).GetSafeNormal();
-            FVector NewLoc = CurrentLoc + Direction * Agent.MoveSpeed * DeltaTime * 3.0f; // 3x speed when fleeing
-            Agent.AgentActor->SetActorLocation(NewLoc, true);
-            Agent.AgentLocation = NewLoc;
-
-            // Check if far enough from threat
-            if (FVector::Dist(NewLoc, FleeOrigin) > FleeRadius * 2.0f)
+            FVector HomeOffset = CurrentLoc - Agent.HomeLocation;
+            if (HomeOffset.Size() > 800.0f)
             {
-                Agent.AgentState = ECrowd_AgentState::Idle;
+                // Drift back toward home
+                FVector ReturnDir = (Agent.HomeLocation - CurrentLoc).GetSafeNormal();
+                Agent.AgentActor->SetActorLocation(CurrentLoc + ReturnDir * 30.0f * DeltaTime, false);
             }
+            break;
         }
-    }
-}
 
-void UCrowdSimulationManager::UpdateIdleAgents(float DeltaTime)
-{
-    // Idle agents wander within their zone
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (Agent.AgentState == ECrowd_AgentState::Idle && Agent.AgentActor)
+        case ECrowd_HerdBehaviour::Fleeing:
         {
-            // Simple wander: move toward target, pick new target when reached
-            FVector CurrentLoc = Agent.AgentActor->GetActorLocation();
-            float DistToTarget = FVector::Dist(CurrentLoc, Agent.TargetLocation);
-
-            if (DistToTarget < 50.0f)
+            // Move away from threat location
+            if (Agent.ThreatLocation != FVector::ZeroVector)
             {
-                // Pick new wander target within zone
-                Agent.TargetLocation = Agent.HomeLocation + FVector(
-                    FMath::RandRange(-300.0f, 300.0f),
-                    FMath::RandRange(-300.0f, 300.0f),
-                    0.0f
+                FVector FleeDir = (Agent.AgentActor->GetActorLocation() - Agent.ThreatLocation).GetSafeNormal();
+                Agent.AgentActor->SetActorLocation(
+                    Agent.AgentActor->GetActorLocation() + FleeDir * FleeSpeed * DeltaTime, false
                 );
+            }
+
+            // Reduce alert over time
+            Agent.AlertLevel = FMath::Max(0.0f, Agent.AlertLevel - DeltaTime * 0.3f);
+            if (Agent.AlertLevel <= 0.0f)
+            {
+                Agent.CurrentBehaviour = ECrowd_HerdBehaviour::Returning;
+            }
+            break;
+        }
+
+        case ECrowd_HerdBehaviour::Returning:
+        {
+            FVector CurrentLoc = Agent.AgentActor->GetActorLocation();
+            FVector ToHome = Agent.HomeLocation - CurrentLoc;
+            if (ToHome.Size() < 150.0f)
+            {
+                Agent.CurrentBehaviour = ECrowd_HerdBehaviour::Grazing;
             }
             else
             {
-                FVector Direction = (Agent.TargetLocation - CurrentLoc).GetSafeNormal();
-                FVector NewLoc = CurrentLoc + Direction * Agent.MoveSpeed * DeltaTime;
-                Agent.AgentActor->SetActorLocation(NewLoc, true);
-                Agent.AgentLocation = NewLoc;
+                FVector ReturnDir = ToHome.GetSafeNormal();
+                Agent.AgentActor->SetActorLocation(CurrentLoc + ReturnDir * WalkSpeed * DeltaTime, false);
             }
+            break;
         }
+
+        default:
+            break;
     }
 }
 
-ECrowd_AgentLOD UCrowdSimulationManager::GetAgentLODLevel(FVector AgentLocation, FVector PlayerLocation)
+void UCrowdSimulationManager::TriggerHerdFlee(FVector ThreatLocation, float AlertRadius)
 {
-    float Distance = FVector::Dist(AgentLocation, PlayerLocation);
+    int32 AlertedCount = 0;
 
-    if (Distance < LODDistanceMid)
+    for (FCrowd_AgentState& Agent : ManagedAgents)
     {
-        return ECrowd_AgentLOD::Full;
-    }
-    else if (Distance < LODDistanceFar)
-    {
-        return ECrowd_AgentLOD::Mid;
-    }
-    else
-    {
-        return ECrowd_AgentLOD::Distant;
-    }
-}
+        if (!Agent.AgentActor) continue;
 
-int32 UCrowdSimulationManager::GetActiveCrowdCount() const
-{
-    return ActiveAgents.Num();
-}
-
-TArray<FCrowd_AgentData> UCrowdSimulationManager::GetAgentsInRadius(FVector Center, float Radius) const
-{
-    TArray<FCrowd_AgentData> Result;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (FVector::Dist(Agent.AgentLocation, Center) <= Radius)
+        float DistToThreat = FVector::Dist(Agent.AgentActor->GetActorLocation(), ThreatLocation);
+        if (DistToThreat <= AlertRadius)
         {
-            Result.Add(Agent);
+            Agent.CurrentBehaviour = ECrowd_HerdBehaviour::Fleeing;
+            Agent.ThreatLocation = ThreatLocation;
+            Agent.AlertLevel = 1.0f;
+            AlertedCount++;
+
+            // Propagate alert to nearby agents (herd instinct)
+            PropagateAlert(Agent, ThreatLocation, AlertRadius * 0.6f);
         }
     }
-    return Result;
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd flee triggered: %d agents alerted (radius=%.0f)"), AlertedCount, AlertRadius);
+}
+
+void UCrowdSimulationManager::PropagateAlert(const FCrowd_AgentState& SourceAgent, FVector ThreatLocation, float PropagationRadius)
+{
+    for (FCrowd_AgentState& NearbyAgent : ManagedAgents)
+    {
+        if (!NearbyAgent.AgentActor) continue;
+        if (NearbyAgent.CurrentBehaviour == ECrowd_HerdBehaviour::Fleeing) continue;
+
+        float Dist = FVector::Dist(NearbyAgent.AgentActor->GetActorLocation(), SourceAgent.AgentActor->GetActorLocation());
+        if (Dist <= PropagationRadius)
+        {
+            NearbyAgent.CurrentBehaviour = ECrowd_HerdBehaviour::Fleeing;
+            NearbyAgent.ThreatLocation = ThreatLocation;
+            NearbyAgent.AlertLevel = 0.7f; // Secondary alert — less intense
+        }
+    }
+}
+
+int32 UCrowdSimulationManager::GetActiveAgentCount() const
+{
+    int32 Count = 0;
+    for (const FCrowd_AgentState& Agent : ManagedAgents)
+    {
+        if (Agent.AgentActor) Count++;
+    }
+    return Count;
 }
