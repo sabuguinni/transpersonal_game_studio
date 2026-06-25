@@ -1,108 +1,23 @@
+// PrehistoricAnimInstance.h
+// Animation Agent #10 — Transpersonal Game Studio
+// AnimInstance for the prehistoric survivor character.
+// Exposes locomotion state variables consumed by the Animation Blueprint.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
 #include "PrehistoricAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_ActionState : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Crafting    UMETA(DisplayName = "Crafting"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Eating      UMETA(DisplayName = "Eating"),
-    Drinking    UMETA(DisplayName = "Drinking"),
-    Building    UMETA(DisplayName = "Building"),
-    Hunting     UMETA(DisplayName = "Hunting")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float GroundSpeed = 0.0f;
-
-    FAnim_MovementData()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        Velocity = FVector::ZeroVector;
-        GroundSpeed = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_SurvivalData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Health = 100.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Stamina = 100.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Hunger = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Thirst = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Fear = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float Temperature = 20.0f;
-
-    FAnim_SurvivalData()
-    {
-        Health = 100.0f;
-        Stamina = 100.0f;
-        Hunger = 0.0f;
-        Thirst = 0.0f;
-        Fear = 0.0f;
-        Temperature = 20.0f;
-    }
-};
+class ACharacter;
 
 /**
- * Animation Instance for prehistoric characters with survival mechanics
- * Handles movement states, action states, and survival-based animation blending
+ * UPrehistoricAnimInstance
+ *
+ * Drives the survivor character's animation state machine.
+ * Reads velocity, movement flags and survival stats each tick,
+ * then exposes clean float/bool properties for the AnimBlueprint
+ * to blend between Idle, Walk, Run, Crouch, Jump, Attack and Death states.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPrehistoricAnimInstance : public UAnimInstance
@@ -112,90 +27,84 @@ class TRANSPERSONALGAME_API UPrehistoricAnimInstance : public UAnimInstance
 public:
     UPrehistoricAnimInstance();
 
-protected:
+    // ── UAnimInstance interface ─────────────────────────────────────────────
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // Movement State Machine
-    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
-    EAnim_MovementState CurrentMovementState;
+    // ── Called by the character when it lands after a jump ─────────────────
+    UFUNCTION(BlueprintCallable, Category = "Animation|Events")
+    void OnLanded();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation States")
-    EAnim_ActionState CurrentActionState;
+    // ── State setters (called by Character/Combat components) ───────────────
+    UFUNCTION(BlueprintCallable, Category = "Animation|State")
+    void SetAttacking(bool bAttacking);
 
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
-    FAnim_MovementData MovementData;
+    UFUNCTION(BlueprintCallable, Category = "Animation|State")
+    void SetDead(bool bDead);
 
-    // Survival Data
-    UPROPERTY(BlueprintReadOnly, Category = "Survival Data")
-    FAnim_SurvivalData SurvivalData;
+    /** 0=calm, 1=max fear — affects trembling/crouching blend weight */
+    UFUNCTION(BlueprintCallable, Category = "Animation|Survival")
+    void SetFearIntensity(float Intensity);
 
-    // Animation Blending Parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float WalkRunBlend = 0.0f;
+    /** 0=exhausted, 1=full stamina — scales animation playback speed */
+    UFUNCTION(BlueprintCallable, Category = "Animation|Survival")
+    void SetStaminaRatio(float Ratio);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float FearIntensity = 0.0f;
+    /** Returns animation playback speed multiplier (0.75–1.0) */
+    UFUNCTION(BlueprintPure, Category = "Animation|Survival")
+    float GetAnimSpeedScale() const;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float FatigueLevel = 0.0f;
+    // ── Locomotion state (read by AnimBlueprint) ────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float InjuryLevel = 0.0f;
+    /** Ground speed (cm/s, XY plane only) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float Speed;
 
-    // Character References
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class ACharacter* OwnerCharacter;
+    /** Strafe direction angle relative to actor forward (-180..180) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    class UCharacterMovementComponent* MovementComponent;
+    /** True while the character is airborne */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsInAir;
+
+    /** True while the character is crouching */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsCrouching;
+
+    /** True when speed > 400 and on ground (sprint threshold) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsSprinting;
+
+    /** Set externally by the combat system */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    bool bIsAttacking;
+
+    /** Set externally when health reaches zero */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    bool bIsDead;
+
+    /** Lateral lean angle driven by strafe direction (-15..15 degrees) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float LeanAngle;
+
+    /** Control rotation pitch for aim offset (-90..90) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float AimPitch;
+
+    /** 1.0 on landing, fades to 0 — drives landing recovery blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float LandedBlendAlpha;
+
+    /** 0=calm, 1=max fear — drives trembling/cowering blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float FearIntensity;
+
+    /** 0=exhausted, 1=full — scales animation speed */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float StaminaRatio;
 
 private:
-    // Update Functions
-    void UpdateMovementData();
-    void UpdateSurvivalData();
-    void UpdateMovementState();
-    void UpdateActionState();
-    void UpdateBlendingParameters();
-
-    // State Transition Logic
-    bool ShouldTransitionToRunning() const;
-    bool ShouldTransitionToWalking() const;
-    bool ShouldTransitionToIdle() const;
-    bool ShouldTransitionToJumping() const;
-    bool ShouldTransitionToFalling() const;
-
-    // Animation Triggers
-    UFUNCTION(BlueprintCallable, Category = "Animation Triggers")
-    void TriggerGatheringAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Triggers")
-    void TriggerCraftingAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Triggers")
-    void TriggerCombatAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Triggers")
-    void TriggerEatingAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Triggers")
-    void TriggerDrinkingAnimation();
-
-public:
-    // Blueprint Interface
-    UFUNCTION(BlueprintCallable, Category = "Animation Control")
-    void SetActionState(EAnim_ActionState NewActionState);
-
-    UFUNCTION(BlueprintPure, Category = "Animation Control")
-    bool IsPerformingAction() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Control")
-    float GetMovementSpeedRatio() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Control")
-    bool ShouldPlayFearAnimation() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation Control")
-    bool ShouldPlayFatigueAnimation() const;
+    UPROPERTY()
+    ACharacter* OwnerCharacter;
 };
