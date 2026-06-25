@@ -1,273 +1,115 @@
+// PrehistoricAnimInstance.cpp
+// Animation Agent #10 — Transpersonal Game Studio
+// Locomotion AnimInstance for the prehistoric survivor character.
+// Drives idle/walk/run/crouch/jump blend states from character movement data.
+
 #include "PrehistoricAnimInstance.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
 
 UPrehistoricAnimInstance::UPrehistoricAnimInstance()
 {
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentActionState = EAnim_ActionState::None;
-    WalkRunBlend = 0.0f;
-    FearIntensity = 0.0f;
-    FatigueLevel = 0.0f;
-    InjuryLevel = 0.0f;
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
+    Speed            = 0.f;
+    Direction        = 0.f;
+    bIsInAir         = false;
+    bIsCrouching     = false;
+    bIsSprinting     = false;
+    bIsAttacking     = false;
+    bIsDead          = false;
+    LeanAngle        = 0.f;
+    AimPitch         = 0.f;
+    LandedBlendAlpha = 0.f;
+    FearIntensity    = 0.f;
+    StaminaRatio     = 1.f;
 }
 
 void UPrehistoricAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
+    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+}
 
-    // Get character and movement component references
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
+void UPrehistoricAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
+{
+    Super::NativeUpdateAnimation(DeltaSeconds);
+
+    if (!OwnerCharacter)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+        if (!OwnerCharacter) return;
     }
 
-    // Initialize default values
-    MovementData = FAnim_MovementData();
-    SurvivalData = FAnim_SurvivalData();
-}
+    UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovComp) return;
 
-void UPrehistoricAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
-{
-    Super::NativeUpdateAnimation(DeltaTimeX);
+    // ── Velocity & Speed ────────────────────────────────────────────────────
+    FVector Velocity = MovComp->Velocity;
+    Speed = Velocity.Size2D();
 
-    if (!OwnerCharacter || !MovementComponent)
+    // ── Direction (strafe angle relative to actor forward) ─────────────────
+    FRotator ActorRot = OwnerCharacter->GetActorRotation();
+    FRotator VelRot   = UKismetMathLibrary::MakeRotFromX(Velocity);
+    FRotator Delta    = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot);
+    Direction = FMath::FInterpTo(Direction, Delta.Yaw, DeltaSeconds, 8.f);
+
+    // ── Air state ───────────────────────────────────────────────────────────
+    bIsInAir = MovComp->IsFalling();
+
+    // ── Crouch ──────────────────────────────────────────────────────────────
+    bIsCrouching = MovComp->IsCrouching();
+
+    // ── Sprint (speed threshold: >400 = sprinting) ──────────────────────────
+    bIsSprinting = (Speed > 400.f && !bIsInAir && !bIsCrouching);
+
+    // ── Lean (lateral tilt based on direction angle) ────────────────────────
+    float TargetLean = FMath::Clamp(Direction * 0.15f, -15.f, 15.f);
+    LeanAngle = FMath::FInterpTo(LeanAngle, TargetLean, DeltaSeconds, 5.f);
+
+    // ── Aim pitch (look up/down) ─────────────────────────────────────────────
+    FRotator ControlRot = OwnerCharacter->GetControlRotation();
+    AimPitch = FMath::ClampAngle(ControlRot.Pitch, -90.f, 90.f);
+
+    // ── Land blend alpha (smoothly fade out landing pose) ──────────────────
+    if (!bIsInAir && LandedBlendAlpha > 0.f)
     {
-        return;
+        LandedBlendAlpha = FMath::FInterpTo(LandedBlendAlpha, 0.f, DeltaSeconds, 4.f);
     }
 
-    // Update all animation data
-    UpdateMovementData();
-    UpdateSurvivalData();
-    UpdateMovementState();
-    UpdateActionState();
-    UpdateBlendingParameters();
+    // ── Stamina ratio drives animation speed scale ──────────────────────────
+    // StaminaRatio is set externally by the character's survival component.
+    // When stamina is low, movement animations slow slightly.
+    float AnimSpeedScale = FMath::Lerp(0.75f, 1.0f, StaminaRatio);
+    SetRootMotionMode(ERootMotionMode::RootMotionFromMontagesOnly);
+    (void)AnimSpeedScale; // Used in Blueprint via GetAnimSpeedScale()
 }
 
-void UPrehistoricAnimInstance::UpdateMovementData()
+void UPrehistoricAnimInstance::OnLanded()
 {
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-
-    // Get velocity and speed
-    MovementData.Velocity = MovementComponent->Velocity;
-    MovementData.Speed = MovementData.Velocity.Size();
-    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
-
-    // Calculate movement direction relative to character rotation
-    if (MovementData.GroundSpeed > 0.1f)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal2D();
-        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
-        {
-            MovementData.Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        MovementData.Direction = 0.0f;
-    }
-
-    // Update air and crouch states
-    MovementData.bIsInAir = MovementComponent->IsFalling();
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
+    LandedBlendAlpha = 1.0f;
 }
 
-void UPrehistoricAnimInstance::UpdateSurvivalData()
+void UPrehistoricAnimInstance::SetAttacking(bool bAttacking)
 {
-    // In a real implementation, this would get data from a survival component
-    // For now, we'll simulate some basic values
-    
-    // Simulate stamina drain during movement
-    if (MovementData.GroundSpeed > 400.0f) // Running
-    {
-        SurvivalData.Stamina = FMath::Max(0.0f, SurvivalData.Stamina - 0.1f);
-    }
-    else if (MovementData.GroundSpeed > 0.1f) // Walking
-    {
-        SurvivalData.Stamina = FMath::Min(100.0f, SurvivalData.Stamina + 0.05f);
-    }
-    else // Idle
-    {
-        SurvivalData.Stamina = FMath::Min(100.0f, SurvivalData.Stamina + 0.1f);
-    }
-
-    // Simulate fear based on proximity to threats (placeholder)
-    SurvivalData.Fear = FMath::Max(0.0f, SurvivalData.Fear - 0.5f);
-
-    // Health regeneration when not in combat
-    if (CurrentActionState != EAnim_ActionState::Combat)
-    {
-        SurvivalData.Health = FMath::Min(100.0f, SurvivalData.Health + 0.01f);
-    }
+    bIsAttacking = bAttacking;
 }
 
-void UPrehistoricAnimInstance::UpdateMovementState()
+void UPrehistoricAnimInstance::SetDead(bool bDead)
 {
-    EAnim_MovementState NewState = CurrentMovementState;
-
-    if (MovementData.bIsInAir)
-    {
-        if (MovementData.Velocity.Z > 0.1f)
-        {
-            NewState = EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            NewState = EAnim_MovementState::Falling;
-        }
-    }
-    else if (MovementData.bIsCrouching)
-    {
-        NewState = EAnim_MovementState::Crouching;
-    }
-    else if (MovementData.GroundSpeed > 400.0f)
-    {
-        NewState = EAnim_MovementState::Running;
-    }
-    else if (MovementData.GroundSpeed > 50.0f)
-    {
-        NewState = EAnim_MovementState::Walking;
-    }
-    else
-    {
-        NewState = EAnim_MovementState::Idle;
-    }
-
-    CurrentMovementState = NewState;
+    bIsDead = bDead;
 }
 
-void UPrehistoricAnimInstance::UpdateActionState()
+void UPrehistoricAnimInstance::SetFearIntensity(float Intensity)
 {
-    // Action states are typically set by external systems
-    // This function handles automatic transitions or timeouts
-    
-    // Auto-return to None state after certain actions complete
-    // This would be expanded with proper action duration tracking
+    FearIntensity = FMath::Clamp(Intensity, 0.f, 1.f);
 }
 
-void UPrehistoricAnimInstance::UpdateBlendingParameters()
+void UPrehistoricAnimInstance::SetStaminaRatio(float Ratio)
 {
-    // Walk/Run blend based on speed
-    float MaxWalkSpeed = 300.0f;
-    float MaxRunSpeed = 600.0f;
-    
-    if (MovementData.GroundSpeed <= MaxWalkSpeed)
-    {
-        WalkRunBlend = MovementData.GroundSpeed / MaxWalkSpeed;
-    }
-    else
-    {
-        WalkRunBlend = 1.0f + ((MovementData.GroundSpeed - MaxWalkSpeed) / (MaxRunSpeed - MaxWalkSpeed));
-    }
-    WalkRunBlend = FMath::Clamp(WalkRunBlend, 0.0f, 2.0f);
-
-    // Fear intensity based on fear level
-    FearIntensity = SurvivalData.Fear / 100.0f;
-
-    // Fatigue level based on stamina
-    FatigueLevel = 1.0f - (SurvivalData.Stamina / 100.0f);
-
-    // Injury level based on health
-    InjuryLevel = 1.0f - (SurvivalData.Health / 100.0f);
+    StaminaRatio = FMath::Clamp(Ratio, 0.f, 1.f);
 }
 
-bool UPrehistoricAnimInstance::ShouldTransitionToRunning() const
+float UPrehistoricAnimInstance::GetAnimSpeedScale() const
 {
-    return MovementData.GroundSpeed > 400.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
-}
-
-bool UPrehistoricAnimInstance::ShouldTransitionToWalking() const
-{
-    return MovementData.GroundSpeed > 50.0f && MovementData.GroundSpeed <= 400.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
-}
-
-bool UPrehistoricAnimInstance::ShouldTransitionToIdle() const
-{
-    return MovementData.GroundSpeed <= 50.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
-}
-
-bool UPrehistoricAnimInstance::ShouldTransitionToJumping() const
-{
-    return MovementData.bIsInAir && MovementData.Velocity.Z > 0.1f;
-}
-
-bool UPrehistoricAnimInstance::ShouldTransitionToFalling() const
-{
-    return MovementData.bIsInAir && MovementData.Velocity.Z <= 0.1f;
-}
-
-void UPrehistoricAnimInstance::TriggerGatheringAnimation()
-{
-    SetActionState(EAnim_ActionState::Gathering);
-}
-
-void UPrehistoricAnimInstance::TriggerCraftingAnimation()
-{
-    SetActionState(EAnim_ActionState::Crafting);
-}
-
-void UPrehistoricAnimInstance::TriggerCombatAnimation()
-{
-    SetActionState(EAnim_ActionState::Combat);
-}
-
-void UPrehistoricAnimInstance::TriggerEatingAnimation()
-{
-    SetActionState(EAnim_ActionState::Eating);
-}
-
-void UPrehistoricAnimInstance::TriggerDrinkingAnimation()
-{
-    SetActionState(EAnim_ActionState::Drinking);
-}
-
-void UPrehistoricAnimInstance::SetActionState(EAnim_ActionState NewActionState)
-{
-    CurrentActionState = NewActionState;
-}
-
-bool UPrehistoricAnimInstance::IsPerformingAction() const
-{
-    return CurrentActionState != EAnim_ActionState::None;
-}
-
-float UPrehistoricAnimInstance::GetMovementSpeedRatio() const
-{
-    if (!MovementComponent)
-    {
-        return 0.0f;
-    }
-
-    float MaxSpeed = MovementComponent->GetMaxSpeed();
-    if (MaxSpeed > 0.0f)
-    {
-        return MovementData.GroundSpeed / MaxSpeed;
-    }
-
-    return 0.0f;
-}
-
-bool UPrehistoricAnimInstance::ShouldPlayFearAnimation() const
-{
-    return SurvivalData.Fear > 50.0f;
-}
-
-bool UPrehistoricAnimInstance::ShouldPlayFatigueAnimation() const
-{
-    return SurvivalData.Stamina < 20.0f;
+    return FMath::Lerp(0.75f, 1.0f, StaminaRatio);
 }
