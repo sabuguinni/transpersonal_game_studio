@@ -8,13 +8,12 @@
 UENUM(BlueprintType)
 enum class EEng_BiomeType : uint8
 {
-    Jungle       UMETA(DisplayName = "Jungle"),
-    Savanna      UMETA(DisplayName = "Savanna"),
-    Swamp        UMETA(DisplayName = "Swamp"),
-    Volcanic     UMETA(DisplayName = "Volcanic"),
-    Coastal      UMETA(DisplayName = "Coastal"),
-    Forest       UMETA(DisplayName = "Forest"),
-    Count        UMETA(Hidden)
+    Jungle         UMETA(DisplayName = "Jungle"),
+    Savanna        UMETA(DisplayName = "Savanna"),
+    Swamp          UMETA(DisplayName = "Swamp"),
+    Volcanic       UMETA(DisplayName = "Volcanic"),
+    CoastalPlain   UMETA(DisplayName = "CoastalPlain"),
+    RiverDelta     UMETA(DisplayName = "RiverDelta"),
 };
 
 USTRUCT(BlueprintType)
@@ -26,28 +25,22 @@ struct FEng_BiomeData
     EEng_BiomeType BiomeType = EEng_BiomeType::Jungle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector WorldOrigin = FVector::ZeroVector;
+    FVector WorldCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Radius = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 28.0f;   // Celsius
+    float Temperature = 30.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.8f;       // 0-1
+    float Humidity = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FoliageDensity = 1.0f; // 0-1 multiplier
+    float VegetationDensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FogDensity = 0.02f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FName> AllowedDinosaurSpecies;
+    TArray<FName> DinosaurSpecies;
 };
 
 UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
@@ -58,41 +51,36 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-    // --- Biome Registry ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FEng_BiomeData> RegisteredBiomes;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float BiomeTransitionWidth = 500.0f;
-
-    // --- Query API ---
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    bool GetBiomeData(EEng_BiomeType BiomeType, FEng_BiomeData& OutData) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeData GetBiomeData(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    float GetBlendWeightAtLocation(const FVector& WorldLocation, EEng_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<FName> GetDinosaurSpeciesForBiome(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    TArray<FName> GetAllowedDinosaursAtLocation(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    // --- Runtime ---
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void RegisterBiome(const FEng_BiomeData& BiomeData);
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void InitializeDefaultBiomes();
+    UFUNCTION(CallInEditor, Category = "Biome|Debug")
+    void DebugPrintAllBiomes();
 
-    // --- Debug ---
-    UFUNCTION(CallInEditor, Category = "Debug")
-    void DrawBiomeBoundaries();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    TArray<FEng_BiomeData> BiomeDefinitions;
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    bool bEnableBiomeTransitions = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float TransitionBlendRadius = 500.0f;
 
 private:
-    UPROPERTY()
-    TMap<EEng_BiomeType, FEng_BiomeData> BiomeMap;
+    void InitializeDefaultBiomes();
 };
