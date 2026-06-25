@@ -1,142 +1,62 @@
 // DinosaurBase.cpp
-// Transpersonal Game Studio — Agent #03 Core Systems / #04 Performance Optimizer
-// Prehistoric survival dinosaur base class implementation
+// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260625_004
+// Base class for all dinosaur pawns in the prehistoric survival game.
 
 #include "DinosaurBase.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.033f; // 30Hz default — performance budget
 
-    // Capsule
-    GetCapsuleComponent()->InitCapsuleSize(80.f, 120.f);
+    // Default survival stats
+    MaxHealth = 500.0f;
+    CurrentHealth = MaxHealth;
+    MaxStamina = 200.0f;
+    CurrentStamina = MaxStamina;
+    WalkSpeed = 300.0f;
+    RunSpeed = 700.0f;
+    AttackDamage = 50.0f;
+    DetectionRadius = 1500.0f;
+    bIsAggressive = false;
+    bIsAlive = true;
+    DinosaurSpecies = EEng_DinosaurSpecies::TRex;
 
-    // Skeletal mesh
-    GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -120.f));
-    GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-
-    // Movement defaults
+    // Movement component defaults
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    GetCharacterMovement()->JumpZVelocity = 0.0f; // Dinosaurs don't jump by default
+    GetCharacterMovement()->GravityScale = 1.0f;
     GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.f, 360.f, 0.f);
-    GetCharacterMovement()->MaxWalkSpeed = 600.f;
-    GetCharacterMovement()->JumpZVelocity = 500.f;
-    GetCharacterMovement()->AirControl = 0.2f;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
 
-    // Species defaults
-    DinosaurSpecies = EPerf_DinoSpecies::TRex;
-    CurrentBehaviorState = EPerf_DinoBehavior::Idle;
-    MaxHealth = 1000.f;
-    CurrentHealth = 1000.f;
-    AttackDamage = 150.f;
-    AttackRange = 300.f;
-    DetectionRadius = 3000.f;
-    bIsAlpha = false;
-    PackID = -1;
-    CurrentBiome = EPerf_DinoHomeRange::Savanna;
+    // Capsule defaults
+    GetCapsuleComponent()->SetCapsuleHalfHeight(88.0f);
+    GetCapsuleComponent()->SetCapsuleRadius(34.0f);
 
-    // LOD tick distances (performance)
-    LODTickIntervals[0] = 0.016f;  // <2000 units: 60Hz
-    LODTickIntervals[1] = 0.033f;  // 2000-5000: 30Hz
-    LODTickIntervals[2] = 0.1f;    // 5000-10000: 10Hz
-    LODTickIntervals[3] = 0.5f;    // >10000: 2Hz (nearly culled)
+    // Mesh defaults
+    GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+    GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 }
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
-
     CurrentHealth = MaxHealth;
-    CurrentBehaviorState = EPerf_DinoBehavior::Idle;
-
-    // Start behavior tick loop
-    GetWorldTimerManager().SetTimer(
-        BehaviorTimerHandle,
-        this,
-        &ADinosaurBase::UpdateBehavior,
-        1.0f,
-        true
-    );
-
-    // Start LOD distance check
-    GetWorldTimerManager().SetTimer(
-        LODCheckTimerHandle,
-        this,
-        &ADinosaurBase::UpdateLODTickRate,
-        2.0f,
-        true
-    );
+    CurrentStamina = MaxStamina;
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // Behavior logic handled by timer — Tick is minimal for performance
-}
 
-void ADinosaurBase::UpdateBehavior()
-{
-    if (CurrentHealth <= 0.f)
+    // Stamina regeneration when not running
+    if (CurrentStamina < MaxStamina)
     {
-        SetBehaviorState(EPerf_DinoBehavior::Dead);
-        return;
+        CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + DeltaTime * 20.0f);
     }
-
-    // Basic state machine — expanded by Combat AI Agent #12
-    switch (CurrentBehaviorState)
-    {
-        case EPerf_DinoBehavior::Idle:
-            // Transition to patrol after idle period
-            SetBehaviorState(EPerf_DinoBehavior::Patrol);
-            break;
-
-        case EPerf_DinoBehavior::Patrol:
-            // Scan for threats — AI Agent #12 will override
-            break;
-
-        case EPerf_DinoBehavior::Fleeing:
-            // Flee logic handled by BehaviorTree
-            break;
-
-        default:
-            break;
-    }
-}
-
-void ADinosaurBase::UpdateLODTickRate()
-{
-    // Adjust tick rate based on distance to nearest player camera
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    float Dist = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
-
-    float NewInterval = LODTickIntervals[3]; // Default: far
-    if (Dist < 2000.f)       NewInterval = LODTickIntervals[0];
-    else if (Dist < 5000.f)  NewInterval = LODTickIntervals[1];
-    else if (Dist < 10000.f) NewInterval = LODTickIntervals[2];
-
-    SetActorTickInterval(NewInterval);
-}
-
-void ADinosaurBase::SetBehaviorState(EPerf_DinoBehavior NewState)
-{
-    if (CurrentBehaviorState == NewState) return;
-    CurrentBehaviorState = NewState;
-    OnBehaviorStateChanged(NewState);
-}
-
-void ADinosaurBase::OnBehaviorStateChanged(EPerf_DinoBehavior NewState)
-{
-    // Blueprint-implementable event — Animation Agent #10 hooks here
 }
 
 float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
@@ -144,49 +64,53 @@ float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEv
 {
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 
-    CurrentHealth = FMath::Max(0.f, CurrentHealth - ActualDamage);
+    if (!bIsAlive) return 0.0f;
 
-    if (CurrentHealth <= 0.f)
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - ActualDamage);
+
+    if (CurrentHealth <= 0.0f)
     {
-        SetBehaviorState(EPerf_DinoBehavior::Dead);
-        HandleDeath();
-    }
-    else if (CurrentHealth < MaxHealth * 0.3f)
-    {
-        // Low health — flee behavior
-        SetBehaviorState(EPerf_DinoBehavior::Fleeing);
-    }
-    else
-    {
-        SetBehaviorState(EPerf_DinoBehavior::Attacking);
+        Die();
     }
 
     return ActualDamage;
 }
 
-void ADinosaurBase::HandleDeath()
+void ADinosaurBase::Die()
 {
-    // Disable collision and tick
-    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    SetActorTickEnabled(false);
-    GetWorldTimerManager().ClearTimer(BehaviorTimerHandle);
-    GetWorldTimerManager().ClearTimer(LODCheckTimerHandle);
+    if (!bIsAlive) return;
+    bIsAlive = false;
 
-    // Ragdoll
+    // Disable movement
+    GetCharacterMovement()->DisableMovement();
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Enable ragdoll on death
     GetMesh()->SetSimulatePhysics(true);
     GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-    // Destroy after 30 seconds (cleanup)
-    SetLifeSpan(30.f);
+    // Destroy after 10 seconds
+    SetLifeSpan(10.0f);
 }
 
-bool ADinosaurBase::IsAlive() const
+void ADinosaurBase::SetRunning(bool bRun)
 {
-    return CurrentHealth > 0.f;
+    if (bRun && CurrentStamina > 10.0f)
+    {
+        GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
+    }
+    else
+    {
+        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    }
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
-    if (MaxHealth <= 0.f) return 0.f;
-    return CurrentHealth / MaxHealth;
+    return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
+}
+
+float ADinosaurBase::GetStaminaPercent() const
+{
+    return (MaxStamina > 0.0f) ? (CurrentStamina / MaxStamina) : 0.0f;
 }
