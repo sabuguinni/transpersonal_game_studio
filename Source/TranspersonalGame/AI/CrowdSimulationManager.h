@@ -1,170 +1,113 @@
-// CrowdSimulationManager.h
-// Crowd & Traffic Simulation Agent #13
-// Manages prehistoric crowd simulation: tribal NPCs, dinosaur herds, migration paths
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/EngineTypes.h"
+#include "Components/ActorComponent.h"
 #include "CrowdSimulationManager.generated.h"
 
-// Crowd agent state enum
-UENUM(BlueprintType)
-enum class ECrowd_AgentState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Wandering   UMETA(DisplayName = "Wandering"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Foraging    UMETA(DisplayName = "Foraging"),
-    Herding     UMETA(DisplayName = "Herding"),
-    Resting     UMETA(DisplayName = "Resting")
-};
-
-// Crowd agent type
-UENUM(BlueprintType)
-enum class ECrowd_AgentType : uint8
-{
-    TribalHuman     UMETA(DisplayName = "Tribal Human"),
-    DinosaurHerd    UMETA(DisplayName = "Dinosaur Herd"),
-    Scavenger       UMETA(DisplayName = "Scavenger"),
-    Predator        UMETA(DisplayName = "Predator")
-};
-
-// Individual crowd agent data
-USTRUCT(BlueprintType)
-struct FCrowd_AgentData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Velocity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentState State;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_AgentType AgentType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FearLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float Energy;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 GroupID;
-
-    FCrowd_AgentData()
-        : Location(FVector::ZeroVector)
-        , Velocity(FVector::ZeroVector)
-        , State(ECrowd_AgentState::Idle)
-        , AgentType(ECrowd_AgentType::TribalHuman)
-        , FearLevel(0.0f)
-        , Energy(100.0f)
-        , GroupID(0)
-    {}
-};
-
-// Migration waypoint
-USTRUCT(BlueprintType)
-struct FCrowd_MigrationWaypoint
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector WorldPosition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float Radius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 WaypointIndex;
-
-    FCrowd_MigrationWaypoint()
-        : WorldPosition(FVector::ZeroVector)
-        , Radius(300.0f)
-        , WaypointIndex(0)
-    {}
-};
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
+/**
+ * UCrowdSimulationManager
+ * Agent #13 — Crowd & Traffic Simulation
+ *
+ * Manages prehistoric herd behavior: migration corridors, flocking (separation/cohesion/alignment),
+ * LOD-aware agent updates, and threat-response scatter for up to 50 agents per herd.
+ *
+ * Usage: Attach to a CrowdDirector actor in the level. Tag herd members with "CrowdAgent".
+ * Call AddMigrationWaypoint() to define the migration path.
+ */
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent), DisplayName="Crowd Simulation Manager")
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACrowdSimulationManager();
+    UCrowdSimulationManager();
 
-protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // Maximum simultaneous agents (performance cap)
+    // --- Configuration ---
+
+    /** Maximum number of agents in this herd */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxAgents;
+    int32 MaxHerdSize;
 
-    // Migration corridor waypoints
+    /** Base movement speed for migration (cm/s) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float MigrationSpeed;
+
+    /** Radius within which agents influence each other for flocking */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Flocking")
+    float FlockingRadius;
+
+    /** Minimum separation distance between agents */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Flocking")
+    float SeparationRadius;
+
+    /** Distance at which full LOD detail is used */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceClose;
+
+    /** Distance at which mid LOD is applied */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceMid;
+
+    /** Distance at which far LOD is applied (beyond = hidden) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceFar;
+
+    /** Radius within which player presence triggers herd scatter */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Behavior")
+    float ThreatResponseRadius;
+
+    // --- Runtime State ---
+
+    /** All active herd agents */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
+    TArray<AActor*> HerdAgents;
+
+    /** Migration waypoints defining the corridor */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    TArray<FCrowd_MigrationWaypoint> MigrationWaypoints;
+    TArray<FVector> MigrationWaypoints;
 
-    // Active agents
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
-    TArray<FCrowd_AgentData> ActiveAgents;
+    /** Whether migration is currently active */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
+    bool bHerdMigrationActive;
 
-    // Threat radius — agents flee when player/predator within this range
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Behavior")
-    float ThreatDetectionRadius;
+    /** Current target waypoint index */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
+    int32 CurrentWaypointIndex;
 
-    // Separation distance between agents (flocking)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Behavior")
-    float AgentSeparationDistance;
+    // --- Blueprint-callable API ---
 
-    // Herd cohesion strength
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Behavior")
-    float CohesionStrength;
+    /** Add a waypoint to the migration corridor */
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Migration")
+    void AddMigrationWaypoint(FVector Waypoint);
 
-    // Current active agent count
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Runtime")
-    int32 ActiveAgentCount;
+    /** Enable or disable herd migration */
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Migration")
+    void SetHerdMigrationActive(bool bActive);
 
-    // Spawn a group of tribal NPCs at location
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void SpawnTribalGroup(FVector CenterLocation, int32 GroupSize, int32 GroupID);
+    /** Returns number of currently visible (non-LOD-hidden) agents */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd|State")
+    int32 GetActiveAgentCount() const;
 
-    // Spawn a dinosaur herd along migration path
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void SpawnDinosaurHerd(FVector StartLocation, int32 HerdSize, int32 GroupID);
-
-    // Trigger fear response — all agents within radius flee from source
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void TriggerFearResponse(FVector ThreatLocation, float FearRadius, float FearIntensity);
-
-    // Update flocking behavior (separation, alignment, cohesion)
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateFlockingBehavior(float DeltaTime);
-
-    // Get nearest agent to a world position
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    bool GetNearestAgent(FVector WorldPosition, FCrowd_AgentData& OutAgent);
-
-    // Clear all agents
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ClearAllAgents();
-
-    // LOD: reduce simulation fidelity for distant agents
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ApplyDistanceLOD(FVector PlayerLocation, float FullSimRadius, float LowSimRadius);
+    /** Force re-scan of world for CrowdAgent-tagged actors */
+    UFUNCTION(BlueprintCallable, Category = "Crowd|State")
+    void InitializeHerd();
 
 private:
-    void UpdateAgentState(FCrowd_AgentData& Agent, float DeltaTime);
-    FVector ComputeFlockingSeparation(const FCrowd_AgentData& Agent);
-    FVector ComputeFlockingAlignment(const FCrowd_AgentData& Agent);
-    FVector ComputeFlockingCohesion(const FCrowd_AgentData& Agent);
-    FVector ComputeMigrationSteering(const FCrowd_AgentData& Agent);
-    int32 GetNextWaypointIndex(int32 CurrentWaypoint) const;
+    /** Compute flocking force (separation + cohesion) for a single agent */
+    FVector ComputeFlockingForce(AActor* Agent) const;
+
+    /** Compute geometric centroid of the herd */
+    FVector ComputeHerdCentroid() const;
+
+    /** Move all agents toward current waypoint with flocking */
+    void UpdateHerdMigration(float DeltaTime);
+
+    /** Adjust skeletal mesh tick rates based on player distance */
+    void UpdateLODForAgents();
+
+    /** Scatter herd if player is within ThreatResponseRadius */
+    void CheckThreatResponse();
 };
