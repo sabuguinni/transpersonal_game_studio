@@ -1,138 +1,192 @@
 #include "DinosaurAnimInstance.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 UDinosaurAnimInstance::UDinosaurAnimInstance()
 {
     GroundSpeed = 0.0f;
     bIsMoving = false;
-    bIsAttacking = false;
-    bIsDead = false;
-    bIsRoaring = false;
+    bIsInAir = false;
     LocomotionState = EAnim_DinoLocomotionState::Idle;
-    FootIKAlpha = 1.0f;
-    LeftFootIKOffset = FVector::ZeroVector;
-    RightFootIKOffset = FVector::ZeroVector;
-    WalkSpeedThreshold = 50.0f;
-    RunSpeedThreshold = 300.0f;
-    OwnerPawn = nullptr;
+    WalkRunBlend = 0.0f;
+    AttackBlendWeight = 0.0f;
+    IKFootBlendWeight = 1.0f;
+    AttackCooldown = 0.0f;
+    RoarCooldown = 0.0f;
 }
 
 void UDinosaurAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    OwnerPawn = TryGetPawnOwner();
+    // Initialize IK foot locations to zero — will be updated each tick
+    LeftFootIKLocation = FVector::ZeroVector;
+    RightFootIKLocation = FVector::ZeroVector;
 }
 
 void UDinosaurAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    OwnerPawn = TryGetPawnOwner();
+    if (DeltaSeconds <= 0.0f)
+    {
+        return;
+    }
+
+    UpdateLocomotionData(DeltaSeconds);
+    UpdateIKFootPlacement();
+    UpdateBlendWeights(DeltaSeconds);
+
+    // Tick cooldowns
+    if (AttackCooldown > 0.0f)
+    {
+        AttackCooldown -= DeltaSeconds;
+    }
+    if (RoarCooldown > 0.0f)
+    {
+        RoarCooldown -= DeltaSeconds;
+    }
+}
+
+void UDinosaurAnimInstance::UpdateLocomotionData(float DeltaSeconds)
+{
+    APawn* OwnerPawn = TryGetPawnOwner();
     if (!OwnerPawn)
     {
         return;
     }
 
-    // Update ground speed from velocity
+    // Calculate ground speed from velocity (ignore Z)
     FVector Velocity = OwnerPawn->GetVelocity();
-    Velocity.Z = 0.0f;
-    GroundSpeed = Velocity.Size();
+    FVector HorizontalVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
+    GroundSpeed = HorizontalVelocity.Size();
 
-    bIsMoving = GroundSpeed > WalkSpeedThreshold;
+    bIsMoving = GroundSpeed > 10.0f;
 
-    UpdateLocomotionState();
-    UpdateFootIK();
-}
+    // Update locomotion data struct
+    LocomotionData.Speed = GroundSpeed;
+    LocomotionData.bIsMoving = bIsMoving;
+    LocomotionData.bIsAttacking = (LocomotionState == EAnim_DinoLocomotionState::Attack);
+    LocomotionData.bIsRoaring = (LocomotionState == EAnim_DinoLocomotionState::Roar);
+    LocomotionData.bIsDead = (LocomotionState == EAnim_DinoLocomotionState::Death);
+    LocomotionData.CurrentState = LocomotionState;
 
-void UDinosaurAnimInstance::UpdateLocomotionState()
-{
-    if (bIsDead)
+    // Auto-transition locomotion state based on speed (unless in special state)
+    if (LocomotionState != EAnim_DinoLocomotionState::Attack &&
+        LocomotionState != EAnim_DinoLocomotionState::Roar &&
+        LocomotionState != EAnim_DinoLocomotionState::Death &&
+        LocomotionState != EAnim_DinoLocomotionState::Eat &&
+        LocomotionState != EAnim_DinoLocomotionState::Sleep)
     {
-        LocomotionState = EAnim_DinoLocomotionState::Death;
-        return;
+        if (GroundSpeed < 10.0f)
+        {
+            LocomotionState = EAnim_DinoLocomotionState::Idle;
+        }
+        else if (GroundSpeed < 400.0f)
+        {
+            LocomotionState = EAnim_DinoLocomotionState::Walk;
+        }
+        else
+        {
+            LocomotionState = EAnim_DinoLocomotionState::Run;
+        }
     }
 
-    if (bIsAttacking)
+    // Calculate walk/run blend (0 = walk, 1 = run)
+    if (bIsMoving)
     {
-        LocomotionState = EAnim_DinoLocomotionState::Attack;
-        return;
-    }
-
-    if (bIsRoaring)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Roar;
-        return;
-    }
-
-    if (GroundSpeed >= RunSpeedThreshold)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Run;
-    }
-    else if (GroundSpeed >= WalkSpeedThreshold)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Walk;
+        float NormalizedSpeed = FMath::Clamp(GroundSpeed / 800.0f, 0.0f, 1.0f);
+        WalkRunBlend = NormalizedSpeed;
     }
     else
     {
-        LocomotionState = EAnim_DinoLocomotionState::Idle;
+        WalkRunBlend = 0.0f;
     }
 }
 
-void UDinosaurAnimInstance::UpdateFootIK()
+void UDinosaurAnimInstance::UpdateIKFootPlacement()
 {
-    if (!OwnerPawn)
+    USkeletalMeshComponent* MeshComp = GetSkelMeshComponent();
+    if (!MeshComp)
     {
         return;
     }
 
-    // Basic foot IK — trace down from foot bone positions to find ground contact
-    UWorld* World = OwnerPawn->GetWorld();
+    UWorld* World = GetWorld();
     if (!World)
     {
         return;
     }
 
-    // Foot IK alpha: full when idle/walking, reduced when running
-    if (LocomotionState == EAnim_DinoLocomotionState::Run)
+    // Trace down from each foot bone to find ground contact point
+    auto TraceForFootIK = [&](const FName& FootBoneName, FVector& OutIKLocation) -> bool
     {
-        FootIKAlpha = FMath::FInterpTo(FootIKAlpha, 0.0f, World->GetDeltaSeconds(), 5.0f);
-    }
-    else
-    {
-        FootIKAlpha = FMath::FInterpTo(FootIKAlpha, 1.0f, World->GetDeltaSeconds(), 5.0f);
-    }
+        int32 BoneIndex = MeshComp->GetBoneIndex(FootBoneName);
+        if (BoneIndex == INDEX_NONE)
+        {
+            return false;
+        }
 
-    // Trace for left foot
-    FVector ActorLoc = OwnerPawn->GetActorLocation();
-    FVector LeftFootStart = ActorLoc + FVector(-50.0f, 40.0f, 50.0f);
-    FVector LeftFootEnd = LeftFootStart + FVector(0.0f, 0.0f, -200.0f);
+        FVector FootWorldLocation = MeshComp->GetBoneLocation(FootBoneName);
+        FVector TraceStart = FootWorldLocation + FVector(0.0f, 0.0f, 50.0f);
+        FVector TraceEnd = FootWorldLocation - FVector(0.0f, 0.0f, 100.0f);
 
-    FHitResult LeftHit;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(OwnerPawn);
+        FHitResult HitResult;
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(MeshComp->GetOwner());
 
-    if (World->LineTraceSingleByChannel(LeftHit, LeftFootStart, LeftFootEnd, ECC_WorldStatic, Params))
-    {
-        LeftFootIKOffset = FVector(0.0f, 0.0f, LeftHit.ImpactPoint.Z - ActorLoc.Z);
-    }
-    else
-    {
-        LeftFootIKOffset = FVector::ZeroVector;
-    }
+        if (World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
+        {
+            OutIKLocation = HitResult.ImpactPoint;
+            return true;
+        }
 
-    // Trace for right foot
-    FVector RightFootStart = ActorLoc + FVector(-50.0f, -40.0f, 50.0f);
-    FVector RightFootEnd = RightFootStart + FVector(0.0f, 0.0f, -200.0f);
+        OutIKLocation = FootWorldLocation;
+        return false;
+    };
 
-    FHitResult RightHit;
-    if (World->LineTraceSingleByChannel(RightHit, RightFootStart, RightFootEnd, ECC_WorldStatic, Params))
+    TraceForFootIK(FName("foot_l"), LeftFootIKLocation);
+    TraceForFootIK(FName("foot_r"), RightFootIKLocation);
+
+    // Blend IK weight — reduce during fast movement for performance
+    float TargetIKWeight = bIsMoving ? FMath::Clamp(1.0f - (WalkRunBlend * 0.5f), 0.5f, 1.0f) : 1.0f;
+    IKFootBlendWeight = FMath::FInterpTo(IKFootBlendWeight, TargetIKWeight, GetWorld()->GetDeltaSeconds(), 5.0f);
+}
+
+void UDinosaurAnimInstance::UpdateBlendWeights(float DeltaSeconds)
+{
+    // Smoothly blend attack weight in/out
+    float TargetAttackWeight = (LocomotionState == EAnim_DinoLocomotionState::Attack) ? 1.0f : 0.0f;
+    AttackBlendWeight = FMath::FInterpTo(AttackBlendWeight, TargetAttackWeight, DeltaSeconds, 8.0f);
+}
+
+void UDinosaurAnimInstance::SetLocomotionState(EAnim_DinoLocomotionState NewState)
+{
+    LocomotionState = NewState;
+    LocomotionData.CurrentState = NewState;
+}
+
+void UDinosaurAnimInstance::TriggerAttack()
+{
+    if (AttackCooldown <= 0.0f)
     {
-        RightFootIKOffset = FVector(0.0f, 0.0f, RightHit.ImpactPoint.Z - ActorLoc.Z);
+        SetLocomotionState(EAnim_DinoLocomotionState::Attack);
+        AttackCooldown = 2.0f; // 2 second cooldown between attacks
     }
-    else
+}
+
+void UDinosaurAnimInstance::TriggerRoar()
+{
+    if (RoarCooldown <= 0.0f)
     {
-        RightFootIKOffset = FVector::ZeroVector;
+        SetLocomotionState(EAnim_DinoLocomotionState::Roar);
+        RoarCooldown = 5.0f; // 5 second cooldown between roars
     }
+}
+
+bool UDinosaurAnimInstance::IsInAttackState() const
+{
+    return LocomotionState == EAnim_DinoLocomotionState::Attack;
 }
