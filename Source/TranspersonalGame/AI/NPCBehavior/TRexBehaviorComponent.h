@@ -13,123 +13,142 @@ enum class ENPC_TRexState : uint8
     Chasing     UMETA(DisplayName = "Chasing"),
     Attacking   UMETA(DisplayName = "Attacking"),
     Feeding     UMETA(DisplayName = "Feeding"),
-    Resting     UMETA(DisplayName = "Resting")
+    Resting     UMETA(DisplayName = "Resting"),
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_TRexSensoryData
+struct FNPC_TRexSenses
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float SightRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float HearingRange = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float SmellRange = 800.0f;
+    float SightRadius = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
     float SightAngleDegrees = 120.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    bool bPlayerDetected = false;
+    float HearingRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+    float SmellRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float AttackRadius = 350.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float ChaseBreakRadius = 5000.0f;
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_TRexCombatStats
+struct FNPC_TRexMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackRange = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackDamage = 85.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    float TimeSinceLastPlayerSight = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackCooldown = 2.5f;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    bool bHasSeenPlayer = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChaseSpeed = 1200.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    bool bIsHungry = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float PatrolSpeed = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float MaxHealth = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float CurrentHealth = 2000.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    float HungerLevel = 0.5f;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UTRexBehaviorComponent : public UActorComponent
+/**
+ * TRexBehaviorComponent — drives T-Rex NPC state machine.
+ * Patrol → Investigate → Chase → Attack loop.
+ * Attach to any SkeletalMeshActor or Pawn representing the T-Rex.
+ */
+UCLASS(ClassGroup=(NPC), meta=(BlueprintSpawnableComponent), DisplayName="TRex Behavior Component")
+class TRANSPERSONALGAME_API UNPCTRexBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UTRexBehaviorComponent();
+    UNPCTRexBehaviorComponent();
 
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    ENPC_TRexState CurrentState;
+    // --- State ---
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    ENPC_TRexState CurrentState = ENPC_TRexState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    FNPC_TRexSensoryData SensoryData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
+    FNPC_TRexSenses Senses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    FNPC_TRexCombatStats CombatStats;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Memory")
+    FNPC_TRexMemory Memory;
+
+    // --- Patrol ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
+    TArray<AActor*> PatrolWaypoints;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Patrol")
+    int32 CurrentWaypointIndex = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float PatrolRadius = 5000.0f;
+    float PatrolAcceptanceRadius = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    FVector PatrolOrigin = FVector::ZeroVector;
+    float WaypointWaitTime = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float PatrolWaitTime = 3.0f;
+    // --- Combat ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackDamage = 150.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackCooldown = 2.5f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Combat")
+    float TimeSinceLastAttack = 0.0f;
+
+    // --- Blueprint Events ---
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnStateChanged(ENPC_TRexState NewState, ENPC_TRexState OldState);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnPlayerDetected(AActor* Player, float Distance);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnAttackPlayer(AActor* Player);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnLostPlayer();
+
+    // --- Callable ---
     UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    void SetState(ENPC_TRexState NewState);
+    void ForceState(ENPC_TRexState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
     ENPC_TRexState GetCurrentState() const { return CurrentState; }
 
     UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    bool IsPlayerInSightRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    bool IsPlayerInAttackRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
     float GetDistanceToPlayer() const;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void TakeDamage_TRex(float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    bool IsAlive() const { return CombatStats.CurrentHealth > 0.0f; }
-
-    UFUNCTION(BlueprintPure, Category = "TRex|Behavior")
-    FString GetStateAsString() const;
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    bool CanSeePlayer() const;
 
 private:
-    void UpdatePatrolBehavior(float DeltaTime);
-    void UpdateChaseBehavior(float DeltaTime);
-    void UpdateAttackBehavior(float DeltaTime);
-    void UpdateSensoryDetection();
-    FVector GetRandomPatrolPoint() const;
+    void UpdateStateMachine(float DeltaTime);
+    void UpdateIdle(float DeltaTime);
+    void UpdatePatrolling(float DeltaTime);
+    void UpdateInvestigating(float DeltaTime);
+    void UpdateChasing(float DeltaTime);
+    void UpdateAttacking(float DeltaTime);
+    void SetState(ENPC_TRexState NewState);
+    AActor* FindPlayer() const;
 
-    float TimeSinceLastAttack = 0.0f;
-    float PatrolWaitTimer = 0.0f;
-    bool bWaitingAtPatrolPoint = false;
-    FVector CurrentPatrolTarget = FVector::ZeroVector;
-    AActor* CachedPlayerActor = nullptr;
+    UPROPERTY()
+    AActor* CachedPlayer = nullptr;
+
+    float WaypointWaitTimer = 0.0f;
+    float StateTimer = 0.0f;
 };
