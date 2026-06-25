@@ -26,15 +26,8 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion State ──
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    EAnim_DinoLocomotionState LocomotionState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Direction;
+    float GroundSpeed;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsMoving;
@@ -46,49 +39,28 @@ public:
     bool bIsDead;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsRoaring;
+    EAnim_DinoLocomotionState LocomotionState;
 
-    // ── IK Foot Placement ──
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float MovementDirection;
+
     UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector LeftFootIKLocation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector RightFootIKLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    float IKFootTraceDistance;
-
-    // ── Blend weights ──
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
-    float WalkRunBlend;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
-    float AttackBlendWeight;
-
-    // ── Speed thresholds ──
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
     float WalkSpeedThreshold;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
     float RunSpeedThreshold;
 
-    // ── Foot IK update ──
-    UFUNCTION(BlueprintCallable, Category = "Anim|IK")
-    void UpdateFootIK();
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
-    void SetAttacking(bool bAttacking);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
-    void SetDead(bool bDead);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
-    void SetRoaring(bool bRoaring);
-
 private:
-    void UpdateLocomotionState();
-    void UpdateWalkRunBlend();
-    void TraceFootIK(FName FootSocketName, FVector& OutIKLocation);
+    UPROPERTY()
+    class APawn* OwnerPawn;
 
-    APawn* OwnerPawn;
+    void UpdateLocomotionState();
+    void UpdateFootIK();
+    FVector ComputeFootIKLocation(FName SocketName) const;
 };
