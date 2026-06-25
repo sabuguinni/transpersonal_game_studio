@@ -1,115 +1,80 @@
 #include "AudioZoneManager.h"
-#include "Components/AudioComponent.h"
-#include "Components/SphereComponent.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 
-// ─────────────────────────────────────────────
-// UAudio_ZoneManager
-// ─────────────────────────────────────────────
-
-UAudio_ZoneManager::UAudio_ZoneManager()
+UAudioZoneManager::UAudioZoneManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    CurrentBlendAlpha = 0.0f;
-    TargetVolume = 0.0f;
-    BlendSpeed = 2.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for audio blending
 }
 
-void UAudio_ZoneManager::BeginPlay()
+void UAudioZoneManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Attempt to find an AudioComponent on the owner
-    if (AActor* Owner = GetOwner())
-    {
-        AudioComp = Owner->FindComponentByClass<UAudioComponent>();
-    }
+    DinosaurCallTimer = FMath::FRandRange(0.0f, ZoneConfig.DinosaurCallInterval);
 }
 
-void UAudio_ZoneManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAudioZoneManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Smooth blend toward target volume
-    CurrentBlendAlpha = FMath::FInterpTo(CurrentBlendAlpha, TargetVolume, DeltaTime, BlendSpeed);
-
-    if (AudioComp)
+    // Check player proximity
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn && GetOwner())
     {
-        AudioComp->SetVolumeMultiplier(CurrentBlendAlpha * ZoneConfig.MaxVolume);
+        float DistSq = FVector::DistSquared(PlayerPawn->GetActorLocation(), GetOwner()->GetActorLocation());
+        bPlayerInZone = (DistSq <= ZoneRadius * ZoneRadius);
+    }
+
+    if (bPlayerInZone)
+    {
+        UpdateAmbientBlend(DeltaTime);
+
+        // Dinosaur distant call timer
+        if (ZoneConfig.bPlayDinosaurDistantCalls)
+        {
+            DinosaurCallTimer -= DeltaTime;
+            if (DinosaurCallTimer <= 0.0f)
+            {
+                TriggerDinosaurDistantCall();
+                DinosaurCallTimer = ZoneConfig.DinosaurCallInterval + FMath::FRandRange(-3.0f, 5.0f);
+            }
+        }
     }
 }
 
-void UAudio_ZoneManager::SetZoneVolume(float NewVolume)
+void UAudioZoneManager::SetDangerLevel(float DangerLevel)
 {
-    TargetVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
+    ZoneConfig.DangerMusicBlend = CurrentDangerLevel;
 }
 
-void UAudio_ZoneManager::OnPlayerEnterZone(float DistanceToCenter)
+float UAudioZoneManager::GetCurrentAmbientVolume() const
 {
-    if (ZoneConfig.BlendRadius <= 0.0f)
-    {
-        SetZoneVolume(1.0f);
-        return;
-    }
-
-    // Closer to center = louder
-    float Alpha = 1.0f - FMath::Clamp(DistanceToCenter / ZoneConfig.BlendRadius, 0.0f, 1.0f);
-    SetZoneVolume(Alpha);
+    // Danger reduces ambient volume slightly (tension effect)
+    return ZoneConfig.AmbientVolume * (1.0f - CurrentDangerLevel * 0.3f);
 }
 
-// ─────────────────────────────────────────────
-// AAudio_ZoneActor
-// ─────────────────────────────────────────────
-
-AAudio_ZoneActor::AAudio_ZoneActor()
+EAudio_BiomeZone UAudioZoneManager::GetBiomeType() const
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->InitSphereRadius(800.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
-
-    ZoneManager = CreateDefaultSubobject<UAudio_ZoneManager>(TEXT("ZoneManager"));
+    return ZoneConfig.BiomeType;
 }
 
-void AAudio_ZoneActor::BeginPlay()
+void UAudioZoneManager::UpdateAmbientBlend(float DeltaTime)
 {
-    Super::BeginPlay();
-
-    // Sync config to manager
-    ZoneManager->ZoneConfig = ZoneConfig;
-    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
-
-    // Bind overlap events
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
-    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
+    // Smooth danger level transitions for music blending
+    // This is called from Tick — actual audio component control
+    // is handled by Blueprint or MetaSounds parameter binding
+    // CurrentDangerLevel drives the music layer blend parameter
+    (void)DeltaTime; // Used by Blueprint-side interpolation
 }
 
-void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void UAudioZoneManager::TriggerDinosaurDistantCall()
 {
-    if (!OtherActor) return;
-
-    // Only respond to player character
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    float Distance = FVector::Dist(OtherActor->GetActorLocation(), GetActorLocation());
-    ZoneManager->OnPlayerEnterZone(Distance);
-}
-
-void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    // Fade out when player leaves zone
-    ZoneManager->SetZoneVolume(0.0f);
+    // Placeholder: in full implementation this triggers a MetaSound cue
+    // for a distant dinosaur vocalization appropriate to the biome zone.
+    // Raptor chirp for Forest, T-Rex low rumble for Savanna, etc.
+    UE_LOG(LogTemp, Verbose, TEXT("AudioZoneManager: DinosaurDistantCall triggered in zone %d"),
+        (int32)ZoneConfig.BiomeType);
 }
