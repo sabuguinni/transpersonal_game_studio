@@ -1,122 +1,115 @@
-// AudioZoneManager.cpp — Agent #16 Audio Agent
-// Implementation of spatial audio zone manager for prehistoric survival game
 #include "AudioZoneManager.h"
+#include "Components/AudioComponent.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
 
-AAudio_ZoneManager::AAudio_ZoneManager()
+// ─────────────────────────────────────────────
+// UAudio_ZoneManager
+// ─────────────────────────────────────────────
+
+UAudio_ZoneManager::UAudio_ZoneManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    ZoneSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneSphere"));
-    ZoneSphere->InitSphereRadius(1500.0f);
-    ZoneSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = ZoneSphere;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->VolumeMultiplier = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    CurrentBlendAlpha = 0.0f;
+    TargetVolume = 0.0f;
+    BlendSpeed = 2.0f;
 }
 
-void AAudio_ZoneManager::BeginPlay()
+void UAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    ZoneSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerEnterZone);
-    ZoneSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerExitZone);
-
-    // Start ambient audio silently — volume fades in when player enters
-    if (AmbientAudioComponent)
+    // Attempt to find an AudioComponent on the owner
+    if (AActor* Owner = GetOwner())
     {
-        AmbientAudioComponent->Play();
-        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+        AudioComp = Owner->FindComponentByClass<UAudioComponent>();
     }
 }
 
-void AAudio_ZoneManager::Tick(float DeltaTime)
+void UAudio_ZoneManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!AmbientAudioComponent) return;
+    // Smooth blend toward target volume
+    CurrentBlendAlpha = FMath::FInterpTo(CurrentBlendAlpha, TargetVolume, DeltaTime, BlendSpeed);
 
-    // Smooth volume blend based on player presence and danger level
-    float TargetVolume = bPlayerInZone ? ZoneConfig.AmbientVolume : 0.0f;
-
-    // Danger level modifies music intensity
-    float DangerMultiplier = 1.0f;
-    switch (CurrentDangerLevel)
+    if (AudioComp)
     {
-        case EAudio_DangerLevel::Caution:   DangerMultiplier = 1.2f; break;
-        case EAudio_DangerLevel::Danger:    DangerMultiplier = 1.5f; break;
-        case EAudio_DangerLevel::Critical:  DangerMultiplier = 2.0f; break;
-        default: break;
+        AudioComp->SetVolumeMultiplier(CurrentBlendAlpha * ZoneConfig.MaxVolume);
+    }
+}
+
+void UAudio_ZoneManager::SetZoneVolume(float NewVolume)
+{
+    TargetVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+}
+
+void UAudio_ZoneManager::OnPlayerEnterZone(float DistanceToCenter)
+{
+    if (ZoneConfig.BlendRadius <= 0.0f)
+    {
+        SetZoneVolume(1.0f);
+        return;
     }
 
-    float CurrentVolume = AmbientAudioComponent->VolumeMultiplier;
-    float NewVolume = FMath::FInterpTo(CurrentVolume, TargetVolume * DangerMultiplier, DeltaTime, 2.0f);
-    AmbientAudioComponent->SetVolumeMultiplier(NewVolume);
-
-    // Blend danger alpha for pitch shifting effect
-    float TargetDangerAlpha = (CurrentDangerLevel != EAudio_DangerLevel::Safe) ? 1.0f : 0.0f;
-    DangerBlendAlpha = FMath::FInterpTo(DangerBlendAlpha, TargetDangerAlpha, DeltaTime, 1.5f);
-
-    // Pitch rises slightly with danger (tension effect)
-    float PitchMultiplier = FMath::Lerp(1.0f, 1.15f, DangerBlendAlpha);
-    AmbientAudioComponent->SetPitchMultiplier(PitchMultiplier);
+    // Closer to center = louder
+    float Alpha = 1.0f - FMath::Clamp(DistanceToCenter / ZoneConfig.BlendRadius, 0.0f, 1.0f);
+    SetZoneVolume(Alpha);
 }
 
-void AAudio_ZoneManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
+// ─────────────────────────────────────────────
+// AAudio_ZoneActor
+// ─────────────────────────────────────────────
+
+AAudio_ZoneActor::AAudio_ZoneActor()
 {
-    CurrentDangerLevel = NewLevel;
+    PrimaryActorTick.bCanEverTick = false;
+
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->InitSphereRadius(800.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    ZoneManager = CreateDefaultSubobject<UAudio_ZoneManager>(TEXT("ZoneManager"));
 }
 
-void AAudio_ZoneManager::SetBiomeType(EAudio_BiomeType NewBiome)
+void AAudio_ZoneActor::BeginPlay()
 {
-    ZoneConfig.BiomeType = NewBiome;
+    Super::BeginPlay();
+
+    // Sync config to manager
+    ZoneManager->ZoneConfig = ZoneConfig;
+    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
+
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
 }
 
-float AAudio_ZoneManager::GetCurrentAmbientVolume() const
+void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (AmbientAudioComponent)
-    {
-        return AmbientAudioComponent->VolumeMultiplier;
-    }
-    return 0.0f;
+    if (!OtherActor) return;
+
+    // Only respond to player character
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    float Distance = FVector::Dist(OtherActor->GetActorLocation(), GetActorLocation());
+    ZoneManager->OnPlayerEnterZone(Distance);
 }
 
-bool AAudio_ZoneManager::IsPlayerInZone() const
-{
-    return bPlayerInZone;
-}
-
-void AAudio_ZoneManager::OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
     if (!OtherActor) return;
 
     ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar && PlayerChar->IsPlayerControlled())
-    {
-        bPlayerInZone = true;
-        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered %s zone"),
-            *UEnum::GetValueAsString(ZoneConfig.BiomeType));
-    }
-}
+    if (!PlayerChar) return;
 
-void AAudio_ZoneManager::OnPlayerExitZone(UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar && PlayerChar->IsPlayerControlled())
-    {
-        bPlayerInZone = false;
-        UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited %s zone"),
-            *UEnum::GetValueAsString(ZoneConfig.BiomeType));
-    }
+    // Fade out when player leaves zone
+    ZoneManager->SetZoneVolume(0.0f);
 }
