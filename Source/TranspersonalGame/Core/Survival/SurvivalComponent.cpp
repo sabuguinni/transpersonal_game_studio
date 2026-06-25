@@ -1,241 +1,163 @@
 // SurvivalComponent.cpp
-// Transpersonal Game Studio — Core Systems Programmer (Agent #03)
-// Prehistoric survival stats: hunger, thirst, stamina, fear, temperature.
-// Drains every second; applies starvation/dehydration damage at zero.
+// Core Systems Programmer #03 — Cycle PROD_CYCLE_AUTO_20260625_005
+// Prehistoric survival game — USurvivalComponent implementation
 
-#include "Core/Survival/SurvivalComponent.h"
+#include "SurvivalComponent.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
 
 USurvivalComponent::USurvivalComponent()
 {
+    // Tick is enabled — but we throttle internally to StatTickInterval (1s)
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // We handle our own interval
-
-    Stats.Health      = 100.f;
-    Stats.Hunger      = 100.f;
-    Stats.Thirst      = 100.f;
-    Stats.Stamina     = 100.f;
-    Stats.Fear        = 0.f;
-    Stats.Temperature = 37.f;
-
-    CurrentStatus = ECore_SurvivalStatus::Healthy;
-    bIsDead       = false;
-    AccumulatedTime = 0.f;
+    PrimaryComponentTick.TickInterval = 0.1f; // check every 0.1s, drain every 1s
 }
 
 void USurvivalComponent::BeginPlay()
 {
     Super::BeginPlay();
+    TickAccumulator = 0.f;
+    bIsDead = false;
 }
 
-void USurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void USurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                        FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
     if (bIsDead) return;
 
-    AccumulatedTime += DeltaTime;
-    if (AccumulatedTime >= TickInterval)
+    TickAccumulator += DeltaTime;
+    if (TickAccumulator >= StatTickInterval)
     {
-        DrainStats(AccumulatedTime);
-        AccumulatedTime = 0.f;
+        UpdateStats(TickAccumulator);
+        TickAccumulator = 0.f;
     }
 }
 
-// ── Stat modifiers ────────────────────────────────────────────────────────────
+// ─── Internal Stat Update ─────────────────────────────────────────────────────
+
+void USurvivalComponent::UpdateStats(float DeltaSeconds)
+{
+    // Hunger drain
+    SetStat(Hunger, Hunger - HungerDrainRate * DeltaSeconds, FName("Hunger"));
+
+    // Thirst drain (faster than hunger)
+    SetStat(Thirst, Thirst - ThirstDrainRate * DeltaSeconds, FName("Thirst"));
+
+    // Stamina: drain while sprinting, recover otherwise
+    if (bIsSprinting)
+    {
+        SetStat(Stamina, Stamina - StaminaSprintDrainRate * DeltaSeconds, FName("Stamina"));
+    }
+    else
+    {
+        SetStat(Stamina, Stamina + StaminaRecoveryRate * DeltaSeconds, FName("Stamina"));
+    }
+
+    // Fear decay when no active threat
+    if (Fear > 0.f)
+    {
+        SetStat(Fear, Fear - FearDecayRate * DeltaSeconds, FName("Fear"));
+    }
+
+    // Starvation: drain health if hunger or thirst is depleted
+    if (Hunger <= 0.f || Thirst <= 0.f)
+    {
+        float HealthDrain = StarvationHealthDrain * DeltaSeconds;
+        // Double drain if BOTH are depleted
+        if (Hunger <= 0.f && Thirst <= 0.f)
+        {
+            HealthDrain *= 2.f;
+        }
+        SetStat(Health, Health - HealthDrain, FName("Health"));
+    }
+
+    // Temperature stress: drain health at high stress levels (>70)
+    if (TemperatureStress > 70.f)
+    {
+        float TempDrain = (TemperatureStress - 70.f) * 0.01f * DeltaSeconds;
+        SetStat(Health, Health - TempDrain, FName("Health"));
+    }
+
+    // Death check
+    if (Health <= 0.f && !bIsDead)
+    {
+        bIsDead = true;
+        Health = 0.f;
+        OnOwnerDied.Broadcast();
+    }
+}
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::SetStat(float& Stat, float NewValue, FName StatName)
+{
+    float OldValue = Stat;
+    Stat = FMath::Clamp(NewValue, 0.f, 100.f);
+
+    // Broadcast if change is significant (>5 points) to avoid event spam
+    if (FMath::Abs(Stat - OldValue) > 5.f)
+    {
+        OnSurvivalStatChanged.Broadcast(StatName, Stat);
+    }
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+float USurvivalComponent::ApplyDamage(float DamageAmount)
+{
+    if (bIsDead || DamageAmount <= 0.f) return 0.f;
+
+    float OldHealth = Health;
+    SetStat(Health, Health - DamageAmount, FName("Health"));
+    float ActualDamage = OldHealth - Health;
+
+    if (Health <= 0.f && !bIsDead)
+    {
+        bIsDead = true;
+        OnOwnerDied.Broadcast();
+    }
+
+    return ActualDamage;
+}
 
 void USurvivalComponent::ConsumeFood(float Amount)
 {
-    Stats.Hunger = FMath::Clamp(Stats.Hunger + Amount, 0.f, 100.f);
-    UpdateStatus();
+    if (bIsDead || Amount <= 0.f) return;
+    SetStat(Hunger, Hunger + Amount, FName("Hunger"));
 }
 
 void USurvivalComponent::DrinkWater(float Amount)
 {
-    Stats.Thirst = FMath::Clamp(Stats.Thirst + Amount, 0.f, 100.f);
-    UpdateStatus();
+    if (bIsDead || Amount <= 0.f) return;
+    SetStat(Thirst, Thirst + Amount, FName("Thirst"));
 }
 
-void USurvivalComponent::RestoreStamina(float Amount)
+void USurvivalComponent::AddFear(float Amount)
 {
-    Stats.Stamina = FMath::Clamp(Stats.Stamina + Amount, 0.f, 100.f);
-    UpdateStatus();
+    if (bIsDead || Amount <= 0.f) return;
+    SetStat(Fear, Fear + Amount, FName("Fear"));
 }
 
-void USurvivalComponent::ApplyFear(float Amount)
+void USurvivalComponent::SetTemperatureStress(float Stress)
 {
-    Stats.Fear = FMath::Clamp(Stats.Fear + Amount, 0.f, 100.f);
-    if (Stats.Fear >= FearPanicThreshold)
-    {
-        OnFearPanic(Stats.Fear);
-    }
-    UpdateStatus();
+    SetStat(TemperatureStress, Stress, FName("TemperatureStress"));
 }
 
-void USurvivalComponent::ReduceFear(float Amount)
+bool USurvivalComponent::IsInCriticalState() const
 {
-    Stats.Fear = FMath::Clamp(Stats.Fear - Amount, 0.f, 100.f);
-    UpdateStatus();
+    return Health < 15.f || Hunger < 15.f || Thirst < 15.f || Stamina < 15.f;
 }
 
-void USurvivalComponent::ApplyDamage(float Amount)
+float USurvivalComponent::GetOverallDangerScore() const
 {
-    if (bIsDead) return;
-    Stats.Health = FMath::Clamp(Stats.Health - Amount, 0.f, 100.f);
+    // Weighted danger: health most important, then thirst, hunger, fear
+    float HealthDanger   = (100.f - Health)   * 0.40f;
+    float ThirstDanger   = (100.f - Thirst)   * 0.25f;
+    float HungerDanger   = (100.f - Hunger)   * 0.20f;
+    float FearDanger     = Fear                * 0.10f;
+    float TempDanger     = TemperatureStress   * 0.05f;
 
-    if (Stats.Health <= CriticalHealthThreshold && Stats.Health > 0.f)
-    {
-        OnCriticalHealth(Stats.Health);
-    }
-
-    if (Stats.Health <= 0.f)
-    {
-        bIsDead = true;
-        OnDeath();
-    }
-
-    UpdateStatus();
-}
-
-void USurvivalComponent::HealHealth(float Amount)
-{
-    if (bIsDead) return;
-    Stats.Health = FMath::Clamp(Stats.Health + Amount, 0.f, 100.f);
-    UpdateStatus();
-}
-
-void USurvivalComponent::UseStamina(float Amount)
-{
-    Stats.Stamina = FMath::Clamp(Stats.Stamina - Amount, 0.f, 100.f);
-    if (Stats.Stamina <= StaminaExhaustionThreshold)
-    {
-        OnStaminaExhausted();
-    }
-    UpdateStatus();
-}
-
-// ── Internal drain logic ──────────────────────────────────────────────────────
-
-void USurvivalComponent::DrainStats(float DeltaSeconds)
-{
-    // Hunger drain
-    Stats.Hunger = FMath::Clamp(Stats.Hunger - (HungerDrainPerSecond * DeltaSeconds), 0.f, 100.f);
-    if (Stats.Hunger <= HungerWarningThreshold)
-    {
-        OnHungerWarning(Stats.Hunger);
-    }
-
-    // Thirst drain (faster than hunger — dehydration kills quicker)
-    Stats.Thirst = FMath::Clamp(Stats.Thirst - (ThirstDrainPerSecond * DeltaSeconds), 0.f, 100.f);
-    if (Stats.Thirst <= ThirstWarningThreshold)
-    {
-        OnThirstWarning(Stats.Thirst);
-    }
-
-    // Stamina regen when not running
-    if (!bIsRunning)
-    {
-        Stats.Stamina = FMath::Clamp(Stats.Stamina + (StaminaRegenPerSecond * DeltaSeconds), 0.f, 100.f);
-    }
-
-    // Fear decay (calm down over time when not threatened)
-    Stats.Fear = FMath::Clamp(Stats.Fear - (FearDecayPerSecond * DeltaSeconds), 0.f, 100.f);
-
-    // Apply starvation / dehydration damage
-    ApplyStarvationDamage();
-    ApplyDehydrationDamage();
-
-    ClampStats();
-    UpdateStatus();
-}
-
-void USurvivalComponent::ApplyStarvationDamage()
-{
-    if (Stats.Hunger <= 0.f && !bIsDead)
-    {
-        Stats.Health = FMath::Clamp(Stats.Health - StarvationDamagePerSecond, 0.f, 100.f);
-        if (Stats.Health <= 0.f)
-        {
-            bIsDead = true;
-            OnDeath();
-        }
-    }
-}
-
-void USurvivalComponent::ApplyDehydrationDamage()
-{
-    if (Stats.Thirst <= 0.f && !bIsDead)
-    {
-        Stats.Health = FMath::Clamp(Stats.Health - DehydrationDamagePerSecond, 0.f, 100.f);
-        if (Stats.Health <= 0.f)
-        {
-            bIsDead = true;
-            OnDeath();
-        }
-    }
-}
-
-void USurvivalComponent::UpdateStatus()
-{
-    if (bIsDead)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Critical;
-        return;
-    }
-
-    if (Stats.Health <= CriticalHealthThreshold)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Critical;
-    }
-    else if (Stats.Fear >= FearPanicThreshold)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Panicking;
-    }
-    else if (Stats.Stamina <= StaminaExhaustionThreshold)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Exhausted;
-    }
-    else if (Stats.Thirst <= 0.f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Dehydrated;
-    }
-    else if (Stats.Hunger <= 0.f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Starving;
-    }
-    else if (Stats.Thirst <= ThirstWarningThreshold)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Thirsty;
-    }
-    else if (Stats.Hunger <= HungerWarningThreshold)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Hungry;
-    }
-    else
-    {
-        CurrentStatus = ECore_SurvivalStatus::Healthy;
-    }
-}
-
-void USurvivalComponent::ClampStats()
-{
-    Stats.Health      = FMath::Clamp(Stats.Health,      0.f, 100.f);
-    Stats.Hunger      = FMath::Clamp(Stats.Hunger,      0.f, 100.f);
-    Stats.Thirst      = FMath::Clamp(Stats.Thirst,      0.f, 100.f);
-    Stats.Stamina     = FMath::Clamp(Stats.Stamina,     0.f, 100.f);
-    Stats.Fear        = FMath::Clamp(Stats.Fear,        0.f, 100.f);
-    Stats.Temperature = FMath::Clamp(Stats.Temperature, -50.f, 60.f);
-}
-
-void USurvivalComponent::PrintSurvivalStats() const
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== SurvivalComponent Stats ==="));
-    UE_LOG(LogTemp, Warning, TEXT("  Health:  %.1f"), Stats.Health);
-    UE_LOG(LogTemp, Warning, TEXT("  Hunger:  %.1f"), Stats.Hunger);
-    UE_LOG(LogTemp, Warning, TEXT("  Thirst:  %.1f"), Stats.Thirst);
-    UE_LOG(LogTemp, Warning, TEXT("  Stamina: %.1f"), Stats.Stamina);
-    UE_LOG(LogTemp, Warning, TEXT("  Fear:    %.1f"), Stats.Fear);
-    UE_LOG(LogTemp, Warning, TEXT("  Temp:    %.1f C"), Stats.Temperature);
-    UE_LOG(LogTemp, Warning, TEXT("  Status:  %d"), (int32)CurrentStatus);
+    float Total = (HealthDanger + ThirstDanger + HungerDanger + FearDanger + TempDanger) / 100.f;
+    return FMath::Clamp(Total, 0.f, 1.f);
 }
