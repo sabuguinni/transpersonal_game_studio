@@ -3,172 +3,180 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 ATRexBehaviorController::ATRexBehaviorController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    CurrentState = ENPC_TRexState::Patrolling;
-    CurrentWaypointIndex = 0;
+    CurrentState = ENPC_TRexState::Patrol;
+    CurrentTarget = nullptr;
     TimeSinceLastAttack = 0.0f;
+    PatrolCenter = FVector::ZeroVector;
+    CurrentPatrolDestination = FVector::ZeroVector;
 }
 
 void ATRexBehaviorController::BeginPlay()
 {
     Super::BeginPlay();
-    StartPatrol();
+    PatrolCenter = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+    CurrentPatrolDestination = GetRandomPatrolPoint();
 }
 
 void ATRexBehaviorController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn);
-    StartPatrol();
+    if (InPawn)
+    {
+        PatrolCenter = InPawn->GetActorLocation();
+        CurrentPatrolDestination = GetRandomPatrolPoint();
+        SetBehaviorState(ENPC_TRexState::Patrol);
+    }
 }
 
 void ATRexBehaviorController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+
     TimeSinceLastAttack += DeltaTime;
-    UpdateBehavior(DeltaTime);
+
+    switch (CurrentState)
+    {
+        case ENPC_TRexState::Patrol:
+            ScanForPlayer();
+            UpdatePatrol(DeltaTime);
+            break;
+        case ENPC_TRexState::Alert:
+            ScanForPlayer();
+            break;
+        case ENPC_TRexState::Chase:
+            UpdateChase(DeltaTime);
+            break;
+        case ENPC_TRexState::Attack:
+            if (TimeSinceLastAttack >= PatrolData.AttackCooldown)
+            {
+                ExecuteAttack();
+            }
+            break;
+        case ENPC_TRexState::Rest:
+            // Idle — do nothing
+            break;
+    }
+}
+
+void ATRexBehaviorController::SetBehaviorState(ENPC_TRexState NewState)
+{
+    if (CurrentState == NewState) return;
+    CurrentState = NewState;
+
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    ACharacter* MyChar = Cast<ACharacter>(MyPawn);
+    if (MyChar && MyChar->GetCharacterMovement())
+    {
+        switch (NewState)
+        {
+            case ENPC_TRexState::Patrol:
+                MyChar->GetCharacterMovement()->MaxWalkSpeed = PatrolData.PatrolSpeed;
+                break;
+            case ENPC_TRexState::Chase:
+                MyChar->GetCharacterMovement()->MaxWalkSpeed = PatrolData.ChaseSpeed;
+                break;
+            case ENPC_TRexState::Attack:
+                MyChar->GetCharacterMovement()->MaxWalkSpeed = 0.0f;
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 void ATRexBehaviorController::StartPatrol()
 {
-    CurrentState = ENPC_TRexState::Patrolling;
-    CurrentTarget = nullptr;
-    MoveToNextWaypoint();
+    SetBehaviorState(ENPC_TRexState::Patrol);
+    CurrentPatrolDestination = GetRandomPatrolPoint();
+    MoveToLocation(CurrentPatrolDestination, 100.0f);
 }
 
 void ATRexBehaviorController::ChaseTarget(AActor* Target)
 {
     if (!Target) return;
     CurrentTarget = Target;
-    CurrentState = ENPC_TRexState::Chasing;
+    SetBehaviorState(ENPC_TRexState::Chase);
+    MoveToActor(Target, PatrolData.AttackRange * 0.8f);
+}
 
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return;
+void ATRexBehaviorController::ExecuteAttack()
+{
+    if (!CurrentTarget) return;
 
-    ACharacter* TRexChar = Cast<ACharacter>(ControlledPawn);
-    if (TRexChar && TRexChar->GetCharacterMovement())
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    float DistToTarget = FVector::Dist(MyPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
+    if (DistToTarget <= PatrolData.AttackRange)
     {
-        TRexChar->GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
+        // Apply damage to target
+        UGameplayStatics::ApplyDamage(
+            CurrentTarget,
+            PatrolData.AttackDamage,
+            this,
+            MyPawn,
+            UDamageType::StaticClass()
+        );
+        TimeSinceLastAttack = 0.0f;
+    }
+    else
+    {
+        // Target moved out of range — resume chase
+        SetBehaviorState(ENPC_TRexState::Chase);
+        MoveToActor(CurrentTarget, PatrolData.AttackRange * 0.8f);
+    }
+}
+
+void ATRexBehaviorController::UpdatePatrol(float DeltaTime)
+{
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    float DistToDest = FVector::Dist2D(MyPawn->GetActorLocation(), CurrentPatrolDestination);
+    if (DistToDest < 200.0f)
+    {
+        // Reached patrol point — pick new one
+        CurrentPatrolDestination = GetRandomPatrolPoint();
+        MoveToLocation(CurrentPatrolDestination, 100.0f);
+    }
+}
+
+void ATRexBehaviorController::UpdateChase(float DeltaTime)
+{
+    if (!CurrentTarget) 
+    {
+        SetBehaviorState(ENPC_TRexState::Patrol);
+        return;
     }
 
-    MoveToActor(Target, AttackRange * 0.8f);
-}
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
 
-void ATRexBehaviorController::AttackTarget(AActor* Target)
-{
-    if (!Target) return;
-    if (TimeSinceLastAttack < AttackCooldown) return;
+    float DistToTarget = FVector::Dist(MyPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
 
-    CurrentState = ENPC_TRexState::Attacking;
-    TimeSinceLastAttack = 0.0f;
-
-    // Stop movement during attack
-    StopMovement();
-
-    // Attack logic: apply damage via gameplay damage system
-    UGameplayStatics::ApplyDamage(
-        Target,
-        150.0f,         // T-Rex bite damage
-        this,
-        GetPawn(),
-        nullptr
-    );
-}
-
-void ATRexBehaviorController::UpdateBehavior(float DeltaTime)
-{
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return;
-
-    switch (CurrentState)
+    if (DistToTarget <= PatrolData.AttackRange)
     {
-        case ENPC_TRexState::Patrolling:
-        {
-            ScanForPlayer();
-
-            // Check if reached current waypoint
-            if (PatrolWaypoints.IsValidIndex(CurrentWaypointIndex))
-            {
-                AActor* WP = PatrolWaypoints[CurrentWaypointIndex];
-                if (WP)
-                {
-                    float DistToWP = FVector::Dist(ControlledPawn->GetActorLocation(), WP->GetActorLocation());
-                    if (DistToWP < 200.0f)
-                    {
-                        CurrentWaypointIndex = (CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
-                        MoveToNextWaypoint();
-                    }
-                }
-            }
-            break;
-        }
-
-        case ENPC_TRexState::Chasing:
-        {
-            if (!CurrentTarget)
-            {
-                StartPatrol();
-                break;
-            }
-
-            float DistToTarget = FVector::Dist(ControlledPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
-
-            if (DistToTarget <= AttackRange)
-            {
-                AttackTarget(CurrentTarget);
-            }
-            else if (DistToTarget > DetectionRange * 1.5f)
-            {
-                // Lost the target
-                StartPatrol();
-            }
-            else
-            {
-                MoveToActor(CurrentTarget, AttackRange * 0.8f);
-            }
-            break;
-        }
-
-        case ENPC_TRexState::Attacking:
-        {
-            if (!CurrentTarget)
-            {
-                StartPatrol();
-                break;
-            }
-
-            float DistToTarget = FVector::Dist(ControlledPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
-            if (DistToTarget > AttackRange * 1.2f)
-            {
-                CurrentState = ENPC_TRexState::Chasing;
-            }
-            else if (TimeSinceLastAttack >= AttackCooldown)
-            {
-                AttackTarget(CurrentTarget);
-            }
-            break;
-        }
-
-        case ENPC_TRexState::Resting:
-        {
-            // After rest period, resume patrol
-            static float RestTimer = 0.0f;
-            RestTimer += DeltaTime;
-            if (RestTimer > 10.0f)
-            {
-                RestTimer = 0.0f;
-                StartPatrol();
-            }
-            break;
-        }
-
-        default:
-            break;
+        SetBehaviorState(ENPC_TRexState::Attack);
+    }
+    else if (DistToTarget > PatrolData.ChaseDetectionRange * 1.5f)
+    {
+        // Lost the target — return to patrol
+        CurrentTarget = nullptr;
+        SetBehaviorState(ENPC_TRexState::Patrol);
+        StartPatrol();
+    }
+    else
+    {
+        MoveToActor(CurrentTarget, PatrolData.AttackRange * 0.8f);
     }
 }
 
@@ -177,64 +185,28 @@ void ATRexBehaviorController::ScanForPlayer()
     UWorld* World = GetWorld();
     if (!World) return;
 
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return;
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
 
-    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0);
-    if (!PlayerChar) return;
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PC) return;
 
-    float DistToPlayer = FVector::Dist(ControlledPawn->GetActorLocation(), PlayerChar->GetActorLocation());
-    if (DistToPlayer <= DetectionRange)
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    float DistToPlayer = FVector::Dist(MyPawn->GetActorLocation(), PlayerPawn->GetActorLocation());
+
+    if (DistToPlayer <= PatrolData.ChaseDetectionRange)
     {
-        ChaseTarget(PlayerChar);
+        ChaseTarget(PlayerPawn);
     }
 }
 
-void ATRexBehaviorController::MoveToNextWaypoint()
+FVector ATRexBehaviorController::GetRandomPatrolPoint() const
 {
-    if (PatrolWaypoints.Num() == 0)
-    {
-        // No waypoints — random nav point within patrol radius
-        APawn* ControlledPawn = GetPawn();
-        if (!ControlledPawn) return;
-
-        UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
-        if (!NavSys) return;
-
-        FNavLocation RandomPoint;
-        bool bFound = NavSys->GetRandomReachablePointInRadius(
-            ControlledPawn->GetActorLocation(),
-            PatrolRadius,
-            RandomPoint
-        );
-
-        if (bFound)
-        {
-            MoveToLocation(RandomPoint.Location);
-        }
-        return;
-    }
-
-    if (PatrolWaypoints.IsValidIndex(CurrentWaypointIndex))
-    {
-        AActor* WP = PatrolWaypoints[CurrentWaypointIndex];
-        if (WP)
-        {
-            MoveToActor(WP, 150.0f);
-        }
-    }
-}
-
-bool ATRexBehaviorController::IsPlayerInRange(float Range) const
-{
-    APawn* ControlledPawn = GetPawn();
-    if (!ControlledPawn) return false;
-
-    UWorld* World = GetWorld();
-    if (!World) return false;
-
-    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0);
-    if (!PlayerChar) return false;
-
-    return FVector::Dist(ControlledPawn->GetActorLocation(), PlayerChar->GetActorLocation()) <= Range;
+    float Angle = FMath::RandRange(0.0f, 360.0f);
+    float Radius = FMath::RandRange(PatrolData.PatrolRadius * 0.3f, PatrolData.PatrolRadius);
+    float X = PatrolCenter.X + Radius * FMath::Cos(FMath::DegreesToRadians(Angle));
+    float Y = PatrolCenter.Y + Radius * FMath::Sin(FMath::DegreesToRadians(Angle));
+    return FVector(X, Y, PatrolCenter.Z);
 }
