@@ -1,289 +1,149 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// PCGWorldGenerator.h - Core PCG World Generation System
+// PCGWorldGenerator.h
+// Procedural World Generator — Agent #5
+// Transpersonal Game Studio — Dinosaur Survival Game
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
-#include "Landscape.h"
-#include "LandscapeProxy.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "PCGWorldGenerator.generated.h"
 
-class UPCGComponent;
-class UPCGGraph;
-class ALandscape;
-class ULandscapeComponent;
-
-/**
- * Biome Types for the Prehistoric World
- * Based on Jurassic/Cretaceous period environments
- */
+// ============================================================
+// EWorld_BiomeType — biome classification enum
+// ============================================================
 UENUM(BlueprintType)
-enum class EPrehistoricBiome : uint8
+enum class EWorld_BiomeType : uint8
 {
-    TropicalRainforest      UMETA(DisplayName = "Tropical Rainforest"),
-    ConiferousForest        UMETA(DisplayName = "Coniferous Forest"),
-    FernPrairie             UMETA(DisplayName = "Fern Prairie"),
-    RiverDelta              UMETA(DisplayName = "River Delta"),
-    VolcanicRegion          UMETA(DisplayName = "Volcanic Region"),
-    CoastalPlains           UMETA(DisplayName = "Coastal Plains"),
-    SwampLands              UMETA(DisplayName = "Swamp Lands"),
-    HighlandPlateau         UMETA(DisplayName = "Highland Plateau")
+    JungleForest    UMETA(DisplayName = "Jungle Forest"),
+    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
+    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
+    RiverDelta      UMETA(DisplayName = "River Delta"),
+    CoastalFlats    UMETA(DisplayName = "Coastal Flats"),
 };
 
-/**
- * Terrain Generation Parameters
- */
+// ============================================================
+// FWorld_BiomeCell — data for a single biome region
+// ============================================================
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTerrainGenerationParams
+struct FWorld_BiomeCell
 {
     GENERATED_BODY()
 
-    // Base terrain settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 HeightmapResolution = 2017;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenSavanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 ComponentCountX = 16;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector CenterLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 ComponentCountY = 16;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 10000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float TerrainScale = 100.0f;
+    /** Temperature in Celsius (Cretaceous era range: 18-35°C) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 28.0f;
 
-    // Noise parameters for height generation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    float NoiseScale = 0.01f;
+    /** Humidity 0.0 (arid) to 1.0 (saturated) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Humidity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    int32 NoiseOctaves = 6;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    float NoisePersistence = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
-    float NoiseLacunarity = 2.0f;
-
-    // Biome distribution
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TMap<EPrehistoricBiome, float> BiomeWeights;
-
-    FTerrainGenerationParams()
-    {
-        // Default biome weights for prehistoric world
-        BiomeWeights.Add(EPrehistoricBiome::TropicalRainforest, 0.3f);
-        BiomeWeights.Add(EPrehistoricBiome::ConiferousForest, 0.2f);
-        BiomeWeights.Add(EPrehistoricBiome::FernPrairie, 0.15f);
-        BiomeWeights.Add(EPrehistoricBiome::RiverDelta, 0.1f);
-        BiomeWeights.Add(EPrehistoricBiome::SwampLands, 0.1f);
-        BiomeWeights.Add(EPrehistoricBiome::CoastalPlains, 0.08f);
-        BiomeWeights.Add(EPrehistoricBiome::VolcanicRegion, 0.05f);
-        BiomeWeights.Add(EPrehistoricBiome::HighlandPlateau, 0.02f);
-    }
+    /** Vegetation density 0.0 (bare) to 1.0 (dense canopy) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 0.4f;
 };
 
-/**
- * PCG World Generator Component
- * Main component for procedural world generation using UE5's PCG Framework
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(PCG), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPCGWorldGenerator : public UActorComponent
+// ============================================================
+// APCGWorldGenerator — main world generation actor
+// ============================================================
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG World Generator"))
+class TRANSPERSONALGAME_API APCGWorldGenerator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UPCGWorldGenerator();
+    APCGWorldGenerator();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // Core generation functions
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    // --------------------------------------------------------
+    // Generation Parameters
+    // --------------------------------------------------------
+
+    /** Random seed for deterministic world generation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 BiomeSeed;
+
+    /** World size in Unreal units (X axis) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float WorldSizeX;
+
+    /** World size in Unreal units (Y axis) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float WorldSizeY;
+
+    /** Maximum terrain height variation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float TerrainHeightScale;
+
+    /** If true, generate world automatically on BeginPlay */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    bool bGenerateOnBeginPlay;
+
+    /** Biome type to weight mapping (must sum to ~1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    TMap<EWorld_BiomeType, float> BiomeWeights;
+
+    // --------------------------------------------------------
+    // Runtime Data
+    // --------------------------------------------------------
+
+    /** All generated biome cells */
+    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
+    TArray<FWorld_BiomeCell> ActiveBiomes;
+
+    /** River source points for spline generation */
+    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
+    TArray<FVector> RiverSourcePoints;
+
+    /** Landmark positions (volcanoes, rock formations) */
+    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
+    TArray<FVector> LandmarkLocations;
+
+    // --------------------------------------------------------
+    // Generation Functions
+    // --------------------------------------------------------
+
+    /** Trigger full world generation */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World Generation")
     void GenerateWorld();
 
+    /** Generate biome map using Voronoi-style placement */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateTerrain();
+    void GenerateBiomeMap();
 
+    /** Generate river network flowing from highlands to coast */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiomes();
+    void GenerateRiverNetwork();
 
+    /** Place terrain landmarks: volcanic peaks, rock formations */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateRivers();
+    void PlaceTerrainLandmarks();
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateVegetation();
+    /** Query biome type at a world-space location */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void ClearGeneration();
+    // --------------------------------------------------------
+    // Biome Property Helpers
+    // --------------------------------------------------------
 
-    // Biome-specific generation
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void GenerateTropicalRainforest(const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
+    float GetBiomeTemperature(EWorld_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void GenerateConiferousForest(const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
+    float GetBiomeHumidity(EWorld_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void GenerateFernPrairie(const FVector& Location, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void GenerateSwampLands(const FVector& Location, float Radius);
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EPrehistoricBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    float GetHeightAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    FVector GetNormalAtLocation(const FVector& WorldLocation) const;
-
-    // Performance and LOD
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetGenerationLOD(int32 LODLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableRuntimeGeneration(bool bEnable);
-
-protected:
-    // Core PCG components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
-    TObjectPtr<UPCGComponent> PCGComponent;
-
-    // PCG Graphs for different generation tasks
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    TObjectPtr<UPCGGraph> TerrainGenerationGraph;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    TObjectPtr<UPCGGraph> BiomeGenerationGraph;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    TObjectPtr<UPCGGraph> VegetationGenerationGraph;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    TObjectPtr<UPCGGraph> RiverGenerationGraph;
-
-    // Generation parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    FTerrainGenerationParams TerrainParams;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 WorldSeed = 12345;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    FVector WorldSize = FVector(204800.0f, 204800.0f, 25600.0f); // 20km x 20km world
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseHierarchicalGeneration = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableRuntimeGeneration = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 GenerationRadius = 5000; // 50m generation radius
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 CleanupRadius = 7500; // 75m cleanup radius
-
-    // Landscape reference
-    UPROPERTY()
-    TWeakObjectPtr<ALandscape> GeneratedLandscape;
-
-private:
-    // Internal generation functions
-    void InitializePCGComponent();
-    void SetupPCGGraphs();
-    void GenerateHeightmap();
-    void ApplyBiomeDistribution();
-    void CreateRiverNetwork();
-    void PopulateVegetation();
-
-    // Noise generation utilities
-    float GeneratePerlinNoise(float X, float Y, int32 Octaves, float Persistence, float Lacunarity) const;
-    float GenerateRidgedNoise(float X, float Y) const;
-    float GenerateBiomeNoise(float X, float Y, EPrehistoricBiome BiomeType) const;
-
-    // Biome transition utilities
-    float CalculateBiomeBlend(const FVector& Location, EPrehistoricBiome BiomeA, EPrehistoricBiome BiomeB) const;
-    TArray<EPrehistoricBiome> GetNearbyBiomes(const FVector& Location, float SearchRadius) const;
-
-    // Performance monitoring
-    UPROPERTY()
-    float LastGenerationTime;
-
-    UPROPERTY()
-    int32 GeneratedPointsCount;
-
-public:
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWorldGenerationComplete, bool, bSuccess);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnWorldGenerationComplete OnWorldGenerationComplete;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeGenerated, EPrehistoricBiome, BiomeType, FVector, Location);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeGenerated OnBiomeGenerated;
-};
-
-/**
- * World Generation Subsystem
- * Manages world generation across the entire game world
- */
-UCLASS()
-class TRANSPERSONALGAME_API UPCGWorldSubsystem : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // World management
-    UFUNCTION(BlueprintCallable, Category = "World Management")
-    void InitializeWorldGeneration();
-
-    UFUNCTION(BlueprintCallable, Category = "World Management")
-    void GenerateWorldChunk(const FVector& ChunkCenter, int32 ChunkSize);
-
-    UFUNCTION(BlueprintCallable, Category = "World Management")
-    void UnloadWorldChunk(const FVector& ChunkCenter);
-
-    // Streaming management
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void UpdateStreamingAroundPlayer(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void SetStreamingRadius(float NewRadius);
-
-    // Biome queries
-    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
-    EPrehistoricBiome GetBiomeAtWorldLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Queries")
-    TArray<FVector> FindBiomeLocations(EPrehistoricBiome BiomeType, float SearchRadius) const;
-
-protected:
-    UPROPERTY()
-    TMap<FIntPoint, TObjectPtr<UPCGWorldGenerator>> ActiveChunks;
-
-    UPROPERTY()
-    float StreamingRadius = 10000.0f; // 100m streaming radius
-
-    UPROPERTY()
-    FVector LastPlayerLocation = FVector::ZeroVector;
-
-private:
-    void CleanupDistantChunks(const FVector& PlayerLocation);
-    FIntPoint WorldLocationToChunkCoord(const FVector& WorldLocation) const;
-    FVector ChunkCoordToWorldLocation(const FIntPoint& ChunkCoord) const;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
+    float GetBiomeVegetationDensity(EWorld_BiomeType BiomeType) const;
 };
