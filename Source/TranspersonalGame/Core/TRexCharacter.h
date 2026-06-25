@@ -1,30 +1,21 @@
-// TRexCharacter.h
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Tyrannosaurus Rex — apex predator subclass of ADinosaurBase
-// UE5.5 compliant — TRANSPERSONALGAME_API exported
+// TRexCharacter.h — Tyrannosaurus Rex — apex predator species
+// Inherits from ADinosaurBase. Species-specific stats, charge attack, roar ability.
+// Agent #03 — Core Systems Programmer — PROD_CYCLE_AUTO_20260625_002
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Core/DinosaurBase.h"
-#include "BehaviorTree/BehaviorTree.h"
 #include "TRexCharacter.generated.h"
 
 /**
  * ATRexCharacter
- *
- * Tyrannosaurus Rex — the apex predator of the prehistoric survival game.
- * Extends ADinosaurBase with T-Rex specific stats:
- *   - Capsule: radius 120, half-height 280 (large bipedal predator)
- *   - Walk speed: 350 cm/s  |  Run speed: 900 cm/s
- *   - Bite damage: 150 (one-shot kills most prey)
- *   - Detection radius: 3000 cm (large sensory cone)
- *   - Roar ability: stuns nearby prey for 2 seconds
- *
- * AI: Uses BTT_TRex BehaviorTree (patrol → detect → chase → attack).
- * Mesh: /Game/Dinosaur_Pack/Trex/Mesh/SKM_Trex_Skin (scale 3.0)
+ * Tyrannosaurus Rex — the apex predator of the prehistoric world.
+ * Stats: Health=500, RunSpeed=900, AttackDamage=120, SenseRadius=3000
+ * Behaviour: Solitary hunter, charges prey, roars to stun nearby animals.
+ * Inherits full metabolism, damage, death/decay from ADinosaurBase.
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "DinosaurAI")
 class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -32,69 +23,94 @@ class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 public:
     ATRexCharacter();
 
-    // ── Roar ability ─────────────────────────────────────────────────────────
+    // === OVERRIDES ===
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    /** Roar — stuns nearby prey within RoarRadius for RoarStunDuration seconds */
+    // === CHARGE ATTACK ===
+    /** Initiates a charge towards the target — covers ground fast, high damage on impact */
     UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void StartCharge(AActor* Target);
+
+    /** Called when charge impact occurs — deals bonus damage and knockback */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void OnChargeImpact(AActor* HitActor);
+
+    /** Stop charge (wall hit, target dead, stamina depleted) */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void StopCharge();
+
+    // === ROAR ===
+    /** Intimidation roar — stuns nearby prey for RoarStunDuration seconds */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
     void PerformRoar();
 
-    /** Radius within which the roar stuns prey (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    /** Blueprint event — play roar animation + sound */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Abilities")
+    void OnRoar();
+
+    /** Blueprint event — play charge animation */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Combat")
+    void OnChargeStart();
+
+    /** Blueprint event — play charge impact animation */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Combat")
+    void OnChargeImpactEvent(AActor* HitActor);
+
+    // === STATS (species-specific) ===
+    /** Charge speed multiplier over base movement speed */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float ChargeSpeedMultiplier = 2.2f;
+
+    /** Charge impact bonus damage (added to base AttackDamage) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float ChargeImpactBonusDamage = 80.0f;
+
+    /** Roar stun duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float RoarStunDuration = 3.0f;
+
+    /** Roar radius — all prey within this range are stunned */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
     float RoarRadius = 1500.0f;
 
-    /** Duration prey is stunned after a roar (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarStunDuration = 2.0f;
+    /** Roar cooldown in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float RoarCooldown = 20.0f;
 
-    /** Cooldown between roars (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarCooldown = 30.0f;
+    /** Charge stamina cost */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float ChargeStaminaCost = 40.0f;
 
-    // ── Detection ────────────────────────────────────────────────────────────
+    /** Minimum distance to target before charge triggers */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Stats")
+    float ChargeActivationDistance = 800.0f;
 
-    /** Detection radius — T-Rex has excellent vision and smell (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|AI")
-    float DetectionRadius = 3000.0f;
+    /** Is currently charging */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    bool bIsCharging = false;
 
-    /** Field of view for visual detection (degrees, forward cone) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|AI")
-    float DetectionFOV = 120.0f;
+    /** Time since last roar */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    float TimeSinceLastRoar = 0.0f;
 
-    // ── BehaviorTree ─────────────────────────────────────────────────────────
-
-    /** BehaviorTree asset for T-Rex AI (patrol → detect → chase → attack) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|AI")
-    TObjectPtr<UBehaviorTree> TRexBehaviorTree;
-
-    // ── Stomp ─────────────────────────────────────────────────────────────────
-
-    /** Ground stomp — area damage when T-Rex lands a heavy step */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void PerformStomp();
-
-    /** Stomp radius (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadius = 400.0f;
-
-    /** Stomp damage */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompDamage = 80.0f;
-
-protected:
-    virtual void BeginPlay() override;
-
-    /** Blueprint event — fired when T-Rex roars */
-    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
-    void OnTRexRoar();
-
-    /** Blueprint event — fired when T-Rex stomps */
-    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
-    void OnTRexStomp();
+    /** Current charge target */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    TObjectPtr<AActor> ChargeTarget = nullptr;
 
 private:
-    /** Timestamp of last roar — used for cooldown check */
-    float LastRoarTime = -999.0f;
+    /** Charge duration timer */
+    FTimerHandle ChargeTimerHandle;
 
-    /** Whether the roar cooldown has elapsed */
+    /** Roar cooldown timer */
+    FTimerHandle RoarCooldownHandle;
+
+    /** Internal: apply charge movement each tick */
+    void TickCharge(float DeltaTime);
+
+    /** Internal: check if roar is off cooldown */
     bool CanRoar() const;
+
+    /** Internal: find all stun targets within RoarRadius */
+    void ApplyRoarStun();
 };
