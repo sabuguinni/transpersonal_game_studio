@@ -1,289 +1,216 @@
 #include "CretaceousLightingManager.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
-#include "Engine/ExponentialHeightFog.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "EngineUtils.h"
+#include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
 
 ACretaceousLightingManager::ACretaceousLightingManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
 
-    CurrentTimeOfDay = ELight_TimeOfDay::Afternoon;
-    DayProgress = 0.45f;
+    // Morning preset — warm golden hour
+    MorningSettings.SunPitch = -15.0f;
+    MorningSettings.SunIntensity = 6.0f;
+    MorningSettings.SunColor = FLinearColor(1.0f, 0.72f, 0.42f, 1.0f);
+    MorningSettings.FogDensity = 0.045f;
+    MorningSettings.FogColor = FLinearColor(0.65f, 0.72f, 0.9f, 1.0f);
+    MorningSettings.SkyLightIntensity = 1.2f;
 
-    // Default Dawn settings — cool blue-pink
-    DawnSettings.SunPitchDegrees = -5.0f;
-    DawnSettings.SunIntensity = 3.0f;
-    DawnSettings.SunColor = FLinearColor(1.0f, 0.72f, 0.55f, 1.0f);
-    DawnSettings.FogDensity = 0.06f;
-    DawnSettings.FogColor = FLinearColor(0.6f, 0.65f, 0.9f, 1.0f);
-    DawnSettings.SkyLightIntensity = 0.8f;
+    // Midday preset — bright, slightly harsh
+    MiddaySettings.SunPitch = -75.0f;
+    MiddaySettings.SunIntensity = 18.0f;
+    MiddaySettings.SunColor = FLinearColor(1.0f, 0.97f, 0.88f, 1.0f);
+    MiddaySettings.FogDensity = 0.012f;
+    MiddaySettings.FogColor = FLinearColor(0.55f, 0.72f, 0.9f, 1.0f);
+    MiddaySettings.SkyLightIntensity = 3.5f;
 
-    // Default Noon settings — bright white
-    NoonSettings.SunPitchDegrees = -75.0f;
-    NoonSettings.SunIntensity = 16.0f;
-    NoonSettings.SunColor = FLinearColor(1.0f, 0.97f, 0.88f, 1.0f);
-    NoonSettings.FogDensity = 0.02f;
-    NoonSettings.FogColor = FLinearColor(0.7f, 0.82f, 0.95f, 1.0f);
-    NoonSettings.SkyLightIntensity = 3.5f;
-
-    // Default Dusk settings — warm orange-red
-    DuskSettings.SunPitchDegrees = -8.0f;
+    // Dusk preset — deep amber/orange
+    DuskSettings.SunPitch = -8.0f;
     DuskSettings.SunIntensity = 4.0f;
     DuskSettings.SunColor = FLinearColor(1.0f, 0.45f, 0.18f, 1.0f);
-    DuskSettings.FogDensity = 0.055f;
-    DuskSettings.FogColor = FLinearColor(0.85f, 0.55f, 0.35f, 1.0f);
-    DuskSettings.SkyLightIntensity = 1.0f;
-
-    // Default Night settings — deep blue moonlight
-    NightSettings.SunPitchDegrees = 30.0f;
-    NightSettings.SunIntensity = 0.5f;
-    NightSettings.SunColor = FLinearColor(0.3f, 0.35f, 0.7f, 1.0f);
-    NightSettings.FogDensity = 0.045f;
-    NightSettings.FogColor = FLinearColor(0.1f, 0.12f, 0.3f, 1.0f);
-    NightSettings.SkyLightIntensity = 0.3f;
+    DuskSettings.FogDensity = 0.065f;
+    DuskSettings.FogColor = FLinearColor(0.85f, 0.52f, 0.35f, 1.0f);
+    DuskSettings.SkyLightIntensity = 0.8f;
 }
 
 void ACretaceousLightingManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    DayProgress = StartingDayProgress;
-    AutoFindLightingActors();
-
-    // Apply initial settings
-    FLight_DayPhaseSettings InitialSettings = GetSettingsForProgress(DayProgress);
-    ApplyDayPhaseSettings(InitialSettings);
+    ApplyCretaceousPreset();
 }
 
 void ACretaceousLightingManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bEnableDayNightCycle && DayDurationSeconds > 0.0f)
+    if (bEnableDynamicDayCycle)
     {
-        AdvanceDayNightCycle(DeltaTime);
+        // Advance time — DayCycleSpeed=60 means 60 in-game seconds per real second
+        TimeOfDayNormalized += (DeltaTime * DayCycleSpeed) / 86400.0f;
+        if (TimeOfDayNormalized > 1.0f)
+        {
+            TimeOfDayNormalized -= 1.0f;
+        }
+        SetTimeOfDay(TimeOfDayNormalized);
     }
 }
 
-void ACretaceousLightingManager::AdvanceDayNightCycle(float DeltaSeconds)
+void ACretaceousLightingManager::SetTimeOfDay(float NormalizedTime)
 {
-    DayProgress += DeltaSeconds / DayDurationSeconds;
-    if (DayProgress >= 1.0f)
-    {
-        DayProgress -= 1.0f;
-    }
+    TimeOfDayNormalized = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
+    UpdateSunRotation();
+    UpdateFogSettings();
+    UpdateSkyLight();
+}
 
-    // Determine time of day from progress (0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk)
-    if (DayProgress < 0.2f || DayProgress >= 0.85f)
+ELight_TimeOfDay ACretaceousLightingManager::GetCurrentTimeOfDayEnum() const
+{
+    if (TimeOfDayNormalized < 0.15f || TimeOfDayNormalized > 0.92f) return ELight_TimeOfDay::Night;
+    if (TimeOfDayNormalized < 0.22f) return ELight_TimeOfDay::Dawn;
+    if (TimeOfDayNormalized < 0.35f) return ELight_TimeOfDay::Morning;
+    if (TimeOfDayNormalized < 0.60f) return ELight_TimeOfDay::Midday;
+    if (TimeOfDayNormalized < 0.75f) return ELight_TimeOfDay::Afternoon;
+    return ELight_TimeOfDay::Dusk;
+}
+
+void ACretaceousLightingManager::ApplyCretaceousPreset()
+{
+    // Default: golden afternoon (TimeOfDayNormalized = 0.35)
+    SetTimeOfDay(TimeOfDayNormalized);
+}
+
+void ACretaceousLightingManager::ApplyLightingInEditor()
+{
+    ApplyCretaceousPreset();
+}
+
+void ACretaceousLightingManager::UpdateSunRotation()
+{
+    if (!SunLight) return;
+
+    UDirectionalLightComponent* SunComp = SunLight->GetComponentByClass<UDirectionalLightComponent>();
+    if (!SunComp) return;
+
+    // Determine current phase settings by blending
+    FLight_DayPhaseSettings CurrentSettings;
+
+    // Simple 3-phase blend: morning (0.2-0.4), midday (0.4-0.65), dusk (0.65-0.85)
+    float t = TimeOfDayNormalized;
+
+    if (t < 0.3f)
     {
-        CurrentTimeOfDay = ELight_TimeOfDay::Night;
+        CurrentSettings = MorningSettings;
     }
-    else if (DayProgress < 0.3f)
+    else if (t < 0.55f)
     {
-        CurrentTimeOfDay = ELight_TimeOfDay::Dawn;
+        float alpha = (t - 0.3f) / 0.25f;
+        CurrentSettings = LerpDayPhase(MorningSettings, MiddaySettings, alpha);
     }
-    else if (DayProgress < 0.45f)
+    else if (t < 0.75f)
     {
-        CurrentTimeOfDay = ELight_TimeOfDay::Morning;
-    }
-    else if (DayProgress < 0.6f)
-    {
-        CurrentTimeOfDay = ELight_TimeOfDay::Noon;
-    }
-    else if (DayProgress < 0.7f)
-    {
-        CurrentTimeOfDay = ELight_TimeOfDay::Afternoon;
+        CurrentSettings = MiddaySettings;
     }
     else
     {
-        CurrentTimeOfDay = ELight_TimeOfDay::Dusk;
+        float alpha = (t - 0.75f) / 0.15f;
+        CurrentSettings = LerpDayPhase(MiddaySettings, DuskSettings, FMath::Clamp(alpha, 0.0f, 1.0f));
     }
 
-    FLight_DayPhaseSettings CurrentSettings = GetSettingsForProgress(DayProgress);
-    ApplyDayPhaseSettings(CurrentSettings);
+    SunLight->SetActorRotation(FRotator(CurrentSettings.SunPitch, 45.0f, 0.0f));
+    SunComp->SetIntensity(CurrentSettings.SunIntensity);
+    SunComp->SetLightColor(CurrentSettings.SunColor);
 }
 
-void ACretaceousLightingManager::SetTimeOfDay(ELight_TimeOfDay NewTime)
+void ACretaceousLightingManager::UpdateFogSettings()
 {
-    CurrentTimeOfDay = NewTime;
+    if (!GetWorld()) return;
 
-    switch (NewTime)
-    {
-    case ELight_TimeOfDay::Dawn:
-        DayProgress = 0.25f;
-        break;
-    case ELight_TimeOfDay::Morning:
-        DayProgress = 0.35f;
-        break;
-    case ELight_TimeOfDay::Noon:
-        DayProgress = 0.5f;
-        break;
-    case ELight_TimeOfDay::Afternoon:
-        DayProgress = 0.55f;
-        break;
-    case ELight_TimeOfDay::Dusk:
-        DayProgress = 0.72f;
-        break;
-    case ELight_TimeOfDay::Night:
-        DayProgress = 0.1f;
-        break;
-    }
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AExponentialHeightFog::StaticClass(), FogActors);
 
-    FLight_DayPhaseSettings Settings = GetSettingsForProgress(DayProgress);
-    ApplyDayPhaseSettings(Settings);
-}
+    if (FogActors.Num() == 0) return;
 
-void ACretaceousLightingManager::ApplyDayPhaseSettings(const FLight_DayPhaseSettings& Settings)
-{
-    // Apply sun settings
-    if (SunActor)
-    {
-        UpdateSunTransform(Settings.SunPitchDegrees);
-        UDirectionalLightComponent* SunComp = SunActor->GetComponent();
-        if (SunComp)
-        {
-            SunComp->SetIntensity(Settings.SunIntensity);
-            SunComp->SetLightColor(Settings.SunColor);
-        }
-    }
+    AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActors[0]);
+    if (!Fog) return;
 
-    // Apply sky light
-    if (SkyLightActor)
-    {
-        USkyLightComponent* SLComp = SkyLightActor->GetLightComponent();
-        if (SLComp)
-        {
-            SLComp->SetIntensity(Settings.SkyLightIntensity);
-        }
-    }
+    UExponentialHeightFogComponent* FogComp = Fog->GetComponentByClass<UExponentialHeightFogComponent>();
+    if (!FogComp) return;
 
-    // Apply fog settings
-    if (FogActor)
-    {
-        UExponentialHeightFogComponent* FogComp = FogActor->GetComponent();
-        if (FogComp)
-        {
-            FogComp->SetFogDensity(Settings.FogDensity);
-            FogComp->SetFogInscatteringColor(Settings.FogColor);
-        }
-    }
-}
+    // Determine phase
+    float t = TimeOfDayNormalized;
+    FLight_DayPhaseSettings CurrentSettings;
 
-FLight_DayPhaseSettings ACretaceousLightingManager::GetSettingsForProgress(float Progress) const
-{
-    // Map progress to phase transitions
-    // 0.0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1.0 = midnight
-
-    if (Progress < 0.2f)
+    if (t < 0.3f)
     {
-        // Night -> Dawn transition
-        float Alpha = Progress / 0.2f;
-        return LerpDayPhaseSettings(NightSettings, DawnSettings, Alpha);
+        CurrentSettings = MorningSettings;
     }
-    else if (Progress < 0.3f)
+    else if (t < 0.55f)
     {
-        // Dawn -> Morning
-        float Alpha = (Progress - 0.2f) / 0.1f;
-        return LerpDayPhaseSettings(DawnSettings, NoonSettings, Alpha * 0.5f);
+        float alpha = (t - 0.3f) / 0.25f;
+        CurrentSettings = LerpDayPhase(MorningSettings, MiddaySettings, alpha);
     }
-    else if (Progress < 0.5f)
+    else if (t < 0.75f)
     {
-        // Morning -> Noon
-        float Alpha = (Progress - 0.3f) / 0.2f;
-        return LerpDayPhaseSettings(DawnSettings, NoonSettings, 0.5f + Alpha * 0.5f);
-    }
-    else if (Progress < 0.65f)
-    {
-        // Noon -> Afternoon (use dusk as afternoon target)
-        float Alpha = (Progress - 0.5f) / 0.15f;
-        return LerpDayPhaseSettings(NoonSettings, DuskSettings, Alpha * 0.5f);
-    }
-    else if (Progress < 0.8f)
-    {
-        // Afternoon -> Dusk
-        float Alpha = (Progress - 0.65f) / 0.15f;
-        return LerpDayPhaseSettings(NoonSettings, DuskSettings, 0.5f + Alpha * 0.5f);
+        CurrentSettings = MiddaySettings;
     }
     else
     {
-        // Dusk -> Night
-        float Alpha = (Progress - 0.8f) / 0.2f;
-        return LerpDayPhaseSettings(DuskSettings, NightSettings, Alpha);
+        float alpha = (t - 0.75f) / 0.15f;
+        CurrentSettings = LerpDayPhase(MiddaySettings, DuskSettings, FMath::Clamp(alpha, 0.0f, 1.0f));
     }
+
+    FogComp->SetFogDensity(CurrentSettings.FogDensity);
+    FogComp->SetFogInscatteringColor(CurrentSettings.FogColor);
 }
 
-FLight_DayPhaseSettings ACretaceousLightingManager::LerpDayPhaseSettings(
+void ACretaceousLightingManager::UpdateSkyLight()
+{
+    if (!SceneSkyLight) return;
+
+    USkyLightComponent* SLComp = SceneSkyLight->GetComponentByClass<USkyLightComponent>();
+    if (!SLComp) return;
+
+    float t = TimeOfDayNormalized;
+    FLight_DayPhaseSettings CurrentSettings;
+
+    if (t < 0.3f)
+    {
+        CurrentSettings = MorningSettings;
+    }
+    else if (t < 0.55f)
+    {
+        float alpha = (t - 0.3f) / 0.25f;
+        CurrentSettings = LerpDayPhase(MorningSettings, MiddaySettings, alpha);
+    }
+    else if (t < 0.75f)
+    {
+        CurrentSettings = MiddaySettings;
+    }
+    else
+    {
+        float alpha = (t - 0.75f) / 0.15f;
+        CurrentSettings = LerpDayPhase(MiddaySettings, DuskSettings, FMath::Clamp(alpha, 0.0f, 1.0f));
+    }
+
+    SLComp->SetIntensity(CurrentSettings.SkyLightIntensity);
+}
+
+FLight_DayPhaseSettings ACretaceousLightingManager::LerpDayPhase(
     const FLight_DayPhaseSettings& A,
     const FLight_DayPhaseSettings& B,
     float Alpha) const
 {
     FLight_DayPhaseSettings Result;
-    Result.SunPitchDegrees = FMath::Lerp(A.SunPitchDegrees, B.SunPitchDegrees, Alpha);
+    Result.SunPitch = FMath::Lerp(A.SunPitch, B.SunPitch, Alpha);
     Result.SunIntensity = FMath::Lerp(A.SunIntensity, B.SunIntensity, Alpha);
-    Result.SunColor = FLinearColor(
-        FMath::Lerp(A.SunColor.R, B.SunColor.R, Alpha),
-        FMath::Lerp(A.SunColor.G, B.SunColor.G, Alpha),
-        FMath::Lerp(A.SunColor.B, B.SunColor.B, Alpha),
-        1.0f
-    );
+    Result.SunColor = FMath::Lerp(A.SunColor, B.SunColor, Alpha);
     Result.FogDensity = FMath::Lerp(A.FogDensity, B.FogDensity, Alpha);
-    Result.FogColor = FLinearColor(
-        FMath::Lerp(A.FogColor.R, B.FogColor.R, Alpha),
-        FMath::Lerp(A.FogColor.G, B.FogColor.G, Alpha),
-        FMath::Lerp(A.FogColor.B, B.FogColor.B, Alpha),
-        1.0f
-    );
+    Result.FogColor = FMath::Lerp(A.FogColor, B.FogColor, Alpha);
     Result.SkyLightIntensity = FMath::Lerp(A.SkyLightIntensity, B.SkyLightIntensity, Alpha);
     return Result;
-}
-
-void ACretaceousLightingManager::UpdateSunTransform(float PitchDegrees)
-{
-    if (SunActor)
-    {
-        FRotator CurrentRot = SunActor->GetActorRotation();
-        SunActor->SetActorRotation(FRotator(PitchDegrees, CurrentRot.Yaw, 0.0f));
-    }
-}
-
-void ACretaceousLightingManager::AutoFindLightingActors()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Auto-find DirectionalLight
-    if (!SunActor)
-    {
-        for (TActorIterator<ADirectionalLight> It(World); It; ++It)
-        {
-            SunActor = *It;
-            break;
-        }
-    }
-
-    // Auto-find SkyLight
-    if (!SkyLightActor)
-    {
-        for (TActorIterator<ASkyLight> It(World); It; ++It)
-        {
-            SkyLightActor = *It;
-            break;
-        }
-    }
-
-    // Auto-find ExponentialHeightFog
-    if (!FogActor)
-    {
-        for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
-        {
-            FogActor = *It;
-            break;
-        }
-    }
 }
