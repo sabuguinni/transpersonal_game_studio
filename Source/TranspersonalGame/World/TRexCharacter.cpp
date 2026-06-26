@@ -1,234 +1,175 @@
-#include "TRexCharacter.h"
+// TRexCharacter.cpp
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Tyrannosaurus Rex — apex predator implementation.
+// Inherits ADinosaurBase; overrides stats and adds roar/stomp abilities.
+
+#include "World/TRexCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
 ATRexCharacter::ATRexCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ── T-Rex Species Stats ──────────────────────────────────────────────────
-    // Override DinosaurBase defaults with T-Rex-specific values
-    DinoStats.MaxHealth          = 1200.0f;
-    DinoStats.CurrentHealth      = 1200.0f;
-    DinoStats.MoveSpeed          = 350.0f;   // Patrol speed (cm/s)
-    DinoStats.RunSpeed           = 900.0f;   // Charge speed (cm/s)
-    DinoStats.AttackDamage       = 120.0f;   // Bite damage
-    DinoStats.AttackRange        = 280.0f;   // Bite reach (cm)
-    DinoStats.AggroRadius        = 3500.0f;  // Detection radius (cm)
-    DinoStats.PatrolRadius       = 2500.0f;  // Patrol wander radius (cm)
-    DinoStats.AttackCooldown     = 2.5f;     // Seconds between bites
-    DinoStats.SpeciesName        = FName("Tyrannosaurus_Rex");
-    DinoStats.bIsCarnivore       = true;
-    DinoStats.bIsPack            = false;    // Solitary apex predator
-    DinoStats.ThreatLevel        = 10;       // Maximum threat
+    // Override base species identity
+    Species = EEng_DinoSpecies::TRex;
+    Diet    = EEng_DinoDiet::Carnivore;
 
-    // ── Movement Setup ───────────────────────────────────────────────────────
-    if (GetCharacterMovement())
-    {
-        GetCharacterMovement()->MaxWalkSpeed        = DinoStats.MoveSpeed;
-        GetCharacterMovement()->MaxAcceleration     = 600.0f;
-        GetCharacterMovement()->BrakingDecelerationWalking = 400.0f;
-        GetCharacterMovement()->RotationRate        = FRotator(0.0f, 120.0f, 0.0f);
-        GetCharacterMovement()->bOrientRotationToMovement = true;
-        GetCharacterMovement()->GravityScale        = 1.2f;  // Heavier feel
-    }
+    // T-Rex stats — apex predator values
+    DinoStats.MaxHealth        = 2000.0f;
+    DinoStats.CurrentHealth    = 2000.0f;
+    DinoStats.AttackDamage     = 200.0f;
+    DinoStats.AttackRange      = 220.0f;    // Bite range (cm)
+    DinoStats.MoveSpeed        = 600.0f;    // ~22 km/h — realistic T-Rex sprint
+    DinoStats.DetectionRadius  = 3000.0f;  // Excellent vision
+    DinoStats.FleeHealthThresh = 0.15f;    // T-Rex almost never flees
+    DinoStats.AttackCooldown   = 2.5f;     // Slow but devastating
+    DinoStats.Mass             = 8000.0f;  // kg — adult T-Rex
+    DinoStats.bIsPack          = false;    // Solitary hunter
 
-    // ── Subscribe to state change delegate ──────────────────────────────────
-    // Binding happens in BeginPlay after world is valid
+    // Movement — T-Rex is large and deliberate
+    GetCharacterMovement()->MaxWalkSpeed        = DinoStats.MoveSpeed;
+    GetCharacterMovement()->MaxAcceleration     = 800.0f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 1200.0f;
+    GetCharacterMovement()->RotationRate        = FRotator(0.0f, 120.0f, 0.0f);
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+
+    // Capsule size — T-Rex is enormous
+    // Note: actual capsule resize happens in BeginPlay after mesh is set
 }
 
 void ATRexCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind to state change delegate to trigger roar on combat entry
-    OnDinoStateChanged.AddDynamic(this, &ATRexCharacter::HandleStateChanged);
+    // Ensure stats are applied after any Blueprint overrides
+    InitializeSpeciesStats();
 
-    LastStompTime = -StompCooldown;  // Allow immediate stomp
-    LastRoarTime  = -RoarCooldown;   // Allow immediate roar
+    RoarCooldownRemaining = FMath::RandRange(0.0f, RoarCooldown * 0.5f); // Stagger initial roar
 }
 
 void ATRexCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Stomp attack logic: when in combat and target is close, attempt stomp
-    if (CurrentState == EEng_DinoState::Attacking && AttackTarget.IsValid())
+    // Roar cooldown countdown
+    if (RoarCooldownRemaining > 0.0f)
     {
-        const float DistToTarget = FVector::Dist(GetActorLocation(), AttackTarget->GetActorLocation());
-        const float Now = GetWorld()->GetTimeSeconds();
+        RoarCooldownRemaining -= DeltaTime;
+    }
 
-        // Stomp when target is within 1.5× stomp radius and cooldown elapsed
-        if (DistToTarget <= StompRadius * 1.5f && (Now - LastStompTime) >= StompCooldown)
+    // Roar suppression countdown
+    if (bRoarActive)
+    {
+        RoarSuppressRemaining -= DeltaTime;
+        if (RoarSuppressRemaining <= 0.0f)
         {
-            PerformStompAttack();
-            LastStompTime = Now;
+            bRoarActive = false;
         }
+    }
+
+    // Auto-roar when hunting and cooldown is ready
+    if (CurrentState == EEng_DinoState::Hunt && RoarCooldownRemaining <= 0.0f)
+    {
+        PerformRoar();
     }
 }
 
-// ── State Change Handler ─────────────────────────────────────────────────────
-
-void ATRexCharacter::HandleStateChanged(EEng_DinoState NewState)
+void ATRexCharacter::PerformRoar()
 {
-    if (NewState == EEng_DinoState::Attacking)
-    {
-        const float Now = GetWorld()->GetTimeSeconds();
-        if ((Now - LastRoarTime) >= RoarCooldown)
-        {
-            OnTRexRoar();
-            LastRoarTime = Now;
-        }
-    }
-}
+    if (RoarCooldownRemaining > 0.0f) return;
 
-// ── Roar Implementation ──────────────────────────────────────────────────────
+    RoarCooldownRemaining = RoarCooldown;
+    bRoarActive = true;
+    RoarSuppressRemaining = RoarSuppressDuration;
 
-void ATRexCharacter::OnTRexRoar_Implementation()
-{
-    // Apply fear to nearby players
-    ApplyRoarFearToNearbyPlayers();
+    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter::PerformRoar — %s roars! Suppressing prey in %.0f radius for %.1fs"),
+        *GetActorLabel(), DinoStats.DetectionRadius, RoarSuppressDuration);
 
-    // Blueprint subclass adds roar animation + audio cue
-    UE_LOG(LogTemp, Log, TEXT("TRex [%s] ROAR — fear radius: %.0f units"),
-        *GetActorLabel(), RoarFearRadius);
-
-#if WITH_EDITOR
-    // Debug sphere in editor builds
-    DrawDebugSphere(GetWorld(), GetActorLocation(), RoarFearRadius, 16,
-        FColor::Orange, false, 3.0f, 0, 4.0f);
-#endif
-}
-
-void ATRexCharacter::ApplyRoarFearToNearbyPlayers()
-{
-    if (!GetWorld()) return;
-
-    // Find all player pawns within roar radius
+    // Radial fear effect — find all actors in detection radius
     TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
 
     for (AActor* Actor : NearbyActors)
     {
-        if (!Actor || Actor == this) continue;
+        if (Actor == this) continue;
 
-        const float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist > RoarFearRadius) continue;
+        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Dist > DinoStats.DetectionRadius) continue;
 
-        // Scale fear by proximity (closer = more fear)
-        const float FearScale = 1.0f - (Dist / RoarFearRadius);
-        const float AppliedFear = RoarFearAmount * FearScale;
-
-        // Try to apply fear via SurvivalComponent interface
-        // SurvivalComponent is found by component class name to avoid hard dependency
-        UActorComponent* SurvComp = Actor->FindComponentByClass(
-            UActorComponent::StaticClass());
-
-        // Log for now — Blueprint/SurvivalComponent integration via event
-        UE_LOG(LogTemp, Log, TEXT("TRex Roar: applying %.1f fear to %s (dist: %.0f)"),
-            AppliedFear, *Actor->GetActorLabel(), Dist);
+        // Apply fear to any ADinosaurBase that is prey
+        ADinosaurBase* OtherDino = Cast<ADinosaurBase>(Actor);
+        if (OtherDino && OtherDino->Diet == EEng_DinoDiet::Herbivore)
+        {
+            // Force flee state on herbivores within range
+            OtherDino->CurrentState = EEng_DinoState::Flee;
+            OtherDino->CurrentTarget = this;
+            UE_LOG(LogTemp, Verbose, TEXT("  Roar suppressed: %s"), *OtherDino->GetActorLabel());
+        }
     }
-}
-
-// ── Stomp Attack Implementation ──────────────────────────────────────────────
-
-void ATRexCharacter::PerformStompAttack_Implementation()
-{
-    ExecuteStompAoE();
-
-    // Blueprint subclass adds stomp animation, ground crack VFX, camera shake
-    UE_LOG(LogTemp, Log, TEXT("TRex [%s] STOMP — AoE radius: %.0f, damage: %.0f"),
-        *GetActorLabel(), StompRadius, StompDamage);
 
 #if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), GetActorLocation(), StompRadius, 12,
-        FColor::Red, false, 2.0f, 0, 6.0f);
+    // Debug sphere for roar radius
+    DrawDebugSphere(GetWorld(), GetActorLocation(), DinoStats.DetectionRadius,
+        16, FColor::Orange, false, 3.0f, 0, 5.0f);
 #endif
 }
 
-void ATRexCharacter::ExecuteStompAoE()
+void ATRexCharacter::PerformStomp()
 {
-    if (!GetWorld()) return;
+    FVector StompLocation = GetActorLocation();
+    StompLocation.Z -= GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 100.0f;
 
-    // Sphere overlap to find all actors in stomp radius
-    TArray<FOverlapResult> Overlaps;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
+    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter::PerformStomp — %s stomps at (%.0f, %.0f, %.0f)"),
+        *GetActorLabel(), StompLocation.X, StompLocation.Y, StompLocation.Z);
 
-    GetWorld()->OverlapMultiByChannel(
-        Overlaps,
-        GetActorLocation(),
-        FQuat::Identity,
-        ECollisionChannel::ECC_Pawn,
-        FCollisionShape::MakeSphere(StompRadius),
-        QueryParams
+    // Radial damage
+    TArray<AActor*> IgnoredActors;
+    IgnoredActors.Add(this);
+
+    UGameplayStatics::ApplyRadialDamage(
+        GetWorld(),
+        StompDamage,
+        StompLocation,
+        StompRadius,
+        UDamageType::StaticClass(),
+        IgnoredActors,
+        this,
+        GetInstigatorController(),
+        true // full damage at center, falloff to edge
     );
 
-    for (const FOverlapResult& Overlap : Overlaps)
-    {
-        AActor* HitActor = Overlap.GetActor();
-        if (!HitActor || HitActor == this) continue;
-
-        // Apply radial damage — falls off with distance
-        const float Dist = FVector::Dist(GetActorLocation(), HitActor->GetActorLocation());
-        const float DamageFalloff = 1.0f - FMath::Clamp(Dist / StompRadius, 0.0f, 1.0f);
-        const float FinalDamage = StompDamage * DamageFalloff;
-
-        UGameplayStatics::ApplyDamage(
-            HitActor,
-            FinalDamage,
-            GetController(),
-            this,
-            UDamageType::StaticClass()
-        );
-    }
-
-    // Camera shake for player if within range
+    // Camera shake for nearby players
     if (StompCameraShakeClass)
     {
         APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
         if (PC)
         {
-            const float PCDist = FVector::Dist(GetActorLocation(),
+            float DistToPlayer = FVector::Dist(GetActorLocation(),
                 PC->GetPawn() ? PC->GetPawn()->GetActorLocation() : FVector::ZeroVector);
-
-            if (PCDist <= StompRadius * 3.0f)
+            float ShakeScale = FMath::Clamp(1.0f - (DistToPlayer / 3000.0f), 0.0f, 1.0f);
+            if (ShakeScale > 0.01f)
             {
-                const float ShakeScale = FMath::Clamp(1.0f - (PCDist / (StompRadius * 3.0f)), 0.1f, 1.0f);
                 PC->ClientStartCameraShake(StompCameraShakeClass, ShakeScale);
             }
         }
     }
+
+#if WITH_EDITOR
+    DrawDebugSphere(GetWorld(), StompLocation, StompRadius,
+        12, FColor::Red, false, 2.0f, 0, 3.0f);
+#endif
 }
 
-// ── Death Override ───────────────────────────────────────────────────────────
-
-void ATRexCharacter::OnDinoDeath_Implementation()
+void ATRexCharacter::InitializeSpeciesStats()
 {
-    // Call parent death logic first (ragdoll, disable AI, etc.)
-    Super::OnDinoDeath_Implementation();
-
-    // T-Rex death triggers environmental reaction
-    UE_LOG(LogTemp, Warning, TEXT("TRex [%s] DIED — triggering environmental death reaction"),
-        *GetActorLabel());
-
-    // Final stomp on death (ground impact)
-    if (GetWorld())
+    // Ensure movement component reflects current stats
+    if (GetCharacterMovement())
     {
-        // Trigger one last stomp AoE as the body hits the ground
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle{},
-            [this]()
-            {
-                if (IsValid(this))
-                {
-                    ExecuteStompAoE();
-                }
-            },
-            0.8f,   // 0.8s delay — when body hits ground
-            false
-        );
+        GetCharacterMovement()->MaxWalkSpeed = DinoStats.MoveSpeed;
     }
+
+    // Ensure health is clamped to max
+    DinoStats.CurrentHealth = FMath::Min(DinoStats.CurrentHealth, DinoStats.MaxHealth);
 }
