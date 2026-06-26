@@ -1,6 +1,6 @@
-// BiomeManager.cpp — Transpersonal Game Studio
-// Agent #02 — Engine Architect — Cycle 004
-// Full implementation of BiomeManager: biome classification, vegetation density, weather state
+// BiomeManager.cpp
+// Transpersonal Game Studio — Engine Architect #02
+// Biome system: classifies terrain zones, drives vegetation/fauna density
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
@@ -11,348 +11,245 @@
 // ============================================================
 // Constructor
 // ============================================================
-UBiomeManager::UBiomeManager()
+
+ABiomeManager::ABiomeManager()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 2.0f; // Update every 2s — not every frame
+
+    // Default biome grid
+    BiomeGridResolution = 16;
+    WorldExtentKm = 4.0f;
+    bDebugDrawBiomes = false;
+
     // Default biome parameters
-    CurrentBiomeType = EEng_BiomeType::TropicalJungle;
-    CurrentTemperature = 28.0f;
-    CurrentHumidity = 0.85f;
-    CurrentWindSpeed = 0.3f;
-    CurrentWeatherState = EEng_WeatherState::Clear;
-    TimeOfDay = 12.0f;
-    DayDurationSeconds = 1200.0f; // 20-minute day cycle
-    bDayNightCycleEnabled = true;
-    VegetationDensityMultiplier = 1.0f;
-    DinosaurSpawnMultiplier = 1.0f;
+    FEng_BiomeParams ForestParams;
+    ForestParams.BiomeType = EEng_BiomeType::TropicalForest;
+    ForestParams.VegetationDensity = 0.85f;
+    ForestParams.FaunaDensity = 0.7f;
+    ForestParams.TemperatureCelsius = 28.0f;
+    ForestParams.HumidityPercent = 80.0f;
+    ForestParams.DangerLevel = 0.6f;
+    BiomeTable.Add(EEng_BiomeType::TropicalForest, ForestParams);
+
+    FEng_BiomeParams SavannaParams;
+    SavannaParams.BiomeType = EEng_BiomeType::Savanna;
+    SavannaParams.VegetationDensity = 0.35f;
+    SavannaParams.FaunaDensity = 0.9f;
+    SavannaParams.TemperatureCelsius = 34.0f;
+    SavannaParams.HumidityPercent = 30.0f;
+    SavannaParams.DangerLevel = 0.8f;
+    BiomeTable.Add(EEng_BiomeType::Savanna, SavannaParams);
+
+    FEng_BiomeParams SwampParams;
+    SwampParams.BiomeType = EEng_BiomeType::Swamp;
+    SwampParams.VegetationDensity = 0.9f;
+    SwampParams.FaunaDensity = 0.5f;
+    SwampParams.TemperatureCelsius = 26.0f;
+    SwampParams.HumidityPercent = 95.0f;
+    SwampParams.DangerLevel = 0.7f;
+    BiomeTable.Add(EEng_BiomeType::Swamp, SwampParams);
+
+    FEng_BiomeParams VolcanicParams;
+    VolcanicParams.BiomeType = EEng_BiomeType::Volcanic;
+    VolcanicParams.VegetationDensity = 0.05f;
+    VolcanicParams.FaunaDensity = 0.1f;
+    VolcanicParams.TemperatureCelsius = 55.0f;
+    VolcanicParams.HumidityPercent = 10.0f;
+    VolcanicParams.DangerLevel = 1.0f;
+    BiomeTable.Add(EEng_BiomeType::Volcanic, VolcanicParams);
+
+    FEng_BiomeParams RiverbankParams;
+    RiverbankParams.BiomeType = EEng_BiomeType::Riverbank;
+    RiverbankParams.VegetationDensity = 0.75f;
+    RiverbankParams.FaunaDensity = 0.65f;
+    RiverbankParams.TemperatureCelsius = 24.0f;
+    RiverbankParams.HumidityPercent = 70.0f;
+    RiverbankParams.DangerLevel = 0.5f;
+    BiomeTable.Add(EEng_BiomeType::Riverbank, RiverbankParams);
 }
 
 // ============================================================
-// Initialize
+// BeginPlay
 // ============================================================
-void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
+
+void ABiomeManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    // Register default biome zones
-    RegisterDefaultBiomes();
-    
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized with %d biome zones"), BiomeZones.Num());
+    Super::BeginPlay();
+    GenerateBiomeGrid();
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — %d biome cells, world %.1fkm²"),
+        BiomeGrid.Num(), WorldExtentKm * WorldExtentKm);
 }
 
 // ============================================================
-// Deinitialize
+// Tick
 // ============================================================
-void UBiomeManager::Deinitialize()
-{
-    BiomeZones.Empty();
-    Super::Deinitialize();
-}
 
-// ============================================================
-// Tick (called via GameInstance tick if registered)
-// ============================================================
-void UBiomeManager::Tick(float DeltaTime)
+void ABiomeManager::Tick(float DeltaTime)
 {
-    if (bDayNightCycleEnabled)
+    Super::Tick(DeltaTime);
+
+#if WITH_EDITOR
+    if (bDebugDrawBiomes)
     {
-        UpdateDayNightCycle(DeltaTime);
+        DebugDrawBiomes();
     }
-    
-    UpdateWeatherTransition(DeltaTime);
+#endif
 }
 
 // ============================================================
-// GetBiomeAtLocation
+// GenerateBiomeGrid — Procedural biome assignment using noise
 // ============================================================
-EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+
+void ABiomeManager::GenerateBiomeGrid()
 {
-    // Find the closest biome zone that contains this location
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    BiomeGrid.Empty();
+    BiomeGrid.Reserve(BiomeGridResolution * BiomeGridResolution);
+
+    const float WorldExtentCm = WorldExtentKm * 100000.0f;
+    const float CellSize = WorldExtentCm / BiomeGridResolution;
+
+    for (int32 Y = 0; Y < BiomeGridResolution; ++Y)
     {
-        float DistSq = FVector::DistSquared2D(WorldLocation, Zone.CenterLocation);
-        if (DistSq <= (Zone.Radius * Zone.Radius))
+        for (int32 X = 0; X < BiomeGridResolution; ++X)
         {
-            return Zone.BiomeType;
+            FEng_BiomeCell Cell;
+            Cell.GridX = X;
+            Cell.GridY = Y;
+            Cell.WorldCenter = FVector(
+                (X + 0.5f) * CellSize - WorldExtentCm * 0.5f,
+                (Y + 0.5f) * CellSize - WorldExtentCm * 0.5f,
+                0.0f
+            );
+            Cell.BiomeType = ClassifyBiomeAtPosition(Cell.WorldCenter);
+            BiomeGrid.Add(Cell);
         }
     }
-    
-    // Default to current biome if no zone found
-    return CurrentBiomeType;
+
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Generated %d biome cells"), BiomeGrid.Num());
+}
+
+// ============================================================
+// ClassifyBiomeAtPosition — Simple noise-based classification
+// ============================================================
+
+EEng_BiomeType ABiomeManager::ClassifyBiomeAtPosition(const FVector& WorldPos) const
+{
+    // Normalize to [0,1]
+    const float WorldExtentCm = WorldExtentKm * 100000.0f;
+    const float NX = (WorldPos.X / WorldExtentCm) + 0.5f;
+    const float NY = (WorldPos.Y / WorldExtentCm) + 0.5f;
+
+    // Simple deterministic pseudo-noise using sine waves
+    const float Moisture = FMath::Sin(NX * 7.3f) * FMath::Cos(NY * 5.1f) * 0.5f + 0.5f;
+    const float Temperature = FMath::Cos(NX * 3.7f + NY * 4.2f) * 0.5f + 0.5f;
+    const float Elevation = FMath::Sin(NX * 11.1f) * FMath::Sin(NY * 9.3f) * 0.5f + 0.5f;
+
+    // Classification rules (Whittaker biome model simplified)
+    if (Elevation > 0.75f)
+    {
+        return EEng_BiomeType::Volcanic;
+    }
+    if (Moisture > 0.65f && Temperature > 0.55f)
+    {
+        return EEng_BiomeType::TropicalForest;
+    }
+    if (Moisture > 0.7f && Temperature < 0.5f)
+    {
+        return EEng_BiomeType::Swamp;
+    }
+    if (Moisture > 0.5f && Elevation < 0.3f)
+    {
+        return EEng_BiomeType::Riverbank;
+    }
+
+    return EEng_BiomeType::Savanna;
+}
+
+// ============================================================
+// GetBiomeAtLocation — Query biome for any world position
+// ============================================================
+
+EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    return ClassifyBiomeAtPosition(WorldLocation);
+}
+
+// ============================================================
+// GetBiomeParams — Retrieve parameters for a biome type
+// ============================================================
+
+FEng_BiomeParams ABiomeManager::GetBiomeParams(EEng_BiomeType BiomeType) const
+{
+    const FEng_BiomeParams* Found = BiomeTable.Find(BiomeType);
+    if (Found)
+    {
+        return *Found;
+    }
+
+    // Return safe defaults if not found
+    FEng_BiomeParams Default;
+    Default.BiomeType = BiomeType;
+    Default.VegetationDensity = 0.5f;
+    Default.FaunaDensity = 0.5f;
+    Default.TemperatureCelsius = 25.0f;
+    Default.HumidityPercent = 50.0f;
+    Default.DangerLevel = 0.5f;
+    return Default;
 }
 
 // ============================================================
 // GetVegetationDensityAtLocation
 // ============================================================
-float UBiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
+
+float ABiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
 {
     EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    float BaseDensity = GetBaseDensityForBiome(Biome);
-    
-    // Modify by weather
-    float WeatherMod = 1.0f;
-    switch (CurrentWeatherState)
-    {
-        case EEng_WeatherState::Rain:       WeatherMod = 1.2f; break;
-        case EEng_WeatherState::Storm:      WeatherMod = 0.8f; break;
-        case EEng_WeatherState::Drought:    WeatherMod = 0.5f; break;
-        default:                            WeatherMod = 1.0f; break;
-    }
-    
-    return FMath::Clamp(BaseDensity * WeatherMod * VegetationDensityMultiplier, 0.0f, 1.0f);
+    FEng_BiomeParams Params = GetBiomeParams(Biome);
+    return Params.VegetationDensity;
 }
 
 // ============================================================
-// GetTemperatureAtLocation
+// GetDangerLevelAtLocation
 // ============================================================
-float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+
+float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
 {
     EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    float BaseTemp = GetBaseTemperatureForBiome(Biome);
-    
-    // Modify by time of day
-    float TimeModifier = FMath::Sin((TimeOfDay / 24.0f) * PI * 2.0f - PI * 0.5f) * 8.0f;
-    
-    return BaseTemp + TimeModifier;
+    FEng_BiomeParams Params = GetBiomeParams(Biome);
+    return Params.DangerLevel;
 }
 
 // ============================================================
-// SetWeatherState
+// DebugDrawBiomes — Editor visualization
 // ============================================================
-void UBiomeManager::SetWeatherState(EEng_WeatherState NewWeather)
-{
-    if (CurrentWeatherState != NewWeather)
-    {
-        EEng_WeatherState OldWeather = CurrentWeatherState;
-        CurrentWeatherState = NewWeather;
-        
-        UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Weather changed: %d -> %d"), 
-               (int32)OldWeather, (int32)NewWeather);
-        
-        OnWeatherChanged.Broadcast(NewWeather);
-        ApplyWeatherEffects(NewWeather);
-    }
-}
 
-// ============================================================
-// RegisterBiomeZone
-// ============================================================
-void UBiomeManager::RegisterBiomeZone(const FEng_BiomeZone& Zone)
+void ABiomeManager::DebugDrawBiomes()
 {
-    // Check for duplicate zone IDs
-    for (const FEng_BiomeZone& Existing : BiomeZones)
+#if WITH_EDITOR
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    const float WorldExtentCm = WorldExtentKm * 100000.0f;
+    const float CellSize = WorldExtentCm / BiomeGridResolution;
+
+    for (const FEng_BiomeCell& Cell : BiomeGrid)
     {
-        if (Existing.ZoneID == Zone.ZoneID)
+        FColor DebugColor = FColor::White;
+        switch (Cell.BiomeType)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[BiomeManager] Zone ID %s already registered, skipping"), *Zone.ZoneID);
-            return;
+            case EEng_BiomeType::TropicalForest: DebugColor = FColor::Green; break;
+            case EEng_BiomeType::Savanna:        DebugColor = FColor::Yellow; break;
+            case EEng_BiomeType::Swamp:          DebugColor = FColor(0, 100, 50); break;
+            case EEng_BiomeType::Volcanic:       DebugColor = FColor::Red; break;
+            case EEng_BiomeType::Riverbank:      DebugColor = FColor::Blue; break;
+            default: break;
         }
+
+        DrawDebugBox(World,
+            Cell.WorldCenter + FVector(0, 0, 100),
+            FVector(CellSize * 0.45f, CellSize * 0.45f, 50.0f),
+            DebugColor, false, 2.5f, 0, 20.0f);
     }
-    
-    BiomeZones.Add(Zone);
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Registered biome zone: %s (%s)"), 
-           *Zone.ZoneID, *Zone.ZoneName);
-}
-
-// ============================================================
-// GetDinosaurSpawnWeightForBiome
-// ============================================================
-float UBiomeManager::GetDinosaurSpawnWeightForBiome(EEng_BiomeType BiomeType, const FName& DinosaurSpecies) const
-{
-    // Base spawn weights by biome
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::TropicalJungle:
-            if (DinosaurSpecies == "Velociraptor") return 0.9f;
-            if (DinosaurSpecies == "TRex")         return 0.6f;
-            if (DinosaurSpecies == "Triceratops")  return 0.4f;
-            return 0.5f;
-            
-        case EEng_BiomeType::OpenSavanna:
-            if (DinosaurSpecies == "TRex")              return 0.8f;
-            if (DinosaurSpecies == "Triceratops")       return 0.9f;
-            if (DinosaurSpecies == "Brachiosaurus")     return 0.7f;
-            if (DinosaurSpecies == "Parasaurolophus")   return 0.8f;
-            return 0.6f;
-            
-        case EEng_BiomeType::RiverDelta:
-            if (DinosaurSpecies == "Brachiosaurus")     return 0.9f;
-            if (DinosaurSpecies == "Parasaurolophus")   return 0.8f;
-            return 0.4f;
-            
-        case EEng_BiomeType::VolcanicPlains:
-            if (DinosaurSpecies == "Ankylosaurus")      return 0.7f;
-            if (DinosaurSpecies == "TRex")              return 0.5f;
-            return 0.3f;
-            
-        case EEng_BiomeType::CoastalCliffs:
-            return 0.3f;
-            
-        default:
-            return 0.5f;
-    }
-}
-
-// ============================================================
-// GetCurrentDayPhase
-// ============================================================
-EEng_DayPhase UBiomeManager::GetCurrentDayPhase() const
-{
-    if (TimeOfDay >= 5.0f && TimeOfDay < 7.0f)   return EEng_DayPhase::Dawn;
-    if (TimeOfDay >= 7.0f && TimeOfDay < 11.0f)  return EEng_DayPhase::Morning;
-    if (TimeOfDay >= 11.0f && TimeOfDay < 15.0f) return EEng_DayPhase::Midday;
-    if (TimeOfDay >= 15.0f && TimeOfDay < 18.0f) return EEng_DayPhase::Afternoon;
-    if (TimeOfDay >= 18.0f && TimeOfDay < 20.0f) return EEng_DayPhase::Dusk;
-    if (TimeOfDay >= 20.0f && TimeOfDay < 22.0f) return EEng_DayPhase::Evening;
-    return EEng_DayPhase::Night;
-}
-
-// ============================================================
-// Private: UpdateDayNightCycle
-// ============================================================
-void UBiomeManager::UpdateDayNightCycle(float DeltaTime)
-{
-    // Advance time of day
-    float TimeAdvance = (24.0f / DayDurationSeconds) * DeltaTime;
-    TimeOfDay = FMath::Fmod(TimeOfDay + TimeAdvance, 24.0f);
-    
-    // Update sun angle (broadcast for lighting system)
-    float SunAngle = ((TimeOfDay - 6.0f) / 12.0f) * 180.0f - 90.0f;
-    OnTimeOfDayChanged.Broadcast(TimeOfDay, SunAngle);
-}
-
-// ============================================================
-// Private: UpdateWeatherTransition
-// ============================================================
-void UBiomeManager::UpdateWeatherTransition(float DeltaTime)
-{
-    // Simple stochastic weather transitions (placeholder for full system)
-    // In production, this would use noise-based weather patterns
-    WeatherTransitionTimer += DeltaTime;
-    
-    if (WeatherTransitionTimer > 300.0f) // Check every 5 minutes
-    {
-        WeatherTransitionTimer = 0.0f;
-        
-        // Random weather event based on biome
-        float Roll = FMath::FRand();
-        if (CurrentBiomeType == EEng_BiomeType::TropicalJungle)
-        {
-            if (Roll < 0.3f && CurrentWeatherState == EEng_WeatherState::Clear)
-            {
-                SetWeatherState(EEng_WeatherState::Rain);
-            }
-            else if (Roll < 0.1f && CurrentWeatherState == EEng_WeatherState::Rain)
-            {
-                SetWeatherState(EEng_WeatherState::Storm);
-            }
-            else if (CurrentWeatherState != EEng_WeatherState::Clear && Roll > 0.7f)
-            {
-                SetWeatherState(EEng_WeatherState::Clear);
-            }
-        }
-    }
-}
-
-// ============================================================
-// Private: RegisterDefaultBiomes
-// ============================================================
-void UBiomeManager::RegisterDefaultBiomes()
-{
-    // MinPlayableMap biome zones
-    FEng_BiomeZone JungleZone;
-    JungleZone.ZoneID = "zone_jungle_central";
-    JungleZone.ZoneName = "Cretaceous Jungle";
-    JungleZone.BiomeType = EEng_BiomeType::TropicalJungle;
-    JungleZone.CenterLocation = FVector(2200.0f, 2500.0f, 0.0f);
-    JungleZone.Radius = 3000.0f;
-    JungleZone.VegetationDensity = 0.9f;
-    JungleZone.Temperature = 32.0f;
-    JungleZone.Humidity = 0.9f;
-    BiomeZones.Add(JungleZone);
-    
-    FEng_BiomeZone SavannaZone;
-    SavannaZone.ZoneID = "zone_savanna_north";
-    SavannaZone.ZoneName = "Northern Savanna";
-    SavannaZone.BiomeType = EEng_BiomeType::OpenSavanna;
-    SavannaZone.CenterLocation = FVector(-2000.0f, 0.0f, 0.0f);
-    SavannaZone.Radius = 4000.0f;
-    SavannaZone.VegetationDensity = 0.4f;
-    SavannaZone.Temperature = 38.0f;
-    SavannaZone.Humidity = 0.3f;
-    BiomeZones.Add(SavannaZone);
-    
-    FEng_BiomeZone RiverZone;
-    RiverZone.ZoneID = "zone_river_delta";
-    RiverZone.ZoneName = "River Delta";
-    RiverZone.BiomeType = EEng_BiomeType::RiverDelta;
-    RiverZone.CenterLocation = FVector(5000.0f, -1000.0f, 0.0f);
-    RiverZone.Radius = 2500.0f;
-    RiverZone.VegetationDensity = 0.7f;
-    RiverZone.Temperature = 28.0f;
-    RiverZone.Humidity = 0.95f;
-    BiomeZones.Add(RiverZone);
-    
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Registered %d default biome zones"), BiomeZones.Num());
-}
-
-// ============================================================
-// Private: ApplyWeatherEffects
-// ============================================================
-void UBiomeManager::ApplyWeatherEffects(EEng_WeatherState NewWeather)
-{
-    switch (NewWeather)
-    {
-        case EEng_WeatherState::Rain:
-            CurrentHumidity = FMath::Min(CurrentHumidity + 0.2f, 1.0f);
-            CurrentTemperature -= 4.0f;
-            break;
-        case EEng_WeatherState::Storm:
-            CurrentHumidity = 1.0f;
-            CurrentTemperature -= 8.0f;
-            CurrentWindSpeed = 0.9f;
-            break;
-        case EEng_WeatherState::Clear:
-            CurrentWindSpeed = 0.2f;
-            break;
-        case EEng_WeatherState::Drought:
-            CurrentHumidity = FMath::Max(CurrentHumidity - 0.3f, 0.0f);
-            CurrentTemperature += 6.0f;
-            break;
-        default:
-            break;
-    }
-}
-
-// ============================================================
-// Private: GetBaseDensityForBiome
-// ============================================================
-float UBiomeManager::GetBaseDensityForBiome(EEng_BiomeType BiomeType) const
-{
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::TropicalJungle:    return 0.95f;
-        case EEng_BiomeType::RiverDelta:        return 0.75f;
-        case EEng_BiomeType::OpenSavanna:       return 0.35f;
-        case EEng_BiomeType::VolcanicPlains:    return 0.15f;
-        case EEng_BiomeType::CoastalCliffs:     return 0.25f;
-        case EEng_BiomeType::DeepForest:        return 0.85f;
-        default:                                return 0.5f;
-    }
-}
-
-// ============================================================
-// Private: GetBaseTemperatureForBiome
-// ============================================================
-float UBiomeManager::GetBaseTemperatureForBiome(EEng_BiomeType BiomeType) const
-{
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::TropicalJungle:    return 32.0f;
-        case EEng_BiomeType::RiverDelta:        return 28.0f;
-        case EEng_BiomeType::OpenSavanna:       return 38.0f;
-        case EEng_BiomeType::VolcanicPlains:    return 45.0f;
-        case EEng_BiomeType::CoastalCliffs:     return 22.0f;
-        case EEng_BiomeType::DeepForest:        return 26.0f;
-        default:                                return 30.0f;
-    }
+#endif
 }
