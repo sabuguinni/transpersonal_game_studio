@@ -5,18 +5,19 @@
 #include "TRexCharacter.generated.h"
 
 /**
- * ATRexCharacter — Tyrannosaurus Rex species implementation.
+ * ATRexCharacter
+ * Apex predator — Tyrannosaurus Rex.
+ * Inherits ADinosaurBase and overrides stats for a large, powerful carnivore.
+ * Designed for Blueprint subclassing: designers can tweak stats in BP_TRex
+ * without touching C++.
  *
- * Inherits from ADinosaurBase and overrides species-specific stats:
- * - High health (1200), massive damage (120), slow patrol / fast charge speed
- * - Territorial aggro radius 3500 units — largest of all species
- * - Roar ability on entering Combat state (Blueprint-extendable)
- * - Death triggers environmental reaction (screen shake, audio cue)
- *
- * Designed as a Blueprint-friendly base: all key events are BlueprintNativeEvent
- * so designers can add VFX/audio without touching C++.
+ * Key traits:
+ *  - MaxHealth = 2000, AttackDamage = 200, DetectionRadius = 3000
+ *  - Solitary hunter (no pack logic)
+ *  - Stomps trigger camera shake on nearby players
+ *  - Roar ability that temporarily suppresses nearby prey AI
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs", meta = (DisplayName = "T-Rex Character"))
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
 class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -24,66 +25,47 @@ class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 public:
     ATRexCharacter();
 
-    // ── Species Overrides ────────────────────────────────────────────────────
-
-    /** Called when T-Rex enters Combat state — triggers roar sequence */
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "TRex|Combat")
-    void OnTRexRoar();
-    virtual void OnTRexRoar_Implementation();
-
-    /** Stomp attack — deals AoE damage in 400-unit radius around feet */
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "TRex|Combat")
-    void PerformStompAttack();
-    virtual void PerformStompAttack_Implementation();
-
-    // ── T-Rex Specific Properties ────────────────────────────────────────────
-
-    /** Radius of stomp AoE damage (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadius = 400.0f;
-
-    /** Stomp damage dealt to all actors in radius */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompDamage = 80.0f;
-
-    /** Cooldown between stomp attacks (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompCooldown = 6.0f;
-
-    /** Camera shake class to trigger on stomp (assign in Blueprint) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    TSubclassOf<UCameraShakeBase> StompCameraShakeClass;
-
-    /** Roar cooldown — prevents spam (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    float RoarCooldown = 12.0f;
-
-    /** How far the roar intimidates prey (causes Fear stat increase) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    float RoarFearRadius = 5000.0f;
-
-    /** Fear amount added to player SurvivalComponent when within roar radius */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    float RoarFearAmount = 35.0f;
-
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    /** Override state change to trigger roar on entering Combat */
-    UFUNCTION()
-    void HandleStateChanged(EEng_DinoState NewState);
+    /** Roar ability — suppresses nearby prey AI for RoarSuppressDuration seconds */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void PerformRoar();
 
-    /** Override death to trigger environmental reaction */
-    virtual void OnDinoDeath_Implementation() override;
+    /** Stomp — deals radial damage in StompRadius and triggers camera shake */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void PerformStomp();
 
-private:
-    float LastStompTime = 0.0f;
-    float LastRoarTime = 0.0f;
+    /** Time between roars (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarCooldown = 15.0f;
 
-    /** Apply fear to player characters within RoarFearRadius */
-    void ApplyRoarFearToNearbyPlayers();
+    /** Radius of stomp radial damage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompRadius = 400.0f;
 
-    /** Execute stomp AoE damage */
-    void ExecuteStompAoE();
+    /** Stomp radial damage amount */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompDamage = 80.0f;
+
+    /** Duration prey AI is suppressed after roar (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarSuppressDuration = 5.0f;
+
+    /** Camera shake class triggered on stomp */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    TSubclassOf<UCameraShakeBase> StompCameraShakeClass;
+
+protected:
+    /** Cooldown timer for roar */
+    float RoarCooldownRemaining = 0.0f;
+
+    /** Whether currently suppressing nearby prey */
+    bool bRoarActive = false;
+
+    /** Remaining suppression time */
+    float RoarSuppressRemaining = 0.0f;
+
+    /** Override base stats in constructor */
+    virtual void InitializeSpeciesStats();
 };
