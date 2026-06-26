@@ -1,186 +1,276 @@
 #include "DinosaurBase.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Default capsule for large dinosaur
-    GetCapsuleComponent()->InitCapsuleSize(88.0f, 96.0f);
-
-    // Movement defaults — overridden per species
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    // Default movement config — subclasses override per species
+    if (UCharacterMovementComponent* Move = GetCharacterMovement())
     {
-        MoveComp->MaxWalkSpeed = Stats.MoveSpeed;
-        MoveComp->bOrientRotationToMovement = true;
-        MoveComp->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
-        MoveComp->GravityScale = 1.0f;
-        MoveComp->Mass = Stats.Mass;
+        Move->MaxWalkSpeed          = Stats.MoveSpeed;
+        Move->MaxAcceleration       = 800.f;
+        Move->BrakingDecelerationWalking = 600.f;
+        Move->RotationRate          = FRotator(0.f, 180.f, 0.f);
+        Move->bOrientRotationToMovement = true;
+        Move->GravityScale          = 1.2f;
     }
 
-    // Dinosaurs do not use controller rotation by default
+    bUseControllerRotationYaw   = false;
     bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw = false;
-    bUseControllerRotationRoll = false;
+    bUseControllerRotationRoll  = false;
 }
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Record territory center at spawn location
-    TerritoryCenter = GetActorLocation();
-
-    // Initialise health
-    Stats.CurrentHealth = Stats.MaxHealth;
-
-    // Set initial behavior
-    SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
+    HomeLocation = GetActorLocation();
+    SetDinoState(EEng_DinoState::Idle);
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!IsAlive())
+    if (!IsAlive()) return;
+
+    StateTimer += DeltaTime;
+
+    switch (CurrentState)
     {
-        return;
+        case EEng_DinoState::Idle:    UpdateIdleState(DeltaTime);    break;
+        case EEng_DinoState::Patrol:  UpdatePatrolState(DeltaTime);  break;
+        case EEng_DinoState::Alert:   UpdateAlertState(DeltaTime);   break;
+        case EEng_DinoState::Chasing: UpdateChaseState(DeltaTime);   break;
+        case EEng_DinoState::Attacking: UpdateAttackState(DeltaTime); break;
+        case EEng_DinoState::Fleeing: UpdateFleeState(DeltaTime);    break;
+        default: break;
     }
 
-    BehaviorUpdateTimer += DeltaTime;
-    if (BehaviorUpdateTimer >= BehaviorUpdateInterval)
+    // Periodic player scan every 0.5s
+    if (FMath::Fmod(StateTimer, 0.5f) < DeltaTime)
     {
-        BehaviorUpdateTimer = 0.0f;
-        UpdateBehavior(DeltaTime);
+        ScanForPlayer();
     }
 }
 
-float ADinosaurBase::TakeDinosaurDamage(float DamageAmount, AActor* DamageCauser)
+// ── Combat ───────────────────────────────────────────────────────────────
+
+float ADinosaurBase::TakeDamageFromAttack(float DamageAmount, AActor* DamageCauser)
 {
-    if (!IsAlive() || DamageAmount <= 0.0f)
+    if (!IsAlive()) return 0.f;
+
+    const float ActualDamage = FMath::Max(0.f, DamageAmount);
+    Stats.CurrentHealth = FMath::Max(0.f, Stats.CurrentHealth - ActualDamage);
+
+    if (!IsAlive())
     {
-        return 0.0f;
+        SetDinoState(EEng_DinoState::Dead);
+        GetCharacterMovement()->DisableMovement();
     }
-
-    const float ActualDamage = FMath::Min(DamageAmount, Stats.CurrentHealth);
-    Stats.CurrentHealth -= ActualDamage;
-
-    // React to damage — become aggressive toward attacker
-    if (DamageCauser && BehaviorState != EEng_DinosaurBehaviorState::Fleeing)
+    else if (bIsAggressive && DamageCauser)
     {
-        SetBehaviorState(EEng_DinosaurBehaviorState::Aggressive);
+        CurrentTarget = DamageCauser;
+        SetDinoState(EEng_DinoState::Chasing);
     }
-
-    if (Stats.CurrentHealth <= 0.0f)
+    else if (!bIsAggressive)
     {
-        Stats.CurrentHealth = 0.0f;
-        OnDeath();
+        SetDinoState(EEng_DinoState::Fleeing);
     }
 
     return ActualDamage;
 }
 
-void ADinosaurBase::Attack(AActor* Target)
+void ADinosaurBase::PerformAttack()
 {
-    if (!Target || !IsAlive())
-    {
-        return;
-    }
+    if (!CurrentTarget || !IsAlive()) return;
 
-    // Base attack — deal damage to target
-    // Subclasses override for species-specific attack animations and effects
-    if (ADinosaurBase* DinoTarget = Cast<ADinosaurBase>(Target))
+    const float Dist = FVector::Dist(GetActorLocation(), CurrentTarget->GetActorLocation());
+    if (Dist <= Stats.AttackRange)
     {
-        DinoTarget->TakeDinosaurDamage(Stats.AttackDamage, this);
-    }
-    else
-    {
-        // Apply damage to any actor (player, etc.)
-        Target->TakeDamage(Stats.AttackDamage, FDamageEvent(), nullptr, this);
+        // Apply damage via UE5 damage system
+        UGameplayStatics::ApplyDamage(
+            CurrentTarget,
+            Stats.AttackDamage,
+            GetController(),
+            this,
+            UDamageType::StaticClass()
+        );
     }
 }
 
-void ADinosaurBase::SetBehaviorState(EEng_DinosaurBehaviorState NewState)
+// ── State Machine ────────────────────────────────────────────────────────
+
+void ADinosaurBase::SetDinoState(EEng_DinoState NewState)
 {
-    if (BehaviorState == NewState)
-    {
-        return;
-    }
+    if (CurrentState == NewState) return;
+    CurrentState = NewState;
+    StateTimer = 0.f;
 
-    BehaviorState = NewState;
-
-    // Adjust movement speed based on state
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    // Adjust speed per state
+    if (UCharacterMovementComponent* Move = GetCharacterMovement())
     {
         switch (NewState)
         {
-        case EEng_DinosaurBehaviorState::Hunting:
-        case EEng_DinosaurBehaviorState::Aggressive:
-            MoveComp->MaxWalkSpeed = Stats.MoveSpeed * 1.5f;
-            break;
-        case EEng_DinosaurBehaviorState::Fleeing:
-            MoveComp->MaxWalkSpeed = Stats.MoveSpeed * 2.0f;
-            break;
-        case EEng_DinosaurBehaviorState::Resting:
-        case EEng_DinosaurBehaviorState::Feeding:
-            MoveComp->MaxWalkSpeed = 0.0f;
-            break;
-        default:
-            MoveComp->MaxWalkSpeed = Stats.MoveSpeed;
-            break;
+            case EEng_DinoState::Chasing:
+            case EEng_DinoState::Fleeing:
+                Move->MaxWalkSpeed = Stats.SprintSpeed;
+                break;
+            default:
+                Move->MaxWalkSpeed = Stats.MoveSpeed;
+                break;
         }
     }
 }
 
-bool ADinosaurBase::IsAlive() const
+void ADinosaurBase::UpdateIdleState(float DeltaTime)
 {
-    return Stats.CurrentHealth > 0.0f;
+    // After 5s idle, begin patrol
+    if (StateTimer > 5.f)
+    {
+        SetDinoState(EEng_DinoState::Patrol);
+    }
+}
+
+void ADinosaurBase::UpdatePatrolState(float DeltaTime)
+{
+    // Simple patrol: move toward a random point near home
+    if (StateTimer < 0.1f)
+    {
+        const FVector Offset = FVector(
+            FMath::RandRange(-PatrolRadius, PatrolRadius),
+            FMath::RandRange(-PatrolRadius, PatrolRadius),
+            0.f
+        );
+        const FVector Target = HomeLocation + Offset;
+        AddMovementInput((Target - GetActorLocation()).GetSafeNormal(), 1.f);
+    }
+
+    // Return to idle after 15s patrol
+    if (StateTimer > 15.f)
+    {
+        SetDinoState(EEng_DinoState::Idle);
+    }
+}
+
+void ADinosaurBase::UpdateAlertState(float DeltaTime)
+{
+    if (!CurrentTarget) { SetDinoState(EEng_DinoState::Idle); return; }
+
+    // Face the threat
+    const FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(
+        GetActorLocation(), CurrentTarget->GetActorLocation());
+    SetActorRotation(FRotator(0.f, LookAt.Yaw, 0.f));
+
+    // Carnivores chase after 2s alert; herbivores flee
+    if (StateTimer > 2.f)
+    {
+        SetDinoState(bIsAggressive ? EEng_DinoState::Chasing : EEng_DinoState::Fleeing);
+    }
+}
+
+void ADinosaurBase::UpdateChaseState(float DeltaTime)
+{
+    if (!CurrentTarget || !IsPlayerInRange(Stats.DetectionRange * 1.5f))
+    {
+        OnLosePlayer();
+        return;
+    }
+
+    const FVector Dir = (CurrentTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+    AddMovementInput(Dir, 1.f);
+
+    if (IsPlayerInRange(Stats.AttackRange))
+    {
+        SetDinoState(EEng_DinoState::Attacking);
+    }
+}
+
+void ADinosaurBase::UpdateAttackState(float DeltaTime)
+{
+    if (!CurrentTarget) { SetDinoState(EEng_DinoState::Idle); return; }
+
+    if (!IsPlayerInRange(Stats.AttackRange * 1.2f))
+    {
+        SetDinoState(EEng_DinoState::Chasing);
+        return;
+    }
+
+    // Attack every 1.5s
+    if (StateTimer >= 1.5f)
+    {
+        PerformAttack();
+        StateTimer = 0.f;
+    }
+}
+
+void ADinosaurBase::UpdateFleeState(float DeltaTime)
+{
+    if (!CurrentTarget) { SetDinoState(EEng_DinoState::Idle); return; }
+
+    // Run away from threat
+    const FVector AwayDir = (GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
+    AddMovementInput(AwayDir, 1.f);
+
+    // Stop fleeing after 10s or if far enough
+    if (StateTimer > 10.f || !IsPlayerInRange(Stats.DetectionRange * 2.f))
+    {
+        SetDinoState(EEng_DinoState::Idle);
+        CurrentTarget = nullptr;
+    }
+}
+
+// ── Detection ────────────────────────────────────────────────────────────
+
+void ADinosaurBase::ScanForPlayer()
+{
+    if (!IsAlive()) return;
+
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!Player) return;
+
+    const float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    if (Dist <= Stats.DetectionRange)
+    {
+        OnDetectPlayer(Player);
+    }
+}
+
+bool ADinosaurBase::IsPlayerInRange(float Range) const
+{
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!Player) return false;
+    return FVector::Dist(GetActorLocation(), Player->GetActorLocation()) <= Range;
+}
+
+float ADinosaurBase::DistanceToPlayer() const
+{
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!Player) return TNumericLimits<float>::Max();
+    return FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+}
+
+void ADinosaurBase::OnDetectPlayer(AActor* Player)
+{
+    if (CurrentState == EEng_DinoState::Dead) return;
+    if (CurrentState == EEng_DinoState::Chasing || CurrentState == EEng_DinoState::Attacking) return;
+
+    CurrentTarget = Player;
+    SetDinoState(EEng_DinoState::Alert);
+}
+
+void ADinosaurBase::OnLosePlayer()
+{
+    CurrentTarget = nullptr;
+    SetDinoState(EEng_DinoState::Idle);
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
-    if (Stats.MaxHealth <= 0.0f)
-    {
-        return 0.0f;
-    }
+    if (Stats.MaxHealth <= 0.f) return 0.f;
     return Stats.CurrentHealth / Stats.MaxHealth;
-}
-
-void ADinosaurBase::OnDeath()
-{
-    SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
-
-    // Disable collision on death
-    if (UCapsuleComponent* Capsule = GetCapsuleComponent())
-    {
-        Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    }
-
-    // Disable movement
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-    {
-        MoveComp->DisableMovement();
-    }
-
-    // Ragdoll on death — enable physics on mesh
-    if (USkeletalMeshComponent* Mesh = GetMesh())
-    {
-        Mesh->SetSimulatePhysics(true);
-        Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    }
-}
-
-void ADinosaurBase::UpdateBehavior(float DeltaTime)
-{
-    // Base behavior tick — subclasses implement species-specific AI
-    // Default: if idle and far from territory center, roam back
-    if (BehaviorState == EEng_DinosaurBehaviorState::Idle)
-    {
-        const float DistFromTerritory = FVector::Dist(GetActorLocation(), TerritoryCenter);
-        if (DistFromTerritory > TerritoryRadius)
-        {
-            SetBehaviorState(EEng_DinosaurBehaviorState::Roaming);
-        }
-    }
 }
