@@ -1,164 +1,123 @@
-// AudioZoneManager.cpp
-// Agent #16 — Audio Agent
-// Prehistoric survival audio zone system — ambient sound management for MinPlayableMap
-// Handles jungle, river, wind, danger, cave, and open plain audio zones
-
 #include "AudioZoneManager.h"
-#include "Components/SphereComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
-
-// ============================================================
-// UAudio_ZoneComponent
-// ============================================================
-
-UAudio_ZoneComponent::UAudio_ZoneComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-}
-
-void UAudio_ZoneComponent::BeginPlay()
-{
-    Super::BeginPlay();
-
-    // Find or create audio component on owner
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        AudioComponent = Owner->FindComponentByClass<UAudioComponent>();
-    }
-}
-
-void UAudio_ZoneComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->FadeOut(ZoneConfig.FadeOutDuration, 0.0f);
-    }
-    Super::EndPlay(EndPlayReason);
-}
-
-void UAudio_ZoneComponent::OnPlayerEnterZone()
-{
-    bIsPlayerInZone = true;
-
-    if (AudioComponent && !AudioComponent->IsPlaying())
-    {
-        AudioComponent->SetVolumeMultiplier(0.0f);
-        AudioComponent->Play();
-        AudioComponent->AdjustVolume(ZoneConfig.FadeInDuration, ZoneConfig.VolumeMultiplier);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone type %d"), (int32)ZoneConfig.ZoneType);
-}
-
-void UAudio_ZoneComponent::OnPlayerExitZone()
-{
-    bIsPlayerInZone = false;
-
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->FadeOut(ZoneConfig.FadeOutDuration, 0.0f);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone type %d"), (int32)ZoneConfig.ZoneType);
-}
-
-// ============================================================
-// AAudio_ZoneManager
-// ============================================================
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 
 AAudio_ZoneManager::AAudio_ZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10x/sec — sufficient for audio blending
 
-    // Default zones for MinPlayableMap
-    FAudio_ZoneConfig JungleZone;
-    JungleZone.ZoneType = EAudio_ZoneType::JungleAmbience;
-    JungleZone.AttenuationRadius = 4000.0f;
-    JungleZone.VolumeMultiplier = 0.8f;
-    JungleZone.bLooping = true;
-    JungleZone.FadeInDuration = 3.0f;
-    RegisteredZones.Add(JungleZone);
+    ZoneSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneSphere"));
+    ZoneSphere->SetSphereRadius(1000.0f);
+    ZoneSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    ZoneSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    ZoneSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    RootComponent = ZoneSphere;
 
-    FAudio_ZoneConfig RiverZone;
-    RiverZone.ZoneType = EAudio_ZoneType::RiverAmbience;
-    RiverZone.AttenuationRadius = 2000.0f;
-    RiverZone.VolumeMultiplier = 0.6f;
-    RiverZone.bLooping = true;
-    RiverZone.FadeInDuration = 2.0f;
-    RegisteredZones.Add(RiverZone);
-
-    FAudio_ZoneConfig DangerZone;
-    DangerZone.ZoneType = EAudio_ZoneType::DangerZone;
-    DangerZone.AttenuationRadius = 5000.0f;
-    DangerZone.VolumeMultiplier = 1.0f;
-    DangerZone.bLooping = false;
-    DangerZone.FadeInDuration = 0.5f;
-    RegisteredZones.Add(DangerZone);
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
 }
 
 void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Initialized with %d zones"), RegisteredZones.Num());
+
+    if (ZoneConfig.bLooping && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->Play();
+        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+    }
 }
 
 void AAudio_ZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    UpdateVolumeByDistance(DeltaTime);
+}
 
-    if (bEnableDynamicMixing)
+void AAudio_ZoneManager::SetZoneVolume(float NewVolume)
+{
+    CurrentVolume = FMath::Clamp(NewVolume, 0.0f, ZoneConfig.MaxVolume);
+    if (AmbientAudioComponent)
     {
-        UpdateDangerMix(DeltaTime);
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
     }
 }
 
-void AAudio_ZoneManager::RegisterZone(FAudio_ZoneConfig ZoneConfig)
+void AAudio_ZoneManager::FadeInAudio()
 {
-    RegisteredZones.Add(ZoneConfig);
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Registered new zone type %d"), (int32)ZoneConfig.ZoneType);
-}
-
-void AAudio_ZoneManager::SetGlobalVolume(float NewVolume)
-{
-    GlobalVolumeScale = FMath::Clamp(NewVolume, 0.0f, 2.0f);
-    // Apply to all active audio components via UGameplayStatics
-    UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 1.0f); // Keep time normal
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Global volume set to %.2f"), GlobalVolumeScale);
-}
-
-void AAudio_ZoneManager::TriggerDangerStinger(FVector DangerLocation)
-{
-    // Increase danger level — drives music intensity
-    TargetDangerLevel = FMath::Min(TargetDangerLevel + 0.3f, 1.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Danger stinger triggered at (%.0f, %.0f, %.0f) — danger level: %.2f"),
-        DangerLocation.X, DangerLocation.Y, DangerLocation.Z, TargetDangerLevel);
-}
-
-void AAudio_ZoneManager::TriggerNightTransition()
-{
-    // Night: reduce jungle birds, increase insect/frog ambience
-    // In a full implementation this would crossfade sound cues
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Night transition triggered — switching to nocturnal ambience"));
-}
-
-void AAudio_ZoneManager::TriggerDawnTransition()
-{
-    // Dawn: bring back bird calls, reduce nocturnal sounds
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Dawn transition triggered — switching to diurnal ambience"));
-}
-
-void AAudio_ZoneManager::UpdateDangerMix(float DeltaTime)
-{
-    // Smoothly blend danger level toward target
-    if (!FMath::IsNearlyEqual(CurrentDangerLevel, TargetDangerLevel, 0.01f))
+    if (AmbientAudioComponent)
     {
-        CurrentDangerLevel = FMath::FInterpTo(CurrentDangerLevel, TargetDangerLevel, DeltaTime, DangerBlendSpeed);
+        AmbientAudioComponent->FadeIn(ZoneConfig.FadeInTime, ZoneConfig.MaxVolume);
+    }
+}
+
+void AAudio_ZoneManager::FadeOutAudio()
+{
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->FadeOut(ZoneConfig.FadeOutTime, 0.0f);
+    }
+}
+
+float AAudio_ZoneManager::GetDistanceToPlayer() const
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC) return TNumericLimits<float>::Max();
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return TNumericLimits<float>::Max();
+
+    return FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+}
+
+bool AAudio_ZoneManager::IsPlayerInZone() const
+{
+    float Dist = GetDistanceToPlayer();
+    return Dist <= ZoneSphere->GetScaledSphereRadius();
+}
+
+void AAudio_ZoneManager::UpdateVolumeByDistance(float DeltaTime)
+{
+    float Dist = GetDistanceToPlayer();
+    float Radius = ZoneSphere->GetScaledSphereRadius();
+    float BlendStart = Radius - ZoneConfig.BlendRadius;
+
+    float TargetVolume = 0.0f;
+
+    if (Dist <= BlendStart)
+    {
+        TargetVolume = ZoneConfig.MaxVolume;
+        if (!bPlayerInZone)
+        {
+            bPlayerInZone = true;
+        }
+    }
+    else if (Dist <= Radius)
+    {
+        float Alpha = 1.0f - ((Dist - BlendStart) / ZoneConfig.BlendRadius);
+        TargetVolume = Alpha * ZoneConfig.MaxVolume;
+        bPlayerInZone = true;
+    }
+    else
+    {
+        TargetVolume = 0.0f;
+        if (bPlayerInZone)
+        {
+            bPlayerInZone = false;
+        }
     }
 
-    // Danger decays over time when no stingers triggered
-    TargetDangerLevel = FMath::Max(0.0f, TargetDangerLevel - (DeltaTime * 0.05f));
+    float FadeSpeed = (TargetVolume > CurrentVolume)
+        ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.01f))
+        : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.01f));
+
+    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
+
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+    }
 }
