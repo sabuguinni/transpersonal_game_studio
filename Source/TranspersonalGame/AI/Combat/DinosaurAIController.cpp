@@ -1,658 +1,420 @@
 #include "DinosaurAIController.h"
-#include "CombatAITypes.h"
-#include "CombatAIArchitecture.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISenseConfig_Damage.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
-#include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Navigation/PathFollowingComponent.h"
 
-ADinosaurAIController::ADinosaurAIController(const FObjectInitializer& ObjectInitializer)
-    : Super(ObjectInitializer)
+// -----------------------------------------------------------------------
+// Blackboard key name constants
+// -----------------------------------------------------------------------
+const FName ADinosaurAIController::BB_PlayerActor    = TEXT("PlayerActor");
+const FName ADinosaurAIController::BB_PatrolTarget   = TEXT("PatrolTarget");
+const FName ADinosaurAIController::BB_bIsChasing     = TEXT("bIsChasing");
+const FName ADinosaurAIController::BB_bCanAttack     = TEXT("bCanAttack");
+const FName ADinosaurAIController::BB_AttackCooldown = TEXT("AttackCooldown");
+const FName ADinosaurAIController::BB_FlankIndex     = TEXT("FlankIndex");
+
+// -----------------------------------------------------------------------
+// Constructor
+// -----------------------------------------------------------------------
+ADinosaurAIController::ADinosaurAIController()
+    : CurrentState(ECombat_DinoState::Idle)
+    , TargetActor(nullptr)
+    , FlankIndex(0)
+    , AttackCooldownRemaining(0.0f)
+    , StateEntryTime(0.0f)
+    , DinoSpecies(ECombat_DinoSpecies::Generic)
 {
-    // Create AI Perception Component
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-    SetPerceptionComponent(*AIPerceptionComponent);
-
-    // Create Behavior Tree Component
-    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-
-    // Create Blackboard Component
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-
-    // Configure AI Sight
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = 1500.0f;
-    SightConfig->LoseSightRadius = 1600.0f;
-    SightConfig->PeripheralVisionAngleDegrees = 120.0f;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-
-    // Configure AI Hearing
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = 2000.0f;
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
-
-    // Configure AI Damage Sense
-    UAISenseConfig_Damage* DamageConfig = CreateDefaultSubobject<UAISenseConfig_Damage>(TEXT("DamageConfig"));
-    AIPerceptionComponent->ConfigureSense(*DamageConfig);
-
-    // Set dominant sense to sight
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Enable ticking
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for AI logic
 
-    // Initialize state
-    CurrentCombatState = ECombatState::Passive;
-    PreviousCombatState = ECombatState::Passive;
+    // Create perception component
+    PerceptionComponent_Combat = CreateDefaultSubobject<UAIPerceptionComponent>(
+        TEXT("PerceptionComponent_Combat")
+    );
+    SetPerceptionComponent(*PerceptionComponent_Combat);
+
+    // Sight config — defaults (overridden per species in InitPerceptionForSpecies)
+    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius                = 3000.0f;
+    SightConfig->LoseSightRadius            = 4000.0f;
+    SightConfig->PeripheralVisionAngleDegrees = 90.0f;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies   = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals  = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+
+    // Hearing config
+    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = 1500.0f;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectEnemies   = true;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals  = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+
+    PerceptionComponent_Combat->ConfigureSense(*SightConfig);
+    PerceptionComponent_Combat->ConfigureSense(*HearingConfig);
+    PerceptionComponent_Combat->SetDominantSense(SightConfig->GetSenseImplementation());
 }
 
-void ADinosaurAIController::BeginPlay()
+// -----------------------------------------------------------------------
+// OnPossess — start BT and wire perception callback
+// -----------------------------------------------------------------------
+void ADinosaurAIController::OnPossess(APawn* InPawn)
 {
-    Super::BeginPlay();
+    Super::OnPossess(InPawn);
 
-    // Bind perception events
-    if (AIPerceptionComponent)
+    InitPerceptionForSpecies();
+
+    PerceptionComponent_Combat->OnPerceptionUpdated.AddDynamic(
+        this, &ADinosaurAIController::OnPerceptionUpdated
+    );
+
+    if (BehaviorTreeAsset)
     {
-        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ADinosaurAIController::OnPerceptionUpdated);
-        AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ADinosaurAIController::OnTargetPerceptionUpdated);
+        RunBehaviorTree(BehaviorTreeAsset);
     }
 
-    // Initialize blackboard
-    if (BlackboardComponent)
+    // Seed blackboard with initial values
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
     {
-        BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(CurrentCombatState));
-        BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 0.0f);
-        BlackboardComponent->SetValueAsVector(TEXT("LastKnownPlayerLocation"), FVector::ZeroVector);
-        BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), nullptr);
+        BB->SetValueAsBool(BB_bIsChasing, false);
+        BB->SetValueAsBool(BB_bCanAttack, false);
+        BB->SetValueAsInt(BB_FlankIndex, FlankIndex);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAIController initialized for %s"), 
-           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"));
+    SetCombatState(ECombat_DinoState::Patrolling);
 }
 
+// -----------------------------------------------------------------------
+// OnUnPossess
+// -----------------------------------------------------------------------
+void ADinosaurAIController::OnUnPossess()
+{
+    Super::OnUnPossess();
+    PerceptionComponent_Combat->OnPerceptionUpdated.RemoveDynamic(
+        this, &ADinosaurAIController::OnPerceptionUpdated
+    );
+}
+
+// -----------------------------------------------------------------------
+// Tick — drive FSM per species
+// -----------------------------------------------------------------------
 void ADinosaurAIController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Update threat assessment periodically
-    if (CurrentTime - LastThreatAssessmentTime >= ThreatAssessmentInterval)
+    if (AttackCooldownRemaining > 0.0f)
     {
-        UpdateThreatAssessment();
-        LastThreatAssessmentTime = CurrentTime;
+        AttackCooldownRemaining -= DeltaTime;
+        if (AttackCooldownRemaining <= 0.0f)
+        {
+            if (UBlackboardComponent* BB = GetBlackboardComponent())
+            {
+                BB->SetValueAsBool(BB_bCanAttack, true);
+            }
+        }
     }
 
-    // Clean up old memories
-    CleanupMemory();
-
-    // Update blackboard values
-    UpdateBlackboardValues();
-
-    // Handle state timeouts
-    float TimeSinceStateChange = CurrentTime - StateChangeTime;
-    
-    switch (CurrentCombatState)
+    switch (DinoSpecies)
     {
-        case ECombatState::Investigating:
-            if (TimeSinceStateChange > AlertStateTimeout && KnownThreats.Num() == 0)
-            {
-                SetCombatState(ECombatState::Passive);
-            }
+        case ECombat_DinoSpecies::TRex:
+            HandleTRexCombat(DeltaTime);
             break;
-            
-        case ECombatState::Stalking:
-            if (TimeSinceStateChange > AlertStateTimeout * 2.0f && !PrimaryThreat.ThreatActor)
-            {
-                SetCombatState(ECombatState::Passive);
-            }
+        case ECombat_DinoSpecies::Velociraptor:
+            HandleRaptorCombat(DeltaTime);
             break;
-            
-        case ECombatState::Fleeing:
-            if (TimeSinceStateChange > AlertStateTimeout && KnownThreats.Num() == 0)
-            {
-                SetCombatState(ECombatState::Passive);
-            }
+        default:
             break;
     }
 }
 
+// -----------------------------------------------------------------------
+// OnPerceptionUpdated — detect player entering sight/hearing range
+// -----------------------------------------------------------------------
 void ADinosaurAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
     for (AActor* Actor : UpdatedActors)
     {
-        if (Actor && Actor != GetPawn())
+        if (Actor == PlayerPawn)
         {
-            AssessThreat(Actor);
-            
-            // Update memory
-            ActorMemory.Add(Actor, GetWorld()->GetTimeSeconds());
-            
-            // If this is a player, remember their location
-            if (Actor->IsA<ACharacter>() && Cast<ACharacter>(Actor)->GetController() && 
-                Cast<ACharacter>(Actor)->GetController()->IsA<APlayerController>())
+            FActorPerceptionBlueprintInfo Info;
+            PerceptionComponent_Combat->GetActorsPerception(Actor, Info);
+
+            bool bCurrentlySensed = false;
+            for (const FAIStimulus& Stimulus : Info.LastSensedStimuli)
             {
-                RememberLocation(Actor->GetActorLocation(), TEXT("LastPlayerLocation"));
-                
-                if (BlackboardComponent)
+                if (Stimulus.WasSuccessfullySensed())
                 {
-                    BlackboardComponent->SetValueAsVector(TEXT("LastKnownPlayerLocation"), Actor->GetActorLocation());
-                    BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), Actor);
+                    bCurrentlySensed = true;
+                    break;
+                }
+            }
+
+            if (bCurrentlySensed)
+            {
+                SetTargetActor(PlayerPawn);
+                SetCombatState(ECombat_DinoState::Chasing);
+            }
+            else if (CurrentState == ECombat_DinoState::Chasing && TargetActor == PlayerPawn)
+            {
+                SetCombatState(ECombat_DinoState::Investigating);
+            }
+            break;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// SetCombatState
+// -----------------------------------------------------------------------
+void ADinosaurAIController::SetCombatState(ECombat_DinoState NewState)
+{
+    if (CurrentState == NewState) return;
+
+    CurrentState = NewState;
+    StateEntryTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
+    {
+        BB->SetValueAsBool(BB_bIsChasing,
+            NewState == ECombat_DinoState::Chasing ||
+            NewState == ECombat_DinoState::Attacking);
+    }
+
+    // Adjust movement speed based on state
+    if (APawn* Pawn = GetPawn())
+    {
+        if (ACharacter* Char = Cast<ACharacter>(Pawn))
+        {
+            UCharacterMovementComponent* MoveComp = Char->GetCharacterMovement();
+            if (MoveComp)
+            {
+                switch (NewState)
+                {
+                    case ECombat_DinoState::Chasing:
+                    case ECombat_DinoState::Attacking:
+                        MoveComp->MaxWalkSpeed = PerceptionConfig.ChaseSpeed;
+                        break;
+                    case ECombat_DinoState::Patrolling:
+                    case ECombat_DinoState::Idle:
+                        MoveComp->MaxWalkSpeed = PerceptionConfig.PatrolSpeed;
+                        break;
+                    default:
+                        MoveComp->MaxWalkSpeed = PerceptionConfig.PatrolSpeed * 1.2f;
+                        break;
                 }
             }
         }
     }
 }
 
-void ADinosaurAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+// -----------------------------------------------------------------------
+// SetTargetActor
+// -----------------------------------------------------------------------
+void ADinosaurAIController::SetTargetActor(AActor* Target)
 {
-    if (!Actor)
+    TargetActor = Target;
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
     {
-        return;
+        BB->SetValueAsObject(BB_PlayerActor, Target);
     }
+}
 
-    if (Stimulus.WasSuccessfullySensed())
+// -----------------------------------------------------------------------
+// GetDistanceToTarget
+// -----------------------------------------------------------------------
+float ADinosaurAIController::GetDistanceToTarget() const
+{
+    if (!TargetActor || !GetPawn()) return MAX_FLT;
+    return FVector::Dist(GetPawn()->GetActorLocation(), TargetActor->GetActorLocation());
+}
+
+// -----------------------------------------------------------------------
+// TriggerRaptorFlank — signal pack members to execute flanking manoeuvre
+// -----------------------------------------------------------------------
+void ADinosaurAIController::TriggerRaptorFlank()
+{
+    if (DinoSpecies != ECombat_DinoSpecies::Velociraptor) return;
+    if (!TargetActor) return;
+
+    FVector PlayerLoc = TargetActor->GetActorLocation();
+    FVector Forward   = (PlayerLoc - GetPawn()->GetActorLocation()).GetSafeNormal();
+    FVector Right     = FVector::CrossProduct(Forward, FVector::UpVector);
+
+    // Assign flank positions to pack members
+    for (int32 i = 0; i < PackMembers.Num(); ++i)
     {
-        // Actor was detected
-        AssessThreat(Actor);
-        ActorMemory.Add(Actor, GetWorld()->GetTimeSeconds());
-        
-        UE_LOG(LogTemp, Log, TEXT("%s detected %s"), 
-               GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
-               *Actor->GetName());
-    }
-    else
-    {
-        // Actor was lost
-        // Remove from known threats if it was there
-        for (int32 i = KnownThreats.Num() - 1; i >= 0; i--)
+        if (!PackMembers[i]) continue;
+
+        FVector FlankTarget;
+        switch (i % 3)
         {
-            if (KnownThreats[i].ThreatActor == Actor)
-            {
-                KnownThreats.RemoveAt(i);
+            case 0: // Frontal distraction — charge straight at player
+                FlankTarget = PlayerLoc + Forward * 200.0f;
                 break;
-            }
-        }
-        
-        // If this was our primary threat, find a new one
-        if (PrimaryThreat.ThreatActor == Actor)
-        {
-            PrimaryThreat.ThreatActor = nullptr;
-            PrimaryThreat.ThreatLevel = EThreatLevel::None;
-            
-            // Find new primary threat
-            for (const FThreatAssessment& Threat : KnownThreats)
-            {
-                if (Threat.ThreatLevel > PrimaryThreat.ThreatLevel)
-                {
-                    PrimaryThreat = Threat;
-                }
-            }
-            
-            // If no threats remain, return to passive state
-            if (PrimaryThreat.ThreatLevel == EThreatLevel::None)
-            {
-                SetCombatState(ECombatState::Passive);
-            }
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("%s lost sight of %s"), 
-               GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
-               *Actor->GetName());
-    }
-}
-
-void ADinosaurAIController::SetCombatState(ECombatState NewState)
-{
-    if (CurrentCombatState == NewState)
-    {
-        return;
-    }
-
-    PreviousCombatState = CurrentCombatState;
-    CurrentCombatState = NewState;
-    StateChangeTime = GetWorld()->GetTimeSeconds();
-
-    // Update blackboard
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(CurrentCombatState));
-    }
-
-    // Fire event
-    OnCombatStateChanged.Broadcast(NewState);
-
-    UE_LOG(LogTemp, Log, TEXT("%s: Combat state changed from %d to %d"), 
-           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
-           (int32)PreviousCombatState, (int32)CurrentCombatState);
-
-    // State-specific logic
-    switch (NewState)
-    {
-        case ECombatState::Passive:
-            // Clear current target
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), nullptr);
-                BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 0.0f);
-            }
-            break;
-            
-        case ECombatState::Investigating:
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 0.3f);
-            }
-            break;
-            
-        case ECombatState::Stalking:
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 0.6f);
-            }
-            break;
-            
-        case ECombatState::Hunting:
-        case ECombatState::Attacking:
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 1.0f);
-            }
-            StartCombatBehavior();
-            break;
-            
-        case ECombatState::Fleeing:
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsFloat(TEXT("AlertLevel"), 0.8f);
-            }
-            break;
-    }
-}
-
-void ADinosaurAIController::AssessThreat(AActor* PotentialThreat)
-{
-    if (!PotentialThreat || PotentialThreat == GetPawn())
-    {
-        return;
-    }
-
-    EThreatLevel ThreatLevel = CalculateThreatLevel(PotentialThreat);
-    
-    if (ThreatLevel > EThreatLevel::None)
-    {
-        // Add or update threat in our list
-        bool bFoundExisting = false;
-        for (FThreatAssessment& Threat : KnownThreats)
-        {
-            if (Threat.ThreatActor == PotentialThreat)
-            {
-                Threat.ThreatLevel = ThreatLevel;
-                Threat.LastSeenTime = GetWorld()->GetTimeSeconds();
-                bFoundExisting = true;
+            case 1: // Left flank
+                FlankTarget = PlayerLoc - Right * 600.0f + Forward * 100.0f;
                 break;
-            }
-        }
-        
-        if (!bFoundExisting)
-        {
-            FThreatAssessment NewThreat;
-            NewThreat.ThreatActor = PotentialThreat;
-            NewThreat.ThreatLevel = ThreatLevel;
-            NewThreat.LastSeenTime = GetWorld()->GetTimeSeconds();
-            NewThreat.FirstDetectedTime = NewThreat.LastSeenTime;
-            KnownThreats.Add(NewThreat);
-            
-            // Fire threat detected event
-            OnThreatDetected.Broadcast(PotentialThreat, ThreatLevel);
-        }
-        
-        // Update primary threat if this is more dangerous
-        if (ThreatLevel > PrimaryThreat.ThreatLevel)
-        {
-            PrimaryThreat.ThreatActor = PotentialThreat;
-            PrimaryThreat.ThreatLevel = ThreatLevel;
-            PrimaryThreat.LastSeenTime = GetWorld()->GetTimeSeconds();
-            
-            if (BlackboardComponent)
-            {
-                BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), PotentialThreat);
-            }
-        }
-        
-        // Determine appropriate response based on threat level and current state
-        if (CurrentCombatState == ECombatState::Passive)
-        {
-            if (ThreatLevel >= EThreatLevel::Medium)
-            {
-                if (ShouldEngageTarget(PotentialThreat))
-                {
-                    SetCombatState(ECombatState::Stalking);
-                }
-                else if (ShouldFleeFromTarget(PotentialThreat))
-                {
-                    SetCombatState(ECombatState::Fleeing);
-                }
-                else
-                {
-                    SetCombatState(ECombatState::Investigating);
-                }
-            }
-            else if (ThreatLevel >= EThreatLevel::Low)
-            {
-                SetCombatState(ECombatState::Investigating);
-            }
-        }
-    }
-}
-
-EThreatLevel ADinosaurAIController::CalculateThreatLevel(AActor* Actor) const
-{
-    if (!Actor || !GetPawn())
-    {
-        return EThreatLevel::None;
-    }
-
-    float ThreatScore = CalculateActorThreatScore(Actor);
-    
-    // Convert threat score to threat level
-    if (ThreatScore >= 0.8f)
-        return EThreatLevel::Lethal;
-    else if (ThreatScore >= 0.6f)
-        return EThreatLevel::Critical;
-    else if (ThreatScore >= 0.4f)
-        return EThreatLevel::High;
-    else if (ThreatScore >= 0.3f)
-        return EThreatLevel::Medium;
-    else if (ThreatScore >= 0.2f)
-        return EThreatLevel::Low;
-    else if (ThreatScore >= 0.1f)
-        return EThreatLevel::Minimal;
-    else
-        return EThreatLevel::None;
-}
-
-void ADinosaurAIController::StartCombatBehavior()
-{
-    // This would start the appropriate behavior tree for combat
-    // For now, we'll just log the action
-    UE_LOG(LogTemp, Log, TEXT("%s: Starting combat behavior"), 
-           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"));
-    
-    // In a full implementation, this would:
-    // 1. Load the appropriate behavior tree based on dinosaur type
-    // 2. Set up blackboard values for combat
-    // 3. Start the behavior tree execution
-}
-
-void ADinosaurAIController::StopCombatBehavior()
-{
-    // Stop combat behavior tree and return to normal behavior
-    UE_LOG(LogTemp, Log, TEXT("%s: Stopping combat behavior"), 
-           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"));
-    
-    if (BehaviorTreeComponent)
-    {
-        BehaviorTreeComponent->StopTree();
-    }
-}
-
-void ADinosaurAIController::RememberLocation(const FVector& Location, const FString& LocationTag)
-{
-    RememberedLocations.Add(LocationTag, Location);
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("%s: Remembered location %s at %s"), 
-           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
-           *LocationTag, *Location.ToString());
-}
-
-FVector ADinosaurAIController::GetRememberedLocation(const FString& LocationTag) const
-{
-    if (const FVector* Location = RememberedLocations.Find(LocationTag))
-    {
-        return *Location;
-    }
-    return FVector::ZeroVector;
-}
-
-bool ADinosaurAIController::ShouldEngageTarget(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-    {
-        return false;
-    }
-
-    // Get combat AI component for personality-based decisions
-    UCombatAIComponent* CombatAI = GetPawn()->FindComponentByClass<UCombatAIComponent>();
-    if (CombatAI)
-    {
-        return CombatAI->ShouldEngageTarget(Target);
-    }
-
-    // Fallback logic if no combat AI component
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-    EThreatLevel ThreatLevel = CalculateThreatLevel(Target);
-    
-    // Basic engagement logic
-    return (ThreatLevel >= EThreatLevel::Medium && Distance < 800.0f);
-}
-
-bool ADinosaurAIController::ShouldFleeFromTarget(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-    {
-        return false;
-    }
-
-    // Get combat AI component for personality-based decisions
-    UCombatAIComponent* CombatAI = GetPawn()->FindComponentByClass<UCombatAIComponent>();
-    if (CombatAI)
-    {
-        return CombatAI->ShouldRetreat();
-    }
-
-    // Fallback logic
-    EThreatLevel ThreatLevel = CalculateThreatLevel(Target);
-    return (ThreatLevel >= EThreatLevel::Critical);
-}
-
-bool ADinosaurAIController::ShouldInvestigateSound(const FVector& SoundLocation, float SoundLoudness) const
-{
-    if (!GetPawn())
-    {
-        return false;
-    }
-
-    // Get combat AI component for personality-based decisions
-    UCombatAIComponent* CombatAI = GetPawn()->FindComponentByClass<UCombatAIComponent>();
-    if (CombatAI)
-    {
-        // Base investigation on curiosity and current state
-        float InvestigationChance = CombatAI->Personality.Curiosity;
-        
-        // Modify based on current combat state
-        switch (CurrentCombatState)
-        {
-            case ECombatState::Passive:
-                InvestigationChance += 0.2f;
+            case 2: // Right flank
+                FlankTarget = PlayerLoc + Right * 600.0f + Forward * 100.0f;
                 break;
-            case ECombatState::Investigating:
-                InvestigationChance += 0.1f;
-                break;
-            case ECombatState::Attacking:
-            case ECombatState::Fleeing:
-                InvestigationChance -= 0.3f;
+            default:
+                FlankTarget = PlayerLoc;
                 break;
         }
-        
-        // Louder sounds are more likely to be investigated
-        InvestigationChance += (SoundLoudness / 100.0f) * 0.3f;
-        
-        return FMath::RandRange(0.0f, 1.0f) < InvestigationChance;
-    }
 
-    // Fallback logic
-    return (SoundLoudness > 50.0f && CurrentCombatState == ECombatState::Passive);
+        PackMembers[i]->SetTargetActor(TargetActor);
+        PackMembers[i]->MoveToLocation(FlankTarget, 150.0f);
+
+        if (UBlackboardComponent* BB = PackMembers[i]->GetBlackboardComponent())
+        {
+            BB->SetValueAsInt(BB_FlankIndex, i % 3);
+            BB->SetValueAsBool(BB_bIsChasing, true);
+        }
+    }
 }
 
-void ADinosaurAIController::UpdateThreatAssessment()
+// -----------------------------------------------------------------------
+// InitPerceptionForSpecies — tune sight/hearing per species
+// -----------------------------------------------------------------------
+void ADinosaurAIController::InitPerceptionForSpecies()
 {
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Remove old or invalid threats
-    for (int32 i = KnownThreats.Num() - 1; i >= 0; i--)
+    switch (DinoSpecies)
     {
-        FThreatAssessment& Threat = KnownThreats[i];
-        
-        // Remove if actor is invalid or too old
-        if (!IsValid(Threat.ThreatActor) || 
-            (CurrentTime - Threat.LastSeenTime) > MemoryDecayTime)
+        case ECombat_DinoSpecies::TRex:
+            PerceptionConfig.SightRadius             = 3500.0f;
+            PerceptionConfig.LoseSightRadius         = 5000.0f;
+            PerceptionConfig.PeripheralVisionAngle   = 70.0f;   // Narrow — T-Rex has poor peripheral
+            PerceptionConfig.HearingRange            = 2500.0f; // Excellent hearing
+            PerceptionConfig.AttackRange             = 450.0f;
+            PerceptionConfig.ChaseSpeed              = 1200.0f;
+            PerceptionConfig.PatrolSpeed             = 350.0f;
+            break;
+
+        case ECombat_DinoSpecies::Velociraptor:
+            PerceptionConfig.SightRadius             = 2500.0f;
+            PerceptionConfig.LoseSightRadius         = 3500.0f;
+            PerceptionConfig.PeripheralVisionAngle   = 120.0f;  // Wide — raptors had excellent vision
+            PerceptionConfig.HearingRange            = 1200.0f;
+            PerceptionConfig.AttackRange             = 200.0f;
+            PerceptionConfig.ChaseSpeed              = 1600.0f; // Fastest dinosaur
+            PerceptionConfig.PatrolSpeed             = 500.0f;
+            break;
+
+        case ECombat_DinoSpecies::Triceratops:
+            PerceptionConfig.SightRadius             = 2000.0f;
+            PerceptionConfig.LoseSightRadius         = 3000.0f;
+            PerceptionConfig.PeripheralVisionAngle   = 100.0f;
+            PerceptionConfig.HearingRange            = 1000.0f;
+            PerceptionConfig.AttackRange             = 350.0f;
+            PerceptionConfig.ChaseSpeed              = 900.0f;
+            PerceptionConfig.PatrolSpeed             = 300.0f;
+            break;
+
+        default:
+            break;
+    }
+
+    // Apply updated config to perception component
+    if (SightConfig)
+    {
+        SightConfig->SightRadius                  = PerceptionConfig.SightRadius;
+        SightConfig->LoseSightRadius              = PerceptionConfig.LoseSightRadius;
+        SightConfig->PeripheralVisionAngleDegrees = PerceptionConfig.PeripheralVisionAngle;
+        PerceptionComponent_Combat->ConfigureSense(*SightConfig);
+    }
+    if (HearingConfig)
+    {
+        HearingConfig->HearingRange = PerceptionConfig.HearingRange;
+        PerceptionComponent_Combat->ConfigureSense(*HearingConfig);
+    }
+}
+
+// -----------------------------------------------------------------------
+// HandleTRexCombat — T-Rex specific combat logic (called from Tick)
+// -----------------------------------------------------------------------
+void ADinosaurAIController::HandleTRexCombat(float DeltaTime)
+{
+    if (CurrentState != ECombat_DinoState::Chasing &&
+        CurrentState != ECombat_DinoState::Attacking) return;
+
+    float DistToTarget = GetDistanceToTarget();
+
+    if (DistToTarget <= PerceptionConfig.AttackRange)
+    {
+        if (AttackCooldownRemaining <= 0.0f)
         {
-            if (PrimaryThreat.ThreatActor == Threat.ThreatActor)
+            SetCombatState(ECombat_DinoState::Attacking);
+            if (UBlackboardComponent* BB = GetBlackboardComponent())
             {
-                PrimaryThreat.ThreatActor = nullptr;
-                PrimaryThreat.ThreatLevel = EThreatLevel::None;
+                BB->SetValueAsBool(BB_bCanAttack, true);
             }
-            KnownThreats.RemoveAt(i);
-        }
-        else
-        {
-            // Update threat level for existing threats
-            EThreatLevel NewThreatLevel = CalculateThreatLevel(Threat.ThreatActor);
-            Threat.ThreatLevel = NewThreatLevel;
+            AttackCooldownRemaining = 3.0f; // T-Rex attacks every 3 seconds
         }
     }
-    
-    // Find new primary threat
-    PrimaryThreat.ThreatLevel = EThreatLevel::None;
-    PrimaryThreat.ThreatActor = nullptr;
-    
-    for (const FThreatAssessment& Threat : KnownThreats)
+    else if (DistToTarget > PerceptionConfig.LoseSightRadius)
     {
-        if (Threat.ThreatLevel > PrimaryThreat.ThreatLevel)
-        {
-            PrimaryThreat = Threat;
-        }
+        SetCombatState(ECombat_DinoState::Patrolling);
+        SetTargetActor(nullptr);
     }
 }
 
-void ADinosaurAIController::CleanupMemory()
+// -----------------------------------------------------------------------
+// HandleRaptorCombat — Raptor pack logic (called from Tick)
+// -----------------------------------------------------------------------
+void ADinosaurAIController::HandleRaptorCombat(float DeltaTime)
 {
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Clean up actor memory
-    for (auto It = ActorMemory.CreateIterator(); It; ++It)
+    if (CurrentState != ECombat_DinoState::Chasing &&
+        CurrentState != ECombat_DinoState::Attacking) return;
+
+    float DistToTarget = GetDistanceToTarget();
+
+    // Trigger flanking when pack leader (FlankIndex==0) gets within 1000 units
+    if (FlankIndex == 0 && DistToTarget < 1000.0f && PackMembers.Num() > 0)
     {
-        if (!IsValid(It.Key()) || (CurrentTime - It.Value()) > MemoryDecayTime)
+        TriggerRaptorFlank();
+    }
+
+    if (DistToTarget <= PerceptionConfig.AttackRange)
+    {
+        if (AttackCooldownRemaining <= 0.0f)
         {
-            It.RemoveCurrent();
-        }
-    }
-}
-
-void ADinosaurAIController::UpdateBlackboardValues()
-{
-    if (!BlackboardComponent)
-    {
-        return;
-    }
-
-    // Update primary threat
-    BlackboardComponent->SetValueAsObject(TEXT("PrimaryThreat"), PrimaryThreat.ThreatActor);
-    BlackboardComponent->SetValueAsEnum(TEXT("ThreatLevel"), static_cast<uint8>(PrimaryThreat.ThreatLevel));
-    
-    // Update threat count
-    BlackboardComponent->SetValueAsInt(TEXT("ThreatCount"), KnownThreats.Num());
-    
-    // Update last known player location if we have one
-    FVector LastPlayerLocation = GetRememberedLocation(TEXT("LastPlayerLocation"));
-    if (!LastPlayerLocation.IsZero())
-    {
-        BlackboardComponent->SetValueAsVector(TEXT("LastKnownPlayerLocation"), LastPlayerLocation);
-    }
-}
-
-float ADinosaurAIController::CalculateActorThreatScore(AActor* Actor) const
-{
-    if (!Actor || !GetPawn())
-    {
-        return 0.0f;
-    }
-
-    float ThreatScore = 0.0f;
-    
-    // Base threat for different actor types
-    if (Actor->IsA<ACharacter>())
-    {
-        ACharacter* Character = Cast<ACharacter>(Actor);
-        if (Character->GetController() && Character->GetController()->IsA<APlayerController>())
-        {
-            // Players are inherently threatening
-            ThreatScore += 0.4f;
-        }
-        else
-        {
-            // Other NPCs are less threatening
-            ThreatScore += 0.2f;
-        }
-    }
-    
-    // Distance factor (closer = more threatening)
-    float Distance = FVector::Dist(Actor->GetActorLocation(), GetPawn()->GetActorLocation());
-    float MaxThreatDistance = 1500.0f; // Same as sight radius
-    float DistanceFactor = 1.0f - FMath::Clamp(Distance / MaxThreatDistance, 0.0f, 1.0f);
-    ThreatScore += DistanceFactor * 0.3f;
-    
-    // Line of sight factor (visible = more threatening)
-    if (IsActorInLineOfSight(Actor))
-    {
-        ThreatScore += 0.2f;
-    }
-    
-    // Movement factor (moving actors are more threatening)
-    if (Actor->GetVelocity().Size() > 100.0f)
-    {
-        ThreatScore += 0.1f;
-    }
-    
-    return FMath::Clamp(ThreatScore, 0.0f, 1.0f);
-}
-
-bool ADinosaurAIController::IsActorInLineOfSight(AActor* Actor) const
-{
-    if (!Actor || !GetPawn() || !AIPerceptionComponent)
-    {
-        return false;
-    }
-
-    FActorPerceptionBlueprintInfo PerceptionInfo;
-    bool bHasInfo = AIPerceptionComponent->GetActorsPerception(Actor, PerceptionInfo);
-    
-    if (bHasInfo)
-    {
-        for (const FAIStimulus& Stimulus : PerceptionInfo.LastSensedStimuli)
-        {
-            if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>() && 
-                Stimulus.WasSuccessfullySensed())
+            SetCombatState(ECombat_DinoState::Attacking);
+            if (UBlackboardComponent* BB = GetBlackboardComponent())
             {
-                return true;
+                BB->SetValueAsBool(BB_bCanAttack, true);
             }
+            AttackCooldownRemaining = 1.5f; // Raptors attack faster
         }
     }
-    
-    return false;
+    else if (DistToTarget > PerceptionConfig.LoseSightRadius)
+    {
+        SetCombatState(ECombat_DinoState::Patrolling);
+        SetTargetActor(nullptr);
+    }
+}
+
+// -----------------------------------------------------------------------
+// UpdateBlackboard — sync all state to blackboard
+// -----------------------------------------------------------------------
+void ADinosaurAIController::UpdateBlackboard()
+{
+    UBlackboardComponent* BB = GetBlackboardComponent();
+    if (!BB) return;
+
+    BB->SetValueAsObject(BB_PlayerActor, TargetActor);
+    BB->SetValueAsBool(BB_bIsChasing,
+        CurrentState == ECombat_DinoState::Chasing ||
+        CurrentState == ECombat_DinoState::Attacking);
+    BB->SetValueAsBool(BB_bCanAttack, AttackCooldownRemaining <= 0.0f);
+    BB->SetValueAsFloat(BB_AttackCooldown, AttackCooldownRemaining);
+    BB->SetValueAsInt(BB_FlankIndex, FlankIndex);
 }
