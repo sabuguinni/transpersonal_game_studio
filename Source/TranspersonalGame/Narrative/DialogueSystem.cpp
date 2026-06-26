@@ -1,132 +1,197 @@
-// DialogueSystem.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// Cycle: PROD_CYCLE_AUTO_20260625_011
-
 #include "DialogueSystem.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
 
-// ─────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// UNarr_DialogueComponent
+// ─────────────────────────────────────────────────────────────────────────────
 
-ANarr_DialogueActor::ANarr_DialogueActor()
+UNarr_DialogueComponent::UNarr_DialogueComponent()
+    : NPCRole(ENarr_NPCRole::Survivor)
+    , NPCName(TEXT("Unknown"))
+    , CurrentState(ENarr_DialogueState::Idle)
+    , ActiveTreeIndex(INDEX_NONE)
+    , bDialogueActive(false)
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Interaction sphere — player proximity detection
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetSphereRadius(300.0f);
-    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = InteractionSphere;
-
-    // Defaults
-    InteractionRadius = 300.0f;
-    bIsPlayerInRange = false;
-    CurrentDialogueIndex = 0;
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
-// ─────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────
-
-void ANarr_DialogueActor::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(
-        this, &ANarr_DialogueActor::OnPlayerEnterRange);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(
-        this, &ANarr_DialogueActor::OnPlayerExitRange);
-
-    // Populate default dialogue if none set in editor
-    if (NPCData.DialogueLines.Num() == 0)
+    // Auto-populate dialogue trees based on role
+    if (NPCRole == ENarr_NPCRole::Elder || NPCRole == ENarr_NPCRole::Hunter)
     {
-        InitialiseDefaultDialogue();
+        InitRaptorHuntDialogue();
+    }
+    else if (NPCRole == ENarr_NPCRole::Craftsman)
+    {
+        InitCraftingIntroDialogue();
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Tick
-// ─────────────────────────────────────────────────────────────
-
-void ANarr_DialogueActor::Tick(float DeltaTime)
+void UNarr_DialogueComponent::StartDialogue(const FString& QuestID)
 {
-    Super::Tick(DeltaTime);
-    // Tick reserved for future dialogue timing logic
-}
-
-// ─────────────────────────────────────────────────────────────
-// Dialogue Logic
-// ─────────────────────────────────────────────────────────────
-
-void ANarr_DialogueActor::TriggerDialogue(ENarr_DialogueTrigger Trigger)
-{
-    if (NPCData.DialogueLines.Num() == 0)
+    for (int32 i = 0; i < DialogueTrees.Num(); ++i)
     {
-        return;
-    }
-
-    // Find first line matching this trigger
-    for (int32 i = 0; i < NPCData.DialogueLines.Num(); ++i)
-    {
-        if (NPCData.DialogueLines[i].TriggerCondition == Trigger)
+        if (DialogueTrees[i].QuestID == QuestID)
         {
-            CurrentDialogueIndex = i;
-            NPCData.bHasBeenSpokenTo = true;
+            ActiveTreeIndex = i;
+            DialogueTrees[i].CurrentLineIndex = 0;
+            bDialogueActive = true;
+            CurrentState = ENarr_DialogueState::QuestOffer;
             return;
         }
     }
-
-    // Fallback: start from beginning
-    CurrentDialogueIndex = 0;
-    NPCData.bHasBeenSpokenTo = true;
+    // Fallback: start first tree if QuestID not found
+    if (DialogueTrees.Num() > 0)
+    {
+        ActiveTreeIndex = 0;
+        DialogueTrees[0].CurrentLineIndex = 0;
+        bDialogueActive = true;
+        CurrentState = ENarr_DialogueState::Greeting;
+    }
 }
 
-FNarr_DialogueLine ANarr_DialogueActor::GetCurrentDialogueLine() const
+FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
 {
-    if (NPCData.DialogueLines.IsValidIndex(CurrentDialogueIndex))
+    if (!bDialogueActive || ActiveTreeIndex == INDEX_NONE)
     {
-        return NPCData.DialogueLines[CurrentDialogueIndex];
+        return FNarr_DialogueLine();
+    }
+    const FNarr_DialogueTree& Tree = DialogueTrees[ActiveTreeIndex];
+    if (Tree.Lines.IsValidIndex(Tree.CurrentLineIndex))
+    {
+        return Tree.Lines[Tree.CurrentLineIndex];
     }
     return FNarr_DialogueLine();
 }
 
-void ANarr_DialogueActor::AdvanceDialogue()
+bool UNarr_DialogueComponent::AdvanceLine()
 {
-    if (CurrentDialogueIndex < NPCData.DialogueLines.Num() - 1)
+    if (!bDialogueActive || ActiveTreeIndex == INDEX_NONE)
     {
-        ++CurrentDialogueIndex;
+        return false;
     }
+    FNarr_DialogueTree& Tree = DialogueTrees[ActiveTreeIndex];
+    Tree.CurrentLineIndex++;
+    if (Tree.CurrentLineIndex >= Tree.Lines.Num())
+    {
+        EndDialogue();
+        return false;
+    }
+    return true;
 }
 
-bool ANarr_DialogueActor::HasMoreDialogue() const
+void UNarr_DialogueComponent::EndDialogue()
 {
-    return CurrentDialogueIndex < NPCData.DialogueLines.Num() - 1;
+    bDialogueActive = false;
+    ActiveTreeIndex = INDEX_NONE;
+    CurrentState = ENarr_DialogueState::Idle;
 }
 
-void ANarr_DialogueActor::ResetDialogue()
+void UNarr_DialogueComponent::SetState(ENarr_DialogueState NewState)
 {
-    CurrentDialogueIndex = 0;
+    CurrentState = NewState;
 }
 
-FString ANarr_DialogueActor::GetNPCName() const
+bool UNarr_DialogueComponent::IsDialogueActive() const
 {
-    return NPCData.NPCName;
+    return bDialogueActive;
 }
 
-ENarr_NPCRole ANarr_DialogueActor::GetNPCRole() const
+void UNarr_DialogueComponent::InitRaptorHuntDialogue()
 {
-    return NPCData.Role;
+    FNarr_DialogueTree Tree;
+    Tree.QuestID = TEXT("QUEST_RAPTOR_HUNT");
+
+    // Line 0 — Elder Kael greeting (audio from cycle 014)
+    FNarr_DialogueLine Line0;
+    Line0.SpeakerName = TEXT("Elder Kael");
+    Line0.DialogueText = TEXT("Listen carefully. The raptors hunt in packs. Three, maybe four of them. They will circle you, cut off your escape, then strike from behind. Your only chance is to reach high ground before they close in. Move now. Do not look back.");
+    Line0.TriggerState = ENarr_DialogueState::QuestOffer;
+    Line0.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782434120789_ElderHunter_Kael.mp3");
+    Line0.DisplayDuration = 6.0f;
+    Tree.Lines.Add(Line0);
+
+    // Line 1 — Scout Mira intel
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Scout Mira");
+    Line1.DialogueText = TEXT("I found their tracks near the river bend. Fresh. Maybe two hours old. They dragged something large — a young brachiosaur, I think. If they fed recently, they will be slower. This is our chance to push them back from the camp perimeter.");
+    Line1.TriggerState = ENarr_DialogueState::QuestActive;
+    Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782434129458_Scout_Mira.mp3");
+    Line1.DisplayDuration = 6.0f;
+    Tree.Lines.Add(Line1);
+
+    // Line 2 — Quest complete / Elder reaction
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder Kael");
+    Line2.DialogueText = TEXT("You came back. I did not think you would. Three kills, just as the Elder asked. The tribe will eat tonight because of what you did out there. You are not just a survivor anymore. You are a hunter.");
+    Line2.TriggerState = ENarr_DialogueState::QuestComplete;
+    Line2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782434159770_TribalElder_Narrator.mp3");
+    Line2.DisplayDuration = 6.0f;
+    Tree.Lines.Add(Line2);
+
+    DialogueTrees.Add(Tree);
 }
 
-// ─────────────────────────────────────────────────────────────
-// Overlap Callbacks
-// ─────────────────────────────────────────────────────────────
+void UNarr_DialogueComponent::InitCraftingIntroDialogue()
+{
+    FNarr_DialogueTree Tree;
+    Tree.QuestID = TEXT("QUEST_CRAFTING_INTRO");
 
-void ANarr_DialogueActor::OnPlayerEnterRange(
+    // Line 0 — Craftsman Boro teaches stone axe
+    FNarr_DialogueLine Line0;
+    Line0.SpeakerName = TEXT("Craftsman Boro");
+    Line0.DialogueText = TEXT("The stone axe. My grandfather taught me to make one just like this. Two good rocks, one straight branch, and patience. With this, you can split bone, cut hide, and defend yourself. Keep it close. You will need it before nightfall.");
+    Line0.TriggerState = ENarr_DialogueState::QuestOffer;
+    Line0.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782434132013_Craftsman_Boro.mp3");
+    Line0.DisplayDuration = 6.0f;
+    Tree.Lines.Add(Line0);
+
+    // Line 1 — Boro warns about the night
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Craftsman Boro");
+    Line1.DialogueText = TEXT("Gather three sticks and you can make a campfire. Fire keeps the small predators away. The big ones... well. Fire slows them down. It does not stop them. Nothing stops a T-Rex except distance.");
+    Line1.TriggerState = ENarr_DialogueState::Lore;
+    Line1.AudioURL = TEXT("");
+    Line1.DisplayDuration = 5.0f;
+    Tree.Lines.Add(Line1);
+
+    DialogueTrees.Add(Tree);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANarr_NPCDialogueActor
+// ─────────────────────────────────────────────────────────────────────────────
+
+ANarr_NPCDialogueActor::ANarr_NPCDialogueActor()
+    : InteractionRadius(300.0f)
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    ProximityTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("ProximityTrigger"));
+    RootComponent = ProximityTrigger;
+    ProximityTrigger->SetSphereRadius(InteractionRadius);
+    ProximityTrigger->SetCollisionProfileName(TEXT("Trigger"));
+
+    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueComponent>(TEXT("DialogueComponent"));
+}
+
+void ANarr_NPCDialogueActor::BeginPlay()
+{
+    Super::BeginPlay();
+
+    ProximityTrigger->SetSphereRadius(InteractionRadius);
+
+    ProximityTrigger->OnComponentBeginOverlap.AddDynamic(
+        this, &ANarr_NPCDialogueActor::OnPlayerEnterRange);
+    ProximityTrigger->OnComponentEndOverlap.AddDynamic(
+        this, &ANarr_NPCDialogueActor::OnPlayerExitRange);
+}
+
+void ANarr_NPCDialogueActor::OnPlayerEnterRange(
     UPrimitiveComponent* OverlappedComp,
     AActor* OtherActor,
     UPrimitiveComponent* OtherComp,
@@ -134,111 +199,28 @@ void ANarr_DialogueActor::OnPlayerEnterRange(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    if (!OtherActor || !DialogueComponent) return;
+
+    // Only trigger for player characters
+    if (OtherActor->ActorHasTag(TEXT("Player")))
     {
-        bIsPlayerInRange = true;
-        TriggerDialogue(ENarr_DialogueTrigger::Proximity);
+        DialogueComponent->StartDialogue(TEXT("QUEST_RAPTOR_HUNT"));
     }
 }
 
-void ANarr_DialogueActor::OnPlayerExitRange(
+void ANarr_NPCDialogueActor::OnPlayerExitRange(
     UPrimitiveComponent* OverlappedComp,
     AActor* OtherActor,
     UPrimitiveComponent* OtherComp,
     int32 OtherBodyIndex)
 {
-    if (OtherActor && OtherActor->IsA<ACharacter>())
+    if (!OtherActor || !DialogueComponent) return;
+
+    if (OtherActor->ActorHasTag(TEXT("Player")))
     {
-        bIsPlayerInRange = false;
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Default Dialogue Initialisation
-// Hardcoded survival-focused lines for the three core NPCs
-// ─────────────────────────────────────────────────────────────
-
-void ANarr_DialogueActor::InitialiseDefaultDialogue()
-{
-    // Determine which NPC this is by role and populate accordingly
-    switch (NPCData.Role)
-    {
-        case ENarr_NPCRole::Elder:
+        if (DialogueComponent->IsDialogueActive())
         {
-            NPCData.NPCName = TEXT("Elder Kael");
-
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Elder Kael");
-            Line1.LineText = TEXT("The river crossing is safe at dawn. The great lizards sleep until the sun warms them. Cross fast, stay silent.");
-            Line1.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-            Line1.DisplayDuration = 5.0f;
-            NPCData.DialogueLines.Add(Line1);
-
-            FNarr_DialogueLine Line2;
-            Line2.SpeakerName = TEXT("Elder Kael");
-            Line2.LineText = TEXT("Build your shelter before you build your weapons. Survival is not about strength. It is about preparation.");
-            Line2.TriggerCondition = ENarr_DialogueTrigger::NightFall;
-            Line2.DisplayDuration = 5.0f;
-            NPCData.DialogueLines.Add(Line2);
-
-            FNarr_DialogueLine Line3;
-            Line3.SpeakerName = TEXT("Elder Kael");
-            Line3.LineText = TEXT("We found the bones of twelve hunters near the northern ridge. Not killed by beasts — killed by cold.");
-            Line3.TriggerCondition = ENarr_DialogueTrigger::PlayerLowHealth;
-            Line3.DisplayDuration = 5.0f;
-            NPCData.DialogueLines.Add(Line3);
-            break;
-        }
-
-        case ENarr_NPCRole::Scout:
-        {
-            NPCData.NPCName = TEXT("Scout Mira");
-
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Scout Mira");
-            Line1.LineText = TEXT("Stay low. The pack hunts together — three raptors, maybe four. They will circle from the east while the big one drives you toward them.");
-            Line1.TriggerCondition = ENarr_DialogueTrigger::DinosaurNearby;
-            Line1.DisplayDuration = 6.0f;
-            NPCData.DialogueLines.Add(Line1);
-
-            FNarr_DialogueLine Line2;
-            Line2.SpeakerName = TEXT("Scout Mira");
-            Line2.LineText = TEXT("Do not run. Find high ground, use the rocks. A spear through the throat will stop even the largest one, but only if your aim is true.");
-            Line2.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-            Line2.DisplayDuration = 5.0f;
-            NPCData.DialogueLines.Add(Line2);
-            break;
-        }
-
-        case ENarr_NPCRole::Hunter:
-        {
-            NPCData.NPCName = TEXT("Hunter Brak");
-
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Hunter Brak");
-            Line1.LineText = TEXT("I tracked the Triceratops herd for three days. The young ones stay in the center, the big bulls on the outside. You cannot take one from the herd.");
-            Line1.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-            Line1.DisplayDuration = 6.0f;
-            NPCData.DialogueLines.Add(Line1);
-
-            FNarr_DialogueLine Line2;
-            Line2.SpeakerName = TEXT("Hunter Brak");
-            Line2.LineText = TEXT("Wait for a straggler, an injured one, or drive one away from the group using fire and noise. Patience is the hunter's greatest weapon.");
-            Line2.TriggerCondition = ENarr_DialogueTrigger::QuestStart;
-            Line2.DisplayDuration = 5.0f;
-            NPCData.DialogueLines.Add(Line2);
-            break;
-        }
-
-        default:
-        {
-            FNarr_DialogueLine DefaultLine;
-            DefaultLine.SpeakerName = TEXT("Tribesperson");
-            DefaultLine.LineText = TEXT("Stay alert. The dinosaurs are active today.");
-            DefaultLine.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-            DefaultLine.DisplayDuration = 3.0f;
-            NPCData.DialogueLines.Add(DefaultLine);
-            break;
+            DialogueComponent->EndDialogue();
         }
     }
 }
