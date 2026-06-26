@@ -9,13 +9,12 @@
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Jungle_Day      UMETA(DisplayName = "Jungle Day"),
-    Jungle_Night    UMETA(DisplayName = "Jungle Night"),
     Campfire        UMETA(DisplayName = "Campfire"),
+    ForestNight     UMETA(DisplayName = "Forest Night"),
+    TRexTerritory   UMETA(DisplayName = "T-Rex Territory"),
     River           UMETA(DisplayName = "River"),
-    Cave            UMETA(DisplayName = "Cave"),
     OpenPlain       UMETA(DisplayName = "Open Plain"),
-    DinoTerritory   UMETA(DisplayName = "Dino Territory")
+    Cave            UMETA(DisplayName = "Cave")
 };
 
 USTRUCT(BlueprintType)
@@ -24,10 +23,10 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle_Day;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::ForestNight;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float BlendRadius = 500.0f;
+    float BlendRadius = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float MaxVolume = 1.0f;
@@ -40,9 +39,17 @@ struct FAudio_ZoneConfig
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     bool bLooping = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bTriggersDangerMusic = false;
 };
 
-UCLASS(BlueprintType, Blueprintable)
+/**
+ * AAudio_ZoneManager — Adaptive ambient audio zone actor.
+ * Blends ambient sound based on player proximity.
+ * Supports campfire, forest night, T-Rex territory, river, cave zones.
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone Manager"))
 class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 {
     GENERATED_BODY()
@@ -56,33 +63,42 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     FAudio_ZoneConfig ZoneConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone")
-    USphereComponent* ZoneSphere;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
+        meta = (AllowPrivateAccess = "true"))
+    USphereComponent* BlendSphere;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone",
+        meta = (AllowPrivateAccess = "true"))
     UAudioComponent* AmbientAudioComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void SetZoneVolume(float NewVolume);
+    /** Current blend weight 0-1 based on player distance */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone")
+    float CurrentBlendWeight = 0.0f;
+
+    /** Is player currently inside this zone? */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone")
+    bool bPlayerInZone = false;
 
     UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void FadeInAudio();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void FadeOutAudio();
+    void SetZoneActive(bool bActive);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Zone")
     float GetDistanceToPlayer() const;
 
     UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    bool IsPlayerInZone() const;
+    void TriggerDangerStinger();
 
 private:
-    UPROPERTY()
-    float CurrentVolume = 0.0f;
+    void UpdateBlendWeight(float DeltaTime);
 
-    UPROPERTY()
-    bool bPlayerInZone = false;
+    UFUNCTION()
+    void OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
 
-    void UpdateVolumeByDistance(float DeltaTime);
+    UFUNCTION()
+    void OnPlayerLeaveZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    float TargetBlendWeight = 0.0f;
 };
