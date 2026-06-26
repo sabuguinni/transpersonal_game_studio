@@ -1,149 +1,124 @@
-// PCGWorldGenerator.h
-// Procedural World Generator — Agent #5
-// Transpersonal Game Studio — Dinosaur Survival Game
+// PCGWorldGenerator.h — Procedural World Generator #05
+// Cycle: PROD_CYCLE_AUTO_20260626_008
+// Biome system, terrain variation, river generation for Cretaceous world
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "UObject/NoExportTypes.h"
 #include "PCGWorldGenerator.generated.h"
 
-// ============================================================
-// EWorld_BiomeType — biome classification enum
-// ============================================================
+// === BIOME TYPES ===
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    JungleForest    UMETA(DisplayName = "Jungle Forest"),
-    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
-    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
-    RiverDelta      UMETA(DisplayName = "River Delta"),
-    CoastalFlats    UMETA(DisplayName = "Coastal Flats"),
+    TropicalForest    UMETA(DisplayName = "Tropical Forest"),
+    OpenPlains        UMETA(DisplayName = "Open Plains"),
+    RockyHighlands    UMETA(DisplayName = "Rocky Highlands"),
+    RiverValley       UMETA(DisplayName = "River Valley"),
+    CoastalSwamp      UMETA(DisplayName = "Coastal Swamp"),
+    VolcanicField     UMETA(DisplayName = "Volcanic Field")
 };
 
-// ============================================================
-// FWorld_BiomeCell — data for a single biome region
-// ============================================================
+// === BIOME ZONE DATA ===
 USTRUCT(BlueprintType)
-struct FWorld_BiomeCell
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenSavanna;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenPlains;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
     FVector CenterLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 10000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float Radius = 2000.f;
 
-    /** Temperature in Celsius (Cretaceous era range: 18-35°C) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 28.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float VegetationDensity = 0.5f;
 
-    /** Humidity 0.0 (arid) to 1.0 (saturated) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
-
-    /** Vegetation density 0.0 (bare) to 1.0 (dense canopy) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.4f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float GroundHeightOffset = 0.f;
 };
 
-// ============================================================
-// APCGWorldGenerator — main world generation actor
-// ============================================================
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG World Generator"))
-class TRANSPERSONALGAME_API APCGWorldGenerator : public AActor
+// === TERRAIN SAMPLE ===
+USTRUCT(BlueprintType)
+struct FWorld_TerrainSample
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "World|Terrain")
+    FVector WorldLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "World|Terrain")
+    float Height = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "World|Terrain")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenPlains;
+
+    UPROPERTY(BlueprintReadOnly, Category = "World|Terrain")
+    float SlopeAngle = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "World|Terrain")
+    bool bIsWater = false;
+};
+
+// === PCG WORLD GENERATOR ===
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
+class TRANSPERSONALGAME_API UPCGWorldGenerator : public UObject
 {
     GENERATED_BODY()
 
 public:
-    APCGWorldGenerator();
+    UPCGWorldGenerator();
 
-protected:
-    virtual void BeginPlay() override;
+    // === INITIALIZATION ===
+    UFUNCTION(BlueprintCallable, Category = "World|Generation")
+    void InitializeWorld(int32 Seed);
 
-public:
-    // --------------------------------------------------------
-    // Generation Parameters
-    // --------------------------------------------------------
-
-    /** Random seed for deterministic world generation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 BiomeSeed;
-
-    /** World size in Unreal units (X axis) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float WorldSizeX;
-
-    /** World size in Unreal units (Y axis) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float WorldSizeY;
-
-    /** Maximum terrain height variation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float TerrainHeightScale;
-
-    /** If true, generate world automatically on BeginPlay */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    bool bGenerateOnBeginPlay;
-
-    /** Biome type to weight mapping (must sum to ~1.0) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    TMap<EWorld_BiomeType, float> BiomeWeights;
-
-    // --------------------------------------------------------
-    // Runtime Data
-    // --------------------------------------------------------
-
-    /** All generated biome cells */
-    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
-    TArray<FWorld_BiomeCell> ActiveBiomes;
-
-    /** River source points for spline generation */
-    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
-    TArray<FVector> RiverSourcePoints;
-
-    /** Landmark positions (volcanoes, rock formations) */
-    UPROPERTY(BlueprintReadOnly, Category = "World Generation|Runtime")
-    TArray<FVector> LandmarkLocations;
-
-    // --------------------------------------------------------
-    // Generation Functions
-    // --------------------------------------------------------
-
-    /** Trigger full world generation */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World Generation")
-    void GenerateWorld();
-
-    /** Generate biome map using Voronoi-style placement */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiomeMap();
-
-    /** Generate river network flowing from highlands to coast */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateRiverNetwork();
-
-    /** Place terrain landmarks: volcanic peaks, rock formations */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void PlaceTerrainLandmarks();
-
-    /** Query biome type at a world-space location */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    // === BIOME QUERIES ===
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
     EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    // --------------------------------------------------------
-    // Biome Property Helpers
-    // --------------------------------------------------------
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    TArray<FWorld_BiomeZone> GetAllBiomeZones() const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
-    float GetBiomeTemperature(EWorld_BiomeType BiomeType) const;
+    // === TERRAIN QUERIES ===
+    UFUNCTION(BlueprintCallable, Category = "World|Terrain")
+    float GetTerrainHeightAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
-    float GetBiomeHumidity(EWorld_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "World|Terrain")
+    FWorld_TerrainSample SampleTerrain(FVector Location) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation|Biome")
-    float GetBiomeVegetationDensity(EWorld_BiomeType BiomeType) const;
+    // === RIVER SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "World|Rivers")
+    int32 GetRiverCount() const;
+
+    // === CONFIGURATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    int32 BiomeSeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    float TerrainScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    int32 RiverCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    bool bEnableBiomeTransitions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    float WorldExtentXY;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Config")
+    float HeightVariationScale;
+
+private:
+    void GenerateBiomeMap();
+    void GenerateRivers();
+
+    TArray<FWorld_BiomeZone> BiomeZones;
+    TArray<TArray<FVector>> RiverPaths;
+    FRandomStream RandomStream;
 };
