@@ -1,123 +1,189 @@
-// PerformanceConfig.h — Transpersonal Game Studio
-// Agent #4 Performance Optimizer — Cycle 003
-// Frame budget constants and LOD thresholds for 60fps PC / 30fps console
+// PerformanceConfig.h — Agent #4 Performance Optimizer
+// Cycle: PROD_CYCLE_AUTO_20260626_009
+// Target: 60fps PC high-end / 30fps console
+// All constants prefixed Perf_ to avoid naming collisions
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "PerformanceConfig.generated.h"
 
 // ============================================================
-// FRAME BUDGET CONSTANTS
+// ENUMS (global scope — RULE 1)
 // ============================================================
 
-// Target frame times (milliseconds)
-#define PERF_TARGET_FPS_PC          60.0f
-#define PERF_TARGET_FPS_CONSOLE     30.0f
-#define PERF_FRAME_BUDGET_PC_MS     16.67f   // 1000ms / 60fps
-#define PERF_FRAME_BUDGET_CONSOLE_MS 33.33f  // 1000ms / 30fps
+UENUM(BlueprintType)
+enum class EPerf_QualityTier : uint8
+{
+    Console_30fps   UMETA(DisplayName = "Console 30fps"),
+    PC_Medium_60fps UMETA(DisplayName = "PC Medium 60fps"),
+    PC_High_60fps   UMETA(DisplayName = "PC High 60fps"),
+    PC_Ultra_60fps  UMETA(DisplayName = "PC Ultra 60fps"),
+};
 
-// Sub-budget allocations (PC, in ms)
-#define PERF_BUDGET_RENDER_MS       8.0f     // GPU render thread
-#define PERF_BUDGET_GAME_MS         4.0f     // Game thread (logic, AI, physics)
-#define PERF_BUDGET_GPU_MS          12.0f    // Total GPU budget
-#define PERF_BUDGET_RHITHREAD_MS    2.0f     // RHI submission
-
-// ============================================================
-// LOD DISTANCE THRESHOLDS (Unreal Units = cm)
-// ============================================================
-
-// Dinosaur LOD distances
-#define PERF_DINO_LOD0_DISTANCE     2000.0f   // Full detail
-#define PERF_DINO_LOD1_DISTANCE     5000.0f   // Medium detail
-#define PERF_DINO_LOD2_DISTANCE     10000.0f  // Low detail
-#define PERF_DINO_LOD3_DISTANCE     15000.0f  // Minimal / impostor
-
-// Large dinosaur (Brachiosaurus) extended distances
-#define PERF_DINO_LARGE_LOD0        3000.0f
-#define PERF_DINO_LARGE_LOD1        8000.0f
-#define PERF_DINO_LARGE_MAX_DRAW    20000.0f
-
-// T-Rex (apex predator — always visible further)
-#define PERF_DINO_TREX_LOD0         2500.0f
-#define PERF_DINO_TREX_LOD1         6000.0f
-#define PERF_DINO_TREX_MAX_DRAW     15000.0f
-
-// Small dinosaurs (Raptor, Protoceratops)
-#define PERF_DINO_SMALL_LOD0        1500.0f
-#define PERF_DINO_SMALL_LOD1        4000.0f
-#define PERF_DINO_SMALL_MAX_DRAW    8000.0f
-
-// Foliage LOD distances
-#define PERF_FOLIAGE_LOD0_DISTANCE  1000.0f
-#define PERF_FOLIAGE_LOD1_DISTANCE  3000.0f
-#define PERF_FOLIAGE_LOD2_DISTANCE  6000.0f
-#define PERF_FOLIAGE_CULL_DISTANCE  8000.0f
-
-// Rock / prop LOD distances
-#define PERF_PROP_LOD0_DISTANCE     1500.0f
-#define PERF_PROP_LOD1_DISTANCE     4000.0f
-#define PERF_PROP_CULL_DISTANCE     6000.0f
+UENUM(BlueprintType)
+enum class EPerf_LODZone : uint8
+{
+    Near    UMETA(DisplayName = "Near (0-3000u)"),
+    Mid     UMETA(DisplayName = "Mid (3000-5000u)"),
+    Far     UMETA(DisplayName = "Far (5000-8000u)"),
+    VeryFar UMETA(DisplayName = "VeryFar (8000u+)"),
+    Culled  UMETA(DisplayName = "Culled (beyond max draw)"),
+};
 
 // ============================================================
-// DRAW CALL BUDGETS
+// STRUCTS (global scope — RULE 1)
 // ============================================================
 
-#define PERF_MAX_DRAW_CALLS_PC      2000
-#define PERF_MAX_DRAW_CALLS_CONSOLE 800
-#define PERF_MAX_DYNAMIC_LIGHTS     8       // Dynamic shadow-casting lights
-#define PERF_MAX_SKELETAL_MESHES    20      // Animated characters/dinos on screen
-#define PERF_MAX_PARTICLES_PC       500     // Niagara particle count
-#define PERF_MAX_PARTICLES_CONSOLE  200
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_DinoTickBudget
+{
+    GENERATED_BODY()
+
+    // Distance from player at which this budget applies
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    float MaxDistanceUnits = 3000.0f;
+
+    // Tick interval in seconds for dinos in this zone
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    float TickIntervalSeconds = 0.1f;
+
+    // Whether full AI behavior tree runs at this distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    bool bFullAIEnabled = true;
+
+    // Whether perception system is active at this distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    bool bPerceptionEnabled = true;
+
+    FPerf_DinoTickBudget() {}
+    FPerf_DinoTickBudget(float Dist, float Interval, bool bAI, bool bPerc)
+        : MaxDistanceUnits(Dist), TickIntervalSeconds(Interval)
+        , bFullAIEnabled(bAI), bPerceptionEnabled(bPerc) {}
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_FrameBudget
+{
+    GENERATED_BODY()
+
+    // Target frame time in milliseconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float TargetFrameTimeMs = 16.67f; // 60fps
+
+    // Maximum ms allowed for AI systems per frame
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float AIBudgetMs = 3.0f;
+
+    // Maximum ms allowed for rendering per frame
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float RenderBudgetMs = 10.0f;
+
+    // Maximum ms allowed for physics per frame
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float PhysicsBudgetMs = 2.5f;
+
+    // Maximum ms allowed for game logic per frame
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float GameLogicBudgetMs = 1.17f;
+
+    FPerf_FrameBudget() {}
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_LODThresholds
+{
+    GENERATED_BODY()
+
+    // Distance at which LOD0 (full detail) transitions to LOD1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD0_To_LOD1 = 2000.0f;
+
+    // Distance at which LOD1 transitions to LOD2
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD1_To_LOD2 = 4000.0f;
+
+    // Distance at which LOD2 transitions to LOD3 (lowest)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD2_To_LOD3 = 7000.0f;
+
+    // Distance beyond which actor is culled entirely
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float CullDistance = 12000.0f;
+
+    // Dino-specific cull distance (larger = more visible at range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float DinoCullDistance = 15000.0f;
+
+    FPerf_LODThresholds() {}
+};
 
 // ============================================================
-// SURVIVAL COMPONENT TICK INTERVALS
+// MAIN CONFIG CLASS
 // ============================================================
 
-// SurvivalComponent tick at 1Hz (every 1 second) — validated for 60fps
-#define PERF_SURVIVAL_TICK_INTERVAL     1.0f
+UCLASS(BlueprintType, Blueprintable, Config = Game)
+class TRANSPERSONALGAME_API UPerf_PerformanceConfig : public UObject
+{
+    GENERATED_BODY()
 
-// AI behavior tree tick interval
-#define PERF_AI_TICK_INTERVAL           0.1f    // 10Hz for AI decisions
+public:
+    UPerf_PerformanceConfig();
 
-// Crowd simulation tick interval (Mass AI)
-#define PERF_CROWD_TICK_INTERVAL        0.2f    // 5Hz for crowd agents
+    // Current quality tier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_QualityTier QualityTier = EPerf_QualityTier::PC_High_60fps;
 
-// World streaming check interval
-#define PERF_STREAMING_CHECK_INTERVAL   0.5f    // 2Hz for streaming updates
+    // Frame budget for this quality tier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget FrameBudget;
 
-// ============================================================
-// MEMORY BUDGETS
-// ============================================================
+    // LOD thresholds for meshes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODThresholds LODThresholds;
 
-#define PERF_TEXTURE_POOL_PC_MB         2048    // 2GB texture streaming pool
-#define PERF_TEXTURE_POOL_CONSOLE_MB    512     // 512MB for console
-#define PERF_MESH_BUDGET_MB             256     // Static/skeletal mesh budget
-#define PERF_AUDIO_BUDGET_MB            128     // Audio streaming budget
+    // Dino tick budgets by distance zone (Near, Mid, Far, VeryFar)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    TArray<FPerf_DinoTickBudget> DinoTickBudgets;
 
-// ============================================================
-// SHADOW QUALITY SETTINGS
-// ============================================================
+    // Maximum simultaneous dinos with full AI (beyond this, tick culled)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    int32 MaxFullAIDinos = 8;
 
-#define PERF_SHADOW_MAX_CASCADES        2       // CSM cascades (2 for perf)
-#define PERF_SHADOW_MAX_RESOLUTION      1024    // Shadow map resolution
-#define PERF_SHADOW_RADIUS_THRESHOLD    0.03f   // Skip tiny shadow casters
+    // Maximum total dinos in world (spawner respects this)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Dino")
+    int32 MaxTotalDinos = 30;
 
-// ============================================================
-// SCALABILITY PRESETS
-// ============================================================
+    // NavMesh query cache radius — reuse patrol points within this radius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI")
+    float NavMeshCacheRadius = 500.0f;
 
-// PC High-End (target: 60fps @ 1080p/1440p)
-#define PERF_PRESET_PC_SHADOW_QUALITY       3
-#define PERF_PRESET_PC_TEXTURE_QUALITY      3
-#define PERF_PRESET_PC_EFFECTS_QUALITY      3
-#define PERF_PRESET_PC_POSTPROCESS_QUALITY  3
-#define PERF_PRESET_PC_FOLIAGE_QUALITY      2   // Foliage at medium saves 3-5ms
-#define PERF_PRESET_PC_VIEWDIST_QUALITY     3
+    // Whether to enable Lumen GI (disable on console tier)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Rendering")
+    bool bEnableLumenGI = true;
 
-// Console (target: 30fps @ 1080p)
-#define PERF_PRESET_CONSOLE_SHADOW_QUALITY      2
-#define PERF_PRESET_CONSOLE_TEXTURE_QUALITY     2
-#define PERF_PRESET_CONSOLE_EFFECTS_QUALITY     2
-#define PERF_PRESET_CONSOLE_POSTPROCESS_QUALITY 2
-#define PERF_PRESET_CONSOLE_FOLIAGE_QUALITY     1
-#define PERF_PRESET_CONSOLE_VIEWDIST_QUALITY    2
+    // Whether to enable Lumen Reflections
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Rendering")
+    bool bEnableLumenReflections = true;
+
+    // Shadow map resolution (1024 console, 2048 PC, 4096 ultra)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Rendering")
+    int32 ShadowMapResolution = 2048;
+
+    // Apply this config to the running world via console commands
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyToWorld(UWorld* World);
+
+    // Get the tick interval for a dino at a given distance from player
+    UFUNCTION(BlueprintCallable, Category = "Performance|Dino")
+    float GetDinoTickInterval(float DistanceFromPlayer) const;
+
+    // Get LOD zone for a given distance
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    EPerf_LODZone GetLODZone(float DistanceFromPlayer) const;
+
+    // Singleton accessor (returns CDO)
+    UFUNCTION(BlueprintCallable, Category = "Performance", meta = (WorldContext = "WorldContextObject"))
+    static UPerf_PerformanceConfig* Get(UObject* WorldContextObject);
+};
