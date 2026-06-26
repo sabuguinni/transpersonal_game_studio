@@ -1,51 +1,73 @@
+// BiomeManager.h — Core Systems Programmer #03 — Cycle 008
+// Prehistoric survival game: spatial biome registry.
+// Manages biome definitions, species assignment, and location queries.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Core/SharedTypes.h"
 #include "BiomeManager.generated.h"
 
+/** Biome type classification */
 UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
+enum class ECore_BiomeType : uint8
 {
-    TropicalJungle   UMETA(DisplayName = "Tropical Jungle"),
-    OpenSavanna      UMETA(DisplayName = "Open Savanna"),
-    RockyHighlands   UMETA(DisplayName = "Rocky Highlands"),
-    RiverDelta       UMETA(DisplayName = "River Delta"),
-    DenseForest      UMETA(DisplayName = "Dense Forest"),
-    VolcanicPlains   UMETA(DisplayName = "Volcanic Plains"),
+    Jungle      UMETA(DisplayName = "Jungle"),
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Canyon      UMETA(DisplayName = "Canyon"),
+    Beach       UMETA(DisplayName = "Beach"),
+    Volcanic    UMETA(DisplayName = "Volcanic"),
+    Unknown     UMETA(DisplayName = "Unknown"),
 };
 
+/** Data for a single biome region */
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData
+struct FCore_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenSavanna;
+    FName BiomeName = NAME_None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    ECore_BiomeType BiomeType = ECore_BiomeType::Unknown;
 
+    /** World-space center of this biome region */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 3000.0f;
+    FVector Center = FVector::ZeroVector;
 
+    /** Radius in world units (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 5000.f;
+
+    /** Danger level 0-1: drives dinosaur aggression scaling */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float DangerLevel = 0.5f;
 
+    /** Average temperature (Celsius) — affects survival mechanics */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 28.f;
+
+    /** Dinosaur species that spawn in this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FName> DinosaurSpecies;
+
+    /** Foliage density multiplier for procedural world gen */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float FoliageDensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor AmbientTint = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.7f;
 };
 
+/**
+ * ABiomeManager — Spatial registry of all biome regions in the world.
+ * Non-ticking actor (biome data is static). Provides location queries used by:
+ *   - PCGWorldGenerator (#05) for foliage density and terrain variation
+ *   - DinosaurBase AI for aggression scaling via DangerLevel
+ *   - SurvivalComponent for temperature-based survival penalties
+ *
+ * Usage: Place one ABiomeManager in the level. Call GetBiomeAtLocation() from any system.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
@@ -55,46 +77,62 @@ public:
     ABiomeManager();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // Biome query
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    // ── Query API ──────────────────────────────────────────────────────────────
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    FWorld_BiomeData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    /** Returns the biome data for the closest biome at the given world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    FCore_BiomeData GetBiomeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+    /** Returns the biome type at the given world location */
+    UFUNCTION(BlueprintPure, Category = "Biome|Query")
+    ECore_BiomeType GetBiomeTypeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetFoliageDensityAtLocation(const FVector& WorldLocation) const;
+    /** Returns true if the location falls within the given biome's radius */
+    UFUNCTION(BlueprintPure, Category = "Biome|Query")
+    bool IsLocationInBiome(FVector WorldLocation, FName BiomeName) const;
 
-    // Biome registration
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    void RegisterBiome(const FWorld_BiomeData& BiomeData);
+    /** Returns the danger level (0-1) at the given world location */
+    UFUNCTION(BlueprintPure, Category = "Biome|Query")
+    float GetDangerLevelAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    void ClearAllBiomes();
+    /** Returns the temperature at the given world location */
+    UFUNCTION(BlueprintPure, Category = "Biome|Query")
+    float GetTemperatureAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Biome")
-    void InitializeDefaultBiomes();
+    /** Returns all dinosaur species names that spawn in the biome at this location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    TArray<FName> GetDinosaursForBiome(FVector WorldLocation) const;
 
-    // Debug
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    int32 GetBiomeCount() const { return RegisteredBiomes.Num(); }
+    /** Returns all registered biomes */
+    UFUNCTION(BlueprintPure, Category = "Biome|Query")
+    TArray<FCore_BiomeData> GetAllBiomes() const { return Biomes; }
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    TArray<FWorld_BiomeData> RegisteredBiomes;
+    // ── Registration ──────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float BiomeBlendRadius = 500.0f;
+    /** Add a biome at runtime (used by PCGWorldGenerator) */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Registration")
+    void RegisterBiome(const FCore_BiomeData& BiomeData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    bool bAutoInitOnBeginPlay = true;
+    /** Clear all biomes and re-register defaults */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Registration")
+    void ResetToDefaults();
+
+    // ── Editor utility ────────────────────────────────────────────────────────
+
+    /** Draw debug spheres for all biome regions in the viewport */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void DrawBiomeDebug();
+
+    // ── Data ──────────────────────────────────────────────────────────────────
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Data")
+    TArray<FCore_BiomeData> Biomes;
 
 private:
-    const FWorld_BiomeData* FindClosestBiome(const FVector& WorldLocation) const;
-    float CalculateBlendWeight(const FVector& Location, const FWorld_BiomeData& Biome) const;
+    /** Populate default 4-biome layout for MinPlayableMap */
+    void InitializeDefaultBiomes();
+
+    /** Find the index of the closest biome to a world location. Returns -1 if none. */
+    int32 FindClosestBiomeIndex(FVector WorldLocation) const;
 };
