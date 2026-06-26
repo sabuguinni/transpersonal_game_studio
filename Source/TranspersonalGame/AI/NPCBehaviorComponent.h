@@ -2,98 +2,59 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
 #include "NPCBehaviorComponent.generated.h"
-
-// -----------------------------------------------------------------------
-// Enums — NPC_prefix to avoid collision with other agents
-// -----------------------------------------------------------------------
 
 UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Patrol      UMETA(DisplayName = "Patrol"),
-    Investigate UMETA(DisplayName = "Investigate"),
-    Flee        UMETA(DisplayName = "Flee"),
     Alert       UMETA(DisplayName = "Alert"),
-    Hunt        UMETA(DisplayName = "Hunt"),
-    Rest        UMETA(DisplayName = "Rest"),
-    Social      UMETA(DisplayName = "Social"),
+    Flee        UMETA(DisplayName = "Flee"),
+    Interact    UMETA(DisplayName = "Interact"),
+    Shelter     UMETA(DisplayName = "Shelter"),
+    Sleep       UMETA(DisplayName = "Sleep"),
 };
 
 UENUM(BlueprintType)
-enum class ENPC_ThreatLevel : uint8
+enum class ENPC_Role : uint8
 {
-    None    UMETA(DisplayName = "None"),
-    Low     UMETA(DisplayName = "Low"),
-    Medium  UMETA(DisplayName = "Medium"),
-    High    UMETA(DisplayName = "High"),
-    Extreme UMETA(DisplayName = "Extreme"),
+    TribeLeader UMETA(DisplayName = "TribeLeader"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Guard       UMETA(DisplayName = "Guard"),
 };
-
-UENUM(BlueprintType)
-enum class ENPC_DailyActivity : uint8
-{
-    Sleep   UMETA(DisplayName = "Sleep"),
-    Forage  UMETA(DisplayName = "Forage"),
-    Hunt    UMETA(DisplayName = "Hunt"),
-    Guard   UMETA(DisplayName = "Guard"),
-    Craft   UMETA(DisplayName = "Craft"),
-    Socialize UMETA(DisplayName = "Socialize"),
-    Scout   UMETA(DisplayName = "Scout"),
-};
-
-// -----------------------------------------------------------------------
-// Memory entry — what this NPC remembers about a threat/event
-// -----------------------------------------------------------------------
 
 USTRUCT(BlueprintType)
-struct FNPC_MemoryEntry
+struct FNPC_Memory
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    AActor* SourceActor = nullptr;
+    FVector LastKnownThreatLocation;
 
     UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    FVector LastKnownLocation = FVector::ZeroVector;
+    float ThreatLevel;
 
     UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float ThreatScore = 0.0f;
+    float TimeSinceThreat;
 
     UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float TimeStamp = 0.0f;
+    bool bHasSeenPlayer;
 
     UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    bool bIsActive = true;
+    bool bHasSeenDinosaur;
+
+    FNPC_Memory()
+        : LastKnownThreatLocation(FVector::ZeroVector)
+        , ThreatLevel(0.f)
+        , TimeSinceThreat(0.f)
+        , bHasSeenPlayer(false)
+        , bHasSeenDinosaur(false)
+    {}
 };
-
-// -----------------------------------------------------------------------
-// Daily schedule entry
-// -----------------------------------------------------------------------
-
-USTRUCT(BlueprintType)
-struct FNPC_ScheduleEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    float StartHour = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    float EndHour = 6.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    ENPC_DailyActivity Activity = ENPC_DailyActivity::Sleep;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    FVector TargetLocation = FVector::ZeroVector;
-};
-
-// -----------------------------------------------------------------------
-// Main component
-// -----------------------------------------------------------------------
 
 UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
@@ -103,110 +64,83 @@ class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
 public:
     UNPCBehaviorComponent();
 
-    // --- Lifecycle ---
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // --- State ---
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Idle;
+    // Current behavior state
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Behavior")
+    ENPC_BehaviorState CurrentState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    ENPC_ThreatLevel CurrentThreatLevel = ENPC_ThreatLevel::None;
+    // NPC role in the tribe
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Role")
+    ENPC_Role NPCRole;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|State")
-    float FearLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|State")
-    float Alertness = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|State")
-    float Stamina = 100.0f;
-
-    // --- Patrol ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    TArray<AActor*> PatrolWaypoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    int32 CurrentWaypointIndex = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    float PatrolAcceptanceRadius = 150.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    float PatrolWaitTime = 2.0f;
-
-    // --- Perception ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
-    float SightRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
-    float HearingRadius = 1200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
-    float SightAngleDegrees = 90.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Perception")
-    float FleeThresholdFear = 70.0f;
-
-    // --- Memory ---
+    // NPC memory of threats and events
     UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
-    TArray<FNPC_MemoryEntry> ThreatMemory;
+    FNPC_Memory Memory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
-    float MemoryDecayRate = 5.0f;
+    // Patrol radius from home location
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
+    float PatrolRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
-    int32 MaxMemoryEntries = 8;
+    // Home base location (set on BeginPlay)
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
+    FVector HomeLocation;
 
-    // --- Daily Schedule ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Schedule")
-    TArray<FNPC_ScheduleEntry> DailySchedule;
+    // Detection range for threats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Detection")
+    float ThreatDetectionRange;
 
+    // Fear threshold — above this, NPC flees
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Detection")
+    float FearFleeThreshold;
+
+    // Current fear level (0-1)
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
+    float FearLevel;
+
+    // Stamina for running/fleeing (0-1)
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
+    float Stamina;
+
+    // Time of day awareness (0=midnight, 0.5=noon, 1=midnight)
     UPROPERTY(BlueprintReadOnly, Category = "NPC|Schedule")
-    ENPC_DailyActivity CurrentActivity = ENPC_DailyActivity::Guard;
+    float TimeOfDay;
 
-    // --- Functions ---
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void RegisterThreat(AActor* ThreatActor, float ThreatScore, FVector LastKnownLoc);
+    // Should NPC sleep at night?
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Schedule")
+    bool bSleepsAtNight;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void ClearThreat(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void UpdateBehaviorState(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void AdvancePatrolWaypoint();
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Behavior")
-    FVector GetNextPatrolLocation() const;
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Behavior")
-    bool HasActiveThreat() const;
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Behavior")
-    AActor* GetHighestThreatActor() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Schedule")
-    void UpdateDailyActivity(float CurrentGameHour);
-
+    // Transition to a new behavior state
     UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
     void SetBehaviorState(ENPC_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void OnHearNoise(AActor* NoiseSource, float Loudness);
+    // Notify NPC of a threat at a location
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    void RegisterThreat(FVector ThreatLocation, float ThreatMagnitude, bool bIsDinosaur);
 
+    // Clear threat memory over time
+    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
+    void DecayMemory(float DeltaTime);
+
+    // Get next patrol point within radius
+    UFUNCTION(BlueprintCallable, Category = "NPC|Patrol")
+    FVector GetNextPatrolPoint() const;
+
+    // Check if it's time to sleep (night schedule)
+    UFUNCTION(BlueprintCallable, Category = "NPC|Schedule")
+    bool ShouldSleep() const;
+
+    // Get a flee direction away from threat
     UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void OnSeeActor(AActor* SeenActor);
+    FVector GetFleeDirection() const;
+
+protected:
+    void UpdateBehavior(float DeltaTime);
+    void ScanForThreats();
 
 private:
-    float PatrolWaitTimer = 0.0f;
-    bool bIsWaitingAtWaypoint = false;
-
-    void DecayMemory(float DeltaTime);
-    void UpdateFearLevel(float DeltaTime);
-    void EvaluateThreatLevel();
-
-    ENPC_BehaviorState DetermineStateFromContext() const;
+    float PatrolTimer;
+    FVector CurrentPatrolTarget;
+    bool bHasPatrolTarget;
 };
