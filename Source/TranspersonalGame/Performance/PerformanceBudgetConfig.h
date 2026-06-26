@@ -1,153 +1,189 @@
 // PerformanceBudgetConfig.h
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260623_007
-// Defines compile-time performance budget constants for the prehistoric survival game.
-// All systems must respect these limits to hit 60fps PC / 30fps console targets.
+// Performance Optimizer #04 — Frame budget constants and LOD thresholds
+// Target: 60fps PC (16.67ms) / 30fps Console (33.33ms)
+// Cycle: PROD_CYCLE_AUTO_20260626_002
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "PerformanceBudgetConfig.generated.h"
 
 // ============================================================
-// FRAME BUDGET TARGETS
+// ENUMS — Perf_ prefix to avoid collision with other agents
 // ============================================================
 
-/** Target frame time on high-end PC (ms) — 60 fps */
-static constexpr float PERF_TARGET_FRAME_MS_PC = 16.67f;
+UENUM(BlueprintType)
+enum class EPerf_TargetPlatform : uint8
+{
+    PC_High     UMETA(DisplayName = "PC High-End"),
+    PC_Mid      UMETA(DisplayName = "PC Mid-Range"),
+    Console     UMETA(DisplayName = "Console"),
+    Mobile      UMETA(DisplayName = "Mobile")
+};
 
-/** Target frame time on console (ms) — 30 fps */
-static constexpr float PERF_TARGET_FRAME_MS_CONSOLE = 33.33f;
-
-/** Maximum allowed GPU frame time before quality is reduced (ms) */
-static constexpr float PERF_GPU_BUDGET_MS = 12.0f;
-
-/** Maximum allowed CPU game-thread time per frame (ms) */
-static constexpr float PERF_CPU_GAME_BUDGET_MS = 6.0f;
-
-/** Maximum allowed render-thread time per frame (ms) */
-static constexpr float PERF_CPU_RENDER_BUDGET_MS = 6.0f;
-
-// ============================================================
-// ACTOR / DRAW CALL BUDGET
-// ============================================================
-
-/** Maximum number of actors visible in any single frame */
-static constexpr int32 PERF_MAX_VISIBLE_ACTORS = 500;
-
-/** Maximum draw calls per frame (PC) */
-static constexpr int32 PERF_MAX_DRAW_CALLS_PC = 2000;
-
-/** Maximum draw calls per frame (console) */
-static constexpr int32 PERF_MAX_DRAW_CALLS_CONSOLE = 1200;
-
-/** Maximum simultaneous dynamic lights */
-static constexpr int32 PERF_MAX_DYNAMIC_LIGHTS = 8;
-
-/** Maximum simultaneous shadow-casting lights */
-static constexpr int32 PERF_MAX_SHADOW_LIGHTS = 4;
+UENUM(BlueprintType)
+enum class EPerf_BudgetStatus : uint8
+{
+    Comfortable UMETA(DisplayName = "Comfortable (>4ms headroom)"),
+    Tight       UMETA(DisplayName = "Tight (1-4ms headroom)"),
+    OverBudget  UMETA(DisplayName = "Over Budget (<1ms headroom)")
+};
 
 // ============================================================
-// DINOSAUR AI BUDGET
+// STRUCTS — Frame budget breakdown
 // ============================================================
 
-/** Maximum dinosaurs with full AI ticking simultaneously */
-static constexpr int32 PERF_MAX_DINOS_FULL_AI = 12;
+USTRUCT(BlueprintType)
+struct FPerf_FrameBudget
+{
+    GENERATED_BODY()
 
-/** Maximum dinosaurs in scene total (beyond this, use LOD AI) */
-static constexpr int32 PERF_MAX_DINOS_TOTAL = 40;
+    // Total frame budget in milliseconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TotalBudgetMs = 16.67f; // 60fps
 
-/** Distance at which dinosaur AI switches to simplified tick (cm) */
-static constexpr float PERF_DINO_AI_LOD_DISTANCE = 5000.0f;
+    // Rendering sub-budgets (ms)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LumenGIBudgetMs = 4.0f;
 
-/** Distance at which dinosaur AI is fully dormant (cm) */
-static constexpr float PERF_DINO_AI_SLEEP_DISTANCE = 15000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float ShadowBudgetMs = 2.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float SkeletalMeshBudgetMs = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float StaticMeshBudgetMs = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float ParticlesBudgetMs = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float GameThreadBudgetMs = 4.0f;
+
+    // Computed headroom
+    float GetHeadroomMs() const
+    {
+        return TotalBudgetMs - (LumenGIBudgetMs + ShadowBudgetMs +
+               SkeletalMeshBudgetMs + StaticMeshBudgetMs +
+               ParticlesBudgetMs + GameThreadBudgetMs);
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FPerf_LODThresholds
+{
+    GENERATED_BODY()
+
+    // Distance at which dinosaur LOD1 kicks in (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float DinoLOD1Distance = 1500.0f;
+
+    // Distance at which dinosaur LOD2 kicks in (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float DinoLOD2Distance = 4000.0f;
+
+    // Distance at which dinosaur culls entirely (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float DinoCullDistance = 8000.0f;
+
+    // Foliage cull distance (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float FoliageCullDistance = 5000.0f;
+
+    // NPC URO (Update Rate Optimization) distance threshold (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float NPCURODistance = 2000.0f;
+
+    // Max simultaneous animated skeletal meshes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    int32 MaxAnimatedSkeletalMeshes = 12;
+};
+
+USTRUCT(BlueprintType)
+struct FPerf_ShadowBudget
+{
+    GENERATED_BODY()
+
+    // Max shadow cascade count (3 = good balance)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 MaxCSMCascades = 3;
+
+    // Max shadow map resolution
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 MaxShadowResolution = 2048;
+
+    // Max dynamic shadow-casting lights in scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 MaxDynamicShadowLights = 4;
+
+    // Distance beyond which shadows are culled (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    float ShadowCullDistance = 6000.0f;
+};
 
 // ============================================================
-// CROWD SIMULATION BUDGET (Mass AI)
+// MAIN CONFIG CLASS
 // ============================================================
 
-/** Maximum Mass AI agents simultaneously simulated */
-static constexpr int32 PERF_MAX_MASS_AGENTS = 50000;
+UCLASS(BlueprintType, Blueprintable, Config = Game)
+class TRANSPERSONALGAME_API UPerf_PerformanceBudgetConfig : public UObject
+{
+    GENERATED_BODY()
 
-/** Maximum Mass AI agents with full behaviour trees */
-static constexpr int32 PERF_MAX_MASS_BT_AGENTS = 200;
+public:
+    UPerf_PerformanceBudgetConfig();
 
-// ============================================================
-// PHYSICS BUDGET
-// ============================================================
+    // --- Platform target ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Platform")
+    EPerf_TargetPlatform TargetPlatform = EPerf_TargetPlatform::PC_High;
 
-/** Maximum physics sub-steps per frame */
-static constexpr int32 PERF_MAX_PHYSICS_SUBSTEPS = 4;
+    // --- Frame budgets per platform ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget PCHighBudget;
 
-/** Maximum physics delta time (seconds) */
-static constexpr float PERF_MAX_PHYSICS_DELTA = 0.033f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget ConsoleBudget;
 
-/** Maximum simultaneous ragdolls */
-static constexpr int32 PERF_MAX_RAGDOLLS = 6;
+    // --- LOD thresholds ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODThresholds LODThresholds;
 
-/** Maximum simultaneous destructible actors */
-static constexpr int32 PERF_MAX_DESTRUCTIBLES = 20;
+    // --- Shadow budget ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
+    FPerf_ShadowBudget ShadowBudget;
 
-// ============================================================
-// TEXTURE / STREAMING BUDGET
-// ============================================================
+    // --- Max actor counts (enforced by CAP system) ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
+    int32 MaxDinosInScene = 12;
 
-/** Texture streaming pool size (MB) */
-static constexpr int32 PERF_TEXTURE_POOL_MB = 1024;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
+    int32 MaxFoliageActors = 500;
 
-/** Maximum texture anisotropy level */
-static constexpr int32 PERF_MAX_ANISOTROPY = 8;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
+    int32 MaxParticleSystemsActive = 20;
 
-// ============================================================
-// PARTICLE / VFX BUDGET
-// ============================================================
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
+    int32 MaxDynamicLights = 8;
 
-/** Maximum CPU particle time per frame (ms) */
-static constexpr float PERF_PARTICLE_CPU_BUDGET_MS = 2.0f;
+    // --- Streaming ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    int32 TextureStreamingPoolMB = 2048;
 
-/** Maximum GPU particle time per frame (ms) */
-static constexpr float PERF_PARTICLE_GPU_BUDGET_MS = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    float WorldPartitionStreamingRadius = 15000.0f;
 
-/** Maximum simultaneous Niagara systems */
-static constexpr int32 PERF_MAX_NIAGARA_SYSTEMS = 64;
+    // --- Blueprint callable helpers ---
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_FrameBudget GetActiveBudget() const;
 
-// ============================================================
-// SHADOW CASCADE CONFIG
-// ============================================================
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EPerf_BudgetStatus EvaluateBudgetStatus(float MeasuredFrameMs) const;
 
-/** Number of CSM shadow cascades */
-static constexpr int32 PERF_SHADOW_CASCADE_COUNT = 3;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FString GetPerformanceReport() const;
 
-/** Shadow radius threshold — meshes smaller than this skip shadows */
-static constexpr float PERF_SHADOW_RADIUS_THRESHOLD = 0.03f;
-
-/** Shadow distance scale factor */
-static constexpr float PERF_SHADOW_DISTANCE_SCALE = 0.7f;
-
-// ============================================================
-// LOD DISTANCES (cm)
-// ============================================================
-
-/** LOD0→LOD1 transition distance */
-static constexpr float PERF_LOD1_DISTANCE = 1500.0f;
-
-/** LOD1→LOD2 transition distance */
-static constexpr float PERF_LOD2_DISTANCE = 4000.0f;
-
-/** LOD2→LOD3 (lowest) transition distance */
-static constexpr float PERF_LOD3_DISTANCE = 8000.0f;
-
-/** Cull distance — actors beyond this are not rendered */
-static constexpr float PERF_CULL_DISTANCE = 20000.0f;
-
-// ============================================================
-// ANIMATION BUDGET
-// ============================================================
-
-/** Enable Update Rate Optimisation (URO) for distant characters */
-static constexpr bool PERF_URO_ENABLED = true;
-
-/** Enable parallel animation evaluation */
-static constexpr bool PERF_PARALLEL_ANIM = true;
-
-/** Distance at which URO kicks in (cm) */
-static constexpr float PERF_URO_DISTANCE = 3000.0f;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyConsoleCommandsForPlatform();
+};
