@@ -5,53 +5,9 @@
 #include "DinoAnimInstance.generated.h"
 
 /**
- * FAnim_DinoLocomotionData — runtime locomotion data for dinosaur animation
- * Drives blend spaces: speed, direction, stance
- */
-USTRUCT(BlueprintType)
-struct FAnim_DinoLocomotionData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    float Speed = 0.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    float Direction = 0.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    bool bIsMoving = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    bool bIsAttacking = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    bool bIsAggressive = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Locomotion")
-    float ThreatLevel = 0.f;  // 0=calm, 1=full aggression
-};
-
-/**
- * EAnim_DinoStance — high-level stance state for state machine
- */
-UENUM(BlueprintType)
-enum class EAnim_DinoStance : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Roaring     UMETA(DisplayName = "Roaring"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Dead        UMETA(DisplayName = "Dead"),
-};
-
-/**
- * UDinoAnimInstance
- * Base AnimInstance for all dinosaur species.
- * Drives locomotion blend spaces, IK foot placement, and attack montages.
- * Works with any dinosaur skeletal mesh from /Game/Dinosaur_Pack/.
+ * Animation instance for dinosaur skeletal meshes.
+ * Drives locomotion blend space, attack montages, and idle variation.
+ * Agent #10 — Animation Agent
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoAnimInstance : public UAnimInstance
@@ -64,68 +20,95 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion State ──────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
-    FAnim_DinoLocomotionData LocomotionData;
+    // ── Locomotion ──────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion",
-              meta = (AllowPrivateAccess = "true"))
-    EAnim_DinoStance CurrentStance = EAnim_DinoStance::Idle;
+    /** Current movement speed (0 = idle, >0 = walking/running) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Speed;
 
-    // ── IK Foot Placement ─────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK",
-              meta = (AllowPrivateAccess = "true"))
-    FVector LeftFootIKLocation = FVector::ZeroVector;
+    /** Lateral strafe direction (-1 left, 0 straight, 1 right) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK",
-              meta = (AllowPrivateAccess = "true"))
-    FVector RightFootIKLocation = FVector::ZeroVector;
+    /** True when the dino is airborne (jump/fall) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK",
-              meta = (AllowPrivateAccess = "true"))
-    float FootIKAlpha = 1.f;
+    /** True when the dino is actively sprinting */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsSprinting;
 
-    // ── Blend Space Inputs ────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|BlendSpace",
-              meta = (AllowPrivateAccess = "true"))
-    float LocomotionSpeed = 0.f;
+    // ── Combat ──────────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|BlendSpace",
-              meta = (AllowPrivateAccess = "true"))
-    float LocomotionDirection = 0.f;
+    /** True when the dino is attacking */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsAttacking;
 
-    // ── Attack / Montage ──────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat",
-              meta = (AllowPrivateAccess = "true"))
-    bool bPlayAttackMontage = false;
+    /** True when the dino has been hit */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsHit;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat",
-              meta = (AllowPrivateAccess = "true"))
-    bool bPlayRoarMontage = false;
+    /** True when the dino is dead */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsDead;
 
-    // ── Blueprint-callable helpers ────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Anim|Locomotion")
-    void SetLocomotionSpeed(float NewSpeed);
+    // ── Behaviour ───────────────────────────────────────────────────────────
+
+    /** True when the dino is eating */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behaviour")
+    bool bIsEating;
+
+    /** True when the dino is roaring */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behaviour")
+    bool bIsRoaring;
+
+    /** Normalised alert level 0-1 (0=calm, 1=fully alerted) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behaviour")
+    float AlertLevel;
+
+    // ── IK ──────────────────────────────────────────────────────────────────
+
+    /** Left foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftFootIKLocation;
+
+    /** Right foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightFootIKLocation;
+
+    /** IK alpha blend (0 = off, 1 = full IK) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float IKAlpha;
+
+    // ── Trigger functions (called by AI/combat systems) ──────────────────────
 
     UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
     void TriggerAttack();
 
     UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    void TriggerHit();
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    void TriggerDeath();
+
+    UFUNCTION(BlueprintCallable, Category = "Anim|Behaviour")
     void TriggerRoar();
 
-    UFUNCTION(BlueprintPure, Category = "Anim|Locomotion")
-    EAnim_DinoStance GetCurrentStance() const { return CurrentStance; }
-
-protected:
-    // ── Internal helpers ──────────────────────────────────────────────
-    void UpdateLocomotionState(float DeltaSeconds);
-    void UpdateFootIK();
-    void DetermineStance();
-
+private:
+    /** Cached owning pawn */
     UPROPERTY()
-    TObjectPtr<APawn> OwnerPawn;
+    class APawn* OwnerPawn;
 
-    float AttackCooldown = 0.f;
-    float RoarCooldown   = 0.f;
+    /** Cached movement component */
+    UPROPERTY()
+    class UMovementComponent* MovementComp;
+
+    /** Update foot IK positions using line traces */
+    void UpdateFootIK(float DeltaSeconds);
+
+    /** Smooth IK alpha in/out based on movement speed */
+    void UpdateIKAlpha(float DeltaSeconds);
+
+    float IKAlphaTarget;
+    float IKAlphaInterpSpeed;
 };
