@@ -1,133 +1,101 @@
-// PCGBiomeSystem.h
-// Agent #05 — Procedural World Generator
-// Cycle: PROD_CYCLE_AUTO_20260626_001
-// Biome classification and PCG-driven world population system
+// PCGBiomeSystem.h — Transpersonal Game Studio
+// Agent #05 — Procedural World Generator — Cycle PROD_CYCLE_AUTO_20260626_003
+// Biome system: defines biome types, terrain features, and foliage distribution rules
+// Uses World_ prefix on all types to avoid cross-agent collisions (Rule 2)
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Components/StaticMeshComponent.h"
 #include "PCGBiomeSystem.generated.h"
 
-// ============================================================
-// ENUMS — Global scope (RULE 1)
-// ============================================================
-
+// ─── Biome Type Enum ───────────────────────────────────────────────────────────
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    CretaceousJungle    UMETA(DisplayName = "Cretaceous Jungle"),
-    OpenSavanna         UMETA(DisplayName = "Open Savanna"),
-    RockyBadlands       UMETA(DisplayName = "Rocky Badlands"),
-    RiverDelta          UMETA(DisplayName = "River Delta"),
-    VolcanicPlains      UMETA(DisplayName = "Volcanic Plains"),
-    CoastalShallows     UMETA(DisplayName = "Coastal Shallows")
+    None            UMETA(DisplayName = "None"),
+    TropicalForest  UMETA(DisplayName = "Tropical Forest"),
+    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
+    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
+    Wetlands        UMETA(DisplayName = "Wetlands"),
+    RiverDelta      UMETA(DisplayName = "River Delta"),
+    VolcanicPlains  UMETA(DisplayName = "Volcanic Plains"),
 };
 
+// ─── Water Body Type ──────────────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class EWorld_WeatherState : uint8
+enum class EWorld_WaterBodyType : uint8
 {
-    Clear       UMETA(DisplayName = "Clear"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Storm"),
-    Fog         UMETA(DisplayName = "Dense Fog")
+    None    UMETA(DisplayName = "None"),
+    River   UMETA(DisplayName = "River"),
+    Lake    UMETA(DisplayName = "Lake"),
+    Swamp   UMETA(DisplayName = "Swamp"),
+    Ocean   UMETA(DisplayName = "Ocean"),
 };
 
-// ============================================================
-// STRUCTS — Global scope (RULE 1)
-// ============================================================
-
+// ─── Terrain Feature Struct ───────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData : public FTableRowBase
+struct FWorld_TerrainFeature
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::CretaceousJungle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Cretaceous Jungle");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TreeDensity = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    EWorld_BiomeType Biome = EWorld_BiomeType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float RockDensity = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    float HeightOffset = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float WaterCoverage = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    bool bIsWaterBody = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float AmbientTemperature = 28.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    EWorld_WaterBodyType WaterType = EWorld_WaterBodyType::None;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HumidityLevel = 0.85f;
+// ─── Biome Config Struct ──────────────────────────────────────────────────────
+USTRUCT(BlueprintType)
+struct FWorld_BiomeConfig
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogColor = FLinearColor(0.6f, 0.8f, 0.5f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    FLinearColor FogColor = FLinearColor(0.5f, 0.7f, 0.4f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float TreeDensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FName> DinosaurSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float RockDensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float WaterPresence = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float MinTerrainHeight = -100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float MaxTerrainHeight = 500.0f;
+
+    // Foliage cull distance — must align with PerformanceConfig.h PERF_FOLIAGE_CULL_DISTANCE (8000.0f)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float FoliageCullDistance = 8000.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FWorld_TerrainCell
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    FVector2D GridPosition = FVector2D::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    EWorld_BiomeType AssignedBiome = EWorld_BiomeType::CretaceousJungle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float ElevationMeters = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float MoistureLevel = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    bool bHasWater = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    bool bIsPopulated = false;
-};
-
-USTRUCT(BlueprintType)
-struct FWorld_PCGSpawnRequest
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    FVector WorldLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    EWorld_BiomeType TargetBiome = EWorld_BiomeType::CretaceousJungle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    float SpawnRadius = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    int32 MaxActorsToSpawn = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    int32 RandomSeed = 42;
-};
-
-// ============================================================
-// MAIN CLASS
-// ============================================================
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+// ─── PCG Biome System Actor ───────────────────────────────────────────────────
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "PCG Biome System"))
 class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
     GENERATED_BODY()
@@ -135,103 +103,61 @@ class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 public:
     APCGBiomeSystem();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // ─── Biome Configuration ──────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    TArray<FWorld_BiomeConfig> BiomeConfigs;
 
-    // ---- Biome Query ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType ActiveBiome = EWorld_BiomeType::TropicalForest;
+
+    // ─── Terrain Features ─────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    TArray<FWorld_TerrainFeature> TerrainFeatures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    int32 RockFormationCount = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    int32 WaterBodyCount = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Terrain")
+    int32 TreeClusterCount = 30;
+
+    // ─── World Bounds ─────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Bounds")
+    FVector WorldCenter = FVector(2000.0f, 2000.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Bounds")
+    float WorldRadius = 4000.0f;
+
+    // ─── Performance ──────────────────────────────────────────────────────
+    // Aligned with PerformanceConfig.h PERF_FOLIAGE_CULL_DISTANCE
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Performance")
+    float FoliageCullDistance = 8000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Performance")
+    float RockCullDistance = 10000.0f;
+
+    // ─── Functions ────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    FWorld_BiomeConfig GetBiomeConfig(EWorld_BiomeType BiomeType) const;
 
     UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetHumidityAtLocation(const FVector& WorldLocation) const;
-
-    // ---- PCG Population ----
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void PopulateBiomeRegion(const FWorld_PCGSpawnRequest& Request);
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void ClearAllProceduralActors();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|PCG")
-    void RegenerateWorld();
-
-    // ---- Weather ----
-
-    UFUNCTION(BlueprintCallable, Category = "World|Weather")
-    void SetWeatherState(EWorld_WeatherState NewWeather);
-
-    UFUNCTION(BlueprintPure, Category = "World|Weather")
-    EWorld_WeatherState GetCurrentWeather() const { return CurrentWeather; }
-
-    UFUNCTION(BlueprintCallable, Category = "World|Weather")
-    void TickWeatherSystem(float DeltaSeconds);
-
-    // ---- Terrain Grid ----
+    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "World|Terrain")
-    void InitializeTerrainGrid(int32 GridWidth, int32 GridHeight, float CellSize);
+    TArray<FWorld_TerrainFeature> GetTerrainFeaturesInRadius(FVector Center, float Radius) const;
 
-    UFUNCTION(BlueprintPure, Category = "World|Terrain")
-    int32 GetTotalTerrainCells() const { return TerrainGrid.Num(); }
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Generation")
+    void GenerateBiomeDefaults();
+
+    UFUNCTION(BlueprintCallable, Category = "World|Water")
+    bool IsLocationInWater(FVector WorldLocation) const;
 
 protected:
-    // ---- Biome Configuration ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    TMap<EWorld_BiomeType, FWorld_BiomeData> BiomeDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Config")
-    float BiomeBlendRadius = 500.0f;
-
-    // ---- Terrain Grid ----
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain")
-    TArray<FWorld_TerrainCell> TerrainGrid;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 GridWidth = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 GridHeight = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float CellSizeUnits = 1000.0f;
-
-    // ---- Weather ----
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weather")
-    EWorld_WeatherState CurrentWeather = EWorld_WeatherState::Clear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherTransitionTime = 120.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherChangeChancePerMinute = 0.15f;
-
-    // ---- PCG State ----
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
-    TArray<AActor*> ProceduralActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    int32 GlobalSeed = 12345;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    bool bAutoPopulateOnBeginPlay = false;
+    virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-    float WeatherTimer = 0.0f;
-
-    void InitializeBiomeDatabase();
-    FVector2D WorldToGrid(const FVector& WorldLocation) const;
-    float SampleNoise(float X, float Y, int32 Seed) const;
-    EWorld_BiomeType ClassifyBiomeFromNoise(float Temperature, float Moisture) const;
+    void InitializeDefaultBiomes();
 };
