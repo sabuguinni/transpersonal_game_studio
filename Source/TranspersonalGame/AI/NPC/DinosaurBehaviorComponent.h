@@ -2,24 +2,24 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "GameFramework/Character.h"
 #include "DinosaurBehaviorComponent.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums — global scope (UHT requirement)
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// Enums — must be at global scope (UE5 compilation rule #1)
+// ============================================================
 
 UENUM(BlueprintType)
 enum class ENPC_DinoState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Grazing     UMETA(DisplayName = "Grazing"),
+    Patrol      UMETA(DisplayName = "Patrol"),
     Alert       UMETA(DisplayName = "Alert"),
-    Chasing     UMETA(DisplayName = "Chasing"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Resting     UMETA(DisplayName = "Resting"),
+    Chase       UMETA(DisplayName = "Chase"),
+    Attack      UMETA(DisplayName = "Attack"),
+    Flee        UMETA(DisplayName = "Flee"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+    Sleeping    UMETA(DisplayName = "Sleeping")
 };
 
 UENUM(BlueprintType)
@@ -31,82 +31,116 @@ enum class ENPC_DinoSpecies : uint8
     Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
     Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
     Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
+    Generic         UMETA(DisplayName = "Generic")
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Patrol waypoint struct
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// Structs — must be at global scope
+// ============================================================
 
 USTRUCT(BlueprintType)
-struct FNPC_PatrolWaypoint
+struct FNPC_DinoSensoryData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    FVector Location = FVector::ZeroVector;
+    /** Distance at which the dinosaur detects the player by sight */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sensory")
+    float SightRange = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    float WaitTimeSeconds = 2.0f;
+    /** Distance at which the dinosaur detects the player by sound */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sensory")
+    float HearingRange = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    bool bLookAround = true;
+    /** Distance at which the dinosaur detects the player by smell */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sensory")
+    float SmellRange = 800.0f;
+
+    /** Field of view in degrees for sight detection */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sensory")
+    float SightFOV = 120.0f;
+
+    /** Whether the player is currently detected */
+    UPROPERTY(BlueprintReadOnly, Category = "Sensory")
+    bool bPlayerDetected = false;
+
+    /** Last known player location */
+    UPROPERTY(BlueprintReadOnly, Category = "Sensory")
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+
+    /** Time since player was last seen (seconds) */
+    UPROPERTY(BlueprintReadOnly, Category = "Sensory")
+    float TimeSinceLastSeen = 0.0f;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Species trait data
-// ─────────────────────────────────────────────────────────────────────────────
-
 USTRUCT(BlueprintType)
-struct FNPC_DinoSpeciesTraits
+struct FNPC_DinoPatrolData
 {
     GENERATED_BODY()
 
-    /** Detection radius for player/prey (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    float DetectionRadius = 3000.0f;
+    /** Radius around home location for patrol */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
+    float PatrolRadius = 5000.0f;
 
-    /** Attack range (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
+    /** Home/spawn location — patrol stays within radius of this */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
+    FVector HomeLocation = FVector::ZeroVector;
+
+    /** Current patrol target */
+    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
+    FVector CurrentPatrolTarget = FVector::ZeroVector;
+
+    /** How long to wait at each patrol point (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Patrol")
+    float WaitTimeAtPoint = 3.0f;
+
+    /** Current wait timer */
+    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
+    float CurrentWaitTimer = 0.0f;
+
+    /** Whether currently waiting at a patrol point */
+    UPROPERTY(BlueprintReadOnly, Category = "Patrol")
+    bool bIsWaiting = false;
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_DinoCombatData
+{
+    GENERATED_BODY()
+
+    /** Melee attack range */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     float AttackRange = 300.0f;
 
-    /** Chase speed (cm/s) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    float ChaseSpeed = 800.0f;
-
-    /** Patrol speed (cm/s) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    float PatrolSpeed = 250.0f;
-
-    /** Base damage per attack */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
+    /** Damage dealt per attack */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     float AttackDamage = 40.0f;
 
-    /** Attack cooldown in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
+    /** Cooldown between attacks (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     float AttackCooldown = 2.0f;
 
-    /** Is this a pack hunter? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    bool bIsPackHunter = false;
+    /** Current attack cooldown timer */
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float AttackCooldownTimer = 0.0f;
 
-    /** Does this species flee from larger predators? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    bool bFleeFromPredators = false;
+    /** Maximum chase distance before giving up */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float MaxChaseDistance = 8000.0f;
 
-    /** Is herbivore (grazes, only attacks when threatened) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    bool bIsHerbivore = false;
+    /** Health below which the dinosaur flees */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float FleeHealthThreshold = 0.2f;
 
-    /** Territorial radius — attacks anything entering this zone */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    float TerritorialRadius = 1500.0f;
+    /** Current health (0.0 - 1.0 normalized) */
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float CurrentHealthNormalized = 1.0f;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// Main Component
+// ============================================================
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "Dinosaur Behavior Component")
 class TRANSPERSONALGAME_API UDinosaurBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -114,117 +148,92 @@ class TRANSPERSONALGAME_API UDinosaurBehaviorComponent : public UActorComponent
 public:
     UDinosaurBehaviorComponent();
 
-    // ── Species & state ──────────────────────────────────────────────────────
+    // ---- Species & State ----
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Identity")
-    ENPC_DinoSpecies Species = ENPC_DinoSpecies::TRex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Identity")
+    ENPC_DinoSpecies Species = ENPC_DinoSpecies::Generic;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State",
-        meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|State")
     ENPC_DinoState CurrentState = ENPC_DinoState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Traits")
-    FNPC_DinoSpeciesTraits Traits;
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|State")
+    ENPC_DinoState PreviousState = ENPC_DinoState::Idle;
 
-    // ── Patrol ───────────────────────────────────────────────────────────────
+    // ---- Sensory Data ----
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    TArray<FNPC_PatrolWaypoint> PatrolWaypoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Sensory")
+    FNPC_DinoSensoryData SensoryData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    int32 CurrentWaypointIndex = 0;
+    // ---- Patrol Data ----
 
-    // ── Threat tracking ──────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Patrol")
+    FNPC_DinoPatrolData PatrolData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Threat")
-    AActor* ThreatTarget = nullptr;
+    // ---- Combat Data ----
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Threat")
-    float DistanceToThreat = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    FNPC_DinoCombatData CombatData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Threat")
-    float LastAttackTime = 0.0f;
+    // ---- Behavior Flags ----
 
-    // ── Memory ───────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Behavior")
+    bool bIsAggressive = false;
 
-    /** Last known player position (updated when player is in detection range) */
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
-    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Behavior")
+    bool bIsHerbivore = false;
 
-    /** How long ago the dino last saw the player (seconds) */
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
-    float TimeSinceLastSighting = 9999.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Behavior")
+    bool bIsPackHunter = false;
 
-    /** Memory decay — after this many seconds without sighting, dino returns to patrol */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
-    float MemoryDecaySeconds = 15.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Behavior")
+    bool bEnablePatrol = true;
 
-    // ── Pack behavior ────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Behavior")
+    bool bEnableDebugDraw = false;
 
-    /** Other pack members (for Raptors) */
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Pack")
-    TArray<AActor*> PackMembers;
+    // ---- Public API ----
 
-    /** Pack leader (nullptr if this dino IS the leader) */
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Pack")
-    AActor* PackLeader = nullptr;
-
-    // ── UActorComponent overrides ────────────────────────────────────────────
-
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-        FActorComponentTickFunction* ThisTickFunction) override;
-
-    // ── Public API ───────────────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
     void SetState(ENPC_DinoState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void RegisterThreat(AActor* Threat);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void ClearThreat();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    bool IsPlayerInDetectionRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    bool IsPlayerInAttackRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void AdvancePatrolWaypoint();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    FVector GetCurrentWaypointLocation() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void AlertPackMembers();
-
-    /** Apply default species traits based on Species enum */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "NPC|Behavior")
-    void ApplySpeciesDefaults();
-
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
     ENPC_DinoState GetCurrentState() const { return CurrentState; }
 
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
-    bool IsAggressive() const;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Sensory")
+    bool CanSeePlayer() const;
 
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
-    bool IsPatrolling() const { return CurrentState == ENPC_DinoState::Patrolling; }
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Sensory")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    void TakeDamageNormalized(float DamageNormalized);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void ApplySpeciesDefaults();
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Patrol")
+    FVector PickNewPatrolTarget();
+
+    UFUNCTION(BlueprintPure, Category = "Dinosaur|State")
+    bool IsInCombatState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Dinosaur|State")
+    bool IsFleeingState() const;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    void TickBehavior(float DeltaTime);
-    void TickThreatDetection();
-    void TickMemoryDecay(float DeltaTime);
-    void TickPatrol(float DeltaTime);
-    void TickChase(float DeltaTime);
-    void TickAttack(float DeltaTime);
-    void TickGrazing(float DeltaTime);
+    void UpdateSensory(float DeltaTime);
+    void UpdateStateMachine(float DeltaTime);
+    void UpdatePatrol(float DeltaTime);
+    void UpdateChase(float DeltaTime);
+    void UpdateAttack(float DeltaTime);
+    void UpdateFlee(float DeltaTime);
 
-    AActor* FindPlayerActor() const;
+    UPROPERTY()
+    APawn* CachedPlayerPawn = nullptr;
 
-    float PatrolWaitTimer = 0.0f;
-    bool bWaitingAtWaypoint = false;
+    float StateTimer = 0.0f;
 };
