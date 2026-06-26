@@ -1,6 +1,6 @@
-// PCGWorldGenerator.cpp
-// Procedural World Generator — Agent #5
-// Transpersonal Game Studio — Dinosaur Survival Game
+// PCGWorldGenerator.cpp — Procedural World Generator #05
+// Cycle: PROD_CYCLE_AUTO_20260626_008
+// Implements biome system, terrain variation, and river generation
 
 #include "PCGWorldGenerator.h"
 #include "Engine/World.h"
@@ -9,216 +9,159 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-// ============================================================
-// Constructor
-// ============================================================
-APCGWorldGenerator::APCGWorldGenerator()
+UPCGWorldGenerator::UPCGWorldGenerator()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Default biome parameters
     BiomeSeed = 42;
-    WorldSizeX = 100000.0f;
-    WorldSizeY = 100000.0f;
-    TerrainHeightScale = 5000.0f;
-    bGenerateOnBeginPlay = false;
-
-    // Default biome weights (Cretaceous ecosystem)
-    BiomeWeights.Add(EWorld_BiomeType::JungleForest, 0.35f);
-    BiomeWeights.Add(EWorld_BiomeType::OpenSavanna, 0.25f);
-    BiomeWeights.Add(EWorld_BiomeType::RockyHighlands, 0.20f);
-    BiomeWeights.Add(EWorld_BiomeType::RiverDelta, 0.10f);
-    BiomeWeights.Add(EWorld_BiomeType::CoastalFlats, 0.10f);
+    TerrainScale = 1.0f;
+    RiverCount = 3;
+    bEnableBiomeTransitions = true;
+    WorldExtentXY = 10000.0f;
+    HeightVariationScale = 500.0f;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-void APCGWorldGenerator::BeginPlay()
+void UPCGWorldGenerator::InitializeWorld(int32 Seed)
 {
-    Super::BeginPlay();
-
-    if (bGenerateOnBeginPlay)
-    {
-        GenerateWorld();
-    }
-}
-
-// ============================================================
-// GenerateWorld — entry point for full world generation
-// ============================================================
-void APCGWorldGenerator::GenerateWorld()
-{
-    UE_LOG(LogTemp, Log, TEXT("[PCGWorldGenerator] GenerateWorld() called. Seed=%d"), BiomeSeed);
+    BiomeSeed = Seed;
+    RandomStream.Initialize(Seed);
+    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Initialized with seed %d"), Seed);
 
     GenerateBiomeMap();
-    GenerateRiverNetwork();
-    PlaceTerrainLandmarks();
-
-    UE_LOG(LogTemp, Log, TEXT("[PCGWorldGenerator] World generation complete. Biomes=%d"), ActiveBiomes.Num());
+    GenerateRivers();
 }
 
-// ============================================================
-// GenerateBiomeMap — creates biome regions using noise
-// ============================================================
-void APCGWorldGenerator::GenerateBiomeMap()
+void UPCGWorldGenerator::GenerateBiomeMap()
 {
-    ActiveBiomes.Empty();
+    BiomeZones.Empty();
 
-    // Simple deterministic biome placement based on seed
-    FRandomStream RNG(BiomeSeed);
+    // Define 5 core biomes for the Cretaceous world
+    FWorld_BiomeZone Forest;
+    Forest.BiomeType = EWorld_BiomeType::TropicalForest;
+    Forest.CenterLocation = FVector(1500.f, 1500.f, 30.f);
+    Forest.Radius = 2500.f;
+    Forest.VegetationDensity = 0.9f;
+    Forest.GroundHeightOffset = 30.f;
+    BiomeZones.Add(Forest);
 
-    // Generate biome centers
-    const int32 NumBiomeCells = 12;
-    for (int32 i = 0; i < NumBiomeCells; ++i)
-    {
-        FWorld_BiomeCell Cell;
-        Cell.CenterLocation = FVector(
-            RNG.FRandRange(0.0f, WorldSizeX),
-            RNG.FRandRange(0.0f, WorldSizeY),
-            0.0f
-        );
-        Cell.Radius = RNG.FRandRange(8000.0f, 20000.0f);
+    FWorld_BiomeZone Plains;
+    Plains.BiomeType = EWorld_BiomeType::OpenPlains;
+    Plains.CenterLocation = FVector(-1000.f, 1000.f, 0.f);
+    Plains.Radius = 3000.f;
+    Plains.VegetationDensity = 0.3f;
+    Plains.GroundHeightOffset = 0.f;
+    BiomeZones.Add(Plains);
 
-        // Assign biome type based on weighted random
-        float Roll = RNG.FRandRange(0.0f, 1.0f);
-        float Cumulative = 0.0f;
-        Cell.BiomeType = EWorld_BiomeType::OpenSavanna; // default
-        for (auto& Pair : BiomeWeights)
-        {
-            Cumulative += Pair.Value;
-            if (Roll <= Cumulative)
-            {
-                Cell.BiomeType = Pair.Key;
-                break;
-            }
-        }
+    FWorld_BiomeZone Rocky;
+    Rocky.BiomeType = EWorld_BiomeType::RockyHighlands;
+    Rocky.CenterLocation = FVector(-500.f, -1500.f, 60.f);
+    Rocky.Radius = 2000.f;
+    Rocky.VegetationDensity = 0.2f;
+    Rocky.GroundHeightOffset = 60.f;
+    BiomeZones.Add(Rocky);
 
-        Cell.Temperature = GetBiomeTemperature(Cell.BiomeType);
-        Cell.Humidity = GetBiomeHumidity(Cell.BiomeType);
-        Cell.VegetationDensity = GetBiomeVegetationDensity(Cell.BiomeType);
+    FWorld_BiomeZone Valley;
+    Valley.BiomeType = EWorld_BiomeType::RiverValley;
+    Valley.CenterLocation = FVector(2500.f, 0.f, -20.f);
+    Valley.Radius = 1500.f;
+    Valley.VegetationDensity = 0.7f;
+    Valley.GroundHeightOffset = -20.f;
+    BiomeZones.Add(Valley);
 
-        ActiveBiomes.Add(Cell);
-    }
+    FWorld_BiomeZone Jungle;
+    Jungle.BiomeType = EWorld_BiomeType::TropicalForest;
+    Jungle.CenterLocation = FVector(0.f, 2500.f, 20.f);
+    Jungle.Radius = 2200.f;
+    Jungle.VegetationDensity = 1.0f;
+    Jungle.GroundHeightOffset = 20.f;
+    BiomeZones.Add(Jungle);
 
-    UE_LOG(LogTemp, Log, TEXT("[PCGWorldGenerator] Generated %d biome cells"), ActiveBiomes.Num());
+    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generated %d biome zones"), BiomeZones.Num());
 }
 
-// ============================================================
-// GenerateRiverNetwork — places river splines through terrain
-// ============================================================
-void APCGWorldGenerator::GenerateRiverNetwork()
+EWorld_BiomeType UPCGWorldGenerator::GetBiomeAtLocation(FVector WorldLocation) const
 {
-    // River generation: find high-elevation points and flow downhill
-    // In a full implementation this would use heightmap data
-    // For now, log the intent and store river source points
-    RiverSourcePoints.Empty();
+    float ClosestDist = MAX_FLT;
+    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::OpenPlains;
 
-    FRandomStream RNG(BiomeSeed + 1000);
-    const int32 NumRivers = 3;
-
-    for (int32 i = 0; i < NumRivers; ++i)
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
     {
-        FVector Source(
-            RNG.FRandRange(WorldSizeX * 0.3f, WorldSizeX * 0.7f),
-            RNG.FRandRange(WorldSizeY * 0.3f, WorldSizeY * 0.7f),
-            TerrainHeightScale * 0.8f
-        );
-        RiverSourcePoints.Add(Source);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[PCGWorldGenerator] River network: %d rivers planned"), NumRivers);
-}
-
-// ============================================================
-// PlaceTerrainLandmarks — volcanic peaks, rock formations, etc.
-// ============================================================
-void APCGWorldGenerator::PlaceTerrainLandmarks()
-{
-    LandmarkLocations.Empty();
-
-    FRandomStream RNG(BiomeSeed + 2000);
-
-    // Volcanic peak (central landmark)
-    LandmarkLocations.Add(FVector(WorldSizeX * 0.5f, WorldSizeY * 0.5f, 0.0f));
-
-    // Rocky outcrops in highlands biomes
-    for (const FWorld_BiomeCell& Cell : ActiveBiomes)
-    {
-        if (Cell.BiomeType == EWorld_BiomeType::RockyHighlands)
-        {
-            LandmarkLocations.Add(Cell.CenterLocation);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[PCGWorldGenerator] Placed %d terrain landmarks"), LandmarkLocations.Num());
-}
-
-// ============================================================
-// GetBiomeAtLocation — returns biome type for a world position
-// ============================================================
-EWorld_BiomeType APCGWorldGenerator::GetBiomeAtLocation(FVector WorldLocation) const
-{
-    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::OpenSavanna;
-    float ClosestDist = FLT_MAX;
-
-    for (const FWorld_BiomeCell& Cell : ActiveBiomes)
-    {
-        float Dist = FVector::Dist2D(WorldLocation, Cell.CenterLocation);
+        float Dist = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
         if (Dist < ClosestDist)
         {
             ClosestDist = Dist;
-            ClosestBiome = Cell.BiomeType;
+            ClosestBiome = Zone.BiomeType;
         }
     }
 
     return ClosestBiome;
 }
 
-// ============================================================
-// GetBiomeTemperature — realistic Cretaceous temperatures (°C)
-// ============================================================
-float APCGWorldGenerator::GetBiomeTemperature(EWorld_BiomeType BiomeType) const
+float UPCGWorldGenerator::GetTerrainHeightAtLocation(FVector WorldLocation) const
 {
-    switch (BiomeType)
-    {
-    case EWorld_BiomeType::JungleForest:    return 32.0f;
-    case EWorld_BiomeType::OpenSavanna:     return 28.0f;
-    case EWorld_BiomeType::RockyHighlands:  return 18.0f;
-    case EWorld_BiomeType::RiverDelta:      return 30.0f;
-    case EWorld_BiomeType::CoastalFlats:    return 25.0f;
-    default:                                return 25.0f;
-    }
+    // Layered noise for organic terrain height
+    float x = WorldLocation.X / 2000.f;
+    float y = WorldLocation.Y / 2000.f;
+
+    // Base large-scale hills
+    float h = FMath::Sin(x * 0.8f) * FMath::Cos(y * 0.6f) * 200.f;
+    // Mid-frequency detail
+    h += FMath::Sin(x * 2.3f + 0.5f) * FMath::Cos(y * 1.9f + 0.3f) * 80.f;
+    // Fine detail
+    h += FMath::Sin(x * 5.1f + 1.2f) * FMath::Cos(y * 4.7f + 0.8f) * 30.f;
+
+    return h * TerrainScale;
 }
 
-// ============================================================
-// GetBiomeHumidity — 0.0 (arid) to 1.0 (saturated)
-// ============================================================
-float APCGWorldGenerator::GetBiomeHumidity(EWorld_BiomeType BiomeType) const
+void UPCGWorldGenerator::GenerateRivers()
 {
-    switch (BiomeType)
+    RiverPaths.Empty();
+
+    // Main river: flows from highlands to valley
+    TArray<FVector> MainRiver;
+    for (int32 i = 0; i <= 20; i++)
     {
-    case EWorld_BiomeType::JungleForest:    return 0.90f;
-    case EWorld_BiomeType::OpenSavanna:     return 0.40f;
-    case EWorld_BiomeType::RockyHighlands:  return 0.25f;
-    case EWorld_BiomeType::RiverDelta:      return 0.85f;
-    case EWorld_BiomeType::CoastalFlats:    return 0.60f;
-    default:                                return 0.50f;
+        float t = (float)i / 20.f;
+        float rx = FMath::Lerp(-2000.f, 3500.f, t) + FMath::Sin(t * 6.28f) * 300.f;
+        float ry = FMath::Lerp(500.f, -500.f, t) + FMath::Cos(t * 4.71f) * 200.f;
+        MainRiver.Add(FVector(rx, ry, -15.f));
     }
+    RiverPaths.Add(MainRiver);
+
+    // Tributary river
+    TArray<FVector> Tributary;
+    for (int32 i = 0; i <= 12; i++)
+    {
+        float t = (float)i / 12.f;
+        float rx = FMath::Lerp(0.f, 2000.f, t) + FMath::Sin(t * 9.42f) * 150.f;
+        float ry = FMath::Lerp(2000.f, 200.f, t);
+        Tributary.Add(FVector(rx, ry, -10.f));
+    }
+    RiverPaths.Add(Tributary);
+
+    UE_LOG(LogTemp, Log, TEXT("PCGWorldGenerator: Generated %d river paths"), RiverPaths.Num());
 }
 
-// ============================================================
-// GetBiomeVegetationDensity — 0.0 (bare) to 1.0 (dense)
-// ============================================================
-float APCGWorldGenerator::GetBiomeVegetationDensity(EWorld_BiomeType BiomeType) const
+TArray<FWorld_BiomeZone> UPCGWorldGenerator::GetAllBiomeZones() const
 {
-    switch (BiomeType)
-    {
-    case EWorld_BiomeType::JungleForest:    return 0.95f;
-    case EWorld_BiomeType::OpenSavanna:     return 0.35f;
-    case EWorld_BiomeType::RockyHighlands:  return 0.15f;
-    case EWorld_BiomeType::RiverDelta:      return 0.70f;
-    case EWorld_BiomeType::CoastalFlats:    return 0.45f;
-    default:                                return 0.40f;
-    }
+    return BiomeZones;
+}
+
+int32 UPCGWorldGenerator::GetRiverCount() const
+{
+    return RiverPaths.Num();
+}
+
+FWorld_TerrainSample UPCGWorldGenerator::SampleTerrain(FVector Location) const
+{
+    FWorld_TerrainSample Sample;
+    Sample.WorldLocation = Location;
+    Sample.Height = GetTerrainHeightAtLocation(Location);
+    Sample.BiomeType = GetBiomeAtLocation(Location);
+
+    // Slope approximation via finite difference
+    float dx = GetTerrainHeightAtLocation(Location + FVector(100.f, 0.f, 0.f)) - Sample.Height;
+    float dy = GetTerrainHeightAtLocation(Location + FVector(0.f, 100.f, 0.f)) - Sample.Height;
+    Sample.SlopeAngle = FMath::RadiansToDegrees(FMath::Atan2(FMath::Sqrt(dx*dx + dy*dy), 100.f));
+    Sample.bIsWater = (Sample.Height < -10.f);
+
+    return Sample;
 }
