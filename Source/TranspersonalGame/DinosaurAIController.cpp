@@ -1,17 +1,17 @@
-// DinosaurAIController.cpp
-// Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260620_006
-// Full implementation of ADinosaurAIController FSM.
+// DinosaurAIController.cpp — AI Controller implementation for dinosaur pawns
+// Agent #3 — Core Systems Programmer
 
 #include "DinosaurAIController.h"
 #include "DinosaurBase.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
+#include "NavigationSystem.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
-#include "Navigation/PathFollowingComponent.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor
@@ -20,25 +20,35 @@
 ADinosaurAIController::ADinosaurAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 Hz — sufficient for AI FSM
 
-    // Default detection parameters (tuned for T-Rex; child BPs override)
-    DetectionRadius    = 3000.0f;  // 30 m
-    AttackRadius       = 250.0f;   // 2.5 m
-    VisionHalfAngleDeg = 45.0f;    // 90° total FOV
-    PatrolRadius       = 2000.0f;  // 20 m patrol range
-    PatrolWaitTime     = 3.0f;
-    AttackCooldown     = 2.0f;
-    AttackDamage       = 30.0f;
+    // ── Perception component ──────────────────────────────────────────────────
+    PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
+    SetPerceptionComponent(*PerceptionComp);
 
-    CurrentState         = ECore_DinoAIState::Idle;
-    IdleTimer            = 0.0f;
-    AttackTimer          = 0.0f;
-    ControlledDino       = nullptr;
-    ChaseTarget          = nullptr;
-    SpawnLocation        = FVector::ZeroVector;
-    PatrolTarget         = FVector::ZeroVector;
-    LastKnownPlayerLocation = FVector::ZeroVector;
+    // Sight sense
+    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = SightRadius;
+    SightConfig->LoseSightRadius = SightRadius * 1.25f;
+    SightConfig->PeripheralVisionAngleDegrees = SightAngle;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies    = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals   = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+    PerceptionComp->ConfigureSense(*SightConfig);
+
+    // Hearing sense
+    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = HearingRange;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectEnemies    = true;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals   = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+    PerceptionComp->ConfigureSense(*HearingConfig);
+
+    PerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // Default state
+    CurrentBehaviorState = ECore_DinosaurBehaviorState::Idle;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,297 +60,290 @@ void ADinosaurAIController::OnPossess(APawn* InPawn)
     Super::OnPossess(InPawn);
 
     ControlledDino = Cast<ADinosaurBase>(InPawn);
-    if (InPawn)
+    if (!ControlledDino)
     {
-        SpawnLocation = InPawn->GetActorLocation();
+        UE_LOG(LogTemp, Warning, TEXT("DinosaurAIController: Possessed non-DinosaurBase pawn '%s'"),
+            *InPawn->GetName());
+        return;
     }
 
-    SetAIState(ECore_DinoAIState::Idle);
+    // Record home location for patrol radius
+    HomeLocation = ControlledDino->GetActorLocation();
+
+    // Bind perception delegate
+    PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(
+        this, &ADinosaurAIController::OnTargetPerceptionUpdated);
+
+    // Start Behavior Tree if assigned, otherwise use code-driven tick
+    if (BehaviorTreeAsset)
+    {
+        RunBehaviorTree(BehaviorTreeAsset);
+        UE_LOG(LogTemp, Log, TEXT("DinosaurAIController: BT started for '%s'"),
+            *ControlledDino->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("DinosaurAIController: No BT — using code-driven tick for '%s'"),
+            *ControlledDino->GetName());
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+    }
 }
 
 void ADinosaurAIController::OnUnPossess()
 {
-    Super::OnUnPossess();
+    PerceptionComp->OnTargetPerceptionUpdated.RemoveDynamic(
+        this, &ADinosaurAIController::OnTargetPerceptionUpdated);
+
     ControlledDino = nullptr;
-    ChaseTarget    = nullptr;
+    ThreatTarget   = nullptr;
+
+    Super::OnUnPossess();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tick — dispatch to current state handler
+// Tick — code-driven state machine (used when no BT asset is assigned)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void ADinosaurAIController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!GetPawn() || CurrentState == ECore_DinoAIState::Dead)
+    // BT handles logic if running
+    if (BehaviorTreeAsset) return;
+    if (!ControlledDino)   return;
+
+    switch (CurrentBehaviorState)
     {
-        return;
-    }
-
-    switch (CurrentState)
-    {
-        case ECore_DinoAIState::Idle:   HandleIdle(DeltaTime);   break;
-        case ECore_DinoAIState::Patrol: HandlePatrol(DeltaTime); break;
-        case ECore_DinoAIState::Chase:  HandleChase(DeltaTime);  break;
-        case ECore_DinoAIState::Attack: HandleAttack(DeltaTime); break;
-        case ECore_DinoAIState::Flee:   HandleFlee(DeltaTime);   break;
-        default: break;
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// State Machine
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ADinosaurAIController::SetAIState(ECore_DinoAIState NewState)
-{
-    if (CurrentState == NewState)
-    {
-        return;
-    }
-
-    CurrentState = NewState;
-    IdleTimer    = 0.0f;
-    AttackTimer  = 0.0f;
-
-    // On entering Patrol, pick a destination immediately
-    if (NewState == ECore_DinoAIState::Patrol)
-    {
-        PatrolTarget = PickPatrolDestination();
-        MoveToDestination(PatrolTarget);
+        case ECore_DinosaurBehaviorState::Idle:       TickIdle(DeltaTime);       break;
+        case ECore_DinosaurBehaviorState::Patrolling: TickPatrolling(DeltaTime); break;
+        case ECore_DinosaurBehaviorState::Alerted:    TickAlerted(DeltaTime);    break;
+        case ECore_DinosaurBehaviorState::Hunting:    TickHunting(DeltaTime);    break;
+        case ECore_DinosaurBehaviorState::Fleeing:    TickFleeing(DeltaTime);    break;
+        case ECore_DinosaurBehaviorState::Resting:    TickResting(DeltaTime);    break;
+        case ECore_DinosaurBehaviorState::Dead:       /* no-op */                break;
+        default:                                                                  break;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// State Handlers
+// Perception callback
 // ─────────────────────────────────────────────────────────────────────────────
 
-void ADinosaurAIController::HandleIdle(float DeltaTime)
+void ADinosaurAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-    IdleTimer += DeltaTime;
+    if (!Actor || !ControlledDino) return;
 
-    // Check for player every tick
-    APawn* Player = FindPlayerInRange();
-    if (Player)
-    {
-        ChaseTarget = Player;
-        SetAIState(ECore_DinoAIState::Chase);
-        return;
-    }
+    // Ignore other dinosaurs of the same species (no intra-species aggression for now)
+    if (Actor->IsA(ADinosaurBase::StaticClass())) return;
 
-    // After waiting, begin patrol
-    if (IdleTimer >= PatrolWaitTime)
+    if (Stimulus.WasSuccessfullySensed())
     {
-        SetAIState(ECore_DinoAIState::Patrol);
-    }
-}
+        // Threat detected
+        ThreatTarget = Actor;
 
-void ADinosaurAIController::HandlePatrol(float DeltaTime)
-{
-    // Check for player
-    APawn* Player = FindPlayerInRange();
-    if (Player)
-    {
-        ChaseTarget = Player;
-        StopMovement();
-        SetAIState(ECore_DinoAIState::Chase);
-        return;
-    }
-
-    // Check if we reached the patrol point
-    EPathFollowingStatus::Type MoveStatus = GetMoveStatus();
-    if (MoveStatus == EPathFollowingStatus::Idle)
-    {
-        // Arrived — wait then pick new point
-        IdleTimer += DeltaTime;
-        if (IdleTimer >= PatrolWaitTime)
+        // Aggression decision: carnivores hunt, herbivores flee
+        if (ControlledDino->DinoSpecies == ECore_DinosaurSpecies::TRex ||
+            ControlledDino->DinoSpecies == ECore_DinosaurSpecies::Velociraptor)
         {
-            IdleTimer    = 0.0f;
-            PatrolTarget = PickPatrolDestination();
-            MoveToDestination(PatrolTarget);
+            SetBehaviorState(ECore_DinosaurBehaviorState::Hunting);
+        }
+        else
+        {
+            SetBehaviorState(ECore_DinosaurBehaviorState::Fleeing);
         }
     }
-}
-
-void ADinosaurAIController::HandleChase(float DeltaTime)
-{
-    if (!ChaseTarget || !ChaseTarget->IsValidLowLevel())
+    else
     {
-        SetAIState(ECore_DinoAIState::Idle);
-        return;
+        // Lost sight/hearing — return to patrol
+        ThreatTarget = nullptr;
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
     }
-
-    float DistToTarget = FVector::Dist(GetPawn()->GetActorLocation(), ChaseTarget->GetActorLocation());
-
-    // Within attack range → attack
-    if (DistToTarget <= AttackRadius)
-    {
-        StopMovement();
-        SetAIState(ECore_DinoAIState::Attack);
-        return;
-    }
-
-    // Lost sight (too far) → return to patrol
-    if (DistToTarget > DetectionRadius * 1.5f)
-    {
-        ChaseTarget = nullptr;
-        SetAIState(ECore_DinoAIState::Patrol);
-        return;
-    }
-
-    // Keep chasing
-    LastKnownPlayerLocation = ChaseTarget->GetActorLocation();
-    MoveToDestination(LastKnownPlayerLocation);
-}
-
-void ADinosaurAIController::HandleAttack(float DeltaTime)
-{
-    AttackTimer += DeltaTime;
-
-    if (!ChaseTarget || !ChaseTarget->IsValidLowLevel())
-    {
-        SetAIState(ECore_DinoAIState::Idle);
-        return;
-    }
-
-    float DistToTarget = FVector::Dist(GetPawn()->GetActorLocation(), ChaseTarget->GetActorLocation());
-
-    // Target moved out of attack range — chase again
-    if (DistToTarget > AttackRadius * 1.5f)
-    {
-        SetAIState(ECore_DinoAIState::Chase);
-        return;
-    }
-
-    // Attack on cooldown
-    if (AttackTimer >= AttackCooldown)
-    {
-        AttackTimer = 0.0f;
-        PerformAttack(ChaseTarget);
-    }
-}
-
-void ADinosaurAIController::HandleFlee(float DeltaTime)
-{
-    // Flee: move away from spawn toward a random distant point.
-    // Transition back to Idle after 10 seconds.
-    IdleTimer += DeltaTime;
-    if (IdleTimer >= 10.0f)
-    {
-        SetAIState(ECore_DinoAIState::Idle);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Detection
-// ─────────────────────────────────────────────────────────────────────────────
-
-APawn* ADinosaurAIController::FindPlayerInRange() const
-{
-    UWorld* World = GetWorld();
-    if (!World || !GetPawn())
-    {
-        return nullptr;
-    }
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC)
-    {
-        return nullptr;
-    }
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn)
-    {
-        return nullptr;
-    }
-
-    FVector MyLocation     = GetPawn()->GetActorLocation();
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    float   Distance       = FVector::Dist(MyLocation, PlayerLocation);
-
-    if (Distance > DetectionRadius)
-    {
-        return nullptr;
-    }
-
-    // Vision cone check
-    FVector ToPlayer    = (PlayerLocation - MyLocation).GetSafeNormal();
-    FVector ForwardDir  = GetPawn()->GetActorForwardVector();
-    float   DotProduct  = FVector::DotProduct(ForwardDir, ToPlayer);
-    float   CosHalfFOV  = FMath::Cos(FMath::DegreesToRadians(VisionHalfAngleDeg));
-
-    if (DotProduct < CosHalfFOV)
-    {
-        return nullptr; // Outside vision cone
-    }
-
-    // Line-of-sight check
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(GetPawn());
-
-    bool bBlocked = World->LineTraceSingleByChannel(
-        HitResult,
-        MyLocation,
-        PlayerLocation,
-        ECC_Visibility,
-        Params
-    );
-
-    if (bBlocked && HitResult.GetActor() != PlayerPawn)
-    {
-        return nullptr; // Obstructed
-    }
-
-    return PlayerPawn;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Navigation helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-FVector ADinosaurAIController::PickPatrolDestination() const
+FVector ADinosaurAIController::GetRandomPatrolPoint() const
 {
-    UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-    if (!NavSys)
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (!NavSys) return HomeLocation;
+
+    FNavLocation NavLoc;
+    const bool bFound = NavSys->GetRandomReachablePointInRadius(HomeLocation, PatrolRadius, NavLoc);
+    return bFound ? NavLoc.Location : HomeLocation;
+}
+
+void ADinosaurAIController::MoveToNextPatrolPoint()
+{
+    const FVector Target = GetRandomPatrolPoint();
+    MoveToLocation(Target, 100.0f, true, true, false, true);
+}
+
+void ADinosaurAIController::ChaseTarget(AActor* Target)
+{
+    if (!Target) return;
+    MoveToActor(Target, 200.0f, true, true, false);
+}
+
+void ADinosaurAIController::FleeFromTarget(AActor* Target)
+{
+    if (!Target || !ControlledDino) return;
+
+    // Move in the opposite direction of the threat
+    const FVector ToThreat = (Target->GetActorLocation() - ControlledDino->GetActorLocation()).GetSafeNormal();
+    const FVector FleeDir  = -ToThreat;
+    const FVector FleeDest = ControlledDino->GetActorLocation() + FleeDir * PatrolRadius;
+
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
     {
-        return SpawnLocation;
+        FNavLocation NavLoc;
+        if (NavSys->GetRandomReachablePointInRadius(FleeDest, 500.0f, NavLoc))
+        {
+            MoveToLocation(NavLoc.Location, 100.0f, true, true, false, true);
+            return;
+        }
+    }
+    MoveToLocation(FleeDest, 100.0f, true, true, false, true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State machine
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurAIController::SetBehaviorState(ECore_DinosaurBehaviorState NewState)
+{
+    if (CurrentBehaviorState == NewState) return;
+
+    CurrentBehaviorState = NewState;
+
+    // Propagate to the pawn so it can update movement speed, animations, etc.
+    if (ControlledDino)
+    {
+        ControlledDino->OnBehaviorStateChanged(NewState);
     }
 
-    FNavLocation NavLocation;
-    bool bFound = NavSys->GetRandomReachablePointInRadius(SpawnLocation, PatrolRadius, NavLocation);
-
-    return bFound ? NavLocation.Location : SpawnLocation;
+    UE_LOG(LogTemp, Verbose, TEXT("DinosaurAIController: '%s' → state %d"),
+        ControlledDino ? *ControlledDino->GetName() : TEXT("?"),
+        static_cast<int32>(NewState));
 }
 
-void ADinosaurAIController::MoveToDestination(const FVector& Destination)
-{
-    FAIMoveRequest MoveRequest;
-    MoveRequest.SetGoalLocation(Destination);
-    MoveRequest.SetAcceptanceRadius(100.0f);
-    MoveRequest.SetUsePathfinding(true);
-    MoveTo(MoveRequest);
-}
+// ─── Per-state tick helpers ───────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Combat
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ADinosaurAIController::PerformAttack(APawn* Target)
+void ADinosaurAIController::TickIdle(float DeltaTime)
 {
-    if (!Target || !GetPawn())
+    // After a short delay, transition to patrolling
+    PatrolWaitTimer += DeltaTime;
+    if (PatrolWaitTimer >= PatrolWaitTime)
     {
+        PatrolWaitTimer = 0.0f;
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+    }
+}
+
+void ADinosaurAIController::TickPatrolling(float DeltaTime)
+{
+    // If we've stopped moving, pick a new patrol point
+    if (GetMoveStatus() == EPathFollowingStatus::Idle)
+    {
+        if (bWaitingAtPatrolPoint)
+        {
+            PatrolWaitTimer += DeltaTime;
+            if (PatrolWaitTimer >= PatrolWaitTime)
+            {
+                PatrolWaitTimer       = 0.0f;
+                bWaitingAtPatrolPoint = false;
+                MoveToNextPatrolPoint();
+            }
+        }
+        else
+        {
+            bWaitingAtPatrolPoint = true;
+            PatrolWaitTimer       = 0.0f;
+        }
+    }
+}
+
+void ADinosaurAIController::TickAlerted(float DeltaTime)
+{
+    // Look around for a few seconds then decide
+    PatrolWaitTimer += DeltaTime;
+    if (PatrolWaitTimer >= 3.0f)
+    {
+        PatrolWaitTimer = 0.0f;
+        if (ThreatTarget)
+        {
+            if (ControlledDino->DinoSpecies == ECore_DinosaurSpecies::TRex ||
+                ControlledDino->DinoSpecies == ECore_DinosaurSpecies::Velociraptor)
+            {
+                SetBehaviorState(ECore_DinosaurBehaviorState::Hunting);
+            }
+            else
+            {
+                SetBehaviorState(ECore_DinosaurBehaviorState::Fleeing);
+            }
+        }
+        else
+        {
+            SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+        }
+    }
+}
+
+void ADinosaurAIController::TickHunting(float DeltaTime)
+{
+    if (!ThreatTarget)
+    {
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
         return;
     }
 
-    // Apply damage via UE5 damage system — works with any AActor that handles TakeDamage
-    UGameplayStatics::ApplyDamage(
-        Target,
-        AttackDamage,
-        this,
-        GetPawn(),
-        UDamageType::StaticClass()
-    );
+    // If target is dead or too far, give up
+    const float DistSq = FVector::DistSquared(
+        ControlledDino->GetActorLocation(), ThreatTarget->GetActorLocation());
+    const float GiveUpDist = SightRadius * 2.0f;
+
+    if (DistSq > GiveUpDist * GiveUpDist)
+    {
+        ThreatTarget = nullptr;
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+        return;
+    }
+
+    ChaseTarget(ThreatTarget);
+}
+
+void ADinosaurAIController::TickFleeing(float DeltaTime)
+{
+    if (!ThreatTarget)
+    {
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+        return;
+    }
+
+    // If we've put enough distance, calm down
+    const float DistSq = FVector::DistSquared(
+        ControlledDino->GetActorLocation(), ThreatTarget->GetActorLocation());
+    const float SafeDist = SightRadius * 1.5f;
+
+    if (DistSq > SafeDist * SafeDist)
+    {
+        ThreatTarget = nullptr;
+        SetBehaviorState(ECore_DinosaurBehaviorState::Resting);
+        return;
+    }
+
+    FleeFromTarget(ThreatTarget);
+}
+
+void ADinosaurAIController::TickResting(float DeltaTime)
+{
+    // Rest for PatrolWaitTime * 2 then resume patrol
+    PatrolWaitTimer += DeltaTime;
+    if (PatrolWaitTimer >= PatrolWaitTime * 2.0f)
+    {
+        PatrolWaitTimer = 0.0f;
+        SetBehaviorState(ECore_DinosaurBehaviorState::Patrolling);
+    }
 }
