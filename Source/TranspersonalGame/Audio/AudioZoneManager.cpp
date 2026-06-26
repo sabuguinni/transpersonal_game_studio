@@ -1,20 +1,20 @@
 #include "AudioZoneManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/World.h"
 
 AAudio_ZoneManager::AAudio_ZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    ZoneSphere = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneSphere"));
-    ZoneSphere->SetSphereRadius(1000.0f);
-    ZoneSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    ZoneSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    ZoneSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-    RootComponent = ZoneSphere;
+    BlendSphere = CreateDefaultSubobject<USphereComponent>(TEXT("BlendSphere"));
+    BlendSphere->SetSphereRadius(1500.0f);
+    BlendSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = BlendSphere;
 
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
     AmbientAudioComponent->SetupAttachment(RootComponent);
     AmbientAudioComponent->bAutoActivate = false;
     AmbientAudioComponent->SetVolumeMultiplier(0.0f);
@@ -24,7 +24,18 @@ void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (ZoneConfig.bLooping && AmbientAudioComponent)
+    // Update sphere radius from config
+    if (BlendSphere)
+    {
+        BlendSphere->SetSphereRadius(ZoneConfig.BlendRadius);
+    }
+
+    // Bind overlap events
+    BlendSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerEnterZone);
+    BlendSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerLeaveZone);
+
+    // Start audio looping at zero volume
+    if (AmbientAudioComponent && ZoneConfig.bLooping)
     {
         AmbientAudioComponent->Play();
         AmbientAudioComponent->SetVolumeMultiplier(0.0f);
@@ -34,90 +45,80 @@ void AAudio_ZoneManager::BeginPlay()
 void AAudio_ZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    UpdateVolumeByDistance(DeltaTime);
+    UpdateBlendWeight(DeltaTime);
 }
 
-void AAudio_ZoneManager::SetZoneVolume(float NewVolume)
+void AAudio_ZoneManager::UpdateBlendWeight(float DeltaTime)
 {
-    CurrentVolume = FMath::Clamp(NewVolume, 0.0f, ZoneConfig.MaxVolume);
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-    }
+    if (!AmbientAudioComponent) return;
+
+    float BlendSpeed = bPlayerInZone
+        ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.01f))
+        : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.01f));
+
+    CurrentBlendWeight = FMath::FInterpTo(
+        CurrentBlendWeight,
+        TargetBlendWeight,
+        DeltaTime,
+        BlendSpeed
+    );
+
+    AmbientAudioComponent->SetVolumeMultiplier(CurrentBlendWeight * ZoneConfig.MaxVolume);
 }
 
-void AAudio_ZoneManager::FadeInAudio()
+void AAudio_ZoneManager::SetZoneActive(bool bActive)
 {
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->FadeIn(ZoneConfig.FadeInTime, ZoneConfig.MaxVolume);
-    }
-}
-
-void AAudio_ZoneManager::FadeOutAudio()
-{
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->FadeOut(ZoneConfig.FadeOutTime, 0.0f);
-    }
+    TargetBlendWeight = bActive ? 1.0f : 0.0f;
+    bPlayerInZone = bActive;
 }
 
 float AAudio_ZoneManager::GetDistanceToPlayer() const
 {
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC) return TNumericLimits<float>::Max();
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (!Player) return MAX_FLT;
 
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return TNumericLimits<float>::Max();
-
-    return FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    return FVector::Dist(GetActorLocation(), Player->GetActorLocation());
 }
 
-bool AAudio_ZoneManager::IsPlayerInZone() const
+void AAudio_ZoneManager::TriggerDangerStinger()
 {
-    float Dist = GetDistanceToPlayer();
-    return Dist <= ZoneSphere->GetScaledSphereRadius();
-}
+    if (!ZoneConfig.bTriggersDangerMusic) return;
 
-void AAudio_ZoneManager::UpdateVolumeByDistance(float DeltaTime)
-{
-    float Dist = GetDistanceToPlayer();
-    float Radius = ZoneSphere->GetScaledSphereRadius();
-    float BlendStart = Radius - ZoneConfig.BlendRadius;
-
-    float TargetVolume = 0.0f;
-
-    if (Dist <= BlendStart)
-    {
-        TargetVolume = ZoneConfig.MaxVolume;
-        if (!bPlayerInZone)
-        {
-            bPlayerInZone = true;
-        }
-    }
-    else if (Dist <= Radius)
-    {
-        float Alpha = 1.0f - ((Dist - BlendStart) / ZoneConfig.BlendRadius);
-        TargetVolume = Alpha * ZoneConfig.MaxVolume;
-        bPlayerInZone = true;
-    }
-    else
-    {
-        TargetVolume = 0.0f;
-        if (bPlayerInZone)
-        {
-            bPlayerInZone = false;
-        }
-    }
-
-    float FadeSpeed = (TargetVolume > CurrentVolume)
-        ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.01f))
-        : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.01f));
-
-    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
-
+    // Boost volume briefly as a danger stinger
     if (AmbientAudioComponent)
     {
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+        AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.MaxVolume * 1.5f);
+    }
+}
+
+void AAudio_ZoneManager::OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (OtherActor == Player)
+    {
+        bPlayerInZone = true;
+        TargetBlendWeight = 1.0f;
+
+        if (ZoneConfig.bTriggersDangerMusic)
+        {
+            TriggerDangerStinger();
+        }
+    }
+}
+
+void AAudio_ZoneManager::OnPlayerLeaveZone(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!OtherActor) return;
+
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (OtherActor == Player)
+    {
+        bPlayerInZone = false;
+        TargetBlendWeight = 0.0f;
     }
 }
