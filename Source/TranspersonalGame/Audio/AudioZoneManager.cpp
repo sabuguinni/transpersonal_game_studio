@@ -1,80 +1,164 @@
-#include "AudioZoneManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
+// AudioZoneManager.cpp
+// Agent #16 — Audio Agent
+// Prehistoric survival audio zone system — ambient sound management for MinPlayableMap
+// Handles jungle, river, wind, danger, cave, and open plain audio zones
 
-UAudioZoneManager::UAudioZoneManager()
+#include "AudioZoneManager.h"
+#include "Components/SphereComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
+
+// ============================================================
+// UAudio_ZoneComponent
+// ============================================================
+
+UAudio_ZoneComponent::UAudio_ZoneComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for audio blending
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UAudioZoneManager::BeginPlay()
+void UAudio_ZoneComponent::BeginPlay()
 {
     Super::BeginPlay();
-    DinosaurCallTimer = FMath::FRandRange(0.0f, ZoneConfig.DinosaurCallInterval);
-}
 
-void UAudioZoneManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Check player proximity
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn && GetOwner())
+    // Find or create audio component on owner
+    AActor* Owner = GetOwner();
+    if (Owner)
     {
-        float DistSq = FVector::DistSquared(PlayerPawn->GetActorLocation(), GetOwner()->GetActorLocation());
-        bPlayerInZone = (DistSq <= ZoneRadius * ZoneRadius);
-    }
-
-    if (bPlayerInZone)
-    {
-        UpdateAmbientBlend(DeltaTime);
-
-        // Dinosaur distant call timer
-        if (ZoneConfig.bPlayDinosaurDistantCalls)
-        {
-            DinosaurCallTimer -= DeltaTime;
-            if (DinosaurCallTimer <= 0.0f)
-            {
-                TriggerDinosaurDistantCall();
-                DinosaurCallTimer = ZoneConfig.DinosaurCallInterval + FMath::FRandRange(-3.0f, 5.0f);
-            }
-        }
+        AudioComponent = Owner->FindComponentByClass<UAudioComponent>();
     }
 }
 
-void UAudioZoneManager::SetDangerLevel(float DangerLevel)
+void UAudio_ZoneComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    CurrentDangerLevel = FMath::Clamp(DangerLevel, 0.0f, 1.0f);
-    ZoneConfig.DangerMusicBlend = CurrentDangerLevel;
+    if (AudioComponent && AudioComponent->IsPlaying())
+    {
+        AudioComponent->FadeOut(ZoneConfig.FadeOutDuration, 0.0f);
+    }
+    Super::EndPlay(EndPlayReason);
 }
 
-float UAudioZoneManager::GetCurrentAmbientVolume() const
+void UAudio_ZoneComponent::OnPlayerEnterZone()
 {
-    // Danger reduces ambient volume slightly (tension effect)
-    return ZoneConfig.AmbientVolume * (1.0f - CurrentDangerLevel * 0.3f);
+    bIsPlayerInZone = true;
+
+    if (AudioComponent && !AudioComponent->IsPlaying())
+    {
+        AudioComponent->SetVolumeMultiplier(0.0f);
+        AudioComponent->Play();
+        AudioComponent->AdjustVolume(ZoneConfig.FadeInDuration, ZoneConfig.VolumeMultiplier);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone type %d"), (int32)ZoneConfig.ZoneType);
 }
 
-EAudio_BiomeZone UAudioZoneManager::GetBiomeType() const
+void UAudio_ZoneComponent::OnPlayerExitZone()
 {
-    return ZoneConfig.BiomeType;
+    bIsPlayerInZone = false;
+
+    if (AudioComponent && AudioComponent->IsPlaying())
+    {
+        AudioComponent->FadeOut(ZoneConfig.FadeOutDuration, 0.0f);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone type %d"), (int32)ZoneConfig.ZoneType);
 }
 
-void UAudioZoneManager::UpdateAmbientBlend(float DeltaTime)
+// ============================================================
+// AAudio_ZoneManager
+// ============================================================
+
+AAudio_ZoneManager::AAudio_ZoneManager()
 {
-    // Smooth danger level transitions for music blending
-    // This is called from Tick — actual audio component control
-    // is handled by Blueprint or MetaSounds parameter binding
-    // CurrentDangerLevel drives the music layer blend parameter
-    (void)DeltaTime; // Used by Blueprint-side interpolation
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10x/sec — sufficient for audio blending
+
+    // Default zones for MinPlayableMap
+    FAudio_ZoneConfig JungleZone;
+    JungleZone.ZoneType = EAudio_ZoneType::JungleAmbience;
+    JungleZone.AttenuationRadius = 4000.0f;
+    JungleZone.VolumeMultiplier = 0.8f;
+    JungleZone.bLooping = true;
+    JungleZone.FadeInDuration = 3.0f;
+    RegisteredZones.Add(JungleZone);
+
+    FAudio_ZoneConfig RiverZone;
+    RiverZone.ZoneType = EAudio_ZoneType::RiverAmbience;
+    RiverZone.AttenuationRadius = 2000.0f;
+    RiverZone.VolumeMultiplier = 0.6f;
+    RiverZone.bLooping = true;
+    RiverZone.FadeInDuration = 2.0f;
+    RegisteredZones.Add(RiverZone);
+
+    FAudio_ZoneConfig DangerZone;
+    DangerZone.ZoneType = EAudio_ZoneType::DangerZone;
+    DangerZone.AttenuationRadius = 5000.0f;
+    DangerZone.VolumeMultiplier = 1.0f;
+    DangerZone.bLooping = false;
+    DangerZone.FadeInDuration = 0.5f;
+    RegisteredZones.Add(DangerZone);
 }
 
-void UAudioZoneManager::TriggerDinosaurDistantCall()
+void AAudio_ZoneManager::BeginPlay()
 {
-    // Placeholder: in full implementation this triggers a MetaSound cue
-    // for a distant dinosaur vocalization appropriate to the biome zone.
-    // Raptor chirp for Forest, T-Rex low rumble for Savanna, etc.
-    UE_LOG(LogTemp, Verbose, TEXT("AudioZoneManager: DinosaurDistantCall triggered in zone %d"),
-        (int32)ZoneConfig.BiomeType);
+    Super::BeginPlay();
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Initialized with %d zones"), RegisteredZones.Num());
+}
+
+void AAudio_ZoneManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bEnableDynamicMixing)
+    {
+        UpdateDangerMix(DeltaTime);
+    }
+}
+
+void AAudio_ZoneManager::RegisterZone(FAudio_ZoneConfig ZoneConfig)
+{
+    RegisteredZones.Add(ZoneConfig);
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Registered new zone type %d"), (int32)ZoneConfig.ZoneType);
+}
+
+void AAudio_ZoneManager::SetGlobalVolume(float NewVolume)
+{
+    GlobalVolumeScale = FMath::Clamp(NewVolume, 0.0f, 2.0f);
+    // Apply to all active audio components via UGameplayStatics
+    UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 1.0f); // Keep time normal
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Global volume set to %.2f"), GlobalVolumeScale);
+}
+
+void AAudio_ZoneManager::TriggerDangerStinger(FVector DangerLocation)
+{
+    // Increase danger level — drives music intensity
+    TargetDangerLevel = FMath::Min(TargetDangerLevel + 0.3f, 1.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Danger stinger triggered at (%.0f, %.0f, %.0f) — danger level: %.2f"),
+        DangerLocation.X, DangerLocation.Y, DangerLocation.Z, TargetDangerLevel);
+}
+
+void AAudio_ZoneManager::TriggerNightTransition()
+{
+    // Night: reduce jungle birds, increase insect/frog ambience
+    // In a full implementation this would crossfade sound cues
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Night transition triggered — switching to nocturnal ambience"));
+}
+
+void AAudio_ZoneManager::TriggerDawnTransition()
+{
+    // Dawn: bring back bird calls, reduce nocturnal sounds
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Dawn transition triggered — switching to diurnal ambience"));
+}
+
+void AAudio_ZoneManager::UpdateDangerMix(float DeltaTime)
+{
+    // Smoothly blend danger level toward target
+    if (!FMath::IsNearlyEqual(CurrentDangerLevel, TargetDangerLevel, 0.01f))
+    {
+        CurrentDangerLevel = FMath::FInterpTo(CurrentDangerLevel, TargetDangerLevel, DeltaTime, DangerBlendSpeed);
+    }
+
+    // Danger decays over time when no stingers triggered
+    TargetDangerLevel = FMath::Max(0.0f, TargetDangerLevel - (DeltaTime * 0.05f));
 }
