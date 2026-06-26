@@ -1,290 +1,207 @@
-#include "VelociraptorCharacter.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Dinosaurs/VelociraptorCharacter.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "DrawDebugHelpers.h"
 #include "TimerManager.h"
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────────────────────
+#include "Engine/World.h"
 
 AVelociraptorCharacter::AVelociraptorCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // ── Raptor stats (override DinosaurBase defaults) ──────────────────────
-    DinoStats.MaxHealth       = 200.0f;
-    DinoStats.CurrentHealth   = 200.0f;
-    DinoStats.AttackDamage    = 45.0f;
-    DinoStats.DetectionRadius = 1800.0f;
-    DinoStats.AttackRadius    = 150.0f;
-    DinoStats.PatrolSpeed     = 300.0f;
-    DinoStats.ChaseSpeed      = 800.0f;
-    DinoStats.Species         = EEng_DinoSpecies::Velociraptor;
-
-    // ── Pack defaults ──────────────────────────────────────────────────────
-    PackIndex        = 0;
-    FlankAngleOffset = 0.0f;
-
-    // ── Leap defaults ──────────────────────────────────────────────────────
-    LeapRange        = 400.0f;
-    LeapImpulse      = 1200.0f;
-    LeapCooldown     = 3.0f;
-    LeapCooldownTimer = 0.0f;
-    bIsLeaping       = false;
-
-    // ── Movement ──────────────────────────────────────────────────────────
-    GetCharacterMovement()->MaxWalkSpeed        = DinoStats.PatrolSpeed;
-    GetCharacterMovement()->JumpZVelocity       = 600.0f;
-    GetCharacterMovement()->AirControl          = 0.4f;
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate        = FRotator(0.0f, 540.0f, 0.0f);
+    InitVelociraptorStats();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
+void AVelociraptorCharacter::InitVelociraptorStats()
+{
+    // Species-specific stats — Velociraptor: fast, fragile, deadly in packs
+    MaxHealth         = 180.0f;
+    CurrentHealth     = 180.0f;
+    AttackDamage      = 35.0f;   // Low solo damage — pack multiplies this
+    DetectionRadius   = 1800.0f;
+    MoveSpeed         = 700.0f;  // Very fast — fastest land predator in game
+    bIsCarnivore      = true;
+
+    // Pack hunting parameters
+    PackSearchRadius  = 2500.0f;
+    MaxPackSize       = 5;
+    bIsAlpha          = false;
+    PackScanInterval  = 3.0f;
+
+    // Combat
+    PounceCooldown    = 6.0f;
+    ClawDamage        = 25.0f;
+    PounceVelocityScale = 1400.0f;
+    bPounceCoolingDown = false;
+
+    // Movement tuning
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed        = MoveSpeed;
+        MoveComp->JumpZVelocity       = 600.0f;   // Raptors can leap
+        MoveComp->AirControl          = 0.4f;
+        MoveComp->GravityScale        = 1.1f;
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate        = FRotator(0.0f, 540.0f, 0.0f);
+    }
+}
 
 void AVelociraptorCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    // Scale: raptors are smaller than T-Rex
-    SetActorScale3D(FVector(1.5f, 1.5f, 1.5f));
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tick
-// ─────────────────────────────────────────────────────────────────────────────
+    // Start periodic pack scan
+    GetWorldTimerManager().SetTimer(
+        PackScanTimerHandle,
+        this,
+        &AVelociraptorCharacter::ScanForPackAllies,
+        PackScanInterval,
+        true,   // looping
+        1.0f    // initial delay
+    );
+}
 
 void AVelociraptorCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Tick leap cooldown
-    if (LeapCooldownTimer > 0.0f)
-    {
-        LeapCooldownTimer -= DeltaTime;
-    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TickChase — flanking movement override
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::TickChase(float DeltaTime)
+void AVelociraptorCharacter::ScanForPackAllies()
 {
-    if (!CurrentTarget)
-    {
-        // Fall back to base chase if no target
-        Super::TickChase(DeltaTime);
-        return;
-    }
+    PackAllies.Empty();
 
-    // Alpha (index 0) charges directly; flankers move to offset positions
-    if (PackIndex == 0)
-    {
-        Super::TickChase(DeltaTime);
-    }
-    else
-    {
-        UpdateFlankMovement(DeltaTime);
-    }
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AVelociraptorCharacter::StaticClass(), NearbyActors);
 
-    // All pack members attempt leap when close enough
-    float DistToTarget = FVector::Dist(GetActorLocation(), CurrentTarget->GetActorLocation());
-    if (DistToTarget <= LeapRange)
+    for (AActor* Actor : NearbyActors)
     {
-        AttemptLeap(CurrentTarget);
-    }
-}
+        if (Actor == this) continue;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TickAttack — leap attack override
-// ─────────────────────────────────────────────────────────────────────────────
+        AVelociraptorCharacter* OtherRaptor = Cast<AVelociraptorCharacter>(Actor);
+        if (!OtherRaptor) continue;
 
-void AVelociraptorCharacter::TickAttack(float DeltaTime)
-{
-    if (!CurrentTarget)
-    {
-        SetDinoState(EEng_DinoState::Idle);
-        return;
-    }
-
-    float DistToTarget = FVector::Dist(GetActorLocation(), CurrentTarget->GetActorLocation());
-
-    if (DistToTarget <= DinoStats.AttackRadius)
-    {
-        // In melee range — perform standard attack
-        PerformAttack();
-    }
-    else if (DistToTarget <= LeapRange)
-    {
-        // In leap range — leap at target
-        AttemptLeap(CurrentTarget);
-    }
-    else
-    {
-        // Target moved out of attack range — chase again
-        SetDinoState(EEng_DinoState::Chase);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OnDinoStateChanged — raptor-specific reactions
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::OnDinoStateChanged_Implementation(EEng_DinoState NewState)
-{
-    Super::OnDinoStateChanged_Implementation(NewState);
-
-    switch (NewState)
-    {
-    case EEng_DinoState::Chase:
-        GetCharacterMovement()->MaxWalkSpeed = DinoStats.ChaseSpeed;
-        // Alpha alerts the pack when it starts chasing
-        if (PackIndex == 0 && CurrentTarget)
+        float Dist = FVector::Dist(GetActorLocation(), OtherRaptor->GetActorLocation());
+        if (Dist <= PackSearchRadius)
         {
-            AlertPack(CurrentTarget);
-        }
-        break;
-
-    case EEng_DinoState::Patrol:
-        GetCharacterMovement()->MaxWalkSpeed = DinoStats.PatrolSpeed;
-        bIsLeaping = false;
-        break;
-
-    case EEng_DinoState::Flee:
-        // Raptors flee at max speed
-        GetCharacterMovement()->MaxWalkSpeed = DinoStats.ChaseSpeed * 1.2f;
-        break;
-
-    default:
-        break;
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OnDinoDied — pack scatter
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::OnDinoDied_Implementation()
-{
-    // Surviving pack members flee when a packmate dies
-    for (AVelociraptorCharacter* Member : PackMembers)
-    {
-        if (Member && Member != this && Member->IsAlive())
-        {
-            Member->SetDinoState(EEng_DinoState::Flee);
+            PackAllies.Add(OtherRaptor);
+            if (PackAllies.Num() >= MaxPackSize) break;
         }
     }
 
-    Super::OnDinoDied_Implementation();
+    // Determine alpha: the raptor with the most health in the pack is Alpha
+    if (PackAllies.Num() > 0)
+    {
+        bool bShouldBeAlpha = true;
+        for (AVelociraptorCharacter* Ally : PackAllies)
+        {
+            if (Ally->CurrentHealth > CurrentHealth)
+            {
+                bShouldBeAlpha = false;
+                break;
+            }
+        }
+        bIsAlpha = bShouldBeAlpha;
+    }
+    else
+    {
+        bIsAlpha = true; // Lone raptor is its own alpha
+    }
+
+#if WITH_EDITOR
+    // Debug: draw pack radius
+    DrawDebugSphere(GetWorld(), GetActorLocation(), PackSearchRadius, 16,
+        bIsAlpha ? FColor::Red : FColor::Yellow, false, PackScanInterval * 0.9f);
+#endif
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// JoinPack
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::JoinPack(const TArray<AVelociraptorCharacter*>& Pack, int32 Index)
+void AVelociraptorCharacter::InitiatePackAttack(AActor* Target)
 {
-    PackMembers      = Pack;
-    PackIndex        = Index;
+    if (!Target || !bIsAlpha) return;
 
-    // Assign flank angles: alpha=0°, flanker1=90°, flanker2=-90°
-    const float Angles[] = { 0.0f, 90.0f, -90.0f };
-    if (Index >= 0 && Index < 3)
+    // Alpha attacks from the front
+    PerformPounce(Target);
+
+    // Distribute flanking directions to allies
+    int32 AllyCount = PackAllies.Num();
+    for (int32 i = 0; i < AllyCount; ++i)
     {
-        FlankAngleOffset = Angles[Index];
+        if (!PackAllies[i]) continue;
+
+        // Spread allies around the target: left flank, right flank, rear
+        float AngleDeg = (360.0f / (AllyCount + 1)) * (i + 1);
+        float AngleRad = FMath::DegreesToRadians(AngleDeg);
+        FVector FlankDir = FVector(FMath::Cos(AngleRad), FMath::Sin(AngleRad), 0.0f);
+
+        PackAllies[i]->RespondToPackAttack(Target, FlankDir);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AlertPack
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::AlertPack(AActor* Target)
+void AVelociraptorCharacter::RespondToPackAttack(AActor* Target, FVector FlankDirection)
 {
     if (!Target) return;
 
-    for (AVelociraptorCharacter* Member : PackMembers)
+    // Move to flanking position relative to target, then attack
+    FVector TargetLoc = Target->GetActorLocation();
+    FVector FlankPos  = TargetLoc + FlankDirection * 300.0f; // 3m offset
+
+    // Move toward flank position — AI controller will handle pathfinding
+    // For now, apply a direct launch toward the flank position
+    FVector ToFlank = (FlankPos - GetActorLocation()).GetSafeNormal();
+    LaunchCharacter(ToFlank * 400.0f, true, false);
+
+    // After reaching flank, perform claw slash
+    FTimerHandle FlankAttackTimer;
+    GetWorldTimerManager().SetTimer(FlankAttackTimer, this,
+        &AVelociraptorCharacter::PerformClawSlash, 0.8f, false);
+}
+
+void AVelociraptorCharacter::PerformPounce(AActor* Target)
+{
+    if (!Target || bPounceCoolingDown) return;
+
+    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+    FVector PounceVelocity = ToTarget * PounceVelocityScale + FVector(0, 0, 400.0f);
+
+    LaunchCharacter(PounceVelocity, true, true);
+
+    // Apply damage on landing — simplified: damage target directly
+    UGameplayStatics::ApplyDamage(Target, AttackDamage * 1.5f, GetController(), this, nullptr);
+
+    // Start cooldown
+    bPounceCoolingDown = true;
+    GetWorldTimerManager().SetTimer(
+        PounceCooldownTimerHandle,
+        [this]() { bPounceCoolingDown = false; },
+        PounceCooldown,
+        false
+    );
+
+#if WITH_EDITOR
+    DrawDebugLine(GetWorld(), GetActorLocation(), Target->GetActorLocation(),
+        FColor::Orange, false, 1.5f, 0, 3.0f);
+#endif
+}
+
+void AVelociraptorCharacter::PerformClawSlash()
+{
+    // Find actors within melee range (120cm)
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
+
+    for (AActor* Actor : NearbyActors)
     {
-        if (Member && Member != this && Member->IsAlive())
+        if (Actor == this) continue;
+        if (Cast<AVelociraptorCharacter>(Actor)) continue; // Don't hit pack allies
+
+        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Dist <= 120.0f)
         {
-            Member->CurrentTarget = Target;
-            Member->SetDinoState(EEng_DinoState::Chase);
+            UGameplayStatics::ApplyDamage(Actor, ClawDamage, GetController(), this, nullptr);
+
+#if WITH_EDITOR
+            DrawDebugSphere(GetWorld(), Actor->GetActorLocation(), 60.0f, 8,
+                FColor::Red, false, 0.5f);
+#endif
         }
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ComputeFlankPosition
-// ─────────────────────────────────────────────────────────────────────────────
-
-FVector AVelociraptorCharacter::ComputeFlankPosition(AActor* Target) const
-{
-    if (!Target) return GetActorLocation();
-
-    // Direction from target to this raptor, rotated by flank angle
-    FVector ToRaptor = (GetActorLocation() - Target->GetActorLocation()).GetSafeNormal();
-    FVector FlankDir = ToRaptor.RotateAngleAxis(FlankAngleOffset, FVector::UpVector);
-
-    // Flank position is 300 units from the target at the flank angle
-    const float FlankDistance = 300.0f;
-    return Target->GetActorLocation() + FlankDir * FlankDistance;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AttemptLeap
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::AttemptLeap(AActor* Target)
-{
-    if (!Target || bIsLeaping || LeapCooldownTimer > 0.0f) return;
-
-    bIsLeaping        = true;
-    LeapCooldownTimer = LeapCooldown;
-
-    // Direction toward target
-    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    ToTarget.Z       = 0.4f; // slight upward arc
-
-    // Apply launch velocity
-    LaunchCharacter(ToTarget * LeapImpulse, true, true);
-
-    // Deal damage on leap impact (slight delay for arc)
-    FTimerHandle LeapImpactTimer;
-    GetWorldTimerManager().SetTimer(LeapImpactTimer, [this, Target]()
-    {
-        if (Target && IsAlive())
-        {
-            float DistOnLand = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-            if (DistOnLand <= DinoStats.AttackRadius * 1.5f)
-            {
-                UGameplayStatics::ApplyDamage(Target, DinoStats.AttackDamage * 1.5f,
-                    GetController(), this, nullptr);
-            }
-        }
-        bIsLeaping = false;
-    }, 0.6f, false);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UpdateFlankMovement (private)
-// ─────────────────────────────────────────────────────────────────────────────
-
-void AVelociraptorCharacter::UpdateFlankMovement(float DeltaTime)
-{
-    if (!CurrentTarget) return;
-
-    FVector FlankPos = ComputeFlankPosition(CurrentTarget);
-    FVector ToFlank  = (FlankPos - GetActorLocation()).GetSafeNormal();
-
-    // Add movement input toward flank position
-    AddMovementInput(ToFlank, 1.0f);
-
-    // Face the target while flanking
-    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(
-        GetActorLocation(), CurrentTarget->GetActorLocation());
-    SetActorRotation(FRotator(0.0f, LookAt.Yaw, 0.0f));
 }
