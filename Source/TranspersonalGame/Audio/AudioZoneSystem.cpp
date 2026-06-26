@@ -1,272 +1,197 @@
+// AudioZoneSystem.cpp — Agent #16 Audio Agent
+// Adaptive audio zone system for prehistoric survival game.
+// Manages ambient sound blending, danger-level response, and TTS dialogue integration.
+
 #include "AudioZoneSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Math/UnrealMathUtility.h"
 
-// ============================================================
-// AAudio_ZoneActor
-// ============================================================
-
-AAudio_ZoneActor::AAudio_ZoneActor()
+UAudio_ZoneSystem::UAudio_ZoneSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = TickInterval;
 
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(1500.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
+    // Default zone config
+    ZoneConfig.ZoneType = EAudio_ZoneType::Jungle;
+    ZoneConfig.BlendRadius = 1000.0f;
+    ZoneConfig.MaxVolume = 1.0f;
+    ZoneConfig.FadeInTime = 2.0f;
+    ZoneConfig.FadeOutTime = 3.0f;
+    ZoneConfig.bLooping = true;
 
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
+    // Campfire Freesound IDs (from Agent #16 search results)
+    ZoneConfig.FreesoundIDs = { 819666, 856943, 790790 };
+}
 
-    PlayerDistance = 99999.0f;
+void UAudio_ZoneSystem::BeginPlay()
+{
+    Super::BeginPlay();
+    SeedDefaultAudioURLs();
     CurrentVolume = 0.0f;
+    TargetVolume = 0.0f;
+}
+
+void UAudio_ZoneSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    TickAccumulator += DeltaTime;
+    if (TickAccumulator < TickInterval)
+    {
+        return;
+    }
+    TickAccumulator = 0.0f;
+
+    // Smooth volume towards target using simple lerp
+    float FadeSpeed = bPlayerInZone
+        ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.01f))
+        : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.01f));
+
+    float DangerMult = GetDangerVolumeMultiplier();
+    float FinalTarget = TargetVolume * DangerMult;
+
+    CurrentVolume = FMath::FInterpTo(CurrentVolume, FinalTarget, TickInterval, FadeSpeed * 5.0f);
+    CurrentVolume = FMath::Clamp(CurrentVolume, 0.0f, ZoneConfig.MaxVolume);
+}
+
+void UAudio_ZoneSystem::OnPlayerEnterZone()
+{
+    bPlayerInZone = true;
+    TargetVolume = ZoneConfig.MaxVolume;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone [%s]"), *GetZoneTypeString());
+}
+
+void UAudio_ZoneSystem::OnPlayerExitZone()
+{
     bPlayerInZone = false;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
+    TargetVolume = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone [%s]"), *GetZoneTypeString());
 }
 
-void AAudio_ZoneActor::BeginPlay()
+void UAudio_ZoneSystem::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
-    Super::BeginPlay();
-
-    if (ZoneConfig.bActive && AmbientAudioComponent)
+    if (CurrentDangerLevel != NewLevel)
     {
-        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
-        AmbientAudioComponent->Play();
+        CurrentDangerLevel = NewLevel;
+        UE_LOG(LogTemp, Log, TEXT("AudioZone: Danger level changed to [%d] in zone [%s]"),
+            (int32)NewLevel, *GetZoneTypeString());
     }
 }
 
-void AAudio_ZoneActor::Tick(float DeltaTime)
+FString UAudio_ZoneSystem::GetZoneTypeString() const
 {
-    Super::Tick(DeltaTime);
-
-    // Update player distance
-    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (PlayerChar)
+    switch (ZoneConfig.ZoneType)
     {
-        PlayerDistance = FVector::Dist(GetActorLocation(), PlayerChar->GetActorLocation());
-    }
-
-    UpdateAudioBlend(DeltaTime);
-}
-
-void AAudio_ZoneActor::UpdateAudioBlend(float DeltaTime)
-{
-    if (!AmbientAudioComponent || !ZoneConfig.bActive)
-    {
-        return;
-    }
-
-    float TargetVolume = 0.0f;
-    float BlendRadius = ZoneConfig.BlendRadius;
-
-    if (PlayerDistance < BlendRadius)
-    {
-        float Alpha = 1.0f - (PlayerDistance / BlendRadius);
-        Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-
-        float TimeVolume = (CurrentTimeOfDay == EAudio_TimeOfDay::Night || CurrentTimeOfDay == EAudio_TimeOfDay::Dawn)
-            ? ZoneConfig.NightVolume
-            : ZoneConfig.DayVolume;
-
-        TargetVolume = Alpha * TimeVolume * ZoneConfig.MaxVolume;
-        bPlayerInZone = true;
-    }
-    else
-    {
-        bPlayerInZone = false;
-    }
-
-    // Smooth blend
-    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, 2.0f);
-    AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-}
-
-void AAudio_ZoneActor::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
-{
-    CurrentTimeOfDay = NewTimeOfDay;
-}
-
-void AAudio_ZoneActor::SetPlayerDistance(float Distance)
-{
-    PlayerDistance = Distance;
-}
-
-float AAudio_ZoneActor::GetBlendedVolume() const
-{
-    return CurrentVolume;
-}
-
-void AAudio_ZoneActor::ActivateZone()
-{
-    ZoneConfig.bActive = true;
-    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Play();
+        case EAudio_ZoneType::Jungle:       return TEXT("Jungle");
+        case EAudio_ZoneType::Campfire:     return TEXT("Campfire");
+        case EAudio_ZoneType::TRexDanger:   return TEXT("TRex_Danger");
+        case EAudio_ZoneType::River:        return TEXT("River");
+        case EAudio_ZoneType::Cave:         return TEXT("Cave");
+        case EAudio_ZoneType::OpenPlain:    return TEXT("OpenPlain");
+        case EAudio_ZoneType::NightTime:    return TEXT("NightTime");
+        case EAudio_ZoneType::Storm:        return TEXT("Storm");
+        default:                            return TEXT("Unknown");
     }
 }
 
-void AAudio_ZoneActor::DeactivateZone()
+float UAudio_ZoneSystem::GetDangerVolumeMultiplier() const
 {
-    ZoneConfig.bActive = false;
-    if (AmbientAudioComponent)
+    // Danger level modulates ambient volume:
+    // Safe → full jungle ambience, low tension music
+    // Danger/Critical → suppress ambient, boost heartbeat/danger stings
+    switch (CurrentDangerLevel)
     {
-        AmbientAudioComponent->FadeOut(2.0f, 0.0f);
+        case EAudio_DangerLevel::Safe:      return 1.0f;
+        case EAudio_DangerLevel::Caution:   return 0.75f;
+        case EAudio_DangerLevel::Danger:    return 0.4f;
+        case EAudio_DangerLevel::Critical:  return 0.1f;
+        default:                            return 1.0f;
     }
 }
 
-// ============================================================
-// AAudio_ScreenShakeTrigger
-// ============================================================
-
-AAudio_ScreenShakeTrigger::AAudio_ScreenShakeTrigger()
+void UAudio_ZoneSystem::RegisterDialogueLine(const FString& Speaker, const FString& Text, const FString& AudioURL, float Duration)
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetSphereRadius(800.0f);
-    DetectionSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = DetectionSphere;
-
-    bPlayerCurrentlyInRange = false;
-    LastShakeTime = 0.0f;
-    ShakeCooldown = 1.5f;
+    FAudio_DialogueEntry Entry;
+    Entry.SpeakerName = Speaker;
+    Entry.DialogueText = Text;
+    Entry.AudioURL = AudioURL;
+    Entry.Duration = Duration;
+    Entry.bHasBeenPlayed = false;
+    DialogueEntries.Add(Entry);
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Registered dialogue line for [%s]"), *Speaker);
 }
 
-void AAudio_ScreenShakeTrigger::BeginPlay()
+bool UAudio_ZoneSystem::GetNextDialogueLine(FAudio_DialogueEntry& OutEntry)
 {
-    Super::BeginPlay();
-    DetectionSphere->SetSphereRadius(ShakeConfig.TriggerRadius);
-}
-
-void AAudio_ScreenShakeTrigger::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    CheckPlayerProximity();
-}
-
-void AAudio_ScreenShakeTrigger::CheckPlayerProximity()
-{
-    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (!PlayerChar)
+    for (FAudio_DialogueEntry& Entry : DialogueEntries)
     {
-        return;
-    }
-
-    float Dist = FVector::Dist(GetActorLocation(), PlayerChar->GetActorLocation());
-    bool bInRange = Dist < ShakeConfig.TriggerRadius;
-
-    if (bInRange && !bPlayerCurrentlyInRange)
-    {
-        // Player just entered range — trigger shake
-        float Now = GetWorld()->GetTimeSeconds();
-        if (Now - LastShakeTime > ShakeCooldown)
+        if (!Entry.bHasBeenPlayed)
         {
-            TriggerShake(ShakeConfig.ShakeIntensity);
-            LastShakeTime = Now;
+            OutEntry = Entry;
+            return true;
         }
     }
-
-    bPlayerCurrentlyInRange = bInRange;
+    return false;
 }
 
-void AAudio_ScreenShakeTrigger::TriggerShake(float Intensity)
+void UAudio_ZoneSystem::MarkDialoguePlayed(const FString& Speaker)
 {
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC)
+    for (FAudio_DialogueEntry& Entry : DialogueEntries)
     {
-        // Screen shake via client camera shake
-        // Parameters: scale, play space
-        PC->ClientStartCameraShake(
-            nullptr, // Camera shake class — set in Blueprint
-            Intensity
-        );
+        if (Entry.SpeakerName == Speaker && !Entry.bHasBeenPlayed)
+        {
+            Entry.bHasBeenPlayed = true;
+            UE_LOG(LogTemp, Log, TEXT("AudioZone: Marked dialogue played for [%s]"), *Speaker);
+            return;
+        }
     }
 }
 
-bool AAudio_ScreenShakeTrigger::IsPlayerInRange() const
+void UAudio_ZoneSystem::SeedDefaultAudioURLs()
 {
-    return bPlayerCurrentlyInRange;
-}
+    // TTS audio URLs generated by Agent #16 in PROD_CYCLE_AUTO_20260626_006
+    JungleNarrationURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469187596_Narrator_Jungle_Ambience.mp3");
+    CombatWarningURL   = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469196131_Kael_Combat_Warning.mp3");
 
-// ============================================================
-// UAudio_DayNightManager
-// ============================================================
+    // Register dialogue lines from Agent #15 TTS outputs (PROD_CYCLE_AUTO_20260626_006)
+    RegisterDialogueLine(
+        TEXT("Narrator"),
+        TEXT("The jungle never goes quiet. That is how you know something is wrong."),
+        JungleNarrationURL,
+        15.0f
+    );
+    RegisterDialogueLine(
+        TEXT("Kael"),
+        TEXT("Run. Do not look back. Do not stop to fight."),
+        CombatWarningURL,
+        9.0f
+    );
+    // Agent #15 TTS lines
+    RegisterDialogueLine(
+        TEXT("Kael"),
+        TEXT("We lost the eastern camp three nights ago. The ground shook before dawn."),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469054495_Kael_Survivor.mp3"),
+        12.0f
+    );
+    RegisterDialogueLine(
+        TEXT("Mira"),
+        TEXT("The river is low. That means the big ones are moving upstream."),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469057365_Mira_Scout.mp3"),
+        11.0f
+    );
+    RegisterDialogueLine(
+        TEXT("Elder Oru"),
+        TEXT("The big ones do not hunt at midday. That is our window."),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469087849_Elder_Oru.mp3"),
+        10.0f
+    );
+    RegisterDialogueLine(
+        TEXT("Dara"),
+        TEXT("I tracked it for four days. A Triceratops — old one, scarred flank."),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782469091133_Dara_Tracker.mp3"),
+        11.0f
+    );
 
-UAudio_DayNightManager::UAudio_DayNightManager()
-{
-    DayDurationSeconds = 600.0f;
-    NightDurationSeconds = 300.0f;
-    CurrentTimeNormalized = 0.5f;
-    CurrentPhase = EAudio_TimeOfDay::Day;
-    ElapsedSeconds = 0.0f;
-    TotalCycleDuration = DayDurationSeconds + NightDurationSeconds;
-}
-
-void UAudio_DayNightManager::AdvanceTime(float DeltaSeconds)
-{
-    ElapsedSeconds += DeltaSeconds;
-    TotalCycleDuration = DayDurationSeconds + NightDurationSeconds;
-
-    if (ElapsedSeconds >= TotalCycleDuration)
-    {
-        ElapsedSeconds -= TotalCycleDuration;
-    }
-
-    CurrentTimeNormalized = ElapsedSeconds / TotalCycleDuration;
-
-    // Determine phase
-    float DayFraction = DayDurationSeconds / TotalCycleDuration;
-    float DawnFraction = 0.05f;
-    float DuskFraction = DayFraction - 0.05f;
-
-    if (CurrentTimeNormalized < DawnFraction)
-    {
-        CurrentPhase = EAudio_TimeOfDay::Dawn;
-    }
-    else if (CurrentTimeNormalized < DuskFraction)
-    {
-        CurrentPhase = EAudio_TimeOfDay::Day;
-    }
-    else if (CurrentTimeNormalized < DayFraction)
-    {
-        CurrentPhase = EAudio_TimeOfDay::Dusk;
-    }
-    else
-    {
-        CurrentPhase = EAudio_TimeOfDay::Night;
-    }
-}
-
-EAudio_TimeOfDay UAudio_DayNightManager::GetCurrentPhase() const
-{
-    return CurrentPhase;
-}
-
-float UAudio_DayNightManager::GetSunPitch() const
-{
-    // Map normalized time to sun pitch: -90 (midnight) to +90 (noon) to -90 (midnight)
-    float Angle = CurrentTimeNormalized * 360.0f - 90.0f;
-    return FMath::Sin(FMath::DegreesToRadians(Angle)) * 90.0f;
-}
-
-FLinearColor UAudio_DayNightManager::GetAmbientColor() const
-{
-    switch (CurrentPhase)
-    {
-    case EAudio_TimeOfDay::Dawn:
-        return FLinearColor(1.0f, 0.6f, 0.3f, 1.0f); // Warm orange dawn
-    case EAudio_TimeOfDay::Day:
-        return FLinearColor(1.0f, 0.95f, 0.85f, 1.0f); // Bright daylight
-    case EAudio_TimeOfDay::Dusk:
-        return FLinearColor(1.0f, 0.4f, 0.1f, 1.0f); // Deep red dusk
-    case EAudio_TimeOfDay::Night:
-        return FLinearColor(0.05f, 0.05f, 0.2f, 1.0f); // Dark blue night
-    default:
-        return FLinearColor::White;
-    }
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Seeded %d default dialogue entries"), DialogueEntries.Num());
 }
