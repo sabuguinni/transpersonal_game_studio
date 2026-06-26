@@ -1,151 +1,180 @@
-// BiomeManager.cpp — Engine Architect #02 — Cycle AUTO_009
-// Manages biome regions, assigns dinosaur species to biomes,
-// and provides query functions for world generation systems.
-// P1 priority: World Generation backbone.
+// BiomeManager.cpp
+// Engine Architect #02 — Transpersonal Game Studio
+// Manages biome classification, terrain queries, and biome-driven
+// foliage/fauna spawning for the procedural prehistoric world.
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
-ABiomeManager::ABiomeManager()
+UBiomeManager::UBiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = false;  // Biome data is static — no per-frame update needed
+    // Default biome thresholds (altitude-based)
+    BiomeAltitudeThresholds.Add(EBiomeType::CoastalShallows,    -200.0f);
+    BiomeAltitudeThresholds.Add(EBiomeType::TropicalJungle,      200.0f);
+    BiomeAltitudeThresholds.Add(EBiomeType::Savanna,             600.0f);
+    BiomeAltitudeThresholds.Add(EBiomeType::TemperateForest,    1200.0f);
+    BiomeAltitudeThresholds.Add(EBiomeType::AlpineMeadow,       2000.0f);
+    BiomeAltitudeThresholds.Add(EBiomeType::VolcanicBadlands,   3000.0f);
 
-    // Default biome configuration for the MinPlayableMap
-    // Centered around the dino zone (2000, 2000)
-    InitializeDefaultBiomes();
+    // Default biome temperatures (Celsius)
+    BiomeTemperatures.Add(EBiomeType::CoastalShallows,    28.0f);
+    BiomeTemperatures.Add(EBiomeType::TropicalJungle,     35.0f);
+    BiomeTemperatures.Add(EBiomeType::Savanna,            32.0f);
+    BiomeTemperatures.Add(EBiomeType::TemperateForest,    18.0f);
+    BiomeTemperatures.Add(EBiomeType::AlpineMeadow,        8.0f);
+    BiomeTemperatures.Add(EBiomeType::VolcanicBadlands,   55.0f);
+
+    // Default biome humidity (0-1)
+    BiomeHumidity.Add(EBiomeType::CoastalShallows,    0.9f);
+    BiomeHumidity.Add(EBiomeType::TropicalJungle,     0.95f);
+    BiomeHumidity.Add(EBiomeType::Savanna,            0.3f);
+    BiomeHumidity.Add(EBiomeType::TemperateForest,    0.6f);
+    BiomeHumidity.Add(EBiomeType::AlpineMeadow,       0.5f);
+    BiomeHumidity.Add(EBiomeType::VolcanicBadlands,   0.1f);
+
+    // Foliage density per biome (0-1)
+    BiomeFoliageDensity.Add(EBiomeType::CoastalShallows,    0.4f);
+    BiomeFoliageDensity.Add(EBiomeType::TropicalJungle,     1.0f);
+    BiomeFoliageDensity.Add(EBiomeType::Savanna,            0.3f);
+    BiomeFoliageDensity.Add(EBiomeType::TemperateForest,    0.7f);
+    BiomeFoliageDensity.Add(EBiomeType::AlpineMeadow,       0.2f);
+    BiomeFoliageDensity.Add(EBiomeType::VolcanicBadlands,   0.05f);
 }
 
-void ABiomeManager::BeginPlay()
+void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — %d biomes registered"), BiomeAltitudeThresholds.Num());
+}
 
-    if (Biomes.Num() == 0)
+void UBiomeManager::Deinitialize()
+{
+    BiomeAltitudeThresholds.Empty();
+    BiomeTemperatures.Empty();
+    BiomeHumidity.Empty();
+    BiomeFoliageDensity.Empty();
+    Super::Deinitialize();
+}
+
+EBiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    float Altitude = WorldLocation.Z;
+
+    // Walk thresholds from lowest to highest
+    EBiomeType Result = EBiomeType::TropicalJungle; // default
+
+    // Coastal if below sea level
+    if (Altitude < 0.0f) return EBiomeType::CoastalShallows;
+
+    // Altitude-based classification
+    if (Altitude < 200.0f)  return EBiomeType::TropicalJungle;
+    if (Altitude < 600.0f)  return EBiomeType::Savanna;
+    if (Altitude < 1200.0f) return EBiomeType::TemperateForest;
+    if (Altitude < 2000.0f) return EBiomeType::AlpineMeadow;
+
+    return EBiomeType::VolcanicBadlands;
+}
+
+FBiomeData UBiomeManager::GetBiomeData(EBiomeType BiomeType) const
+{
+    FBiomeData Data;
+    Data.BiomeType = BiomeType;
+
+    if (const float* Temp = BiomeTemperatures.Find(BiomeType))
+        Data.Temperature = *Temp;
+    else
+        Data.Temperature = 25.0f;
+
+    if (const float* Hum = BiomeHumidity.Find(BiomeType))
+        Data.Humidity = *Hum;
+    else
+        Data.Humidity = 0.5f;
+
+    if (const float* Density = BiomeFoliageDensity.Find(BiomeType))
+        Data.FoliageDensity = *Density;
+    else
+        Data.FoliageDensity = 0.5f;
+
+    // Biome display names
+    switch (BiomeType)
     {
-        InitializeDefaultBiomes();
+        case EBiomeType::CoastalShallows:  Data.BiomeName = TEXT("Coastal Shallows");  break;
+        case EBiomeType::TropicalJungle:   Data.BiomeName = TEXT("Tropical Jungle");   break;
+        case EBiomeType::Savanna:          Data.BiomeName = TEXT("Cretaceous Savanna"); break;
+        case EBiomeType::TemperateForest:  Data.BiomeName = TEXT("Temperate Forest");  break;
+        case EBiomeType::AlpineMeadow:     Data.BiomeName = TEXT("Alpine Meadow");     break;
+        case EBiomeType::VolcanicBadlands: Data.BiomeName = TEXT("Volcanic Badlands"); break;
+        default:                           Data.BiomeName = TEXT("Unknown Biome");     break;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biomes"), Biomes.Num());
+    return Data;
 }
 
-void ABiomeManager::InitializeDefaultBiomes()
+float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-    Biomes.Empty();
-
-    // Biome 1: Dense Jungle (center — main play area)
-    FBiomeData Jungle;
-    Jungle.BiomeType = EBiomeType::Forest;
-    Jungle.BiomeCenter = FVector2D(2000.0f, 2000.0f);
-    Jungle.BiomeRadius = 3000.0f;
-    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Velociraptor);
-    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Compsognathus);
-    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Parasaurolophus);
-    Biomes.Add(Jungle);
-
-    // Biome 2: Open Savanna (north — large herbivores)
-    FBiomeData Savanna;
-    Savanna.BiomeType = EBiomeType::Savanna;
-    Savanna.BiomeCenter = FVector2D(2000.0f, -1000.0f);
-    Savanna.BiomeRadius = 4000.0f;
-    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Triceratops);
-    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Brachiosaurus);
-    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Stegosaurus);
-    Biomes.Add(Savanna);
-
-    // Biome 3: Swamp (south — dangerous)
-    FBiomeData Swamp;
-    Swamp.BiomeType = EBiomeType::Swamp;
-    Swamp.BiomeCenter = FVector2D(2000.0f, 5000.0f);
-    Swamp.BiomeRadius = 2500.0f;
-    Swamp.NativeDinosaurs.Add(EDinosaurSpecies::TRex);
-    Swamp.NativeDinosaurs.Add(EDinosaurSpecies::Ankylosaurus);
-    Biomes.Add(Swamp);
-
-    // Biome 4: Mountain Canyon (west — exploration)
-    FBiomeData Canyon;
-    Canyon.BiomeType = EBiomeType::Canyon;
-    Canyon.BiomeCenter = FVector2D(-2000.0f, 2000.0f);
-    Canyon.BiomeRadius = 3500.0f;
-    Canyon.NativeDinosaurs.Add(EDinosaurSpecies::Velociraptor);
-    Canyon.NativeDinosaurs.Add(EDinosaurSpecies::TRex);
-    Biomes.Add(Canyon);
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    if (const float* Temp = BiomeTemperatures.Find(Biome))
+        return *Temp;
+    return 25.0f;
 }
 
-EBiomeType ABiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
 {
-    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-    float ClosestDist = TNumericLimits<float>::Max();
-    EBiomeType ClosestBiome = EBiomeType::Forest;
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    if (const float* Hum = BiomeHumidity.Find(Biome))
+        return *Hum;
+    return 0.5f;
+}
 
-    for (const FBiomeData& Biome : Biomes)
+float UBiomeManager::GetFoliageDensityAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    if (const float* Density = BiomeFoliageDensity.Find(Biome))
+        return *Density;
+    return 0.5f;
+}
+
+bool UBiomeManager::IsBiomeSuitableForSpecies(EBiomeType Biome, const FName& SpeciesName) const
+{
+    // Carnivores (T-Rex, Raptor) prefer jungle/savanna
+    if (SpeciesName == TEXT("TRex") || SpeciesName == TEXT("Velociraptor"))
     {
-        float Dist = FVector2D::Distance(Loc2D, Biome.BiomeCenter);
-        if (Dist < ClosestDist)
-        {
-            ClosestDist = Dist;
-            ClosestBiome = Biome.BiomeType;
-        }
+        return (Biome == EBiomeType::TropicalJungle || Biome == EBiomeType::Savanna);
     }
 
-    return ClosestBiome;
-}
-
-TArray<EDinosaurSpecies> ABiomeManager::GetDinosaursForBiome(EBiomeType BiomeType) const
-{
-    for (const FBiomeData& Biome : Biomes)
+    // Herbivores (Brachiosaurus, Triceratops) prefer jungle/savanna/temperate
+    if (SpeciesName == TEXT("Brachiosaurus") || SpeciesName == TEXT("Triceratops")
+        || SpeciesName == TEXT("Parasaurolophus"))
     {
-        if (Biome.BiomeType == BiomeType)
-        {
-            return Biome.NativeDinosaurs;
-        }
-    }
-    return TArray<EDinosaurSpecies>();
-}
-
-FBiomeData ABiomeManager::GetBiomeDataAtLocation(FVector WorldLocation) const
-{
-    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-    float ClosestDist = TNumericLimits<float>::Max();
-    int32 ClosestIdx = 0;
-
-    for (int32 i = 0; i < Biomes.Num(); ++i)
-    {
-        float Dist = FVector2D::Distance(Loc2D, Biomes[i].BiomeCenter);
-        if (Dist < ClosestDist)
-        {
-            ClosestDist = Dist;
-            ClosestIdx = i;
-        }
+        return (Biome == EBiomeType::TropicalJungle
+             || Biome == EBiomeType::Savanna
+             || Biome == EBiomeType::TemperateForest);
     }
 
-    return Biomes.IsValidIndex(ClosestIdx) ? Biomes[ClosestIdx] : FBiomeData();
+    // Default: most biomes are suitable
+    return (Biome != EBiomeType::VolcanicBadlands);
 }
 
-bool ABiomeManager::IsLocationInBiome(FVector WorldLocation, EBiomeType BiomeType) const
+TArray<EBiomeType> UBiomeManager::GetAllBiomeTypes() const
 {
-    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
-
-    for (const FBiomeData& Biome : Biomes)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            float Dist = FVector2D::Distance(Loc2D, Biome.BiomeCenter);
-            if (Dist <= Biome.BiomeRadius)
-            {
-                return true;
-            }
-        }
-    }
-    return false;
+    TArray<EBiomeType> AllBiomes;
+    BiomeAltitudeThresholds.GetKeys(AllBiomes);
+    return AllBiomes;
 }
 
-int32 ABiomeManager::GetBiomeCount() const
+void UBiomeManager::SetBiomeTemperature(EBiomeType BiomeType, float Temperature)
 {
-    return Biomes.Num();
+    BiomeTemperatures.Add(BiomeType, Temperature);
 }
 
-void ABiomeManager::AddBiome(FBiomeData NewBiome)
+void UBiomeManager::SetBiomeHumidity(EBiomeType BiomeType, float Humidity)
 {
-    Biomes.Add(NewBiome);
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Added biome. Total: %d"), Biomes.Num());
+    BiomeHumidity.Add(BiomeType, FMath::Clamp(Humidity, 0.0f, 1.0f));
+}
+
+void UBiomeManager::SetBiomeFoliageDensity(EBiomeType BiomeType, float Density)
+{
+    BiomeFoliageDensity.Add(BiomeType, FMath::Clamp(Density, 0.0f, 1.0f));
 }
