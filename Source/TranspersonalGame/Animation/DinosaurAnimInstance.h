@@ -11,8 +11,8 @@ enum class EAnim_DinoLocomotionState : uint8
     Walk        UMETA(DisplayName = "Walk"),
     Run         UMETA(DisplayName = "Run"),
     Attack      UMETA(DisplayName = "Attack"),
-    Death       UMETA(DisplayName = "Death"),
     Roar        UMETA(DisplayName = "Roar"),
+    Death       UMETA(DisplayName = "Death"),
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -26,8 +26,15 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
+    // --- Locomotion State ---
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float GroundSpeed;
+    EAnim_DinoLocomotionState LocomotionState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float Direction;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsMoving;
@@ -36,31 +43,41 @@ public:
     bool bIsAttacking;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsRoaring;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsDead;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    EAnim_DinoLocomotionState LocomotionState;
+    // --- Blend Space Params ---
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|BlendSpace")
+    float WalkRunAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float MovementDirection;
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|BlendSpace")
+    float TurnRate;
 
+    // --- IK ---
     UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector LeftFootIKLocation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
     FVector RightFootIKLocation;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float BodyIKOffset;
+
+    // --- Speed thresholds ---
     UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
     float WalkSpeedThreshold;
 
     UPROPERTY(EditDefaultsOnly, Category = "Anim|Config")
     float RunSpeedThreshold;
 
+protected:
+    void UpdateLocomotionState();
+    void UpdateFootIK();
+    void SolveFootIK(FName FootSocketName, FVector& OutIKLocation);
+
 private:
     UPROPERTY()
     class APawn* OwnerPawn;
-
-    void UpdateLocomotionState();
-    void UpdateFootIK();
-    FVector ComputeFootIKLocation(FName SocketName) const;
 };
