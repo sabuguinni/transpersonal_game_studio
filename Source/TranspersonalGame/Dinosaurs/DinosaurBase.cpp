@@ -1,191 +1,107 @@
-// DinosaurBase.cpp — Performance Optimizer #04 — Cycle AUTO_008
-// Implements ADinosaurBase with performance-conscious patterns:
-// - Detection uses cached sphere overlap (not O(n) actor iteration)
-// - Tick at 20Hz via SetActorTickInterval(0.05f) in constructor
-// - BiomeManager query cached per-second (not per-frame)
-// - Ragdoll death disables tick immediately
+// DinosaurBase.cpp
+// Engine Architect #02 — Transpersonal Game Studio
+// Base class for all dinosaur actors. Provides skeletal mesh, movement,
+// survival stats (health, hunger, thirst), and basic AI state machine.
 
 #include "DinosaurBase.h"
-#include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/SphereComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 ADinosaurBase::ADinosaurBase()
 {
-    // Tick at 20Hz — dino AI does not need per-frame updates
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.05f; // 20Hz
 
-    // Detection sphere — overlap-based, not O(n) iteration
-    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
-    DetectionSphere->SetupAttachment(RootComponent);
-    DetectionSphere->SetSphereRadius(1500.0f);
-    DetectionSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-    DetectionSphere->SetGenerateOverlapEvents(true);
+    // Capsule collision (root)
+    GetCapsuleComponent()->InitCapsuleSize(60.0f, 120.0f);
+    GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
 
-    // Attack sphere — tight radius
-    AttackSphere = CreateDefaultSubobject<USphereComponent>(TEXT("AttackSphere"));
-    AttackSphere->SetupAttachment(RootComponent);
-    AttackSphere->SetSphereRadius(200.0f);
-    AttackSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-
-    // Default stats
-    DinoStats.MaxHealth = 500.0f;
-    DinoStats.CurrentHealth = 500.0f;
-    DinoStats.AttackDamage = 80.0f;
-    DinoStats.MoveSpeed = 600.0f;
-    DinoStats.DetectionRadius = 1500.0f;
-    DinoStats.AttackRadius = 200.0f;
-    DinoStats.AttackCooldown = 1.5f;
-
-    CurrentState = ECore_DinoState::Idle;
-    Species = ECore_DinoSpecies::TyrannosaurusRex;
-
-    // Cache invalidation timer
-    BiomeCacheAge = 0.0f;
-    BiomeCacheInterval = 1.0f; // Re-query biome once per second max
+    // Skeletal mesh
+    GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -120.0f));
+    GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
     // Movement defaults
-    GetCharacterMovement()->MaxWalkSpeed = DinoStats.MoveSpeed;
+    GetCharacterMovement()->MaxWalkSpeed = 400.0f;
     GetCharacterMovement()->bOrientRotationToMovement = true;
-    bUseControllerRotationYaw = false;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 360.0f, 0.0f);
+    GetCharacterMovement()->GravityScale = 1.0f;
+    GetCharacterMovement()->JumpZVelocity = 600.0f;
+
+    // Default stats
+    MaxHealth = 500.0f;
+    CurrentHealth = 500.0f;
+    MaxHunger = 100.0f;
+    CurrentHunger = 100.0f;
+    MaxThirst = 100.0f;
+    CurrentThirst = 100.0f;
+    MoveSpeed = 400.0f;
+    AttackDamage = 50.0f;
+    AttackRange = 200.0f;
+    DetectionRadius = 2000.0f;
+    bIsCarnivore = true;
+    bIsAlive = true;
+    CurrentAIState = EDinoAIState::Idle;
+    DinoSpecies = EDinoSpecies::TRex;
 }
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind overlap events for detection sphere
-    DetectionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADinosaurBase::OnDetectionBeginOverlap);
-    DetectionSphere->OnComponentEndOverlap.AddDynamic(this, &ADinosaurBase::OnDetectionEndOverlap);
+    // Start metabolism tick every 5 seconds
+    GetWorldTimerManager().SetTimer(
+        MetabolismTimerHandle,
+        this,
+        &ADinosaurBase::TickMetabolism,
+        5.0f,
+        true
+    );
 
-    // Set cull distance for performance (8000cm = 80m)
-    if (USkeletalMeshComponent* SKM = GetMesh())
-    {
-        SKM->SetCullDistance(8000.0f);
-        SKM->bPerBoneMotionBlur = false; // Perf: disable per-bone motion blur
-    }
-
-    // Set capsule cull distance
-    if (UCapsuleComponent* Cap = GetCapsuleComponent())
-    {
-        Cap->SetCullDistance(8000.0f);
-    }
+    // Start AI state evaluation every 2 seconds
+    GetWorldTimerManager().SetTimer(
+        AIStateTimerHandle,
+        this,
+        &ADinosaurBase::EvaluateAIState,
+        2.0f,
+        true
+    );
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Dead dinos don't tick (tick disabled in Die())
-    if (CurrentState == ECore_DinoState::Dead)
+    // Execute current AI state behaviour
+    switch (CurrentAIState)
     {
-        return;
-    }
-
-    // Update biome cache age
-    BiomeCacheAge += DeltaTime;
-
-    // State machine update at 20Hz
-    UpdateStateMachine(DeltaTime);
-}
-
-void ADinosaurBase::UpdateStateMachine(float DeltaTime)
-{
-    switch (CurrentState)
-    {
-        case ECore_DinoState::Idle:
-            HandleIdleState(DeltaTime);
+        case EDinoAIState::Idle:
+            // Stand still, play idle animation
             break;
-        case ECore_DinoState::Patrolling:
-            HandlePatrolState(DeltaTime);
+        case EDinoAIState::Roaming:
+            // Handled by BehaviorTree / AI controller
             break;
-        case ECore_DinoState::Chasing:
-            HandleChaseState(DeltaTime);
+        case EDinoAIState::Hunting:
+            // Chase target
             break;
-        case ECore_DinoState::Attacking:
-            HandleAttackState(DeltaTime);
+        case EDinoAIState::Fleeing:
+            // Run from threat
             break;
-        case ECore_DinoState::Fleeing:
-            HandleFleeState(DeltaTime);
+        case EDinoAIState::Eating:
+            // Consume food, restore hunger
+            CurrentHunger = FMath::Min(CurrentHunger + DeltaTime * 10.0f, MaxHunger);
             break;
-        case ECore_DinoState::Feeding:
-        case ECore_DinoState::Resting:
-        case ECore_DinoState::Dead:
+        case EDinoAIState::Drinking:
+            // Consume water, restore thirst
+            CurrentThirst = FMath::Min(CurrentThirst + DeltaTime * 10.0f, MaxThirst);
+            break;
+        case EDinoAIState::Dead:
+            // No behaviour
+            break;
         default:
             break;
     }
-}
-
-void ADinosaurBase::HandleIdleState(float DeltaTime)
-{
-    // Idle: occasionally transition to patrol
-    // Overlap events handle threat detection
-}
-
-void ADinosaurBase::HandlePatrolState(float DeltaTime)
-{
-    // Patrol: move toward patrol waypoint
-    // Overlap events handle threat detection
-}
-
-void ADinosaurBase::HandleChaseState(float DeltaTime)
-{
-    if (!TargetActor || !TargetActor->IsValidLowLevel())
-    {
-        SetDinoState(ECore_DinoState::Idle);
-        return;
-    }
-
-    // Check if in attack range
-    float DistSq = FVector::DistSquared(GetActorLocation(), TargetActor->GetActorLocation());
-    float AttackRadiusSq = DinoStats.AttackRadius * DinoStats.AttackRadius;
-
-    if (DistSq <= AttackRadiusSq)
-    {
-        SetDinoState(ECore_DinoState::Attacking);
-    }
-}
-
-void ADinosaurBase::HandleAttackState(float DeltaTime)
-{
-    if (!TargetActor || !TargetActor->IsValidLowLevel())
-    {
-        SetDinoState(ECore_DinoState::Idle);
-        return;
-    }
-
-    // Check still in range
-    float DistSq = FVector::DistSquared(GetActorLocation(), TargetActor->GetActorLocation());
-    float AttackRadiusSq = DinoStats.AttackRadius * DinoStats.AttackRadius * 1.5f; // 50% hysteresis
-
-    if (DistSq > AttackRadiusSq)
-    {
-        SetDinoState(ECore_DinoState::Chasing);
-    }
-}
-
-void ADinosaurBase::HandleFleeState(float DeltaTime)
-{
-    // Flee: move away from threat
-    if (!TargetActor)
-    {
-        SetDinoState(ECore_DinoState::Idle);
-    }
-}
-
-void ADinosaurBase::SetDinoState(ECore_DinoState NewState)
-{
-    if (CurrentState == NewState) return;
-
-    ECore_DinoState OldState = CurrentState;
-    CurrentState = NewState;
-
-    OnStateChanged(OldState, NewState);
 }
 
 float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
@@ -193,19 +109,25 @@ float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEv
 {
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 
-    DinoStats.CurrentHealth = FMath::Max(0.0f, DinoStats.CurrentHealth - ActualDamage);
+    if (!bIsAlive) return 0.0f;
 
-    OnDamageTaken(ActualDamage, DinoStats.CurrentHealth);
+    CurrentHealth = FMath::Max(CurrentHealth - ActualDamage, 0.0f);
 
-    if (DinoStats.CurrentHealth <= 0.0f)
+    if (CurrentHealth <= 0.0f)
     {
         Die();
     }
-    else if (DamageCauser)
+    else if (CurrentAIState != EDinoAIState::Hunting)
     {
-        // Aggro: chase attacker
-        TargetActor = DamageCauser;
-        SetDinoState(ECore_DinoState::Chasing);
+        // Attacked — switch to hunting/fleeing
+        if (bIsCarnivore)
+        {
+            SetAIState(EDinoAIState::Hunting);
+        }
+        else
+        {
+            SetAIState(EDinoAIState::Fleeing);
+        }
     }
 
     return ActualDamage;
@@ -213,79 +135,100 @@ float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEv
 
 void ADinosaurBase::Die()
 {
-    if (CurrentState == ECore_DinoState::Dead) return;
+    bIsAlive = false;
+    SetAIState(EDinoAIState::Dead);
 
-    SetDinoState(ECore_DinoState::Dead);
+    // Disable collision
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Disable tick immediately — dead dinos don't need updates
-    SetActorTickEnabled(false);
+    // Disable movement
+    GetCharacterMovement()->DisableMovement();
 
-    // Disable collision on capsule
-    if (UCapsuleComponent* Cap = GetCapsuleComponent())
-    {
-        Cap->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    }
+    // Clear timers
+    GetWorldTimerManager().ClearTimer(MetabolismTimerHandle);
+    GetWorldTimerManager().ClearTimer(AIStateTimerHandle);
 
-    // Enable ragdoll on skeletal mesh
-    if (USkeletalMeshComponent* SKM = GetMesh())
-    {
-        SKM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        SKM->SetSimulatePhysics(true);
-        SKM->SetAllBodiesBelowSimulatePhysics(FName("pelvis"), true, true);
-    }
-
-    // Disable detection sphere
-    if (DetectionSphere)
-    {
-        DetectionSphere->SetGenerateOverlapEvents(false);
-        DetectionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    }
-
-    OnDeath();
-
-    // Auto-destroy after 30 seconds (configurable)
-    SetLifeSpan(30.0f);
+    // Broadcast death event for quest/AI systems
+    OnDinosaurDied.Broadcast(this);
 }
 
-bool ADinosaurBase::IsAlive() const
+void ADinosaurBase::SetAIState(EDinoAIState NewState)
 {
-    return CurrentState != ECore_DinoState::Dead && DinoStats.CurrentHealth > 0.0f;
+    if (CurrentAIState == NewState) return;
+    CurrentAIState = NewState;
+    OnAIStateChanged.Broadcast(NewState);
+}
+
+void ADinosaurBase::TickMetabolism()
+{
+    if (!bIsAlive) return;
+
+    // Drain hunger and thirst over time
+    CurrentHunger = FMath::Max(CurrentHunger - 2.0f, 0.0f);
+    CurrentThirst = FMath::Max(CurrentThirst - 3.0f, 0.0f);
+
+    // Starvation damage
+    if (CurrentHunger <= 0.0f)
+    {
+        CurrentHealth = FMath::Max(CurrentHealth - 5.0f, 0.0f);
+        if (CurrentHealth <= 0.0f) Die();
+    }
+
+    // Dehydration damage
+    if (CurrentThirst <= 0.0f)
+    {
+        CurrentHealth = FMath::Max(CurrentHealth - 8.0f, 0.0f);
+        if (CurrentHealth <= 0.0f) Die();
+    }
+}
+
+void ADinosaurBase::EvaluateAIState()
+{
+    if (!bIsAlive) return;
+    if (CurrentAIState == EDinoAIState::Dead) return;
+
+    // Priority: hunger/thirst > hunting > roaming
+    if (CurrentHunger < 30.0f && bIsCarnivore)
+    {
+        SetAIState(EDinoAIState::Hunting);
+        return;
+    }
+
+    if (CurrentThirst < 20.0f)
+    {
+        SetAIState(EDinoAIState::Drinking);
+        return;
+    }
+
+    if (CurrentAIState == EDinoAIState::Idle)
+    {
+        // Occasionally start roaming
+        if (FMath::RandBool())
+        {
+            SetAIState(EDinoAIState::Roaming);
+        }
+    }
+    else if (CurrentAIState == EDinoAIState::Roaming)
+    {
+        // Occasionally rest
+        if (FMath::RandRange(0, 4) == 0)
+        {
+            SetAIState(EDinoAIState::Idle);
+        }
+    }
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
-    if (DinoStats.MaxHealth <= 0.0f) return 0.0f;
-    return DinoStats.CurrentHealth / DinoStats.MaxHealth;
+    return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
 }
 
-void ADinosaurBase::OnDetectionBeginOverlap(UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+float ADinosaurBase::GetHungerPercent() const
 {
-    if (!OtherActor || OtherActor == this) return;
-    if (CurrentState == ECore_DinoState::Dead) return;
-
-    // Check if it's a player character
-    APawn* Pawn = Cast<APawn>(OtherActor);
-    if (Pawn && Pawn->IsPlayerControlled())
-    {
-        TargetActor = OtherActor;
-        SetDinoState(ECore_DinoState::Chasing);
-    }
+    return (MaxHunger > 0.0f) ? (CurrentHunger / MaxHunger) : 0.0f;
 }
 
-void ADinosaurBase::OnDetectionEndOverlap(UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor, UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex)
+float ADinosaurBase::GetThirstPercent() const
 {
-    if (OtherActor == TargetActor)
-    {
-        TargetActor = nullptr;
-        SetDinoState(ECore_DinoState::Idle);
-    }
+    return (MaxThirst > 0.0f) ? (CurrentThirst / MaxThirst) : 0.0f;
 }
-
-// Blueprint-implementable stubs (called from C++, overridden in BP)
-void ADinosaurBase::OnStateChanged_Implementation(ECore_DinoState OldState, ECore_DinoState NewState) {}
-void ADinosaurBase::OnDamageTaken_Implementation(float Damage, float RemainingHealth) {}
-void ADinosaurBase::OnDeath_Implementation() {}
