@@ -1,307 +1,285 @@
-// DialogueSystem.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// Prehistoric survival game — NPC dialogue component implementation
+// DialogueSystem.cpp — Agent #15 Narrative & Dialogue
+// Implements UNarr_DialogueSystem: proximity-triggered, quest-linked dialogue
+// for NPC survivors, scouts, elders and trackers in the prehistoric world.
 
 #include "DialogueSystem.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "TimerManager.h"
+
+// ============================================================
+// Constructor
+// ============================================================
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for dialogue timing
 
-	ProximityTriggerRadius = 400.0f;
-	SpeakerDisplayName = TEXT("NPC");
-	bIsSpeaking = false;
-	ActiveSequenceIndex = -1;
-	ActiveLineIndex = -1;
-	TimeSinceLastProximityCheck = 0.0f;
+    ProximityTriggerRadius = 400.0f;
+    bAutoTriggerOnProximity = false;
+    CurrentLineIndex = 0;
+    bIsPlaying = false;
+    ActiveSequenceID = TEXT("");
+    LineTimer = 0.0f;
+    ActiveSequence = nullptr;
 }
+
+// ============================================================
+// BeginPlay — seed default dialogue library for testing
+// ============================================================
 
 void UNarr_DialogueSystem::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
+
+    // Seed a default DinoSighted sequence if library is empty
+    if (DialogueLibrary.Num() == 0)
+    {
+        FNarr_DialogueSequence DinoSeq;
+        DinoSeq.SequenceID = TEXT("DINO_SIGHTED_DEFAULT");
+        DinoSeq.TriggerType = ENarr_DialogueTrigger::DinoSighted;
+        DinoSeq.bCanRepeat = false;
+        DinoSeq.bPlayedThisSession = false;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = TEXT("Kael");
+        Line1.SpeakerRole = ENarr_CharacterRole::Survivor;
+        Line1.LineText = TEXT("Stay low. Do not run. It tracks movement.");
+        Line1.DisplayDuration = 4.0f;
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = TEXT("Mira");
+        Line2.SpeakerRole = ENarr_CharacterRole::Scout;
+        Line2.LineText = TEXT("Wind is in our favour. Move north — slow.");
+        Line2.DisplayDuration = 4.0f;
+
+        DinoSeq.Lines.Add(Line1);
+        DinoSeq.Lines.Add(Line2);
+        DialogueLibrary.Add(DinoSeq);
+
+        // Night fall sequence
+        FNarr_DialogueSequence NightSeq;
+        NightSeq.SequenceID = TEXT("NIGHTFALL_DEFAULT");
+        NightSeq.TriggerType = ENarr_DialogueTrigger::NightFall;
+        NightSeq.bCanRepeat = true;
+        NightSeq.bPlayedThisSession = false;
+
+        FNarr_DialogueLine NightLine1;
+        NightLine1.SpeakerName = TEXT("Elder Oru");
+        NightLine1.SpeakerRole = ENarr_CharacterRole::Elder;
+        NightLine1.LineText = TEXT("Fire high. Noise low. The dark belongs to them.");
+        NightLine1.DisplayDuration = 5.0f;
+
+        NightSeq.Lines.Add(NightLine1);
+        DialogueLibrary.Add(NightSeq);
+    }
 }
+
+// ============================================================
+// TickComponent — advance line timer when playing
+// ============================================================
 
 void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Proximity check at reduced frequency for performance
-	TimeSinceLastProximityCheck += DeltaTime;
-	if (TimeSinceLastProximityCheck >= ProximityCheckInterval)
-	{
-		TimeSinceLastProximityCheck = 0.0f;
+    if (!bIsPlaying || !ActiveSequence)
+    {
+        return;
+    }
 
-		if (!bIsSpeaking && IsPlayerInRange())
-		{
-			TriggerDialogueByType(ENarr_DialogueTriggerType::Proximity);
-		}
-	}
+    LineTimer -= DeltaTime;
+
+    if (LineTimer <= 0.0f)
+    {
+        AdvanceLine();
+    }
 }
 
-bool UNarr_DialogueSystem::TriggerDialogueSequence(const FString& SequenceID)
+// ============================================================
+// TriggerDialogue — start a named sequence
+// ============================================================
+
+bool UNarr_DialogueSystem::TriggerDialogue(const FString& SequenceID)
 {
-	if (bIsSpeaking)
-	{
-		return false;
-	}
+    FNarr_DialogueSequence* Seq = FindSequence(SequenceID);
+    if (!Seq)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence '%s' not found."), *SequenceID);
+        return false;
+    }
 
-	int32 FoundIndex = FindSequenceIndexByID(SequenceID);
-	if (FoundIndex == -1)
-	{
-		return false;
-	}
+    if (Seq->bPlayedThisSession && !Seq->bCanRepeat)
+    {
+        return false;
+    }
 
-	FNarr_DialogueSequence& Seq = DialogueSequences[FoundIndex];
+    if (Seq->Lines.Num() == 0)
+    {
+        return false;
+    }
 
-	// Respect play-once flag
-	if (Seq.bPlayOnce && Seq.bHasPlayed)
-	{
-		return false;
-	}
+    // Stop any current dialogue
+    StopDialogue();
 
-	if (Seq.Lines.Num() == 0)
-	{
-		return false;
-	}
+    ActiveSequence = Seq;
+    ActiveSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    bIsPlaying = true;
+    Seq->bPlayedThisSession = true;
 
-	ActiveSequenceIndex = FoundIndex;
-	ActiveLineIndex = 0;
-	bIsSpeaking = true;
+    // Set timer for first line
+    LineTimer = Seq->Lines[0].DisplayDuration;
 
-	PlayCurrentLine();
-	return true;
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Starting sequence '%s' (%d lines)"),
+        *SequenceID, Seq->Lines.Num());
+
+    return true;
 }
 
-void UNarr_DialogueSystem::TriggerDialogueByType(ENarr_DialogueTriggerType TriggerType)
+// ============================================================
+// TriggerByType — find first matching sequence by trigger type
+// ============================================================
+
+void UNarr_DialogueSystem::TriggerByType(ENarr_DialogueTrigger TriggerType)
 {
-	if (bIsSpeaking)
-	{
-		return;
-	}
-
-	// Find first unplayed sequence matching this trigger type
-	for (int32 i = 0; i < DialogueSequences.Num(); ++i)
-	{
-		FNarr_DialogueSequence& Seq = DialogueSequences[i];
-
-		if (Seq.bPlayOnce && Seq.bHasPlayed)
-		{
-			continue;
-		}
-
-		if (Seq.Lines.Num() == 0)
-		{
-			continue;
-		}
-
-		// Check if any line in sequence matches trigger type
-		bool bMatchFound = false;
-		for (const FNarr_DialogueLine& Line : Seq.Lines)
-		{
-			if (Line.TriggerType == TriggerType)
-			{
-				bMatchFound = true;
-				break;
-			}
-		}
-
-		if (bMatchFound)
-		{
-			ActiveSequenceIndex = i;
-			ActiveLineIndex = 0;
-			bIsSpeaking = true;
-			PlayCurrentLine();
-			return;
-		}
-	}
+    for (FNarr_DialogueSequence& Seq : DialogueLibrary)
+    {
+        if (Seq.TriggerType == TriggerType)
+        {
+            if (!Seq.bPlayedThisSession || Seq.bCanRepeat)
+            {
+                TriggerDialogue(Seq.SequenceID);
+                return;
+            }
+        }
+    }
 }
 
-void UNarr_DialogueSystem::AdvanceDialogue()
+// ============================================================
+// AdvanceLine — move to next line or end sequence
+// ============================================================
+
+void UNarr_DialogueSystem::AdvanceLine()
 {
-	if (!bIsSpeaking || ActiveSequenceIndex == -1)
-	{
-		return;
-	}
+    if (!bIsPlaying || !ActiveSequence)
+    {
+        return;
+    }
 
-	ActiveLineIndex++;
+    CurrentLineIndex++;
 
-	const FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
+    if (CurrentLineIndex >= ActiveSequence->Lines.Num())
+    {
+        // Sequence complete
+        StopDialogue();
+        UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Sequence '%s' complete."), *ActiveSequenceID);
+        return;
+    }
 
-	if (ActiveLineIndex >= Seq.Lines.Num())
-	{
-		// Sequence complete
-		MarkSequencePlayed(ActiveSequenceIndex);
-		StopDialogue();
-		return;
-	}
-
-	PlayCurrentLine();
+    // Set timer for next line
+    LineTimer = ActiveSequence->Lines[CurrentLineIndex].DisplayDuration;
 }
+
+// ============================================================
+// StopDialogue
+// ============================================================
 
 void UNarr_DialogueSystem::StopDialogue()
 {
-	bIsSpeaking = false;
-	ActiveSequenceIndex = -1;
-	ActiveLineIndex = -1;
-
-	UWorld* World = GetWorld();
-	if (World)
-	{
-		World->GetTimerManager().ClearTimer(DialogueAdvanceTimer);
-	}
+    bIsPlaying = false;
+    ActiveSequence = nullptr;
+    ActiveSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
 }
 
-FString UNarr_DialogueSystem::GetCurrentLineText() const
+// ============================================================
+// GetCurrentLine
+// ============================================================
+
+FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentLine() const
 {
-	if (!bIsSpeaking || ActiveSequenceIndex == -1 || ActiveLineIndex == -1)
-	{
-		return FString();
-	}
+    if (!bIsPlaying || !ActiveSequence)
+    {
+        return FNarr_DialogueLine();
+    }
 
-	if (ActiveSequenceIndex >= DialogueSequences.Num())
-	{
-		return FString();
-	}
+    if (!ActiveSequence->Lines.IsValidIndex(CurrentLineIndex))
+    {
+        return FNarr_DialogueLine();
+    }
 
-	const FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
-
-	if (ActiveLineIndex >= Seq.Lines.Num())
-	{
-		return FString();
-	}
-
-	return Seq.Lines[ActiveLineIndex].LineText;
+    return ActiveSequence->Lines[CurrentLineIndex];
 }
 
-FString UNarr_DialogueSystem::GetCurrentSpeakerName() const
+// ============================================================
+// IsDialoguePlaying
+// ============================================================
+
+bool UNarr_DialogueSystem::IsDialoguePlaying() const
 {
-	if (!bIsSpeaking || ActiveSequenceIndex == -1 || ActiveLineIndex == -1)
-	{
-		return SpeakerDisplayName;
-	}
-
-	if (ActiveSequenceIndex >= DialogueSequences.Num())
-	{
-		return SpeakerDisplayName;
-	}
-
-	const FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
-
-	if (ActiveLineIndex >= Seq.Lines.Num())
-	{
-		return SpeakerDisplayName;
-	}
-
-	const FString& LineSpeaker = Seq.Lines[ActiveLineIndex].SpeakerID;
-	return LineSpeaker.IsEmpty() ? SpeakerDisplayName : LineSpeaker;
+    return bIsPlaying;
 }
 
-bool UNarr_DialogueSystem::IsPlayerInRange() const
+// ============================================================
+// AddDialogueLine — runtime line injection
+// ============================================================
+
+void UNarr_DialogueSystem::AddDialogueLine(const FString& SequenceID, const FNarr_DialogueLine& Line)
 {
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
+    FNarr_DialogueSequence* Seq = FindSequence(SequenceID);
+    if (Seq)
+    {
+        Seq->Lines.Add(Line);
+        return;
+    }
 
-	APlayerController* PC = World->GetFirstPlayerController();
-	if (!PC)
-	{
-		return false;
-	}
-
-	APawn* PlayerPawn = PC->GetPawn();
-	if (!PlayerPawn)
-	{
-		return false;
-	}
-
-	AActor* Owner = GetOwner();
-	if (!Owner)
-	{
-		return false;
-	}
-
-	float DistSq = FVector::DistSquared(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-	return DistSq <= (ProximityTriggerRadius * ProximityTriggerRadius);
+    // Create new sequence
+    FNarr_DialogueSequence NewSeq;
+    NewSeq.SequenceID = SequenceID;
+    NewSeq.TriggerType = ENarr_DialogueTrigger::Manual;
+    NewSeq.bCanRepeat = false;
+    NewSeq.bPlayedThisSession = false;
+    NewSeq.Lines.Add(Line);
+    DialogueLibrary.Add(NewSeq);
 }
 
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& NewSequence)
-{
-	// Check for duplicate ID
-	for (const FNarr_DialogueSequence& Existing : DialogueSequences)
-	{
-		if (Existing.SequenceID == NewSequence.SequenceID)
-		{
-			return;
-		}
-	}
+// ============================================================
+// GetTotalLinesInSequence
+// ============================================================
 
-	DialogueSequences.Add(NewSequence);
+int32 UNarr_DialogueSystem::GetTotalLinesInSequence(const FString& SequenceID) const
+{
+    const FNarr_DialogueSequence* Seq = FindSequenceConst(SequenceID);
+    return Seq ? Seq->Lines.Num() : 0;
 }
 
-int32 UNarr_DialogueSystem::FindSequenceIndexByID(const FString& SequenceID) const
+// ============================================================
+// Private helpers
+// ============================================================
+
+FNarr_DialogueSequence* UNarr_DialogueSystem::FindSequence(const FString& SequenceID)
 {
-	for (int32 i = 0; i < DialogueSequences.Num(); ++i)
-	{
-		if (DialogueSequences[i].SequenceID == SequenceID)
-		{
-			return i;
-		}
-	}
-	return -1;
+    for (FNarr_DialogueSequence& Seq : DialogueLibrary)
+    {
+        if (Seq.SequenceID == SequenceID)
+        {
+            return &Seq;
+        }
+    }
+    return nullptr;
 }
 
-void UNarr_DialogueSystem::PlayCurrentLine()
+const FNarr_DialogueSequence* UNarr_DialogueSystem::FindSequenceConst(const FString& SequenceID) const
 {
-	if (ActiveSequenceIndex == -1 || ActiveLineIndex == -1)
-	{
-		return;
-	}
-
-	if (ActiveSequenceIndex >= DialogueSequences.Num())
-	{
-		StopDialogue();
-		return;
-	}
-
-	const FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
-
-	if (ActiveLineIndex >= Seq.Lines.Num())
-	{
-		StopDialogue();
-		return;
-	}
-
-	const FNarr_DialogueLine& Line = Seq.Lines[ActiveLineIndex];
-
-	// Schedule auto-advance after line duration
-	float AdvanceDelay = FMath::Max(Line.DisplayDuration, 1.0f);
-
-	UWorld* World = GetWorld();
-	if (World)
-	{
-		World->GetTimerManager().SetTimer(
-			DialogueAdvanceTimer,
-			this,
-			&UNarr_DialogueSystem::AdvanceDialogue,
-			AdvanceDelay,
-			false
-		);
-	}
-}
-
-void UNarr_DialogueSystem::MarkSequencePlayed(int32 SequenceIndex)
-{
-	if (SequenceIndex >= 0 && SequenceIndex < DialogueSequences.Num())
-	{
-		DialogueSequences[SequenceIndex].bHasPlayed = true;
-	}
+    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
+    {
+        if (Seq.SequenceID == SequenceID)
+        {
+            return &Seq;
+        }
+    }
+    return nullptr;
 }
