@@ -1,80 +1,123 @@
+// DinosaurBase.h
+// Transpersonal Game Studio — Core Systems Programmer (Agent #03)
+// Prehistoric survival game — dinosaur base pawn with biome-aware behavior
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Pawn.h"
-#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
-#include "AIController.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "DinosaurBase.generated.h"
 
+// ─── Enums (global scope — UHT requirement) ───────────────────────────────────
+
 UENUM(BlueprintType)
-enum class ENPC_DinosaurSpecies : uint8
+enum class EDino_BehaviorState : uint8
 {
-    TRex UMETA(DisplayName = "Tyrannosaurus Rex"),
-    Raptor UMETA(DisplayName = "Velociraptor"),
-    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
-    Triceratops UMETA(DisplayName = "Triceratops"),
-    Stegosaurus UMETA(DisplayName = "Stegosaurus")
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Foraging    UMETA(DisplayName = "Foraging"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Resting     UMETA(DisplayName = "Resting"),
+    Dead        UMETA(DisplayName = "Dead"),
 };
 
 UENUM(BlueprintType)
-enum class ENPC_DinosaurBehaviorState : uint8
+enum class EDino_DietType : uint8
 {
-    Idle UMETA(DisplayName = "Idle"),
-    Patrol UMETA(DisplayName = "Patrol"),
-    Hunt UMETA(DisplayName = "Hunt"),
-    Flee UMETA(DisplayName = "Flee"),
-    Feed UMETA(DisplayName = "Feed"),
-    Sleep UMETA(DisplayName = "Sleep"),
-    Aggressive UMETA(DisplayName = "Aggressive")
+    Carnivore   UMETA(DisplayName = "Carnivore"),
+    Herbivore   UMETA(DisplayName = "Herbivore"),
+    Omnivore    UMETA(DisplayName = "Omnivore"),
 };
+
+UENUM(BlueprintType)
+enum class EDino_SizeClass : uint8
+{
+    Small       UMETA(DisplayName = "Small"),   // Raptor-class
+    Medium      UMETA(DisplayName = "Medium"),  // Triceratops-class
+    Large       UMETA(DisplayName = "Large"),   // T-Rex-class
+    Colossal    UMETA(DisplayName = "Colossal"),// Brachiosaurus-class
+};
+
+// ─── Structs (global scope — UHT requirement) ─────────────────────────────────
 
 USTRUCT(BlueprintType)
-struct FNPC_DinosaurStats
+struct FDino_SpeciesTraits
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Health = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    FName SpeciesName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MaxHealth = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    EDino_DietType DietType = EDino_DietType::Carnivore;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackDamage = 25.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    EDino_SizeClass SizeClass = EDino_SizeClass::Large;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MovementSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float MaxHealth = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float DetectionRange = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float AttackDamage = 80.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackRange = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float DetectionRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Hunger = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float AttackRadius = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Aggression = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float PatrolRadius = 3000.0f;
 
-    FNPC_DinosaurStats()
-    {
-        Health = 100.0f;
-        MaxHealth = 100.0f;
-        AttackDamage = 25.0f;
-        MovementSpeed = 300.0f;
-        DetectionRange = 2000.0f;
-        AttackRange = 500.0f;
-        Hunger = 50.0f;
-        Aggression = 0.5f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float MaxWalkSpeed = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    float MaxRunSpeed = 900.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    bool bIsPack = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    int32 PackSize = 1;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADinosaurBase : public APawn
+USTRUCT(BlueprintType)
+struct FDino_CombatStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    float CurrentHealth = 500.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    float Hunger = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    float Aggression = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    float ThreatLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    bool bIsAlerted = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    float LastAttackTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float AttackCooldown = 1.5f;
+};
+
+// ─── ADinosaurBase ─────────────────────────────────────────────────────────────
+
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame")
+class TRANSPERSONALGAME_API ADinosaurBase : public ACharacter
 {
     GENERATED_BODY()
 
@@ -83,84 +126,99 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+                              AController* EventInstigator, AActor* DamageCauser) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    // ── Species Configuration ──────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
+    FDino_SpeciesTraits SpeciesTraits;
 
-    // Componentes principais
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* DinosaurMesh;
+    // ── Combat State ───────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
+    FDino_CombatStats CombatStats;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    // ── Behavior State ─────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Behavior")
+    EDino_BehaviorState CurrentBehaviorState = EDino_BehaviorState::Idle;
+
+    // ── Detection Sphere ───────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Components",
+              meta = (AllowPrivateAccess = "true"))
     USphereComponent* DetectionSphere;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    // ── Attack Sphere ──────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Components",
+              meta = (AllowPrivateAccess = "true"))
     USphereComponent* AttackSphere;
 
-    // Propriedades do dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    ENPC_DinosaurSpecies Species;
+    // ── Patrol Origin ──────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Behavior")
+    FVector PatrolOrigin;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FNPC_DinosaurStats Stats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    ENPC_DinosaurBehaviorState CurrentBehaviorState;
-
-    // Behavior Tree
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* BehaviorTreeAsset;
-
-    // Pontos de patrulha
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    TArray<FVector> PatrolPoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    int32 CurrentPatrolIndex;
-
-    // Target atual
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
+    // ── Current Target ─────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Behavior")
     AActor* CurrentTarget;
 
-    // Timers
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    float LastAttackTime;
+    // ── Biome Danger Level (set by BiomeManager query) ─────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Biome")
+    float BiomeDangerLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    float AttackCooldown = 2.0f;
+    // ── Tick interval for behavior update (seconds) ────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Performance")
+    float BehaviorTickInterval = 0.5f;
 
-    // Funções de comportamento
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    void SetBehaviorState(ENPC_DinosaurBehaviorState NewState);
+    // ── Public API ─────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    void ApplyDamage(float Damage, AActor* DamageCauser);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    void TakeDamage(float DamageAmount, AActor* DamageSource);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    bool IsAlive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    void AttackTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void SetBehaviorState(EDino_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void AlertToThreat(AActor* Threat, float ThreatStrength);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    EDino_BehaviorState GetCurrentBehaviorState() const { return CurrentBehaviorState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    float GetHealthPercent() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Biome")
+    void UpdateBiomeDangerLevel(float NewDangerLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void UpdateBehavior(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
     bool CanAttack() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    FVector GetNextPatrolPoint();
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    void PerformAttack();
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    void SetPatrolPoints(const TArray<FVector>& NewPatrolPoints);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    FVector GetRandomPatrolPoint() const;
 
-    // Detecção
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void OnDeath();
+
+    // ── Detection callbacks ────────────────────────────────────────────────
     UFUNCTION()
-    void OnDetectionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+    void OnDetectionBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                  UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                                  bool bFromSweep, const FHitResult& SweepResult);
 
     UFUNCTION()
-    void OnDetectionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
-
-    // Configuração por espécie
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur")
-    void ConfigureForSpecies(ENPC_DinosaurSpecies NewSpecies);
+    void OnAttackBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                               UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                               bool bFromSweep, const FHitResult& SweepResult);
 
 private:
-    void UpdateHunger(float DeltaTime);
-    void UpdateBehavior(float DeltaTime);
+    float BehaviorTickAccumulator = 0.0f;
+    float HungerDecayRate = 2.0f;   // per second
+    float AggressionDecayRate = 5.0f; // per second when no threat
 };
