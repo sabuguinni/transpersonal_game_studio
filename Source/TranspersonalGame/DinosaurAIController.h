@@ -1,39 +1,33 @@
-// DinosaurAIController.h
-// Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260620_006
-// Minimal AI controller for dinosaur pawns: Idle → Patrol → Attack state machine.
-// Uses UE5 AIModule (no BehaviorTree asset required — pure C++ state machine).
+// DinosaurAIController.h — AI Controller for dinosaur pawns
+// Handles navigation, perception, and behavior state transitions
+// Agent #3 — Core Systems Programmer
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "Navigation/PathFollowingComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "DinosaurBase.h"
 #include "DinosaurAIController.generated.h"
 
-// Forward declarations — avoid cross-module header pulls
-class ADinosaurBase;
-class APawn;
-
-/** Dinosaur AI states — simple FSM driving patrol and combat. */
-UENUM(BlueprintType)
-enum class ECore_DinoAIState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrol      UMETA(DisplayName = "Patrol"),
-    Chase       UMETA(DisplayName = "Chase"),
-    Attack      UMETA(DisplayName = "Attack"),
-    Flee        UMETA(DisplayName = "Flee"),
-    Dead        UMETA(DisplayName = "Dead")
-};
+// Forward declarations
+class UBehaviorTree;
+class UBlackboardComponent;
+class UAIPerceptionComponent;
 
 /**
  * ADinosaurAIController
  *
- * Minimal AI controller for all dinosaur species.
- * Implements a tick-driven FSM: Idle → Patrol → Chase → Attack.
- * No BehaviorTree asset dependency — fully self-contained C++.
+ * AI Controller for all dinosaur species. Manages:
+ * - Perception (sight + hearing) via AIPerceptionComponent
+ * - Biome-aware roaming using random patrol points
+ * - Threat response: idle → alert → hunt → flee state transitions
+ * - Navigation via UE5 NavMesh (recast)
  *
- * Usage: Set as AIControllerClass in ADinosaurBase (or child BP).
+ * Designed to work with ADinosaurBase without requiring a full Behavior Tree asset —
+ * falls back to code-driven tick logic if no BT asset is assigned.
  */
 UCLASS(ClassGroup = "DinosaurAI", meta = (DisplayName = "Dinosaur AI Controller"))
 class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
@@ -43,98 +37,122 @@ class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
 public:
     ADinosaurAIController();
 
-    // AAIController overrides
+    // ─── Overrides ────────────────────────────────────────────────────────────
+
     virtual void OnPossess(APawn* InPawn) override;
     virtual void OnUnPossess() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ── State Machine ─────────────────────────────────────────────────────────
+    // ─── Perception ───────────────────────────────────────────────────────────
 
-    /** Current AI state. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|State")
-    ECore_DinoAIState CurrentState;
+    /** Called by AIPerception when a stimulus is detected or lost */
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    /** Force a state transition (callable from Blueprint or child classes). */
-    UFUNCTION(BlueprintCallable, Category = "AI|State")
-    void SetAIState(ECore_DinoAIState NewState);
+    // ─── Navigation ───────────────────────────────────────────────────────────
 
-    // ── Detection ─────────────────────────────────────────────────────────────
+    /** Pick a random patrol point within PatrolRadius of the home location */
+    UFUNCTION(BlueprintCallable, Category = "DinosaurAI|Navigation")
+    FVector GetRandomPatrolPoint() const;
 
-    /** Radius (cm) within which the dinosaur detects the player. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Detection")
-    float DetectionRadius;
+    /** Move to the next patrol point */
+    UFUNCTION(BlueprintCallable, Category = "DinosaurAI|Navigation")
+    void MoveToNextPatrolPoint();
 
-    /** Radius (cm) within which the dinosaur initiates a melee attack. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Detection")
-    float AttackRadius;
+    /** Chase the current threat target */
+    UFUNCTION(BlueprintCallable, Category = "DinosaurAI|Navigation")
+    void ChaseTarget(AActor* Target);
 
-    /** Half-angle (degrees) of the forward vision cone. 45 = 90° total FOV. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Detection")
-    float VisionHalfAngleDeg;
+    /** Flee away from the threat target */
+    UFUNCTION(BlueprintCallable, Category = "DinosaurAI|Navigation")
+    void FleeFromTarget(AActor* Target);
 
-    // ── Patrol ────────────────────────────────────────────────────────────────
+    // ─── State ────────────────────────────────────────────────────────────────
 
-    /** Radius (cm) around spawn point used to pick random patrol destinations. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Patrol")
-    float PatrolRadius;
+    /** Force a behavior state change (called by DinosaurBase or external systems) */
+    UFUNCTION(BlueprintCallable, Category = "DinosaurAI|State")
+    void SetBehaviorState(ECore_DinosaurBehaviorState NewState);
 
-    /** Time (s) the dinosaur waits at a patrol point before moving to the next. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Patrol")
-    float PatrolWaitTime;
+    /** Current behavior state mirrored from the pawn */
+    UFUNCTION(BlueprintPure, Category = "DinosaurAI|State")
+    ECore_DinosaurBehaviorState GetCurrentBehaviorState() const { return CurrentBehaviorState; }
 
-    // ── Attack ────────────────────────────────────────────────────────────────
+    // ─── Properties ───────────────────────────────────────────────────────────
 
-    /** Cooldown (s) between consecutive attacks. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat")
-    float AttackCooldown;
+    /** Radius within which this dinosaur patrols around its home location */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|Patrol",
+        meta = (ClampMin = "200.0", ClampMax = "10000.0"))
+    float PatrolRadius = 2000.0f;
 
-    /** Damage dealt per attack hit. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat")
-    float AttackDamage;
+    /** How long (seconds) the dinosaur waits at a patrol point before moving */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|Patrol",
+        meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float PatrolWaitTime = 5.0f;
+
+    /** Sight radius for AIPerceptionComponent */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|Perception",
+        meta = (ClampMin = "100.0", ClampMax = "5000.0"))
+    float SightRadius = 1500.0f;
+
+    /** Peripheral vision half-angle (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|Perception",
+        meta = (ClampMin = "10.0", ClampMax = "180.0"))
+    float SightAngle = 90.0f;
+
+    /** Hearing range radius */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|Perception",
+        meta = (ClampMin = "100.0", ClampMax = "3000.0"))
+    float HearingRange = 800.0f;
+
+    /** Optional Behavior Tree asset — if null, uses code-driven tick logic */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinosaurAI|BehaviorTree")
+    TObjectPtr<UBehaviorTree> BehaviorTreeAsset;
 
 protected:
-    // ── Internal helpers ──────────────────────────────────────────────────────
+    // ─── Internal state ───────────────────────────────────────────────────────
 
-    /** Scan for the player pawn within DetectionRadius + VisionHalfAngleDeg. */
-    APawn* FindPlayerInRange() const;
+    /** Cached reference to the controlled dinosaur pawn */
+    UPROPERTY(Transient)
+    TObjectPtr<ADinosaurBase> ControlledDino;
 
-    /** Pick a random reachable point within PatrolRadius of SpawnLocation. */
-    FVector PickPatrolDestination() const;
+    /** Current behavior state */
+    UPROPERTY(Transient, BlueprintReadOnly, Category = "DinosaurAI|State",
+        meta = (AllowPrivateAccess = "true"))
+    ECore_DinosaurBehaviorState CurrentBehaviorState;
 
-    /** Issue a move request to Destination. */
-    void MoveToDestination(const FVector& Destination);
+    /** Home location — set when the pawn is possessed */
+    UPROPERTY(Transient)
+    FVector HomeLocation;
 
-    /** Perform a melee attack on Target. */
-    void PerformAttack(APawn* Target);
+    /** Current threat target (player or another actor) */
+    UPROPERTY(Transient)
+    TObjectPtr<AActor> ThreatTarget;
 
-    // ── State handlers ────────────────────────────────────────────────────────
-    void HandleIdle(float DeltaTime);
-    void HandlePatrol(float DeltaTime);
-    void HandleChase(float DeltaTime);
-    void HandleAttack(float DeltaTime);
-    void HandleFlee(float DeltaTime);
+    /** Timer accumulator for patrol wait */
+    float PatrolWaitTimer = 0.0f;
+
+    /** Whether we are currently waiting at a patrol point */
+    bool bWaitingAtPatrolPoint = false;
+
+    /** Perception component */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinosaurAI|Perception",
+        meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAIPerceptionComponent> PerceptionComp;
+
+    /** Sight sense config */
+    UPROPERTY()
+    TObjectPtr<UAISenseConfig_Sight> SightConfig;
+
+    /** Hearing sense config */
+    UPROPERTY()
+    TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
 
 private:
-    /** World location where this controller possessed its pawn. */
-    FVector SpawnLocation;
-
-    /** Cached reference to the controlled dinosaur pawn. */
-    UPROPERTY()
-    ADinosaurBase* ControlledDino;
-
-    /** Current patrol destination. */
-    FVector PatrolTarget;
-
-    /** Accumulated idle/wait timer. */
-    float IdleTimer;
-
-    /** Accumulated attack cooldown timer. */
-    float AttackTimer;
-
-    /** Last known player location (used during chase). */
-    FVector LastKnownPlayerLocation;
-
-    /** Weak ref to current chase target. */
-    UPROPERTY()
-    APawn* ChaseTarget;
+    /** Tick sub-routines per state */
+    void TickIdle(float DeltaTime);
+    void TickPatrolling(float DeltaTime);
+    void TickAlerted(float DeltaTime);
+    void TickHunting(float DeltaTime);
+    void TickFleeing(float DeltaTime);
+    void TickResting(float DeltaTime);
 };
