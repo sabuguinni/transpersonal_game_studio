@@ -5,12 +5,10 @@
 #include "SurvivorAnimInstance.generated.h"
 
 /**
- * Animation Instance for the prehistoric human survivor character.
+ * USurvivorAnimInstance
+ * Animation instance for the prehistoric survivor player character.
  * Drives locomotion blend space (idle/walk/run), jump states,
- * foot IK adaptation to terrain, and fear/stealth pose blending.
- *
- * Agent #10 — Animation Agent
- * Transpersonal Game Studio — Prehistoric Survival Game
+ * crouching, and foot IK placement on uneven terrain.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API USurvivorAnimInstance : public UAnimInstance
@@ -23,120 +21,99 @@ public:
 	virtual void NativeInitializeAnimation() override;
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-	// -------------------------------------------------------
-	// LOCOMOTION PROPERTIES (read by AnimGraph blend space)
-	// -------------------------------------------------------
+	// ── Locomotion ──────────────────────────────────────────────────────────
 
-	/** Current movement speed (0 = idle, 150 = walk, 375 = run) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+	/** Current movement speed (cm/s). Drives the locomotion blend space. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	float Speed;
 
-	/** Lateral movement direction (-1 left, 0 forward, 1 right) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+	/** Lateral strafe direction (-1 left, 0 forward, 1 right). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	float Direction;
 
-	/** True when character is in the air (jumping or falling) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsInAir;
-
-	/** True when character is crouching (stealth mode) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsCrouching;
-
-	/** True when character is sprinting */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
-	bool bIsSprinting;
-
-	/** True when character is moving (speed > threshold) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion", meta = (AllowPrivateAccess = "true"))
+	/** True when the character is moving (Speed > IdleThreshold). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	bool bIsMoving;
 
-	// -------------------------------------------------------
-	// SURVIVAL STATE PROPERTIES (affect pose blending)
-	// -------------------------------------------------------
+	/** True when the character is sprinting (Speed > SprintThreshold). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsSprinting;
 
-	/** Fear level 0-1 — affects hunched posture and head-look urgency */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
+	/** True when the character is crouching. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsCrouching;
+
+	// ── Airborne ────────────────────────────────────────────────────────────
+
+	/** True when the character is in the air (jumping or falling). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Airborne")
+	bool bIsInAir;
+
+	/** Vertical velocity (Z component). Positive = rising, negative = falling. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Airborne")
+	float VerticalVelocity;
+
+	// ── Survival State ──────────────────────────────────────────────────────
+
+	/** Stamina ratio [0..1]. Affects animation speed and posture. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+	float StaminaRatio;
+
+	/** Fear level [0..1]. Triggers fear animations (trembling, cowering). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
 	float FearLevel;
 
-	/** Stamina 0-1 — low stamina triggers exhaustion pose blend */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	float StaminaNormalized;
+	/** True when health is critically low (<20%). Triggers limping. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+	bool bIsInjured;
 
-	/** Health 0-1 — critical health triggers limping blend */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	float HealthNormalized;
+	// ── Foot IK ─────────────────────────────────────────────────────────────
 
-	/** True when character is carrying a weapon/tool */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival", meta = (AllowPrivateAccess = "true"))
-	bool bIsArmed;
+	/** Left foot IK target location in component space. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	FVector LeftFootIKLocation;
 
-	// -------------------------------------------------------
-	// FOOT IK PROPERTIES
-	// -------------------------------------------------------
+	/** Right foot IK target location in component space. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	FVector RightFootIKLocation;
 
-	/** Left foot IK target offset from ground */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK", meta = (AllowPrivateAccess = "true"))
-	FVector LeftFootIKOffset;
+	/** IK alpha blend [0..1]. 0 = no IK, 1 = full IK. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	float FootIKAlpha;
 
-	/** Right foot IK target offset from ground */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK", meta = (AllowPrivateAccess = "true"))
-	FVector RightFootIKOffset;
+	// ── Thresholds (tunable in Blueprint) ───────────────────────────────────
 
-	/** Pelvis height adjustment for foot IK */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK", meta = (AllowPrivateAccess = "true"))
-	float PelvisOffset;
+	/** Speed below which the character is considered idle. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
+	float IdleThreshold;
 
-	/** Enable foot IK terrain adaptation */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|FootIK")
-	bool bEnableFootIK;
+	/** Speed above which the character is considered sprinting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
+	float SprintThreshold;
 
-	// -------------------------------------------------------
-	// AIM OFFSET PROPERTIES
-	// -------------------------------------------------------
+	/** IK trace distance below the foot bone (cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anim|Config")
+	float FootIKTraceDistance;
 
-	/** Pitch for aim offset (-90 to 90) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset", meta = (AllowPrivateAccess = "true"))
-	float AimPitch;
+protected:
+	/** Updates locomotion variables from the owning character's movement component. */
+	void UpdateLocomotion();
 
-	/** Yaw for aim offset (-90 to 90) */
-	UPROPERTY(BlueprintReadOnly, Category = "Anim|AimOffset", meta = (AllowPrivateAccess = "true"))
-	float AimYaw;
+	/** Updates survival state variables from the owning character's stats. */
+	void UpdateSurvivalState();
 
-	// -------------------------------------------------------
-	// FUNCTIONS
-	// -------------------------------------------------------
-
-	/** Update foot IK traces against terrain */
-	UFUNCTION(BlueprintCallable, Category = "Anim|FootIK")
+	/** Performs two line traces (left/right foot) and updates IK target locations. */
 	void UpdateFootIK(float DeltaSeconds);
 
-	/** Get the locomotion blend space X axis value (speed) */
-	UFUNCTION(BlueprintPure, Category = "Anim|Locomotion")
-	float GetLocomotionSpeed() const { return Speed; }
-
-	/** Get the locomotion blend space Y axis value (direction) */
-	UFUNCTION(BlueprintPure, Category = "Anim|Locomotion")
-	float GetLocomotionDirection() const { return Direction; }
-
 private:
-	/** Cached reference to owning character */
+	/** Cached reference to the owning ACharacter. Set in NativeInitializeAnimation. */
 	UPROPERTY()
 	class ACharacter* OwnerCharacter;
 
-	/** Cached reference to movement component */
+	/** Cached reference to the owning character's movement component. */
 	UPROPERTY()
 	class UCharacterMovementComponent* MovementComponent;
 
-	/** Smooth foot IK offset — left foot */
-	FVector LeftFootIKOffsetTarget;
-
-	/** Smooth foot IK offset — right foot */
-	FVector RightFootIKOffsetTarget;
-
-	/** Trace foot position against terrain */
-	bool TraceFootPosition(FName SocketName, FVector& OutIKOffset);
-
-	/** Interpolation speed for foot IK smoothing */
-	float FootIKInterpSpeed;
+	/** Smooth IK alpha interpolation speed. */
+	float IKInterpSpeed;
 };
