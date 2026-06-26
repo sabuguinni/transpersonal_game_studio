@@ -1,248 +1,259 @@
 #include "AudioSystemManager.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "Camera/CameraShakeBase.h"
-#include "Components/AudioComponent.h"
 #include "Engine/World.h"
 
 // ============================================================
-// UAudio_ProximityTrigger
+// AAudio_ZoneActor — Implementation
 // ============================================================
 
-UAudio_ProximityTrigger::UAudio_ProximityTrigger()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-}
-
-void UAudio_ProximityTrigger::BeginPlay()
-{
-    Super::BeginPlay();
-    bHasTriggered = false;
-}
-
-void UAudio_ProximityTrigger::CheckPlayerProximity(const FVector& PlayerLocation)
-{
-    if (bPlayOnce && bHasTriggered) return;
-
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    float Distance = FVector::Dist(Owner->GetActorLocation(), PlayerLocation);
-    if (Distance <= TriggerRadius)
-    {
-        USoundBase* Sound = TriggerSound.LoadSynchronous();
-        if (Sound)
-        {
-            UGameplayStatics::PlaySoundAtLocation(
-                GetWorld(),
-                Sound,
-                Owner->GetActorLocation(),
-                Volume
-            );
-            bHasTriggered = true;
-        }
-    }
-}
-
-void UAudio_ProximityTrigger::ResetTrigger()
-{
-    bHasTriggered = false;
-}
-
-// ============================================================
-// AAudio_SystemManager
-// ============================================================
-
-AAudio_SystemManager::AAudio_SystemManager()
+AAudio_ZoneActor::AAudio_ZoneActor()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 100ms — not every frame
+
+    // Trigger sphere for player overlap detection
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(2000.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    // Audio component for spatial ambient playback
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
 }
 
-void AAudio_SystemManager::BeginPlay()
+void AAudio_ZoneActor::BeginPlay()
 {
     Super::BeginPlay();
-    DangerMusicBlend = 0.0f;
-    BiomeFadeTimer = 0.0f;
-    PreviousBiome = CurrentBiome;
+
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnPlayerEnterZone);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnPlayerExitZone);
+
+    // Set sphere radius from config
+    TriggerSphere->SetSphereRadius(ZoneRadius);
+
+    // Start ambient if sound asset is assigned
+    if (PrimaryAmbientSound && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetSound(PrimaryAmbientSound);
+        AmbientAudioComponent->Play();
+    }
 }
 
-void AAudio_SystemManager::Tick(float DeltaTime)
+void AAudio_ZoneActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    UpdateDynamicMix(DeltaTime);
+
+    // Smooth volume fade
+    if (bFading && AmbientAudioComponent)
+    {
+        float CurrentVol = AmbientAudioComponent->VolumeMultiplier;
+        float NewVol = FMath::FInterpTo(CurrentVol, FadeTargetVolume, DeltaTime, FadeSpeed);
+        AmbientAudioComponent->SetVolumeMultiplier(NewVol);
+        CurrentVolume = NewVol;
+
+        if (FMath::IsNearlyEqual(NewVol, FadeTargetVolume, 0.01f))
+        {
+            AmbientAudioComponent->SetVolumeMultiplier(FadeTargetVolume);
+            CurrentVolume = FadeTargetVolume;
+            bFading = false;
+        }
+    }
+
+    // Voice line cooldown timer
+    if (bPlayerInZone && VoiceLines.Num() > 0)
+    {
+        VoiceLineTimer -= DeltaTime;
+        if (VoiceLineTimer <= 0.0f)
+        {
+            TriggerNextVoiceLine();
+            // Reset timer: 30-60 seconds between lines
+            VoiceLineTimer = FMath::RandRange(30.0f, 60.0f);
+        }
+    }
 }
 
-void AAudio_SystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
+void AAudio_ZoneActor::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
     CurrentDangerLevel = NewLevel;
-}
 
-void AAudio_SystemManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
-{
-    if (NewBiome != CurrentBiome)
+    // Adjust ambient volume based on danger
+    float TargetVol = AmbientLayer.BaseVolume;
+    if (NewLevel == EAudio_DangerLevel::Danger || NewLevel == EAudio_DangerLevel::Critical)
     {
-        PreviousBiome = CurrentBiome;
-        CurrentBiome = NewBiome;
-        BiomeFadeTimer = 0.0f;
-        UpdateAmbientLayers();
+        TargetVol *= AmbientLayer.DangerVolumeMultiplier;
     }
-}
 
-void AAudio_SystemManager::UpdateNearestDinosaurDistance(float Distance)
-{
-    NearestDinosaurDistance = Distance;
+    FadeInAmbient(TargetVol, AmbientLayer.FadeInTime);
 
-    // Auto-escalate danger level based on proximity
-    if (Distance < 500.0f)
+    // Play danger stinger if available
+    if (DangerStingerSound && (NewLevel == EAudio_DangerLevel::Danger || NewLevel == EAudio_DangerLevel::Critical))
     {
-        SetDangerLevel(EAudio_DangerLevel::Critical);
-    }
-    else if (Distance < 1500.0f)
-    {
-        SetDangerLevel(EAudio_DangerLevel::Danger);
-    }
-    else if (Distance < 3000.0f)
-    {
-        SetDangerLevel(EAudio_DangerLevel::Cautious);
-    }
-    else
-    {
-        SetDangerLevel(EAudio_DangerLevel::Safe);
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), DangerStingerSound, GetActorLocation());
     }
 }
 
-void AAudio_SystemManager::PlayDinosaurFootstep(FName Species, const FVector& FootLocation)
+void AAudio_ZoneActor::TriggerNextVoiceLine()
 {
-    // Find matching profile
-    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    if (VoiceLines.Num() == 0) return;
+
+    // Find next unplayed line
+    for (int32 i = 0; i < VoiceLines.Num(); i++)
     {
-        if (Profile.DinosaurSpecies == Species)
+        int32 Idx = (CurrentVoiceLineIndex + i) % VoiceLines.Num();
+        if (!VoiceLines[Idx].bHasPlayed)
         {
-            USoundBase* FootSound = Profile.FootstepSound.LoadSynchronous();
-            if (FootSound)
-            {
-                UGameplayStatics::PlaySoundAtLocation(
-                    GetWorld(),
-                    FootSound,
-                    FootLocation,
-                    SFXVolume * MasterVolume
-                );
-            }
-
-            // Trigger ground shake if player is close enough
-            APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-            if (PC && PC->GetPawn())
-            {
-                float DistToPlayer = FVector::Dist(FootLocation, PC->GetPawn()->GetActorLocation());
-                if (DistToPlayer <= Profile.FootstepGroundShakeRadius)
-                {
-                    float ScaledIntensity = Profile.FootstepGroundShakeIntensity *
-                        (1.0f - (DistToPlayer / Profile.FootstepGroundShakeRadius));
-                    TriggerScreenShakeFromFootstep(ScaledIntensity, DistToPlayer);
-                }
-            }
-            break;
+            CurrentVoiceLineIndex = Idx;
+            VoiceLines[Idx].bHasPlayed = true;
+            UE_LOG(LogTemp, Log, TEXT("[AudioZone] Playing voice line: %s — %s"),
+                *VoiceLines[Idx].SpeakerName, *VoiceLines[Idx].LineText);
+            return;
         }
     }
+
+    // All played — reset and cycle
+    for (auto& Line : VoiceLines)
+    {
+        Line.bHasPlayed = false;
+    }
+    CurrentVoiceLineIndex = 0;
 }
 
-void AAudio_SystemManager::TriggerScreenShakeFromFootstep(float Intensity, float Distance)
+void AAudio_ZoneActor::FadeInAmbient(float TargetVolume, float FadeTime)
 {
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC) return;
+    FadeTargetVolume = TargetVolume;
+    FadeSpeed = (FadeTime > 0.0f) ? (1.0f / FadeTime) : 10.0f;
+    bFading = true;
 
-    // Scale shake by intensity and distance
-    float ShakeScale = FMath::Clamp(Intensity * (1.0f - Distance / 2000.0f), 0.0f, 1.0f);
-    if (ShakeScale > 0.05f)
+    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
     {
-        // Use built-in camera shake via console command as fallback
-        // (Blueprint should assign a proper UCameraShakeBase subclass)
-        UGameplayStatics::PlayWorldCameraShake(
-            GetWorld(),
-            nullptr, // Camera shake class — assign in Blueprint
-            PC->GetPawn() ? PC->GetPawn()->GetActorLocation() : FVector::ZeroVector,
-            0.0f,
-            1500.0f * ShakeScale,
-            ShakeScale
-        );
+        AmbientAudioComponent->Play();
     }
 }
 
-float AAudio_SystemManager::GetDangerMusicIntensity() const
+void AAudio_ZoneActor::FadeOutAmbient(float FadeTime)
 {
-    switch (CurrentDangerLevel)
+    FadeTargetVolume = 0.0f;
+    FadeSpeed = (FadeTime > 0.0f) ? (1.0f / FadeTime) : 10.0f;
+    bFading = true;
+}
+
+void AAudio_ZoneActor::OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    // Check if it's a player character
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar->IsPlayerControlled())
     {
-        case EAudio_DangerLevel::Safe:     return 0.0f;
-        case EAudio_DangerLevel::Cautious: return 0.3f;
-        case EAudio_DangerLevel::Danger:   return 0.7f;
-        case EAudio_DangerLevel::Critical: return 1.0f;
-        default: return 0.0f;
+        bPlayerInZone = true;
+        VoiceLineTimer = 5.0f; // First line after 5 seconds
+        FadeInAmbient(AmbientLayer.BaseVolume, AmbientLayer.FadeInTime);
+        UE_LOG(LogTemp, Log, TEXT("[AudioZone] Player entered zone: %s"), *GetActorLabel());
     }
 }
 
-void AAudio_SystemManager::FadeAmbientToNewBiome(EAudio_BiomeType TargetBiome, float FadeTime)
+void AAudio_ZoneActor::OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    SetCurrentBiome(TargetBiome);
-    // Fade is handled in UpdateDynamicMix via BiomeFadeTimer
-    BiomeFadeTimer = FadeTime;
-}
+    if (!OtherActor) return;
 
-bool AAudio_SystemManager::IsPlayerInDanger() const
-{
-    return CurrentDangerLevel == EAudio_DangerLevel::Danger ||
-           CurrentDangerLevel == EAudio_DangerLevel::Critical;
-}
-
-void AAudio_SystemManager::UpdateDynamicMix(float DeltaTime)
-{
-    // Blend danger music intensity toward target
-    float TargetBlend = GetDangerMusicIntensity();
-    float BlendSpeed = 0.5f * DeltaTime; // Smooth transition
-    DangerMusicBlend = FMath::FInterpTo(DangerMusicBlend, TargetBlend, DeltaTime, 1.5f);
-
-    // Fade biome timer
-    if (BiomeFadeTimer > 0.0f)
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar->IsPlayerControlled())
     {
-        BiomeFadeTimer -= DeltaTime;
+        bPlayerInZone = false;
+        FadeOutAmbient(AmbientLayer.FadeOutTime);
+        UE_LOG(LogTemp, Log, TEXT("[AudioZone] Player exited zone: %s"), *GetActorLabel());
     }
 }
 
-void AAudio_SystemManager::UpdateAmbientLayers()
+// ============================================================
+// UAudio_SystemManager — Implementation
+// ============================================================
+
+UAudio_SystemManager::UAudio_SystemManager()
 {
-    // Stop all current ambient components
-    for (UAudioComponent* Comp : ActiveAmbientComponents)
+    // Pre-populate Freesound asset IDs discovered this cycle
+    FreesoundAssetIDs.Add(TEXT("Campfire_Crackle"), 157187);
+    FreesoundAssetIDs.Add(TEXT("Campfire_Long"), 394952);
+    FreesoundAssetIDs.Add(TEXT("River_Stream_Gentle"), 446019);
+    FreesoundAssetIDs.Add(TEXT("River_Spring_Water"), 684315);
+}
+
+void UAudio_SystemManager::RegisterVoiceLineURL(const FString& LineID, const FString& URL)
+{
+    VoiceLineURLs.Add(LineID, URL);
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Registered voice line: %s"), *LineID);
+}
+
+void UAudio_SystemManager::SetGlobalDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    GlobalDangerLevel = NewLevel;
+
+    // Propagate to all registered zones
+    for (AAudio_ZoneActor* Zone : ActiveZones)
     {
-        if (Comp && Comp->IsValidLowLevel())
+        if (Zone)
         {
-            Comp->FadeOut(2.0f, 0.0f);
+            Zone->SetDangerLevel(NewLevel);
         }
     }
-    ActiveAmbientComponents.Empty();
 
-    // Start new ambient layer for current biome
-    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Global danger level set to: %d"),
+        static_cast<int32>(NewLevel));
+}
+
+void UAudio_SystemManager::RegisterZone(AAudio_ZoneActor* Zone)
+{
+    if (Zone && !ActiveZones.Contains(Zone))
     {
-        if (Layer.BiomeType == CurrentBiome)
-        {
-            USoundBase* Sound = Layer.AmbientSound.LoadSynchronous();
-            if (Sound)
-            {
-                UAudioComponent* NewComp = UGameplayStatics::SpawnSound2D(
-                    GetWorld(),
-                    Sound,
-                    Layer.BaseVolume * AmbientVolume * MasterVolume,
-                    1.0f,
-                    0.0f,
-                    nullptr,
-                    true,
-                    true
-                );
-                if (NewComp)
-                {
-                    ActiveAmbientComponents.Add(NewComp);
-                }
-            }
-        }
+        ActiveZones.Add(Zone);
+        UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Zone registered: %s"), *Zone->GetActorLabel());
     }
+}
+
+void UAudio_SystemManager::UnregisterZone(AAudio_ZoneActor* Zone)
+{
+    ActiveZones.Remove(Zone);
+}
+
+FString UAudio_SystemManager::GetVoiceLineURL(const FString& LineID) const
+{
+    const FString* URL = VoiceLineURLs.Find(LineID);
+    return URL ? *URL : FString();
+}
+
+void UAudio_SystemManager::InitializeDefaultVoiceLines()
+{
+    // TTS voice lines generated this cycle (Agent #16 — PROD_CYCLE_AUTO_20260626_003)
+    RegisterVoiceLineURL(TEXT("TRex_Approach_Warning"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448450103_SurvivalNarrator.mp3"));
+
+    RegisterVoiceLineURL(TEXT("Raptor_Pack_Warning"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448457485_SurvivalNarrator.mp3"));
+
+    // TTS voice lines from Agent #15 (PROD_CYCLE_AUTO_20260626_003)
+    RegisterVoiceLineURL(TEXT("Elder_Kael_Fire_Defence"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448341913_Elder_Kael.mp3"));
+
+    RegisterVoiceLineURL(TEXT("Scout_Mira_Eastern_Ridge"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448344688_Scout_Mira.mp3"));
+
+    RegisterVoiceLineURL(TEXT("Hunter_Brak_Birds_Quiet"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448369738_Hunter_Brak.mp3"));
+
+    RegisterVoiceLineURL(TEXT("Scout_Mira_River_Fork"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448371935_Scout_Mira.mp3"));
+
+    // Previous cycle TTS lines (Agent #16 — PROD_CYCLE_AUTO_20260626_002)
+    RegisterVoiceLineURL(TEXT("Narrator_TRex_Sight"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782448450103_SurvivalNarrator.mp3"));
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] InitializeDefaultVoiceLines: %d lines registered"),
+        VoiceLineURLs.Num());
 }
