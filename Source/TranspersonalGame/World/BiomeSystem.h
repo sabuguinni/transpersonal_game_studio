@@ -1,20 +1,46 @@
+// BiomeSystem.h — Agent #5 Procedural World Generator
+// Defines biome zones, terrain features, and water bodies for the prehistoric world
+// Cycle: PROD_CYCLE_AUTO_20260626_009
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Engine/DataTable.h"
 #include "BiomeSystem.generated.h"
+
+// ============================================================
+// ENUMS — Global scope (RULE 1)
+// ============================================================
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Jungle    UMETA(DisplayName = "Jungle"),
-    Plains    UMETA(DisplayName = "Plains"),
-    Rocky     UMETA(DisplayName = "Rocky Highlands"),
-    Wetlands  UMETA(DisplayName = "Wetlands"),
-    Volcanic  UMETA(DisplayName = "Volcanic"),
-    Count     UMETA(Hidden)
+    DenseTropicalForest     UMETA(DisplayName = "Dense Tropical Forest"),
+    OpenPlains              UMETA(DisplayName = "Open Plains"),
+    RockyHighlands          UMETA(DisplayName = "Rocky Highlands"),
+    RiverValley             UMETA(DisplayName = "River Valley"),
+    LakeShore               UMETA(DisplayName = "Lake Shore"),
+    VolcanicZone            UMETA(DisplayName = "Volcanic Zone"),
+    Swampland               UMETA(DisplayName = "Swampland"),
+    COUNT                   UMETA(Hidden)
 };
+
+UENUM(BlueprintType)
+enum class EWorld_TerrainFeature : uint8
+{
+    FlatGround      UMETA(DisplayName = "Flat Ground"),
+    GentleHill      UMETA(DisplayName = "Gentle Hill"),
+    SteepCliff      UMETA(DisplayName = "Steep Cliff"),
+    RiverBed        UMETA(DisplayName = "River Bed"),
+    LakeBasin       UMETA(DisplayName = "Lake Basin"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    COUNT           UMETA(Hidden)
+};
+
+// ============================================================
+// STRUCTS — Global scope (RULE 1)
+// ============================================================
 
 USTRUCT(BlueprintType)
 struct FWorld_BiomeZone
@@ -22,68 +48,133 @@ struct FWorld_BiomeZone
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Plains;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenPlains;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector CentreLocation = FVector::ZeroVector;
+    FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 8000.0f;
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BaseElevation = 0.0f;
+    float VegetationDensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FoliageDensity = 1.0f;
+    float WaterCoverage = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
+    float ElevationVariance = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    FLinearColor DebugColor = FLinearColor::Green;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABiomeSystem : public AActor
+USTRUCT(BlueprintType)
+struct FWorld_WaterBody
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector Extent = FVector(1000.0f, 1000.0f, 10.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    bool bIsRiver = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    float FlowSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FLinearColor WaterColor = FLinearColor(0.1f, 0.3f, 0.8f, 0.85f);
+};
+
+USTRUCT(BlueprintType)
+struct FWorld_TerrainConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float HeightScale = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float NoiseFrequency = 0.001f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 OctaveCount = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Persistence = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Lacunarity = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 RandomSeed = 42;
+};
+
+// ============================================================
+// UCLASS: ABiomeManager
+// ============================================================
+
+UCLASS(ClassGroup = (World), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ABiomeSystem();
+    ABiomeManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    FWorld_BiomeZone GetBiomeZoneData(EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetHumidityAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Biome")
-    void InitialiseBiomeZones();
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    bool IsInWaterZone(const FVector& WorldLocation) const;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    // ---- Biome Zones ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
     TArray<FWorld_BiomeZone> BiomeZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float TransitionBlendRadius = 1500.0f;
+    // ---- Water Bodies ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    TArray<FWorld_WaterBody> WaterBodies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float WaterZoneRadius = 2000.0f;
+    // ---- Terrain Config ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FWorld_TerrainConfig TerrainConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    FVector WaterSourceLocation = FVector(8000.0f, 0.0f, 50.0f);
+    // ---- World Bounds ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float WorldRadius = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 BiomeCount = 5;
+
+    // ---- Runtime State ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime",
+              meta = (AllowPrivateAccess = "true"))
+    bool bBiomesInitialized = false;
+
+    // ---- Functions ----
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void InitializeBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    float GetVegetationDensityAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Water")
+    bool IsLocationInWater(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetTerrainHeightAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugDrawBiomeBoundaries();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-    void SetupDefaultBiomes();
+    void SetupDefaultBiomeZones();
+    void SetupDefaultWaterBodies();
+    float PerlinNoise2D(float X, float Y, int32 Seed) const;
 };
