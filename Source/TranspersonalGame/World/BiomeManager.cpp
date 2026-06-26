@@ -1,255 +1,151 @@
-// BiomeManager.cpp
-// Transpersonal Game Studio — Engine Architect #02
-// Biome system: classifies terrain zones, drives vegetation/fauna density
+// BiomeManager.cpp — Engine Architect #02 — Cycle AUTO_009
+// Manages biome regions, assigns dinosaur species to biomes,
+// and provides query functions for world generation systems.
+// P1 priority: World Generation backbone.
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
-
-// ============================================================
-// Constructor
-// ============================================================
 
 ABiomeManager::ABiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 2.0f; // Update every 2s — not every frame
+    PrimaryActorTick.bCanEverTick = false;  // Biome data is static — no per-frame update needed
 
-    // Default biome grid
-    BiomeGridResolution = 16;
-    WorldExtentKm = 4.0f;
-    bDebugDrawBiomes = false;
-
-    // Default biome parameters
-    FEng_BiomeParams ForestParams;
-    ForestParams.BiomeType = EEng_BiomeType::TropicalForest;
-    ForestParams.VegetationDensity = 0.85f;
-    ForestParams.FaunaDensity = 0.7f;
-    ForestParams.TemperatureCelsius = 28.0f;
-    ForestParams.HumidityPercent = 80.0f;
-    ForestParams.DangerLevel = 0.6f;
-    BiomeTable.Add(EEng_BiomeType::TropicalForest, ForestParams);
-
-    FEng_BiomeParams SavannaParams;
-    SavannaParams.BiomeType = EEng_BiomeType::Savanna;
-    SavannaParams.VegetationDensity = 0.35f;
-    SavannaParams.FaunaDensity = 0.9f;
-    SavannaParams.TemperatureCelsius = 34.0f;
-    SavannaParams.HumidityPercent = 30.0f;
-    SavannaParams.DangerLevel = 0.8f;
-    BiomeTable.Add(EEng_BiomeType::Savanna, SavannaParams);
-
-    FEng_BiomeParams SwampParams;
-    SwampParams.BiomeType = EEng_BiomeType::Swamp;
-    SwampParams.VegetationDensity = 0.9f;
-    SwampParams.FaunaDensity = 0.5f;
-    SwampParams.TemperatureCelsius = 26.0f;
-    SwampParams.HumidityPercent = 95.0f;
-    SwampParams.DangerLevel = 0.7f;
-    BiomeTable.Add(EEng_BiomeType::Swamp, SwampParams);
-
-    FEng_BiomeParams VolcanicParams;
-    VolcanicParams.BiomeType = EEng_BiomeType::Volcanic;
-    VolcanicParams.VegetationDensity = 0.05f;
-    VolcanicParams.FaunaDensity = 0.1f;
-    VolcanicParams.TemperatureCelsius = 55.0f;
-    VolcanicParams.HumidityPercent = 10.0f;
-    VolcanicParams.DangerLevel = 1.0f;
-    BiomeTable.Add(EEng_BiomeType::Volcanic, VolcanicParams);
-
-    FEng_BiomeParams RiverbankParams;
-    RiverbankParams.BiomeType = EEng_BiomeType::Riverbank;
-    RiverbankParams.VegetationDensity = 0.75f;
-    RiverbankParams.FaunaDensity = 0.65f;
-    RiverbankParams.TemperatureCelsius = 24.0f;
-    RiverbankParams.HumidityPercent = 70.0f;
-    RiverbankParams.DangerLevel = 0.5f;
-    BiomeTable.Add(EEng_BiomeType::Riverbank, RiverbankParams);
+    // Default biome configuration for the MinPlayableMap
+    // Centered around the dino zone (2000, 2000)
+    InitializeDefaultBiomes();
 }
-
-// ============================================================
-// BeginPlay
-// ============================================================
 
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    GenerateBiomeGrid();
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — %d biome cells, world %.1fkm²"),
-        BiomeGrid.Num(), WorldExtentKm * WorldExtentKm);
-}
 
-// ============================================================
-// Tick
-// ============================================================
-
-void ABiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-#if WITH_EDITOR
-    if (bDebugDrawBiomes)
+    if (Biomes.Num() == 0)
     {
-        DebugDrawBiomes();
+        InitializeDefaultBiomes();
     }
-#endif
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biomes"), Biomes.Num());
 }
 
-// ============================================================
-// GenerateBiomeGrid — Procedural biome assignment using noise
-// ============================================================
-
-void ABiomeManager::GenerateBiomeGrid()
+void ABiomeManager::InitializeDefaultBiomes()
 {
-    BiomeGrid.Empty();
-    BiomeGrid.Reserve(BiomeGridResolution * BiomeGridResolution);
+    Biomes.Empty();
 
-    const float WorldExtentCm = WorldExtentKm * 100000.0f;
-    const float CellSize = WorldExtentCm / BiomeGridResolution;
+    // Biome 1: Dense Jungle (center — main play area)
+    FBiomeData Jungle;
+    Jungle.BiomeType = EBiomeType::Forest;
+    Jungle.BiomeCenter = FVector2D(2000.0f, 2000.0f);
+    Jungle.BiomeRadius = 3000.0f;
+    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Velociraptor);
+    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Compsognathus);
+    Jungle.NativeDinosaurs.Add(EDinosaurSpecies::Parasaurolophus);
+    Biomes.Add(Jungle);
 
-    for (int32 Y = 0; Y < BiomeGridResolution; ++Y)
+    // Biome 2: Open Savanna (north — large herbivores)
+    FBiomeData Savanna;
+    Savanna.BiomeType = EBiomeType::Savanna;
+    Savanna.BiomeCenter = FVector2D(2000.0f, -1000.0f);
+    Savanna.BiomeRadius = 4000.0f;
+    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Triceratops);
+    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Brachiosaurus);
+    Savanna.NativeDinosaurs.Add(EDinosaurSpecies::Stegosaurus);
+    Biomes.Add(Savanna);
+
+    // Biome 3: Swamp (south — dangerous)
+    FBiomeData Swamp;
+    Swamp.BiomeType = EBiomeType::Swamp;
+    Swamp.BiomeCenter = FVector2D(2000.0f, 5000.0f);
+    Swamp.BiomeRadius = 2500.0f;
+    Swamp.NativeDinosaurs.Add(EDinosaurSpecies::TRex);
+    Swamp.NativeDinosaurs.Add(EDinosaurSpecies::Ankylosaurus);
+    Biomes.Add(Swamp);
+
+    // Biome 4: Mountain Canyon (west — exploration)
+    FBiomeData Canyon;
+    Canyon.BiomeType = EBiomeType::Canyon;
+    Canyon.BiomeCenter = FVector2D(-2000.0f, 2000.0f);
+    Canyon.BiomeRadius = 3500.0f;
+    Canyon.NativeDinosaurs.Add(EDinosaurSpecies::Velociraptor);
+    Canyon.NativeDinosaurs.Add(EDinosaurSpecies::TRex);
+    Biomes.Add(Canyon);
+}
+
+EBiomeType ABiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+{
+    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+    float ClosestDist = TNumericLimits<float>::Max();
+    EBiomeType ClosestBiome = EBiomeType::Forest;
+
+    for (const FBiomeData& Biome : Biomes)
     {
-        for (int32 X = 0; X < BiomeGridResolution; ++X)
+        float Dist = FVector2D::Distance(Loc2D, Biome.BiomeCenter);
+        if (Dist < ClosestDist)
         {
-            FEng_BiomeCell Cell;
-            Cell.GridX = X;
-            Cell.GridY = Y;
-            Cell.WorldCenter = FVector(
-                (X + 0.5f) * CellSize - WorldExtentCm * 0.5f,
-                (Y + 0.5f) * CellSize - WorldExtentCm * 0.5f,
-                0.0f
-            );
-            Cell.BiomeType = ClassifyBiomeAtPosition(Cell.WorldCenter);
-            BiomeGrid.Add(Cell);
+            ClosestDist = Dist;
+            ClosestBiome = Biome.BiomeType;
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Generated %d biome cells"), BiomeGrid.Num());
+    return ClosestBiome;
 }
 
-// ============================================================
-// ClassifyBiomeAtPosition — Simple noise-based classification
-// ============================================================
-
-EEng_BiomeType ABiomeManager::ClassifyBiomeAtPosition(const FVector& WorldPos) const
+TArray<EDinosaurSpecies> ABiomeManager::GetDinosaursForBiome(EBiomeType BiomeType) const
 {
-    // Normalize to [0,1]
-    const float WorldExtentCm = WorldExtentKm * 100000.0f;
-    const float NX = (WorldPos.X / WorldExtentCm) + 0.5f;
-    const float NY = (WorldPos.Y / WorldExtentCm) + 0.5f;
-
-    // Simple deterministic pseudo-noise using sine waves
-    const float Moisture = FMath::Sin(NX * 7.3f) * FMath::Cos(NY * 5.1f) * 0.5f + 0.5f;
-    const float Temperature = FMath::Cos(NX * 3.7f + NY * 4.2f) * 0.5f + 0.5f;
-    const float Elevation = FMath::Sin(NX * 11.1f) * FMath::Sin(NY * 9.3f) * 0.5f + 0.5f;
-
-    // Classification rules (Whittaker biome model simplified)
-    if (Elevation > 0.75f)
+    for (const FBiomeData& Biome : Biomes)
     {
-        return EEng_BiomeType::Volcanic;
-    }
-    if (Moisture > 0.65f && Temperature > 0.55f)
-    {
-        return EEng_BiomeType::TropicalForest;
-    }
-    if (Moisture > 0.7f && Temperature < 0.5f)
-    {
-        return EEng_BiomeType::Swamp;
-    }
-    if (Moisture > 0.5f && Elevation < 0.3f)
-    {
-        return EEng_BiomeType::Riverbank;
-    }
-
-    return EEng_BiomeType::Savanna;
-}
-
-// ============================================================
-// GetBiomeAtLocation — Query biome for any world position
-// ============================================================
-
-EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    return ClassifyBiomeAtPosition(WorldLocation);
-}
-
-// ============================================================
-// GetBiomeParams — Retrieve parameters for a biome type
-// ============================================================
-
-FEng_BiomeParams ABiomeManager::GetBiomeParams(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeParams* Found = BiomeTable.Find(BiomeType);
-    if (Found)
-    {
-        return *Found;
-    }
-
-    // Return safe defaults if not found
-    FEng_BiomeParams Default;
-    Default.BiomeType = BiomeType;
-    Default.VegetationDensity = 0.5f;
-    Default.FaunaDensity = 0.5f;
-    Default.TemperatureCelsius = 25.0f;
-    Default.HumidityPercent = 50.0f;
-    Default.DangerLevel = 0.5f;
-    return Default;
-}
-
-// ============================================================
-// GetVegetationDensityAtLocation
-// ============================================================
-
-float ABiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeParams Params = GetBiomeParams(Biome);
-    return Params.VegetationDensity;
-}
-
-// ============================================================
-// GetDangerLevelAtLocation
-// ============================================================
-
-float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeParams Params = GetBiomeParams(Biome);
-    return Params.DangerLevel;
-}
-
-// ============================================================
-// DebugDrawBiomes — Editor visualization
-// ============================================================
-
-void ABiomeManager::DebugDrawBiomes()
-{
-#if WITH_EDITOR
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    const float WorldExtentCm = WorldExtentKm * 100000.0f;
-    const float CellSize = WorldExtentCm / BiomeGridResolution;
-
-    for (const FEng_BiomeCell& Cell : BiomeGrid)
-    {
-        FColor DebugColor = FColor::White;
-        switch (Cell.BiomeType)
+        if (Biome.BiomeType == BiomeType)
         {
-            case EEng_BiomeType::TropicalForest: DebugColor = FColor::Green; break;
-            case EEng_BiomeType::Savanna:        DebugColor = FColor::Yellow; break;
-            case EEng_BiomeType::Swamp:          DebugColor = FColor(0, 100, 50); break;
-            case EEng_BiomeType::Volcanic:       DebugColor = FColor::Red; break;
-            case EEng_BiomeType::Riverbank:      DebugColor = FColor::Blue; break;
-            default: break;
+            return Biome.NativeDinosaurs;
         }
-
-        DrawDebugBox(World,
-            Cell.WorldCenter + FVector(0, 0, 100),
-            FVector(CellSize * 0.45f, CellSize * 0.45f, 50.0f),
-            DebugColor, false, 2.5f, 0, 20.0f);
     }
-#endif
+    return TArray<EDinosaurSpecies>();
+}
+
+FBiomeData ABiomeManager::GetBiomeDataAtLocation(FVector WorldLocation) const
+{
+    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+    float ClosestDist = TNumericLimits<float>::Max();
+    int32 ClosestIdx = 0;
+
+    for (int32 i = 0; i < Biomes.Num(); ++i)
+    {
+        float Dist = FVector2D::Distance(Loc2D, Biomes[i].BiomeCenter);
+        if (Dist < ClosestDist)
+        {
+            ClosestDist = Dist;
+            ClosestIdx = i;
+        }
+    }
+
+    return Biomes.IsValidIndex(ClosestIdx) ? Biomes[ClosestIdx] : FBiomeData();
+}
+
+bool ABiomeManager::IsLocationInBiome(FVector WorldLocation, EBiomeType BiomeType) const
+{
+    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+
+    for (const FBiomeData& Biome : Biomes)
+    {
+        if (Biome.BiomeType == BiomeType)
+        {
+            float Dist = FVector2D::Distance(Loc2D, Biome.BiomeCenter);
+            if (Dist <= Biome.BiomeRadius)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+int32 ABiomeManager::GetBiomeCount() const
+{
+    return Biomes.Num();
+}
+
+void ABiomeManager::AddBiome(FBiomeData NewBiome)
+{
+    Biomes.Add(NewBiome);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Added biome. Total: %d"), Biomes.Num());
 }
