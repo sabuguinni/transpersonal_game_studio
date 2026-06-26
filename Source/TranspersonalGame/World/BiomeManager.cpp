@@ -1,309 +1,286 @@
 // BiomeManager.cpp
-// Core Systems Programmer — Agent #03
-// Transpersonal Game Studio — Prehistoric Survival Game
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Biome system: classifies world locations into prehistoric biomes,
+// drives survival stat modifiers (temperature, hydration drain, visibility)
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "GameFramework/Actor.h"
 
-// ============================================================
-// Constructor
-// ============================================================
-UBiomeManager::UBiomeManager()
+// ─────────────────────────────────────────────────────────────────────────────
+// FCore_BiomeData defaults
+// ─────────────────────────────────────────────────────────────────────────────
+
+FCore_BiomeData::FCore_BiomeData()
+    : BiomeType(ECore_BiomeType::Jungle)
+    , DisplayName(TEXT("Jungle"))
+    , BaseTemperature(32.0f)
+    , HydrationDrainMultiplier(1.5f)
+    , StaminaDrainMultiplier(1.2f)
+    , FoodAbundance(0.8f)
+    , DangerLevel(0.6f)
+    , VisibilityRange(1500.0f)
+    , BiomeColor(FLinearColor(0.1f, 0.5f, 0.1f, 1.0f))
 {
-    CurrentBiome = ECore_BiomeType::Jungle;
-    TransitionBlend = 0.0f;
-    bBiomeTransitionActive = false;
-    BiomeTransitionDuration = 5.0f;
-    BiomeTransitionElapsed = 0.0f;
-    TemperatureBase = 28.0f;
-    HumidityBase = 0.75f;
-    DangerLevel = 0.5f;
 }
 
-// ============================================================
-// Initialization
-// ============================================================
-void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
+// ─────────────────────────────────────────────────────────────────────────────
+// ABiomeManager
+// ─────────────────────────────────────────────────────────────────────────────
+
+ABiomeManager::ABiomeManager()
 {
-    Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — current biome: %d"), (int32)CurrentBiome);
-    ApplyBiomeEnvironment(CurrentBiome);
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 2.0f; // Update every 2 seconds — not every frame
+
+    CurrentPlayerBiome = ECore_BiomeType::Jungle;
+    bBiomesInitialized = false;
+    BiomeTransitionBlend = 0.0f;
+    BiomeCheckRadius = 5000.0f;
 }
 
-void UBiomeManager::Deinitialize()
+void ABiomeManager::BeginPlay()
 {
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Deinitialized"));
+    Super::BeginPlay();
+    InitializeBiomes();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: BeginPlay — %d biomes registered"), BiomeRegistry.Num());
 }
 
-// ============================================================
-// Tick
-// ============================================================
-void UBiomeManager::Tick(float DeltaTime)
+void ABiomeManager::Tick(float DeltaTime)
 {
-    if (bBiomeTransitionActive)
-    {
-        BiomeTransitionElapsed += DeltaTime;
-        TransitionBlend = FMath::Clamp(BiomeTransitionElapsed / BiomeTransitionDuration, 0.0f, 1.0f);
+    Super::Tick(DeltaTime);
 
-        if (TransitionBlend >= 1.0f)
-        {
-            bBiomeTransitionActive = false;
-            CurrentBiome = TargetBiome;
-            TransitionBlend = 0.0f;
-            BiomeTransitionElapsed = 0.0f;
-            OnBiomeChanged.Broadcast(CurrentBiome);
-            UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Transition complete — new biome: %d"), (int32)CurrentBiome);
-        }
-    }
-}
-
-bool UBiomeManager::IsTickable() const
-{
-    return true;
-}
-
-TStatId UBiomeManager::GetStatId() const
-{
-    RETURN_QUICK_DECLARE_CYCLE_STAT(UBiomeManager, STATGROUP_Tickables);
-}
-
-// ============================================================
-// Biome Query
-// ============================================================
-ECore_BiomeType UBiomeManager::GetCurrentBiome() const
-{
-    return CurrentBiome;
-}
-
-ECore_BiomeType UBiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
-{
-    // Simple height-based biome determination for prototype
-    // Z < 0     → Swamp
-    // Z 0-500   → Jungle (default)
-    // Z 500-1500 → Forest
-    // Z > 1500  → Mountain
-    float Z = WorldLocation.Z;
-    if (Z < 0.0f)        return ECore_BiomeType::Swamp;
-    if (Z < 500.0f)      return ECore_BiomeType::Jungle;
-    if (Z < 1500.0f)     return ECore_BiomeType::Forest;
-    return ECore_BiomeType::Mountain;
-}
-
-FCore_BiomeData UBiomeManager::GetBiomeData(ECore_BiomeType BiomeType) const
-{
-    // Return cached data if available
-    if (const FCore_BiomeData* Found = BiomeDataMap.Find(BiomeType))
-    {
-        return *Found;
-    }
-
-    // Build default data per biome type
-    FCore_BiomeData Data;
-    Data.BiomeType = BiomeType;
-
-    switch (BiomeType)
-    {
-    case ECore_BiomeType::Jungle:
-        Data.DisplayName = FText::FromString(TEXT("Cretaceous Jungle"));
-        Data.BaseTemperature = 32.0f;
-        Data.Humidity = 0.85f;
-        Data.DangerRating = 0.7f;
-        Data.FoliageDensity = 1.0f;
-        Data.bAllowsLargeHerbivores = true;
-        Data.bAllowsCarnivores = true;
-        Data.PrimaryFogColor = FLinearColor(0.05f, 0.12f, 0.05f, 1.0f);
-        break;
-
-    case ECore_BiomeType::Savanna:
-        Data.DisplayName = FText::FromString(TEXT("Open Savanna"));
-        Data.BaseTemperature = 38.0f;
-        Data.Humidity = 0.25f;
-        Data.DangerRating = 0.6f;
-        Data.FoliageDensity = 0.3f;
-        Data.bAllowsLargeHerbivores = true;
-        Data.bAllowsCarnivores = true;
-        Data.PrimaryFogColor = FLinearColor(0.18f, 0.14f, 0.06f, 1.0f);
-        break;
-
-    case ECore_BiomeType::Forest:
-        Data.DisplayName = FText::FromString(TEXT("Conifer Forest"));
-        Data.BaseTemperature = 18.0f;
-        Data.Humidity = 0.6f;
-        Data.DangerRating = 0.5f;
-        Data.FoliageDensity = 0.8f;
-        Data.bAllowsLargeHerbivores = true;
-        Data.bAllowsCarnivores = false;
-        Data.PrimaryFogColor = FLinearColor(0.08f, 0.1f, 0.08f, 1.0f);
-        break;
-
-    case ECore_BiomeType::Swamp:
-        Data.DisplayName = FText::FromString(TEXT("Primordial Swamp"));
-        Data.BaseTemperature = 26.0f;
-        Data.Humidity = 0.95f;
-        Data.DangerRating = 0.8f;
-        Data.FoliageDensity = 0.6f;
-        Data.bAllowsLargeHerbivores = false;
-        Data.bAllowsCarnivores = true;
-        Data.PrimaryFogColor = FLinearColor(0.04f, 0.08f, 0.04f, 1.0f);
-        break;
-
-    case ECore_BiomeType::Mountain:
-        Data.DisplayName = FText::FromString(TEXT("Rocky Highlands"));
-        Data.BaseTemperature = 8.0f;
-        Data.Humidity = 0.3f;
-        Data.DangerRating = 0.4f;
-        Data.FoliageDensity = 0.15f;
-        Data.bAllowsLargeHerbivores = false;
-        Data.bAllowsCarnivores = false;
-        Data.PrimaryFogColor = FLinearColor(0.12f, 0.12f, 0.15f, 1.0f);
-        break;
-
-    case ECore_BiomeType::Coastal:
-        Data.DisplayName = FText::FromString(TEXT("Coastal Shore"));
-        Data.BaseTemperature = 24.0f;
-        Data.Humidity = 0.7f;
-        Data.DangerRating = 0.45f;
-        Data.FoliageDensity = 0.4f;
-        Data.bAllowsLargeHerbivores = true;
-        Data.bAllowsCarnivores = false;
-        Data.PrimaryFogColor = FLinearColor(0.1f, 0.15f, 0.18f, 1.0f);
-        break;
-
-    default:
-        Data.DisplayName = FText::FromString(TEXT("Unknown Biome"));
-        Data.BaseTemperature = 20.0f;
-        Data.Humidity = 0.5f;
-        Data.DangerRating = 0.5f;
-        Data.FoliageDensity = 0.5f;
-        break;
-    }
-
-    return Data;
-}
-
-// ============================================================
-// Biome Transition
-// ============================================================
-void UBiomeManager::TransitionToBiome(ECore_BiomeType NewBiome, float Duration)
-{
-    if (NewBiome == CurrentBiome && !bBiomeTransitionActive)
-    {
+    if (!bBiomesInitialized)
         return;
-    }
 
-    TargetBiome = NewBiome;
-    BiomeTransitionDuration = FMath::Max(Duration, 0.1f);
-    BiomeTransitionElapsed = 0.0f;
-    TransitionBlend = 0.0f;
-    bBiomeTransitionActive = true;
-
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Transition started: %d → %d over %.1fs"),
-        (int32)CurrentBiome, (int32)NewBiome, Duration);
-}
-
-void UBiomeManager::SetBiomeImmediate(ECore_BiomeType NewBiome)
-{
-    bBiomeTransitionActive = false;
-    TransitionBlend = 0.0f;
-    BiomeTransitionElapsed = 0.0f;
-    CurrentBiome = NewBiome;
-    ApplyBiomeEnvironment(NewBiome);
-    OnBiomeChanged.Broadcast(NewBiome);
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Biome set immediately: %d"), (int32)NewBiome);
-}
-
-// ============================================================
-// Environment Application
-// ============================================================
-void UBiomeManager::ApplyBiomeEnvironment(ECore_BiomeType BiomeType)
-{
-    FCore_BiomeData Data = GetBiomeData(BiomeType);
-    TemperatureBase = Data.BaseTemperature;
-    HumidityBase = Data.Humidity;
-    DangerLevel = Data.DangerRating;
-
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Applied biome env — Temp:%.1f Humidity:%.2f Danger:%.2f"),
-        TemperatureBase, HumidityBase, DangerLevel);
-}
-
-// ============================================================
-// Survival Queries
-// ============================================================
-float UBiomeManager::GetTemperatureAtLocation(FVector WorldLocation) const
-{
-    ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FCore_BiomeData Data = GetBiomeData(Biome);
-    // Add altitude cooling: -2°C per 100 units above 0
-    float AltitudeFactor = FMath::Max(0.0f, WorldLocation.Z / 100.0f) * -2.0f;
-    return Data.BaseTemperature + AltitudeFactor;
-}
-
-float UBiomeManager::GetHumidityAtLocation(FVector WorldLocation) const
-{
-    ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FCore_BiomeData Data = GetBiomeData(Biome);
-    return Data.Humidity;
-}
-
-float UBiomeManager::GetDangerLevelAtLocation(FVector WorldLocation) const
-{
-    ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FCore_BiomeData Data = GetBiomeData(Biome);
-    return Data.DangerRating;
-}
-
-bool UBiomeManager::IsLocationSafeForPlayer(FVector WorldLocation) const
-{
-    return GetDangerLevelAtLocation(WorldLocation) < 0.5f;
-}
-
-// ============================================================
-// Dinosaur Spawning Rules
-// ============================================================
-bool UBiomeManager::CanSpawnDinosaurInBiome(ECore_BiomeType BiomeType, bool bIsLargeHerbivore, bool bIsCarnivore) const
-{
-    FCore_BiomeData Data = GetBiomeData(BiomeType);
-    if (bIsLargeHerbivore && !Data.bAllowsLargeHerbivores) return false;
-    if (bIsCarnivore && !Data.bAllowsCarnivores) return false;
-    return true;
-}
-
-TArray<FVector> UBiomeManager::GetValidSpawnLocationsInBiome(ECore_BiomeType BiomeType, int32 Count, float SearchRadius) const
-{
-    TArray<FVector> Locations;
-    UWorld* World = GetWorld();
-    if (!World) return Locations;
-
-    // Simple grid-based spawn location search
-    FVector Center = FVector::ZeroVector;
-    float Step = SearchRadius / FMath::Sqrt((float)FMath::Max(Count, 1));
-
-    for (int32 i = 0; i < Count * 4 && Locations.Num() < Count; ++i)
+    // Update player's current biome
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
     {
-        float Angle = (float)i * 137.5f * (PI / 180.0f); // Golden angle distribution
-        float Radius = FMath::Sqrt((float)i / (float)(Count * 4)) * SearchRadius;
-        FVector Candidate = Center + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            500.0f // Start high for line trace
-        );
+        FVector PlayerLoc = PlayerPawn->GetActorLocation();
+        ECore_BiomeType NewBiome = GetBiomeAtLocation(PlayerLoc);
 
-        // Line trace to find ground
-        FHitResult Hit;
-        FVector TraceEnd = Candidate - FVector(0, 0, 2000.0f);
-        FCollisionQueryParams Params;
-        if (World->LineTraceSingleByChannel(Hit, Candidate, TraceEnd, ECC_WorldStatic, Params))
+        if (NewBiome != CurrentPlayerBiome)
         {
-            ECore_BiomeType HitBiome = GetBiomeAtLocation(Hit.Location);
-            if (HitBiome == BiomeType)
-            {
-                Locations.Add(Hit.Location);
-            }
+            ECore_BiomeType OldBiome = CurrentPlayerBiome;
+            CurrentPlayerBiome = NewBiome;
+            OnBiomeTransition(OldBiome, NewBiome);
+            UE_LOG(LogTemp, Verbose, TEXT("BiomeManager: Player entered biome %d"), (int32)NewBiome);
         }
     }
 
-    return Locations;
+    UpdateActiveBiomes();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InitializeBiomes — register all prehistoric biomes with their stat modifiers
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ABiomeManager::InitializeBiomes()
+{
+    BiomeRegistry.Empty();
+
+    // ── Jungle ──────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData Jungle;
+        Jungle.BiomeType = ECore_BiomeType::Jungle;
+        Jungle.DisplayName = TEXT("Dense Jungle");
+        Jungle.BaseTemperature = 34.0f;
+        Jungle.HydrationDrainMultiplier = 1.6f;   // Hot + humid = high sweat
+        Jungle.StaminaDrainMultiplier = 1.3f;      // Dense vegetation = harder movement
+        Jungle.FoodAbundance = 0.9f;               // Fruit, small prey abundant
+        Jungle.DangerLevel = 0.7f;                 // Raptors, ambush predators
+        Jungle.VisibilityRange = 800.0f;           // Dense canopy limits sight
+        Jungle.BiomeColor = FLinearColor(0.05f, 0.45f, 0.05f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::Jungle, Jungle);
+    }
+
+    // ── Savanna ─────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData Savanna;
+        Savanna.BiomeType = ECore_BiomeType::Savanna;
+        Savanna.DisplayName = TEXT("Open Savanna");
+        Savanna.BaseTemperature = 38.0f;
+        Savanna.HydrationDrainMultiplier = 2.0f;   // Hot + exposed = rapid dehydration
+        Savanna.StaminaDrainMultiplier = 0.9f;     // Flat terrain = easier movement
+        Savanna.FoodAbundance = 0.5f;              // Sparse vegetation
+        Savanna.DangerLevel = 0.8f;                // T-Rex territory, open = no cover
+        Savanna.VisibilityRange = 8000.0f;         // Clear sightlines
+        Savanna.BiomeColor = FLinearColor(0.7f, 0.6f, 0.2f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::Savanna, Savanna);
+    }
+
+    // ── Swamp ───────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData Swamp;
+        Swamp.BiomeType = ECore_BiomeType::Swamp;
+        Swamp.DisplayName = TEXT("Primordial Swamp");
+        Swamp.BaseTemperature = 28.0f;
+        Swamp.HydrationDrainMultiplier = 0.7f;    // Water everywhere = low thirst
+        Swamp.StaminaDrainMultiplier = 1.8f;      // Mud/water = very slow movement
+        Swamp.FoodAbundance = 0.7f;               // Fish, amphibians
+        Swamp.DangerLevel = 0.9f;                 // Spinosaurus, crocodilians
+        Swamp.VisibilityRange = 600.0f;           // Fog + vegetation
+        Swamp.BiomeColor = FLinearColor(0.2f, 0.35f, 0.15f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::Swamp, Swamp);
+    }
+
+    // ── Volcanic ────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData Volcanic;
+        Volcanic.BiomeType = ECore_BiomeType::Volcanic;
+        Volcanic.DisplayName = TEXT("Volcanic Badlands");
+        Volcanic.BaseTemperature = 55.0f;
+        Volcanic.HydrationDrainMultiplier = 3.0f;  // Extreme heat = rapid dehydration
+        Volcanic.StaminaDrainMultiplier = 2.0f;    // Ash, unstable ground
+        Volcanic.FoodAbundance = 0.1f;             // Almost nothing survives here
+        Volcanic.DangerLevel = 1.0f;               // Lava flows, toxic gas, apex predators
+        Volcanic.VisibilityRange = 1200.0f;        // Ash clouds reduce visibility
+        Volcanic.BiomeColor = FLinearColor(0.6f, 0.15f, 0.05f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::Volcanic, Volcanic);
+    }
+
+    // ── River ───────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData River;
+        River.BiomeType = ECore_BiomeType::River;
+        River.DisplayName = TEXT("River Crossing");
+        River.BaseTemperature = 25.0f;
+        River.HydrationDrainMultiplier = 0.3f;    // Drinking water available
+        River.StaminaDrainMultiplier = 1.4f;      // Swimming/wading costs stamina
+        River.FoodAbundance = 0.85f;              // Fish, riverbank prey
+        River.DangerLevel = 0.6f;                 // Spinosaurus near water
+        River.VisibilityRange = 3000.0f;
+        River.BiomeColor = FLinearColor(0.1f, 0.3f, 0.7f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::River, River);
+    }
+
+    // ── Forest ──────────────────────────────────────────────────────────────
+    {
+        FCore_BiomeData Forest;
+        Forest.BiomeType = ECore_BiomeType::Forest;
+        Forest.DisplayName = TEXT("Ancient Forest");
+        Forest.BaseTemperature = 22.0f;
+        Forest.HydrationDrainMultiplier = 1.0f;   // Baseline
+        Forest.StaminaDrainMultiplier = 1.1f;
+        Forest.FoodAbundance = 0.75f;
+        Forest.DangerLevel = 0.5f;                // Moderate — raptors patrol
+        Forest.VisibilityRange = 1500.0f;
+        Forest.BiomeColor = FLinearColor(0.1f, 0.4f, 0.1f, 1.0f);
+        BiomeRegistry.Add(ECore_BiomeType::Forest, Forest);
+    }
+
+    bBiomesInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: InitializeBiomes complete — %d biomes"), BiomeRegistry.Num());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetBiomeAtLocation — classify a world position into a biome
+// Uses elevation + distance heuristics (PCG biome data will replace this later)
+// ─────────────────────────────────────────────────────────────────────────────
+
+ECore_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    if (!bBiomesInitialized)
+        return ECore_BiomeType::Jungle;
+
+    float Z = WorldLocation.Z;
+    float X = WorldLocation.X;
+    float Y = WorldLocation.Y;
+
+    // Elevation-based classification (terrain height drives biome)
+    if (Z > 8000.0f)
+        return ECore_BiomeType::Volcanic;   // High altitude = volcanic peaks
+
+    if (Z < -200.0f)
+        return ECore_BiomeType::Swamp;      // Below sea level = swamp/wetlands
+
+    // Distance from world center drives biome ring
+    float DistFromCenter = FVector2D(X, Y).Size();
+
+    if (DistFromCenter < 3000.0f)
+        return ECore_BiomeType::Jungle;     // Central jungle
+
+    if (DistFromCenter < 6000.0f)
+        return ECore_BiomeType::Forest;     // Mid-ring forest
+
+    if (DistFromCenter < 10000.0f)
+        return ECore_BiomeType::Savanna;    // Outer savanna
+
+    // River corridors (Y axis approximation — PCG will refine)
+    if (FMath::Abs(Y) < 500.0f && DistFromCenter > 2000.0f)
+        return ECore_BiomeType::River;
+
+    return ECore_BiomeType::Savanna;
+}
+
+FCore_BiomeData ABiomeManager::GetBiomeData(ECore_BiomeType BiomeType) const
+{
+    const FCore_BiomeData* Data = BiomeRegistry.Find(BiomeType);
+    if (Data)
+        return *Data;
+
+    // Return default jungle data if not found
+    return FCore_BiomeData();
+}
+
+FCore_BiomeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
+{
+    ECore_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    return GetBiomeData(Biome);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateActiveBiomes — called every tick interval to refresh nearby biome state
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ABiomeManager::UpdateActiveBiomes()
+{
+    // Lightweight update — just ensure player biome is current
+    // Full biome streaming (PCG integration) handled by Agent #05
+    BiomeTransitionBlend = FMath::Clamp(BiomeTransitionBlend + 0.05f, 0.0f, 1.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OnBiomeTransition — Blueprint event + C++ logic on biome change
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ABiomeManager::OnBiomeTransition(ECore_BiomeType FromBiome, ECore_BiomeType ToBiome)
+{
+    BiomeTransitionBlend = 0.0f; // Reset blend on new transition
+
+    // Log the transition
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transition %d → %d"), (int32)FromBiome, (int32)ToBiome);
+
+    // Blueprint can override this to play ambient sound transitions, fog changes, etc.
+    OnBiomeTransitionEvent(FromBiome, ToBiome);
+}
+
+void ABiomeManager::OnBiomeTransitionEvent_Implementation(ECore_BiomeType FromBiome, ECore_BiomeType ToBiome)
+{
+    // Default C++ implementation — Blueprint overrides for visual/audio effects
+    UE_LOG(LogTemp, Verbose, TEXT("BiomeManager: OnBiomeTransitionEvent %d → %d"), (int32)FromBiome, (int32)ToBiome);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetSurvivalModifiersForBiome — returns stat multipliers for survival system
+// Called by SurvivalComponent every tick to apply biome penalties/bonuses
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ABiomeManager::GetSurvivalModifiersForBiome(
+    ECore_BiomeType BiomeType,
+    float& OutHydrationDrain,
+    float& OutStaminaDrain,
+    float& OutTemperature) const
+{
+    FCore_BiomeData Data = GetBiomeData(BiomeType);
+    OutHydrationDrain = Data.HydrationDrainMultiplier;
+    OutStaminaDrain = Data.StaminaDrainMultiplier;
+    OutTemperature = Data.BaseTemperature;
+}
+
+ECore_BiomeType ABiomeManager::GetCurrentPlayerBiome() const
+{
+    return CurrentPlayerBiome;
 }
