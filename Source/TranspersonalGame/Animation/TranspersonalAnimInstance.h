@@ -4,123 +4,207 @@
 #include "Animation/AnimInstance.h"
 #include "TranspersonalAnimInstance.generated.h"
 
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
+{
+	Idle		UMETA(DisplayName = "Idle"),
+	Walk		UMETA(DisplayName = "Walk"),
+	Run			UMETA(DisplayName = "Run"),
+	Sprint		UMETA(DisplayName = "Sprint"),
+	Jump		UMETA(DisplayName = "Jump"),
+	Fall		UMETA(DisplayName = "Fall"),
+	Land		UMETA(DisplayName = "Land"),
+	Crouch		UMETA(DisplayName = "Crouch"),
+	Climb		UMETA(DisplayName = "Climb"),
+	Swim		UMETA(DisplayName = "Swim")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_StanceState : uint8
+{
+	Upright		UMETA(DisplayName = "Upright"),
+	Crouched	UMETA(DisplayName = "Crouched"),
+	Prone		UMETA(DisplayName = "Prone")
+};
+
+USTRUCT(BlueprintType)
+struct FAnim_LocomotionData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	float Speed = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	float Direction = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	float Pitch = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	bool bIsInAir = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	bool bIsCrouching = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	bool bIsAccelerating = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Locomotion")
+	float LeanAmount = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FAnim_IKData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	FVector LeftFootLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	FVector RightFootLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	FRotator LeftFootRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	FRotator RightFootRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	float LeftFootAlpha = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	float RightFootAlpha = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|IK")
+	float PelvisOffset = 0.f;
+};
+
+USTRUCT(BlueprintType)
+struct FAnim_SurvivalData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Survival")
+	float StaminaNormalized = 1.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Survival")
+	float HealthNormalized = 1.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Survival")
+	float FearNormalized = 0.f;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Survival")
+	bool bIsExhausted = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Animation|Survival")
+	bool bIsInjured = false;
+};
+
 /**
- * Animation Instance for the Transpersonal prehistoric survival game character.
- * Drives locomotion blend space, jump states, and survival-state driven poses.
- * Agent #10 — Animation Agent
+ * Main Animation Instance for the TranspersonalCharacter.
+ * Drives locomotion blend spaces, IK, and survival state animations.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UTranspersonalAnimInstance : public UAnimInstance
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    UTranspersonalAnimInstance();
+	UTranspersonalAnimInstance();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+	virtual void NativeInitializeAnimation() override;
+	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+	virtual void NativeThreadSafeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion ──────────────────────────────────────────────────────────
+	// ─── Locomotion ───────────────────────────────────────────────────────────
 
-    /** Ground speed (0 = idle, >0 = moving). Drives BlendSpace X axis. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float GroundSpeed;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+		meta = (AllowPrivateAccess = "true"))
+	FAnim_LocomotionData LocomotionData;
 
-    /** Lateral strafe speed. Drives BlendSpace Y axis. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float StrafeSpeed;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+		meta = (AllowPrivateAccess = "true"))
+	EAnim_MovementState MovementState;
 
-    /** True when the character is accelerating (not decelerating to a stop). */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsAccelerating;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion",
+		meta = (AllowPrivateAccess = "true"))
+	EAnim_StanceState StanceState;
 
-    /** True when the character is in the air (jumping or falling). */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsInAir;
+	// ─── IK ──────────────────────────────────────────────────────────────────
 
-    /** True when the character is crouching. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsCrouching;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|IK",
+		meta = (AllowPrivateAccess = "true"))
+	FAnim_IKData IKData;
 
-    /** True when the character is sprinting (speed > SprintThreshold). */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    bool bIsSprinting;
+	// ─── Survival ─────────────────────────────────────────────────────────────
 
-    /** Direction of movement relative to actor forward (-180 to 180). */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
-    float MovementDirection;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival",
+		meta = (AllowPrivateAccess = "true"))
+	FAnim_SurvivalData SurvivalData;
 
-    // ── Survival States ─────────────────────────────────────────────────────
+	// ─── Blend weights ────────────────────────────────────────────────────────
 
-    /** Stamina 0-1. Below 0.2 triggers exhaustion pose blend. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float StaminaNormalized;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Blend",
+		meta = (AllowPrivateAccess = "true"))
+	float GroundSpeed = 0.f;
 
-    /** Health 0-1. Below 0.3 triggers injured locomotion blend. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float HealthNormalized;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Blend",
+		meta = (AllowPrivateAccess = "true"))
+	bool bShouldMove = false;
 
-    /** Fear level 0-1. Above 0.7 triggers fear locomotion blend. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float FearNormalized;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Blend",
+		meta = (AllowPrivateAccess = "true"))
+	bool bIsFalling = false;
 
-    /** True when character is carrying a heavy object (changes posture). */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    bool bIsCarryingHeavyObject;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Blend",
+		meta = (AllowPrivateAccess = "true"))
+	float WalkRunAlpha = 0.f;
 
-    // ── IK ──────────────────────────────────────────────────────────────────
+	// ─── Aim offset ───────────────────────────────────────────────────────────
 
-    /** Foot IK enabled when on uneven terrain. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    bool bEnableFootIK;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Aim",
+		meta = (AllowPrivateAccess = "true"))
+	float AimYaw = 0.f;
 
-    /** Left foot IK target location in world space. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector LeftFootIKLocation;
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Aim",
+		meta = (AllowPrivateAccess = "true"))
+	float AimPitch = 0.f;
 
-    /** Right foot IK target location in world space. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FVector RightFootIKLocation;
+	// ─── Functions ────────────────────────────────────────────────────────────
 
-    /** Pelvis adjustment offset for foot IK. */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    float PelvisOffset;
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	void UpdateLocomotionData();
 
-    // ── Thresholds ───────────────────────────────────────────────────────────
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	void UpdateIKData();
 
-    /** Speed above which character is considered sprinting. */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Config")
-    float SprintThreshold;
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	void UpdateSurvivalData();
 
-    /** Speed above which character is considered walking (not idle). */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Config")
-    float WalkThreshold;
+	UFUNCTION(BlueprintPure, Category = "Animation")
+	EAnim_MovementState GetMovementState() const { return MovementState; }
 
-protected:
-    /** Cached reference to owning character. */
-    UPROPERTY()
-    class ACharacter* OwnerCharacter;
-
-    /** Cached movement component. */
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
+	UFUNCTION(BlueprintPure, Category = "Animation")
+	bool IsExhausted() const { return SurvivalData.bIsExhausted; }
 
 private:
-    /** Update locomotion variables from movement component. */
-    void UpdateLocomotionData(float DeltaSeconds);
+	void UpdateMovementState();
+	void PerformFootIKTrace(bool bIsLeftFoot, FVector& OutLocation, FRotator& OutRotation, float& OutAlpha);
 
-    /** Update survival state variables from character stats. */
-    void UpdateSurvivalData();
+	UPROPERTY()
+	TObjectPtr<class ACharacter> OwnerCharacter;
 
-    /** Perform foot IK raycasts and update IK targets. */
-    void UpdateFootIK();
+	UPROPERTY()
+	TObjectPtr<class UCharacterMovementComponent> MovementComponent;
 
-    /** Calculate movement direction angle relative to actor forward. */
-    float CalculateMovementDirection() const;
+	// IK trace settings
+	float IKTraceDistance = 50.f;
+	float IKInterpSpeed = 15.f;
+	float PelvisInterpSpeed = 10.f;
 
-    /** Smoothly interpolate pelvis offset for foot IK. */
-    float CurrentPelvisOffset;
-
-    /** Smooth speed for pelvis IK interpolation. */
-    static constexpr float PelvisInterpSpeed = 15.0f;
+	// Lean smoothing
+	float PreviousYaw = 0.f;
+	float LeanInterpSpeed = 5.f;
 };
