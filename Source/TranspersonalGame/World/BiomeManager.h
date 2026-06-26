@@ -1,7 +1,6 @@
 // BiomeManager.h
-// Agent #5 — Procedural World Generator
-// Manages biome zones: Forest, Savanna, Rocky, River, Lake
-// Each zone has environmental multipliers for survival stats
+// Transpersonal Game Studio — Engine Architect #02
+// Biome classification system for the Cretaceous world
 
 #pragma once
 
@@ -10,53 +9,75 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
+// ============================================================
+// ENUMS — must be at global scope (UHT rule)
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
+enum class EEng_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Savanna     UMETA(DisplayName = "Savanna"),
-    Rocky       UMETA(DisplayName = "Rocky"),
-    River       UMETA(DisplayName = "River"),
-    Lake        UMETA(DisplayName = "Lake"),
-    Unknown     UMETA(DisplayName = "Unknown")
+    TropicalForest  UMETA(DisplayName = "Tropical Forest"),
+    Savanna         UMETA(DisplayName = "Savanna"),
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Volcanic        UMETA(DisplayName = "Volcanic"),
+    Riverbank       UMETA(DisplayName = "Riverbank"),
+    Unknown         UMETA(DisplayName = "Unknown")
 };
 
+// ============================================================
+// STRUCTS — must be at global scope (UHT rule)
+// ============================================================
+
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
+struct FEng_BiomeParams
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Unknown;
+
+    /** 0.0 = barren, 1.0 = dense jungle */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VegetationDensity = 0.5f;
+
+    /** 0.0 = empty, 1.0 = teeming with life */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FaunaDensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Centre = FVector::ZeroVector;
+    float TemperatureCelsius = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float HumidityPercent = 50.0f;
 
-    // Survival stat multipliers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float ThirstDrainMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float HungerDrainMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float TemperatureOffset = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float FearMultiplier = 1.0f;
-
-    // Visual identity
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
-    FLinearColor FogTint = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
-    float FogDensity = 0.03f;
+    /** 0.0 = safe, 1.0 = extremely dangerous */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DangerLevel = 0.5f;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct FEng_BiomeCell
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    int32 GridX = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    int32 GridY = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FVector WorldCenter = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Unknown;
+};
+
+// ============================================================
+// ABiomeManager — World actor that owns the biome grid
+// ============================================================
+
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -64,38 +85,50 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-    // Returns the biome type at a given world location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    // ---- Configuration ----
 
-    // Returns the full biome zone data at a given world location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_BiomeZone GetBiomeZoneAtLocation(const FVector& WorldLocation) const;
+    /** Number of cells per axis (total cells = N²) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Grid")
+    int32 BiomeGridResolution;
 
-    // Returns thirst drain multiplier for a location (used by SurvivalComponent)
-    UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetThirstMultiplierAt(const FVector& WorldLocation) const;
+    /** World size in km (square world) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Grid")
+    float WorldExtentKm;
 
-    // Returns hunger drain multiplier for a location
-    UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetHungerMultiplierAt(const FVector& WorldLocation) const;
+    /** Show debug boxes in editor viewport */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
+    bool bDebugDrawBiomes;
 
-    // Returns fear multiplier for a location (proximity to predator zones)
-    UFUNCTION(BlueprintCallable, Category = "Biome|Survival")
-    float GetFearMultiplierAt(const FVector& WorldLocation) const;
+    // ---- Runtime Data ----
 
-    // Registered biome zones
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    TArray<FEng_BiomeCell> BiomeGrid;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    TMap<EEng_BiomeType, FEng_BiomeParams> BiomeTable;
 
-    // Default zone returned when no biome matches
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FWorld_BiomeZone DefaultZone;
+    // ---- Query API (callable from Blueprint and other C++ systems) ----
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeParams GetBiomeParams(EEng_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
+    void GenerateBiomeGrid();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    // Initialise default biome zones matching MinPlayableMap layout
-    void InitialiseDefaultZones();
+    EEng_BiomeType ClassifyBiomeAtPosition(const FVector& WorldPos) const;
+    void DebugDrawBiomes();
 };
