@@ -2,184 +2,190 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Components/SphereComponent.h"
 #include "DialogueSystem.generated.h"
 
-// ============================================================
-// Agent #15 — Narrative & Dialogue Agent
-// DialogueSystem.h — NPC dialogue trees for quest givers
-// Cycle: PROD_CYCLE_AUTO_20260625_012
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums — global scope (UHT requirement)
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Enum: which NPC is speaking
-UENUM(BlueprintType)
-enum class ENarr_NPCIdentity : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Hunter_Kael     UMETA(DisplayName = "Hunter Kael"),
-    Elder_Mara      UMETA(DisplayName = "Elder Mara"),
-    Lookout_Dara    UMETA(DisplayName = "Lookout Dara"),
-    Stranger        UMETA(DisplayName = "Unknown Stranger")
-};
-
-// Enum: dialogue response type (player choice)
-UENUM(BlueprintType)
-enum class ENarr_DialogueResponse : uint8
-{
-    Accept          UMETA(DisplayName = "Accept Quest"),
-    Decline         UMETA(DisplayName = "Decline"),
-    AskMore         UMETA(DisplayName = "Ask for More Info"),
-    Barter          UMETA(DisplayName = "Offer Trade"),
-    Farewell        UMETA(DisplayName = "Say Goodbye")
-};
-
-// Enum: dialogue state in the conversation tree
 UENUM(BlueprintType)
 enum class ENarr_DialogueState : uint8
 {
+    Idle            UMETA(DisplayName = "Idle"),
     Greeting        UMETA(DisplayName = "Greeting"),
-    QuestOffer      UMETA(DisplayName = "Quest Offer"),
-    QuestDetails    UMETA(DisplayName = "Quest Details"),
-    QuestAccepted   UMETA(DisplayName = "Quest Accepted"),
-    QuestDeclined   UMETA(DisplayName = "Quest Declined"),
-    QuestComplete   UMETA(DisplayName = "Quest Complete"),
-    Idle            UMETA(DisplayName = "Idle / No Quest")
+    QuestOffer      UMETA(DisplayName = "QuestOffer"),
+    QuestActive     UMETA(DisplayName = "QuestActive"),
+    QuestComplete   UMETA(DisplayName = "QuestComplete"),
+    Lore            UMETA(DisplayName = "Lore"),
+    Warning         UMETA(DisplayName = "Warning"),
 };
 
-// A single line of dialogue
+UENUM(BlueprintType)
+enum class ENarr_NPCRole : uint8
+{
+    Elder           UMETA(DisplayName = "Elder"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Craftsman       UMETA(DisplayName = "Craftsman"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Survivor        UMETA(DisplayName = "Survivor"),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Structs — global scope
+// ─────────────────────────────────────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCIdentity Speaker = ENarr_NPCIdentity::None;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString LineText;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState TriggerState = ENarr_DialogueState::Greeting;
+    ENarr_DialogueState TriggerState;
 
-    // Optional audio asset path (set by Audio Agent #16)
+    // Audio URL from ElevenLabs TTS (set in editor or at runtime)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString AudioURL;
 
     // How long to display this line (seconds)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration = 4.0f;
+    float DisplayDuration;
+
+    FNarr_DialogueLine()
+        : SpeakerName(TEXT("Unknown"))
+        , DialogueText(TEXT(""))
+        , TriggerState(ENarr_DialogueState::Idle)
+        , AudioURL(TEXT(""))
+        , DisplayDuration(4.0f)
+    {}
 };
 
-// A player response option shown in UI
 USTRUCT(BlueprintType)
-struct FNarr_PlayerChoice
+struct FNarr_DialogueTree
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString ChoiceText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueResponse ResponseType = ENarr_DialogueResponse::Accept;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState NextState = ENarr_DialogueState::QuestAccepted;
-};
-
-// Full dialogue tree node
-USTRUCT(BlueprintType)
-struct FNarr_DialogueNode
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueState State = ENarr_DialogueState::Greeting;
+    FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_PlayerChoice> PlayerChoices;
+    int32 CurrentLineIndex;
+
+    FNarr_DialogueTree()
+        : QuestID(TEXT(""))
+        , CurrentLineIndex(0)
+    {}
 };
 
-// ============================================================
-// ADialogueSystem — Actor placed near NPCs to drive conversation
-// ============================================================
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADialogueSystem : public AActor
+// ─────────────────────────────────────────────────────────────────────────────
+// UNarr_DialogueComponent — attach to NPC actors
+// ─────────────────────────────────────────────────────────────────────────────
+
+UCLASS(ClassGroup = "Narrative", meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ADialogueSystem();
+    UNarr_DialogueComponent();
 
-    // Which NPC owns this dialogue tree
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NPCIdentity NPCIdentity = ENarr_NPCIdentity::None;
+    ENarr_NPCRole NPCRole;
 
-    // Current state in the conversation
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
-    ENarr_DialogueState CurrentState = ENarr_DialogueState::Greeting;
-
-    // All dialogue nodes for this NPC
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueNode> DialogueTree;
+    FString NPCName;
 
-    // Interaction radius (player must be within this distance)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float InteractionRadius = 300.0f;
+    ENarr_DialogueState CurrentState;
 
-    // Is dialogue currently active?
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative")
-    bool bDialogueActive = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueTree> DialogueTrees;
 
-    // Start conversation with this NPC
+    // Currently active tree index
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    int32 ActiveTreeIndex;
+
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue();
+    void StartDialogue(const FString& QuestID);
 
-    // Advance to next state based on player choice
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceDialogue(ENarr_DialogueResponse PlayerResponse);
+    FNarr_DialogueLine GetCurrentLine() const;
 
-    // End conversation
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool AdvanceLine();
+
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     void EndDialogue();
 
-    // Get lines for current state
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_DialogueLine> GetCurrentLines() const;
+    void SetState(ENarr_DialogueState NewState);
 
-    // Get player choices for current state
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_PlayerChoice> GetCurrentChoices() const;
+    bool IsDialogueActive() const;
 
-    // Build default dialogue tree for Hunter Kael (mammoth quest)
+    // Populate the Raptor Hunt quest dialogue tree
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void BuildHunterKaelDialogue();
+    void InitRaptorHuntDialogue();
 
-    // Build default dialogue tree for Elder Mara (raptor quest)
+    // Populate the Crafting Introduction dialogue tree
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void BuildElderMaraDialogue();
-
-    // Build default dialogue tree for Lookout Dara (post-quest debrief)
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void BuildLookoutDaraDialogue();
-
-    // BlueprintImplementableEvent — called when dialogue starts (for UI)
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnDialogueStarted(ENarr_NPCIdentity NPC);
-
-    // BlueprintImplementableEvent — called when state changes
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnDialogueStateChanged(ENarr_DialogueState NewState);
-
-    // BlueprintImplementableEvent — called when dialogue ends
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative")
-    void OnDialogueEnded(ENarr_NPCIdentity NPC);
+    void InitCraftingIntroDialogue();
 
 protected:
     virtual void BeginPlay() override;
 
 private:
-    // Find the node for a given state
-    const FNarr_DialogueNode* FindNode(ENarr_DialogueState State) const;
+    bool bDialogueActive;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANarr_NPCDialogueActor — placeable NPC with proximity trigger
+// ─────────────────────────────────────────────────────────────────────────────
+
+UCLASS()
+class TRANSPERSONALGAME_API ANarr_NPCDialogueActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_NPCDialogueActor();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+        meta = (AllowPrivateAccess = "true"))
+    USphereComponent* ProximityTrigger;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+        meta = (AllowPrivateAccess = "true"))
+    UNarr_DialogueComponent* DialogueComponent;
+
+    // Interaction radius in cm
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float InteractionRadius;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp,
+                            AActor* OtherActor,
+                            UPrimitiveComponent* OtherComp,
+                            int32 OtherBodyIndex,
+                            bool bFromSweep,
+                            const FHitResult& SweepResult);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnPlayerExitRange(UPrimitiveComponent* OverlappedComp,
+                           AActor* OtherActor,
+                           UPrimitiveComponent* OtherComp,
+                           int32 OtherBodyIndex);
+
+protected:
+    virtual void BeginPlay() override;
 };
