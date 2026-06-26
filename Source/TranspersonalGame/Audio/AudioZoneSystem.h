@@ -1,176 +1,236 @@
+// AudioZoneSystem.h
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260626_008
+// Proximity-based audio zone system for prehistoric soundscape
+// Wires MetaSounds ambient cues to dialogue trigger zones
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Sound/SoundBase.h"
+#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "AudioZoneSystem.generated.h"
 
 // ============================================================
-// Audio Zone System — Agent #16 Audio Agent
-// Adaptive ambient audio zones for prehistoric survival game.
-// Zones respond to player proximity, time of day, and dino state.
+// ENUMS — Audio_* prefix (RULE 2: unique names across project)
 // ============================================================
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    Jungle          UMETA(DisplayName = "Jungle Ambience"),
-    Campfire        UMETA(DisplayName = "Campfire Zone"),
-    TRexDanger      UMETA(DisplayName = "T-Rex Danger Zone"),
-    River           UMETA(DisplayName = "River Ambience"),
-    Cave            UMETA(DisplayName = "Cave Interior"),
-    OpenPlain       UMETA(DisplayName = "Open Plain"),
-    NightTime       UMETA(DisplayName = "Night Ambience"),
-    Storm           UMETA(DisplayName = "Thunderstorm")
+    JungleAmbience      UMETA(DisplayName = "Jungle Ambience"),
+    TRexProximity       UMETA(DisplayName = "T-Rex Proximity"),
+    RaptorStalk         UMETA(DisplayName = "Raptor Stalk"),
+    RiverAmbience       UMETA(DisplayName = "River Ambience"),
+    CampfireSafe        UMETA(DisplayName = "Campfire Safe Zone"),
+    DangerAlert         UMETA(DisplayName = "Danger Alert")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_DangerLevel : uint8
+enum class EAudio_IntensityLevel : uint8
 {
-    Safe            UMETA(DisplayName = "Safe"),
-    Caution         UMETA(DisplayName = "Caution"),
-    Danger          UMETA(DisplayName = "Danger"),
-    Critical        UMETA(DisplayName = "Critical — Flee Now")
+    Silent      UMETA(DisplayName = "Silent"),
+    Whisper     UMETA(DisplayName = "Whisper"),
+    Ambient     UMETA(DisplayName = "Ambient"),
+    Tense       UMETA(DisplayName = "Tense"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Critical    UMETA(DisplayName = "Critical")
 };
+
+// ============================================================
+// STRUCTS
+// ============================================================
 
 USTRUCT(BlueprintType)
 struct FAudio_ZoneConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::JungleAmbience;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float BlendRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float TriggerRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float BaseVolume = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float MaxVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float FadeInTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     float FadeOutTime = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     bool bLooping = true;
 
-    // Freesound reference IDs for this zone (from search results)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    TArray<int32> FreesoundIDs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bOneShot = false;
 
-    // TTS audio URL for narration lines in this zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FString NarrationAudioURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FString FreesoundAssetID = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FString VoiceLineURL = TEXT("");
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_DialogueEntry
+struct FAudio_DinosaurSoundProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    FString SpeakerName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    FName DinosaurSpecies = NAME_None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    float RoarRadius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    FString AudioURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    float FootstepRadius = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    float Duration = 8.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    float BreathingRadius = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    bool bHasBeenPlayed = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    float RoarCooldown = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    float FootstepInterval = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    EAudio_IntensityLevel ThreatLevel = EAudio_IntensityLevel::Ambient;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    int32 FreesoundRoarID = 586546;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino Audio")
+    int32 FreesoundGrowlID = 586547;
 };
 
-/**
- * UAudio_ZoneSystem
- * ActorComponent that manages adaptive audio zones for the prehistoric world.
- * Attach to a zone trigger actor. Blends ambient sounds based on player distance.
- * Integrates with Agent #15 DialogueSystem for triggered narration.
- */
-UCLASS(ClassGroup = "TranspersonalGame|Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Audio Zone System")
-class TRANSPERSONALGAME_API UAudio_ZoneSystem : public UActorComponent
+// ============================================================
+// MAIN CLASS — Audio Zone Actor
+// ============================================================
+
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone Actor"))
+class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ZoneSystem();
-
-    // Zone configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    // Current danger level — set by AI/Combat agents
-    UPROPERTY(BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::Safe;
-
-    // Current volume (0-1), driven by player proximity
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    float CurrentVolume = 0.0f;
-
-    // Is player currently inside this zone?
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Zone")
-    bool bPlayerInZone = false;
-
-    // Dialogue entries registered for this zone
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    TArray<FAudio_DialogueEntry> DialogueEntries;
-
-    // Audio URLs from TTS generation (Agent #16 cycle outputs)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
-    FString JungleNarrationURL;   // Narrator_Jungle_Ambience TTS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
-    FString CombatWarningURL;     // Kael_Combat_Warning TTS
+    AAudio_ZoneActor();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // Called by proximity trigger when player enters zone
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void OnPlayerEnterZone();
+    virtual void Tick(float DeltaTime) override;
 
-    // Called by proximity trigger when player exits zone
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void OnPlayerExitZone();
+    // ── Zone Configuration ──────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_ZoneConfig ZoneConfig;
 
-    // Update danger level from AI/Combat systems
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetDangerLevel(EAudio_DangerLevel NewLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_DinosaurSoundProfile DinosaurProfile;
 
-    // Get current zone type as string (for UI/debug)
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Audio|Zone")
-    FString GetZoneTypeString() const;
+    // ── Components ──────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+        meta = (AllowPrivateAccess = "true"))
+    USphereComponent* TriggerSphere;
 
-    // Get volume multiplier based on danger level
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Audio|Zone")
-    float GetDangerVolumeMultiplier() const;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components",
+        meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* AmbientAudioComponent;
 
-    // Register a dialogue entry for this zone
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
-    void RegisterDialogueLine(const FString& Speaker, const FString& Text, const FString& AudioURL, float Duration);
+    // ── State ────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone State")
+    bool bPlayerInZone = false;
 
-    // Get next unplayed dialogue entry (returns false if none available)
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
-    bool GetNextDialogueLine(FAudio_DialogueEntry& OutEntry);
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone State")
+    float CurrentVolume = 0.0f;
 
-    // Mark a dialogue line as played
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
-    void MarkDialoguePlayed(const FString& Speaker);
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone State")
+    EAudio_IntensityLevel CurrentIntensity = EAudio_IntensityLevel::Silent;
 
-    // Seed default TTS URLs from Agent #16 production cycle
-    UFUNCTION(BlueprintCallable, Category = "Audio|TTS")
-    void SeedDefaultAudioURLs();
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone State")
+    float TimeSinceLastRoar = 0.0f;
+
+    // ── Functions ────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void OnPlayerEnterZone(AActor* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void OnPlayerExitZone(AActor* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetIntensityLevel(EAudio_IntensityLevel NewIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void TriggerDinosaurRoar();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintPure, Category = "Audio Zone")
+    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
+
+    UFUNCTION(BlueprintPure, Category = "Audio Zone")
+    bool IsPlayerInZone() const { return bPlayerInZone; }
+
+    UFUNCTION(CallInEditor, Category = "Audio Zone")
+    void PreviewZoneInEditor();
 
 private:
+    void UpdateVolumeBlend(float DeltaTime);
     float TargetVolume = 0.0f;
-    float VolumeVelocity = 0.0f;
-    float TickAccumulator = 0.0f;
-    static constexpr float TickInterval = 0.1f; // 10Hz
+    bool bHasTriggeredOnce = false;
+};
+
+// ============================================================
+// AUDIO MANAGER SUBSYSTEM
+// ============================================================
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAudio_PrehistoricSoundManager : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UAudio_PrehistoricSoundManager();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    TArray<FAudio_DinosaurSoundProfile> RegisteredDinosaurProfiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    TArray<FAudio_ZoneConfig> ActiveZoneConfigs;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Sound Manager")
+    EAudio_IntensityLevel GlobalThreatLevel = EAudio_IntensityLevel::Ambient;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    float MasterVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    float MusicVolume = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    float SFXVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound Manager")
+    float VoiceVolume = 1.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Sound Manager")
+    void UpdateGlobalThreatLevel(EAudio_IntensityLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Sound Manager")
+    void RegisterDinosaurProfile(FAudio_DinosaurSoundProfile Profile);
+
+    UFUNCTION(BlueprintPure, Category = "Sound Manager")
+    EAudio_IntensityLevel GetGlobalThreatLevel() const { return GlobalThreatLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Sound Manager")
+    float GetEffectiveMasterVolume() const { return MasterVolume; }
 };
