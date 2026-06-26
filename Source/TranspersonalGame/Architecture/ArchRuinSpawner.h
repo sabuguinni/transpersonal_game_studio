@@ -8,14 +8,14 @@ UENUM(BlueprintType)
 enum class EArch_RuinType : uint8
 {
     Pillar      UMETA(DisplayName = "Stone Pillar"),
-    Wall        UMETA(DisplayName = "Ruined Wall"),
-    Altar       UMETA(DisplayName = "Stone Altar"),
-    Archway     UMETA(DisplayName = "Collapsed Archway"),
+    WallSection UMETA(DisplayName = "Wall Section"),
+    Archway     UMETA(DisplayName = "Archway"),
+    Boulder     UMETA(DisplayName = "Mossy Boulder"),
     Foundation  UMETA(DisplayName = "Foundation Slab")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_RuinElement
+struct FArch_RuinConfig
 {
     GENERATED_BODY()
 
@@ -23,62 +23,51 @@ struct FArch_RuinElement
     EArch_RuinType RuinType = EArch_RuinType::Pillar;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FVector RelativeOffset = FVector::ZeroVector;
+    FVector SpawnScale = FVector(1.0f, 1.0f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    float MossIntensity = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float RotationYaw = 0.0f;
+    float WeatheringAmount = 0.85f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasVines = true;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArch_RuinSpawner : public AActor
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API AArchRuinSpawner : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AArch_RuinSpawner();
+    AArchRuinSpawner();
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
+    TArray<FArch_RuinConfig> RuinConfigs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
+    float SpawnRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
+    int32 MaxRuinCount = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
+    bool bScatterRandomly = true;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruins", CallInEditor)
+    void SpawnRuinCluster();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruins", CallInEditor)
+    void ClearAllRuins();
+
+    UFUNCTION(BlueprintPure, Category = "Architecture|Ruins")
+    int32 GetActiveRuinCount() const;
+
+protected:
     virtual void BeginPlay() override;
-    virtual void OnConstruction(const FTransform& Transform) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    TArray<FArch_RuinElement> RuinElements;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    EArch_RuinType PrimaryRuinType = EArch_RuinType::Pillar;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    float RuinRadius = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    int32 PillarCount = 4;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    bool bHasCentralAltar = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    float MossIntensity = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruins")
-    float WeatheringAmount = 0.7f;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruins")
-    void SpawnRuinFormation();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruins")
-    void ClearRuinFormation();
-
-    UFUNCTION(BlueprintPure, Category = "Architecture|Ruins")
-    FVector GetAltarLocation() const;
-
-    UFUNCTION(BlueprintPure, Category = "Architecture|Ruins")
-    bool IsRuinComplete() const;
 
 private:
     UPROPERTY()
-    TArray<UStaticMeshComponent*> SpawnedComponents;
-
-    void SetupPillarComponent(UStaticMeshComponent* Comp, const FArch_RuinElement& Element);
+    TArray<AActor*> SpawnedRuins;
 };
