@@ -3,33 +3,54 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
+#include "Components/SphereComponent.h"
 #include "Sound/SoundBase.h"
 #include "AudioSystemManager.generated.h"
 
 // ============================================================
 // Audio Agent #16 — AudioSystemManager
-// Adaptive ambient audio, dinosaur proximity audio,
-// screen shake triggers, and dialogue audio routing.
+// Prehistoric survival ambient audio + dialogue audio wiring
 // ============================================================
 
 UENUM(BlueprintType)
-enum class EAudio_BiomeZone : uint8
+enum class EAudio_ZoneType : uint8
 {
-    OpenSavanna     UMETA(DisplayName = "Open Savanna"),
-    DenseJungle     UMETA(DisplayName = "Dense Jungle"),
-    RiverBank       UMETA(DisplayName = "River Bank"),
-    CaveInterior    UMETA(DisplayName = "Cave Interior"),
-    Volcanic        UMETA(DisplayName = "Volcanic"),
-    NightCamp       UMETA(DisplayName = "Night Camp"),
+    Jungle         UMETA(DisplayName = "Jungle Ambience"),
+    River          UMETA(DisplayName = "River / Water"),
+    Campfire       UMETA(DisplayName = "Campfire"),
+    DangerZone     UMETA(DisplayName = "Danger / Predator Zone"),
+    OpenPlain      UMETA(DisplayName = "Open Plain"),
+    Cave           UMETA(DisplayName = "Cave / Enclosed")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
+enum class EAudio_DangerLevel : uint8
 {
-    Safe            UMETA(DisplayName = "Safe"),
-    Cautious        UMETA(DisplayName = "Cautious"),
-    Danger          UMETA(DisplayName = "Danger"),
-    Panic           UMETA(DisplayName = "Panic"),
+    Safe           UMETA(DisplayName = "Safe"),
+    Cautious       UMETA(DisplayName = "Cautious"),
+    Danger         UMETA(DisplayName = "Danger"),
+    Critical       UMETA(DisplayName = "Critical")
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_VoiceLine
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString SpeakerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString LineText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString AudioURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    float DisplayDuration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    bool bHasPlayed = false;
 };
 
 USTRUCT(BlueprintType)
@@ -37,222 +58,164 @@ struct FAudio_AmbientLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> SoundAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BaseVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float BaseVolume = 0.6f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float DangerVolumeMultiplier = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
     float FadeInTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float FadeOutTime = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_BiomeZone BiomeZone = EAudio_BiomeZone::OpenSavanna;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    EAudio_ThreatLevel MaxThreatLevel = EAudio_ThreatLevel::Panic;
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_DinoSoundProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FName DinoSpecies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> RoarSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> FootstepSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> BreathingSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FootstepShakeRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FootstepShakeMagnitude = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float RoarAudibleRadius = 5000.0f;
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_DialogueLine
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString LineText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundBase> AudioAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float DisplayDuration = 4.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* SoundAsset = nullptr;
 };
 
 // ============================================================
-// UAudio_ProximityComponent — attaches to dinosaur actors
-// Plays footstep/roar audio and triggers camera shake
-// when player is within range.
+// AAudio_ZoneActor — Spatial ambient audio zone
 // ============================================================
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ProximityComponent : public UActorComponent
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Zone Actor"))
+class TRANSPERSONALGAME_API AAudio_ZoneActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_ProximityComponent();
+    AAudio_ZoneActor();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    FAudio_DinoSoundProfile SoundProfile;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    float ProximityCheckInterval = 0.5f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dino", meta = (AllowPrivateAccess = "true"))
-    float CurrentDistanceToPlayer = 99999.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void TriggerRoar();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void TriggerFootstep();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    float GetDistanceToPlayer() const;
-
-protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-private:
-    float TimeSinceLastCheck = 0.0f;
-    float TimeSinceLastFootstep = 0.0f;
-
-    UPROPERTY()
-    UAudioComponent* RoarAudioComp = nullptr;
-
-    UPROPERTY()
-    UAudioComponent* FootstepAudioComp = nullptr;
-
-    UPROPERTY()
-    UAudioComponent* BreathingAudioComp = nullptr;
-
-    void UpdateProximityAudio(float DeltaTime);
-    void ApplyCameraShake(float Magnitude, float Radius);
-};
-
-// ============================================================
-// AAudio_AmbientZoneActor — placed in level to define
-// biome audio zones. Fades ambient layers in/out as
-// player enters/exits the zone radius.
-// ============================================================
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AmbientZoneActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_AmbientZoneActor();
-
+    // Zone configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_BiomeZone BiomeZone = EAudio_BiomeZone::OpenSavanna;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
     float ZoneRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    TArray<FAudio_AmbientLayer> AmbientLayers;
+    FAudio_AmbientLayer AmbientLayer;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float BlendWeight = 0.0f;
+    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::Safe;
+
+    // Freesound asset references (set in editor)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* PrimaryAmbientSound = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* DangerStingerSound = nullptr;
+
+    // Voice lines wired from Agent #15 TTS
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    TArray<FAudio_VoiceLine> VoiceLines;
+
+    // Runtime state
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
+    bool bPlayerInZone = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
+    float CurrentVolume = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentVoiceLineIndex = 0;
+
+    // Blueprint callable
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void SetDangerLevel(EAudio_DangerLevel NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetThreatLevel(EAudio_ThreatLevel NewThreat);
+    void TriggerNextVoiceLine();
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+    void FadeInAmbient(float TargetVolume, float FadeTime);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    bool IsPlayerInZone() const;
+    void FadeOutAmbient(float FadeTime);
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    float GetCurrentVolume() const { return CurrentVolume; }
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    bool IsPlayerInZone() const { return bPlayerInZone; }
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Zone")
+    EAudio_DangerLevel GetDangerLevel() const { return CurrentDangerLevel; }
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* TriggerSphere = nullptr;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UAudioComponent* AmbientAudioComponent = nullptr;
+
+    UFUNCTION()
+    void OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
-    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-
-    UPROPERTY()
-    TArray<UAudioComponent*> ActiveAudioComponents;
-
-    void UpdateBlendWeight(float DeltaTime);
-    void SyncLayersToThreat();
+    float VoiceLineTimer = 0.0f;
+    float FadeTargetVolume = 0.0f;
+    float FadeSpeed = 0.0f;
+    bool bFading = false;
 };
 
 // ============================================================
-// UAudio_SystemManagerSubsystem — GameInstance subsystem
-// Central coordinator for all audio in the game.
-// Manages biome transitions, threat level, dialogue routing.
+// UAudio_SystemManager — GameInstance subsystem for global audio
 // ============================================================
-UCLASS()
-class TRANSPERSONALGAME_API UAudio_SystemManagerSubsystem : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio System Manager"))
+class TRANSPERSONALGAME_API UAudio_SystemManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UAudio_SystemManager();
+
+    // TTS voice line URLs from Agent #15 and #16
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    TMap<FString, FString> VoiceLineURLs;
+
+    // Freesound asset IDs for runtime reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Freesound")
+    TMap<FString, int32> FreesoundAssetIDs;
+
+    // Global danger level (affects all zones)
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Global")
+    EAudio_DangerLevel GlobalDangerLevel = EAudio_DangerLevel::Safe;
+
+    // Active zone tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Global")
+    TArray<AAudio_ZoneActor*> ActiveZones;
 
     UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    void SetGlobalThreatLevel(EAudio_ThreatLevel NewThreat);
+    void RegisterVoiceLineURL(const FString& LineID, const FString& URL);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    void SetActiveBiome(EAudio_BiomeZone NewBiome);
+    void SetGlobalDangerLevel(EAudio_DangerLevel NewLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    EAudio_ThreatLevel GetGlobalThreatLevel() const { return GlobalThreatLevel; }
+    void RegisterZone(AAudio_ZoneActor* Zone);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    EAudio_BiomeZone GetActiveBiome() const { return ActiveBiome; }
+    void UnregisterZone(AAudio_ZoneActor* Zone);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    void PlayDialogueLine(const FAudio_DialogueLine& Line);
+    UFUNCTION(BlueprintPure, Category = "Audio|System")
+    FString GetVoiceLineURL(const FString& LineID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    void StopDialogue();
+    UFUNCTION(BlueprintPure, Category = "Audio|System")
+    EAudio_DangerLevel GetGlobalDangerLevel() const { return GlobalDangerLevel; }
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|System")
-    bool IsDialoguePlaying() const { return bDialoguePlaying; }
-
-    // TTS Audio URL registry — maps speaker name to Supabase URL
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
-    TMap<FString, FString> TTSAudioURLRegistry;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
-    void RegisterTTSAudioURL(const FString& SpeakerName, const FString& AudioURL);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
-    FString GetTTSAudioURL(const FString& SpeakerName) const;
-
-private:
-    EAudio_ThreatLevel GlobalThreatLevel = EAudio_ThreatLevel::Safe;
-    EAudio_BiomeZone ActiveBiome = EAudio_BiomeZone::OpenSavanna;
-    bool bDialoguePlaying = false;
-
-    UPROPERTY()
-    UAudioComponent* DialogueAudioComp = nullptr;
-
-    void InitializeTTSRegistry();
+    // Initialize with known TTS URLs from this cycle
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Audio|System")
+    void InitializeDefaultVoiceLines();
 };
