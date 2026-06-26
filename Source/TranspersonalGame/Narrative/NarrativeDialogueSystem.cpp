@@ -1,327 +1,190 @@
 #include "NarrativeDialogueSystem.h"
+#include "Components/SphereComponent.h"
 #include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 // ============================================================
-// ANarr_DialogueTriggerActor
+// ANarr_DialogueTrigger — Constructor
 // ============================================================
 
-ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
+ANarr_DialogueTrigger::ANarr_DialogueTrigger()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    TriggerType = ENarr_DialogueTriggerType::QuestStart;
-    ActivationRadius = 300.0f;
-    bOneShot = true;
-    QuestTimerThreshold = 1.0f;
-    CurrentState = ENarr_DialogueState::Inactive;
-    bHasTriggered = false;
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    RootComponent = TriggerSphere;
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+
+    TriggerRadius = 500.0f;
+    bDebugDraw = false;
     CurrentLineIndex = 0;
+    bIsPlaying = false;
+    LineTimer = 0.0f;
+
+    // Default dialogue sequence — TRex encounter warning
+    DialogueSequence.SequenceID = TEXT("DEFAULT_ENCOUNTER");
+    DialogueSequence.TriggerType = ENarr_DialogueTriggerType::DinoEncounter;
+    DialogueSequence.bCanRepeat = false;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Scout Mira");
+    Line1.SpeakerRole = ENarr_SpeakerRole::Scout;
+    Line1.LineText = TEXT("Danger! Stay low. Do not run — running triggers the hunt.");
+    Line1.DisplayDuration = 5.0f;
+    DialogueSequence.Lines.Add(Line1);
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Hunter Brak");
+    Line2.SpeakerRole = ENarr_SpeakerRole::Hunter;
+    Line2.LineText = TEXT("Find cover. A boulder, a tree — anything between you and it.");
+    Line2.DisplayDuration = 5.0f;
+    DialogueSequence.Lines.Add(Line2);
 }
 
-void ANarr_DialogueTriggerActor::BeginPlay()
+// ============================================================
+// BeginPlay
+// ============================================================
+
+void ANarr_DialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
-    PopulateDefaultLines();
+
+    if (TriggerSphere)
+    {
+        TriggerSphere->SetSphereRadius(TriggerRadius);
+        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnPlayerEnterRadius);
+    }
 }
 
-void ANarr_DialogueTriggerActor::Tick(float DeltaTime)
+// ============================================================
+// Tick — advance line timer
+// ============================================================
+
+void ANarr_DialogueTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Auto-trigger on proximity for QuestStart type
-    if (TriggerType == ENarr_DialogueTriggerType::QuestStart
-        && !bHasTriggered
-        && CurrentState == ENarr_DialogueState::Inactive)
+    if (bIsPlaying && DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
     {
-        if (IsPlayerInRange())
+        LineTimer -= DeltaTime;
+        if (LineTimer <= 0.0f)
         {
-            TriggerDialogue();
+            PlayNextLine();
         }
     }
+
+    if (bDebugDraw)
+    {
+        DrawDebugSphere(GetWorld(), GetActorLocation(), TriggerRadius, 16,
+            FColor::Yellow, false, -1.0f, 0, 2.0f);
+    }
 }
 
-void ANarr_DialogueTriggerActor::TriggerDialogue()
+// ============================================================
+// OnPlayerEnterRadius — overlap callback
+// ============================================================
+
+void ANarr_DialogueTrigger::OnPlayerEnterRadius(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (bOneShot && bHasTriggered)
+    if (!OtherActor) return;
+
+    // Only trigger for player characters
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    TriggerDialogue(OtherActor);
+}
+
+// ============================================================
+// TriggerDialogue — start playback if not already played
+// ============================================================
+
+void ANarr_DialogueTrigger::TriggerDialogue(AActor* PlayerActor)
+{
+    if (DialogueSequence.bHasPlayed && !DialogueSequence.bCanRepeat)
     {
         return;
     }
 
-    if (DialogueLines.Num() == 0)
+    if (DialogueSequence.Lines.Num() == 0)
     {
         return;
     }
 
-    CurrentState = ENarr_DialogueState::Playing;
-    bHasTriggered = true;
     CurrentLineIndex = 0;
+    bIsPlaying = true;
+    DialogueSequence.bHasPlayed = true;
 
-    OnDialogueStarted(DialogueLines[0]);
-
-    // Schedule auto-advance after display duration
-    if (DialogueLines.Num() > 1)
+    // Start timer for first line
+    if (DialogueSequence.Lines.IsValidIndex(0))
     {
-        float Duration = DialogueLines[0].DisplayDuration;
-        GetWorldTimerManager().SetTimer(
-            LineAdvanceTimer,
-            this,
-            &ANarr_DialogueTriggerActor::AdvanceLineInternal,
-            Duration,
-            false
-        );
-    }
-    else
-    {
-        // Single line — complete after duration
-        float Duration = DialogueLines[0].DisplayDuration;
-        FTimerHandle CompleteTimer;
-        GetWorldTimerManager().SetTimer(
-            CompleteTimer,
-            [this]()
-            {
-                CurrentState = ENarr_DialogueState::Completed;
-                OnDialogueCompleted();
-            },
-            Duration,
-            false
-        );
+        LineTimer = DialogueSequence.Lines[0].DisplayDuration;
+        UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue started: %s — '%s'"),
+            *DialogueSequence.Lines[0].SpeakerName,
+            *DialogueSequence.Lines[0].LineText);
     }
 }
 
-void ANarr_DialogueTriggerActor::AdvanceLine()
-{
-    AdvanceLineInternal();
-}
+// ============================================================
+// PlayNextLine — advance to next line or end sequence
+// ============================================================
 
-void ANarr_DialogueTriggerActor::AdvanceLineInternal()
+void ANarr_DialogueTrigger::PlayNextLine()
 {
-    GetWorldTimerManager().ClearTimer(LineAdvanceTimer);
-
     CurrentLineIndex++;
 
-    if (CurrentLineIndex >= DialogueLines.Num())
+    if (!DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
     {
-        CurrentState = ENarr_DialogueState::Completed;
-        OnDialogueCompleted();
+        // Sequence complete
+        bIsPlaying = false;
+        UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue sequence complete: %s"),
+            *DialogueSequence.SequenceID);
         return;
     }
 
-    OnLineAdvanced(DialogueLines[CurrentLineIndex]);
+    const FNarr_DialogueLine& Line = DialogueSequence.Lines[CurrentLineIndex];
+    LineTimer = Line.DisplayDuration;
 
-    float Duration = DialogueLines[CurrentLineIndex].DisplayDuration;
-    GetWorldTimerManager().SetTimer(
-        LineAdvanceTimer,
-        this,
-        &ANarr_DialogueTriggerActor::AdvanceLineInternal,
-        Duration,
-        false
-    );
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Line %d — %s: '%s'"),
+        CurrentLineIndex,
+        *Line.SpeakerName,
+        *Line.LineText);
 }
 
-void ANarr_DialogueTriggerActor::InterruptDialogue()
+// ============================================================
+// IsSequenceComplete
+// ============================================================
+
+bool ANarr_DialogueTrigger::IsSequenceComplete() const
 {
-    GetWorldTimerManager().ClearTimer(LineAdvanceTimer);
-    CurrentState = ENarr_DialogueState::Interrupted;
+    return !bIsPlaying && DialogueSequence.bHasPlayed;
 }
 
-void ANarr_DialogueTriggerActor::ResetTrigger()
+// ============================================================
+// ResetSequence — allow replay
+// ============================================================
+
+void ANarr_DialogueTrigger::ResetSequence()
 {
-    GetWorldTimerManager().ClearTimer(LineAdvanceTimer);
-    CurrentState = ENarr_DialogueState::Inactive;
-    bHasTriggered = false;
     CurrentLineIndex = 0;
+    bIsPlaying = false;
+    LineTimer = 0.0f;
+    DialogueSequence.bHasPlayed = false;
 }
 
-bool ANarr_DialogueTriggerActor::IsPlayerInRange() const
-{
-    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (!Player)
-    {
-        return false;
-    }
+// ============================================================
+// GetCurrentLine — returns the active dialogue line
+// ============================================================
 
-    float Distance = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
-    return Distance <= ActivationRadius;
-}
-
-FNarr_DialogueLine ANarr_DialogueTriggerActor::GetCurrentLine() const
+FNarr_DialogueLine ANarr_DialogueTrigger::GetCurrentLine() const
 {
-    if (CurrentLineIndex >= 0 && CurrentLineIndex < DialogueLines.Num())
+    if (DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
     {
-        return DialogueLines[CurrentLineIndex];
+        return DialogueSequence.Lines[CurrentLineIndex];
     }
     return FNarr_DialogueLine();
-}
-
-bool ANarr_DialogueTriggerActor::IsDialogueActive() const
-{
-    return CurrentState == ENarr_DialogueState::Playing;
-}
-
-void ANarr_DialogueTriggerActor::PopulateDefaultLines()
-{
-    if (DialogueLines.Num() > 0)
-    {
-        return; // Already configured in editor
-    }
-
-    // Populate default lines based on trigger type
-    switch (TriggerType)
-    {
-        case ENarr_DialogueTriggerType::QuestStart:
-        {
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Elder");
-            Line1.LineText = TEXT("The herd is moving. If they reach the camp, we lose everything.");
-            Line1.DisplayDuration = 4.5f;
-            Line1.TriggerType = ENarr_DialogueTriggerType::QuestStart;
-            DialogueLines.Add(Line1);
-
-            FNarr_DialogueLine Line2;
-            Line2.SpeakerName = TEXT("Elder");
-            Line2.LineText = TEXT("Get to high ground. Now. Do not stop running.");
-            Line2.DisplayDuration = 3.5f;
-            Line2.TriggerType = ENarr_DialogueTriggerType::QuestStart;
-            DialogueLines.Add(Line2);
-            break;
-        }
-
-        case ENarr_DialogueTriggerType::UrgencyMid:
-        {
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Hunter");
-            Line1.LineText = TEXT("Hurry! The ground is shaking — they are close!");
-            Line1.DisplayDuration = 3.0f;
-            Line1.TriggerType = ENarr_DialogueTriggerType::UrgencyMid;
-            DialogueLines.Add(Line1);
-            break;
-        }
-
-        case ENarr_DialogueTriggerType::UrgencyFinal:
-        {
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Hunter");
-            Line1.LineText = TEXT("Almost there! Keep moving!");
-            Line1.DisplayDuration = 2.5f;
-            Line1.TriggerType = ENarr_DialogueTriggerType::UrgencyFinal;
-            DialogueLines.Add(Line1);
-            break;
-        }
-
-        case ENarr_DialogueTriggerType::Victory:
-        {
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Elder");
-            Line1.LineText = TEXT("You made it. The herd passed below. The camp still stands.");
-            Line1.DisplayDuration = 5.0f;
-            Line1.TriggerType = ENarr_DialogueTriggerType::Victory;
-            DialogueLines.Add(Line1);
-
-            FNarr_DialogueLine Line2;
-            Line2.SpeakerName = TEXT("Elder");
-            Line2.LineText = TEXT("You are faster than I thought. Good.");
-            Line2.DisplayDuration = 3.5f;
-            Line2.TriggerType = ENarr_DialogueTriggerType::Victory;
-            DialogueLines.Add(Line2);
-            break;
-        }
-
-        case ENarr_DialogueTriggerType::Failure:
-        {
-            FNarr_DialogueLine Line1;
-            Line1.SpeakerName = TEXT("Elder");
-            Line1.LineText = TEXT("The herd took everything. We rebuild. We survive. That is what we do.");
-            Line1.DisplayDuration = 5.0f;
-            Line1.TriggerType = ENarr_DialogueTriggerType::Failure;
-            DialogueLines.Add(Line1);
-            break;
-        }
-
-        default:
-            break;
-    }
-}
-
-// ============================================================
-// ANarr_StampedeNarrativeManager
-// ============================================================
-
-ANarr_StampedeNarrativeManager::ANarr_StampedeNarrativeManager()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    UrgencyMidThreshold = 0.5f;
-    UrgencyFinalThreshold = 0.2f;
-    bMidUrgencyFired = false;
-    bFinalUrgencyFired = false;
-}
-
-void ANarr_StampedeNarrativeManager::BeginPlay()
-{
-    Super::BeginPlay();
-
-    // Auto-discover trigger actors in the level
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANarr_DialogueTriggerActor::StaticClass(), FoundActors);
-    for (AActor* Actor : FoundActors)
-    {
-        ANarr_DialogueTriggerActor* Trigger = Cast<ANarr_DialogueTriggerActor>(Actor);
-        if (Trigger)
-        {
-            RegisteredTriggers.AddUnique(Trigger);
-        }
-    }
-}
-
-void ANarr_StampedeNarrativeManager::OnQuestStarted()
-{
-    bMidUrgencyFired = false;
-    bFinalUrgencyFired = false;
-    FireTriggerByType(ENarr_DialogueTriggerType::QuestStart);
-}
-
-void ANarr_StampedeNarrativeManager::OnQuestTimerUpdated(float NormalizedTimeRemaining)
-{
-    if (!bMidUrgencyFired && NormalizedTimeRemaining <= UrgencyMidThreshold)
-    {
-        bMidUrgencyFired = true;
-        FireTriggerByType(ENarr_DialogueTriggerType::UrgencyMid);
-    }
-
-    if (!bFinalUrgencyFired && NormalizedTimeRemaining <= UrgencyFinalThreshold)
-    {
-        bFinalUrgencyFired = true;
-        FireTriggerByType(ENarr_DialogueTriggerType::UrgencyFinal);
-    }
-}
-
-void ANarr_StampedeNarrativeManager::OnQuestSucceeded()
-{
-    FireTriggerByType(ENarr_DialogueTriggerType::Victory);
-}
-
-void ANarr_StampedeNarrativeManager::OnQuestFailed()
-{
-    FireTriggerByType(ENarr_DialogueTriggerType::Failure);
-}
-
-void ANarr_StampedeNarrativeManager::RegisterTrigger(ANarr_DialogueTriggerActor* Trigger)
-{
-    if (Trigger)
-    {
-        RegisteredTriggers.AddUnique(Trigger);
-    }
-}
-
-void ANarr_StampedeNarrativeManager::FireTriggerByType(ENarr_DialogueTriggerType Type)
-{
-    for (ANarr_DialogueTriggerActor* Trigger : RegisteredTriggers)
-    {
-        if (Trigger && Trigger->TriggerType == Type)
-        {
-            Trigger->TriggerDialogue();
-        }
-    }
 }
