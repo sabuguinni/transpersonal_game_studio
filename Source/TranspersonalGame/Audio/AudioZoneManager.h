@@ -3,18 +3,19 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundAttenuation.h"
+#include "Components/SphereComponent.h"
 #include "AudioZoneManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_ZoneType : uint8
 {
-    JungleAmbience      UMETA(DisplayName = "Jungle Ambience"),
-    RiverAmbience       UMETA(DisplayName = "River Ambience"),
-    WindAmbience        UMETA(DisplayName = "Wind Ambience"),
-    DangerZone          UMETA(DisplayName = "Danger Zone"),
-    CaveAmbience        UMETA(DisplayName = "Cave Ambience"),
-    OpenPlain           UMETA(DisplayName = "Open Plain"),
+    Jungle_Day      UMETA(DisplayName = "Jungle Day"),
+    Jungle_Night    UMETA(DisplayName = "Jungle Night"),
+    Campfire        UMETA(DisplayName = "Campfire"),
+    River           UMETA(DisplayName = "River"),
+    Cave            UMETA(DisplayName = "Cave"),
+    OpenPlain       UMETA(DisplayName = "Open Plain"),
+    DinoTerritory   UMETA(DisplayName = "Dino Territory")
 };
 
 USTRUCT(BlueprintType)
@@ -23,60 +24,25 @@ struct FAudio_ZoneConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::JungleAmbience;
+    EAudio_ZoneType ZoneType = EAudio_ZoneType::Jungle_Day;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float AttenuationRadius = 3000.0f;
+    float BlendRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float VolumeMultiplier = 1.0f;
+    float MaxVolume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float PitchMultiplier = 1.0f;
+    float FadeInTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float FadeOutTime = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
     bool bLooping = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeInDuration = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeOutDuration = 3.0f;
 };
 
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ZoneComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UAudio_ZoneComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    FAudio_ZoneConfig ZoneConfig;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Zone", meta = (AllowPrivateAccess = "true"))
-    bool bIsPlayerInZone = false;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void OnPlayerEnterZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    void OnPlayerExitZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
-    EAudio_ZoneType GetZoneType() const { return ZoneConfig.ZoneType; }
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-private:
-    UPROPERTY()
-    UAudioComponent* AudioComponent = nullptr;
-};
-
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 {
     GENERATED_BODY()
@@ -84,38 +50,39 @@ class TRANSPERSONALGAME_API AAudio_ZoneManager : public AActor
 public:
     AAudio_ZoneManager();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Manager")
-    TArray<FAudio_ZoneConfig> RegisteredZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Manager")
-    float GlobalVolumeScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Manager")
-    bool bEnableDynamicMixing = true;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void RegisterZone(FAudio_ZoneConfig ZoneConfig);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void SetGlobalVolume(float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void TriggerDangerStinger(FVector DangerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void TriggerNightTransition();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void TriggerDawnTransition();
-
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-private:
-    float CurrentDangerLevel = 0.0f;
-    float TargetDangerLevel = 0.0f;
-    float DangerBlendSpeed = 1.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FAudio_ZoneConfig ZoneConfig;
 
-    void UpdateDangerMix(float DeltaTime);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone")
+    USphereComponent* ZoneSphere;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Zone")
+    UAudioComponent* AmbientAudioComponent;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void SetZoneVolume(float NewVolume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void FadeInAudio();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    void FadeOutAudio();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Zone")
+    bool IsPlayerInZone() const;
+
+private:
+    UPROPERTY()
+    float CurrentVolume = 0.0f;
+
+    UPROPERTY()
+    bool bPlayerInZone = false;
+
+    void UpdateVolumeByDistance(float DeltaTime);
 };
