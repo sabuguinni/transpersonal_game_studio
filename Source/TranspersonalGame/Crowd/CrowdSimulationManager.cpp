@@ -1,456 +1,330 @@
 // CrowdSimulationManager.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Prehistoric tribe crowd simulation: hunters, gatherers, scouts, elders, children
-// Uses UE5 Mass AI concepts adapted for prehistoric survival context
+// Prehistoric survival crowd simulation: herds, predator packs, fleeing groups
 
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
-#include "NavMesh/NavMeshBoundsVolume.h"
+#include "GameFramework/Actor.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UCrowdSimulationManager — UObject lifecycle
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── UCrowdSimulationManager ─────────────────────────────────────────────────
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxCrowdAgents = 500;
-    TickInterval = 0.1f;
-    CampCenterLocation = FVector(0.f, 0.f, 100.f);
-    DangerRadius = 2000.f;
-    bCrowdInDangerState = false;
-    CurrentThreatLevel = ECrowd_ThreatLevel::Safe;
-    AccumulatedTime = 0.f;
+    MaxAgents = 500;
+    UpdateIntervalSeconds = 0.25f;
+    FlockingRadius = 800.0f;
+    SeparationRadius = 150.0f;
+    bDebugDraw = false;
+    CurrentAgentCount = 0;
 }
 
-void UCrowdSimulationManager::Initialize(UWorld* InWorld)
+void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    World = InWorld;
-    if (!World)
+    Super::Initialize(Collection);
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Subsystem initialized. MaxAgents=%d"), MaxAgents);
+
+    // Start periodic crowd update tick
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: World is null on Initialize"));
-        return;
+        World->GetTimerManager().SetTimer(
+            UpdateTimerHandle,
+            this,
+            &UCrowdSimulationManager::TickCrowdUpdate,
+            UpdateIntervalSeconds,
+            true
+        );
+    }
+}
+
+void UCrowdSimulationManager::Deinitialize()
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(UpdateTimerHandle);
+    }
+    ActiveGroups.Empty();
+    Super::Deinitialize();
+}
+
+// ─── Group Registration ───────────────────────────────────────────────────────
+
+int32 UCrowdSimulationManager::RegisterCrowdGroup(ECrowd_GroupType GroupType, FVector SpawnCenter, int32 AgentCount)
+{
+    if (CurrentAgentCount + AgentCount > MaxAgents)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Agent cap reached (%d/%d). Clamping group."), CurrentAgentCount, MaxAgents);
+        AgentCount = FMath::Max(0, MaxAgents - CurrentAgentCount);
+    }
+    if (AgentCount <= 0) return -1;
+
+    FCrowd_GroupData NewGroup;
+    NewGroup.GroupID = NextGroupID++;
+    NewGroup.GroupType = GroupType;
+    NewGroup.CenterLocation = SpawnCenter;
+    NewGroup.AgentCount = AgentCount;
+    NewGroup.bIsActive = true;
+    NewGroup.CurrentState = ECrowd_GroupState::Idle;
+    NewGroup.AlertLevel = 0.0f;
+    NewGroup.TargetLocation = SpawnCenter;
+
+    // Assign default behavior based on group type
+    switch (GroupType)
+    {
+        case ECrowd_GroupType::HerbivoreHerd:
+            NewGroup.WanderRadius = 2000.0f;
+            NewGroup.MoveSpeed = 250.0f;
+            NewGroup.FleeThreshold = 0.4f;
+            break;
+        case ECrowd_GroupType::PredatorPack:
+            NewGroup.WanderRadius = 3500.0f;
+            NewGroup.MoveSpeed = 450.0f;
+            NewGroup.FleeThreshold = 0.8f;
+            break;
+        case ECrowd_GroupType::ScavengerFlock:
+            NewGroup.WanderRadius = 1500.0f;
+            NewGroup.MoveSpeed = 180.0f;
+            NewGroup.FleeThreshold = 0.2f;
+            break;
+        case ECrowd_GroupType::MigrationHerd:
+            NewGroup.WanderRadius = 8000.0f;
+            NewGroup.MoveSpeed = 300.0f;
+            NewGroup.FleeThreshold = 0.5f;
+            break;
+        default:
+            NewGroup.WanderRadius = 1000.0f;
+            NewGroup.MoveSpeed = 200.0f;
+            NewGroup.FleeThreshold = 0.3f;
+            break;
     }
 
-    // Register default waypoints
-    RegisterDefaultWaypoints();
+    ActiveGroups.Add(NewGroup.GroupID, NewGroup);
+    CurrentAgentCount += AgentCount;
 
-    // Spawn initial tribe population
-    SpawnInitialTribe();
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d registered. Type=%d, Agents=%d, Total=%d/%d"),
+        NewGroup.GroupID, (int32)GroupType, AgentCount, CurrentAgentCount, MaxAgents);
 
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized with %d agents"), ActiveAgents.Num());
+    return NewGroup.GroupID;
 }
 
-void UCrowdSimulationManager::Tick(float DeltaTime)
+bool UCrowdSimulationManager::UnregisterCrowdGroup(int32 GroupID)
 {
-    if (!World) return;
-
-    AccumulatedTime += DeltaTime;
-    if (AccumulatedTime < TickInterval) return;
-    AccumulatedTime = 0.f;
-
-    // Update each agent
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    if (FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
     {
-        UpdateAgentBehavior(Agent, TickInterval);
+        CurrentAgentCount -= Group->AgentCount;
+        ActiveGroups.Remove(GroupID);
+        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d unregistered. Total=%d"), GroupID, CurrentAgentCount);
+        return true;
     }
-
-    // Update threat assessment
-    UpdateThreatLevel();
+    return false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Agent Management
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Alert & Flee System ──────────────────────────────────────────────────────
 
-void UCrowdSimulationManager::SpawnInitialTribe()
+void UCrowdSimulationManager::AlertGroupsInRadius(FVector AlertOrigin, float Radius, float AlertIntensity)
 {
-    if (!World) return;
-
-    // Tribe composition: realistic prehistoric group
-    // ~40% hunters, ~35% gatherers, ~10% scouts, ~10% children, ~5% elders
-    TArray<TPair<ECrowd_AgentRole, int32>> Composition = {
-        { ECrowd_AgentRole::Hunter,   8 },
-        { ECrowd_AgentRole::Gatherer, 7 },
-        { ECrowd_AgentRole::Scout,    2 },
-        { ECrowd_AgentRole::Child,    2 },
-        { ECrowd_AgentRole::Elder,    1 },
-    };
-
-    int32 AgentID = 0;
-    for (auto& Pair : Composition)
+    for (auto& Pair : ActiveGroups)
     {
-        for (int32 i = 0; i < Pair.Value; i++)
+        FCrowd_GroupData& Group = Pair.Value;
+        float Dist = FVector::Dist(Group.CenterLocation, AlertOrigin);
+        if (Dist <= Radius)
         {
-            FCrowd_AgentData NewAgent;
-            NewAgent.AgentID = AgentID++;
-            NewAgent.Role = Pair.Key;
-            NewAgent.State = ECrowd_AgentState::Idle;
-            NewAgent.Health = 100.f;
-            NewAgent.Stamina = 100.f;
-            NewAgent.FearLevel = 0.f;
+            // Closer = more alert
+            float DistanceFactor = 1.0f - (Dist / Radius);
+            Group.AlertLevel = FMath::Clamp(Group.AlertLevel + AlertIntensity * DistanceFactor, 0.0f, 1.0f);
 
-            // Scatter around camp center
-            float Angle = FMath::RandRange(0.f, 360.f);
-            float Radius = FMath::RandRange(100.f, 600.f);
-            NewAgent.CurrentLocation = CampCenterLocation + FVector(
-                FMath::Cos(FMath::DegreesToRadians(Angle)) * Radius,
-                FMath::Sin(FMath::DegreesToRadians(Angle)) * Radius,
-                0.f
-            );
-            NewAgent.TargetLocation = NewAgent.CurrentLocation;
-            NewAgent.HomeLocation = CampCenterLocation;
-
-            // Assign movement speed by role
-            switch (Pair.Key)
+            if (Group.AlertLevel >= Group.FleeThreshold)
             {
-                case ECrowd_AgentRole::Hunter:   NewAgent.MoveSpeed = 350.f; break;
-                case ECrowd_AgentRole::Gatherer: NewAgent.MoveSpeed = 250.f; break;
-                case ECrowd_AgentRole::Scout:    NewAgent.MoveSpeed = 450.f; break;
-                case ECrowd_AgentRole::Child:    NewAgent.MoveSpeed = 300.f; break;
-                case ECrowd_AgentRole::Elder:    NewAgent.MoveSpeed = 180.f; break;
-                default:                         NewAgent.MoveSpeed = 280.f; break;
+                TriggerGroupFlee(Group.GroupID, AlertOrigin);
+            }
+            else if (Group.AlertLevel > 0.2f && Group.CurrentState == ECrowd_GroupState::Idle)
+            {
+                Group.CurrentState = ECrowd_GroupState::Alert;
             }
 
-            ActiveAgents.Add(NewAgent);
+            UE_LOG(LogTemp, Verbose, TEXT("[CrowdSim] Group %d alert=%.2f (dist=%.0f)"),
+                Group.GroupID, Group.AlertLevel, Dist);
+        }
+    }
+}
+
+void UCrowdSimulationManager::TriggerGroupFlee(int32 GroupID, FVector ThreatLocation)
+{
+    FCrowd_GroupData* Group = ActiveGroups.Find(GroupID);
+    if (!Group || !Group->bIsActive) return;
+
+    // Flee direction = away from threat
+    FVector FleeDir = (Group->CenterLocation - ThreatLocation).GetSafeNormal();
+    Group->TargetLocation = Group->CenterLocation + FleeDir * Group->WanderRadius;
+    Group->CurrentState = ECrowd_GroupState::Fleeing;
+    Group->AlertLevel = 1.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d FLEEING from threat at (%.0f,%.0f,%.0f)"),
+        GroupID, ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z);
+}
+
+void UCrowdSimulationManager::SetGroupTarget(int32 GroupID, FVector TargetLocation)
+{
+    if (FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
+    {
+        Group->TargetLocation = TargetLocation;
+        Group->CurrentState = ECrowd_GroupState::Moving;
+    }
+}
+
+// ─── Periodic Update ──────────────────────────────────────────────────────────
+
+void UCrowdSimulationManager::TickCrowdUpdate()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (auto& Pair : ActiveGroups)
+    {
+        FCrowd_GroupData& Group = Pair.Value;
+        if (!Group.bIsActive) continue;
+
+        UpdateGroupBehavior(Group, UpdateIntervalSeconds);
+
+        if (bDebugDraw)
+        {
+            DrawDebugSphere(World, Group.CenterLocation, 100.0f, 8,
+                Group.CurrentState == ECrowd_GroupState::Fleeing ? FColor::Red :
+                Group.CurrentState == ECrowd_GroupState::Alert   ? FColor::Yellow : FColor::Green,
+                false, UpdateIntervalSeconds * 1.5f);
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d tribe members"), ActiveAgents.Num());
+    // Decay alert levels over time
+    DecayAlertLevels();
 }
 
-void UCrowdSimulationManager::RegisterDefaultWaypoints()
+void UCrowdSimulationManager::UpdateGroupBehavior(FCrowd_GroupData& Group, float DeltaTime)
 {
-    // Camp center
-    FCrowd_Waypoint Camp;
-    Camp.WaypointID = 0;
-    Camp.Location = CampCenterLocation;
-    Camp.WaypointType = ECrowd_WaypointType::Camp;
-    Camp.bIsDangerous = false;
-    Waypoints.Add(Camp);
-
-    // Hunt zones (north and east)
-    FCrowd_Waypoint HuntNorth;
-    HuntNorth.WaypointID = 1;
-    HuntNorth.Location = CampCenterLocation + FVector(0.f, 1500.f, 0.f);
-    HuntNorth.WaypointType = ECrowd_WaypointType::HuntingGrounds;
-    HuntNorth.bIsDangerous = true;
-    Waypoints.Add(HuntNorth);
-
-    FCrowd_Waypoint HuntEast;
-    HuntEast.WaypointID = 2;
-    HuntEast.Location = CampCenterLocation + FVector(1500.f, 0.f, 0.f);
-    HuntEast.WaypointType = ECrowd_WaypointType::HuntingGrounds;
-    HuntEast.bIsDangerous = true;
-    Waypoints.Add(HuntEast);
-
-    // Gather zones (west and south)
-    FCrowd_Waypoint GatherWest;
-    GatherWest.WaypointID = 3;
-    GatherWest.Location = CampCenterLocation + FVector(-1500.f, 0.f, 0.f);
-    GatherWest.WaypointType = ECrowd_WaypointType::GatheringArea;
-    GatherWest.bIsDangerous = false;
-    Waypoints.Add(GatherWest);
-
-    FCrowd_Waypoint GatherSouth;
-    GatherSouth.WaypointID = 4;
-    GatherSouth.Location = CampCenterLocation + FVector(0.f, -1500.f, 0.f);
-    GatherSouth.WaypointType = ECrowd_WaypointType::GatheringArea;
-    GatherSouth.bIsDangerous = false;
-    Waypoints.Add(GatherSouth);
-
-    // Water source
-    FCrowd_Waypoint Water;
-    Water.WaypointID = 5;
-    Water.Location = CampCenterLocation + FVector(-800.f, 800.f, 0.f);
-    Water.WaypointType = ECrowd_WaypointType::WaterSource;
-    Water.bIsDangerous = false;
-    Waypoints.Add(Water);
-
-    // Danger zone (near dinosaur territory)
-    FCrowd_Waypoint Danger;
-    Danger.WaypointID = 6;
-    Danger.Location = FVector(2000.f, 2000.f, 100.f);
-    Danger.WaypointType = ECrowd_WaypointType::DangerZone;
-    Danger.bIsDangerous = true;
-    Waypoints.Add(Danger);
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Registered %d waypoints"), Waypoints.Num());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Agent Behavior Update
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UCrowdSimulationManager::UpdateAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Fear propagation: if in danger state, all agents flee
-    if (bCrowdInDangerState)
+    switch (Group.CurrentState)
     {
-        Agent.FearLevel = FMath::Min(Agent.FearLevel + DeltaTime * 2.f, 10.f);
-        Agent.State = ECrowd_AgentState::Fleeing;
-        Agent.TargetLocation = CampCenterLocation;
-        return;
-    }
-
-    // Stamina recovery when idle
-    if (Agent.State == ECrowd_AgentState::Idle)
-    {
-        Agent.Stamina = FMath::Min(Agent.Stamina + DeltaTime * 5.f, 100.f);
-        Agent.FearLevel = FMath::Max(Agent.FearLevel - DeltaTime * 1.f, 0.f);
-    }
-
-    // Role-based behavior state machine
-    switch (Agent.Role)
-    {
-        case ECrowd_AgentRole::Hunter:
-            UpdateHunterBehavior(Agent, DeltaTime);
+        case ECrowd_GroupState::Idle:
+        {
+            // Random wander trigger (10% chance per tick)
+            if (FMath::RandRange(0, 9) == 0)
+            {
+                FVector WanderOffset = FVector(
+                    FMath::RandRange(-Group.WanderRadius * 0.3f, Group.WanderRadius * 0.3f),
+                    FMath::RandRange(-Group.WanderRadius * 0.3f, Group.WanderRadius * 0.3f),
+                    0.0f
+                );
+                Group.TargetLocation = Group.CenterLocation + WanderOffset;
+                Group.CurrentState = ECrowd_GroupState::Moving;
+            }
             break;
-        case ECrowd_AgentRole::Gatherer:
-            UpdateGathererBehavior(Agent, DeltaTime);
+        }
+        case ECrowd_GroupState::Moving:
+        {
+            FVector ToTarget = Group.TargetLocation - Group.CenterLocation;
+            float DistToTarget = ToTarget.Size();
+            if (DistToTarget < 200.0f)
+            {
+                Group.CurrentState = ECrowd_GroupState::Idle;
+            }
+            else
+            {
+                FVector MoveDir = ToTarget.GetSafeNormal();
+                Group.CenterLocation += MoveDir * Group.MoveSpeed * DeltaTime;
+            }
             break;
-        case ECrowd_AgentRole::Scout:
-            UpdateScoutBehavior(Agent, DeltaTime);
+        }
+        case ECrowd_GroupState::Fleeing:
+        {
+            FVector ToTarget = Group.TargetLocation - Group.CenterLocation;
+            float DistToTarget = ToTarget.Size();
+            if (DistToTarget < 300.0f)
+            {
+                Group.CurrentState = ECrowd_GroupState::Alert;
+            }
+            else
+            {
+                FVector MoveDir = ToTarget.GetSafeNormal();
+                // Flee at 1.5x normal speed
+                Group.CenterLocation += MoveDir * Group.MoveSpeed * 1.5f * DeltaTime;
+            }
             break;
-        case ECrowd_AgentRole::Child:
-            UpdateChildBehavior(Agent, DeltaTime);
+        }
+        case ECrowd_GroupState::Alert:
+        {
+            // Slowly decay back to idle if alert level drops
+            if (Group.AlertLevel < 0.1f)
+            {
+                Group.CurrentState = ECrowd_GroupState::Idle;
+            }
             break;
-        case ECrowd_AgentRole::Elder:
-            UpdateElderBehavior(Agent, DeltaTime);
+        }
+        case ECrowd_GroupState::Grazing:
+        {
+            // Herbivores graze in place — very slow drift
+            FVector GrazeOffset = FVector(
+                FMath::RandRange(-50.0f, 50.0f),
+                FMath::RandRange(-50.0f, 50.0f),
+                0.0f
+            );
+            Group.CenterLocation += GrazeOffset * DeltaTime;
             break;
+        }
         default:
             break;
     }
+}
 
-    // Move agent toward target
-    FVector Direction = Agent.TargetLocation - Agent.CurrentLocation;
-    float Distance = Direction.Size();
-    if (Distance > 50.f)
+void UCrowdSimulationManager::DecayAlertLevels()
+{
+    for (auto& Pair : ActiveGroups)
     {
-        Direction.Normalize();
-        Agent.CurrentLocation += Direction * Agent.MoveSpeed * DeltaTime;
-    }
-    else
-    {
-        // Reached target — go idle
-        Agent.State = ECrowd_AgentState::Idle;
+        FCrowd_GroupData& Group = Pair.Value;
+        // Alert decays at 5% per update tick
+        Group.AlertLevel = FMath::Max(0.0f, Group.AlertLevel - 0.05f);
     }
 }
 
-void UCrowdSimulationManager::UpdateHunterBehavior(FCrowd_AgentData& Agent, float DeltaTime)
+// ─── Query API ────────────────────────────────────────────────────────────────
+
+int32 UCrowdSimulationManager::GetActiveGroupCount() const
 {
-    if (Agent.State == ECrowd_AgentState::Idle && Agent.Stamina > 50.f)
+    return ActiveGroups.Num();
+}
+
+int32 UCrowdSimulationManager::GetTotalAgentCount() const
+{
+    return CurrentAgentCount;
+}
+
+FCrowd_GroupData UCrowdSimulationManager::GetGroupData(int32 GroupID) const
+{
+    if (const FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
     {
-        // Pick a hunting waypoint
-        FCrowd_Waypoint* HuntWP = FindWaypointByType(ECrowd_WaypointType::HuntingGrounds);
-        if (HuntWP)
+        return *Group;
+    }
+    return FCrowd_GroupData();
+}
+
+TArray<int32> UCrowdSimulationManager::GetGroupsInRadius(FVector Center, float Radius) const
+{
+    TArray<int32> Result;
+    for (const auto& Pair : ActiveGroups)
+    {
+        if (FVector::Dist(Pair.Value.CenterLocation, Center) <= Radius)
         {
-            Agent.TargetLocation = HuntWP->Location + FVector(
-                FMath::RandRange(-200.f, 200.f),
-                FMath::RandRange(-200.f, 200.f),
-                0.f
-            );
-            Agent.State = ECrowd_AgentState::Hunting;
+            Result.Add(Pair.Key);
         }
     }
-    else if (Agent.Stamina < 20.f)
-    {
-        // Return to camp to rest
-        Agent.TargetLocation = CampCenterLocation + FVector(
-            FMath::RandRange(-150.f, 150.f),
-            FMath::RandRange(-150.f, 150.f),
-            0.f
-        );
-        Agent.State = ECrowd_AgentState::Resting;
-    }
+    return Result;
 }
 
-void UCrowdSimulationManager::UpdateGathererBehavior(FCrowd_AgentData& Agent, float DeltaTime)
+ECrowd_GroupState UCrowdSimulationManager::GetGroupState(int32 GroupID) const
 {
-    if (Agent.State == ECrowd_AgentState::Idle && Agent.Stamina > 30.f)
+    if (const FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
     {
-        FCrowd_Waypoint* GatherWP = FindWaypointByType(ECrowd_WaypointType::GatheringArea);
-        if (GatherWP)
-        {
-            Agent.TargetLocation = GatherWP->Location + FVector(
-                FMath::RandRange(-300.f, 300.f),
-                FMath::RandRange(-300.f, 300.f),
-                0.f
-            );
-            Agent.State = ECrowd_AgentState::Gathering;
-        }
+        return Group->CurrentState;
     }
-}
-
-void UCrowdSimulationManager::UpdateScoutBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Scouts patrol between waypoints
-    if (Agent.State == ECrowd_AgentState::Idle)
-    {
-        int32 RandomWP = FMath::RandRange(0, Waypoints.Num() - 1);
-        if (Waypoints.IsValidIndex(RandomWP) && !Waypoints[RandomWP].bIsDangerous)
-        {
-            Agent.TargetLocation = Waypoints[RandomWP].Location;
-            Agent.State = ECrowd_AgentState::Patrolling;
-        }
-    }
-}
-
-void UCrowdSimulationManager::UpdateChildBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Children stay near camp, play randomly
-    if (Agent.State == ECrowd_AgentState::Idle)
-    {
-        Agent.TargetLocation = CampCenterLocation + FVector(
-            FMath::RandRange(-300.f, 300.f),
-            FMath::RandRange(-300.f, 300.f),
-            0.f
-        );
-        Agent.State = ECrowd_AgentState::Playing;
-    }
-}
-
-void UCrowdSimulationManager::UpdateElderBehavior(FCrowd_AgentData& Agent, float DeltaTime)
-{
-    // Elders stay near campfire, move slowly
-    if (Agent.State == ECrowd_AgentState::Idle)
-    {
-        Agent.TargetLocation = CampCenterLocation + FVector(
-            FMath::RandRange(-80.f, 80.f),
-            FMath::RandRange(-80.f, 80.f),
-            0.f
-        );
-        Agent.State = ECrowd_AgentState::Resting;
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Threat System
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UCrowdSimulationManager::UpdateThreatLevel()
-{
-    if (!World) return;
-
-    // Check if any dinosaur actor is within danger radius of camp
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-    bool bDinoNearby = false;
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor) continue;
-        FString Label = Actor->GetActorLabel();
-        bool bIsDino = Label.Contains(TEXT("TRex")) || Label.Contains(TEXT("Raptor")) ||
-                       Label.Contains(TEXT("Trike")) || Label.Contains(TEXT("Brachio")) ||
-                       Label.Contains(TEXT("Dino"));
-        if (bIsDino)
-        {
-            float Dist = FVector::Dist(Actor->GetActorLocation(), CampCenterLocation);
-            if (Dist < DangerRadius)
-            {
-                bDinoNearby = true;
-                break;
-            }
-        }
-    }
-
-    if (bDinoNearby)
-    {
-        CurrentThreatLevel = ECrowd_ThreatLevel::Critical;
-        bCrowdInDangerState = true;
-    }
-    else
-    {
-        CurrentThreatLevel = ECrowd_ThreatLevel::Safe;
-        bCrowdInDangerState = false;
-    }
-}
-
-void UCrowdSimulationManager::TriggerDangerAlert(FVector ThreatLocation)
-{
-    bCrowdInDangerState = true;
-    CurrentThreatLevel = ECrowd_ThreatLevel::Critical;
-
-    // All agents flee toward camp
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        Agent.State = ECrowd_AgentState::Fleeing;
-        Agent.FearLevel = 10.f;
-        Agent.TargetLocation = CampCenterLocation + FVector(
-            FMath::RandRange(-200.f, 200.f),
-            FMath::RandRange(-200.f, 200.f),
-            0.f
-        );
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: DANGER ALERT at %s — %d agents fleeing"),
-        *ThreatLocation.ToString(), ActiveAgents.Num());
-}
-
-void UCrowdSimulationManager::ClearDangerAlert()
-{
-    bCrowdInDangerState = false;
-    CurrentThreatLevel = ECrowd_ThreatLevel::Safe;
-
-    for (FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        Agent.FearLevel = FMath::Max(Agent.FearLevel - 3.f, 0.f);
-        Agent.State = ECrowd_AgentState::Idle;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Danger cleared — crowd returning to normal"));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Utility
-// ─────────────────────────────────────────────────────────────────────────────
-
-FCrowd_Waypoint* UCrowdSimulationManager::FindWaypointByType(ECrowd_WaypointType Type)
-{
-    TArray<FCrowd_Waypoint*> Matching;
-    for (FCrowd_Waypoint& WP : Waypoints)
-    {
-        if (WP.WaypointType == Type && !WP.bIsDangerous)
-        {
-            Matching.Add(&WP);
-        }
-    }
-    if (Matching.Num() == 0) return nullptr;
-    return Matching[FMath::RandRange(0, Matching.Num() - 1)];
-}
-
-int32 UCrowdSimulationManager::GetAgentCountByRole(ECrowd_AgentRole Role) const
-{
-    int32 Count = 0;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        if (Agent.Role == Role) Count++;
-    }
-    return Count;
-}
-
-FCrowd_TribeStats UCrowdSimulationManager::GetTribeStats() const
-{
-    FCrowd_TribeStats Stats;
-    Stats.TotalAgents = ActiveAgents.Num();
-    Stats.HunterCount = GetAgentCountByRole(ECrowd_AgentRole::Hunter);
-    Stats.GathererCount = GetAgentCountByRole(ECrowd_AgentRole::Gatherer);
-    Stats.ScoutCount = GetAgentCountByRole(ECrowd_AgentRole::Scout);
-    Stats.ChildCount = GetAgentCountByRole(ECrowd_AgentRole::Child);
-    Stats.ElderCount = GetAgentCountByRole(ECrowd_AgentRole::Elder);
-    Stats.bInDanger = bCrowdInDangerState;
-    Stats.ThreatLevel = CurrentThreatLevel;
-
-    float TotalFear = 0.f;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
-    {
-        TotalFear += Agent.FearLevel;
-    }
-    Stats.AverageFearLevel = (ActiveAgents.Num() > 0) ? (TotalFear / ActiveAgents.Num()) : 0.f;
-
-    return Stats;
+    return ECrowd_GroupState::Idle;
 }
