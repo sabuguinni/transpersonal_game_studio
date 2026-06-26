@@ -3,109 +3,86 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Components/SphereComponent.h"
-#include "Engine/TriggerVolume.h"
-#include "Sound/SoundCue.h"
+#include "Sound/SoundBase.h"
 #include "AudioFeedbackSystem.generated.h"
 
-// Audio feedback types for different game events
+/**
+ * EAudio_FeedbackType — types of audio feedback events in the survival game.
+ * Placed at global scope per UE5 compilation rules.
+ */
 UENUM(BlueprintType)
 enum class EAudio_FeedbackType : uint8
 {
-    None = 0,
-    DinosaurProximity,
-    PlayerDamage,
-    HeartbeatStress,
-    EnvironmentalDanger,
-    SafeZoneEnter,
-    CriticalHealth
-};
-
-// Audio intensity levels for dynamic feedback
-UENUM(BlueprintType)
-enum class EAudio_IntensityLevel : uint8
-{
-    Low = 0,
-    Medium,
-    High,
-    Critical
-};
-
-// Struct for audio feedback configuration
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_FeedbackConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    EAudio_FeedbackType FeedbackType = EAudio_FeedbackType::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    EAudio_IntensityLevel IntensityLevel = EAudio_IntensityLevel::Low;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    float Volume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    float Pitch = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    float FadeInTime = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    float FadeOutTime = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Feedback")
-    bool bLooping = false;
-
-    FAudio_FeedbackConfig()
-    {
-        FeedbackType = EAudio_FeedbackType::None;
-        IntensityLevel = EAudio_IntensityLevel::Low;
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        FadeInTime = 0.5f;
-        FadeOutTime = 1.0f;
-        bLooping = false;
-    }
-};
-
-// Proximity audio data for distance-based effects
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ProximityData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float MinDistance = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float MaxDistance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float VolumeAtMinDistance = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    float VolumeAtMaxDistance = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
-    UCurveFloat* DistanceCurve = nullptr;
-
-    FAudio_ProximityData()
-    {
-        MinDistance = 100.0f;
-        MaxDistance = 1000.0f;
-        VolumeAtMinDistance = 1.0f;
-        VolumeAtMaxDistance = 0.1f;
-        DistanceCurve = nullptr;
-    }
+    None            UMETA(DisplayName = "None"),
+    PlayerDamage    UMETA(DisplayName = "Player Damage"),
+    PlayerDeath     UMETA(DisplayName = "Player Death"),
+    DinoNearby      UMETA(DisplayName = "Dinosaur Nearby"),
+    DinoAttack      UMETA(DisplayName = "Dinosaur Attack"),
+    CraftingSuccess UMETA(DisplayName = "Crafting Success"),
+    FireLit         UMETA(DisplayName = "Fire Lit"),
+    LowHealth       UMETA(DisplayName = "Low Health Warning"),
+    LowHunger       UMETA(DisplayName = "Low Hunger Warning"),
+    StealthSuccess  UMETA(DisplayName = "Stealth Success"),
+    TRexRoar        UMETA(DisplayName = "T-Rex Roar"),
+    HerdStampede    UMETA(DisplayName = "Herd Stampede")
 };
 
 /**
- * Audio Feedback System - Manages dynamic audio responses to gameplay events
- * Provides screen shake audio, damage feedback, proximity effects, and environmental audio
+ * FAudio_FeedbackEvent — data for a single audio feedback event.
  */
-UCLASS(BlueprintType, Blueprintable)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_FeedbackEvent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    EAudio_FeedbackType FeedbackType = EAudio_FeedbackType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    float Volume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    float Pitch = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    FVector WorldLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    bool bIs3DSound = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    float TriggerRadius = 1500.0f;
+};
+
+/**
+ * FAudio_ScreenShakeConfig — configuration for camera shake triggered by audio events.
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_ScreenShakeConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float ShakeIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float ShakeDuration = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float TriggerRadius = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    bool bFalloffWithDistance = true;
+};
+
+/**
+ * AAudioFeedbackSystem — manages audio feedback events including screen shake,
+ * damage audio, dinosaur proximity sounds, and environmental audio cues.
+ * 
+ * Placed in the world to handle all reactive audio for the survival game.
+ * Works with the MetaSounds system and UE5 audio engine.
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio Feedback System"))
 class TRANSPERSONALGAME_API AAudioFeedbackSystem : public AActor
 {
     GENERATED_BODY()
@@ -113,121 +90,87 @@ class TRANSPERSONALGAME_API AAudioFeedbackSystem : public AActor
 public:
     AAudioFeedbackSystem();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Core audio components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class USceneComponent* RootSceneComponent;
+    // ======= SCREEN SHAKE =======
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* FeedbackAudioComponent;
+    /** Trigger screen shake when T-Rex footstep detected nearby */
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerTRexFootstepShake(float DistanceToTRex);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* ProximityAudioComponent;
+    /** Trigger screen shake for herd stampede */
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerStampedeShake(float Intensity);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* HeartbeatAudioComponent;
+    /** Screen shake configuration for T-Rex proximity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeConfig TRexShakeConfig;
 
-    // Audio assets for different feedback types
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EAudio_FeedbackType, USoundCue*> FeedbackSounds;
+    // ======= DAMAGE FEEDBACK =======
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    USoundCue* HeartbeatSound;
+    /** Play damage audio feedback (hit sound + heartbeat if low health) */
+    UFUNCTION(BlueprintCallable, Category = "Audio|Damage")
+    void PlayDamageFeedback(float DamageAmount, float CurrentHealth, float MaxHealth);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    USoundCue* ScreenShakeSound;
+    /** Play death audio sequence */
+    UFUNCTION(BlueprintCallable, Category = "Audio|Damage")
+    void PlayDeathAudio();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    USoundCue* DamageFlashSound;
+    // ======= ENVIRONMENTAL AUDIO =======
 
-    // Feedback configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feedback Config")
-    TMap<EAudio_FeedbackType, FAudio_FeedbackConfig> FeedbackConfigs;
+    /** Trigger a feedback event by type */
+    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
+    void TriggerFeedbackEvent(FAudio_FeedbackEvent Event);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feedback Config")
-    FAudio_ProximityData ProximityConfig;
+    /** Check if player is in T-Rex proximity zone and apply shake */
+    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
+    void UpdateDinoProximityAudio(float DeltaTime);
 
-    // Current state tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_FeedbackType CurrentFeedbackType;
+    // ======= AUDIO ASSETS =======
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_IntensityLevel CurrentIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* DamageHitSound = nullptr;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float CurrentStressLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* LowHealthHeartbeatSound = nullptr;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    bool bIsPlayingHeartbeat;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* TRexFootstepSound = nullptr;
 
-    // Timers and state management
-    FTimerHandle HeartbeatTimerHandle;
-    FTimerHandle FeedbackTimerHandle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* RaptorScreechSound = nullptr;
 
-public:
-    // Main feedback trigger functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void TriggerAudioFeedback(EAudio_FeedbackType FeedbackType, EAudio_IntensityLevel Intensity = EAudio_IntensityLevel::Medium);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* CampfireCrackleSound = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void TriggerScreenShakeAudio(float Intensity = 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    USoundBase* StampedeRumbleSound = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void TriggerDamageFlashAudio(float DamageAmount = 1.0f);
+    // ======= STATE =======
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void TriggerProximityAudio(AActor* SourceActor, float Distance);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State")
+    bool bIsLowHealthWarningActive = false;
 
-    // Stress and heartbeat system
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void UpdateStressLevel(float StressLevel);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State")
+    float LastShakeTime = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void StartHeartbeatAudio(float HeartRate = 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|State")
+    float ShakeCooldown = 2.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void StopHeartbeatAudio();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State")
+    float DinoProximityCheckInterval = 0.5f;
 
-    // Environmental audio feedback
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void TriggerEnvironmentalFeedback(EAudio_FeedbackType EnvironmentType, const FVector& Location);
-
-    // Configuration and management
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void SetFeedbackConfig(EAudio_FeedbackType FeedbackType, const FAudio_FeedbackConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    FAudio_FeedbackConfig GetFeedbackConfig(EAudio_FeedbackType FeedbackType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void StopAllFeedback();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Feedback")
-    void SetMasterFeedbackVolume(float Volume);
-
-protected:
-    // Internal helper functions
-    void InitializeFeedbackConfigs();
-    void UpdateProximityAudio(float DeltaTime);
-    void UpdateHeartbeatRate();
-    float CalculateProximityVolume(float Distance) const;
-    void PlayFeedbackSound(EAudio_FeedbackType FeedbackType, const FAudio_FeedbackConfig& Config);
-
-    // Timer callbacks
-    UFUNCTION()
-    void OnHeartbeatTimer();
-
-    UFUNCTION()
-    void OnFeedbackComplete();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State")
+    float TimeSinceLastProximityCheck = 0.0f;
 
 private:
-    // Internal state
-    float MasterFeedbackVolume;
-    TArray<AActor*> NearbyDinosaurs;
-    float LastProximityUpdate;
-    float HeartbeatRate;
-    bool bInitialized;
+    UPROPERTY()
+    UAudioComponent* HeartbeatAudioComponent = nullptr;
+
+    UPROPERTY()
+    UAudioComponent* CampfireAudioComponent = nullptr;
+
+    float GetShakeIntensityByDistance(float Distance, float MaxRadius) const;
+    void ApplyCameraShake(float Intensity, float Duration);
 };
