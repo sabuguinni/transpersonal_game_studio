@@ -2,91 +2,90 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "TimerManager.h"
 #include "CrowdSimulationManager.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums — must be at global scope (UE5 RULE 1)
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// Crowd Simulation Manager — Agent #13
+// Manages prehistoric creature crowd groups, patrol routes,
+// herd dynamics and density simulation for MinPlayableMap.
+// ============================================================
 
 UENUM(BlueprintType)
 enum class ECrowd_GroupType : uint8
 {
+    ApexPredator    UMETA(DisplayName = "Apex Predator"),
+    PackPredator    UMETA(DisplayName = "Pack Predator"),
     HerbivoreHerd   UMETA(DisplayName = "Herbivore Herd"),
-    PredatorPack    UMETA(DisplayName = "Predator Pack"),
-    MigrationGroup  UMETA(DisplayName = "Migration Group"),
-    ScavengerFlock  UMETA(DisplayName = "Scavenger Flock"),
-    SolitaryRoamer  UMETA(DisplayName = "Solitary Roamer")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
-{
-    LOD_Full    UMETA(DisplayName = "Full Simulation"),
-    LOD_Medium  UMETA(DisplayName = "Medium LOD"),
-    LOD_Low     UMETA(DisplayName = "Low LOD"),
-    LOD_Culled  UMETA(DisplayName = "Culled")
+    MegaHerbivore   UMETA(DisplayName = "Mega Herbivore"),
+    Scavenger       UMETA(DisplayName = "Scavenger"),
 };
 
 UENUM(BlueprintType)
 enum class ECrowd_BehaviorState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Wandering   UMETA(DisplayName = "Wandering"),
     Grazing     UMETA(DisplayName = "Grazing"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
     Hunting     UMETA(DisplayName = "Hunting"),
-    Migrating   UMETA(DisplayName = "Migrating")
+    Resting     UMETA(DisplayName = "Resting"),
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Structs — must be at global scope (UE5 RULE 1)
-// ─────────────────────────────────────────────────────────────────────────────
-
 USTRUCT(BlueprintType)
-struct FCrowd_GroupData
+struct FCrowd_GroupDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FName GroupID;
+    FString GroupID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
     ECrowd_GroupType GroupType = ECrowd_GroupType::HerbivoreHerd;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_BehaviorState BehaviorState = ECrowd_BehaviorState::Idle;
+    ECrowd_BehaviorState CurrentBehavior = ECrowd_BehaviorState::Grazing;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_LODLevel CurrentLOD = ECrowd_LODLevel::LOD_Full;
+    int32 GroupSize = 5;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    int32 AgentCount = 0;
+    FVector TerritoryCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector HomeLocation = FVector::ZeroVector;
+    float TerritoryRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float WanderRadius = 1000.f;
+    float PatrolSpeed = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float MovementSpeed = 300.f;
+    float AlertRadius = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FleeThreshold = 0.5f;
+    bool bIsPackHunter = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float AlertLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    bool bIsAlerting = false;
+    TArray<FVector> WaypointPositions;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UCrowdSimulationManager — World Subsystem
-// ─────────────────────────────────────────────────────────────────────────────
+USTRUCT(BlueprintType)
+struct FCrowd_SimulationStats
+{
+    GENERATED_BODY()
 
-UCLASS(BlueprintType)
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    int32 TotalGroupsActive = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    int32 TotalAgentsSimulated = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    int32 AlertedGroups = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
+    float SimulationTickRate = 0.25f;
+};
+
+UCLASS()
 class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
@@ -98,81 +97,49 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // ── Group Registration ──────────────────────────────────────────────────
+    // Group registration
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void RegisterGroup(const FCrowd_GroupDefinition& GroupDef);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterCrowdGroup(const FCrowd_GroupData& GroupData);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UnregisterGroup(const FString& GroupID);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void RegisterDefaultGroups();
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    FCrowd_GroupDefinition GetGroupByID(const FString& GroupID) const;
 
-    // ── Alert System ────────────────────────────────────────────────────────
+    // Behavior control
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetGroupBehavior(const FString& GroupID, ECrowd_BehaviorState NewBehavior);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void AlertGroupsInRadius(FVector Origin, float Radius, float AlertStrength);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void AlertGroupsNearLocation(FVector Location, float AlertRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void ResetAlerts();
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerFleeResponse(const FString& GroupID, FVector ThreatLocation);
 
-    // ── LOD Management ──────────────────────────────────────────────────────
+    // Stats
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    FCrowd_SimulationStats GetSimulationStats() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void UpdateCrowdLOD(FVector PlayerLocation);
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    int32 GetActiveGroupCount() const;
 
-    // ── Pathfinding ─────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    TArray<FString> GetAllGroupIDs() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    FVector GetFleeDestination(FName GroupID, FVector ThreatLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    FVector GetWanderTarget(FName GroupID);
-
-    // ── Simulation Control ──────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void StartSimulationTick();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd")
-    void StopSimulationTick();
-
-    // ── Query Interface ─────────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    int32 GetGroupCount() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    bool IsGroupAlerting(FName GroupID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    float GetGroupAlertLevel(FName GroupID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    FCrowd_GroupData GetGroupData(FName GroupID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd")
-    TArray<FName> GetAlertingGroups() const;
-
-    // ── State ───────────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    bool bSimulationActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    float GlobalAlertLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    int32 CurrentAgentCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd")
-    int32 MaxActiveAgents;
-
-private:
+protected:
     UPROPERTY()
-    TArray<FCrowd_GroupData> CrowdGroups;
+    TMap<FString, FCrowd_GroupDefinition> ActiveGroups;
 
-    float SimulationTickRate;
+    UPROPERTY()
+    FCrowd_SimulationStats SimStats;
+
     FTimerHandle SimulationTickHandle;
 
-    void OnSimulationTick();
-    void TickGroupBehavior(FCrowd_GroupData& Group);
+    void SimulationTick();
+    void UpdateGroupBehavior(FCrowd_GroupDefinition& Group, float DeltaTime);
+    void RegisterDefaultGroups();
+
+    FVector GetNextWaypoint(const FCrowd_GroupDefinition& Group) const;
+    bool IsPlayerNearGroup(const FCrowd_GroupDefinition& Group, float Radius) const;
 };
