@@ -1,187 +1,136 @@
-// PerformanceConfig.cpp
-// Performance Optimizer — Agent #4
-// Targets: 60fps high-end PC / 30fps console
-// Prehistoric survival game — NO spiritual content
+// PerformanceConfig.cpp — Agent #4 Performance Optimizer
+// Cycle: PROD_CYCLE_AUTO_20260626_009
+// Implements: UPerf_PerformanceConfig — LOD thresholds, dino tick budgets, frame budget
 
 #include "PerformanceConfig.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+
+// ============================================================
+// Constructor — initialize default budgets
+// ============================================================
 
 UPerf_PerformanceConfig::UPerf_PerformanceConfig()
 {
-    // ── PC High-End Budget (target 60fps) ─────────────────────────────────────
-    PCHighEndBudget.TargetFrameTimeMs  = 16.67f;
-    PCHighEndBudget.GPUBudgetMs        = 11.67f;
-    PCHighEndBudget.CPUGameThreadMs    = 8.0f;
-    PCHighEndBudget.CPURenderThreadMs  = 10.0f;
-    PCHighEndBudget.MaxDrawCalls       = 2000;
-    PCHighEndBudget.MaxTrianglesMillion = 8.0f;
+    // Default frame budget: 60fps PC
+    FrameBudget.TargetFrameTimeMs = 16.67f;
+    FrameBudget.AIBudgetMs        = 3.0f;
+    FrameBudget.RenderBudgetMs    = 10.0f;
+    FrameBudget.PhysicsBudgetMs   = 2.5f;
+    FrameBudget.GameLogicBudgetMs = 1.17f;
 
-    // ── Console Budget (target 30fps) ─────────────────────────────────────────
-    ConsoleBudget.TargetFrameTimeMs  = 33.33f;
-    ConsoleBudget.GPUBudgetMs        = 23.33f;
-    ConsoleBudget.CPUGameThreadMs    = 16.0f;
-    ConsoleBudget.CPURenderThreadMs  = 20.0f;
-    ConsoleBudget.MaxDrawCalls       = 1200;
-    ConsoleBudget.MaxTrianglesMillion = 5.0f;
+    // Default LOD thresholds
+    LODThresholds.LOD0_To_LOD1    = 2000.0f;
+    LODThresholds.LOD1_To_LOD2    = 4000.0f;
+    LODThresholds.LOD2_To_LOD3    = 7000.0f;
+    LODThresholds.CullDistance    = 12000.0f;
+    LODThresholds.DinoCullDistance = 15000.0f;
 
-    // ── Large Dino LOD (T-Rex scale ~3.0, Brachiosaurus scale ~2.5) ──────────
-    LargeDinoLOD.LOD0Distance  = 2000.0f;
-    LargeDinoLOD.LOD1Distance  = 4000.0f;
-    LargeDinoLOD.LOD2Distance  = 8000.0f;
-    LargeDinoLOD.CullDistance  = 18000.0f;
-    LargeDinoLOD.LODBias       = 0;
-    LargeDinoLOD.bUseScreenSizeLOD = true;
-
-    // ── Medium Dino LOD (Raptor scale ~1.5, Triceratops scale ~2.0) ──────────
-    MediumDinoLOD.LOD0Distance  = 1500.0f;
-    MediumDinoLOD.LOD1Distance  = 3000.0f;
-    MediumDinoLOD.LOD2Distance  = 6000.0f;
-    MediumDinoLOD.CullDistance  = 12000.0f;
-    MediumDinoLOD.LODBias       = 0;
-    MediumDinoLOD.bUseScreenSizeLOD = true;
-
-    // ── Foliage LOD ───────────────────────────────────────────────────────────
-    FoliageLOD.LOD0Distance  = 800.0f;
-    FoliageLOD.LOD1Distance  = 2000.0f;
-    FoliageLOD.LOD2Distance  = 4000.0f;
-    FoliageLOD.CullDistance  = 8000.0f;
-    FoliageLOD.LODBias       = 1;   // Foliage uses lower LOD sooner
-    FoliageLOD.bUseScreenSizeLOD = true;
-
-    // ── Dinosaur Visibility Budget ────────────────────────────────────────────
-    DinosaurBudget.MaxLargeDinosVisible      = 4;
-    DinosaurBudget.MaxMediumDinosVisible     = 8;
-    DinosaurBudget.MaxSmallDinosVisible      = 16;
-    DinosaurBudget.AnimTickHalfRateDistance  = 4000.0f;
-    DinosaurBudget.AnimTickPauseDistance     = 8000.0f;
+    // Dino tick budgets — 4 distance zones
+    // Zone 0: Near (0-3000u) — full AI, 0.1s tick
+    DinoTickBudgets.Add(FPerf_DinoTickBudget(3000.0f,  0.1f,  true,  true));
+    // Zone 1: Mid (3000-5000u) — full AI, 0.5s tick
+    DinoTickBudgets.Add(FPerf_DinoTickBudget(5000.0f,  0.5f,  true,  true));
+    // Zone 2: Far (5000-8000u) — simplified AI, 2.0s tick, no perception
+    DinoTickBudgets.Add(FPerf_DinoTickBudget(8000.0f,  2.0f,  false, false));
+    // Zone 3: VeryFar (8000u+) — frozen AI, 5.0s tick
+    DinoTickBudgets.Add(FPerf_DinoTickBudget(TNumericLimits<float>::Max(), 5.0f, false, false));
 }
 
-FPerf_FrameBudget UPerf_PerformanceConfig::GetActiveBudget() const
+// ============================================================
+// ApplyToWorld — push config to running world via console cmds
+// ============================================================
+
+void UPerf_PerformanceConfig::ApplyToWorld(UWorld* World)
 {
-    switch (ActiveQualityTier)
-    {
-        case EPerf_QualityTier::Low:
-        case EPerf_QualityTier::Medium:
-            return ConsoleBudget;
-
-        case EPerf_QualityTier::High:
-        case EPerf_QualityTier::Epic:
-        case EPerf_QualityTier::Cinematic:
-        default:
-            return PCHighEndBudget;
-    }
-}
-
-bool UPerf_PerformanceConfig::IsWithinDinosaurBudget(int32 LargeCount, int32 MediumCount, int32 SmallCount) const
-{
-    return (LargeCount  <= DinosaurBudget.MaxLargeDinosVisible)
-        && (MediumCount <= DinosaurBudget.MaxMediumDinosVisible)
-        && (SmallCount  <= DinosaurBudget.MaxSmallDinosVisible);
-}
-
-void UPerf_PerformanceConfig::ApplyQualityTierToConsole()
-{
-    // Build a world context object for ExecuteConsoleCommand
-    // In editor context, pass nullptr — the command is applied globally
-    UWorld* World = nullptr;
-
-    // Find any valid world
-    for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
-    {
-        if (Ctx.World())
-        {
-            World = Ctx.World();
-            break;
-        }
-    }
-
-    if (!GEngine || !World)
+    if (!World)
     {
         return;
     }
 
-    auto Exec = [&](const FString& Cmd)
-    {
-        GEngine->Exec(World, *Cmd);
-    };
+    // LOD distance scale
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.StaticMeshLODDistanceScale 1.0")));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("foliage.LODDistanceScale 1.5")));
 
-    switch (ActiveQualityTier)
-    {
-        case EPerf_QualityTier::Low:
-            Exec(TEXT("sg.ResolutionQuality 50"));
-            Exec(TEXT("sg.ViewDistanceQuality 0"));
-            Exec(TEXT("sg.AntiAliasingQuality 0"));
-            Exec(TEXT("sg.ShadowQuality 0"));
-            Exec(TEXT("sg.GlobalIlluminationQuality 0"));
-            Exec(TEXT("sg.ReflectionQuality 0"));
-            Exec(TEXT("sg.PostProcessQuality 0"));
-            Exec(TEXT("sg.TextureQuality 0"));
-            Exec(TEXT("sg.EffectsQuality 0"));
-            Exec(TEXT("sg.FoliageQuality 0"));
-            Exec(TEXT("sg.ShadingQuality 0"));
-            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
-            break;
+    // Shadow resolution
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.Shadow.MaxCSMResolution %d"), ShadowMapResolution));
 
-        case EPerf_QualityTier::Medium:
-            Exec(TEXT("sg.ResolutionQuality 75"));
-            Exec(TEXT("sg.ViewDistanceQuality 1"));
-            Exec(TEXT("sg.AntiAliasingQuality 1"));
-            Exec(TEXT("sg.ShadowQuality 1"));
-            Exec(TEXT("sg.GlobalIlluminationQuality 1"));
-            Exec(TEXT("sg.ReflectionQuality 1"));
-            Exec(TEXT("sg.PostProcessQuality 1"));
-            Exec(TEXT("sg.TextureQuality 1"));
-            Exec(TEXT("sg.EffectsQuality 1"));
-            Exec(TEXT("sg.FoliageQuality 1"));
-            Exec(TEXT("sg.ShadingQuality 1"));
-            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
-            break;
+    // Lumen GI
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.Lumen.GlobalIllumination.Allow %d"), bEnableLumenGI ? 1 : 0));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.Lumen.Reflections.Allow %d"), bEnableLumenReflections ? 1 : 0));
 
-        case EPerf_QualityTier::High:
-            Exec(TEXT("sg.ResolutionQuality 90"));
-            Exec(TEXT("sg.ViewDistanceQuality 2"));
-            Exec(TEXT("sg.AntiAliasingQuality 2"));
-            Exec(TEXT("sg.ShadowQuality 2"));
-            Exec(TEXT("sg.GlobalIlluminationQuality 2"));
-            Exec(TEXT("sg.ReflectionQuality 2"));
-            Exec(TEXT("sg.PostProcessQuality 2"));
-            Exec(TEXT("sg.TextureQuality 2"));
-            Exec(TEXT("sg.EffectsQuality 2"));
-            Exec(TEXT("sg.FoliageQuality 2"));
-            Exec(TEXT("sg.ShadingQuality 2"));
-            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
-            break;
+    // Occlusion culling
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.HZBOcclusion 1"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.OcclusionCullParallelUpdate 1"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.EarlyZPass 3"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.EarlyZPassMovable 1"));
 
-        case EPerf_QualityTier::Epic:
-        case EPerf_QualityTier::Cinematic:
-        default:
-            Exec(TEXT("sg.ResolutionQuality 100"));
-            Exec(TEXT("sg.ViewDistanceQuality 3"));
-            Exec(TEXT("sg.AntiAliasingQuality 3"));
-            Exec(TEXT("sg.ShadowQuality 3"));
-            Exec(TEXT("sg.GlobalIlluminationQuality 3"));
-            Exec(TEXT("sg.ReflectionQuality 3"));
-            Exec(TEXT("sg.PostProcessQuality 3"));
-            Exec(TEXT("sg.TextureQuality 3"));
-            Exec(TEXT("sg.EffectsQuality 3"));
-            Exec(TEXT("sg.FoliageQuality 3"));
-            Exec(TEXT("sg.ShadingQuality 3"));
-            Exec(TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-            Exec(TEXT("r.Lumen.HardwareRayTracing 0"));
-            break;
-    }
+    // AI crowd cap
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("ai.crowd.MaxAgents 50"));
+
+    // Anisotropy
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.MaxAnisotropy 8"));
+
+    // FastSkyLUT
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceConfig] Applied quality tier %d to world %s"),
+        (int32)QualityTier, *World->GetName());
 }
 
-FPerf_LODConfig UPerf_PerformanceConfig::GetLODConfigForScale(float DinoScale) const
+// ============================================================
+// GetDinoTickInterval — returns tick interval for given distance
+// ============================================================
+
+float UPerf_PerformanceConfig::GetDinoTickInterval(float DistanceFromPlayer) const
 {
-    // Large: scale >= 2.5 (T-Rex at 3.0, Brachiosaurus at 2.5)
-    if (DinoScale >= 2.5f)
+    for (const FPerf_DinoTickBudget& Budget : DinoTickBudgets)
     {
-        return LargeDinoLOD;
+        if (DistanceFromPlayer <= Budget.MaxDistanceUnits)
+        {
+            return Budget.TickIntervalSeconds;
+        }
     }
-    // Medium: scale 1.0 - 2.5 (Raptor at 1.5, Triceratops at 2.0)
-    return MediumDinoLOD;
+    // Beyond all zones — use slowest interval
+    return 5.0f;
+}
+
+// ============================================================
+// GetLODZone — returns LOD zone enum for given distance
+// ============================================================
+
+EPerf_LODZone UPerf_PerformanceConfig::GetLODZone(float DistanceFromPlayer) const
+{
+    if (DistanceFromPlayer > LODThresholds.CullDistance)
+    {
+        return EPerf_LODZone::Culled;
+    }
+    if (DistanceFromPlayer > LODThresholds.LOD2_To_LOD3)
+    {
+        return EPerf_LODZone::VeryFar;
+    }
+    if (DistanceFromPlayer > LODThresholds.LOD1_To_LOD2)
+    {
+        return EPerf_LODZone::Far;
+    }
+    if (DistanceFromPlayer > LODThresholds.LOD0_To_LOD1)
+    {
+        return EPerf_LODZone::Mid;
+    }
+    return EPerf_LODZone::Near;
+}
+
+// ============================================================
+// Get — singleton accessor via CDO
+// ============================================================
+
+UPerf_PerformanceConfig* UPerf_PerformanceConfig::Get(UObject* WorldContextObject)
+{
+    return GetMutableDefault<UPerf_PerformanceConfig>();
 }
