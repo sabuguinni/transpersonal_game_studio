@@ -5,14 +5,9 @@
 #include "VelociraptorCharacter.generated.h"
 
 /**
- * AVelociraptorCharacter
- * Pack-hunting raptor subclass of ADinosaurBase.
- * 
- * Key behaviours:
- *  - Flanking AI: raptors in a pack spread out and attack from different angles
- *  - High speed (ChaseSpeed=800), low health (MaxHealth=200)
- *  - Pack coordination: one raptor distracts, others flank
- *  - Leap attack: closes distance instantly when in leap range
+ * VelociraptorCharacter — Pack-hunting dinosaur species
+ * Coordinates with nearby raptor allies for flanking attacks.
+ * Inherits from ADinosaurBase (ACharacter chain).
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVelociraptorCharacter : public ADinosaurBase
@@ -22,78 +17,77 @@ class TRANSPERSONALGAME_API AVelociraptorCharacter : public ADinosaurBase
 public:
     AVelociraptorCharacter();
 
-    // ─── Pack System ─────────────────────────────────────────────────────────
-
-    /** Other raptors in this pack (max 3). Populated at spawn by the pack spawner. */
-    UPROPERTY(BlueprintReadWrite, Category = "Raptor|Pack")
-    TArray<AVelociraptorCharacter*> PackMembers;
-
-    /** Index in the pack (0 = alpha/distractor, 1-2 = flankers). */
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
-    int32 PackIndex;
-
-    /** Angle offset for flanking (degrees). Alpha=0, Flanker1=90, Flanker2=-90. */
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
-    float FlankAngleOffset;
-
-    // ─── Leap Attack ─────────────────────────────────────────────────────────
-
-    /** Distance at which the raptor performs a leap attack. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapRange;
-
-    /** Impulse force applied during leap. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapImpulse;
-
-    /** Cooldown between leap attacks (seconds). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapCooldown;
-
-    /** Whether the raptor is currently in a leap. */
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Combat")
-    bool bIsLeaping;
-
-    // ─── Overrides ───────────────────────────────────────────────────────────
-
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    /** Override: raptors use flanking movement instead of direct chase. */
-    virtual void TickChase(float DeltaTime) override;
+    // --- Pack Hunting ---
 
-    /** Override: raptors leap when close enough. */
-    virtual void TickAttack(float DeltaTime) override;
+    /** Radius within which this raptor looks for pack allies */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
+    float PackSearchRadius;
 
-    /** Override: set raptor-specific stats and mesh. */
-    virtual void OnDinoStateChanged_Implementation(EEng_DinoState NewState) override;
+    /** Maximum number of pack members to coordinate with */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
+    int32 MaxPackSize;
 
-    /** Override: pack members scatter on death. */
-    virtual void OnDinoDied_Implementation() override;
+    /** Current pack allies (weak refs — no GC ownership) */
+    UPROPERTY(BlueprintReadOnly, Category = "Velociraptor|Pack")
+    TArray<AVelociraptorCharacter*> PackAllies;
 
-    // ─── Pack Coordination ───────────────────────────────────────────────────
+    /** True if this raptor is the pack Alpha */
+    UPROPERTY(BlueprintReadOnly, Category = "Velociraptor|Pack")
+    bool bIsAlpha;
 
-    /** Register this raptor in a pack. Called by the pack spawner. */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void JoinPack(const TArray<AVelociraptorCharacter*>& Pack, int32 Index);
+    /** Find nearby raptor allies and populate PackAllies */
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void ScanForPackAllies();
 
-    /** Called when the alpha raptor spots the player — alerts all pack members. */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void AlertPack(AActor* Target);
+    /** Coordinate a flanking attack — Alpha calls this, allies respond */
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void InitiatePackAttack(AActor* Target);
 
-    /** Compute the flanking destination for this raptor around the target. */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    FVector ComputeFlankPosition(AActor* Target) const;
+    /** Called on non-Alpha raptors by the Alpha to flank from a given direction */
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void RespondToPackAttack(AActor* Target, FVector FlankDirection);
 
-    // ─── Leap ────────────────────────────────────────────────────────────────
+    // --- Combat Abilities ---
 
-    /** Attempt a leap attack toward the target. */
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void AttemptLeap(AActor* Target);
+    /** Pounce leap attack — launches raptor at target */
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    void PerformPounce(AActor* Target);
 
-private:
-    float LeapCooldownTimer;
+    /** Slashing claw attack — fast melee at close range */
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    void PerformClawSlash();
 
-    /** Move toward the flank position each tick. */
-    void UpdateFlankMovement(float DeltaTime);
+    /** Cooldown between pounce attacks (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float PounceCooldown;
+
+    /** Damage dealt by claw slash */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float ClawDamage;
+
+    /** Pounce launch velocity multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float PounceVelocityScale;
+
+    // --- Species Stats ---
+
+    /** Pack scan interval (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|AI")
+    float PackScanInterval;
+
+protected:
+    /** Initialize Velociraptor-specific stats */
+    void InitVelociraptorStats();
+
+    /** Timer handle for periodic pack scanning */
+    FTimerHandle PackScanTimerHandle;
+
+    /** Timer handle for pounce cooldown */
+    FTimerHandle PounceCooldownTimerHandle;
+
+    /** Whether pounce is currently on cooldown */
+    bool bPounceCoolingDown;
 };
