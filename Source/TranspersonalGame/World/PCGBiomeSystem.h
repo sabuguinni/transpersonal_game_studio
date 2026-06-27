@@ -7,38 +7,60 @@
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Jungle      UMETA(DisplayName = "Jungle"),
-    Savanna     UMETA(DisplayName = "Savanna"),
-    Badlands    UMETA(DisplayName = "Badlands"),
-    Wetlands    UMETA(DisplayName = "Wetlands"),
-    Volcanic    UMETA(DisplayName = "Volcanic")
+    RiverDelta     UMETA(DisplayName = "River Delta"),
+    DenseForest    UMETA(DisplayName = "Dense Forest"),
+    OpenPlains     UMETA(DisplayName = "Open Plains"),
+    RockyHighland  UMETA(DisplayName = "Rocky Highland"),
+    Volcanic       UMETA(DisplayName = "Volcanic"),
+    Swamp          UMETA(DisplayName = "Swamp")
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Jungle;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenPlains;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FVector Center = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 5000.0f;
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float VegetationDensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 28.0f;
+    float WaterCoverage = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.8f;
+    FLinearColor BiomeTint = FLinearColor::White;
 };
 
-UCLASS(ClassGroup=(World), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct FWorld_RiverSegment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector StartPoint = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector EndPoint = FVector(0, 1000, 0);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Width = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Depth = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float FlowSpeed = 100.0f;
+};
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
     GENERATED_BODY()
@@ -50,27 +72,46 @@ public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "PCG|Biome")
+    void GenerateBiomeZones();
+
+    UFUNCTION(BlueprintCallable, Category = "PCG|Biome")
     EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "PCG|Biome")
-    FWorld_BiomeData GetBiomeData(EWorld_BiomeType BiomeType) const;
+    float GetBiomeBlendWeight(const FVector& WorldLocation, EWorld_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "PCG|River")
+    void GenerateRiverNetwork();
+
+    UFUNCTION(BlueprintCallable, Category = "PCG|River")
+    bool IsLocationInRiver(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "PCG|Vegetation")
+    void ScatterVegetationForBiome(EWorld_BiomeType BiomeType, int32 Count);
 
     UFUNCTION(BlueprintCallable, Category = "PCG|Biome")
-    void RegisterBiome(const FWorld_BiomeData& BiomeData);
+    const TArray<FWorld_BiomeZone>& GetAllBiomeZones() const { return BiomeZones; }
 
-    UFUNCTION(CallInEditor, Category = "PCG|Biome")
-    void GenerateBiomeLayout();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Biome")
-    TArray<FWorld_BiomeData> Biomes;
+    UFUNCTION(BlueprintCallable, Category = "PCG|River")
+    const TArray<FWorld_RiverSegment>& GetRiverSegments() const { return RiverSegments; }
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Biome")
+    TArray<FWorld_BiomeZone> BiomeZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|River")
+    TArray<FWorld_RiverSegment> RiverSegments;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Settings")
+    int32 RandomSeed = 42;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Settings")
+    float WorldExtent = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Settings")
     bool bAutoGenerateOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Biome")
-    float WorldRadius = 20000.0f;
 
 private:
     void InitializeDefaultBiomes();
-    float CalculateBiomeBlend(const FVector& Location, const FWorld_BiomeData& Biome) const;
+    void InitializeDefaultRivers();
+    float CalculateDistanceToBiomeEdge(const FVector& Location, const FWorld_BiomeZone& Zone) const;
 };
