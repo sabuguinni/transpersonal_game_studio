@@ -2,69 +2,89 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "SharedTypes.h"
 #include "NPCBehaviorComponent.generated.h"
 
+// ============================================================
+// NPC Behavior Component — Agent #11
+// Drives daily routines, memory, threat reactions, and social
+// state for all non-player characters in the prehistoric world.
+// ============================================================
+
 UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
+enum class ENPC_DailyPhase : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrol      UMETA(DisplayName = "Patrol"),
-    Flee        UMETA(DisplayName = "Flee"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Interact    UMETA(DisplayName = "Interact"),
-    Seek        UMETA(DisplayName = "Seek")
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Midday      UMETA(DisplayName = "Midday"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night"),
+    DeepNight   UMETA(DisplayName = "DeepNight")
 };
 
 UENUM(BlueprintType)
-enum class ENPC_DailyRoutine : uint8
+enum class ENPC_AlertLevel : uint8
 {
-    Sleep       UMETA(DisplayName = "Sleep"),
-    Forage      UMETA(DisplayName = "Forage"),
-    Socialize   UMETA(DisplayName = "Socialize"),
+    Calm        UMETA(DisplayName = "Calm"),
+    Aware       UMETA(DisplayName = "Aware"),
+    Suspicious  UMETA(DisplayName = "Suspicious"),
+    Alarmed     UMETA(DisplayName = "Alarmed"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Hiding      UMETA(DisplayName = "Hiding")
+};
+
+UENUM(BlueprintType)
+enum class ENPC_SocialRole : uint8
+{
+    Scout       UMETA(DisplayName = "Scout"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
     Guard       UMETA(DisplayName = "Guard"),
-    Rest        UMETA(DisplayName = "Rest")
+    Child       UMETA(DisplayName = "Child")
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_MemoryEntry
+struct FNPC_ThreatMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    AActor* ThreatActor = nullptr;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float Timestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    FVector LastKnownLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float TimeSinceSeen = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    FString EventTag;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float ThreatScore = 0.0f;
 
-    FNPC_MemoryEntry()
-        : Location(FVector::ZeroVector)
-        , Timestamp(0.f)
-        , ThreatLevel(0.f)
-        , EventTag(TEXT(""))
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    bool bIsActive = false;
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_PatrolPoint
+struct FNPC_DailyTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Patrol")
-    FVector WorldLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Patrol")
-    float WaitDuration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    ENPC_DailyPhase Phase = ENPC_DailyPhase::Morning;
 
-    FNPC_PatrolPoint()
-        : WorldLocation(FVector::ZeroVector)
-        , WaitDuration(2.f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    FName TaskTag = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    float Duration = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    bool bCompleted = false;
 };
 
 UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
@@ -78,77 +98,102 @@ public:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // --- State ---
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    ENPC_BehaviorState CurrentState;
+    // ---- Social Identity ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Identity")
+    ENPC_SocialRole SocialRole = ENPC_SocialRole::Gatherer;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
-    ENPC_DailyRoutine CurrentRoutine;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Identity")
+    FName NPCName = NAME_None;
 
-    // --- Patrol ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    TArray<FNPC_PatrolPoint> PatrolPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Identity")
+    int32 TribeID = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    float PatrolRadius;
+    // ---- Alert State ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Alert")
+    ENPC_AlertLevel AlertLevel = ENPC_AlertLevel::Calm;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    int32 CurrentPatrolIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Alert")
+    float AlertDecayRate = 0.5f;
 
-    // --- Detection ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Detection")
-    float SightRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Alert")
+    float ThreatDetectionRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Detection")
-    float HearingRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Alert")
+    float FleeRadius = 3500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Detection")
-    float FleeThreshold;
+    // ---- Daily Routine ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    ENPC_DailyPhase CurrentPhase = ENPC_DailyPhase::Morning;
 
-    // --- Memory ---
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
-    TArray<FNPC_MemoryEntry> MemoryLog;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Routine")
+    TArray<FNPC_DailyTask> DailySchedule;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Routine")
+    int32 CurrentTaskIndex = 0;
+
+    // ---- Threat Memory ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|Memory")
+    TArray<FNPC_ThreatMemory> ThreatMemories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
-    int32 MaxMemoryEntries;
+    int32 MaxThreatMemories = 5;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
-    float MemoryDecayTime;
+    float MemoryFadeTime = 120.0f;
 
-    // --- Methods ---
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
+    // ---- Survival Stats ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Survival")
+    float Hunger = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void SetDailyRoutine(ENPC_DailyRoutine NewRoutine);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Survival")
+    float Thirst = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Survival")
+    float Fatigue = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Survival")
+    float HungerDrainRate = 0.002f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Survival")
+    float ThirstDrainRate = 0.003f;
+
+    // ---- Public API ----
+    UFUNCTION(BlueprintCallable, Category = "NPC|Alert")
+    void RegisterThreat(AActor* ThreatActor, float ThreatScore);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|Alert")
+    void ClearThreat(AActor* ThreatActor);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|Alert")
+    ENPC_AlertLevel GetAlertLevel() const { return AlertLevel; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|Routine")
+    void AdvanceDailyPhase(ENPC_DailyPhase NewPhase);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|Routine")
+    FNPC_DailyTask GetCurrentTask() const;
+
+    UFUNCTION(BlueprintCallable, Category = "NPC|Routine")
+    bool AdvanceToNextTask();
 
     UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
-    void RecordMemoryEvent(FVector EventLocation, float ThreatLevel, const FString& EventTag);
+    bool HasActiveThreats() const;
 
     UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
-    void PurgeOldMemories(float CurrentTime);
+    FVector GetHighestThreatLocation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Patrol")
-    FVector GetNextPatrolPoint();
+    UFUNCTION(BlueprintCallable, Category = "NPC|Survival")
+    bool IsHungry() const { return Hunger < 0.3f; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Detection")
-    bool IsPlayerInSightRange() const;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Survival")
+    bool IsThirsty() const { return Thirst < 0.3f; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Detection")
-    bool IsThreatNearby(float& OutThreatLevel) const;
-
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
-    ENPC_BehaviorState GetCurrentState() const { return CurrentState; }
+    UFUNCTION(BlueprintCallable, Category = "NPC|Survival")
+    bool IsFatigued() const { return Fatigue > 0.75f; }
 
 private:
-    float StateTimer;
-    float PatrolWaitTimer;
-    bool bWaitingAtPatrolPoint;
-    FVector FleeDestination;
-
-    void TickIdle(float DeltaTime);
-    void TickPatrol(float DeltaTime);
-    void TickFlee(float DeltaTime);
-    void TickAlert(float DeltaTime);
-    void GeneratePatrolPoints();
+    void TickThreatMemories(float DeltaTime);
+    void TickSurvivalStats(float DeltaTime);
+    void EvaluateAlertLevel();
+    void BuildDefaultSchedule();
 };
