@@ -1,41 +1,34 @@
 // TranspersonalGameMode.cpp
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Prehistoric survival game — sets up default pawn, player controller, game state
+// Prehistoric survival game — sets TranspersonalCharacter as default pawn
+// Agent #03 — Core Systems Programmer — PROD_CYCLE_AUTO_20260627_009
 
 #include "TranspersonalGameMode.h"
-#include "TranspersonalCharacter.h"
-#include "TranspersonalGameState.h"
-#include "GameFramework/PlayerController.h"
+#include "Characters/TranspersonalCharacter.h"
 #include "UObject/ConstructorHelpers.h"
+#include "GameFramework/HUD.h"
 
 ATranspersonalGameMode::ATranspersonalGameMode()
 {
-    // Set default pawn to our custom character so the player spawns correctly
+    // Set the default pawn class to our playable character
     DefaultPawnClass = ATranspersonalCharacter::StaticClass();
 
-    // Use the built-in PlayerController — custom controller can be added later
+    // Use default player controller (handles input binding)
     PlayerControllerClass = APlayerController::StaticClass();
 
-    // Use our custom GameState
-    GameStateClass = ATranspersonalGameState::StaticClass();
+    // Use default HUD for now
+    HUDClass = AHUD::StaticClass();
 
-    // HUD class — null for now, UI agent will set this
-    HUDClass = nullptr;
+    unreal::log("TranspersonalGameMode: DefaultPawnClass = ATranspersonalCharacter");
 }
 
 void ATranspersonalGameMode::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: BeginPlay — prehistoric survival world initialized"));
+    UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: BeginPlay — Prehistoric Survival World active"));
 }
 
 void ATranspersonalGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
     UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: InitGame — Map=%s"), *MapName);
-}
-
-APawn* ATranspersonalGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
-{
-    return Super::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
 }
