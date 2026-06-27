@@ -1,24 +1,42 @@
 #include "DinoAnimInstance.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/CharacterMovementComponent.h"
+
 #include "GameFramework/Character.h"
-#include "DrawDebugHelpers.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 UDinoAnimInstance::UDinoAnimInstance()
+    : Speed(0.f)
+    , Direction(0.f)
+    , bIsInAir(false)
+    , bIsAttacking(false)
+    , bIsEating(false)
+    , bIsAlert(false)
+    , LeftFootIKLocation(FVector::ZeroVector)
+    , RightFootIKLocation(FVector::ZeroVector)
+    , PelvisOffset(0.f)
+    , TailSwayAlpha(0.f)
+    , OwnerPawn(nullptr)
+    , MovementComp(nullptr)
+    , PelvisOffsetTarget(0.f)
 {
-    WalkSpeedThreshold   = 50.f;
-    TrotSpeedThreshold   = 200.f;
-    RunSpeedThreshold    = 450.f;
-    SprintSpeedThreshold = 700.f;
-    bEnableFootIK        = true;
-    FootIKTraceDistance  = 100.f;
 }
 
 void UDinoAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
+
     OwnerPawn = TryGetPawnOwner();
+    if (OwnerPawn)
+    {
+        ACharacter* Char = Cast<ACharacter>(OwnerPawn);
+        if (Char)
+        {
+            MovementComp = Char->GetCharacterMovement();
+        }
+    }
 }
 
 void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
@@ -28,113 +46,101 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     if (!OwnerPawn)
     {
         OwnerPawn = TryGetPawnOwner();
-        if (!OwnerPawn) return;
+        return;
     }
 
-    UpdateLocomotionState(DeltaSeconds);
-    UpdateGait();
-
-    if (bEnableFootIK)
-    {
-        UpdateFootIK();
-    }
-}
-
-void UDinoAnimInstance::UpdateLocomotionState(float DeltaSeconds)
-{
-    if (!OwnerPawn) return;
-
+    // ── Locomotion ──────────────────────────────────────────────────────────
     const FVector Velocity = OwnerPawn->GetVelocity();
-    LocomotionState.Speed  = Velocity.Size2D();
-    LocomotionState.bIsMoving = LocomotionState.Speed > 10.f;
+    Speed = Velocity.Size2D();
 
-    // Direction relative to actor forward
-    if (LocomotionState.bIsMoving)
+    // Direction: signed angle between actor forward and velocity
+    if (Speed > 1.f)
     {
-        const FVector VelNorm = Velocity.GetSafeNormal2D();
         const FVector Forward = OwnerPawn->GetActorForwardVector();
-        const FVector Right   = OwnerPawn->GetActorRightVector();
-        LocomotionState.Direction = FMath::RadiansToDegrees(
-            FMath::Atan2(FVector::DotProduct(VelNorm, Right),
-                         FVector::DotProduct(VelNorm, Forward)));
+        const FVector VelNorm = Velocity.GetSafeNormal2D();
+        const float Dot   = FVector::DotProduct(Forward, VelNorm);
+        const FVector Cross = FVector::CrossProduct(Forward, VelNorm);
+        Direction = FMath::RadiansToDegrees(FMath::Atan2(Cross.Z, Dot));
     }
     else
     {
-        LocomotionState.Direction = 0.f;
+        Direction = 0.f;
     }
+
+    // ── Air state ───────────────────────────────────────────────────────────
+    if (MovementComp)
+    {
+        bIsInAir = MovementComp->IsFalling();
+    }
+
+    // ── Tail sway — driven by normalised speed ───────────────────────────────
+    // Assume max dino speed ~1200 cm/s (raptor sprint)
+    TailSwayAlpha = FMath::Clamp(Speed / 1200.f, 0.f, 1.f);
+
+    // ── IK Foot Placement ───────────────────────────────────────────────────
+    if (!bIsInAir)
+    {
+        LeftFootIKLocation  = TraceFootIK(TEXT("foot_l"));
+        RightFootIKLocation = TraceFootIK(TEXT("foot_r"));
+
+        // Pelvis offset: average of foot deltas from capsule base
+        const float OwnerZ = OwnerPawn->GetActorLocation().Z;
+        const float LeftDelta  = LeftFootIKLocation.Z  - OwnerZ;
+        const float RightDelta = RightFootIKLocation.Z - OwnerZ;
+        PelvisOffsetTarget = FMath::Min(LeftDelta, RightDelta);
+    }
+    else
+    {
+        PelvisOffsetTarget = 0.f;
+    }
+
+    // Smooth pelvis offset interpolation
+    PelvisOffset = FMath::FInterpTo(PelvisOffset, PelvisOffsetTarget, DeltaSeconds, 10.f);
 }
 
-void UDinoAnimInstance::UpdateGait()
+FVector UDinoAnimInstance::TraceFootIK(FName SocketName) const
 {
-    if (LocomotionState.bIsDead)
+    if (!OwnerPawn)
     {
-        CurrentGait = EAnim_DinoGait::Dead;
-        return;
+        return FVector::ZeroVector;
     }
-    if (LocomotionState.bIsAttacking)
-    {
-        CurrentGait = EAnim_DinoGait::Attack;
-        return;
-    }
-    if (LocomotionState.bIsRoaring)
-    {
-        CurrentGait = EAnim_DinoGait::Roar;
-        return;
-    }
-
-    const float S = LocomotionState.Speed;
-    if      (S >= SprintSpeedThreshold) CurrentGait = EAnim_DinoGait::Sprint;
-    else if (S >= RunSpeedThreshold)    CurrentGait = EAnim_DinoGait::Run;
-    else if (S >= TrotSpeedThreshold)   CurrentGait = EAnim_DinoGait::Trot;
-    else if (S >= WalkSpeedThreshold)   CurrentGait = EAnim_DinoGait::Walk;
-    else                                CurrentGait = EAnim_DinoGait::Idle;
-}
-
-void UDinoAnimInstance::UpdateFootIK()
-{
-    TraceFootIK(FName("LeftFoot"),  LeftFootIKLocation);
-    TraceFootIK(FName("RightFoot"), RightFootIKLocation);
-}
-
-void UDinoAnimInstance::TraceFootIK(const FName& FootSocketName, FVector& OutIKLocation)
-{
-    if (!OwnerPawn) return;
 
     USkeletalMeshComponent* Mesh = OwnerPawn->FindComponentByClass<USkeletalMeshComponent>();
-    if (!Mesh) return;
+    if (!Mesh)
+    {
+        return OwnerPawn->GetActorLocation();
+    }
 
-    const FVector SocketLoc = Mesh->GetSocketLocation(FootSocketName);
-    const FVector TraceStart = SocketLoc + FVector(0.f, 0.f, FootIKTraceDistance * 0.5f);
-    const FVector TraceEnd   = SocketLoc - FVector(0.f, 0.f, FootIKTraceDistance);
+    const FVector SocketLoc = Mesh->GetSocketLocation(SocketName);
+    const FVector TraceStart = SocketLoc + FVector(0.f, 0.f, 50.f);
+    const FVector TraceEnd   = SocketLoc - FVector(0.f, 0.f, 75.f);
 
-    FHitResult Hit;
+    FHitResult HitResult;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerPawn);
 
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
+    UWorld* World = OwnerPawn->GetWorld();
+    if (World && World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, Params))
     {
-        OutIKLocation = Hit.ImpactPoint;
+        return HitResult.ImpactPoint;
     }
-    else
-    {
-        OutIKLocation = SocketLoc;
-    }
+
+    return SocketLoc;
 }
 
-void UDinoAnimInstance::SetAttacking(bool bAttacking)
+void UDinoAnimInstance::TriggerAttack()
 {
-    LocomotionState.bIsAttacking = bAttacking;
+    bIsAttacking = true;
+    // Montage playback is handled in the Animation Blueprint graph.
+    // This flag drives the state machine transition to the Attack state.
 }
 
-void UDinoAnimInstance::SetRoaring(bool bRoaring)
+void UDinoAnimInstance::StartEating()
 {
-    LocomotionState.bIsRoaring = bRoaring;
+    bIsEating = true;
 }
 
-void UDinoAnimInstance::SetDead(bool bDead)
+void UDinoAnimInstance::StopEating()
 {
-    LocomotionState.bIsDead = bDead;
+    bIsEating = false;
 }
