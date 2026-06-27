@@ -1,286 +1,449 @@
 #include "DinosaurBehaviorComponent.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "Math/UnrealMathUtility.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
 
 UDinosaurBehaviorComponent::UDinosaurBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for AI
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 Hz — sufficient for AI
+
+    // Default species traits (T-Rex baseline)
+    SpeciesTraits.Species             = ENPC_DinoSpecies::TRex;
+    SpeciesTraits.DetectionRadius     = 3000.0f;
+    SpeciesTraits.AttackRadius        = 300.0f;
+    SpeciesTraits.ChaseRadius         = 5000.0f;
+    SpeciesTraits.PatrolRadius        = 3000.0f;
+    SpeciesTraits.WalkSpeed           = 300.0f;
+    SpeciesTraits.RunSpeed            = 700.0f;
+    SpeciesTraits.SprintSpeed         = 1200.0f;
+    SpeciesTraits.bIsPredator         = true;
+    SpeciesTraits.bIsPackHunter       = false;
+    SpeciesTraits.MaxPackSize         = 1;
+    SpeciesTraits.DefaultThreatResponse = ENPC_ThreatResponse::Attack;
+    SpeciesTraits.MemoryDuration      = 30.0f;
+    SpeciesTraits.RoarCooldown        = 15.0f;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BeginPlay
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinosaurBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    CurrentHealth = MaxHealth;
-    CurrentState = ENPC_DinoState::Patrolling;
-
-    // Generate random patrol points around spawn if none defined
-    if (PatrolPoints.Num() == 0 && GetOwner())
+    if (GetOwner())
     {
-        FVector Origin = GetOwner()->GetActorLocation();
-        const int32 NumPoints = 4;
-        for (int32 i = 0; i < NumPoints; ++i)
-        {
-            float Angle = (360.0f / NumPoints) * i;
-            float Rad = FMath::DegreesToRadians(Angle);
-            FNPC_PatrolPoint Pt;
-            Pt.Location = Origin + FVector(
-                FMath::Cos(Rad) * PatrolRadius * 0.5f,
-                FMath::Sin(Rad) * PatrolRadius * 0.5f,
-                0.0f
-            );
-            Pt.WaitTime = FMath::RandRange(1.5f, 4.0f);
-            Pt.bLookAround = (i % 2 == 0);
-            PatrolPoints.Add(Pt);
-        }
+        PatrolOrigin = GetOwner()->GetActorLocation();
     }
+
+    CurrentState  = ENPC_DinoAIState::Idle;
+    PreviousState = ENPC_DinoAIState::Idle;
+    StateEnteredTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TickComponent
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinosaurBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    TickMemory(DeltaTime);
-    TickHunger(DeltaTime);
-    UpdateStateFromPerception();
+    if (CurrentState == ENPC_DinoAIState::Dead)
+    {
+        return;
+    }
+
+    TickThreatMemory(DeltaTime);
+    EvaluateThreatResponse();
 }
 
-// ─── State Management ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// State Machine
+// ─────────────────────────────────────────────────────────────────────────────
 
-void UDinosaurBehaviorComponent::SetState(ENPC_DinoState NewState)
+void UDinosaurBehaviorComponent::SetAIState(ENPC_DinoAIState NewState)
 {
-    if (NewState == CurrentState) return;
+    if (NewState == CurrentState)
+    {
+        return;
+    }
+
+    OnStateExited(CurrentState);
     PreviousState = CurrentState;
-    CurrentState = NewState;
+    CurrentState  = NewState;
+    StateEnteredTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    OnStateEntered(NewState);
 }
 
-// ─── Perception ───────────────────────────────────────────────────────────────
-
-void UDinosaurBehaviorComponent::OnPlayerDetected(AActor* Player, float Distance, bool bIsSprinting)
+void UDinosaurBehaviorComponent::OnStateEntered(ENPC_DinoAIState NewState)
 {
-    if (!Player) return;
-
-    TrackedPlayer = Player;
-    bPlayerDetected = true;
-    bPlayerIsSprinting = bIsSprinting;
-
-    // Update memory
-    PlayerMemory.LastKnownLocation = Player->GetActorLocation();
-    PlayerMemory.TimeSinceLastSeen = 0.0f;
-    PlayerMemory.bIsPlayerTarget = true;
-
-    // Escalate threat based on distance and sprint state
-    float EffectiveSight = GetEffectiveSightRadius();
-    float NormDist = FMath::Clamp(Distance / EffectiveSight, 0.0f, 1.0f);
-
-    if (NormDist < 0.2f || bIsSprinting)
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        PlayerMemory.ThreatLevel = ENPC_ThreatLevel::Critical;
-    }
-    else if (NormDist < 0.5f)
-    {
-        PlayerMemory.ThreatLevel = ENPC_ThreatLevel::High;
-    }
-    else if (NormDist < 0.75f)
-    {
-        PlayerMemory.ThreatLevel = ENPC_ThreatLevel::Medium;
-    }
-    else
-    {
-        PlayerMemory.ThreatLevel = ENPC_ThreatLevel::Low;
+        return;
     }
 
-    // Update range flags
-    bPlayerInChaseRange = (Distance <= ChaseRadius);
-    bPlayerInAttackRange = (Distance <= AttackRadius);
-
-    // State transitions
-    if (bPlayerInAttackRange)
+    ACharacter* OwnerChar = Cast<ACharacter>(Owner);
+    if (!OwnerChar || !OwnerChar->GetCharacterMovement())
     {
-        SetState(ENPC_DinoState::Attacking);
+        return;
     }
-    else if (bPlayerInChaseRange)
-    {
-        SetState(ENPC_DinoState::Chasing);
-    }
-    else
-    {
-        SetState(ENPC_DinoState::Alerted);
-    }
-}
 
-void UDinosaurBehaviorComponent::OnPlayerLost()
-{
-    bPlayerDetected = false;
-    bPlayerInChaseRange = false;
-    bPlayerInAttackRange = false;
-    bPlayerIsSprinting = false;
-    bPlayerIsFleeing = false;
+    UCharacterMovementComponent* Movement = OwnerChar->GetCharacterMovement();
 
-    // Keep memory alive — dino remembers last known position
-    if (CurrentState == ENPC_DinoState::Chasing || CurrentState == ENPC_DinoState::Attacking)
+    switch (NewState)
     {
-        SetState(ENPC_DinoState::Alerted);
+    case ENPC_DinoAIState::Idle:
+    case ENPC_DinoAIState::Resting:
+    case ENPC_DinoAIState::Feeding:
+        Movement->MaxWalkSpeed = SpeciesTraits.WalkSpeed * 0.3f;
+        break;
+
+    case ENPC_DinoAIState::Patrol:
+    case ENPC_DinoAIState::Investigate:
+        Movement->MaxWalkSpeed = SpeciesTraits.WalkSpeed;
+        break;
+
+    case ENPC_DinoAIState::Alert:
+        Movement->MaxWalkSpeed = SpeciesTraits.RunSpeed * 0.5f;
+        break;
+
+    case ENPC_DinoAIState::Chase:
+        Movement->MaxWalkSpeed = SpeciesTraits.RunSpeed;
+        break;
+
+    case ENPC_DinoAIState::Attack:
+        Movement->MaxWalkSpeed = SpeciesTraits.SprintSpeed;
+        break;
+
+    case ENPC_DinoAIState::Flee:
+        Movement->MaxWalkSpeed = SpeciesTraits.SprintSpeed;
+        break;
+
+    case ENPC_DinoAIState::Dead:
+        Movement->MaxWalkSpeed = 0.0f;
+        Movement->DisableMovement();
+        break;
+
+    default:
+        break;
     }
 }
 
-float UDinosaurBehaviorComponent::GetEffectiveSightRadius() const
+void UDinosaurBehaviorComponent::OnStateExited(ENPC_DinoAIState OldState)
 {
-    float Base = PerceptionConfig.SightRadius;
-
-    if (bPlayerIsSprinting)
+    if (OldState == ENPC_DinoAIState::Attack)
     {
-        return Base * PerceptionConfig.SprintDetectionMultiplier;
+        bIsRoaring = false;
     }
-
-    // Herbivores have wider passive sight
-    if (Species == ENPC_DinoSpecies::Brachiosaurus)
-    {
-        return Base * 1.2f;
-    }
-
-    return Base;
 }
 
-// ─── Combat ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Threat Memory
+// ─────────────────────────────────────────────────────────────────────────────
 
-bool UDinosaurBehaviorComponent::CanAttack() const
+void UDinosaurBehaviorComponent::RegisterThreat(AActor* ThreatActor, float ThreatLevel)
 {
-    if (!GetWorld()) return false;
-    float Now = GetWorld()->GetTimeSeconds();
-    return (Now - LastAttackTime) >= AttackCooldown;
-}
-
-void UDinosaurBehaviorComponent::PerformAttack(AActor* Target)
-{
-    if (!Target || !CanAttack()) return;
-
-    LastAttackTime = GetWorld()->GetTimeSeconds();
-
-    // Apply damage via UE5 damage system
-    UGameplayStatics::ApplyDamage(
-        Target,
-        AttackDamage,
-        nullptr,
-        GetOwner(),
-        nullptr
-    );
-}
-
-// ─── Stats ────────────────────────────────────────────────────────────────────
-
-void UDinosaurBehaviorComponent::ApplyDamage(float DamageAmount)
-{
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
-
-    if (CurrentHealth <= 0.0f)
+    if (!ThreatActor)
     {
-        SetState(ENPC_DinoState::Fleeing);
+        return;
     }
-    else if (CurrentHealth / MaxHealth < 0.25f)
+
+    float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    // Update existing entry
+    for (FNPC_DinoMemoryEntry& Entry : ThreatMemory)
     {
-        // Low health — herbivores flee, carnivores may escalate
-        if (Species == ENPC_DinoSpecies::Brachiosaurus || Species == ENPC_DinoSpecies::Triceratops)
+        if (Entry.ThreatActor == ThreatActor)
         {
-            SetState(ENPC_DinoState::Fleeing);
+            Entry.ThreatLevel       = FMath::Max(Entry.ThreatLevel, ThreatLevel);
+            Entry.LastKnownLocation = ThreatActor->GetActorLocation();
+            Entry.TimeStamp         = Now;
+            Entry.bIsActive         = true;
+            return;
         }
     }
+
+    // Add new entry
+    FNPC_DinoMemoryEntry NewEntry;
+    NewEntry.ThreatActor       = ThreatActor;
+    NewEntry.LastKnownLocation = ThreatActor->GetActorLocation();
+    NewEntry.ThreatLevel       = ThreatLevel;
+    NewEntry.TimeStamp         = Now;
+    NewEntry.bIsActive         = true;
+    ThreatMemory.Add(NewEntry);
 }
 
-float UDinosaurBehaviorComponent::GetHealthPercent() const
+void UDinosaurBehaviorComponent::ClearThreat(AActor* ThreatActor)
 {
-    if (MaxHealth <= 0.0f) return 0.0f;
-    return CurrentHealth / MaxHealth;
-}
-
-// ─── State Queries ────────────────────────────────────────────────────────────
-
-bool UDinosaurBehaviorComponent::IsAggressive() const
-{
-    return Species == ENPC_DinoSpecies::TRex
-        || Species == ENPC_DinoSpecies::Raptor;
-}
-
-bool UDinosaurBehaviorComponent::IsPassive() const
-{
-    return Species == ENPC_DinoSpecies::Brachiosaurus;
-}
-
-// ─── Patrol ───────────────────────────────────────────────────────────────────
-
-FVector UDinosaurBehaviorComponent::GetNextPatrolPoint() const
-{
-    if (PatrolPoints.Num() == 0)
+    ThreatMemory.RemoveAll([ThreatActor](const FNPC_DinoMemoryEntry& Entry)
     {
-        return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    }
-    return PatrolPoints[CurrentPatrolIndex].Location;
+        return Entry.ThreatActor == ThreatActor;
+    });
 }
 
-void UDinosaurBehaviorComponent::AdvancePatrolIndex()
+bool UDinosaurBehaviorComponent::HasActiveThreat() const
 {
-    if (PatrolPoints.Num() == 0) return;
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-}
-
-// ─── Private Ticks ────────────────────────────────────────────────────────────
-
-void UDinosaurBehaviorComponent::TickMemory(float DeltaTime)
-{
-    if (!bPlayerDetected && PlayerMemory.bIsPlayerTarget)
+    for (const FNPC_DinoMemoryEntry& Entry : ThreatMemory)
     {
-        PlayerMemory.TimeSinceLastSeen += DeltaTime;
-
-        if (PlayerMemory.TimeSinceLastSeen >= MemoryDuration)
+        if (Entry.bIsActive && Entry.ThreatLevel > 0.0f)
         {
-            // Memory expired — forget player
-            PlayerMemory = FNPC_DinoMemoryEntry();
-            TrackedPlayer = nullptr;
-
-            if (CurrentState == ENPC_DinoState::Alerted)
-            {
-                SetState(ENPC_DinoState::Patrolling);
-            }
+            return true;
         }
     }
+    return false;
 }
 
-void UDinosaurBehaviorComponent::TickHunger(float DeltaTime)
+AActor* UDinosaurBehaviorComponent::GetPrimaryThreat() const
 {
-    Hunger = FMath::Max(0.0f, Hunger - HungerDecayRate * DeltaTime);
+    AActor* BestThreat = nullptr;
+    float   BestLevel  = -1.0f;
 
-    // Starving carnivores become more aggressive — lower chase threshold
-    if (Hunger < 0.2f && IsAggressive())
+    for (const FNPC_DinoMemoryEntry& Entry : ThreatMemory)
     {
-        ChaseRadius = FMath::Min(ChaseRadius * 1.01f, 6000.0f);
-    }
-}
-
-void UDinosaurBehaviorComponent::UpdateStateFromPerception()
-{
-    // If player is detected and we're just patrolling, escalate
-    if (bPlayerDetected && CurrentState == ENPC_DinoState::Patrolling)
-    {
-        if (IsAggressive())
+        if (Entry.bIsActive && Entry.ThreatLevel > BestLevel)
         {
-            SetState(ENPC_DinoState::Chasing);
+            BestLevel  = Entry.ThreatLevel;
+            BestThreat = Entry.ThreatActor;
+        }
+    }
+    return BestThreat;
+}
+
+void UDinosaurBehaviorComponent::TickThreatMemory(float DeltaTime)
+{
+    float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    for (FNPC_DinoMemoryEntry& Entry : ThreatMemory)
+    {
+        float Age = Now - Entry.TimeStamp;
+        if (Age > SpeciesTraits.MemoryDuration)
+        {
+            Entry.bIsActive   = false;
+            Entry.ThreatLevel = 0.0f;
         }
         else
         {
-            SetState(ENPC_DinoState::Alerted);
+            // Decay threat level over time
+            float DecayRate = 1.0f / SpeciesTraits.MemoryDuration;
+            Entry.ThreatLevel = FMath::Max(0.0f, Entry.ThreatLevel - DecayRate * DeltaTime * 10.0f);
         }
     }
 
-    // If fleeing player is detected by aggressive dino — escalate to critical chase
-    if (bPlayerIsFleeing && IsAggressive() && bPlayerDetected)
+    // Remove fully expired entries
+    ThreatMemory.RemoveAll([](const FNPC_DinoMemoryEntry& Entry)
     {
-        if (CurrentState != ENPC_DinoState::Attacking)
+        return !Entry.bIsActive && Entry.ThreatLevel <= 0.0f;
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Threat Evaluation
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinosaurBehaviorComponent::EvaluateThreatResponse()
+{
+    if (!HasActiveThreat())
+    {
+        if (CurrentState == ENPC_DinoAIState::Chase ||
+            CurrentState == ENPC_DinoAIState::Alert ||
+            CurrentState == ENPC_DinoAIState::Investigate)
         {
-            SetState(ENPC_DinoState::Chasing);
+            SetAIState(ENPC_DinoAIState::Patrol);
+        }
+        return;
+    }
+
+    AActor* PrimaryThreat = GetPrimaryThreat();
+    if (!PrimaryThreat || !GetOwner())
+    {
+        return;
+    }
+
+    float DistToThreat = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryThreat->GetActorLocation());
+    FNPC_DinoMemoryEntry* ThreatEntry = nullptr;
+
+    for (FNPC_DinoMemoryEntry& Entry : ThreatMemory)
+    {
+        if (Entry.ThreatActor == PrimaryThreat)
+        {
+            ThreatEntry = &Entry;
+            break;
         }
     }
+
+    if (!ThreatEntry)
+    {
+        return;
+    }
+
+    ENPC_ThreatResponse Response = ClassifyThreat(ThreatEntry->ThreatLevel);
+
+    switch (Response)
+    {
+    case ENPC_ThreatResponse::Ignore:
+        if (CurrentState != ENPC_DinoAIState::Idle)
+        {
+            SetAIState(ENPC_DinoAIState::Idle);
+        }
+        break;
+
+    case ENPC_ThreatResponse::Investigate:
+        if (CurrentState == ENPC_DinoAIState::Idle || CurrentState == ENPC_DinoAIState::Patrol)
+        {
+            SetAIState(ENPC_DinoAIState::Investigate);
+        }
+        break;
+
+    case ENPC_ThreatResponse::Flee:
+        SetAIState(ENPC_DinoAIState::Flee);
+        break;
+
+    case ENPC_ThreatResponse::Attack:
+        if (DistToThreat <= SpeciesTraits.AttackRadius)
+        {
+            SetAIState(ENPC_DinoAIState::Attack);
+        }
+        else if (DistToThreat <= SpeciesTraits.ChaseRadius)
+        {
+            SetAIState(ENPC_DinoAIState::Chase);
+        }
+        else
+        {
+            SetAIState(ENPC_DinoAIState::Alert);
+        }
+        break;
+
+    case ENPC_ThreatResponse::CallPack:
+        BroadcastPackAlert(PrimaryThreat, 5000.0f);
+        SetAIState(ENPC_DinoAIState::Chase);
+        break;
+
+    default:
+        break;
+    }
+}
+
+ENPC_ThreatResponse UDinosaurBehaviorComponent::ClassifyThreat(float ThreatLevel) const
+{
+    if (!SpeciesTraits.bIsPredator)
+    {
+        // Herbivores flee or ignore
+        if (ThreatLevel > 0.7f) return ENPC_ThreatResponse::Flee;
+        if (ThreatLevel > 0.3f) return ENPC_ThreatResponse::Investigate;
+        return ENPC_ThreatResponse::Ignore;
+    }
+
+    // Predators attack or investigate
+    if (ThreatLevel > 0.5f)
+    {
+        if (SpeciesTraits.bIsPackHunter) return ENPC_ThreatResponse::CallPack;
+        return ENPC_ThreatResponse::Attack;
+    }
+    if (ThreatLevel > 0.2f) return ENPC_ThreatResponse::Investigate;
+    return ENPC_ThreatResponse::Ignore;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pack Behavior
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinosaurBehaviorComponent::BroadcastPackAlert(AActor* ThreatActor, float Radius)
+{
+    if (!ThreatActor || !GetOwner() || !GetWorld())
+    {
+        return;
+    }
+
+    FVector Origin = GetOwner()->GetActorLocation();
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), NearbyActors);
+
+    for (AActor* NearbyActor : NearbyActors)
+    {
+        if (NearbyActor == GetOwner())
+        {
+            continue;
+        }
+
+        float Dist = FVector::Dist(Origin, NearbyActor->GetActorLocation());
+        if (Dist > Radius)
+        {
+            continue;
+        }
+
+        UDinosaurBehaviorComponent* PackMember = NearbyActor->FindComponentByClass<UDinosaurBehaviorComponent>();
+        if (PackMember && PackMember->SpeciesTraits.Species == SpeciesTraits.Species)
+        {
+            PackMember->OnPackAlertReceived(ThreatActor, ThreatActor->GetActorLocation());
+        }
+    }
+}
+
+void UDinosaurBehaviorComponent::OnPackAlertReceived(AActor* ThreatActor, FVector ThreatLocation)
+{
+    if (!ThreatActor)
+    {
+        return;
+    }
+
+    RegisterThreat(ThreatActor, 0.8f);
+    SetAIState(ENPC_DinoAIState::Alert);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Patrol
+// ─────────────────────────────────────────────────────────────────────────────
+
+FVector UDinosaurBehaviorComponent::GetNextPatrolPoint()
+{
+    // Generate deterministic patrol points around origin in a polygon pattern
+    const int32 NumPoints = 6;
+    float AngleStep = 360.0f / NumPoints;
+    float Angle     = FMath::DegreesToRadians(PatrolPointIndex * AngleStep);
+
+    float Radius = SpeciesTraits.PatrolRadius * FMath::RandRange(0.5f, 1.0f);
+    FVector Offset(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0f);
+
+    PatrolPointIndex = (PatrolPointIndex + 1) % NumPoints;
+    return PatrolOrigin + Offset;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Roar
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool UDinosaurBehaviorComponent::TryRoar()
+{
+    float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (Now - LastRoarTime < SpeciesTraits.RoarCooldown)
+    {
+        return false;
+    }
+
+    bIsRoaring   = true;
+    LastRoarTime = Now;
+
+    // Auto-clear roar flag after 3 seconds (animation driven)
+    FTimerHandle RoarTimer;
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(RoarTimer, [this]()
+        {
+            bIsRoaring = false;
+        }, 3.0f, false);
+    }
+
+    return true;
 }
