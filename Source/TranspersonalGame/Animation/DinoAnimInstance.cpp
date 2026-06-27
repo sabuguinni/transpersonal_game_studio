@@ -2,23 +2,17 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 
 UDinoAnimInstance::UDinoAnimInstance()
-    : LocomotionState(EAnim_DinoLocomotionState::Idle)
-    , GroundSpeed(0.f)
-    , MovementDirection(0.f)
-    , bIsInAir(false)
-    , bIsAttacking(false)
-    , bIsRoaring(false)
-    , bIsDead(false)
-    , FootIKAlpha(1.f)
-    , LeftFootIKLocation(FVector::ZeroVector)
-    , RightFootIKLocation(FVector::ZeroVector)
-    , OwnerPawn(nullptr)
 {
+    WalkSpeedThreshold   = 50.f;
+    TrotSpeedThreshold   = 200.f;
+    RunSpeedThreshold    = 450.f;
+    SprintSpeedThreshold = 700.f;
+    bEnableFootIK        = true;
+    FootIKTraceDistance  = 100.f;
 }
 
 void UDinoAnimInstance::NativeInitializeAnimation()
@@ -37,112 +31,110 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         if (!OwnerPawn) return;
     }
 
-    // --- Ground speed ---
+    UpdateLocomotionState(DeltaSeconds);
+    UpdateGait();
+
+    if (bEnableFootIK)
+    {
+        UpdateFootIK();
+    }
+}
+
+void UDinoAnimInstance::UpdateLocomotionState(float DeltaSeconds)
+{
+    if (!OwnerPawn) return;
+
     const FVector Velocity = OwnerPawn->GetVelocity();
-    GroundSpeed = Velocity.Size2D();
+    LocomotionState.Speed  = Velocity.Size2D();
+    LocomotionState.bIsMoving = LocomotionState.Speed > 10.f;
 
-    // --- Movement direction (relative to actor forward) ---
-    const FRotator ActorRot = OwnerPawn->GetActorRotation();
-    const FVector LocalVelocity = ActorRot.UnrotateVector(Velocity);
-    MovementDirection = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocity.Y, LocalVelocity.X));
-
-    // --- Air state (Character subclass) ---
-    if (ACharacter* Char = Cast<ACharacter>(OwnerPawn))
+    // Direction relative to actor forward
+    if (LocomotionState.bIsMoving)
     {
-        bIsInAir = Char->GetCharacterMovement()->IsFalling();
+        const FVector VelNorm = Velocity.GetSafeNormal2D();
+        const FVector Forward = OwnerPawn->GetActorForwardVector();
+        const FVector Right   = OwnerPawn->GetActorRightVector();
+        LocomotionState.Direction = FMath::RadiansToDegrees(
+            FMath::Atan2(FVector::DotProduct(VelNorm, Right),
+                         FVector::DotProduct(VelNorm, Forward)));
     }
-
-    // --- Pack AnimData struct ---
-    AnimData.Speed = GroundSpeed;
-    AnimData.Direction = MovementDirection;
-    AnimData.bIsInAir = bIsInAir;
-    AnimData.bIsAttacking = bIsAttacking;
-    AnimData.bIsRoaring = bIsRoaring;
-    AnimData.bIsDead = bIsDead;
-    AnimData.LocomotionState = LocomotionState;
-
-    // --- Resolve locomotion state ---
-    if (!bIsDead)
+    else
     {
-        LocomotionState = ResolveLocomotionState();
+        LocomotionState.Direction = 0.f;
     }
-
-    // --- Foot IK ---
-    UpdateFootIK(DeltaSeconds);
 }
 
-EAnim_DinoLocomotionState UDinoAnimInstance::ResolveLocomotionState() const
+void UDinoAnimInstance::UpdateGait()
 {
-    if (bIsAttacking) return EAnim_DinoLocomotionState::Attack;
-    if (bIsRoaring)   return EAnim_DinoLocomotionState::Roar;
-    if (bIsEating)    return EAnim_DinoLocomotionState::Eat;
-    if (bIsInAir)     return EAnim_DinoLocomotionState::Run; // airborne = sprint
-
-    if (GroundSpeed >= RunSpeedThreshold)  return EAnim_DinoLocomotionState::Run;
-    if (GroundSpeed >= WalkSpeedThreshold) return EAnim_DinoLocomotionState::Walk;
-    return EAnim_DinoLocomotionState::Idle;
-}
-
-void UDinoAnimInstance::TriggerAttack()
-{
-    if (bIsDead) return;
-    bIsAttacking = true;
-    LocomotionState = EAnim_DinoLocomotionState::Attack;
-    // Montage playback is handled by the AnimBlueprint state machine.
-    // Reset flag after montage ends via AnimNotify in BP.
-}
-
-void UDinoAnimInstance::TriggerRoar()
-{
-    if (bIsDead || bIsAttacking) return;
-    bIsRoaring = true;
-    LocomotionState = EAnim_DinoLocomotionState::Roar;
-}
-
-void UDinoAnimInstance::TriggerDeath()
-{
-    bIsDead = true;
-    bIsAttacking = false;
-    bIsRoaring = false;
-    LocomotionState = EAnim_DinoLocomotionState::Death;
-    FootIKAlpha = 0.f; // Disable IK on death
-}
-
-void UDinoAnimInstance::UpdateFootIK(float DeltaSeconds)
-{
-    if (!OwnerPawn || bIsDead)
+    if (LocomotionState.bIsDead)
     {
-        FootIKAlpha = 0.f;
+        CurrentGait = EAnim_DinoGait::Dead;
+        return;
+    }
+    if (LocomotionState.bIsAttacking)
+    {
+        CurrentGait = EAnim_DinoGait::Attack;
+        return;
+    }
+    if (LocomotionState.bIsRoaring)
+    {
+        CurrentGait = EAnim_DinoGait::Roar;
         return;
     }
 
-    // Smoothly enable IK when idle or walking
-    const float TargetAlpha = (GroundSpeed < RunSpeedThreshold) ? 1.f : 0.f;
-    FootIKAlpha = FMath::FInterpTo(FootIKAlpha, TargetAlpha, DeltaSeconds, 5.f);
-
-    if (FootIKAlpha < 0.01f) return;
-
-    LeftFootIKLocation  = TraceFootToGround(TEXT("foot_l"));
-    RightFootIKLocation = TraceFootToGround(TEXT("foot_r"));
+    const float S = LocomotionState.Speed;
+    if      (S >= SprintSpeedThreshold) CurrentGait = EAnim_DinoGait::Sprint;
+    else if (S >= RunSpeedThreshold)    CurrentGait = EAnim_DinoGait::Run;
+    else if (S >= TrotSpeedThreshold)   CurrentGait = EAnim_DinoGait::Trot;
+    else if (S >= WalkSpeedThreshold)   CurrentGait = EAnim_DinoGait::Walk;
+    else                                CurrentGait = EAnim_DinoGait::Idle;
 }
 
-FVector UDinoAnimInstance::TraceFootToGround(const FName& FootSocketName) const
+void UDinoAnimInstance::UpdateFootIK()
 {
-    if (!OwnerPawn) return FVector::ZeroVector;
+    TraceFootIK(FName("LeftFoot"),  LeftFootIKLocation);
+    TraceFootIK(FName("RightFoot"), RightFootIKLocation);
+}
+
+void UDinoAnimInstance::TraceFootIK(const FName& FootSocketName, FVector& OutIKLocation)
+{
+    if (!OwnerPawn) return;
 
     USkeletalMeshComponent* Mesh = OwnerPawn->FindComponentByClass<USkeletalMeshComponent>();
-    if (!Mesh) return FVector::ZeroVector;
+    if (!Mesh) return;
 
-    const FVector FootWorldPos = Mesh->GetSocketLocation(FootSocketName);
-    const FVector TraceStart   = FootWorldPos + FVector(0.f, 0.f, 100.f);
-    const FVector TraceEnd     = FootWorldPos - FVector(0.f, 0.f, 150.f);
+    const FVector SocketLoc = Mesh->GetSocketLocation(FootSocketName);
+    const FVector TraceStart = SocketLoc + FVector(0.f, 0.f, FootIKTraceDistance * 0.5f);
+    const FVector TraceEnd   = SocketLoc - FVector(0.f, 0.f, FootIKTraceDistance);
 
-    FHitResult HitResult;
+    FHitResult Hit;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerPawn);
 
-    const bool bHit = OwnerPawn->GetWorld()->LineTraceSingleByChannel(
-        HitResult, TraceStart, TraceEnd, ECC_WorldStatic, Params);
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    return bHit ? HitResult.ImpactPoint : FootWorldPos;
+    if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
+    {
+        OutIKLocation = Hit.ImpactPoint;
+    }
+    else
+    {
+        OutIKLocation = SocketLoc;
+    }
+}
+
+void UDinoAnimInstance::SetAttacking(bool bAttacking)
+{
+    LocomotionState.bIsAttacking = bAttacking;
+}
+
+void UDinoAnimInstance::SetRoaring(bool bRoaring)
+{
+    LocomotionState.bIsRoaring = bRoaring;
+}
+
+void UDinoAnimInstance::SetDead(bool bDead)
+{
+    LocomotionState.bIsDead = bDead;
 }
