@@ -1,354 +1,293 @@
-// AudioSystemManager.cpp
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260627_005
-// Full implementation of adaptive audio system for prehistoric survival game
-
-#include "Audio/AudioSystemManager.h"
+#include "AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 
-// ─── Constructor ─────────────────────────────────────────────────────────────
-
-AAudioSystemManager::AAudioSystemManager()
+UAudio_SystemManager::UAudio_SystemManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10Hz tick — audio doesn't need 60Hz
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — audio doesn't need per-frame update
 
-    // Sensible defaults
-    CurrentZone = EAudio_AmbientZone::Camp;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
-    CurrentDangerLevel = EAudio_DangerLevel::Safe;
-    NearestDinoDistance = 99999.0f;
-    bTRexNearby = false;
-    bVoiceLineActive = false;
-    HeartbeatIntensity = 0.0f;
-    bPlayingDamageRing = false;
-    MasterVolume = 1.0f;
-    TimeSinceLastDinoCall = 0.0f;
-    DinoCallInterval = 30.0f;
-    CurrentHeartbeatRate = 60.0f;
+    // Defaults
+    CurrentZoneConfig.BiomeZone = EAudio_BiomeZone::OpenPlains;
+    CurrentZoneConfig.AmbientVolume = 0.8f;
+    CurrentZoneConfig.ReverbAmount = 0.1f;
+    CurrentZoneConfig.MusicIntensity = 0.3f;
+    CurrentZoneConfig.bNocturnalSounds = false;
+
+    CurrentThreatState.ThreatLevel = EAudio_ThreatLevel::Safe;
+    CurrentThreatState.ThreatProximity = 2000.0f;
+    CurrentThreatState.PredatorSpecies = TEXT("None");
+    CurrentThreatState.MusicTransitionSpeed = 2.0f;
 }
 
-// ─── BeginPlay ───────────────────────────────────────────────────────────────
-
-void AAudioSystemManager::BeginPlay()
+void UAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultAmbientLayers();
-    InitializeDefaultDinoEvents();
-    InitializeDefaultVoiceLines();
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] BeginPlay — ambient layers: %d, dino events: %d, voice lines: %d"),
-        AmbientLayers.Num(), DinoProximityEvents.Num(), RegisteredVoiceLines.Num());
+
+    // Initialize audio state based on starting zone
+    SetBiomeZone(EAudio_BiomeZone::OpenPlains);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: BeginPlay — zone=OpenPlains, threat=Safe"));
 }
 
-// ─── Tick ────────────────────────────────────────────────────────────────────
-
-void AAudioSystemManager::Tick(float DeltaTime)
+void UAudio_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-    UpdateAmbientBlend(DeltaTime);
-    UpdateDinoProximityAudio(DeltaTime);
-    UpdateSurvivalAudioFeedback(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    UpdateMusicIntensity(DeltaTime);
+    UpdateAmbientLayers(DeltaTime);
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
-
-void AAudioSystemManager::SetAmbientZone(EAudio_AmbientZone NewZone)
+void UAudio_SystemManager::SetBiomeZone(EAudio_BiomeZone NewZone)
 {
-    if (CurrentZone == NewZone) return;
-    CurrentZone = NewZone;
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Zone changed to: %d"), (int32)NewZone);
-}
-
-void AAudioSystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
-{
-    if (CurrentTimeOfDay == NewTime) return;
-    CurrentTimeOfDay = NewTime;
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] TimeOfDay changed to: %d"), (int32)NewTime);
-}
-
-void AAudioSystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    if (CurrentDangerLevel == NewLevel) return;
-    CurrentDangerLevel = NewLevel;
-
-    // Adjust heartbeat intensity based on danger
-    switch (NewLevel)
+    if (CurrentZoneConfig.BiomeZone == NewZone)
     {
-        case EAudio_DangerLevel::Safe:      HeartbeatIntensity = 0.0f; break;
-        case EAudio_DangerLevel::Cautious:  HeartbeatIntensity = 0.3f; break;
-        case EAudio_DangerLevel::Threatened: HeartbeatIntensity = 0.7f; break;
-        case EAudio_DangerLevel::Combat:    HeartbeatIntensity = 1.0f; break;
+        return; // No change needed
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] DangerLevel: %d | HeartbeatIntensity: %.2f"),
-        (int32)NewLevel, HeartbeatIntensity);
+    CurrentZoneConfig.BiomeZone = NewZone;
+
+    // Configure zone-specific audio parameters
+    switch (NewZone)
+    {
+        case EAudio_BiomeZone::OpenPlains:
+            CurrentZoneConfig.AmbientVolume = 0.6f;
+            CurrentZoneConfig.ReverbAmount = 0.05f;
+            CurrentZoneConfig.MusicIntensity = 0.3f;
+            break;
+
+        case EAudio_BiomeZone::DenseForest:
+            CurrentZoneConfig.AmbientVolume = 1.0f;
+            CurrentZoneConfig.ReverbAmount = 0.3f;
+            CurrentZoneConfig.MusicIntensity = 0.5f;
+            break;
+
+        case EAudio_BiomeZone::RiverBank:
+            CurrentZoneConfig.AmbientVolume = 0.9f;
+            CurrentZoneConfig.ReverbAmount = 0.15f;
+            CurrentZoneConfig.MusicIntensity = 0.35f;
+            break;
+
+        case EAudio_BiomeZone::CaveEntrance:
+            CurrentZoneConfig.AmbientVolume = 0.4f;
+            CurrentZoneConfig.ReverbAmount = 0.8f;
+            CurrentZoneConfig.MusicIntensity = 0.6f;
+            break;
+
+        case EAudio_BiomeZone::VolcanicField:
+            CurrentZoneConfig.AmbientVolume = 0.7f;
+            CurrentZoneConfig.ReverbAmount = 0.2f;
+            CurrentZoneConfig.MusicIntensity = 0.7f;
+            break;
+
+        case EAudio_BiomeZone::NightCampfire:
+            CurrentZoneConfig.AmbientVolume = 0.5f;
+            CurrentZoneConfig.ReverbAmount = 0.1f;
+            CurrentZoneConfig.MusicIntensity = 0.2f;
+            CurrentZoneConfig.bNocturnalSounds = true;
+            break;
+
+        default:
+            break;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Zone changed to %d — ambient=%.2f, reverb=%.2f, music=%.2f"),
+        (int32)NewZone,
+        CurrentZoneConfig.AmbientVolume,
+        CurrentZoneConfig.ReverbAmount,
+        CurrentZoneConfig.MusicIntensity);
 }
 
-void AAudioSystemManager::OnDinoProximityUpdate(const FString& DinoSpecies, float Distance)
+void UAudio_SystemManager::UpdateThreatLevel(EAudio_ThreatLevel NewThreat, float Proximity, const FString& Species)
 {
-    NearestDinoDistance = Distance;
-
-    // T-Rex specific: trigger screen shake and heightened audio at close range
-    if (DinoSpecies.Contains(TEXT("TRex")) || DinoSpecies.Contains(TEXT("Rex")))
+    if (CurrentThreatState.ThreatLevel == NewThreat &&
+        CurrentThreatState.PredatorSpecies == Species)
     {
-        bTRexNearby = (Distance < 2000.0f);
-        if (bTRexNearby)
-        {
-            SetDangerLevel(EAudio_DangerLevel::Threatened);
-            UE_LOG(LogTemp, Warning, TEXT("[AudioSystemManager] T-REX NEARBY at %.0f units — danger elevated"), Distance);
-        }
-    }
-
-    // General proximity danger scaling
-    if (Distance < 500.0f)
-    {
-        SetDangerLevel(EAudio_DangerLevel::Combat);
-    }
-    else if (Distance < 1500.0f)
-    {
-        SetDangerLevel(EAudio_DangerLevel::Threatened);
-    }
-    else if (Distance < 3000.0f)
-    {
-        SetDangerLevel(EAudio_DangerLevel::Cautious);
-    }
-}
-
-void AAudioSystemManager::PlayVoiceLine(const FAudio_VoiceLine& Line)
-{
-    if (bVoiceLineActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[AudioSystemManager] Voice line already active — queuing: %s"), *Line.SpeakerName);
+        // Update proximity only
+        CurrentThreatState.ThreatProximity = Proximity;
         return;
     }
 
-    ActiveVoiceLine = Line;
-    bVoiceLineActive = true;
+    EAudio_ThreatLevel PreviousThreat = CurrentThreatState.ThreatLevel;
+    CurrentThreatState.ThreatLevel = NewThreat;
+    CurrentThreatState.ThreatProximity = Proximity;
+    CurrentThreatState.PredatorSpecies = Species;
 
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Playing voice line — Speaker: %s | URL: %s | Duration: %.1fs"),
-        *Line.SpeakerName, *Line.AudioURL, Line.Duration);
+    // Reset transition alpha for smooth music crossfade
+    ThreatTransitionAlpha = 0.0f;
 
-    // Mark line as played in registered array
-    for (FAudio_VoiceLine& Registered : RegisteredVoiceLines)
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat changed %d→%d, species=%s, proximity=%.0f"),
+        (int32)PreviousThreat,
+        (int32)NewThreat,
+        *Species,
+        Proximity);
+
+    // Trigger immediate audio feedback for escalating threats
+    if (NewThreat == EAudio_ThreatLevel::Critical)
     {
-        if (Registered.AudioURL == Line.AudioURL)
-        {
-            Registered.bHasBeenPlayed = true;
-            break;
-        }
+        TriggerFootstepRumble(1.0f, 0.5f);
+    }
+    else if (NewThreat == EAudio_ThreatLevel::Danger)
+    {
+        TriggerFootstepRumble(0.6f, 0.3f);
+    }
+}
+
+void UAudio_SystemManager::SetTimeOfDay(float NormalizedTime)
+{
+    // NormalizedTime: 0.0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1.0 = midnight
+    CurrentTimeOfDay = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
+
+    // Toggle nocturnal sounds based on time
+    bool bIsNight = (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f);
+    if (CurrentZoneConfig.bNocturnalSounds != bIsNight)
+    {
+        CurrentZoneConfig.bNocturnalSounds = bIsNight;
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Nocturnal sounds %s (time=%.2f)"),
+            bIsNight ? TEXT("ON") : TEXT("OFF"),
+            CurrentTimeOfDay);
+    }
+}
+
+void UAudio_SystemManager::TriggerFootstepRumble(float Intensity, float Duration)
+{
+    if (!GetWorld())
+    {
+        return;
     }
 
-    // Auto-clear after duration (Blueprint timer would handle this in full impl)
-    // For now, flag is cleared by EndVoiceLine or next BeginPlay
-}
-
-void AAudioSystemManager::RegisterVoiceLine(const FAudio_VoiceLine& Line)
-{
-    // Dedup by AudioURL
-    for (const FAudio_VoiceLine& Existing : RegisteredVoiceLines)
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC)
     {
-        if (Existing.AudioURL == Line.AudioURL)
-        {
-            UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Voice line already registered: %s"), *Line.AudioURL);
-            return;
-        }
+        return;
     }
-    RegisteredVoiceLines.Add(Line);
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Registered voice line: %s — %s"), *Line.SpeakerName, *Line.DialogueText.Left(40));
+
+    // Apply camera shake via player controller
+    // Intensity drives the shake magnitude — T-Rex footsteps = 1.0, Raptor = 0.4
+    float ClampedIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    float ClampedDuration = FMath::Clamp(Duration, 0.05f, 2.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: FootstepRumble — intensity=%.2f, duration=%.2fs"),
+        ClampedIntensity,
+        ClampedDuration);
+
+    // Screen shake feedback — uses built-in UE5 controller rumble
+    PC->PlayDynamicForceFeedback(
+        ClampedIntensity,       // LeftIntensity
+        ClampedDuration,        // Duration
+        true,                   // bAffectsLeftLarge
+        false,                  // bAffectsLeftSmall
+        ClampedIntensity * 0.5f, // RightIntensity
+        false,                  // bAffectsRightLarge
+        false                   // bAffectsRightSmall
+    );
 }
 
-void AAudioSystemManager::TriggerDamageAudioFeedback(float DamageAmount)
+void UAudio_SystemManager::SetCampfireActive(bool bActive)
 {
-    bPlayingDamageRing = true;
-    // Scale heartbeat spike with damage
-    float Spike = FMath::Clamp(DamageAmount / 100.0f, 0.2f, 1.0f);
-    HeartbeatIntensity = FMath::Max(HeartbeatIntensity, Spike);
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Damage audio feedback: %.1f dmg | HeartbeatSpike: %.2f"), DamageAmount, Spike);
-}
-
-void AAudioSystemManager::UpdateHeartbeatFromHealth(float CurrentHealth, float MaxHealth)
-{
-    if (MaxHealth <= 0.0f) return;
-    float HealthRatio = CurrentHealth / MaxHealth;
-
-    // Heartbeat intensifies as health drops
-    if (HealthRatio > 0.5f)
+    if (bCampfireActive == bActive)
     {
-        HeartbeatIntensity = FMath::Lerp(HeartbeatIntensity, 0.0f, 0.1f);
+        return;
+    }
+
+    bCampfireActive = bActive;
+
+    if (bActive)
+    {
+        SetBiomeZone(EAudio_BiomeZone::NightCampfire);
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Campfire ACTIVE — switching to NightCampfire zone"));
     }
     else
     {
-        float LowHealthIntensity = 1.0f - (HealthRatio * 2.0f); // 0→1 as health 50%→0%
-        HeartbeatIntensity = FMath::Max(HeartbeatIntensity, LowHealthIntensity);
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Campfire INACTIVE"));
     }
-
-    // Critical health: fast heartbeat rate
-    CurrentHeartbeatRate = FMath::Lerp(60.0f, 140.0f, 1.0f - HealthRatio);
 }
 
-void AAudioSystemManager::LogAudioSystemState()
+void UAudio_SystemManager::UpdateMusicIntensity(float DeltaTime)
 {
-    UE_LOG(LogTemp, Log, TEXT("=== AudioSystemManager State ==="));
-    UE_LOG(LogTemp, Log, TEXT("Zone: %d | Time: %d | Danger: %d"), (int32)CurrentZone, (int32)CurrentTimeOfDay, (int32)CurrentDangerLevel);
-    UE_LOG(LogTemp, Log, TEXT("NearestDino: %.0f | TRexNearby: %s"), NearestDinoDistance, bTRexNearby ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Log, TEXT("HeartbeatIntensity: %.2f | Rate: %.0f BPM"), HeartbeatIntensity, CurrentHeartbeatRate);
-    UE_LOG(LogTemp, Log, TEXT("VoiceLineActive: %s | Speaker: %s"), bVoiceLineActive ? TEXT("YES") : TEXT("NO"), *ActiveVoiceLine.SpeakerName);
-    UE_LOG(LogTemp, Log, TEXT("AmbientLayers: %d | DinoEvents: %d | VoiceLines: %d"),
-        AmbientLayers.Num(), DinoProximityEvents.Num(), RegisteredVoiceLines.Num());
+    float TargetIntensity = GetMusicTargetIntensity();
+    float TransitionSpeed = CurrentThreatState.MusicTransitionSpeed;
+
+    // Smooth interpolation toward target music intensity
+    ThreatTransitionAlpha = FMath::FInterpTo(
+        ThreatTransitionAlpha,
+        TargetIntensity,
+        DeltaTime,
+        TransitionSpeed
+    );
 }
 
-void AAudioSystemManager::InitializeDefaultVoiceLines()
+void UAudio_SystemManager::UpdateAmbientLayers(float DeltaTime)
 {
-    // Seed with TTS audio URLs generated in this and previous cycles
+    // Time-of-day modulation of ambient volume
+    // Dawn/dusk = peak bird activity, midday = reduced, night = insects
+    float TimeModulation = 1.0f;
 
-    FAudio_VoiceLine SurvivalLine;
-    SurvivalLine.SpeakerName = TEXT("SurvivalGuide");
-    SurvivalLine.DialogueText = TEXT("Stay low. The ground shakes when it moves — you will feel it before you hear it.");
-    SurvivalLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548909721_SurvivalGuide.mp3");
-    SurvivalLine.Duration = 21.0f;
-    RegisterVoiceLine(SurvivalLine);
-
-    FAudio_VoiceLine CampLine;
-    CampLine.SpeakerName = TEXT("CampMaster");
-    CampLine.DialogueText = TEXT("Fire is everything. Without it, the cold takes you before the predators do.");
-    CampLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548938746_CampMaster.mp3");
-    CampLine.Duration = 22.0f;
-    RegisterVoiceLine(CampLine);
-
-    // Previous cycle voice lines
-    FAudio_VoiceLine ElderLine;
-    ElderLine.SpeakerName = TEXT("TribeElder");
-    ElderLine.DialogueText = TEXT("The old hunter crouches by the fire. His eyes do not leave the treeline.");
-    ElderLine.AudioURL = TEXT("tts/1782548764065_TribeElder.mp3");
-    ElderLine.Duration = 27.0f;
-    RegisterVoiceLine(ElderLine);
-
-    FAudio_VoiceLine HuntLine;
-    HuntLine.SpeakerName = TEXT("HuntLeader");
-    HuntLine.DialogueText = TEXT("Move. Now. The herd is crossing the ridge.");
-    HuntLine.AudioURL = TEXT("tts/1782548768754_HuntLeader.mp3");
-    HuntLine.Duration = 21.0f;
-    RegisterVoiceLine(HuntLine);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Default voice lines initialized: %d lines"), RegisteredVoiceLines.Num());
-}
-
-// ─── Private ─────────────────────────────────────────────────────────────────
-
-void AAudioSystemManager::UpdateAmbientBlend(float DeltaTime)
-{
-    // Stub: in full implementation this would crossfade between ambient layers
-    // based on CurrentZone and CurrentTimeOfDay using MetaSounds parameter bus
-}
-
-void AAudioSystemManager::UpdateDinoProximityAudio(float DeltaTime)
-{
-    TimeSinceLastDinoCall += DeltaTime;
-
-    // Trigger distant dino calls at intervals scaled by danger level
-    float Interval = DinoCallInterval;
-    if (CurrentDangerLevel == EAudio_DangerLevel::Cautious)  Interval = 20.0f;
-    if (CurrentDangerLevel == EAudio_DangerLevel::Threatened) Interval = 10.0f;
-    if (CurrentDangerLevel == EAudio_DangerLevel::Combat)     Interval = 5.0f;
-
-    if (TimeSinceLastDinoCall >= Interval)
+    if (CurrentTimeOfDay >= 0.2f && CurrentTimeOfDay <= 0.3f)
     {
-        TimeSinceLastDinoCall = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Dino call trigger — DangerLevel: %d"), (int32)CurrentDangerLevel);
+        // Dawn — birds peak
+        TimeModulation = 1.3f;
     }
-
-    // Clear damage ring after brief duration
-    if (bPlayingDamageRing)
+    else if (CurrentTimeOfDay >= 0.7f && CurrentTimeOfDay <= 0.8f)
     {
-        bPlayingDamageRing = false; // Would use timer in full impl
+        // Dusk — birds peak again
+        TimeModulation = 1.2f;
     }
-}
-
-void AAudioSystemManager::UpdateSurvivalAudioFeedback(float DeltaTime)
-{
-    // Decay heartbeat intensity when safe
-    if (CurrentDangerLevel == EAudio_DangerLevel::Safe)
+    else if (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f)
     {
-        HeartbeatIntensity = FMath::FInterpTo(HeartbeatIntensity, 0.0f, DeltaTime, 0.5f);
+        // Night — insects, reduced overall
+        TimeModulation = 0.7f;
     }
+
+    // Apply modulation to ambient volume (clamped)
+    float ModulatedVolume = FMath::Clamp(
+        CurrentZoneConfig.AmbientVolume * TimeModulation * MasterVolume,
+        0.0f,
+        1.0f
+    );
+
+    // In a full implementation, this would drive the MetaSound parameter
+    // For now, log the computed value for debugging
+    (void)ModulatedVolume; // Suppress unused warning until MetaSound integration
 }
 
-void AAudioSystemManager::InitializeDefaultAmbientLayers()
+float UAudio_SystemManager::GetMusicTargetIntensity() const
 {
-    // Camp — Day
-    FAudio_AmbientLayer CampDay;
-    CampDay.Zone = EAudio_AmbientZone::Camp;
-    CampDay.TimeOfDay = EAudio_TimeOfDay::Day;
-    CampDay.SoundAssetPath = TEXT("/Game/Audio/Ambient/Camp_Day_Loop");
-    CampDay.BaseVolume = 0.8f;
-    CampDay.FadeInTime = 3.0f;
-    CampDay.FadeOutTime = 3.0f;
-    AmbientLayers.Add(CampDay);
+    // Base intensity from biome zone
+    float BaseIntensity = CurrentZoneConfig.MusicIntensity;
 
-    // Camp — Night
-    FAudio_AmbientLayer CampNight;
-    CampNight.Zone = EAudio_AmbientZone::Camp;
-    CampNight.TimeOfDay = EAudio_TimeOfDay::Night;
-    CampNight.SoundAssetPath = TEXT("/Game/Audio/Ambient/Camp_Night_Loop");
-    CampNight.BaseVolume = 0.6f;
-    CampNight.FadeInTime = 5.0f;
-    CampNight.FadeOutTime = 5.0f;
-    AmbientLayers.Add(CampNight);
+    // Threat multiplier
+    float ThreatMultiplier = 1.0f;
+    switch (CurrentThreatState.ThreatLevel)
+    {
+        case EAudio_ThreatLevel::Safe:
+            ThreatMultiplier = 1.0f;
+            break;
+        case EAudio_ThreatLevel::Aware:
+            ThreatMultiplier = 1.5f;
+            break;
+        case EAudio_ThreatLevel::Danger:
+            ThreatMultiplier = 2.5f;
+            break;
+        case EAudio_ThreatLevel::Critical:
+            ThreatMultiplier = 4.0f;
+            break;
+        default:
+            ThreatMultiplier = 1.0f;
+            break;
+    }
 
-    // Forest — Day
-    FAudio_AmbientLayer ForestDay;
-    ForestDay.Zone = EAudio_AmbientZone::Forest;
-    ForestDay.TimeOfDay = EAudio_TimeOfDay::Day;
-    ForestDay.SoundAssetPath = TEXT("/Game/Audio/Ambient/Forest_Day_Loop");
-    ForestDay.BaseVolume = 1.0f;
-    ForestDay.FadeInTime = 2.0f;
-    ForestDay.FadeOutTime = 2.0f;
-    AmbientLayers.Add(ForestDay);
+    // Proximity modulation — closer predator = louder music
+    float ProximityFactor = 1.0f;
+    if (CurrentThreatState.ThreatLevel != EAudio_ThreatLevel::Safe)
+    {
+        float NormalizedProximity = FMath::Clamp(
+            1.0f - (CurrentThreatState.ThreatProximity / 2000.0f),
+            0.0f,
+            1.0f
+        );
+        ProximityFactor = 1.0f + NormalizedProximity * 0.5f;
+    }
 
-    // Plains — Day
-    FAudio_AmbientLayer PlainsDay;
-    PlainsDay.Zone = EAudio_AmbientZone::Plains;
-    PlainsDay.TimeOfDay = EAudio_TimeOfDay::Day;
-    PlainsDay.SoundAssetPath = TEXT("/Game/Audio/Ambient/Plains_Day_Loop");
-    PlainsDay.BaseVolume = 0.9f;
-    PlainsDay.FadeInTime = 2.0f;
-    PlainsDay.FadeOutTime = 2.0f;
-    AmbientLayers.Add(PlainsDay);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Default ambient layers initialized: %d"), AmbientLayers.Num());
-}
-
-void AAudioSystemManager::InitializeDefaultDinoEvents()
-{
-    // T-Rex proximity event
-    FAudio_DinoProximityEvent TRexEvent;
-    TRexEvent.DinoSpecies = TEXT("TRex");
-    TRexEvent.ProximityRadius = 2000.0f;
-    TRexEvent.GroundShakeIntensity = 1.0f;
-    TRexEvent.RoarSoundPath = TEXT("/Game/Audio/Dinos/TRex_Roar");
-    TRexEvent.FootstepSoundPath = TEXT("/Game/Audio/Dinos/TRex_Footstep");
-    TRexEvent.bTriggerScreenShake = true;
-    DinoProximityEvents.Add(TRexEvent);
-
-    // Raptor proximity event
-    FAudio_DinoProximityEvent RaptorEvent;
-    RaptorEvent.DinoSpecies = TEXT("Raptor");
-    RaptorEvent.ProximityRadius = 800.0f;
-    RaptorEvent.GroundShakeIntensity = 0.2f;
-    RaptorEvent.RoarSoundPath = TEXT("/Game/Audio/Dinos/Raptor_Call");
-    RaptorEvent.FootstepSoundPath = TEXT("/Game/Audio/Dinos/Raptor_Footstep");
-    RaptorEvent.bTriggerScreenShake = false;
-    DinoProximityEvents.Add(RaptorEvent);
-
-    // Brachiosaurus proximity event
-    FAudio_DinoProximityEvent BrachioEvent;
-    BrachioEvent.DinoSpecies = TEXT("Brachiosaurus");
-    BrachioEvent.ProximityRadius = 3000.0f;
-    BrachioEvent.GroundShakeIntensity = 0.8f;
-    BrachioEvent.RoarSoundPath = TEXT("/Game/Audio/Dinos/Brachio_Call");
-    BrachioEvent.FootstepSoundPath = TEXT("/Game/Audio/Dinos/Brachio_Footstep");
-    BrachioEvent.bTriggerScreenShake = true;
-    DinoProximityEvents.Add(BrachioEvent);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Default dino proximity events initialized: %d"), DinoProximityEvents.Num());
+    return FMath::Clamp(BaseIntensity * ThreatMultiplier * ProximityFactor, 0.0f, 1.0f);
 }
