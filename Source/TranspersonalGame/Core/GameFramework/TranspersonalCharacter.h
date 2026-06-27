@@ -4,109 +4,115 @@
 #include "GameFramework/Character.h"
 #include "TranspersonalCharacter.generated.h"
 
-// Forward declarations
-class UCameraComponent;
-class USpringArmComponent;
-class USurvivalComponent;
+USTRUCT(BlueprintType)
+struct FCore_SurvivalStats
+{
+	GENERATED_BODY()
 
-/**
- * ATranspersonalCharacter
- * Player character for the prehistoric survival game.
- * Supports WASD movement, camera boom, jump, sprint,
- * and wires into the SurvivalComponent for hunger/thirst/health/stamina/fear.
- */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Health = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float MaxHealth = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Hunger = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Thirst = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Stamina = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Fear = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	float Temperature = 37.0f;
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATranspersonalCharacter : public ACharacter
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ATranspersonalCharacter();
+	ATranspersonalCharacter();
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+	virtual void Tick(float DeltaTime) override;
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,
+		class AController* EventInstigator, AActor* DamageCauser) override;
 
-    // ── Camera ──────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
-    USpringArmComponent* CameraBoom;
+	// ─── Camera ───────────────────────────────────────────────────────────
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
+		meta = (AllowPrivateAccess = "true"))
+	class USpringArmComponent* CameraBoom;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
-    UCameraComponent* FollowCamera;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
+		meta = (AllowPrivateAccess = "true"))
+	class UCameraComponent* FollowCamera;
 
-    // ── Survival ─────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-    USurvivalComponent* SurvivalComp;
+	// ─── Survival Component ───────────────────────────────────────────────
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival",
+		meta = (AllowPrivateAccess = "true"))
+	class USurvivalComponent* SurvivalComp;
 
-    // ── Movement settings ────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float WalkSpeed;
+	// ─── Survival Stats (direct access for Blueprint) ─────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+	FCore_SurvivalStats SurvivalStats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float SprintSpeed;
+	// ─── Movement flags ───────────────────────────────────────────────────
+	UPROPERTY(BlueprintReadOnly, Category = "Movement",
+		meta = (AllowPrivateAccess = "true"))
+	bool bIsSprinting;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float CrouchSpeed;
+	// ─── Input handlers ───────────────────────────────────────────────────
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void MoveForward(float Value);
 
-    // ── State ────────────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsSprinting;
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void MoveRight(float Value);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsExhausted;
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void TurnAtRate(float Rate);
 
-    // ── Input handlers ───────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void MoveForward(float Value);
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void LookUpAtRate(float Rate);
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void MoveRight(float Value);
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void StartSprint();
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void Turn(float Value);
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void StopSprint();
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void LookUp(float Value);
+	// ─── Survival actions ─────────────────────────────────────────────────
+	UFUNCTION(BlueprintCallable, Category = "Survival")
+	void ApplyDamageToSurvival(float Amount);
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StartSprint();
+	UFUNCTION(BlueprintCallable, Category = "Survival")
+	bool IsAlive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StopSprint();
+	UFUNCTION(BlueprintCallable, Category = "Survival")
+	float GetHealthPercent() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StartCrouch();
+	// ─── Camera settings ──────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	float BaseTurnRate = 45.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StopCrouch();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	float BaseLookUpRate = 45.0f;
 
-    // ── Survival queries (Blueprint-accessible) ───────────────────────────────
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
-    float GetHealth() const;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float WalkSpeed = 300.0f;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
-    float GetHunger() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
-    float GetThirst() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
-    float GetStamina() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
-    float GetFear() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsAlive() const;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float SprintSpeed = 600.0f;
 
 private:
-    // Stamina drain/recovery per second
-    static constexpr float StaminaDrainRate  = 15.0f;
-    static constexpr float StaminaRegenRate  = 8.0f;
-    static constexpr float ExhaustionThreshold = 10.0f;
-
-    void UpdateSprintState(float DeltaTime);
+	void TickSurvivalDecay(float DeltaTime);
 };
