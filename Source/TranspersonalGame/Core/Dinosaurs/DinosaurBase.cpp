@@ -1,242 +1,465 @@
 // DinosaurBase.cpp
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260625_005
-// Full implementation of ADinosaurBase with LOD-aware tick throttling.
-// Key perf feature: distant dinos (>3000u) tick at 2s, very distant (>6000u) at 5s.
+// Core Systems Programmer — Agent #3
+// Full implementation of ADinosaurBase — prehistoric survival game.
 
-#include "DinosaurBase.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Core/Dinosaurs/DinosaurBase.h"
+#include "Components/SphereComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
-// ── Constructor ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Start at 10Hz; UpdateLODTickRate() adjusts this
 
-    // Survival component — tracks hunger/thirst for dinosaurs too
-    SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
+    // ── Detection sphere ───────────────────────────────────────────────────
+    DetectionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DetectionSphere"));
+    DetectionSphere->SetupAttachment(RootComponent);
+    DetectionSphere->SetSphereRadius(1500.f);
+    DetectionSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    DetectionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADinosaurBase::OnDetectionSphereOverlap);
+    DetectionSphere->OnComponentEndOverlap.AddDynamic(this, &ADinosaurBase::OnDetectionSphereEndOverlap);
 
-    // Default capsule size (overridden per species in child BPs)
-    GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+    // ── Territory sphere ───────────────────────────────────────────────────
+    TerritorySphere = CreateDefaultSubobject<USphereComponent>(TEXT("TerritorySphere"));
+    TerritorySphere->SetupAttachment(RootComponent);
+    TerritorySphere->SetSphereRadius(3000.f);
+    TerritorySphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    TerritorySphere->SetVisibility(false);
 
-    // Movement defaults
+    // ── Movement defaults ──────────────────────────────────────────────────
+    GetCharacterMovement()->MaxWalkSpeed = DinoStats.WalkSpeed;
     GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
-    GetCharacterMovement()->MaxWalkSpeed = DinoStats.MovementSpeed;
-    GetCharacterMovement()->JumpZVelocity = 0.0f; // Dinos don't jump by default
-    GetCharacterMovement()->AirControl = 0.0f;
+    GetCharacterMovement()->RotationRate = FRotator(0.f, 180.f, 0.f);
+    GetCharacterMovement()->GravityScale = 1.2f;
+    GetCharacterMovement()->JumpZVelocity = 400.f;
 
-    // Disable controller rotation — movement component handles it
+    // ── Capsule defaults ───────────────────────────────────────────────────
+    GetCapsuleComponent()->SetCapsuleHalfHeight(88.f);
+    GetCapsuleComponent()->SetCapsuleRadius(34.f);
+
+    // ── Rotation ───────────────────────────────────────────────────────────
     bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw = false;
-    bUseControllerRotationRoll = false;
-
-    // Set initial health from stats
-    CurrentHealth = DinoStats.MaxHealth;
+    bUseControllerRotationYaw   = false;
+    bUseControllerRotationRoll  = false;
 }
 
-// ── BeginPlay ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// BeginPlay
+// ─────────────────────────────────────────────────────────────────────────────
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Sync health with stats
-    CurrentHealth = DinoStats.MaxHealth;
+    // Set territory center to spawn location
+    TerritoryCenter = GetActorLocation();
 
-    // Apply movement speed from stats
-    if (GetCharacterMovement())
+    // Apply stats to movement
+    GetCharacterMovement()->MaxWalkSpeed = DinoStats.WalkSpeed;
+    DetectionSphere->SetSphereRadius(DinoStats.DetectionRadius);
+    TerritorySphere->SetSphereRadius(DinoStats.TerritoryRadius);
+
+    // Start hunger drain timer
+    GetWorldTimerManager().SetTimer(
+        HungerTimer,
+        this,
+        &ADinosaurBase::DrainHunger,
+        5.f,   // every 5 seconds
+        true
+    );
+
+    // Auto-start patrol if points are defined
+    if (PatrolPoints.Num() > 0)
     {
-        GetCharacterMovement()->MaxWalkSpeed = DinoStats.MovementSpeed;
+        StartPatrol();
     }
-
-    // Configure SurvivalComponent for dinosaur (slower drain rates than player)
-    if (SurvivalComp)
-    {
-        SurvivalComp->HungerDrainRate = 0.5f;   // Dinos drain hunger slowly
-        SurvivalComp->ThirstDrainRate = 0.3f;   // Dinos are more water-efficient
-        SurvivalComp->StaminaDrainRate = 2.0f;  // Stamina drains during sprinting
-    }
-
-    // Initial LOD tick rate calculation
-    UpdateLODTickRate();
 }
 
-// ── Tick ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Tick
+// ─────────────────────────────────────────────────────────────────────────────
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (IsDead()) return;
+    if (!bIsAlive) return;
 
-    // ── LOD tick accumulator ─────────────────────────────────────────────────
-    // UpdateLODTickRate is expensive — only run it every PlayerCacheInterval seconds
-    PlayerCacheTimer += DeltaTime;
-    if (PlayerCacheTimer >= PlayerCacheInterval)
-    {
-        PlayerCacheTimer = 0.0f;
-        UpdateLODTickRate();
-    }
+    TickAggression(DeltaTime);
 
-    // ── LOD-gated AI update ──────────────────────────────────────────────────
-    LODTickAccumulator += DeltaTime;
-    if (LODTickAccumulator >= CurrentLODTickInterval)
+    if (bIsPatrolling && AggressionState == EDinoAggressionState::Passive)
     {
-        LODTickAccumulator = 0.0f;
-        UpdateBehaviorAI(CurrentLODTickInterval);
+        TickPatrol(DeltaTime);
     }
 }
 
-// ── TakeDamage ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// TakeDamage
+// ─────────────────────────────────────────────────────────────────────────────
 
 float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-                                 AController* EventInstigator, AActor* DamageCauser)
+                                  AController* EventInstigator, AActor* DamageCauser)
 {
-    if (IsDead()) return 0.0f;
+    if (!bIsAlive) return 0.f;
 
-    const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    DinoStats.Health = FMath::Clamp(DinoStats.Health - DamageAmount, 0.f, DinoStats.MaxHealth);
 
-    CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, DinoStats.MaxHealth);
-
-    if (CurrentHealth <= 0.0f)
+    // React to damage — become aggressive
+    if (DamageCauser && AggressionState != EDinoAggressionState::Fleeing)
     {
-        HandleDeath(DamageCauser);
+        if (bIsHerbivore && DinoStats.Health < DinoStats.MaxHealth * 0.3f)
+        {
+            // Herbivores flee when badly hurt
+            SetAggressionState(EDinoAggressionState::Fleeing);
+        }
+        else
+        {
+            AlertToThreat(DamageCauser);
+        }
     }
 
-    return ActualDamage;
-}
-
-// ── SetBehaviorState ─────────────────────────────────────────────────────────
-
-void ADinosaurBase::SetBehaviorState(EPerf_DinoBehaviorState NewState)
-{
-    if (BehaviorState == NewState) return;
-
-    BehaviorState = NewState;
-    OnDinoStateChanged.Broadcast(this, NewState);
-}
-
-// ── GetHealthPercent ─────────────────────────────────────────────────────────
-
-float ADinosaurBase::GetHealthPercent() const
-{
-    if (DinoStats.MaxHealth <= 0.0f) return 0.0f;
-    return CurrentHealth / DinoStats.MaxHealth;
-}
-
-// ── GetDistanceToPlayer ──────────────────────────────────────────────────────
-
-float ADinosaurBase::GetDistanceToPlayer() const
-{
-    if (!CachedPlayerPawn) return TNumericLimits<float>::Max();
-    return FVector::Dist(GetActorLocation(), CachedPlayerPawn->GetActorLocation());
-}
-
-// ── UpdateLODTickRate ─────────────────────────────────────────────────────────
-// Core performance feature: throttle AI tick rate based on distance to player.
-// Near  (<3000u): 0.1s interval  — full AI fidelity
-// Mid   (<6000u): 2.0s interval  — reduced AI updates
-// Far   (<12000u): 5.0s interval — minimal AI (just state machine)
-// Culled (>12000u): AI suspended entirely
-
-void ADinosaurBase::UpdateLODTickRate()
-{
-    // Refresh player pawn cache
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    if (!CachedPlayerPawn || !IsValid(CachedPlayerPawn))
+    if (DinoStats.Health <= 0.f)
     {
-        CachedPlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+        Die();
     }
 
-    const float Dist = GetDistanceToPlayer();
+    return DamageAmount;
+}
 
-    if (Dist > LODConfig.CullDistance)
+// ─────────────────────────────────────────────────────────────────────────────
+// Combat
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::PerformAttack()
+{
+    if (!bIsAlive || !bCanAttack || !CurrentTarget) return;
+
+    if (IsInAttackRange(CurrentTarget))
     {
-        // Suspend AI entirely — set a very long interval
-        CurrentLODTickInterval = 30.0f;
-        SetActorTickEnabled(false);
+        // Apply damage to target
+        UGameplayStatics::ApplyDamage(
+            CurrentTarget,
+            DinoStats.AttackDamage,
+            GetController(),
+            this,
+            UDamageType::StaticClass()
+        );
+
+        // Attack cooldown (1.5 seconds between attacks)
+        bCanAttack = false;
+        GetWorldTimerManager().SetTimer(
+            AttackCooldownTimer,
+            this,
+            &ADinosaurBase::EnableAttack,
+            1.5f,
+            false
+        );
     }
-    else if (Dist > LODConfig.FarLODDistance)
+}
+
+bool ADinosaurBase::IsInAttackRange(AActor* Target) const
+{
+    if (!Target) return false;
+    float Distance = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+    return Distance <= DinoStats.AttackRange;
+}
+
+void ADinosaurBase::EnableAttack()
+{
+    bCanAttack = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggression
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::SetAggressionState(EDinoAggressionState NewState)
+{
+    if (AggressionState == NewState) return;
+
+    AggressionState = NewState;
+
+    switch (NewState)
     {
-        CurrentLODTickInterval = LODConfig.FarTickInterval;
-        SetActorTickEnabled(true);
+    case EDinoAggressionState::Passive:
+        GetCharacterMovement()->MaxWalkSpeed = DinoStats.WalkSpeed;
+        CurrentTarget = nullptr;
+        break;
+
+    case EDinoAggressionState::Alerted:
+        GetCharacterMovement()->MaxWalkSpeed = DinoStats.WalkSpeed * 1.3f;
+        break;
+
+    case EDinoAggressionState::Aggressive:
+        GetCharacterMovement()->MaxWalkSpeed = DinoStats.RunSpeed;
+        break;
+
+    case EDinoAggressionState::Fleeing:
+        GetCharacterMovement()->MaxWalkSpeed = DinoStats.RunSpeed * 1.2f;
+        CurrentTarget = nullptr;
+        break;
+
+    case EDinoAggressionState::Feeding:
+        GetCharacterMovement()->MaxWalkSpeed = 0.f;
+        break;
+
+    case EDinoAggressionState::Sleeping:
+        GetCharacterMovement()->MaxWalkSpeed = 0.f;
+        break;
     }
-    else if (Dist > LODConfig.MediumLODDistance)
+}
+
+void ADinosaurBase::AlertToThreat(AActor* ThreatActor)
+{
+    if (!ThreatActor || !bIsAlive) return;
+
+    CurrentTarget = ThreatActor;
+
+    if (bIsHerbivore)
     {
-        CurrentLODTickInterval = LODConfig.MediumTickInterval;
-        SetActorTickEnabled(true);
+        SetAggressionState(EDinoAggressionState::Fleeing);
     }
     else
     {
-        // Near — full fidelity
-        CurrentLODTickInterval = 0.1f;
-        SetActorTickEnabled(true);
+        SetAggressionState(EDinoAggressionState::Aggressive);
     }
 }
 
-// ── HandleDeath ──────────────────────────────────────────────────────────────
-
-void ADinosaurBase::HandleDeath(AActor* Killer)
+void ADinosaurBase::TickAggression(float DeltaTime)
 {
-    SetBehaviorState(EPerf_DinoBehaviorState::Dead);
+    if (AggressionState == EDinoAggressionState::Passive ||
+        AggressionState == EDinoAggressionState::Sleeping) return;
 
-    // Disable collision and movement
+    if (AggressionState == EDinoAggressionState::Aggressive && CurrentTarget)
+    {
+        // Move toward target
+        FVector Direction = (CurrentTarget->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+        AddMovementInput(Direction, 1.f);
+
+        // Attack if in range
+        PerformAttack();
+
+        // Check if target is too far from territory — give up chase
+        if (!IsInTerritory(CurrentTarget->GetActorLocation()))
+        {
+            SetAggressionState(EDinoAggressionState::Passive);
+        }
+    }
+    else if (AggressionState == EDinoAggressionState::Fleeing)
+    {
+        // Move away from territory center (flee outward)
+        if (CurrentTarget)
+        {
+            FVector FleeDir = (GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
+            AddMovementInput(FleeDir, 1.f);
+        }
+
+        // Return to passive after fleeing far enough
+        float DistFromCenter = FVector::Dist(GetActorLocation(), TerritoryCenter);
+        if (DistFromCenter > DinoStats.TerritoryRadius * 1.5f)
+        {
+            SetAggressionState(EDinoAggressionState::Passive);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Territory
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool ADinosaurBase::IsInTerritory(FVector Location) const
+{
+    return FVector::Dist(Location, TerritoryCenter) <= DinoStats.TerritoryRadius;
+}
+
+void ADinosaurBase::SetTerritoryCenter(FVector Center)
+{
+    TerritoryCenter = Center;
+    TerritorySphere->SetWorldLocation(Center);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Patrol
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::AddPatrolPoint(FVector Location, float WaitTime)
+{
+    FDinoPatrolPoint Point;
+    Point.Location = Location;
+    Point.WaitTime = WaitTime;
+    PatrolPoints.Add(Point);
+}
+
+void ADinosaurBase::StartPatrol()
+{
+    if (PatrolPoints.Num() == 0) return;
+    bIsPatrolling = true;
+    CurrentPatrolIndex = 0;
+    MoveToNextPatrolPoint();
+}
+
+void ADinosaurBase::StopPatrol()
+{
+    bIsPatrolling = false;
+    GetWorldTimerManager().ClearTimer(PatrolWaitTimer);
+}
+
+void ADinosaurBase::TickPatrol(float DeltaTime)
+{
+    if (PatrolPoints.Num() == 0 || !bIsPatrolling) return;
+
+    FVector TargetLocation = PatrolPoints[CurrentPatrolIndex].Location;
+    FVector CurrentLocation = GetActorLocation();
+    float DistToTarget = FVector::Dist2D(CurrentLocation, TargetLocation);
+
+    if (DistToTarget < 100.f)
+    {
+        // Reached patrol point — wait then move to next
+        StopPatrol();
+        float WaitTime = PatrolPoints[CurrentPatrolIndex].WaitTime;
+        GetWorldTimerManager().SetTimer(
+            PatrolWaitTimer,
+            this,
+            &ADinosaurBase::OnPatrolWaitComplete,
+            WaitTime,
+            false
+        );
+    }
+    else
+    {
+        // Move toward patrol point
+        FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
+        AddMovementInput(Direction, 0.7f);
+    }
+}
+
+void ADinosaurBase::MoveToNextPatrolPoint()
+{
+    if (PatrolPoints.Num() == 0) return;
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+    bIsPatrolling = true;
+}
+
+void ADinosaurBase::OnPatrolWaitComplete()
+{
+    MoveToNextPatrolPoint();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Survival
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::DrainHunger()
+{
+    if (!bIsAlive) return;
+
+    DinoStats.Hunger = FMath::Clamp(DinoStats.Hunger - 2.f, 0.f, 100.f);
+
+    if (DinoStats.Hunger <= 0.f && !bIsHerbivore)
+    {
+        // Carnivores become aggressive when starving
+        if (AggressionState == EDinoAggressionState::Passive)
+        {
+            SetAggressionState(EDinoAggressionState::Alerted);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Death
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::Die()
+{
+    if (!bIsAlive) return;
+
+    bIsAlive = false;
+    SetAggressionState(EDinoAggressionState::Passive);
+
+    // Stop all timers
+    GetWorldTimerManager().ClearTimer(HungerTimer);
+    GetWorldTimerManager().ClearTimer(PatrolWaitTimer);
+    GetWorldTimerManager().ClearTimer(AttackCooldownTimer);
+
+    // Enable ragdoll physics
+    GetMesh()->SetSimulatePhysics(true);
+    GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    if (GetCharacterMovement())
-    {
-        GetCharacterMovement()->DisableMovement();
-        GetCharacterMovement()->StopMovementImmediately();
-    }
 
-    // Disable tick — dead dinos don't need updates
-    SetActorTickEnabled(false);
+    // Disable movement
+    GetCharacterMovement()->DisableMovement();
 
-    // Broadcast death event
-    OnDinoDied.Broadcast(this, Killer);
+    // Destroy after 30 seconds (cleanup)
+    SetLifeSpan(30.f);
 }
 
-// ── UpdateBehaviorAI ─────────────────────────────────────────────────────────
-// Minimal stub — full AI implemented by Agent #12 (Combat & Enemy AI).
-// This base class just handles state transitions based on survival stats.
+// ─────────────────────────────────────────────────────────────────────────────
+// Stat Getters
+// ─────────────────────────────────────────────────────────────────────────────
 
-void ADinosaurBase::UpdateBehaviorAI(float DeltaTime)
+float ADinosaurBase::GetHealthPercent() const
 {
-    if (!SurvivalComp) return;
+    if (DinoStats.MaxHealth <= 0.f) return 0.f;
+    return DinoStats.Health / DinoStats.MaxHealth;
+}
 
-    const float Hunger = SurvivalComp->GetStat(EPerf_SurvivalStat::Hunger);
-    const float Fear   = SurvivalComp->GetStat(EPerf_SurvivalStat::Fear);
+// ─────────────────────────────────────────────────────────────────────────────
+// Detection Overlap Callbacks
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Simple state machine — overridden by child classes / BehaviorTree
-    switch (BehaviorState)
+void ADinosaurBase::OnDetectionSphereOverlap(UPrimitiveComponent* OverlappedComp,
+                                               AActor* OtherActor,
+                                               UPrimitiveComponent* OtherComp,
+                                               int32 OtherBodyIndex,
+                                               bool bFromSweep,
+                                               const FHitResult& SweepResult)
+{
+    if (!OtherActor || OtherActor == this || !bIsAlive) return;
+
+    // Check if the overlapping actor is a player (ACharacter that isn't a dinosaur)
+    if (OtherActor->IsA(ACharacter::StaticClass()) && !OtherActor->IsA(ADinosaurBase::StaticClass()))
     {
-    case EPerf_DinoBehaviorState::Idle:
-        if (Hunger < 30.0f)
-        {
-            SetBehaviorState(EPerf_DinoBehaviorState::Foraging);
-        }
-        break;
+        AlertToThreat(OtherActor);
+    }
+}
 
-    case EPerf_DinoBehaviorState::Foraging:
-        if (Hunger > 70.0f)
-        {
-            SetBehaviorState(EPerf_DinoBehaviorState::Patrolling);
-        }
-        break;
+void ADinosaurBase::OnDetectionSphereEndOverlap(UPrimitiveComponent* OverlappedComp,
+                                                  AActor* OtherActor,
+                                                  UPrimitiveComponent* OtherComp,
+                                                  int32 OtherBodyIndex)
+{
+    if (!OtherActor) return;
 
-    case EPerf_DinoBehaviorState::Fleeing:
-        if (Fear < 20.0f)
-        {
-            SetBehaviorState(EPerf_DinoBehaviorState::Idle);
-        }
-        break;
+    if (OtherActor == CurrentTarget)
+    {
+        // Target left detection range — return to passive after a delay
+        CurrentTarget = nullptr;
 
-    default:
-        break;
+        FTimerHandle ReturnTimer;
+        GetWorldTimerManager().SetTimer(
+            ReturnTimer,
+            [this]()
+            {
+                if (!CurrentTarget && bIsAlive)
+                {
+                    SetAggressionState(EDinoAggressionState::Passive);
+                    if (PatrolPoints.Num() > 0)
+                    {
+                        StartPatrol();
+                    }
+                }
+            },
+            5.f,
+            false
+        );
     }
 }
