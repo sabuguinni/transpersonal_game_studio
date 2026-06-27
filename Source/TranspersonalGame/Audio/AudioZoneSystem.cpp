@@ -1,84 +1,53 @@
 // AudioZoneSystem.cpp
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260626_008
-// Full implementation of proximity-based prehistoric audio zones
+// Agent #16 — Audio Agent
+// Cycle: PROD_CYCLE_AUTO_20260627_007
 
 #include "AudioZoneSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 
-// ============================================================
-// AAudio_ZoneActor — Constructor
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// AAudio_ZoneActor
+// ─────────────────────────────────────────────────────────────────────────────
 
 AAudio_ZoneActor::AAudio_ZoneActor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Root trigger sphere
     TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(1500.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
     RootComponent = TriggerSphere;
 
-    // Ambient audio component
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
     AmbientAudioComponent->SetupAttachment(RootComponent);
     AmbientAudioComponent->bAutoActivate = false;
     AmbientAudioComponent->SetVolumeMultiplier(0.0f);
 
-    // Default zone config
-    ZoneConfig.TriggerRadius = 1500.0f;
-    ZoneConfig.BaseVolume = 0.6f;
-    ZoneConfig.FadeInTime = 2.0f;
-    ZoneConfig.FadeOutTime = 3.0f;
-    ZoneConfig.bLooping = true;
-
     bPlayerInZone = false;
     CurrentVolume = 0.0f;
-    TargetVolume = 0.0f;
-    TimeSinceLastRoar = 0.0f;
-    bHasTriggeredOnce = false;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    FadeTimer = 0.0f;
+    bFadingIn = false;
+    bFadingOut = false;
 }
-
-// ============================================================
-// BeginPlay
-// ============================================================
 
 void AAudio_ZoneActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Sync sphere radius from config
-    if (TriggerSphere)
-    {
-        TriggerSphere->SetSphereRadius(ZoneConfig.TriggerRadius);
-    }
+    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
 
-    // Bind overlap events
-    if (TriggerSphere)
-    {
-        TriggerSphere->OnComponentBeginOverlap.AddDynamic(
-            this, &AAudio_ZoneActor::OnPlayerEnterZone_Overlap);
-        TriggerSphere->OnComponentEndOverlap.AddDynamic(
-            this, &AAudio_ZoneActor::OnPlayerExitZone_Overlap);
-    }
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
 
-    // Start ambient audio silently
-    if (AmbientAudioComponent && ZoneConfig.bLooping)
+    if (AmbientSound)
     {
-        AmbientAudioComponent->Play();
-        AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+        AmbientAudioComponent->SetSound(AmbientSound);
     }
-
-    CurrentIntensity = EAudio_IntensityLevel::Silent;
 }
-
-// ============================================================
-// EndPlay
-// ============================================================
 
 void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -89,231 +58,208 @@ void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-// ============================================================
-// Tick — volume blend and roar cooldown
-// ============================================================
-
 void AAudio_ZoneActor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateVolumeBlend(DeltaTime);
-
-    // Roar cooldown timer
-    if (bPlayerInZone && ZoneConfig.ZoneType == EAudio_ZoneType::TRexProximity)
+    if (bFadingIn)
     {
-        TimeSinceLastRoar += DeltaTime;
-        if (TimeSinceLastRoar >= DinosaurProfile.RoarCooldown)
-        {
-            TriggerDinosaurRoar();
-            TimeSinceLastRoar = 0.0f;
-        }
-    }
-}
-
-// ============================================================
-// Volume blend — smooth fade in/out
-// ============================================================
-
-void AAudio_ZoneActor::UpdateVolumeBlend(float DeltaTime)
-{
-    if (FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.001f))
-    {
-        return;
-    }
-
-    float FadeSpeed = bPlayerInZone
-        ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.1f))
-        : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.1f));
-
-    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
-
-    if (AmbientAudioComponent)
-    {
+        FadeTimer += DeltaTime;
+        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeInTime, 0.01f), 0.0f, 1.0f);
+        CurrentVolume = Alpha * ZoneConfig.MaxVolume;
         AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-    }
-}
 
-// ============================================================
-// Player Enter Zone
-// ============================================================
-
-void AAudio_ZoneActor::OnPlayerEnterZone(AActor* Player)
-{
-    if (!Player) return;
-
-    bPlayerInZone = true;
-    TargetVolume = ZoneConfig.MaxVolume;
-
-    // Set intensity based on zone type
-    switch (ZoneConfig.ZoneType)
-    {
-        case EAudio_ZoneType::TRexProximity:
-            SetIntensityLevel(EAudio_IntensityLevel::Critical);
-            break;
-        case EAudio_ZoneType::RaptorStalk:
-            SetIntensityLevel(EAudio_IntensityLevel::Danger);
-            break;
-        case EAudio_ZoneType::DangerAlert:
-            SetIntensityLevel(EAudio_IntensityLevel::Tense);
-            break;
-        case EAudio_ZoneType::JungleAmbience:
-        case EAudio_ZoneType::RiverAmbience:
-            SetIntensityLevel(EAudio_IntensityLevel::Ambient);
-            break;
-        case EAudio_ZoneType::CampfireSafe:
-            SetIntensityLevel(EAudio_IntensityLevel::Whisper);
-            break;
-        default:
-            SetIntensityLevel(EAudio_IntensityLevel::Ambient);
-            break;
-    }
-
-    // One-shot zones fire immediately and don't repeat
-    if (ZoneConfig.bOneShot && !bHasTriggeredOnce)
-    {
-        bHasTriggeredOnce = true;
-        if (AmbientAudioComponent)
+        if (Alpha >= 1.0f)
         {
-            AmbientAudioComponent->Play();
+            bFadingIn = false;
+            FadeTimer = 0.0f;
+        }
+    }
+    else if (bFadingOut)
+    {
+        FadeTimer += DeltaTime;
+        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeOutTime, 0.01f), 0.0f, 1.0f);
+        CurrentVolume = (1.0f - Alpha) * ZoneConfig.MaxVolume;
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+
+        if (Alpha >= 1.0f)
+        {
+            bFadingOut = false;
+            FadeTimer = 0.0f;
+            AmbientAudioComponent->Stop();
         }
     }
 }
 
-// ============================================================
-// Player Exit Zone
-// ============================================================
-
-void AAudio_ZoneActor::OnPlayerExitZone(AActor* Player)
+void AAudio_ZoneActor::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
-    if (!Player) return;
+    CurrentDangerLevel = NewLevel;
 
-    bPlayerInZone = false;
-    TargetVolume = 0.0f;
-    SetIntensityLevel(EAudio_IntensityLevel::Silent);
-}
-
-// ============================================================
-// Set Intensity Level
-// ============================================================
-
-void AAudio_ZoneActor::SetIntensityLevel(EAudio_IntensityLevel NewIntensity)
-{
-    CurrentIntensity = NewIntensity;
-
-    // Adjust volume target based on intensity
-    switch (NewIntensity)
+    // Adjust volume multiplier based on danger — danger zones are louder
+    switch (NewLevel)
     {
-        case EAudio_IntensityLevel::Silent:
-            TargetVolume = 0.0f;
+        case EAudio_DangerLevel::Safe:
+            ZoneConfig.MaxVolume = 0.6f;
             break;
-        case EAudio_IntensityLevel::Whisper:
-            TargetVolume = 0.2f;
+        case EAudio_DangerLevel::Caution:
+            ZoneConfig.MaxVolume = 0.8f;
             break;
-        case EAudio_IntensityLevel::Ambient:
-            TargetVolume = ZoneConfig.BaseVolume;
+        case EAudio_DangerLevel::Danger:
+            ZoneConfig.MaxVolume = 1.0f;
             break;
-        case EAudio_IntensityLevel::Tense:
-            TargetVolume = ZoneConfig.BaseVolume * 1.2f;
-            break;
-        case EAudio_IntensityLevel::Danger:
-            TargetVolume = ZoneConfig.MaxVolume * 0.85f;
-            break;
-        case EAudio_IntensityLevel::Critical:
-            TargetVolume = ZoneConfig.MaxVolume;
+        case EAudio_DangerLevel::Critical:
+            ZoneConfig.MaxVolume = 1.2f;
             break;
     }
 }
 
-// ============================================================
-// Trigger Dinosaur Roar
-// ============================================================
-
-void AAudio_ZoneActor::TriggerDinosaurRoar()
+void AAudio_ZoneActor::FadeAudioIn()
 {
-    // In a full implementation this would play a MetaSound cue
-    // For now we log the roar event for Blueprint wiring
-    UE_LOG(LogTemp, Warning, TEXT("AudioZone: %s ROAR triggered — Freesound ID %d"),
-        *GetActorLabel(), DinosaurProfile.FreesoundRoarID);
-}
-
-// ============================================================
-// Get Distance To Player
-// ============================================================
-
-float AAudio_ZoneActor::GetDistanceToPlayer() const
-{
-    UWorld* World = GetWorld();
-    if (!World) return TNumericLimits<float>::Max();
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn()) return TNumericLimits<float>::Max();
-
-    return FVector::Dist(GetActorLocation(), PC->GetPawn()->GetActorLocation());
-}
-
-// ============================================================
-// Preview Zone In Editor (CallInEditor)
-// ============================================================
-
-void AAudio_ZoneActor::PreviewZoneInEditor()
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioZone Preview — Type: %d | Radius: %.0f | Volume: %.2f"),
-        (int32)ZoneConfig.ZoneType, ZoneConfig.TriggerRadius, ZoneConfig.BaseVolume);
-}
-
-// ============================================================
-// Overlap event stubs (bound in BeginPlay via AddDynamic)
-// These are private helpers — not exposed to Blueprint
-// ============================================================
-
-// NOTE: OnComponentBeginOverlap signature requires these exact params.
-// We define them as private methods and bind them in BeginPlay.
-// The public OnPlayerEnterZone/OnPlayerExitZone are the Blueprint-callable versions.
-
-// (Overlap binding is done via lambda-style AddDynamic in BeginPlay above)
-// The actual UFUNCTION overlap callbacks are defined inline here:
-
-// ============================================================
-// UAudio_PrehistoricSoundManager — Constructor
-// ============================================================
-
-UAudio_PrehistoricSoundManager::UAudio_PrehistoricSoundManager()
-{
-    GlobalThreatLevel = EAudio_IntensityLevel::Ambient;
-    MasterVolume = 1.0f;
-    MusicVolume = 0.7f;
-    SFXVolume = 1.0f;
-    VoiceVolume = 1.0f;
-}
-
-// ============================================================
-// Update Global Threat Level
-// ============================================================
-
-void UAudio_PrehistoricSoundManager::UpdateGlobalThreatLevel(EAudio_IntensityLevel NewLevel)
-{
-    GlobalThreatLevel = NewLevel;
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricSoundManager: GlobalThreatLevel -> %d"), (int32)NewLevel);
-}
-
-// ============================================================
-// Register Dinosaur Profile
-// ============================================================
-
-void UAudio_PrehistoricSoundManager::RegisterDinosaurProfile(FAudio_DinosaurSoundProfile Profile)
-{
-    // Check for duplicate species
-    for (const FAudio_DinosaurSoundProfile& Existing : RegisteredDinosaurProfiles)
+    if (!AmbientAudioComponent->IsPlaying())
     {
-        if (Existing.DinosaurSpecies == Profile.DinosaurSpecies)
+        AmbientAudioComponent->Play();
+    }
+    bFadingIn = true;
+    bFadingOut = false;
+    FadeTimer = 0.0f;
+}
+
+void AAudio_ZoneActor::FadeAudioOut()
+{
+    bFadingOut = true;
+    bFadingIn = false;
+    FadeTimer = 0.0f;
+}
+
+void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+                                              bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar == UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
+    {
+        bPlayerInZone = true;
+        FadeAudioIn();
+    }
+}
+
+void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+                                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (PlayerChar && PlayerChar == UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
+    {
+        bPlayerInZone = false;
+        FadeAudioOut();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AAudio_AdaptiveMusicManager
+// ─────────────────────────────────────────────────────────────────────────────
+
+AAudio_AdaptiveMusicManager::AAudio_AdaptiveMusicManager()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
+    MusicComponent->bAutoActivate = false;
+    RootComponent = MusicComponent;
+
+    GlobalDangerLevel = EAudio_DangerLevel::Safe;
+    PreviousDangerLevel = EAudio_DangerLevel::Safe;
+    TransitionTimer = 0.0f;
+    bTransitioning = false;
+    MusicTransitionTime = 3.0f;
+}
+
+void AAudio_AdaptiveMusicManager::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Start with exploration music if assigned
+    if (ExplorationMusic)
+    {
+        MusicComponent->SetSound(ExplorationMusic);
+        MusicComponent->SetVolumeMultiplier(0.7f);
+        MusicComponent->Play();
+    }
+}
+
+void AAudio_AdaptiveMusicManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bTransitioning)
+    {
+        TransitionTimer += DeltaTime;
+        float Alpha = FMath::Clamp(TransitionTimer / FMath::Max(MusicTransitionTime, 0.01f), 0.0f, 1.0f);
+
+        // Fade out old track in first half, fade in new track in second half
+        if (Alpha < 0.5f)
         {
-            UE_LOG(LogTemp, Warning, TEXT("PrehistoricSoundManager: Profile for %s already registered"),
-                *Profile.DinosaurSpecies.ToString());
-            return;
+            float FadeOut = 1.0f - (Alpha * 2.0f);
+            MusicComponent->SetVolumeMultiplier(FadeOut * 0.7f);
+        }
+        else
+        {
+            float FadeIn = (Alpha - 0.5f) * 2.0f;
+            MusicComponent->SetVolumeMultiplier(FadeIn * 0.7f);
+        }
+
+        if (Alpha >= 1.0f)
+        {
+            bTransitioning = false;
+            TransitionTimer = 0.0f;
         }
     }
-    RegisteredDinosaurProfiles.Add(Profile);
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricSoundManager: Registered audio profile for %s"),
-        *Profile.DinosaurSpecies.ToString());
+}
+
+void AAudio_AdaptiveMusicManager::SetGlobalDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    if (NewLevel == GlobalDangerLevel) return;
+
+    PreviousDangerLevel = GlobalDangerLevel;
+    GlobalDangerLevel = NewLevel;
+
+    USoundBase* TargetTrack = nullptr;
+
+    switch (NewLevel)
+    {
+        case EAudio_DangerLevel::Safe:
+            TargetTrack = ExplorationMusic;
+            break;
+        case EAudio_DangerLevel::Caution:
+            TargetTrack = NightMusic;
+            break;
+        case EAudio_DangerLevel::Danger:
+            TargetTrack = DangerMusic;
+            break;
+        case EAudio_DangerLevel::Critical:
+            TargetTrack = CombatMusic;
+            break;
+    }
+
+    if (TargetTrack)
+    {
+        TransitionToTrack(TargetTrack);
+    }
+}
+
+void AAudio_AdaptiveMusicManager::TransitionToTrack(USoundBase* NewTrack)
+{
+    if (!NewTrack) return;
+
+    MusicComponent->SetSound(NewTrack);
+    if (!MusicComponent->IsPlaying())
+    {
+        MusicComponent->Play();
+    }
+
+    bTransitioning = true;
+    TransitionTimer = 0.0f;
 }
