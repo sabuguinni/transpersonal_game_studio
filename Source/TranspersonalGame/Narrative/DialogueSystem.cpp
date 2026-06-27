@@ -1,167 +1,146 @@
+// DialogueSystem.cpp
+// Agent #15 — Narrative & Dialogue
+// Implementation of dialogue trigger zones for prehistoric survival NPCs
+
 #include "DialogueSystem.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
-
-// ============================================================
-// UNarr_DialogueComponent
-// ============================================================
-
-UNarr_DialogueComponent::UNarr_DialogueComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    bSequenceActive = false;
-    ActiveSequenceIndex = -1;
-    CurrentLineIndex = 0;
-}
-
-void UNarr_DialogueComponent::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-void UNarr_DialogueComponent::TriggerSequence(FName SequenceID)
-{
-    for (int32 i = 0; i < DialogueSequences.Num(); ++i)
-    {
-        FNarr_DialogueSequence& Seq = DialogueSequences[i];
-        if (Seq.SequenceID == SequenceID)
-        {
-            if (Seq.bTriggeredOnce)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence %s already triggered once — skipping."), *SequenceID.ToString());
-                return;
-            }
-            ActiveSequenceID = SequenceID;
-            ActiveSequenceIndex = i;
-            CurrentLineIndex = 0;
-            bSequenceActive = true;
-            UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Sequence %s started (%d lines)."), *SequenceID.ToString(), Seq.Lines.Num());
-            return;
-        }
-    }
-    UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence %s not found."), *SequenceID.ToString());
-}
-
-void UNarr_DialogueComponent::AdvanceLine()
-{
-    if (!bSequenceActive || ActiveSequenceIndex < 0)
-    {
-        return;
-    }
-
-    FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= Seq.Lines.Num())
-    {
-        EndSequence();
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Line %d/%d — %s: %s"),
-            CurrentLineIndex + 1,
-            Seq.Lines.Num(),
-            *Seq.Lines[CurrentLineIndex].SpeakerName,
-            *Seq.Lines[CurrentLineIndex].LineText);
-    }
-}
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
-{
-    if (!bSequenceActive || ActiveSequenceIndex < 0)
-    {
-        return FNarr_DialogueLine();
-    }
-
-    const FNarr_DialogueSequence& Seq = DialogueSequences[ActiveSequenceIndex];
-    if (Seq.Lines.IsValidIndex(CurrentLineIndex))
-    {
-        return Seq.Lines[CurrentLineIndex];
-    }
-    return FNarr_DialogueLine();
-}
-
-bool UNarr_DialogueComponent::IsSequenceActive() const
-{
-    return bSequenceActive;
-}
-
-void UNarr_DialogueComponent::EndSequence()
-{
-    if (ActiveSequenceIndex >= 0 && ActiveSequenceIndex < DialogueSequences.Num())
-    {
-        DialogueSequences[ActiveSequenceIndex].bTriggeredOnce = true;
-    }
-    bSequenceActive = false;
-    ActiveSequenceIndex = -1;
-    CurrentLineIndex = 0;
-    ActiveSequenceID = NAME_None;
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Sequence ended."));
-}
-
-// ============================================================
-// ANarr_DialogueTrigger
-// ============================================================
+#include "TimerManager.h"
 
 ANarr_DialogueTrigger::ANarr_DialogueTrigger()
 {
     PrimaryActorTick.bCanEverTick = true;
-    TriggerRadius = 400.0f;
-    bTriggerOnce = true;
-    bHasTriggered = false;
-    CachedPlayer = nullptr;
+
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    RootComponent = TriggerSphere;
+
+    TriggerRadius = 350.0f;
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
 }
 
 void ANarr_DialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
-    CachedPlayer = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnPlayerEnterRange);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnPlayerExitRange);
 }
 
 void ANarr_DialogueTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bHasTriggered && bTriggerOnce)
-    {
-        return;
-    }
+    if (!bDialogueActive) return;
+    if (DialogueSequence.Lines.Num() == 0) return;
+    if (CurrentLineIndex >= DialogueSequence.Lines.Num()) return;
 
-    if (!CachedPlayer)
+    LineTimer -= DeltaTime;
+    if (LineTimer <= 0.0f)
     {
-        CachedPlayer = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        return;
-    }
-
-    float Dist = FVector::Dist(GetActorLocation(), CachedPlayer->GetActorLocation());
-    if (Dist <= TriggerRadius)
-    {
-        OnPlayerEnterRange();
+        AdvanceLineInternal();
     }
 }
 
-void ANarr_DialogueTrigger::OnPlayerEnterRange()
+void ANarr_DialogueTrigger::OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (bHasTriggered && bTriggerOnce)
+    if (!OtherActor) return;
+
+    // Only trigger for player character
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    TriggerDialogue(OtherActor);
+}
+
+void ANarr_DialogueTrigger::OnPlayerExitRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    // Dialogue continues even if player walks away — realistic behaviour
+    // Only stop if sequence is repeatable and player leaves mid-sequence
+    if (DialogueSequence.bRepeatable && bDialogueActive)
     {
+        // Let current line finish, then stop
+        bDialogueActive = false;
+    }
+}
+
+void ANarr_DialogueTrigger::TriggerDialogue(AActor* PlayerActor)
+{
+    if (!PlayerActor) return;
+
+    // Don't replay non-repeatable sequences
+    if (DialogueSequence.bHasBeenPlayed && !DialogueSequence.bRepeatable) return;
+    if (bDialogueActive) return;
+    if (DialogueSequence.Lines.Num() == 0) return;
+
+    bDialogueActive = true;
+    CurrentLineIndex = 0;
+
+    // Set timer for first line
+    const FNarr_DialogueLine& FirstLine = DialogueSequence.Lines[0];
+    LineTimer = FirstLine.DisplayDuration > 0.0f ? FirstLine.DisplayDuration : 4.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue started: %s — '%s'"),
+        *DialogueSequence.SequenceID.ToString(),
+        *FirstLine.SpeakerName);
+}
+
+void ANarr_DialogueTrigger::AdvanceLine()
+{
+    AdvanceLineInternal();
+}
+
+void ANarr_DialogueTrigger::AdvanceLineInternal()
+{
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= DialogueSequence.Lines.Num())
+    {
+        // Sequence complete
+        bDialogueActive = false;
+        DialogueSequence.bHasBeenPlayed = true;
+        CurrentLineIndex = 0;
+        LineTimer = 0.0f;
+
+        UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue sequence complete: %s"),
+            *DialogueSequence.SequenceID.ToString());
         return;
     }
 
-    bHasTriggered = true;
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger: Player entered range — firing sequence %s"), *DialogueSequenceID.ToString());
+    const FNarr_DialogueLine& NextLine = DialogueSequence.Lines[CurrentLineIndex];
+    LineTimer = NextLine.DisplayDuration > 0.0f ? NextLine.DisplayDuration : 4.0f;
 
-    // Broadcast to any UNarr_DialogueComponent in the level
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Line %d: %s — '%s'"),
+        CurrentLineIndex,
+        *NextLine.SpeakerName,
+        *NextLine.LineText);
+}
 
-    for (AActor* Actor : AllActors)
-    {
-        UNarr_DialogueComponent* DC = Actor->FindComponentByClass<UNarr_DialogueComponent>();
-        if (DC)
-        {
-            DC->TriggerSequence(DialogueSequenceID);
-            break;
-        }
-    }
+bool ANarr_DialogueTrigger::IsDialogueActive() const
+{
+    return bDialogueActive;
+}
+
+FNarr_DialogueLine ANarr_DialogueTrigger::GetCurrentLine() const
+{
+    if (!bDialogueActive || DialogueSequence.Lines.Num() == 0) return FNarr_DialogueLine();
+    if (CurrentLineIndex < 0 || CurrentLineIndex >= DialogueSequence.Lines.Num()) return FNarr_DialogueLine();
+    return DialogueSequence.Lines[CurrentLineIndex];
+}
+
+void ANarr_DialogueTrigger::ResetDialogue()
+{
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
+    DialogueSequence.bHasBeenPlayed = false;
 }
