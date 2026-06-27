@@ -8,21 +8,21 @@
 #include "Engine/PostProcessVolume.h"
 #include "CretaceousLightingManager.generated.h"
 
-/**
- * Lighting preset for different times of day / weather conditions.
- * All types prefixed with Light_ per project naming convention.
- */
+// ============================================================
+// LIGHTING ENUMS — prefixed Light_ to avoid collision
+// ============================================================
+
 UENUM(BlueprintType)
 enum class ELight_TimeOfDay : uint8
 {
     Dawn        UMETA(DisplayName = "Dawn"),
     Morning     UMETA(DisplayName = "Morning"),
     Midday      UMETA(DisplayName = "Midday"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
     GoldenHour  UMETA(DisplayName = "Golden Hour"),
     Dusk        UMETA(DisplayName = "Dusk"),
     Night       UMETA(DisplayName = "Night"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Stormy      UMETA(DisplayName = "Stormy")
+    Midnight    UMETA(DisplayName = "Midnight")
 };
 
 UENUM(BlueprintType)
@@ -31,19 +31,22 @@ enum class ELight_WeatherState : uint8
     Clear       UMETA(DisplayName = "Clear"),
     PartlyCloudy UMETA(DisplayName = "Partly Cloudy"),
     Overcast    UMETA(DisplayName = "Overcast"),
+    Stormy      UMETA(DisplayName = "Stormy"),
     Rain        UMETA(DisplayName = "Rain"),
-    HeavyRain   UMETA(DisplayName = "Heavy Rain"),
-    Fog         UMETA(DisplayName = "Fog"),
-    Storm       UMETA(DisplayName = "Storm")
+    HeavyRain   UMETA(DisplayName = "Heavy Rain")
 };
 
+// ============================================================
+// LIGHTING PRESET STRUCT
+// ============================================================
+
 USTRUCT(BlueprintType)
-struct FLight_DayPhaseSettings
+struct FLight_DayPreset
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunPitchDegrees = -25.0f;
+    float SunPitchDegrees = -30.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
     float SunYawDegrees = 45.0f;
@@ -52,58 +55,27 @@ struct FLight_DayPhaseSettings
     float SunIntensity = 8.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.88f, 0.65f, 1.0f);
+    FLinearColor SunColor = FLinearColor(1.0f, 0.82f, 0.55f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SkyLightIntensity = 2.5f;
+    float SkyLightIntensity = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float FogDensity = 0.018f;
+    float FogDensity = 0.025f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor FogColor = FLinearColor(0.55f, 0.72f, 0.85f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float FogMaxOpacity = 0.88f;
+    FLinearColor FogColor = FLinearColor(0.72f, 0.58f, 0.42f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
     bool bVolumetricFog = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float IndirectLightingIntensity = 1.8f;
+    FLight_DayPreset() {}
 };
 
-USTRUCT(BlueprintType)
-struct FLight_WeatherSettings
-{
-    GENERATED_BODY()
+// ============================================================
+// MAIN LIGHTING MANAGER ACTOR
+// ============================================================
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    ELight_WeatherState WeatherState = ELight_WeatherState::Clear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float CloudCoverage = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float RainfallIntensity = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float ThunderProbability = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float TransitionDurationSeconds = 30.0f;
-};
-
-/**
- * ACretaceousLightingManager
- *
- * Manages the full dynamic lighting stack for the Cretaceous prehistoric world.
- * Controls day/night cycle, weather transitions, Lumen GI, volumetric fog,
- * and post-process grading. Designed as a singleton actor placed in MinPlayableMap.
- *
- * Architecture: Lighting & Atmosphere Agent (#08)
- * Dependency: Placed in world by level designer / UE5 Python setup script.
- */
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Cretaceous Lighting Manager"))
 class TRANSPERSONALGAME_API ACretaceousLightingManager : public AActor
 {
@@ -112,105 +84,103 @@ class TRANSPERSONALGAME_API ACretaceousLightingManager : public AActor
 public:
     ACretaceousLightingManager();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-public:
-    // ── Time of Day ──────────────────────────────────────────────────────────
+    // ---- Day/Night Cycle ----
 
-    /** Current time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    float TimeOfDayNormalized = 0.35f; // Default: morning
+    bool bEnableDayNightCycle = true;
 
-    /** Speed multiplier for day/night cycle (1.0 = real-time, 60.0 = 1 min/day) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float CurrentHourOfDay = 14.5f;  // Default: golden hour afternoon
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle", meta = (ClampMin = "0.1", ClampMax = "120.0"))
+    float DayDurationMinutes = 30.0f;  // Real-time minutes per in-game day
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    float DayCycleSpeed = 60.0f;
+    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::GoldenHour;
 
-    /** Whether the day/night cycle is actively running */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day/Night Cycle")
-    bool bDayCycleActive = true;
-
-    /** Current discrete time-of-day phase (computed from TimeOfDayNormalized) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Day/Night Cycle")
-    ELight_TimeOfDay CurrentTimePhase = ELight_TimeOfDay::GoldenHour;
-
-    // ── Weather ──────────────────────────────────────────────────────────────
+    // ---- Weather ----
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    FLight_WeatherSettings CurrentWeather;
+    ELight_WeatherState CurrentWeather = ELight_WeatherState::Clear;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    FLight_WeatherSettings TargetWeather;
+    bool bEnableWeatherTransitions = true;
 
-    // ── Light References ─────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherTransitionSpeed = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
-    ADirectionalLight* SunLight = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
-    ASkyLight* SkyLightActor = nullptr;
+    // ---- Light References ----
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
-    AExponentialHeightFog* FogActor = nullptr;
+    TObjectPtr<ADirectionalLight> SunActor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
-    APostProcessVolume* PostProcessVolume = nullptr;
+    TObjectPtr<ASkyLight> SkyLightActor;
 
-    // ── Preset Settings ──────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
+    TObjectPtr<AExponentialHeightFog> FogActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    FLight_DayPhaseSettings GoldenHourSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light References")
+    TObjectPtr<APostProcessVolume> PostProcessActor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    FLight_DayPhaseSettings MiddaySettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    FLight_DayPhaseSettings DawnSettings;
+    // ---- Presets ----
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    FLight_DayPhaseSettings NightSettings;
+    FLight_DayPreset GoldenHourPreset;
 
-    // ── Blueprint-callable API ───────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    FLight_DayPreset MiddayPreset;
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void ApplyTimeOfDayPreset(ELight_TimeOfDay Phase);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    FLight_DayPreset NightPreset;
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void TransitionToWeather(ELight_WeatherState NewWeather, float TransitionSeconds);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    FLight_DayPreset DawnPreset;
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetTimeOfDay(float NormalizedTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    ELight_TimeOfDay GetCurrentTimePhase() const { return CurrentTimePhase; }
+    // ---- Blueprint Functions ----
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    float GetSunPitchForTime(float NormalizedTime) const;
+    void SetTimeOfDay(float HourOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    FLinearColor GetSkyColorForTime(float NormalizedTime) const;
+    void SetWeatherState(ELight_WeatherState NewWeather);
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void AutoDiscoverLightActors();
+    void ApplyLightingPreset(const FLight_DayPreset& Preset);
 
-    UFUNCTION(CallInEditor, Category = "Lighting|Debug")
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    ELight_TimeOfDay GetTimeOfDayEnum(float Hour) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    float GetSunPitchForHour(float Hour) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    FLinearColor GetSunColorForHour(float Hour) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting")
+    void AutoFindLightActors();
+
+    UFUNCTION(CallInEditor, Category = "Lighting")
     void ApplyGoldenHourNow();
 
-    UFUNCTION(CallInEditor, Category = "Lighting|Debug")
+    UFUNCTION(CallInEditor, Category = "Lighting")
     void ApplyMiddayNow();
 
-    UFUNCTION(CallInEditor, Category = "Lighting|Debug")
+    UFUNCTION(CallInEditor, Category = "Lighting")
     void ApplyNightNow();
 
 private:
-    void UpdateDayCycle(float DeltaTime);
-    void UpdateWeatherTransition(float DeltaTime);
-    void ApplyPhaseSettings(const FLight_DayPhaseSettings& Settings);
-    void InitializeDefaultPresets();
-    ELight_TimeOfDay ComputeTimePhase(float NormalizedTime) const;
+    float TimeAccumulator = 0.0f;
+    FLight_DayPreset CurrentPreset;
+    FLight_DayPreset TargetPreset;
+    float PresetBlendAlpha = 1.0f;
 
-    float WeatherTransitionElapsed = 0.0f;
-    float WeatherTransitionDuration = 30.0f;
-    bool bWeatherTransitioning = false;
+    void TickDayNightCycle(float DeltaTime);
+    void UpdateSunTransform(float Hour);
+    void UpdateFogForWeather(ELight_WeatherState Weather);
+    FLight_DayPreset GetPresetForHour(float Hour) const;
+    FLight_DayPreset LerpPresets(const FLight_DayPreset& A, const FLight_DayPreset& B, float Alpha) const;
 };
