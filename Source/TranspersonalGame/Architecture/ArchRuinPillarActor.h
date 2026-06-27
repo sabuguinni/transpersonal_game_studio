@@ -5,74 +5,97 @@
 #include "ArchRuinPillarActor.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_RuinState : uint8
+enum class EArch_PillarState : uint8
 {
     Intact       UMETA(DisplayName = "Intact"),
     Cracked      UMETA(DisplayName = "Cracked"),
-    HalfBuried   UMETA(DisplayName = "Half Buried"),
-    Collapsed    UMETA(DisplayName = "Collapsed")
+    Collapsed    UMETA(DisplayName = "Collapsed"),
+    Buried       UMETA(DisplayName = "Buried")
+};
+
+UENUM(BlueprintType)
+enum class EArch_PillarMaterial : uint8
+{
+    Limestone    UMETA(DisplayName = "Limestone"),
+    Basalt       UMETA(DisplayName = "Basalt"),
+    Sandstone    UMETA(DisplayName = "Sandstone"),
+    Granite      UMETA(DisplayName = "Granite")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_RuinData
+struct FArch_PillarConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
-    EArch_RuinState RuinState = EArch_RuinState::HalfBuried;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_PillarState State = EArch_PillarState::Intact;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
-    float WeatheringLevel = 0.75f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_PillarMaterial Material = EArch_PillarMaterial::Limestone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
-    float MossCoverage = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float HeightMeters = 4.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
-    bool bHasVegetationGrowth = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float RadiusMeters = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float MossCoverage = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasVines = true;
 };
 
 /**
- * AArchRuinPillarActor — Cretaceous-era stone ruin pillar
- * Prehistoric architectural remnant placed in the world as environmental storytelling.
- * Represents ancient geological formations or early hominid stone structures.
+ * AArch_RuinPillarActor
+ * Cretaceous era stone ruin pillar — a structural remnant of prehistoric
+ * construction, worn by millennia of jungle growth and geological pressure.
+ * Each pillar is a document of the civilization that built it.
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Arch Ruin Pillar Actor"))
-class TRANSPERSONALGAME_API AArchRuinPillarActor : public AActor
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_RuinPillarActor : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AArchRuinPillarActor();
+    AArch_RuinPillarActor();
 
-protected:
     virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture|Components",
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture",
         meta = (AllowPrivateAccess = "true"))
     UStaticMeshComponent* PillarMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture|Components",
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture",
         meta = (AllowPrivateAccess = "true"))
-    UStaticMeshComponent* BaseMesh;
+    UStaticMeshComponent* DebrisMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
-    FArch_RuinData RuinData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_PillarConfig PillarConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Placement")
-    float BiomeX = 50000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|LOD")
+    float MaxVisibleDistance = 8000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Placement")
-    float BiomeY = 50000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Gameplay")
+    bool bCanBeUsedAsCover = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
-    void ApplyWeathering(float WeatherAmount);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Gameplay")
+    bool bCanBeClimbed = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
-    EArch_RuinState GetRuinState() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetPillarState(EArch_PillarState NewState);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture|Debug")
-    void LogRuinStatus();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    EArch_PillarState GetPillarState() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeathering(float WeatheringIntensity);
+
+    UFUNCTION(CallInEditor, Category = "Architecture")
+    void RegeneratePillar();
+
+private:
+    void UpdateMeshForState();
+    void UpdateMaterialParameters();
 };
