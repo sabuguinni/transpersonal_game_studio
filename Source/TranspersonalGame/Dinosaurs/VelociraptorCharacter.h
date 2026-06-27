@@ -5,9 +5,17 @@
 #include "VelociraptorCharacter.generated.h"
 
 /**
- * VelociraptorCharacter — Pack-hunting dinosaur species
- * Coordinates with nearby raptor allies for flanking attacks.
- * Inherits from ADinosaurBase (ACharacter chain).
+ * AVelociraptorCharacter — Pack-hunting predator.
+ * 
+ * Velociraptor is a fast, coordinated pack hunter. Individually weak but
+ * deadly in groups. Coordinates with nearby pack members to flank targets.
+ * 
+ * Key stats vs ADinosaurBase defaults:
+ *   MaxHealth:    150  (fragile — dies in 3 hits from player)
+ *   AttackDamage:  30  (low per-hit, but pack multiplies this)
+ *   RunSpeed:    1200  (fastest dino — player cannot outrun)
+ *   DetectionRadius: 2500u (keen senses, spots player early)
+ *   bIsPackHunter: true (coordinates with other raptors)
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVelociraptorCharacter : public ADinosaurBase
@@ -20,74 +28,91 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // --- Pack Hunting ---
+    // ── Pack Coordination ─────────────────────────────────────────────────
 
-    /** Radius within which this raptor looks for pack allies */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
-    float PackSearchRadius;
+    /** Maximum distance to search for pack members to coordinate with */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    float PackCoordinationRadius = 1500.0f;
 
-    /** Maximum number of pack members to coordinate with */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
-    int32 MaxPackSize;
+    /** How many pack members are currently in range */
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
+    int32 NearbyPackMemberCount = 0;
 
-    /** Current pack allies (weak refs — no GC ownership) */
-    UPROPERTY(BlueprintReadOnly, Category = "Velociraptor|Pack")
-    TArray<AVelociraptorCharacter*> PackAllies;
+    /** Damage multiplier applied per additional pack member in range (stacks up to 3) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    float PackDamageMultiplier = 1.25f;
 
-    /** True if this raptor is the pack Alpha */
-    UPROPERTY(BlueprintReadOnly, Category = "Velociraptor|Pack")
-    bool bIsAlpha;
+    /** Minimum pack size to trigger coordinated flank attack */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    int32 FlankThreshold = 2;
 
-    /** Find nearby raptor allies and populate PackAllies */
-    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
-    void ScanForPackAllies();
+    // ── Raptor-specific Abilities ─────────────────────────────────────────
 
-    /** Coordinate a flanking attack — Alpha calls this, allies respond */
-    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
-    void InitiatePackAttack(AActor* Target);
-
-    /** Called on non-Alpha raptors by the Alpha to flank from a given direction */
-    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
-    void RespondToPackAttack(AActor* Target, FVector FlankDirection);
-
-    // --- Combat Abilities ---
-
-    /** Pounce leap attack — launches raptor at target */
-    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    /** Pounce — leap at target, dealing bonus damage on landing */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
     void PerformPounce(AActor* Target);
 
-    /** Slashing claw attack — fast melee at close range */
-    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
-    void PerformClawSlash();
+    /** Screech — alerts nearby pack members and increases their aggression */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    void PerformScreech();
 
-    /** Cooldown between pounce attacks (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
-    float PounceCooldown;
+    /** Returns effective damage accounting for pack bonus */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
+    float GetEffectiveAttackDamage() const;
 
-    /** Damage dealt by claw slash */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
-    float ClawDamage;
+    /** Returns true if this raptor is currently the pack leader */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    bool IsPackLeader() const;
 
-    /** Pounce launch velocity multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
-    float PounceVelocityScale;
+    // ── Blueprint Events ──────────────────────────────────────────────────
 
-    // --- Species Stats ---
+    UFUNCTION(BlueprintImplementableEvent, Category = "Raptor|Events")
+    void OnPounce(AActor* Target);
 
-    /** Pack scan interval (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|AI")
-    float PackScanInterval;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Raptor|Events")
+    void OnScreech();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Raptor|Events")
+    void OnPackMemberJoined(AVelociraptorCharacter* NewMember);
 
 protected:
-    /** Initialize Velociraptor-specific stats */
-    void InitVelociraptorStats();
+    /** Pounce cooldown timer handle */
+    FTimerHandle PounceTimerHandle;
 
-    /** Timer handle for periodic pack scanning */
-    FTimerHandle PackScanTimerHandle;
-
-    /** Timer handle for pounce cooldown */
-    FTimerHandle PounceCooldownTimerHandle;
+    /** Screech cooldown timer handle */
+    FTimerHandle ScreechTimerHandle;
 
     /** Whether pounce is currently on cooldown */
-    bool bPounceCoolingDown;
+    bool bPounceCooldown = false;
+
+    /** Whether screech is currently on cooldown */
+    bool bScreechCooldown = false;
+
+    /** Pounce cooldown duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
+    float PounceCooldownDuration = 4.0f;
+
+    /** Screech cooldown duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    float ScreechCooldownDuration = 8.0f;
+
+    /** Pounce bonus damage (added on top of base AttackDamage) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
+    float PounceBonusDamage = 20.0f;
+
+    /** Whether this raptor is the designated pack leader */
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack", meta = (AllowPrivateAccess = "true"))
+    bool bIsLeader = false;
+
+    /** Pack coordination tick — runs every BehaviorTickInterval */
+    void UpdatePackCoordination();
+
+    /** Find and count nearby Velociraptor pack members */
+    int32 CountNearbyPackMembers() const;
+
+    /** Reset pounce cooldown */
+    void ResetPounceCooldown();
+
+    /** Reset screech cooldown */
+    void ResetScreechCooldown();
 };
