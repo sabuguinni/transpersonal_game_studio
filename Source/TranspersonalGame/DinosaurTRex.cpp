@@ -1,5 +1,6 @@
-// DinosaurTRex.cpp — Tyrannosaurus Rex implementation
-// Engine: Unreal Engine 5.5 | Module: TranspersonalGame
+// DinosaurTRex.cpp
+// Tyrannosaurus Rex — apex predator implementation.
+// Inherits from ADinosaurBase. Agent #12 will attach Behavior Trees.
 
 #include "DinosaurTRex.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -7,193 +8,141 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-ATRexCharacter::ATRexCharacter()
+ATRex::ATRex()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // T-Rex species stats — apex predator
-    MaxHealth = 2000.0f;
-    CurrentHealth = 2000.0f;
-    AttackDamage = 120.0f;
-    AttackRange = 350.0f;
-    DetectionRange = 2000.0f;
-    bIsAggressive = true;
+    // ── Species identity ────────────────────────────────────────────────────
+    DinoStats.Species       = EEng_DinoSpecies::TyrannosaurusRex;
+    DinoStats.MaxHealth     = 2500.0f;
+    DinoStats.CurrentHealth = 2500.0f;
+    DinoStats.AttackDamage  = 180.0f;
+    DinoStats.MoveSpeed     = 650.0f;   // cm/s — fast for its size
+    DinoStats.DetectionRadius = 3000.0f;
+    DinoStats.TerritoryRadius = 8000.0f;
+    DinoStats.bIsAggressive = true;
+    DinoStats.bIsPack       = false;
 
-    // Movement — powerful but not agile
-    WalkSpeed = 350.0f;
-    SprintSpeed = 700.0f;
-    TurnRate = 60.0f;
+    // ── Capsule sizing (large predator) ────────────────────────────────────
+    GetCapsuleComponent()->InitCapsuleSize(80.0f, 200.0f);
 
-    // Survival stats
-    MaxHunger = 200.0f;
-    CurrentHunger = 200.0f;
-    MaxThirst = 150.0f;
-    CurrentThirst = 150.0f;
-    HungerDrainRate = 0.8f;   // Large body needs more food
-    ThirstDrainRate = 0.5f;
-
-    // Capsule — large dinosaur
-    GetCapsuleComponent()->SetCapsuleHalfHeight(180.0f);
-    GetCapsuleComponent()->SetCapsuleRadius(80.0f);
-
-    // Movement component
-    if (GetCharacterMovement())
+    // ── Movement ────────────────────────────────────────────────────────────
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
     {
-        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-        GetCharacterMovement()->bOrientRotationToMovement = true;
-        GetCharacterMovement()->RotationRate = FRotator(0.0f, TurnRate, 0.0f);
-        GetCharacterMovement()->JumpZVelocity = 0.0f;   // T-Rex cannot jump
-        GetCharacterMovement()->GravityScale = 1.5f;     // Heavy animal
+        MoveComp->MaxWalkSpeed          = DinoStats.MoveSpeed;
+        MoveComp->MaxAcceleration       = 800.0f;
+        MoveComp->BrakingDecelerationWalking = 600.0f;
+        MoveComp->JumpZVelocity         = 0.0f;   // TRex cannot jump
+        MoveComp->GravityScale          = 1.2f;   // Heavy — falls faster
+        MoveComp->RotationRate          = FRotator(0.0f, 180.0f, 0.0f);
+        MoveComp->bOrientRotationToMovement = true;
     }
+
+    // ── Actor label ─────────────────────────────────────────────────────────
+    Tags.Add(FName("Dinosaur"));
+    Tags.Add(FName("Predator"));
+    Tags.Add(FName("TRex"));
 }
 
-void ATRexCharacter::BeginPlay()
+void ATRex::BeginPlay()
 {
     Super::BeginPlay();
 
-    // T-Rex starts in roaming state
-    SetBehaviorState(ECore_DinosaurBehaviorState::Roaming);
+    // Start in patrol mode — Combat AI (Agent #12) will override via BT
+    SetBehaviorState(EEng_DinoBehaviorState::Patrolling);
 
-    // Initial roar to establish territory
-    TimeSinceLastRoar = RoarCooldown; // Ready to roar immediately
+    UE_LOG(LogTemp, Log, TEXT("ATRex [%s] spawned — Health:%.0f Attack:%.0f"),
+        *GetName(), DinoStats.CurrentHealth, DinoStats.AttackDamage);
 }
 
-void ATRexCharacter::Tick(float DeltaTime)
+void ATRex::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Advance cooldown timers
-    TimeSinceLastStomp += DeltaTime;
-    TimeSinceLastRoar += DeltaTime;
-
-    // Territorial scan — check for nearby prey
-    if (CurrentBehaviorState == ECore_DinosaurBehaviorState::Roaming ||
-        CurrentBehaviorState == ECore_DinosaurBehaviorState::Idle)
+    // Tick down roar cooldown
+    if (RoarCooldownRemaining > 0.0f)
     {
-        TArray<AActor*> NearbyActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
+        RoarCooldownRemaining -= DeltaTime;
+    }
+}
 
-        for (AActor* Actor : NearbyActors)
+void ATRex::PerformRoar()
+{
+    if (RoarCooldownRemaining > 0.0f)
+    {
+        return; // Still on cooldown
+    }
+
+    RoarCooldownRemaining = RoarCooldown;
+
+    // Find all actors within roar radius and apply stun tag
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsWithTag(GetWorld(), FName("Player"), OverlappingActors);
+
+    FVector Origin = GetActorLocation();
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (!Actor) continue;
+        float Dist = FVector::Dist(Origin, Actor->GetActorLocation());
+        if (Dist <= RoarRadius)
         {
-            if (Actor == this) continue;
-            if (!IsValid(Actor)) continue;
+            // Apply stun via tag — Agent #12 Behavior Trees will read this tag
+            Actor->Tags.AddUnique(FName("Stunned"));
+            UE_LOG(LogTemp, Log, TEXT("ATRex roar stunned: %s for %.1fs"),
+                *Actor->GetName(), RoarStunDuration);
 
-            float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-            if (Dist < TerritorialRadius)
+            // Schedule stun removal (simple timer)
+            FTimerHandle StunTimer;
+            TWeakObjectPtr<AActor> WeakActor = Actor;
+            GetWorldTimerManager().SetTimer(StunTimer, [WeakActor]()
             {
-                // Check if it's a player or prey (not another T-Rex)
-                if (Actor->ActorHasTag(FName("Player")) || Actor->ActorHasTag(FName("Prey")))
+                if (WeakActor.IsValid())
                 {
-                    SetBehaviorState(ECore_DinosaurBehaviorState::Hunting);
-                    if (!bHasRoaredThisAttack)
-                    {
-                        TriggerRoar();
-                        bHasRoaredThisAttack = true;
-                    }
-                    break;
+                    WeakActor->Tags.Remove(FName("Stunned"));
                 }
-            }
+            }, RoarStunDuration, false);
         }
-    }
-    else if (CurrentBehaviorState == ECore_DinosaurBehaviorState::Attacking)
-    {
-        // Stomp attack when in attack range
-        if (TimeSinceLastStomp >= StompCooldown)
-        {
-            ExecuteStomp();
-        }
-    }
-    else
-    {
-        // Reset roar flag when not hunting
-        bHasRoaredThisAttack = false;
     }
 
-    // Periodic roar during hunting
-    if (CurrentBehaviorState == ECore_DinosaurBehaviorState::Hunting &&
-        TimeSinceLastRoar >= RoarCooldown)
-    {
-        TriggerRoar();
-    }
+#if WITH_EDITOR
+    DrawDebugSphere(GetWorld(), Origin, RoarRadius, 16, FColor::Orange, false, 2.0f);
+#endif
+
+    UE_LOG(LogTemp, Log, TEXT("ATRex [%s] ROAR — radius:%.0f stunned:%d actors"),
+        *GetName(), RoarRadius, OverlappingActors.Num());
 }
 
-void ATRexCharacter::ExecuteStomp()
+void ATRex::ChargeAttack(AActor* Target)
 {
-    if (TimeSinceLastStomp < StompCooldown) return;
-    TimeSinceLastStomp = 0.0f;
+    if (!Target || bIsCharging) return;
 
-    // AoE damage sphere in front of T-Rex
-    FVector StompCenter = GetActorLocation() + GetActorForwardVector() * (AttackRange * 0.5f);
+    bIsCharging = true;
 
-    TArray<AActor*> HitActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), HitActors);
-
-    for (AActor* Target : HitActors)
+    // Boost movement speed during charge
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
     {
-        if (Target == this) continue;
-        if (!IsValid(Target)) continue;
-
-        float Dist = FVector::Dist(StompCenter, Target->GetActorLocation());
-        if (Dist <= StompRadius)
-        {
-            FDamageEvent DamageEvent;
-            Target->TakeDamage(StompDamage, DamageEvent, GetController(), this);
-        }
+        MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed * 1.8f; // 180% speed during charge
     }
 
-    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter: Stomp executed at %s, radius=%.0f, damage=%.0f"),
-        *StompCenter.ToString(), StompRadius, StompDamage);
-}
+    // Apply charge damage (multiplied)
+    float ChargeDmg = DinoStats.AttackDamage * ChargeDamageMultiplier;
+    ApplyDamage(Target, ChargeDmg);
 
-void ATRexCharacter::TriggerRoar()
-{
-    TimeSinceLastRoar = 0.0f;
-
-    // Frighten nearby prey — increase their fear stat if they have one
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
-
-    int32 FrightenedCount = 0;
-    for (AActor* Actor : NearbyActors)
+    // Reset charge state after 2 seconds
+    FTimerHandle ChargeResetTimer;
+    GetWorldTimerManager().SetTimer(ChargeResetTimer, [this]()
     {
-        if (Actor == this) continue;
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < TerritorialRadius * 1.5f)
+        bIsCharging = false;
+        UCharacterMovementComponent* MC = GetCharacterMovement();
+        if (MC)
         {
-            // Tag actor as frightened (AI controllers can read this)
-            Actor->Tags.AddUnique(FName("Frightened"));
-            FrightenedCount++;
+            MC->MaxWalkSpeed = DinoStats.MoveSpeed;
         }
-    }
+        UE_LOG(LogTemp, Log, TEXT("ATRex [%s] charge ended"), *GetName());
+    }, 2.0f, false);
 
-    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter: ROAR! Frightened %d actors within %.0fm"),
-        FrightenedCount, TerritorialRadius * 1.5f);
-}
-
-bool ATRexCharacter::IsTargetInTerritorialRange(AActor* Target) const
-{
-    if (!IsValid(Target)) return false;
-    float Dist = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-    return Dist <= TerritorialRadius;
-}
-
-void ATRexCharacter::OnDeath_Implementation()
-{
-    // Call base death (disables collision, sets lifespan)
-    Super::OnDeath_Implementation();
-
-    // T-Rex specific: remove frightened tags from nearby actors on death
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
-
-    for (AActor* Actor : NearbyActors)
-    {
-        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < TerritorialRadius)
-        {
-            Actor->Tags.Remove(FName("Frightened"));
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("ATRexCharacter: T-Rex died. Territory cleared."));
+    UE_LOG(LogTemp, Log, TEXT("ATRex [%s] CHARGE on [%s] — damage:%.0f"),
+        *GetName(), *Target->GetName(), ChargeDmg);
 }
