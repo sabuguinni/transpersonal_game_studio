@@ -5,12 +5,14 @@
 #include "TRexDinosaur.generated.h"
 
 /**
- * ATRexDinosaur
- * Apex predator — Tyrannosaurus Rex subclass of ADinosaurBase.
- * Stats: MaxHealth=5000, AttackDamage=400, MoveSpeed=800, Mass=12000, DetectionRadius=3500.
- * Solitary hunter with massive territory radius and devastating bite attack.
+ * ATRexDinosaur — Tyrannosaurus Rex subclass.
+ *
+ * Apex predator. High health, devastating melee attack, poor turning radius.
+ * Detects player by sight (wide forward cone) and sound (footsteps, sprinting).
+ * Territorial: will patrol a 3000 UU radius around its spawn point.
+ * Roars when entering Hunting state — triggers fear response on TranspersonalCharacter.
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
+UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="T-Rex Dinosaur"))
 class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -18,49 +20,65 @@ class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 public:
     ATRexDinosaur();
 
-    /** Roar ability — stuns nearby prey for 2 seconds, triggers Aggressive state */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    // --- Species-specific overrides ---
+
+    /** Roar ability: plays roar montage, applies fear to nearby player, cooldown 15s */
+    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
     void PerformRoar();
 
-    /** Stomp attack — area damage in 600-unit radius, used when prey is directly underfoot */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    /** Stomp attack: AoE ground slam dealing 80 damage in 400 UU radius */
+    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
     void PerformStomp();
 
-    /** Override: T-Rex charges at target when in Hunting state beyond 1500 units */
-    virtual void UpdateBehavior() override;
+    /** Called when TRex enters Hunting state — triggers roar */
+    virtual void OnDetectPlayer(APawn* Player) override;
+
+    /** TRex charges in a straight line when within 1500 UU of target */
+    UFUNCTION(BlueprintCallable, Category="TRex|Movement")
+    void StartChargeAttack(FVector TargetLocation);
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    /** Radius of stomp area damage */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadius = 600.f;
+    // --- TRex-specific stats ---
 
-    /** Stomp damage (separate from bite damage) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompDamage = 200.f;
+    /** Roar fear radius — players within this range receive fear buildup */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
+    float RoarFearRadius = 2500.f;
 
-    /** Roar stun duration in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
-    float RoarStunDuration = 2.0f;
+    /** Fear amount applied per roar (0-100 scale matching SurvivalComponent) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
+    float RoarFearAmount = 35.f;
 
-    /** Charge speed multiplier when hunting at distance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
-    float ChargeSpeedMultiplier = 1.8f;
+    /** Stomp damage radius in Unreal Units */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
+    float StompRadius = 400.f;
 
-    /** Minimum distance to target before switching from charge to bite */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChargeSwitchDistance = 400.f;
+    /** Stomp damage dealt to anything in radius */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
+    float StompDamage = 80.f;
+
+    /** Charge speed multiplier applied to MaxSprintSpeed during charge */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Movement")
+    float ChargeSpeedMultiplier = 1.4f;
+
+    /** Charge duration in seconds before returning to normal movement */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Movement")
+    float ChargeDuration = 2.5f;
+
+    /** Cooldown between roars in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
+    float RoarCooldown = 15.f;
+
+    /** Cooldown between stomps in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
+    float StompCooldown = 8.f;
 
 private:
-    /** Timer handle for roar cooldown */
-    FTimerHandle RoarCooldownHandle;
-
-    /** Whether roar is currently on cooldown */
-    bool bRoarOnCooldown = false;
-
-    /** Roar cooldown duration */
-    float RoarCooldownDuration = 15.0f;
-
-    void ResetRoarCooldown();
+    float LastRoarTime = -999.f;
+    float LastStompTime = -999.f;
+    bool bIsCharging = false;
+    float ChargeEndTime = 0.f;
+    FVector ChargeTargetLocation = FVector::ZeroVector;
 };
