@@ -6,52 +6,48 @@
 
 /**
  * ATyrannosaurusRex
- * Apex predator — highest health, massive damage, wide detection radius.
- * Solitary hunter, charges when target enters detection zone.
+ * Apex predator. Solitary carnivore. High health, devastating attack, large detection radius.
+ * Slow turn rate but charges at high speed when attacking.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATyrannosaurusRex : public ADinosaurBase
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ATyrannosaurusRex();
+	ATyrannosaurusRex();
 
-    virtual void BeginPlay() override;
+	/** Roar ability — stuns nearby prey for a short duration */
+	UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+	void PerformRoar();
 
-    // ── T-Rex specific ────────────────────────────────────────────────────
-    /** Roar radius — nearby prey panics (applies fear to player) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex")
-    float RoarRadius = 3500.0f;
-
-    /** Cooldown between roars in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex")
-    float RoarCooldown = 15.0f;
-
-    /** Charge speed multiplier when closing distance on prey */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex")
-    float ChargeSpeedMultiplier = 1.6f;
-
-    /** Whether T-Rex is currently in charge state */
-    UPROPERTY(BlueprintReadOnly, Category = "TRex")
-    bool bIsCharging = false;
-
-    /** Trigger roar — Blueprint adds audio/VFX */
-    UFUNCTION(BlueprintCallable, Category = "TRex")
-    void PerformRoar();
-
-    /** Initiate charge toward target */
-    UFUNCTION(BlueprintCallable, Category = "TRex")
-    void StartCharge(AActor* Target);
-
-    /** Blueprint event: roar triggered */
-    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
-    void OnRoar();
-
-    /** Blueprint event: charge initiated */
-    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
-    void OnChargeStart(AActor* Target);
+	/** Charge attack — accelerates toward target, deals bonus damage on impact */
+	UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+	void StartCharge();
 
 protected:
-    float RoarTimer = 0.0f;
+	virtual void BeginPlay() override;
+	virtual void PerformAttack(AActor* Target) override;
+	virtual void OnDeath() override;
+
+	/** Duration of roar stun effect on nearby actors (seconds) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
+	float RoarStunDuration;
+
+	/** Charge speed multiplier applied during charge attack */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
+	float ChargeSpeedMultiplier;
+
+	/** Bonus damage dealt when charge connects */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
+	float ChargeBonusDamage;
+
+	/** Radius of roar stun effect */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
+	float RoarRadius;
+
+private:
+	bool bIsCharging;
+	float ChargeTimer;
+	static constexpr float MaxChargeDuration = 3.0f;
 };
