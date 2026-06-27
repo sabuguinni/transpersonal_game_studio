@@ -1,13 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DinosaurBase.h"
+#include "Dinosaurs/DinosaurBase.h"
 #include "Velociraptor.generated.h"
 
 /**
- * AVelociraptor — Fast pack-hunting carnivore.
- * Pack behavior: all raptors in radius share the same CurrentTarget via GameState lookup.
- * Stats: MaxHealth=80, AttackDamage=30, MoveSpeed=600, bIsPackHunter=true
+ * AVelociraptor — Pack hunter dinosaur
+ * Fast, low-HP flanking predator. Hunts in coordinated packs of 3-6.
+ * Species stats: 400 HP, 45 dmg, 800 cm/s sprint, 8000 kg detection radius
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVelociraptor : public ADinosaurBase
@@ -17,77 +17,55 @@ class TRANSPERSONALGAME_API AVelociraptor : public ADinosaurBase
 public:
     AVelociraptor();
 
-    // Pack behavior radius — raptors within this range share targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    float PackCoordinationRadius;
+    // Pack behavior
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
+    void SetPackLeader(AVelociraptor* Leader);
 
-    // Minimum pack size before initiating a coordinated attack
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    int32 MinPackSizeForCoordination;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
+    void ExecuteFlankingManeuver(AActor* Target);
 
-    // Jump attack: leap distance when pouncing on target
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float PounceDistance;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
+    void CallPackToHunt(AActor* Target);
 
-    // Pounce damage multiplier (applied on top of base AttackDamage)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float PounceDamageMultiplier;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
+    bool IsPackLeader() const { return bIsPackLeader; }
 
-    // Whether this raptor is currently the pack leader (coordinates others)
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Pack")
-    bool bIsPackLeader;
-
-    // Number of pack members currently coordinating with this raptor
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Pack")
-    int32 ActivePackSize;
-
-    // Flanking offset angle (degrees) — raptors spread around target
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    float FlankingAngleOffset;
+    // Leap attack
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    void PerformLeapAttack(AActor* Target);
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Share current target with nearby pack members
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void BroadcastTargetToPackMembers(AActor* NewTarget);
-
-    // Receive a shared target from pack leader
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void ReceivePackTarget(AActor* SharedTarget, AVelociraptor* Leader);
-
-    // Perform pounce attack — leap at target dealing bonus damage
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void PerformPounce();
-
-    // Elect pack leader among nearby raptors (highest health = leader)
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void ElectPackLeader();
-
-    // Get all pack members within PackCoordinationRadius
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    TArray<AVelociraptor*> GetNearbyPackMembers() const;
-
-    // Override base attack to include pounce logic
-    virtual void PerformAttack() override;
-
-    // Override death to reassign pack leader
-    virtual void OnDeath() override;
-
-private:
-    // Weak reference to current pack leader (null if this IS the leader)
-    UPROPERTY()
+    // Pack state
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Pack", meta = (AllowPrivateAccess = "true"))
     AVelociraptor* PackLeader;
 
-    // Timer handle for pack coordination tick
-    FTimerHandle PackCoordinationTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Pack", meta = (AllowPrivateAccess = "true"))
+    TArray<AVelociraptor*> PackMembers;
 
-    // Internal: run pack coordination logic
-    void RunPackCoordination();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
+    float PackDetectionRadius = 3000.0f;
 
-    // Internal: calculate flanking position around target
-    FVector CalculateFlankingPosition(AActor* Target, float AngleOffset) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
+    float FlankingAngle = 120.0f; // degrees offset from pack leader
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float LeapAttackRange = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float LeapAttackDamage = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    float LeapAttackCooldown = 4.0f;
+
+private:
+    bool bIsPackLeader = false;
+    float LeapCooldownRemaining = 0.0f;
+
+    FTimerHandle PackScanTimer;
+
+    void ScanForPackMembers();
+    void CoordinateFlankPosition(AActor* Target);
 };
