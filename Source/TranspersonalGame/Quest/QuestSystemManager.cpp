@@ -1,251 +1,314 @@
+// QuestSystemManager.cpp
+// Agent #14 — Quest & Mission Designer
+// Cycle: PROD_CYCLE_AUTO_20260627_004
+// Implements quest lifecycle, objective tracking, and default prehistoric survival quests.
+
 #include "QuestSystemManager.h"
+#include "Engine/World.h"
 
-// ============================================================
-// Quest System Manager — Implementation
-// Agent #14 Quest & Mission Designer
-// PROD_CYCLE_AUTO_20260625_004
-// ============================================================
-
-UQuestSystemManager::UQuestSystemManager()
+AQuestSystemManager::AQuestSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check time limits every second
-    MaxActiveQuests = 3;
+    PrimaryActorTick.bCanEverTick = true;
+    ActiveQuestCount = 0;
+    CompletedQuestCount = 0;
 }
 
-void UQuestSystemManager::BeginPlay()
+void AQuestSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     InitializeDefaultQuests();
 }
 
-void UQuestSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AQuestSystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update elapsed time for time-limited quests
-    for (FQuest_Definition& Quest : ActiveQuests)
-    {
-        if (Quest.QuestState == EQuest_State::Active && Quest.bHasTimeLimit)
-        {
-            float& Elapsed = QuestElapsedTimes.FindOrAdd(Quest.QuestID);
-            Elapsed += DeltaTime;
-            if (Elapsed >= Quest.TimeLimit)
-            {
-                FailQuest(Quest.QuestID);
-            }
-        }
-    }
+    Super::Tick(DeltaTime);
 }
 
-void UQuestSystemManager::InitializeDefaultQuests()
+// ─── Quest lifecycle ──────────────────────────────────────────────────────────
+
+void AQuestSystemManager::StartQuest(const FString& QuestID)
 {
-    // --- Quest 1: Track the Parasaurolophus Herd ---
-    FQuest_Definition TrackHerd;
-    TrackHerd.QuestID = TEXT("QUEST_TRACK_HERD_001");
-    TrackHerd.QuestTitle = TEXT("Follow the Herd");
-    TrackHerd.QuestDescription = TEXT("The Parasaurolophus herd is migrating north. Follow their tracks to find the water source before the raptors cut you off.");
-    TrackHerd.QuestType = EQuest_Type::Track;
-    TrackHerd.QuestState = EQuest_State::Inactive;
-    TrackHerd.bHasTimeLimit = false;
-
-    FQuest_Objective WaypointA;
-    WaypointA.ObjectiveID = TEXT("OBJ_WAYPOINT_A");
-    WaypointA.Description = TEXT("Find the first herd tracks near the river bend");
-    WaypointA.WorldLocation = FVector(2900.0f, 1900.0f, 420.0f);
-    WaypointA.RequiredCount = 1;
-
-    FQuest_Objective WaypointB;
-    WaypointB.ObjectiveID = TEXT("OBJ_WAYPOINT_B");
-    WaypointB.Description = TEXT("Follow the trail through the open valley");
-    WaypointB.WorldLocation = FVector(3100.0f, 2050.0f, 420.0f);
-    WaypointB.RequiredCount = 1;
-
-    FQuest_Objective WaypointC;
-    WaypointC.ObjectiveID = TEXT("OBJ_WAYPOINT_C");
-    WaypointC.Description = TEXT("Reach the herd's resting ground");
-    WaypointC.WorldLocation = FVector(3250.0f, 2150.0f, 420.0f);
-    WaypointC.RequiredCount = 1;
-
-    TrackHerd.Objectives.Add(WaypointA);
-    TrackHerd.Objectives.Add(WaypointB);
-    TrackHerd.Objectives.Add(WaypointC);
-
-    // --- Quest 2: Rescue the Hunters ---
-    FQuest_Definition RescueHunters;
-    RescueHunters.QuestID = TEXT("QUEST_RESCUE_HUNTERS_001");
-    RescueHunters.QuestTitle = TEXT("Find the Missing Hunters");
-    RescueHunters.QuestDescription = TEXT("Three hunters went to investigate raptor activity on the eastern ridge. None have returned. Find them before nightfall.");
-    RescueHunters.QuestType = EQuest_Type::Rescue;
-    RescueHunters.QuestState = EQuest_State::Inactive;
-    RescueHunters.bHasTimeLimit = true;
-    RescueHunters.TimeLimit = 600.0f; // 10 minutes real time
-
-    FQuest_Objective RescuePoint1;
-    RescuePoint1.ObjectiveID = TEXT("OBJ_RESCUE_1");
-    RescuePoint1.Description = TEXT("Find the first hunter near the eastern boulder field");
-    RescuePoint1.WorldLocation = FVector(4300.0f, 1650.0f, 420.0f);
-    RescuePoint1.RequiredCount = 1;
-
-    FQuest_Objective RescuePoint2;
-    RescuePoint2.ObjectiveID = TEXT("OBJ_RESCUE_2");
-    RescuePoint2.Description = TEXT("Find the remaining hunters at the ridge camp");
-    RescuePoint2.WorldLocation = FVector(4450.0f, 1720.0f, 420.0f);
-    RescuePoint2.RequiredCount = 2;
-
-    RescueHunters.Objectives.Add(RescuePoint1);
-    RescueHunters.Objectives.Add(RescuePoint2);
-
-    // --- Quest 3: Survive the Stampede ---
-    FQuest_Definition StampedeSurvival;
-    StampedeSurvival.QuestID = TEXT("QUEST_STAMPEDE_SURVIVAL_001");
-    StampedeSurvival.QuestTitle = TEXT("Survive the Stampede");
-    StampedeSurvival.QuestDescription = TEXT("The herd has been spooked. Hundreds of Parasaurolophus are charging through the valley. Get to high ground before you are trampled.");
-    StampedeSurvival.QuestType = EQuest_Type::Survive;
-    StampedeSurvival.QuestState = EQuest_State::Inactive;
-    StampedeSurvival.bHasTimeLimit = true;
-    StampedeSurvival.TimeLimit = 120.0f; // 2 minutes to escape
-
-    FQuest_Objective EscapeRoute;
-    EscapeRoute.ObjectiveID = TEXT("OBJ_ESCAPE_HIGH_GROUND");
-    EscapeRoute.Description = TEXT("Reach the high ground before the stampede arrives");
-    EscapeRoute.WorldLocation = FVector(3100.0f, 2600.0f, 600.0f);
-    EscapeRoute.RequiredCount = 1;
-
-    StampedeSurvival.Objectives.Add(EscapeRoute);
-
-    // Register all default quests
-    RegisterQuest(TrackHerd);
-    RegisterQuest(RescueHunters);
-    RegisterQuest(StampedeSurvival);
-}
-
-void UQuestSystemManager::RegisterQuest(const FQuest_Definition& QuestDef)
-{
-    // Don't register duplicates
-    for (const FQuest_Definition& Existing : ActiveQuests)
+    for (FQuest_Data& Quest : AllQuests)
     {
-        if (Existing.QuestID == QuestDef.QuestID)
+        if (Quest.QuestID == QuestID && Quest.State == EQuest_State::Inactive)
         {
+            Quest.State = EQuest_State::Active;
+            ActiveQuestCount++;
+            UE_LOG(LogTemp, Log, TEXT("[QuestSystem] Quest started: %s"), *Quest.QuestTitle);
             return;
         }
     }
-    ActiveQuests.Add(QuestDef);
+    UE_LOG(LogTemp, Warning, TEXT("[QuestSystem] Quest not found or already active: %s"), *QuestID);
 }
 
-bool UQuestSystemManager::ActivateQuest(const FString& QuestID)
+void AQuestSystemManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID)
 {
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE)
+    for (FQuest_Data& Quest : AllQuests)
     {
-        return false;
-    }
-
-    if (ActiveQuests[Idx].QuestState != EQuest_State::Inactive)
-    {
-        return false;
-    }
-
-    // Count currently active quests
-    int32 CurrentActive = 0;
-    for (const FQuest_Definition& Q : ActiveQuests)
-    {
-        if (Q.QuestState == EQuest_State::Active)
+        if (Quest.QuestID == QuestID && Quest.State == EQuest_State::Active)
         {
-            ++CurrentActive;
+            for (FQuest_Objective& Obj : Quest.Objectives)
+            {
+                if (Obj.ObjectiveID == ObjectiveID && !Obj.bCompleted)
+                {
+                    Obj.CurrentCount = FMath::Min(Obj.CurrentCount + 1, Obj.RequiredCount);
+                    if (Obj.CurrentCount >= Obj.RequiredCount)
+                    {
+                        Obj.bCompleted = true;
+                        UE_LOG(LogTemp, Log, TEXT("[QuestSystem] Objective completed: %s in quest %s"),
+                            *ObjectiveID, *QuestID);
+                    }
+                    CheckQuestCompletion(Quest);
+                    return;
+                }
+            }
         }
     }
-
-    if (CurrentActive >= MaxActiveQuests)
-    {
-        return false;
-    }
-
-    ActiveQuests[Idx].QuestState = EQuest_State::Active;
-    QuestElapsedTimes.Add(QuestID, 0.0f);
-    return true;
 }
 
-bool UQuestSystemManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID)
+void AQuestSystemManager::FailQuest(const FString& QuestID)
 {
-    int32 QIdx = FindQuestIndex(QuestID);
-    if (QIdx == INDEX_NONE)
+    for (FQuest_Data& Quest : AllQuests)
     {
-        return false;
-    }
-
-    if (ActiveQuests[QIdx].QuestState != EQuest_State::Active)
-    {
-        return false;
-    }
-
-    for (FQuest_Objective& Obj : ActiveQuests[QIdx].Objectives)
-    {
-        if (Obj.ObjectiveID == ObjectiveID && !Obj.bIsCompleted)
+        if (Quest.QuestID == QuestID && Quest.State == EQuest_State::Active)
         {
-            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + 1, Obj.RequiredCount);
-            if (Obj.CurrentCount >= Obj.RequiredCount)
-            {
-                Obj.bIsCompleted = true;
-            }
-            CheckQuestCompletion(QuestID);
-            return true;
+            Quest.State = EQuest_State::Failed;
+            ActiveQuestCount = FMath::Max(0, ActiveQuestCount - 1);
+            UE_LOG(LogTemp, Warning, TEXT("[QuestSystem] Quest failed: %s"), *Quest.QuestTitle);
+            return;
+        }
+    }
+}
+
+bool AQuestSystemManager::IsQuestActive(const FString& QuestID) const
+{
+    for (const FQuest_Data& Quest : AllQuests)
+    {
+        if (Quest.QuestID == QuestID)
+        {
+            return Quest.State == EQuest_State::Active;
         }
     }
     return false;
 }
 
-bool UQuestSystemManager::CheckQuestCompletion(const FString& QuestID)
+bool AQuestSystemManager::IsQuestCompleted(const FString& QuestID) const
 {
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE)
+    for (const FQuest_Data& Quest : AllQuests)
     {
-        return false;
-    }
-
-    for (const FQuest_Objective& Obj : ActiveQuests[Idx].Objectives)
-    {
-        if (!Obj.bIsCompleted)
+        if (Quest.QuestID == QuestID)
         {
-            return false;
+            return Quest.State == EQuest_State::Completed;
         }
     }
-
-    // All objectives complete
-    ActiveQuests[Idx].QuestState = EQuest_State::Completed;
-    CompletedQuestIDs.AddUnique(QuestID);
-    QuestElapsedTimes.Remove(QuestID);
-    return true;
+    return false;
 }
 
-void UQuestSystemManager::FailQuest(const FString& QuestID)
+FQuest_Data AQuestSystemManager::GetQuestData(const FString& QuestID) const
 {
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx != INDEX_NONE)
+    for (const FQuest_Data& Quest : AllQuests)
     {
-        ActiveQuests[Idx].QuestState = EQuest_State::Failed;
-        QuestElapsedTimes.Remove(QuestID);
-    }
-}
-
-EQuest_State UQuestSystemManager::GetQuestState(const FString& QuestID) const
-{
-    int32 Idx = FindQuestIndex(QuestID);
-    if (Idx == INDEX_NONE)
-    {
-        return EQuest_State::Inactive;
-    }
-    return ActiveQuests[Idx].QuestState;
-}
-
-int32 UQuestSystemManager::FindQuestIndex(const FString& QuestID) const
-{
-    for (int32 i = 0; i < ActiveQuests.Num(); ++i)
-    {
-        if (ActiveQuests[i].QuestID == QuestID)
+        if (Quest.QuestID == QuestID)
         {
-            return i;
+            return Quest;
         }
     }
-    return INDEX_NONE;
+    return FQuest_Data();
+}
+
+TArray<FQuest_Data> AQuestSystemManager::GetActiveQuests() const
+{
+    TArray<FQuest_Data> Active;
+    for (const FQuest_Data& Quest : AllQuests)
+    {
+        if (Quest.State == EQuest_State::Active)
+        {
+            Active.Add(Quest);
+        }
+    }
+    return Active;
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+void AQuestSystemManager::CheckQuestCompletion(FQuest_Data& Quest)
+{
+    bool bAllDone = true;
+    for (const FQuest_Objective& Obj : Quest.Objectives)
+    {
+        if (!Obj.bCompleted)
+        {
+            bAllDone = false;
+            break;
+        }
+    }
+    if (bAllDone && Quest.Objectives.Num() > 0)
+    {
+        Quest.State = EQuest_State::Completed;
+        ActiveQuestCount = FMath::Max(0, ActiveQuestCount - 1);
+        CompletedQuestCount++;
+        UE_LOG(LogTemp, Log, TEXT("[QuestSystem] Quest COMPLETED: %s | XP Reward: %d"),
+            *Quest.QuestTitle, Quest.RewardXP);
+    }
+}
+
+void AQuestSystemManager::InitializeDefaultQuests()
+{
+    AllQuests.Empty();
+
+    // ── Quest 1: The First Hunt ───────────────────────────────────────────────
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_FIRST_HUNT");
+        Q.QuestTitle = TEXT("The First Hunt");
+        Q.QuestDescription = TEXT("Track and kill a small dinosaur to feed the tribe. "
+            "Follow the tracks east of camp and use your spear.");
+        Q.State = EQuest_State::Inactive;
+        Q.RewardXP = 150;
+        Q.bIsMainQuest = true;
+
+        FQuest_Objective O1;
+        O1.ObjectiveID = TEXT("OBJ_FIND_TRACKS");
+        O1.Description = TEXT("Find dinosaur tracks near the river");
+        O1.RequiredCount = 1;
+        Q.Objectives.Add(O1);
+
+        FQuest_Objective O2;
+        O2.ObjectiveID = TEXT("OBJ_KILL_DINO");
+        O2.Description = TEXT("Kill a small dinosaur");
+        O2.RequiredCount = 1;
+        Q.Objectives.Add(O2);
+
+        FQuest_Objective O3;
+        O3.ObjectiveID = TEXT("OBJ_RETURN_CAMP");
+        O3.Description = TEXT("Return to camp with the kill");
+        O3.RequiredCount = 1;
+        Q.Objectives.Add(O3);
+
+        AllQuests.Add(Q);
+    }
+
+    // ── Quest 2: Build a Shelter ──────────────────────────────────────────────
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_BUILD_SHELTER");
+        Q.QuestTitle = TEXT("Build a Shelter");
+        Q.QuestDescription = TEXT("Gather materials and construct a basic shelter "
+            "before nightfall. Predators are more active in darkness.");
+        Q.State = EQuest_State::Inactive;
+        Q.RewardXP = 100;
+        Q.bIsMainQuest = true;
+
+        FQuest_Objective O1;
+        O1.ObjectiveID = TEXT("OBJ_GATHER_STICKS");
+        O1.Description = TEXT("Gather 5 sticks");
+        O1.RequiredCount = 5;
+        Q.Objectives.Add(O1);
+
+        FQuest_Objective O2;
+        O2.ObjectiveID = TEXT("OBJ_GATHER_ROCKS");
+        O2.Description = TEXT("Gather 3 rocks");
+        O2.RequiredCount = 3;
+        Q.Objectives.Add(O2);
+
+        FQuest_Objective O3;
+        O3.ObjectiveID = TEXT("OBJ_BUILD_SHELTER");
+        O3.Description = TEXT("Construct the shelter at the marked location");
+        O3.RequiredCount = 1;
+        Q.Objectives.Add(O3);
+
+        AllQuests.Add(Q);
+    }
+
+    // ── Quest 3: Defend the Camp ──────────────────────────────────────────────
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_DEFEND_CAMP");
+        Q.QuestTitle = TEXT("Night Attack");
+        Q.QuestDescription = TEXT("A pack of raptors has been spotted circling the camp. "
+            "Light fires at the perimeter and drive them off.");
+        Q.State = EQuest_State::Inactive;
+        Q.RewardXP = 200;
+        Q.bIsMainQuest = false;
+
+        FQuest_Objective O1;
+        O1.ObjectiveID = TEXT("OBJ_LIGHT_FIRES");
+        O1.Description = TEXT("Light 3 perimeter fires");
+        O1.RequiredCount = 3;
+        Q.Objectives.Add(O1);
+
+        FQuest_Objective O2;
+        O2.ObjectiveID = TEXT("OBJ_REPEL_RAPTORS");
+        O2.Description = TEXT("Drive off the raptor pack");
+        O2.RequiredCount = 4;
+        Q.Objectives.Add(O2);
+
+        AllQuests.Add(Q);
+    }
+
+    // ── Quest 4: Follow the Migration ────────────────────────────────────────
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_MIGRATION");
+        Q.QuestTitle = TEXT("Follow the Herd");
+        Q.QuestDescription = TEXT("A massive herd of herbivores is migrating north. "
+            "Follow them to discover new hunting grounds and water sources.");
+        Q.State = EQuest_State::Inactive;
+        Q.RewardXP = 175;
+        Q.bIsMainQuest = false;
+
+        FQuest_Objective O1;
+        O1.ObjectiveID = TEXT("OBJ_FIND_HERD");
+        O1.Description = TEXT("Locate the migrating herd");
+        O1.RequiredCount = 1;
+        Q.Objectives.Add(O1);
+
+        FQuest_Objective O2;
+        O2.ObjectiveID = TEXT("OBJ_CROSS_RIVER");
+        O2.Description = TEXT("Cross the river with the herd");
+        O2.RequiredCount = 1;
+        Q.Objectives.Add(O2);
+
+        FQuest_Objective O3;
+        O3.ObjectiveID = TEXT("OBJ_DISCOVER_VALLEY");
+        O3.Description = TEXT("Discover the northern valley");
+        O3.RequiredCount = 1;
+        Q.Objectives.Add(O3);
+
+        AllQuests.Add(Q);
+    }
+
+    // ── Quest 5: Explore the Cave ─────────────────────────────────────────────
+    {
+        FQuest_Data Q;
+        Q.QuestID = TEXT("QUEST_CAVE_EXPLORE");
+        Q.QuestTitle = TEXT("Into the Dark");
+        Q.QuestDescription = TEXT("Scouts report a large cave to the northwest. "
+            "Explore it for shelter, flint deposits, and signs of other predators.");
+        Q.State = EQuest_State::Inactive;
+        Q.RewardXP = 225;
+        Q.bIsMainQuest = false;
+
+        FQuest_Objective O1;
+        O1.ObjectiveID = TEXT("OBJ_MAKE_TORCH");
+        O1.Description = TEXT("Craft a torch before entering");
+        O1.RequiredCount = 1;
+        Q.Objectives.Add(O1);
+
+        FQuest_Objective O2;
+        O2.ObjectiveID = TEXT("OBJ_FIND_FLINT");
+        O2.Description = TEXT("Find flint deposits inside the cave");
+        O2.RequiredCount = 3;
+        Q.Objectives.Add(O2);
+
+        FQuest_Objective O3;
+        O3.ObjectiveID = TEXT("OBJ_MAP_CAVE");
+        O3.Description = TEXT("Map the cave passages");
+        O3.RequiredCount = 1;
+        Q.Objectives.Add(O3);
+
+        AllQuests.Add(Q);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[QuestSystem] Initialized %d default quests"), AllQuests.Num());
 }
