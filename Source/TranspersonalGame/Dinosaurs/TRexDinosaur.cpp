@@ -1,168 +1,189 @@
+// TRexDinosaur.cpp
+// Transpersonal Game Studio — Core Systems Programmer (#03)
+// Tyrannosaurus Rex implementation
+
 #include "Dinosaurs/TRexDinosaur.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 ATRexDinosaur::ATRexDinosaur()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // --- T-Rex species stats (override DinosaurBase defaults) ---
-    // These match the GDD: apex predator, high health, devastating melee
-    MaxHealth           = 1200.f;
-    CurrentHealth       = 1200.f;
-    AttackDamage        = 150.f;   // Bite: one-shots unarmoured primitive human
-    AttackRange         = 220.f;   // Short reach — forces close-quarters
-    DetectionRadius     = 3500.f;  // Wide sight radius
-    TerritoryRadius     = 3000.f;  // Large patrol zone
-    MaxWalkSpeed        = 350.f;   // Lumbering walk
-    MaxSprintSpeed      = 900.f;   // Fast sprint — player cannot outrun on foot
-    HungerDecayRate     = 0.8f;    // Apex predator needs frequent meals
-    XPReward            = 500;     // High XP for surviving a TRex encounter
+    // TRex stats — apex predator
+    MaxHealth = 500.0f;
+    CurrentHealth = 500.0f;
+    AttackDamage = 80.0f;
+    AttackRange = 200.0f;
+    DetectionRange = 3000.0f;
+    bIsAggressive = true;
+    DinoSpeciesName = TEXT("Tyrannosaurus Rex");
 
-    // Diet: pure carnivore — hunts player on detection
-    Diet = EEng_DinosaurDiet::Carnivore;
-
-    // Movement: heavy, poor turning
-    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-    if (MoveComp)
+    // Locomotion — powerful but not fastest
+    if (GetCharacterMovement())
     {
-        MoveComp->MaxWalkSpeed        = MaxWalkSpeed;
-        MoveComp->RotationRate        = FRotator(0.f, 120.f, 0.f); // Slow turn
-        MoveComp->bOrientRotationToMovement = true;
-        MoveComp->GravityScale        = 1.2f; // Feels heavy
-        MoveComp->MaxStepHeight       = 80.f; // Can step over boulders
-        MoveComp->JumpZVelocity       = 0.f;  // TRex cannot jump
+        GetCharacterMovement()->MaxWalkSpeed = 600.0f;
+        GetCharacterMovement()->MaxAcceleration = 800.0f;
+        GetCharacterMovement()->BrakingDecelerationWalking = 600.0f;
+        GetCharacterMovement()->RotationRate = FRotator(0.0f, 120.0f, 0.0f);
+        GetCharacterMovement()->bOrientRotationToMovement = true;
     }
+
+    // Roar ability config
+    RoarRadius = 1500.0f;
+    RoarFearAmount = 40.0f;
+    RoarCooldownDuration = 15.0f;
+    RoarCooldownRemaining = 0.0f;
+
+    // Stomp ability config
+    StompRadius = 300.0f;
+    StompDamage = 50.0f;
+    StompCooldownDuration = 8.0f;
+    StompCooldownRemaining = 0.0f;
+
+    // Territory
+    TerritoryCenter = FVector::ZeroVector;
+    TerritoryRadius = 5000.0f;
+    bIsPatrolling = false;
 }
 
 void ATRexDinosaur::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Start in Idle/Patrolling state — becomes aggressive on player detection
-    SetBehaviorState(EEng_DinosaurBehaviorState::Patrolling);
-    unreal::log("TRex spawned and patrolling");
+    // Record spawn location as territory center
+    TerritoryCenter = GetActorLocation();
+    bIsPatrolling = true;
+
+    UE_LOG(LogTemp, Log, TEXT("TRexDinosaur BeginPlay — territory center: %s"), *TerritoryCenter.ToString());
 }
 
 void ATRexDinosaur::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Handle charge movement
-    if (bIsCharging)
+    // Tick down cooldowns
+    if (RoarCooldownRemaining > 0.0f)
     {
-        const float Now = GetWorld()->GetTimeSeconds();
-        if (Now >= ChargeEndTime)
-        {
-            bIsCharging = false;
-            // Restore normal sprint speed
-            if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-            {
-                MoveComp->MaxWalkSpeed = MaxSprintSpeed;
-            }
-        }
+        RoarCooldownRemaining = FMath::Max(0.0f, RoarCooldownRemaining - DeltaTime);
     }
-}
-
-void ATRexDinosaur::OnDetectPlayer(APawn* Player)
-{
-    // Call base class (sets behavior state to Hunting)
-    Super::OnDetectPlayer(Player);
-
-    // TRex-specific: roar on first detection
-    const float Now = GetWorld()->GetTimeSeconds();
-    if (Now - LastRoarTime >= RoarCooldown)
+    if (StompCooldownRemaining > 0.0f)
     {
-        PerformRoar();
+        StompCooldownRemaining = FMath::Max(0.0f, StompCooldownRemaining - DeltaTime);
     }
 }
 
 void ATRexDinosaur::PerformRoar()
 {
-    const float Now = GetWorld()->GetTimeSeconds();
-    if (Now - LastRoarTime < RoarCooldown)
+    if (RoarCooldownRemaining > 0.0f)
     {
-        return; // Still on cooldown
+        UE_LOG(LogTemp, Warning, TEXT("TRex Roar on cooldown: %.1fs remaining"), RoarCooldownRemaining);
+        return;
     }
-    LastRoarTime = Now;
 
-    // Apply fear to player if within roar radius
     UWorld* World = GetWorld();
     if (!World) return;
 
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (PlayerPawn)
+    UE_LOG(LogTemp, Log, TEXT("TRex ROAR — radius: %.0f, fear: %.0f"), RoarRadius, RoarFearAmount);
+
+    // Find all actors within roar radius
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), OverlappingActors);
+
+    int32 FrightenedCount = 0;
+    for (AActor* Actor : OverlappingActors)
     {
-        const float DistToPlayer = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
-        if (DistToPlayer <= RoarFearRadius)
+        if (!Actor || Actor == this) continue;
+
+        float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Distance <= RoarRadius)
         {
-            // Apply fear via damage event — SurvivalComponent listens for EEng_DamageType::Fear
-            // Using point damage so SurvivalComponent can intercept it
-            UGameplayStatics::ApplyPointDamage(
-                PlayerPawn,
-                RoarFearAmount,
-                GetActorLocation(),
-                FHitResult(),
-                GetController(),
-                this,
-                nullptr
-            );
+            // Apply fear damage (fear type) to prey actors
+            UGameplayStatics::ApplyDamage(Actor, RoarFearAmount * 0.1f, GetController(), this, nullptr);
+            FrightenedCount++;
         }
     }
 
-    // Debug: draw roar sphere in editor
+    UE_LOG(LogTemp, Log, TEXT("TRex Roar frightened %d actors"), FrightenedCount);
+
+    // Start cooldown
+    RoarCooldownRemaining = RoarCooldownDuration;
+    GetWorldTimerManager().SetTimer(RoarCooldownTimer, this, &ATRexDinosaur::ResetRoarCooldown, RoarCooldownDuration, false);
+
 #if WITH_EDITOR
-    DrawDebugSphere(World, GetActorLocation(), RoarFearRadius, 16, FColor::Orange, false, 3.f);
+    // Debug visualization
+    DrawDebugSphere(World, GetActorLocation(), RoarRadius, 16, FColor::Orange, false, 3.0f);
 #endif
 }
 
 void ATRexDinosaur::PerformStomp()
 {
-    const float Now = GetWorld()->GetTimeSeconds();
-    if (Now - LastStompTime < StompCooldown)
+    if (StompCooldownRemaining > 0.0f)
     {
+        UE_LOG(LogTemp, Warning, TEXT("TRex Stomp on cooldown: %.1fs remaining"), StompCooldownRemaining);
         return;
     }
-    LastStompTime = Now;
 
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // AoE damage in stomp radius
-    TArray<AActor*> IgnoredActors;
-    IgnoredActors.Add(this);
+    UE_LOG(LogTemp, Log, TEXT("TRex STOMP — radius: %.0f, damage: %.0f"), StompRadius, StompDamage);
 
-    UGameplayStatics::ApplyRadialDamage(
-        World,
-        StompDamage,
-        GetActorLocation(),
-        StompRadius,
-        nullptr,
-        IgnoredActors,
-        this,
-        GetController(),
-        true // Full damage at center, falloff at edge
-    );
+    // AoE damage around feet
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), OverlappingActors);
+
+    int32 HitCount = 0;
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (!Actor || Actor == this) continue;
+
+        float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Distance <= StompRadius)
+        {
+            UGameplayStatics::ApplyDamage(Actor, StompDamage, GetController(), this, nullptr);
+            HitCount++;
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("TRex Stomp hit %d actors"), HitCount);
+
+    // Start cooldown
+    StompCooldownRemaining = StompCooldownDuration;
+    GetWorldTimerManager().SetTimer(StompCooldownTimer, this, &ATRexDinosaur::ResetStompCooldown, StompCooldownDuration, false);
 
 #if WITH_EDITOR
-    DrawDebugSphere(World, GetActorLocation(), StompRadius, 12, FColor::Red, false, 2.f);
+    DrawDebugSphere(World, GetActorLocation(), StompRadius, 12, FColor::Red, false, 2.0f);
 #endif
 }
 
-void ATRexDinosaur::StartChargeAttack(FVector TargetLocation)
+void ATRexDinosaur::OnPlayerDetected_Implementation(AActor* PlayerActor)
 {
-    if (bIsCharging) return;
+    if (!PlayerActor) return;
 
-    bIsCharging = true;
-    ChargeTargetLocation = TargetLocation;
-    ChargeEndTime = GetWorld()->GetTimeSeconds() + ChargeDuration;
+    UE_LOG(LogTemp, Warning, TEXT("TRex detected player: %s — initiating aggressive chase!"), *PlayerActor->GetName());
 
-    // Boost movement speed for charge duration
-    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    // Trigger roar when player first detected (if off cooldown)
+    if (RoarCooldownRemaining <= 0.0f)
     {
-        MoveComp->MaxWalkSpeed = MaxSprintSpeed * ChargeSpeedMultiplier;
+        PerformRoar();
     }
+
+    // Force behavior state to Chasing — handled by base class AI
+    bIsPatrolling = false;
+}
+
+void ATRexDinosaur::ResetRoarCooldown()
+{
+    RoarCooldownRemaining = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("TRex Roar cooldown reset — ready"));
+}
+
+void ATRexDinosaur::ResetStompCooldown()
+{
+    StompCooldownRemaining = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("TRex Stomp cooldown reset — ready"));
 }
