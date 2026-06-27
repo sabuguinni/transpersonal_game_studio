@@ -3,26 +3,28 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 UDinoAnimInstance::UDinoAnimInstance()
+    : LocomotionState(EAnim_DinoLocomotionState::Idle)
+    , GroundSpeed(0.f)
+    , MovementDirection(0.f)
+    , bIsInAir(false)
+    , bIsAttacking(false)
+    , bIsRoaring(false)
+    , bIsDead(false)
+    , FootIKAlpha(1.f)
+    , LeftFootIKLocation(FVector::ZeroVector)
+    , RightFootIKLocation(FVector::ZeroVector)
+    , OwnerPawn(nullptr)
 {
-    WalkSpeedThreshold = 50.f;
-    RunSpeedThreshold = 300.f;
 }
 
 void UDinoAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-
     OwnerPawn = TryGetPawnOwner();
-    if (OwnerPawn)
-    {
-        ACharacter* OwnerChar = Cast<ACharacter>(OwnerPawn);
-        if (OwnerChar)
-        {
-            MovementComp = OwnerChar->GetCharacterMovement();
-        }
-    }
 }
 
 void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
@@ -33,75 +35,51 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     {
         OwnerPawn = TryGetPawnOwner();
         if (!OwnerPawn) return;
-
-        ACharacter* OwnerChar = Cast<ACharacter>(OwnerPawn);
-        if (OwnerChar)
-        {
-            MovementComp = OwnerChar->GetCharacterMovement();
-        }
     }
 
-    // Update ground speed
-    FVector Velocity = OwnerPawn->GetVelocity();
-    Velocity.Z = 0.f;
-    GroundSpeed = Velocity.Size();
+    // --- Ground speed ---
+    const FVector Velocity = OwnerPawn->GetVelocity();
+    GroundSpeed = Velocity.Size2D();
 
-    // Update air state
-    if (MovementComp)
+    // --- Movement direction (relative to actor forward) ---
+    const FRotator ActorRot = OwnerPawn->GetActorRotation();
+    const FVector LocalVelocity = ActorRot.UnrotateVector(Velocity);
+    MovementDirection = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocity.Y, LocalVelocity.X));
+
+    // --- Air state (Character subclass) ---
+    if (ACharacter* Char = Cast<ACharacter>(OwnerPawn))
     {
-        bIsInAir = MovementComp->IsFalling();
+        bIsInAir = Char->GetCharacterMovement()->IsFalling();
     }
 
-    // Update movement direction (relative to actor forward)
-    if (GroundSpeed > 1.f)
+    // --- Pack AnimData struct ---
+    AnimData.Speed = GroundSpeed;
+    AnimData.Direction = MovementDirection;
+    AnimData.bIsInAir = bIsInAir;
+    AnimData.bIsAttacking = bIsAttacking;
+    AnimData.bIsRoaring = bIsRoaring;
+    AnimData.bIsDead = bIsDead;
+    AnimData.LocomotionState = LocomotionState;
+
+    // --- Resolve locomotion state ---
+    if (!bIsDead)
     {
-        FRotator ActorRot = OwnerPawn->GetActorRotation();
-        FVector LocalVelocity = ActorRot.UnrotateVector(OwnerPawn->GetVelocity());
-        MovementDirection = UKismetMathLibrary::DegAtan2(LocalVelocity.Y, LocalVelocity.X);
-    }
-    else
-    {
-        MovementDirection = 0.f;
+        LocomotionState = ResolveLocomotionState();
     }
 
-    // Determine locomotion state
-    LocomotionState = DetermineLocomotionState();
-
-    // Sync locomotion data struct for Blueprint access
-    LocomotionData.Speed = GroundSpeed;
-    LocomotionData.Direction = MovementDirection;
-    LocomotionData.bIsInAir = bIsInAir;
-    LocomotionData.bIsAttacking = bIsAttacking;
-    LocomotionData.bIsRoaring = bIsRoaring;
-    LocomotionData.bIsDead = bIsDead;
-    LocomotionData.bIsEating = bIsEating;
-    LocomotionData.LocomotionState = LocomotionState;
+    // --- Foot IK ---
+    UpdateFootIK(DeltaSeconds);
 }
 
-EAnim_DinoLocomotionState UDinoAnimInstance::DetermineLocomotionState() const
+EAnim_DinoLocomotionState UDinoAnimInstance::ResolveLocomotionState() const
 {
-    // Priority order: Death > Attack > Roar > Eating > Locomotion
-    if (bIsDead)
-        return EAnim_DinoLocomotionState::Death;
+    if (bIsAttacking) return EAnim_DinoLocomotionState::Attack;
+    if (bIsRoaring)   return EAnim_DinoLocomotionState::Roar;
+    if (bIsEating)    return EAnim_DinoLocomotionState::Eat;
+    if (bIsInAir)     return EAnim_DinoLocomotionState::Run; // airborne = sprint
 
-    if (bIsAttacking)
-        return EAnim_DinoLocomotionState::Attack;
-
-    if (bIsRoaring)
-        return EAnim_DinoLocomotionState::Roar;
-
-    if (bIsEating)
-        return EAnim_DinoLocomotionState::Eating;
-
-    if (bIsInAir)
-        return EAnim_DinoLocomotionState::Idle; // Dinos don't fly — stay idle in air
-
-    if (GroundSpeed >= RunSpeedThreshold)
-        return EAnim_DinoLocomotionState::Run;
-
-    if (GroundSpeed >= WalkSpeedThreshold)
-        return EAnim_DinoLocomotionState::Walk;
-
+    if (GroundSpeed >= RunSpeedThreshold)  return EAnim_DinoLocomotionState::Run;
+    if (GroundSpeed >= WalkSpeedThreshold) return EAnim_DinoLocomotionState::Walk;
     return EAnim_DinoLocomotionState::Idle;
 }
 
@@ -109,14 +87,16 @@ void UDinoAnimInstance::TriggerAttack()
 {
     if (bIsDead) return;
     bIsAttacking = true;
-    // Montage playback is handled in Blueprint ABP via state machine transition
-    // Reset after montage completes via Blueprint notify
+    LocomotionState = EAnim_DinoLocomotionState::Attack;
+    // Montage playback is handled by the AnimBlueprint state machine.
+    // Reset flag after montage ends via AnimNotify in BP.
 }
 
 void UDinoAnimInstance::TriggerRoar()
 {
     if (bIsDead || bIsAttacking) return;
     bIsRoaring = true;
+    LocomotionState = EAnim_DinoLocomotionState::Roar;
 }
 
 void UDinoAnimInstance::TriggerDeath()
@@ -124,11 +104,45 @@ void UDinoAnimInstance::TriggerDeath()
     bIsDead = true;
     bIsAttacking = false;
     bIsRoaring = false;
-    bIsEating = false;
+    LocomotionState = EAnim_DinoLocomotionState::Death;
+    FootIKAlpha = 0.f; // Disable IK on death
 }
 
-void UDinoAnimInstance::SetEating(bool bEating)
+void UDinoAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-    if (bIsDead || bIsAttacking) return;
-    bIsEating = bEating;
+    if (!OwnerPawn || bIsDead)
+    {
+        FootIKAlpha = 0.f;
+        return;
+    }
+
+    // Smoothly enable IK when idle or walking
+    const float TargetAlpha = (GroundSpeed < RunSpeedThreshold) ? 1.f : 0.f;
+    FootIKAlpha = FMath::FInterpTo(FootIKAlpha, TargetAlpha, DeltaSeconds, 5.f);
+
+    if (FootIKAlpha < 0.01f) return;
+
+    LeftFootIKLocation  = TraceFootToGround(TEXT("foot_l"));
+    RightFootIKLocation = TraceFootToGround(TEXT("foot_r"));
+}
+
+FVector UDinoAnimInstance::TraceFootToGround(const FName& FootSocketName) const
+{
+    if (!OwnerPawn) return FVector::ZeroVector;
+
+    USkeletalMeshComponent* Mesh = OwnerPawn->FindComponentByClass<USkeletalMeshComponent>();
+    if (!Mesh) return FVector::ZeroVector;
+
+    const FVector FootWorldPos = Mesh->GetSocketLocation(FootSocketName);
+    const FVector TraceStart   = FootWorldPos + FVector(0.f, 0.f, 100.f);
+    const FVector TraceEnd     = FootWorldPos - FVector(0.f, 0.f, 150.f);
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerPawn);
+
+    const bool bHit = OwnerPawn->GetWorld()->LineTraceSingleByChannel(
+        HitResult, TraceStart, TraceEnd, ECC_WorldStatic, Params);
+
+    return bHit ? HitResult.ImpactPoint : FootWorldPos;
 }
