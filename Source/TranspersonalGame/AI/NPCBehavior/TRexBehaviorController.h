@@ -7,38 +7,33 @@
 UENUM(BlueprintType)
 enum class ENPC_TRexState : uint8
 {
-    Patrol     UMETA(DisplayName = "Patrol"),
-    Alert      UMETA(DisplayName = "Alert"),
-    Chase      UMETA(DisplayName = "Chase"),
-    Attack     UMETA(DisplayName = "Attack"),
-    Rest       UMETA(DisplayName = "Rest"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Chasing     UMETA(DisplayName = "Chasing"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+    Resting     UMETA(DisplayName = "Resting")
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_TRexPatrolData
+struct FNPC_TRexSenses
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float SightRadius = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float HearingRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float AttackRadius = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
     float PatrolRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float ChaseDetectionRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float PatrolSpeed = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float ChaseSpeed = 700.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float AttackDamage = 80.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    float AttackCooldown = 2.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
+    float SightAngleDegrees = 120.0f;
 };
 
 UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
@@ -53,35 +48,54 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual void OnPossess(APawn* InPawn) override;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
     void SetBehaviorState(ENPC_TRexState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
     ENPC_TRexState GetCurrentState() const { return CurrentState; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    void StartPatrol();
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void SetPatrolTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    void ChaseTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    bool CanSeePlayer() const;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|TRex")
-    void ExecuteAttack();
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    float GetDistanceToPlayer() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    FNPC_TRexPatrolData PatrolData;
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
+    FNPC_TRexSenses Senses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|TRex")
-    FVector PatrolCenter;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    ENPC_TRexState CurrentState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    AActor* CurrentTarget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
+    TArray<AActor*> PatrolWaypoints;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Patrol")
+    int32 CurrentWaypointIndex;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackDamage = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackCooldown = 2.5f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Combat")
+    float LastAttackTime;
 
 private:
-    ENPC_TRexState CurrentState;
-    AActor* CurrentTarget;
-    float TimeSinceLastAttack;
-    FVector CurrentPatrolDestination;
-
-    void UpdatePatrol(float DeltaTime);
-    void UpdateChase(float DeltaTime);
+    void UpdatePatrolBehavior(float DeltaTime);
+    void UpdateChaseBehavior(float DeltaTime);
+    void UpdateAttackBehavior(float DeltaTime);
     void ScanForPlayer();
-    FVector GetRandomPatrolPoint() const;
+    APawn* GetPlayerPawn() const;
+    FVector GetPatrolOrigin() const;
+
+    FVector PatrolOrigin;
+    float StateTimer;
 };
