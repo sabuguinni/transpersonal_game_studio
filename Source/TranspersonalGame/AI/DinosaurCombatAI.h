@@ -1,33 +1,58 @@
+// DinosaurCombatAI.h
+// Agent #12 — Combat & Enemy AI
+// Dinosaur combat intelligence: threat detection, pack tactics, territorial behavior
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "DinosaurCombatAI.generated.h"
 
-UENUM(BlueprintType)
-enum class ECombat_DinoState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Alerted     UMETA(DisplayName = "Alerted"),
-    Chasing     UMETA(DisplayName = "Chasing"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-};
+// ============================================================
+// ENUMS — must be at global scope (UE5 compilation rule)
+// ============================================================
 
 UENUM(BlueprintType)
 enum class ECombat_DinoSpecies : uint8
 {
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
+    TyrannosaurusRex    UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Velociraptor        UMETA(DisplayName = "Velociraptor"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
+    Pteranodon          UMETA(DisplayName = "Pteranodon"),
+    Ankylosaurus        UMETA(DisplayName = "Ankylosaurus"),
+    Spinosaurus         UMETA(DisplayName = "Spinosaurus")
 };
+
+UENUM(BlueprintType)
+enum class ECombat_ThreatState : uint8
+{
+    Passive             UMETA(DisplayName = "Passive — unaware of player"),
+    Alerted             UMETA(DisplayName = "Alerted — detected player"),
+    Stalking            UMETA(DisplayName = "Stalking — tracking player"),
+    Charging            UMETA(DisplayName = "Charging — direct attack"),
+    Flanking            UMETA(DisplayName = "Flanking — pack maneuver"),
+    Retreating          UMETA(DisplayName = "Retreating — wounded/outmatched"),
+    Territorial         UMETA(DisplayName = "Territorial — defending zone"),
+    Feeding             UMETA(DisplayName = "Feeding — occupied with kill")
+};
+
+UENUM(BlueprintType)
+enum class ECombat_AttackType : uint8
+{
+    Bite                UMETA(DisplayName = "Bite — primary jaw attack"),
+    Claw                UMETA(DisplayName = "Claw — slashing strike"),
+    Charge              UMETA(DisplayName = "Charge — momentum knockback"),
+    TailSwipe           UMETA(DisplayName = "Tail Swipe — area knockback"),
+    Stomp               UMETA(DisplayName = "Stomp — ground pound"),
+    Pounce              UMETA(DisplayName = "Pounce — leap and pin")
+};
+
+// ============================================================
+// STRUCTS — must be at global scope
+// ============================================================
 
 USTRUCT(BlueprintType)
 struct FCombat_DinoStats
@@ -35,55 +60,95 @@ struct FCombat_DinoStats
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float MaxHealth = 1000.0f;
+    float MaxHealth = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float CurrentHealth = 1000.0f;
+    float CurrentHealth = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float AttackDamage = 150.0f;
+    float AttackDamage = 75.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float AttackRange = 300.0f;
+    float AttackRange = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float DetectionRadius = 2000.0f;
+    float DetectionRadius = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float ChaseSpeed = 800.0f;
+    float TerritoryRadius = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float PatrolSpeed = 300.0f;
+    float MoveSpeed = 600.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    float AttackCooldown = 2.0f;
+    float ChargeSpeed = 1200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
-    bool bIsPack = false;
+    float AttackCooldown = 2.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
+    bool bIsPackHunter = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
     int32 PackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Stats")
+    float RetreatHealthThreshold = 0.25f;
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_ThreatEntry
+struct FCombat_ThreatMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat|Threat")
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
     AActor* ThreatActor = nullptr;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat|Threat")
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    FVector LastKnownLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
     float ThreatLevel = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat|Threat")
-    float LastSeenTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    float TimeLastSeen = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat|Threat")
-    FVector LastKnownLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    bool bIsVisible = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Memory")
+    bool bIsWounded = false;
 };
 
-UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct FCombat_PackCoordination
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    TArray<AActor*> PackMembers;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    AActor* AlphaLeader = nullptr;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    FVector FlankPositionLeft = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    FVector FlankPositionRight = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    bool bFlankingActive = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|Pack")
+    int32 DecoyIndex = 0;
+};
+
+// ============================================================
+// COMPONENT CLASS
+// ============================================================
+
+UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent), DisplayName = "Dinosaur Combat AI")
 class TRANSPERSONALGAME_API UDinosaurCombatAI : public UActorComponent
 {
     GENERATED_BODY()
@@ -94,63 +159,85 @@ public:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config")
-    ECombat_DinoSpecies Species = ECombat_DinoSpecies::TRex;
+    // ── Species Configuration ──────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Species")
+    ECombat_DinoSpecies Species = ECombat_DinoSpecies::Velociraptor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Species")
     FCombat_DinoStats Stats;
 
+    // ── Current State ──────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
-    ECombat_DinoState CurrentState = ECombat_DinoState::Idle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
-    TArray<FCombat_ThreatEntry> ThreatList;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Patrol")
-    TArray<FVector> PatrolPoints;
+    ECombat_ThreatState CurrentThreatState = ECombat_ThreatState::Passive;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
-    int32 CurrentPatrolIndex = 0;
+    FCombat_ThreatMemory PrimaryThreat;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
+    FCombat_PackCoordination PackData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
+    float TimeSinceLastAttack = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|State")
+    bool bIsAlpha = false;
+
+    // ── Combat Functions ───────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void DetectThreats();
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void RegisterThreat(AActor* ThreatActor, float ThreatLevel);
+    void UpdateThreatState(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ClearThreat(AActor* ThreatActor);
+    void ExecuteAttack(ECombat_AttackType AttackType);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    float GetCurrentHealth() const { return Stats.CurrentHealth; }
+    void InitiatePackFlank(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ApplyDamage(float DamageAmount);
+    void BroadcastThreatToPackMembers(AActor* Threat);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    ECombat_DinoState GetCurrentState() const { return CurrentState; }
+    float CalculateThreatLevel(AActor* PotentialThreat) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool IsHostile() const;
+    bool ShouldRetreat() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    AActor* GetHighestThreat() const;
+    FVector GetFlankPosition(bool bLeftFlank, AActor* Target) const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetState(ECombat_DinoState NewState);
+    void ApplySpeciesDefaults();
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void ExecuteAttack(AActor* Target);
+    ECombat_AttackType SelectBestAttack() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void InitializeSpeciesStats();
+    // ── Events (Blueprint-implementable) ───────────────────
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Events")
+    void OnThreatDetected(AActor* Threat);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Events")
+    void OnAttackExecuted(ECombat_AttackType AttackType, float DamageDealt);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Events")
+    void OnPackFlankInitiated(FVector LeftPos, FVector RightPos);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Events")
+    void OnRetreatDecision();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat|Events")
+    void OnThreatLost();
 
 private:
-    float LastAttackTime = 0.0f;
-    float StateEntryTime = 0.0f;
+    void UpdatePassiveState(float DeltaTime);
+    void UpdateAlertedState(float DeltaTime);
+    void UpdateStalkingState(float DeltaTime);
+    void UpdateChargingState(float DeltaTime);
+    void UpdateFlankingState(float DeltaTime);
+    void UpdateRetreatState(float DeltaTime);
 
-    void UpdateCombatState(float DeltaTime);
-    void UpdatePatrol(float DeltaTime);
-    void UpdateChase(float DeltaTime);
-    void UpdateAttack(float DeltaTime);
-    void ScanForThreats();
-    void DecayThreatList(float DeltaTime);
-    bool IsInAttackRange(AActor* Target) const;
+    FVector HomeLocation;
+    float StateTimer = 0.0f;
+    bool bHomeLocationSet = false;
 };
