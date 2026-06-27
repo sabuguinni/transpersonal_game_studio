@@ -1,229 +1,204 @@
 // PerformanceOptimizer.h
-// Performance Optimizer Agent #04 — Transpersonal Game Studio
-// Runtime performance manager: LOD, culling, scalability, frame budget
-// Cycle: PROD_CYCLE_AUTO_20260622_008
+// Prehistoric survival game — Performance Optimizer Component
+// Manages LOD, tick rates, shadow quality, and frame budget enforcement
+// Agent #4 — Performance Optimizer | Cycle 009
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "PerformanceOptimizer.generated.h"
 
-// ============================================================
-// ENUMS (global scope — UHT requirement)
-// ============================================================
-
-/** Target platform for scalability preset selection */
+// Performance tier for platform-specific settings
 UENUM(BlueprintType)
-enum class EPerf_Platform : uint8
+enum class EPerf_PerformanceTier : uint8
 {
-    PC_High     UMETA(DisplayName = "PC High-End (60fps)"),
-    PC_Medium   UMETA(DisplayName = "PC Medium (60fps)"),
-    PC_Low      UMETA(DisplayName = "PC Low (30fps)"),
-    Console     UMETA(DisplayName = "Console (30fps)"),
-    Mobile      UMETA(DisplayName = "Mobile (30fps)")
+    Ultra       UMETA(DisplayName = "Ultra (PC High-End)"),
+    High        UMETA(DisplayName = "High (PC Mid-Range)"),
+    Medium      UMETA(DisplayName = "Medium (PC Low / Console)"),
+    Low         UMETA(DisplayName = "Low (Minimum Spec)")
 };
 
-/** Current performance health status */
-UENUM(BlueprintType)
-enum class EPerf_HealthStatus : uint8
-{
-    Optimal     UMETA(DisplayName = "Optimal (>55fps)"),
-    Acceptable  UMETA(DisplayName = "Acceptable (45-55fps)"),
-    Degraded    UMETA(DisplayName = "Degraded (30-45fps)"),
-    Critical    UMETA(DisplayName = "Critical (<30fps)")
-};
-
-// ============================================================
-// STRUCTS (global scope — UHT requirement)
-// ============================================================
-
-/** Frame budget allocation per system */
+// Frame budget allocation per system (milliseconds)
 USTRUCT(BlueprintType)
 struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    /** Total frame budget in milliseconds (16.67ms = 60fps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TotalBudgetMs = 16.67f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float RenderingBudgetMs = 6.0f;
 
-    /** CPU game thread budget (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CpuGameThreadMs = 6.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float AIBudgetMs = 1.5f;
 
-    /** CPU render thread budget (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CpuRenderThreadMs = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float PhysicsBudgetMs = 2.0f;
 
-    /** GPU budget (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GpuMs = 12.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float AudioBudgetMs = 0.5f;
 
-    /** Dinosaur AI tick budget (ms) — shared across all dino pawns */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float DinoAiBudgetMs = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MiscBudgetMs = 1.0f;
 
-    /** Physics simulation budget (ms) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PhysicsBudgetMs = 2.5f;
-
-    /** Max simultaneous dinosaur pawns before LOD culling kicks in */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimultaneousDinos = 10;
-
-    /** Max static mesh actors before streaming LOD enforced */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxStaticMeshActors = 500;
+    float GetTotalBudgetMs() const { return RenderingBudgetMs + AIBudgetMs + PhysicsBudgetMs + AudioBudgetMs + MiscBudgetMs; }
 };
 
-/** Scalability preset for a given platform */
+// LOD distance thresholds for dinosaur actors
 USTRUCT(BlueprintType)
-struct FPerf_ScalabilityPreset
+struct FPerf_DinoLODSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_Platform Platform = EPerf_Platform::PC_High;
+    // Distance at which dino switches to 20Hz tick (reduced AI)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float ReducedTickDistance = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ResolutionQuality = 100;
+    // Distance at which dino switches to 5Hz tick (minimal AI)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float MinimalTickDistance = 8000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ShadowQuality = 3;
+    // Distance at which dino is fully culled from AI updates
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float CullDistance = 15000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TextureQuality = 3;
+    // Full tick rate (close range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float FullTickHz = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 EffectsQuality = 3;
+    // Reduced tick rate (mid range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float ReducedTickHz = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ViewDistanceQuality = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFPS = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ShadowMaxResolution = 2048;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TextureStreamingPoolMB = 512.0f;
+    // Minimal tick rate (far range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float MinimalTickHz = 5.0f;
 };
 
-// ============================================================
-// MAIN CLASS
-// ============================================================
+// Per-frame performance snapshot
+USTRUCT(BlueprintType)
+struct FPerf_FrameSnapshot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    float FrameTimeMs = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    float FPS = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    int32 ActiveDinoCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    int32 FullTickDinoCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    int32 ReducedTickDinoCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    int32 CulledDinoCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    bool bBudgetExceeded = false;
+};
 
 /**
- * APerformanceOptimizer
- *
- * Placed once in the level (or spawned by GameMode).
- * Monitors frame budget, applies scalability presets,
- * enforces LOD/culling settings, and logs performance warnings.
- *
- * Usage:
- *   - Place in MinPlayableMap
- *   - Set TargetPlatform in Details panel
- *   - Call ApplyScalabilityPreset() from BP or GameMode
+ * UPerf_PerformanceOptimizer
+ * 
+ * Actor component that manages runtime performance optimization for the
+ * prehistoric survival game. Handles:
+ * - Distance-based dinosaur tick rate scaling (60Hz → 20Hz → 5Hz → culled)
+ * - Dynamic shadow quality adjustment based on frame time
+ * - Frame budget monitoring and alerts
+ * - Platform-specific quality tier enforcement
+ * 
+ * Attach to GameMode or a persistent manager actor.
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Optimizer"))
-class TRANSPERSONALGAME_API APerformanceOptimizer : public AActor
+UCLASS(ClassGroup = (Performance), meta = (BlueprintSpawnableComponent), DisplayName = "Performance Optimizer")
+class TRANSPERSONALGAME_API UPerf_PerformanceOptimizer : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerformanceOptimizer();
+    UPerf_PerformanceOptimizer();
 
-protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // --------------------------------------------------------
-    // Configuration
-    // --------------------------------------------------------
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
 
-    /** Target platform — determines which scalability preset is applied on BeginPlay */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    EPerf_Platform TargetPlatform = EPerf_Platform::PC_High;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_PerformanceTier PerformanceTier = EPerf_PerformanceTier::High;
 
-    /** Frame budget for this platform */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     FPerf_FrameBudget FrameBudget;
 
-    /** Whether to auto-apply scalability preset on BeginPlay */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    bool bAutoApplyOnBeginPlay = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_DinoLODSettings DinoLODSettings;
 
-    /** Whether to log performance warnings to output log */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    bool bEnablePerfWarnings = true;
+    // Target FPS (60 for PC, 30 for console)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "20", ClampMax = "120"))
+    float TargetFPS = 60.0f;
 
-    /** Interval in seconds between performance checks */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    float PerfCheckIntervalSeconds = 5.0f;
+    // How often to run the full optimization pass (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float OptimizationInterval = 0.5f;
 
-    // --------------------------------------------------------
-    // Runtime State
-    // --------------------------------------------------------
+    // Enable dynamic shadow quality scaling
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bDynamicShadowQuality = true;
 
-    /** Current performance health */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance|State",
-        meta = (AllowPrivateAccess = "true"))
-    EPerf_HealthStatus CurrentHealth = EPerf_HealthStatus::Optimal;
+    // Enable distance-based dino tick scaling
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bDinoTickScaling = true;
 
-    /** Smoothed frame time (ms) over last 60 frames */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance|State")
-    float SmoothedFrameTimeMs = 0.0f;
+    // ============================================================
+    // RUNTIME STATS (read-only)
+    // ============================================================
 
-    /** Number of consecutive degraded frames before auto-downscale */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance|State")
-    int32 DegradedFrameCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats", meta = (AllowPrivateAccess = "true"))
+    FPerf_FrameSnapshot LastSnapshot;
 
-    // --------------------------------------------------------
-    // Public API
-    // --------------------------------------------------------
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats", meta = (AllowPrivateAccess = "true"))
+    float AverageFrameTimeMs = 0.0f;
 
-    /** Apply scalability preset for the configured TargetPlatform */
+    // ============================================================
+    // BLUEPRINT-CALLABLE FUNCTIONS
+    // ============================================================
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTier(EPerf_PerformanceTier NewTier);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceOptimizationPass();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_FrameSnapshot GetCurrentSnapshot() const { return LastSnapshot; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFPS() const { return LastSnapshot.FPS; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceHealthy() const { return !LastSnapshot.bBudgetExceeded; }
+
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void ApplyScalabilityPreset();
-
-    /** Apply a specific preset struct */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyPreset(const FPerf_ScalabilityPreset& Preset);
-
-    /** Get preset struct for a given platform */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    FPerf_ScalabilityPreset GetPresetForPlatform(EPerf_Platform Platform) const;
-
-    /** Force LOD bias on all static mesh actors in the current level */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void EnforceLODOnAllMeshes();
-
-    /** Enable/disable Lumen GI and reflections */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetLumenEnabled(bool bEnabled);
-
-    /** Enable/disable Nanite */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetNaniteEnabled(bool bEnabled);
-
-    /** Get current health status */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    EPerf_HealthStatus GetHealthStatus() const { return CurrentHealth; }
-
-    /** Get smoothed FPS */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    float GetSmoothedFPS() const;
+    void LogPerformanceReport();
 
 private:
-    float TimeSinceLastPerfCheck = 0.0f;
+    // Internal optimization state
+    float TimeSinceLastOptimization = 0.0f;
     float FrameTimeAccumulator = 0.0f;
-    int32 FrameTimesamples = 0;
+    int32 FrameCount = 0;
+    TWeakObjectPtr<AActor> CachedPlayerActor;
 
-    void UpdatePerformanceHealth(float DeltaTime);
-    void ExecuteConsoleCommand(const FString& Command);
-    void LogPerfWarning(const FString& Message) const;
+    // Internal methods
+    void RunOptimizationPass();
+    void UpdateDinoTickRates();
+    void UpdateShadowQuality(float CurrentFrameTimeMs);
+    void ApplyTierSettings(EPerf_PerformanceTier Tier);
+    void CachePlayerActor();
+    float GetTargetFrameTimeMs() const { return 1000.0f / TargetFPS; }
 };
