@@ -1,273 +1,183 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "../SharedTypes.h"
 #include "PerformanceManager.generated.h"
 
+// ============================================================
+// Performance budget thresholds for 60fps PC / 30fps Console
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
+enum class EPerf_TargetPlatform : uint8
 {
-    Low         UMETA(DisplayName = "Low (30 FPS)"),
-    Medium      UMETA(DisplayName = "Medium (45 FPS)"),
-    High        UMETA(DisplayName = "High (60 FPS)"),
-    Ultra       UMETA(DisplayName = "Ultra (120+ FPS)")
+    PC_High     UMETA(DisplayName = "PC High-End"),
+    PC_Mid      UMETA(DisplayName = "PC Mid-Range"),
+    Console     UMETA(DisplayName = "Console")
 };
 
 UENUM(BlueprintType)
-enum class EPerf_OptimizationState : uint8
+enum class EPerf_QualityLevel : uint8
 {
-    Analyzing   UMETA(DisplayName = "Analyzing"),
-    Optimizing  UMETA(DisplayName = "Optimizing"),
-    Stable      UMETA(DisplayName = "Stable"),
-    Critical    UMETA(DisplayName = "Critical")
+    Ultra   UMETA(DisplayName = "Ultra"),
+    High    UMETA(DisplayName = "High"),
+    Medium  UMETA(DisplayName = "Medium"),
+    Low     UMETA(DisplayName = "Low")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
+struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
+    // Target frame time in milliseconds
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    float TargetFrameTimeMs = 16.67f; // 60fps
 
+    // Current measured frame time
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFPS = 0.0f;
+    float CurrentFrameTimeMs = 0.0f;
 
+    // GPU time budget (ms)
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MinFPS = 0.0f;
+    float GPUBudgetMs = 10.0f;
 
+    // CPU time budget (ms)
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxFPS = 0.0f;
+    float CPUBudgetMs = 6.0f;
 
+    // Max draw calls per frame
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float UsedMemoryMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float AvailableMemoryMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
-    int32 DrawCalls = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
-    int32 TriangleCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "World")
-    int32 ActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "World")
-    int32 ComponentCount = 0;
-
-    FPerf_PerformanceMetrics()
-    {
-        CurrentFPS = 0.0f;
-        AverageFPS = 0.0f;
-        MinFPS = 999.0f;
-        MaxFPS = 0.0f;
-        FrameTime = 0.0f;
-        GameThreadTime = 0.0f;
-        RenderThreadTime = 0.0f;
-        GPUTime = 0.0f;
-        UsedMemoryMB = 0.0f;
-        AvailableMemoryMB = 0.0f;
-        DrawCalls = 0;
-        TriangleCount = 0;
-        ActorCount = 0;
-        ComponentCount = 0;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_OptimizationSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float TargetFPS = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float MinAcceptableFPS = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LODDistanceScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxLODLevel = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    float ViewDistanceScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
     int32 MaxDrawCalls = 2000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float MaxMemoryUsageMB = 8192.0f;
+    // Max triangle count (millions)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MaxTrianglesM = 5.0f;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
-    float CullingDistance = 5000.0f;
+USTRUCT(BlueprintType)
+struct FPerf_LODConfig
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bAutoOptimization = true;
+    // Screen size threshold for LOD0 -> LOD1 transition
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD0ScreenSize = 0.15f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    bool bDynamicLOD = true;
+    // Screen size threshold for LOD1 -> LOD2 transition
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD1ScreenSize = 0.08f;
 
-    FPerf_OptimizationSettings()
-    {
-        TargetFPS = 60.0f;
-        MinAcceptableFPS = 30.0f;
-        LODDistanceScale = 1.0f;
-        MaxLODLevel = 3;
-        ViewDistanceScale = 1.0f;
-        MaxDrawCalls = 2000;
-        MaxMemoryUsageMB = 8192.0f;
-        CullingDistance = 5000.0f;
-        bAutoOptimization = true;
-        bDynamicLOD = true;
-    }
+    // Screen size threshold for LOD2 -> cull
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD2ScreenSize = 0.03f;
+
+    // Cull distance in cm
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullDistanceCm = 8000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FPerf_DinosaurBudget
+{
+    GENERATED_BODY()
+
+    // Max simultaneous dinosaurs with full AI
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Budget")
+    int32 MaxFullAIDinosaurs = 12;
+
+    // Max simultaneous dinosaurs with simplified AI
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Budget")
+    int32 MaxSimplifiedAIDinosaurs = 40;
+
+    // Distance at which AI switches to simplified (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Budget")
+    float AISimplifyDistanceCm = 3000.0f;
+
+    // Distance at which dinosaur is fully culled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Budget")
+    float CullDistanceCm = 10000.0f;
 };
 
 /**
- * Performance Manager - Monitors and optimizes game performance in real-time
- * Ensures 60fps on PC and 30fps on console through dynamic optimization
+ * UPerf_PerformanceManager
+ * GameInstance subsystem that monitors and enforces frame budget.
+ * Targets: 60fps PC High-End / 30fps Console
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerformanceManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, DisplayName = "Performance Manager")
+class TRANSPERSONALGAME_API UPerf_PerformanceManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UPerformanceManager();
-
-    // Subsystem Interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Performance Monitoring
+    // Apply quality preset for target platform
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceMonitoring();
+    void ApplyQualityPreset(EPerf_TargetPlatform Platform, EPerf_QualityLevel Quality);
+
+    // Get current frame budget status
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    FPerf_FrameBudget GetFrameBudget() const;
+
+    // Get LOD configuration
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    FPerf_LODConfig GetLODConfig() const;
+
+    // Get dinosaur budget
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    FPerf_DinosaurBudget GetDinosaurBudget() const;
+
+    // Check if we are over budget (returns true if frame time exceeds target)
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    bool IsOverBudget() const;
+
+    // Force LOD bias adjustment (positive = lower quality, negative = higher)
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetGlobalLODBias(float Bias);
+
+    // Enable/disable expensive features dynamically
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetLumenEnabled(bool bEnabled);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceMonitoring();
+    void SetVirtualShadowMapsEnabled(bool bEnabled);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_PerformanceMetrics GetCurrentMetrics() const;
+    void SetNaniteEnabled(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_OptimizationState GetOptimizationState() const;
-
-    // Optimization Controls
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void SetOptimizationSettings(const FPerf_OptimizationSettings& NewSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    FPerf_OptimizationSettings GetOptimizationSettings() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void ForceOptimizationPass();
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void SetPerformanceLevel(EPerf_PerformanceLevel Level);
-
-    // Dynamic LOD Management
-    UFUNCTION(BlueprintCallable, Category = "LOD")
-    void UpdateDynamicLOD();
-
-    UFUNCTION(BlueprintCallable, Category = "LOD")
-    void SetLODDistanceScale(float Scale);
-
-    // Memory Management
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ForceGarbageCollection();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void OptimizeMemoryUsage();
-
-    // Performance Profiling
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void StartProfiling(const FString& ProfileName);
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void StopProfiling();
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void SavePerformanceReport(const FString& ReportName);
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceStateChanged, EPerf_OptimizationState, NewState);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnPerformanceStateChanged OnPerformanceStateChanged;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSDropDetected, float, CurrentFPS);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnFPSDropDetected OnFPSDropDetected;
-
-protected:
-    // Internal monitoring
-    void UpdatePerformanceMetrics();
-    void AnalyzePerformanceBottlenecks();
-    void ApplyOptimizations();
-    void CheckPerformanceThresholds();
-
-    // Optimization methods
-    void OptimizeLODLevels();
-    void OptimizeRenderingSettings();
-    void OptimizeCullingDistance();
-    void OptimizeMemorySettings();
+    // Tick: sample frame time and auto-adjust if over budget
+    void Tick(float DeltaTime);
 
 private:
     UPROPERTY()
-    FPerf_PerformanceMetrics CurrentMetrics;
+    FPerf_FrameBudget FrameBudget;
 
     UPROPERTY()
-    FPerf_OptimizationSettings OptimizationSettings;
+    FPerf_LODConfig LODConfig;
 
     UPROPERTY()
-    EPerf_OptimizationState CurrentState;
+    FPerf_DinosaurBudget DinosaurBudget;
 
     UPROPERTY()
-    EPerf_PerformanceLevel CurrentLevel;
+    EPerf_TargetPlatform CurrentPlatform = EPerf_TargetPlatform::PC_High;
 
-    // Monitoring state
-    bool bIsMonitoring;
-    bool bIsProfiling;
-    FString CurrentProfileName;
-    
-    // Timing
-    FDateTime LastUpdateTime;
-    float UpdateInterval;
-    
-    // Performance history
-    TArray<float> FPSHistory;
-    TArray<float> FrameTimeHistory;
-    int32 MaxHistorySize;
-    
-    // Optimization timers
-    float LastOptimizationTime;
-    float OptimizationCooldown;
-    
-    // Performance thresholds
-    float CriticalFPSThreshold;
-    float LowFPSThreshold;
-    int32 ConsecutiveLowFrames;
-    int32 MaxConsecutiveLowFrames;
+    UPROPERTY()
+    EPerf_QualityLevel CurrentQuality = EPerf_QualityLevel::High;
+
+    // Rolling average of last N frame times
+    TArray<float> FrameTimeSamples;
+    int32 FrameSampleIndex = 0;
+    static constexpr int32 FrameSampleCount = 60;
+
+    // Auto-adjustment state
+    float TimeSinceLastAdjustment = 0.0f;
+    float AdjustmentCooldownSeconds = 5.0f;
+
+    // Internal helpers
+    void ApplyConsoleVarsForPreset(EPerf_TargetPlatform Platform, EPerf_QualityLevel Quality);
+    float GetAverageFrameTime() const;
+    void AutoAdjustQuality();
 };
