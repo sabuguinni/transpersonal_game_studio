@@ -1,342 +1,264 @@
-// AudioSystemManager.cpp
-// Agent #16 — Audio Agent
-// Adaptive audio system implementation
-
 #include "AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/CameraShakeBase.h"
-#include "Components/AudioComponent.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 AAudioSystemManager::AAudioSystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10Hz tick — audio doesn't need per-frame update
+
+    AmbientDayComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientDayAudio"));
+    AmbientDayComponent->SetupAttachment(RootComponent);
+    AmbientDayComponent->bAutoActivate = false;
+    AmbientDayComponent->VolumeMultiplier = 0.8f;
+
+    AmbientNightComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientNightAudio"));
+    AmbientNightComponent->SetupAttachment(RootComponent);
+    AmbientNightComponent->bAutoActivate = false;
+    AmbientNightComponent->VolumeMultiplier = 0.0f;
+
+    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
+    MusicComponent->SetupAttachment(RootComponent);
+    MusicComponent->bAutoActivate = false;
+    MusicComponent->VolumeMultiplier = 0.7f;
+
+    CurrentBiomeZone = EAudio_BiomeZone::OpenPlains;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    CurrentDayNightBlend = 0.0f;
+
+    // Pre-populate narration URLs from ElevenLabs TTS (generated this cycle)
+    NarrationAudioURLs.Add(TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782534909525_Narrator_Survival.mp3"));
+    NarrationAudioURLs.Add(TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782534928593_Narrator_Danger.mp3"));
 }
 
 void AAudioSystemManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Initialize threat state
-    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-    CurrentBiome = EAudio_BiomeType::OpenPlains;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initialized. Threat=Safe, Biome=OpenPlains, Time=Day"));
+    // Start ambient audio for default biome
+    if (AmbientDayComponent && AmbientDayComponent->Sound)
+    {
+        AmbientDayComponent->Play();
+    }
 }
 
 void AAudioSystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    TimeSinceLastThreatChange += DeltaTime;
-    UpdateAdaptiveMusic(DeltaTime);
-    UpdateAmbientLayers(DeltaTime);
+    UpdateAmbientCrossfade(DeltaTime);
+    UpdateMusicLayer(DeltaTime);
 }
 
-// ─── Threat Level ─────────────────────────────────────────────────────────────
-
-void AAudioSystemManager::SetThreatLevel(EAudio_ThreatLevel NewLevel)
+void AAudioSystemManager::SetActiveBiomeZone(EAudio_BiomeZone NewZone)
 {
-    if (NewLevel == CurrentThreatLevel)
+    if (CurrentBiomeZone == NewZone) return;
+    CurrentBiomeZone = NewZone;
+
+    // Find matching ambient layer and update audio components
+    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
     {
-        return;
-    }
-
-    EAudio_ThreatLevel OldLevel = CurrentThreatLevel;
-    CurrentThreatLevel = NewLevel;
-    TimeSinceLastThreatChange = 0.0f;
-    ThreatBlendAlpha = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Threat level changed %d -> %d"),
-        (int32)OldLevel, (int32)NewLevel);
-
-    // Trigger camera shake for high threat transitions
-    if (NewLevel == EAudio_ThreatLevel::Combat || NewLevel == EAudio_ThreatLevel::Flee)
-    {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-        if (PC && PC->PlayerCameraManager)
+        if (Layer.BiomeZone == NewZone)
         {
-            PC->PlayerCameraManager->StartCameraShake(
-                UCameraShakeBase::StaticClass(), 1.0f
-            );
-        }
-    }
-}
-
-// ─── Biome Transition ─────────────────────────────────────────────────────────
-
-void AAudioSystemManager::TransitionToBiome(EAudio_BiomeType NewBiome, float CrossfadeTime)
-{
-    if (NewBiome == CurrentBiome)
-    {
-        return;
-    }
-
-    CurrentBiome = NewBiome;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Biome transition to %d (crossfade %.1fs)"),
-        (int32)NewBiome, CrossfadeTime);
-
-    // Fade out existing ambient components
-    for (UAudioComponent* Comp : ActiveAmbientComponents)
-    {
-        if (Comp && Comp->IsPlaying())
-        {
-            Comp->FadeOut(CrossfadeTime, 0.0f);
-        }
-    }
-    ActiveAmbientComponents.Empty();
-
-    // New layers will be started in UpdateAmbientLayers
-}
-
-void AAudioSystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
-{
-    if (NewTime == CurrentTimeOfDay)
-    {
-        return;
-    }
-
-    CurrentTimeOfDay = NewTime;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Time of day changed to %d"), (int32)NewTime);
-}
-
-// ─── Dinosaur Audio ───────────────────────────────────────────────────────────
-
-void AAudioSystemManager::PlayDinosaurFootstep(FName Species, FVector Location)
-{
-    // Find the species profile
-    FAudio_DinosaurSoundProfile* Profile = nullptr;
-    for (FAudio_DinosaurSoundProfile& P : DinosaurProfiles)
-    {
-        if (P.DinosaurSpecies == Species)
-        {
-            Profile = &P;
+            // Load and assign sounds (async-safe via soft references)
+            if (Layer.DayAmbience.IsValid() && AmbientDayComponent)
+            {
+                AmbientDayComponent->SetSound(Layer.DayAmbience.Get());
+                AmbientDayComponent->Play();
+            }
+            if (Layer.NightAmbience.IsValid() && AmbientNightComponent)
+            {
+                AmbientNightComponent->SetSound(Layer.NightAmbience.Get());
+            }
             break;
         }
     }
+}
 
-    if (!Profile)
+void AAudioSystemManager::SetDayNightBlend(float NormalizedTimeOfDay)
+{
+    // 0.0 = midday, 1.0 = midnight
+    CurrentDayNightBlend = FMath::Clamp(NormalizedTimeOfDay, 0.0f, 1.0f);
+
+    // Crossfade ambient layers
+    if (AmbientDayComponent)
     {
-        return;
+        AmbientDayComponent->SetVolumeMultiplier(AmbientVolume * (1.0f - CurrentDayNightBlend));
     }
-
-    // Check distance to player for shake
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC && PC->GetPawn())
+    if (AmbientNightComponent)
     {
-        float Distance = FVector::Dist(Location, PC->GetPawn()->GetActorLocation());
-
-        if (Distance < Profile->FootstepShakeRadius)
+        AmbientNightComponent->SetVolumeMultiplier(AmbientVolume * CurrentDayNightBlend);
+        if (CurrentDayNightBlend > 0.1f && !AmbientNightComponent->IsPlaying())
         {
-            // Scale shake by distance — closer = stronger
-            float ShakeScale = FMath::Clamp(
-                1.0f - (Distance / Profile->FootstepShakeRadius),
-                0.1f, 1.0f
-            ) * Profile->FootstepShakeIntensity;
-
-            if (PC->PlayerCameraManager)
-            {
-                PC->PlayerCameraManager->StartCameraShake(
-                    UCameraShakeBase::StaticClass(), ShakeScale
-                );
-            }
+            AmbientNightComponent->Play();
         }
     }
+}
+
+void AAudioSystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    if (CurrentDangerLevel == NewLevel) return;
+    CurrentDangerLevel = NewLevel;
+
+    // Music intensity changes based on danger level
+    float TargetMusicVolume = 0.0f;
+    switch (NewLevel)
+    {
+        case EAudio_DangerLevel::Safe:       TargetMusicVolume = 0.3f; break;
+        case EAudio_DangerLevel::Cautious:   TargetMusicVolume = 0.5f; break;
+        case EAudio_DangerLevel::Threatened: TargetMusicVolume = 0.7f; break;
+        case EAudio_DangerLevel::Combat:     TargetMusicVolume = 1.0f; break;
+        case EAudio_DangerLevel::Fleeing:    TargetMusicVolume = 0.9f; break;
+    }
+
+    if (MusicComponent)
+    {
+        MusicComponent->SetVolumeMultiplier(MusicVolume * TargetMusicVolume);
+        if (!MusicComponent->IsPlaying() && NewLevel != EAudio_DangerLevel::Safe)
+        {
+            MusicComponent->Play();
+        }
+    }
+}
+
+void AAudioSystemManager::OnDinosaurFootstep(FVector FootstepLocation, FName DinosaurSpecies, float DinosaurMass)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
 
     // Play footstep sound at location
-    if (Profile->FootstepSound.IsValid())
+    FAudio_DinosaurSoundProfile* Profile = FindDinosaurProfile(DinosaurSpecies);
+    if (Profile && Profile->FootstepSound.IsValid())
     {
-        USoundBase* Sound = Profile->FootstepSound.LoadSynchronous();
-        if (Sound)
-        {
-            UGameplayStatics::PlaySoundAtLocation(GetWorld(), Sound, Location, SFXVolume);
-        }
-    }
-}
-
-void AAudioSystemManager::TriggerTRexApproachSequence(float Distance)
-{
-    // Distance-based threat escalation for T-Rex
-    // > 2000 units: Safe (just ambient rumble)
-    // 1000-2000: Aware (subtle percussion enters)
-    // 500-1000: Danger (full danger music)
-    // < 500: Combat
-
-    EAudio_ThreatLevel NewThreat = EAudio_ThreatLevel::Safe;
-
-    if (Distance < 500.0f)
-    {
-        NewThreat = EAudio_ThreatLevel::Combat;
-    }
-    else if (Distance < 1000.0f)
-    {
-        NewThreat = EAudio_ThreatLevel::Danger;
-    }
-    else if (Distance < 2000.0f)
-    {
-        NewThreat = EAudio_ThreatLevel::Aware;
-    }
-
-    SetThreatLevel(NewThreat);
-
-    // Ground shake for T-Rex proximity
-    if (Distance < 1500.0f)
-    {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-        if (PC && PC->PlayerCameraManager)
-        {
-            float ShakeScale = FMath::Clamp(1.0f - (Distance / 1500.0f), 0.05f, 0.8f);
-            PC->PlayerCameraManager->StartCameraShake(
-                UCameraShakeBase::StaticClass(), ShakeScale
-            );
-        }
-    }
-}
-
-// ─── Narrative Voice ──────────────────────────────────────────────────────────
-
-void AAudioSystemManager::RegisterNarrativeLine(FAudio_NarrativeVoiceLine Line)
-{
-    // Prevent duplicate registration
-    for (FAudio_NarrativeVoiceLine& Existing : NarrativeLines)
-    {
-        if (Existing.LineID == Line.LineID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narrative line '%s' already registered"),
-                *Line.LineID.ToString());
-            return;
-        }
-    }
-
-    NarrativeLines.Add(Line);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered narrative line '%s'"),
-        *Line.LineID.ToString());
-}
-
-void AAudioSystemManager::PlayNarrativeLine(FName LineID)
-{
-    for (FAudio_NarrativeVoiceLine& Line : NarrativeLines)
-    {
-        if (Line.LineID == LineID)
-        {
-            if (Line.bPlayOnce && Line.bHasPlayed)
-            {
-                return;
-            }
-
-            if (Line.AudioAsset.IsValid())
-            {
-                USoundBase* Sound = Line.AudioAsset.LoadSynchronous();
-                if (Sound)
-                {
-                    UGameplayStatics::PlaySound2D(GetWorld(), Sound, VoiceVolume);
-                    Line.bHasPlayed = true;
-                    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing narrative line '%s'"),
-                        *LineID.ToString());
-                }
-            }
-            return;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narrative line '%s' not found"), *LineID.ToString());
-}
-
-// ─── Screen Feedback ──────────────────────────────────────────────────────────
-
-void AAudioSystemManager::TriggerDamageAudioFeedback(float DamageAmount)
-{
-    // Scale camera shake with damage amount
-    float ShakeScale = FMath::Clamp(DamageAmount / 100.0f, 0.1f, 1.5f);
-
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC && PC->PlayerCameraManager)
-    {
-        PC->PlayerCameraManager->StartCameraShake(
-            UCameraShakeBase::StaticClass(), ShakeScale
+        UGameplayStatics::PlaySoundAtLocation(
+            World,
+            Profile->FootstepSound.Get(),
+            FootstepLocation,
+            SFXVolume,
+            1.0f,
+            0.0f
         );
     }
 
-    // Escalate threat on damage
-    if (CurrentThreatLevel == EAudio_ThreatLevel::Safe)
+    // Screen shake based on mass and distance to player
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    if (PC && PC->GetPawn())
     {
-        SetThreatLevel(EAudio_ThreatLevel::Danger);
+        float DistToPlayer = FVector::Dist(FootstepLocation, PC->GetPawn()->GetActorLocation());
+        float ShakeRadius = Profile ? Profile->FootstepScreenShakeRadius : 2000.0f;
+        float ShakeIntensity = Profile ? Profile->FootstepShakeIntensity : 1.0f;
+
+        if (DistToPlayer < ShakeRadius)
+        {
+            float FalloffFactor = 1.0f - (DistToPlayer / ShakeRadius);
+            float MassFactor = FMath::Clamp(DinosaurMass / 8000.0f, 0.1f, 1.0f);
+            TriggerScreenShake(ShakeIntensity * FalloffFactor * MassFactor, 0.4f);
+        }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Damage feedback triggered (%.1f dmg, shake %.2f)"),
-        DamageAmount, ShakeScale);
 }
 
-void AAudioSystemManager::TriggerCraftingAudioFeedback()
+void AAudioSystemManager::OnDinosaurRoar(FVector RoarLocation, FName DinosaurSpecies, float Intensity)
 {
-    // Crafting is a safe activity — no threat escalation
-    // Just play the crafting SFX (stone on stone)
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Crafting audio feedback triggered"));
-}
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-// ─── Private: Adaptive Music ─────────────────────────────────────────────────
-
-void AAudioSystemManager::UpdateAdaptiveMusic(float DeltaTime)
-{
-    // Blend threat alpha toward 1.0 over ThreatTransitionSpeed seconds
-    if (ThreatBlendAlpha < 1.0f)
+    FAudio_DinosaurSoundProfile* Profile = FindDinosaurProfile(DinosaurSpecies);
+    if (Profile && Profile->AlertSound.IsValid())
     {
-        ThreatBlendAlpha = FMath::Min(
-            ThreatBlendAlpha + (DeltaTime / FMath::Max(ThreatTransitionSpeed, 0.1f)),
-            1.0f
+        UGameplayStatics::PlaySoundAtLocation(
+            World,
+            Profile->AlertSound.Get(),
+            RoarLocation,
+            SFXVolume * Intensity,
+            1.0f,
+            0.0f
         );
     }
 
-    // Music volume adjustments based on threat
-    float TargetMusicVol = MusicVolume;
-    switch (CurrentThreatLevel)
-    {
-        case EAudio_ThreatLevel::Safe:    TargetMusicVol = MusicVolume * 0.6f; break;
-        case EAudio_ThreatLevel::Aware:   TargetMusicVol = MusicVolume * 0.8f; break;
-        case EAudio_ThreatLevel::Danger:  TargetMusicVol = MusicVolume * 1.0f; break;
-        case EAudio_ThreatLevel::Combat:  TargetMusicVol = MusicVolume * 1.2f; break;
-        case EAudio_ThreatLevel::Flee:    TargetMusicVol = MusicVolume * 1.3f; break;
-    }
+    // A roar always triggers danger level escalation
+    SetDangerLevel(EAudio_DangerLevel::Threatened);
+}
 
-    if (ActiveMusicComponent && ActiveMusicComponent->IsPlaying())
+void AAudioSystemManager::PlayCraftingSound(FVector Location)
+{
+    // Stone-on-stone crafting sound — primitive tool making
+    UWorld* World = GetWorld();
+    if (!World) return;
+    // Sound asset to be assigned in Blueprint; placeholder log
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Crafting sound at %s"), *Location.ToString());
+}
+
+void AAudioSystemManager::PlayFireIgniteSound(FVector Location)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Fire ignite sound at %s"), *Location.ToString());
+}
+
+void AAudioSystemManager::PlayPlayerDamageSound(float DamageAmount)
+{
+    // Pain grunt — intensity scales with damage
+    float PitchMultiplier = FMath::Lerp(1.2f, 0.8f, FMath::Clamp(DamageAmount / 100.0f, 0.0f, 1.0f));
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Player damage sound, amount=%.1f, pitch=%.2f"), DamageAmount, PitchMultiplier);
+}
+
+void AAudioSystemManager::PlayPlayerDeathSound()
+{
+    // Death audio — silence music, play death sting
+    if (MusicComponent)
     {
-        ActiveMusicComponent->SetVolumeMultiplier(
-            FMath::Lerp(ActiveMusicComponent->VolumeMultiplier, TargetMusicVol, DeltaTime * 2.0f)
+        MusicComponent->Stop();
+    }
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Player death sound triggered"));
+}
+
+void AAudioSystemManager::TriggerScreenShake(float Intensity, float Duration)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    if (PC)
+    {
+        // Use legacy camera shake (compatible with UE5.5)
+        PC->ClientStartCameraShake(
+            UCameraShakeBase::StaticClass(),
+            Intensity
         );
     }
 }
 
-void AAudioSystemManager::UpdateAmbientLayers(float DeltaTime)
+void AAudioSystemManager::PlayNarrationLine(int32 LineIndex)
 {
-    // Manage ambient layer components based on current biome + time of day
-    // In a full implementation this would crossfade between MetaSound assets
-    // For now, log state changes for Blueprint hookup
-    (void)DeltaTime; // suppress unused warning
+    if (NarrationAudioURLs.IsValidIndex(LineIndex))
+    {
+        UE_LOG(LogTemp, Log, TEXT("AudioSystem: Playing narration line %d: %s"),
+            LineIndex, *NarrationAudioURLs[LineIndex]);
+        // In production: use UMediaPlayer or HTTP audio streaming to play URL
+        // For now: log URL for Blueprint pickup
+    }
 }
 
-void AAudioSystemManager::CrossfadeAmbientLayer(FAudio_AmbientLayer& Layer, bool bFadeIn, float Duration)
+void AAudioSystemManager::UpdateAmbientCrossfade(float DeltaTime)
 {
-    // Find or create audio component for this layer
-    if (Layer.SoundAsset.IsValid())
-    {
-        USoundBase* Sound = Layer.SoundAsset.LoadSynchronous();
-        if (!Sound) return;
+    // Smooth crossfade handled via SetDayNightBlend calls from GameState
+}
 
-        if (bFadeIn)
+void AAudioSystemManager::UpdateMusicLayer(float DeltaTime)
+{
+    // Music tension system — gradually relaxes danger level if no threat detected
+    // This would be driven by proximity checks in full implementation
+}
+
+FAudio_DinosaurSoundProfile* AAudioSystemManager::FindDinosaurProfile(FName Species)
+{
+    for (FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    {
+        if (Profile.DinosaurSpecies == Species)
         {
-            UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(
-                GetWorld(), Sound, Layer.BaseVolume, 1.0f, 0.0f, nullptr, false, false
-            );
-            if (Comp)
-            {
-                Comp->FadeIn(Duration, Layer.BaseVolume);
-                ActiveAmbientComponents.Add(Comp);
-            }
+            return &Profile;
         }
     }
+    return nullptr;
 }
