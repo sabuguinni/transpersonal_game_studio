@@ -1,336 +1,455 @@
-// CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Implements prehistoric crowd simulation: herd AI, territory zones, LOD management
-
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "NavigationSystem.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 
-// ============================================================
-// UCrowdSimulationManager — UObject lifecycle
-// ============================================================
-
-UCrowdSimulationManager::UCrowdSimulationManager()
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxCrowdAgents = 50000;
-    ActiveAgentCount = 0;
-    LODUpdateInterval = 0.5f;
-    HerdUpdateInterval = 1.0f;
-    bSimulationActive = false;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Tick at 10Hz for performance
+
+    MaxAgentsPerGroup = 20;
+    MaxActiveGroups = 50;
+    SimulationRadius = 10000.f;
+    UpdateIntervalSeconds = 0.5f;
+    LODDistanceClose = 2000.f;
+    LODDistanceMedium = 5000.f;
+    LODDistanceFar = 10000.f;
+    bSimulationEnabled = true;
+    NextGroupID = 0;
+    TimeSinceLastUpdate = 0.f;
+    TotalActiveAgents = 0;
+    TotalActiveGroups = 0;
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bSimulationActive = true;
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized — max agents: %d"), MaxCrowdAgents);
-}
+    Super::BeginPlay();
 
-void UCrowdSimulationManager::Deinitialize()
-{
-    bSimulationActive = false;
-    HerdGroups.Empty();
-    TerritoryZones.Empty();
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Deinitialized"));
-}
-
-// ============================================================
-// Herd Registration
-// ============================================================
-
-void UCrowdSimulationManager::RegisterHerdGroup(const FCrowd_HerdGroup& HerdGroup)
-{
-    if (HerdGroups.Num() >= MaxCrowdAgents / 10)
+    // Register default spawn points if none set
+    if (TribeSpawnPoints.Num() == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] Max herd groups reached"));
+        FVector Origin = GetActorLocation();
+        TribeSpawnPoints.Add(Origin + FVector(2000.f, 0.f, 0.f));
+        TribeSpawnPoints.Add(Origin + FVector(-2000.f, 500.f, 0.f));
+        TribeSpawnPoints.Add(Origin + FVector(0.f, 2500.f, 0.f));
+    }
+
+    if (HerdSpawnPoints.Num() == 0)
+    {
+        FVector Origin = GetActorLocation();
+        HerdSpawnPoints.Add(Origin + FVector(3000.f, 1000.f, 0.f));
+        HerdSpawnPoints.Add(Origin + FVector(-3000.f, -1000.f, 0.f));
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: BeginPlay — MaxGroups=%d, SimRadius=%.0f"),
+        MaxActiveGroups, SimulationRadius);
+}
+
+void ACrowdSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    ClearAllCrowdAgents();
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACrowdSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (!bSimulationEnabled) return;
+
+    TimeSinceLastUpdate += DeltaTime;
+    if (TimeSinceLastUpdate >= UpdateIntervalSeconds)
+    {
+        TimeSinceLastUpdate = 0.f;
+        UpdateAllGroups(DeltaTime * UpdateIntervalSeconds / DeltaTime);
+    }
+}
+
+// ============================================================
+// Public API
+// ============================================================
+
+void ACrowdSimulationManager::SpawnCrowdGroup(ECrowd_AgentType AgentType, FVector SpawnCenter, int32 AgentCount)
+{
+    if (TotalActiveGroups >= MaxActiveGroups)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: MaxActiveGroups (%d) reached — cannot spawn new group"), MaxActiveGroups);
         return;
     }
-    HerdGroups.Add(HerdGroup);
-    ActiveAgentCount += HerdGroup.Members.Num();
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd registered: %s (%d members)"),
-        *HerdGroup.HerdID.ToString(), HerdGroup.Members.Num());
-}
 
-void UCrowdSimulationManager::UnregisterHerdGroup(const FName& HerdID)
-{
-    int32 Removed = HerdGroups.RemoveAll([&](const FCrowd_HerdGroup& H) {
-        if (H.HerdID == HerdID)
+    int32 ClampedCount = FMath::Clamp(AgentCount, 1, MaxAgentsPerGroup);
+    int32 NewGroupID = RegisterNewGroup(AgentType, SpawnCenter);
+
+    FCrowd_GroupData& Group = ActiveGroups[NewGroupID];
+    Group.GroupCenter = SpawnCenter;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Spawn placeholder actors for each agent (StaticMeshActor as stand-in)
+    // In production, replace with actual character blueprints
+    UClass* ActorClass = AActor::StaticClass();
+
+    for (int32 i = 0; i < ClampedCount; ++i)
+    {
+        FVector SpawnOffset = GetRandomPointNearLocation(SpawnCenter, 300.f);
+        FTransform SpawnTransform(FRotator::ZeroRotator, SpawnOffset);
+
+        AActor* NewAgent = World->SpawnActor<AActor>(ActorClass, SpawnTransform);
+        if (NewAgent)
         {
-            ActiveAgentCount -= H.Members.Num();
-            return true;
-        }
-        return false;
-    });
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd unregistered: %s (removed %d)"), *HerdID.ToString(), Removed);
-}
+            NewAgent->SetActorLabel(FString::Printf(TEXT("CrowdAgent_G%d_%d"), NewGroupID, i));
+            Group.Members.Add(NewAgent);
 
-// ============================================================
-// Territory Zone Management
-// ============================================================
-
-void UCrowdSimulationManager::RegisterTerritoryZone(const FCrowd_TerritoryZone& Zone)
-{
-    TerritoryZones.Add(Zone);
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Territory zone registered: %s at (%.0f, %.0f, %.0f) radius %.0f"),
-        *Zone.ZoneID.ToString(),
-        Zone.Center.X, Zone.Center.Y, Zone.Center.Z,
-        Zone.Radius);
-}
-
-ECrowd_TerritoryType UCrowdSimulationManager::GetTerritoryTypeAtLocation(const FVector& Location) const
-{
-    for (const FCrowd_TerritoryZone& Zone : TerritoryZones)
-    {
-        float DistSq = FVector::DistSquared(Location, Zone.Center);
-        if (DistSq <= Zone.Radius * Zone.Radius)
-        {
-            return Zone.TerritoryType;
-        }
-    }
-    return ECrowd_TerritoryType::Neutral;
-}
-
-// ============================================================
-// LOD Management
-// ============================================================
-
-void UCrowdSimulationManager::UpdateCrowdLOD(const FVector& PlayerLocation)
-{
-    for (FCrowd_HerdGroup& Herd : HerdGroups)
-    {
-        float DistToPlayer = FVector::Dist(PlayerLocation, Herd.CenterLocation);
-
-        ECrowd_LODLevel NewLOD;
-        if (DistToPlayer < 1500.0f)
-            NewLOD = ECrowd_LODLevel::Full;
-        else if (DistToPlayer < 4000.0f)
-            NewLOD = ECrowd_LODLevel::Medium;
-        else if (DistToPlayer < 8000.0f)
-            NewLOD = ECrowd_LODLevel::Low;
-        else
-            NewLOD = ECrowd_LODLevel::Culled;
-
-        if (NewLOD != Herd.CurrentLOD)
-        {
-            ApplyLODToHerd(Herd, NewLOD);
-            Herd.CurrentLOD = NewLOD;
-        }
-    }
-}
-
-void UCrowdSimulationManager::ApplyLODToHerd(FCrowd_HerdGroup& Herd, ECrowd_LODLevel LODLevel)
-{
-    for (TWeakObjectPtr<AActor> MemberPtr : Herd.Members)
-    {
-        if (!MemberPtr.IsValid()) continue;
-        AActor* Member = MemberPtr.Get();
-
-        USkeletalMeshComponent* SkelComp = Member->FindComponentByClass<USkeletalMeshComponent>();
-        if (!SkelComp) continue;
-
-        switch (LODLevel)
-        {
-        case ECrowd_LODLevel::Full:
-            SkelComp->SetForcedLOD(0);
-            Member->SetActorHiddenInGame(false);
-            break;
-        case ECrowd_LODLevel::Medium:
-            SkelComp->SetForcedLOD(1);
-            Member->SetActorHiddenInGame(false);
-            break;
-        case ECrowd_LODLevel::Low:
-            SkelComp->SetForcedLOD(2);
-            Member->SetActorHiddenInGame(false);
-            break;
-        case ECrowd_LODLevel::Culled:
-            Member->SetActorHiddenInGame(true);
-            break;
-        }
-    }
-}
-
-// ============================================================
-// Herd Behavior Update
-// ============================================================
-
-void UCrowdSimulationManager::UpdateHerdBehavior(float DeltaTime)
-{
-    if (!bSimulationActive) return;
-
-    for (FCrowd_HerdGroup& Herd : HerdGroups)
-    {
-        switch (Herd.BehaviorState)
-        {
-        case ECrowd_HerdBehavior::Grazing:
-            UpdateGrazingBehavior(Herd, DeltaTime);
-            break;
-        case ECrowd_HerdBehavior::Migrating:
-            UpdateMigrationBehavior(Herd, DeltaTime);
-            break;
-        case ECrowd_HerdBehavior::Fleeing:
-            UpdateFleeingBehavior(Herd, DeltaTime);
-            break;
-        case ECrowd_HerdBehavior::Hunting:
-            UpdateHuntingBehavior(Herd, DeltaTime);
-            break;
-        default:
-            break;
-        }
-
-        // Recalculate herd center
-        UpdateHerdCenter(Herd);
-    }
-}
-
-void UCrowdSimulationManager::UpdateGrazingBehavior(FCrowd_HerdGroup& Herd, float DeltaTime)
-{
-    // Grazing: slow random movement within territory radius
-    Herd.StateTimer += DeltaTime;
-    if (Herd.StateTimer > 10.0f)
-    {
-        // Occasionally shift grazing direction
-        float AngleRad = FMath::RandRange(0.0f, 2.0f * PI);
-        Herd.MoveDirection = FVector(FMath::Cos(AngleRad), FMath::Sin(AngleRad), 0.0f);
-        Herd.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::UpdateMigrationBehavior(FCrowd_HerdGroup& Herd, float DeltaTime)
-{
-    // Migration: move toward destination in column formation
-    if (!Herd.MigrationDestination.IsZero())
-    {
-        FVector ToDestination = (Herd.MigrationDestination - Herd.CenterLocation).GetSafeNormal();
-        Herd.MoveDirection = ToDestination;
-
-        float DistToDest = FVector::Dist(Herd.CenterLocation, Herd.MigrationDestination);
-        if (DistToDest < 500.0f)
-        {
-            // Arrived — switch to grazing
-            Herd.BehaviorState = ECrowd_HerdBehavior::Grazing;
-            Herd.MigrationDestination = FVector::ZeroVector;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd %s arrived at destination"), *Herd.HerdID.ToString());
-        }
-    }
-}
-
-void UCrowdSimulationManager::UpdateFleeingBehavior(FCrowd_HerdGroup& Herd, float DeltaTime)
-{
-    // Fleeing: move away from threat at high speed
-    Herd.StateTimer += DeltaTime;
-    if (Herd.StateTimer > 15.0f)
-    {
-        // Calmed down — return to grazing
-        Herd.BehaviorState = ECrowd_HerdBehavior::Grazing;
-        Herd.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::UpdateHuntingBehavior(FCrowd_HerdGroup& Herd, float DeltaTime)
-{
-    // Hunting (predator packs): coordinate flanking movement
-    Herd.StateTimer += DeltaTime;
-    // Flanking logic: split into sub-groups
-    // Simplified: rotate move direction over time to simulate encirclement
-    float RotationRate = 45.0f * DeltaTime; // degrees per second
-    FRotator Rot(0.0f, RotationRate, 0.0f);
-    Herd.MoveDirection = Rot.RotateVector(Herd.MoveDirection);
-}
-
-void UCrowdSimulationManager::UpdateHerdCenter(FCrowd_HerdGroup& Herd)
-{
-    if (Herd.Members.Num() == 0) return;
-
-    FVector Sum = FVector::ZeroVector;
-    int32 ValidCount = 0;
-
-    for (TWeakObjectPtr<AActor> MemberPtr : Herd.Members)
-    {
-        if (MemberPtr.IsValid())
-        {
-            Sum += MemberPtr->GetActorLocation();
-            ValidCount++;
+            if (i == 0)
+            {
+                Group.Leader = NewAgent;
+            }
         }
     }
 
-    if (ValidCount > 0)
-    {
-        Herd.CenterLocation = Sum / ValidCount;
-    }
+    TotalActiveAgents += Group.Members.Num();
+    TotalActiveGroups = ActiveGroups.Num();
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned group %d | Type=%d | Agents=%d | Center=%s"),
+        NewGroupID, (int32)AgentType, Group.Members.Num(), *SpawnCenter.ToString());
 }
 
-// ============================================================
-// Threat Response
-// ============================================================
-
-void UCrowdSimulationManager::TriggerHerdFleeResponse(const FName& HerdID, const FVector& ThreatLocation)
+void ACrowdSimulationManager::TriggerMassFlee(FVector ThreatLocation, float ThreatRadius)
 {
-    for (FCrowd_HerdGroup& Herd : HerdGroups)
+    int32 AffectedGroups = 0;
+
+    for (FCrowd_GroupData& Group : ActiveGroups)
     {
-        if (Herd.HerdID == HerdID)
+        float Dist = FVector::Dist(Group.GroupCenter, ThreatLocation);
+        if (Dist <= ThreatRadius)
         {
-            Herd.BehaviorState = ECrowd_HerdBehavior::Fleeing;
-            FVector FleeDir = (Herd.CenterLocation - ThreatLocation).GetSafeNormal();
-            Herd.MoveDirection = FleeDir;
-            Herd.StateTimer = 0.0f;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd %s FLEEING from threat at (%.0f, %.0f)"),
-                *HerdID.ToString(), ThreatLocation.X, ThreatLocation.Y);
+            Group.bIsFleeing = true;
+
+            // Calculate flee direction (away from threat)
+            FVector FleeDir = (Group.GroupCenter - ThreatLocation).GetSafeNormal();
+            Group.GroupCenter = Group.GroupCenter + FleeDir * 3000.f;
+
+            // Update all member targets
+            for (AActor* Member : Group.Members)
+            {
+                if (Member)
+                {
+                    FVector MemberFleeTarget = Member->GetActorLocation() + FleeDir * 3000.f;
+                    // Set flee target — in full implementation, update movement component
+                }
+            }
+
+            OnGroupFleeTriggered(Group.GroupID, ThreatLocation);
+            AffectedGroups++;
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: MassFlee triggered | ThreatLoc=%s | Radius=%.0f | AffectedGroups=%d"),
+        *ThreatLocation.ToString(), ThreatRadius, AffectedGroups);
+}
+
+void ACrowdSimulationManager::TriggerMassFlee_ByDinosaur(AActor* DinosaurActor)
+{
+    if (!DinosaurActor) return;
+
+    FVector DinoLocation = DinosaurActor->GetActorLocation();
+    float DinoFleeRadius = 2500.f; // Default dino threat radius
+
+    TriggerMassFlee(DinoLocation, DinoFleeRadius);
+}
+
+void ACrowdSimulationManager::SetGroupMigrationTarget(int32 GroupID, FVector Destination)
+{
+    for (FCrowd_GroupData& Group : ActiveGroups)
+    {
+        if (Group.GroupID == GroupID)
+        {
+            Group.GroupCenter = Destination;
+            Group.bIsFleeing = false;
+
+            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Group %d migrating to %s"),
+                GroupID, *Destination.ToString());
             return;
         }
     }
 }
 
-void UCrowdSimulationManager::TriggerAreaFleeResponse(const FVector& ThreatLocation, float ThreatRadius)
+int32 ACrowdSimulationManager::GetActiveAgentCount() const
 {
-    for (FCrowd_HerdGroup& Herd : HerdGroups)
+    return TotalActiveAgents;
+}
+
+FCrowd_GroupData ACrowdSimulationManager::GetGroupData(int32 GroupID) const
+{
+    for (const FCrowd_GroupData& Group : ActiveGroups)
     {
-        float DistToThreat = FVector::Dist(Herd.CenterLocation, ThreatLocation);
-        if (DistToThreat <= ThreatRadius)
+        if (Group.GroupID == GroupID)
         {
-            TriggerHerdFleeResponse(Herd.HerdID, ThreatLocation);
+            return Group;
+        }
+    }
+    return FCrowd_GroupData();
+}
+
+void ACrowdSimulationManager::DisbandGroup(int32 GroupID)
+{
+    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
+    {
+        if (ActiveGroups[i].GroupID == GroupID)
+        {
+            // Destroy all member actors
+            for (AActor* Member : ActiveGroups[i].Members)
+            {
+                if (Member)
+                {
+                    Member->Destroy();
+                }
+            }
+            TotalActiveAgents -= ActiveGroups[i].Members.Num();
+            ActiveGroups.RemoveAt(i);
+            TotalActiveGroups = ActiveGroups.Num();
+            UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Group %d disbanded"), GroupID);
+            return;
         }
     }
 }
 
-// ============================================================
-// Debug
-// ============================================================
-
-void UCrowdSimulationManager::DrawDebugCrowdState(UWorld* World) const
+void ACrowdSimulationManager::SetSimulationEnabled(bool bEnabled)
 {
-    if (!World) return;
+    bSimulationEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Simulation %s"), bEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
+}
 
-    for (const FCrowd_HerdGroup& Herd : HerdGroups)
+void ACrowdSimulationManager::SpawnDebugCrowdGroups()
+{
+    FVector Origin = GetActorLocation();
+
+    // Spawn a human tribe group
+    SpawnCrowdGroup(ECrowd_AgentType::HumanTribe, Origin + FVector(1000.f, 0.f, 0.f), 8);
+
+    // Spawn a herbivore herd
+    SpawnCrowdGroup(ECrowd_AgentType::HerbivoreHerd, Origin + FVector(-1500.f, 1000.f, 0.f), 12);
+
+    // Spawn a scavenger pack
+    SpawnCrowdGroup(ECrowd_AgentType::ScavengerPack, Origin + FVector(0.f, -2000.f, 0.f), 5);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Debug groups spawned — TotalAgents=%d"), TotalActiveAgents);
+}
+
+void ACrowdSimulationManager::ClearAllCrowdAgents()
+{
+    for (FCrowd_GroupData& Group : ActiveGroups)
     {
-        FColor DebugColor = FColor::Green;
-        switch (Herd.BehaviorState)
+        for (AActor* Member : Group.Members)
         {
-        case ECrowd_HerdBehavior::Fleeing:  DebugColor = FColor::Red;    break;
-        case ECrowd_HerdBehavior::Hunting:  DebugColor = FColor::Orange; break;
-        case ECrowd_HerdBehavior::Migrating:DebugColor = FColor::Yellow; break;
-        default: break;
+            if (Member)
+            {
+                Member->Destroy();
+            }
         }
+    }
+    ActiveGroups.Empty();
+    TotalActiveAgents = 0;
+    TotalActiveGroups = 0;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: All crowd agents cleared"));
+}
 
-        DrawDebugSphere(World, Herd.CenterLocation, 200.0f, 12, DebugColor, false, 1.0f);
-        DrawDebugString(World, Herd.CenterLocation + FVector(0, 0, 300),
-            FString::Printf(TEXT("%s [%d]"), *Herd.HerdID.ToString(), Herd.Members.Num()),
-            nullptr, DebugColor, 1.0f);
+// ============================================================
+// Private Helpers
+// ============================================================
+
+void ACrowdSimulationManager::UpdateAllGroups(float DeltaTime)
+{
+    AActor* Player = GetPlayerActor();
+
+    for (FCrowd_GroupData& Group : ActiveGroups)
+    {
+        // Remove any destroyed actors
+        RemoveDeadAgentsFromGroup(Group);
+
+        if (Group.Members.Num() == 0) continue;
+
+        // LOD based on distance to player
+        float DistToPlayer = Player ? GetDistanceToPlayer(Group.GroupCenter) : LODDistanceFar + 1.f;
+        UpdateGroupLOD(Group, DistToPlayer);
+
+        // Only full-update close groups
+        if (DistToPlayer <= LODDistanceMedium)
+        {
+            UpdateGroupBehavior(Group, DeltaTime);
+            UpdateGroupCohesion(Group);
+        }
     }
 
-    for (const FCrowd_TerritoryZone& Zone : TerritoryZones)
+    // Update counters
+    TotalActiveAgents = 0;
+    for (const FCrowd_GroupData& Group : ActiveGroups)
     {
-        DrawDebugCylinder(World, Zone.Center - FVector(0, 0, 100), Zone.Center + FVector(0, 0, 100),
-            Zone.Radius, 24, FColor::Cyan, false, 1.0f);
+        TotalActiveAgents += Group.Members.Num();
+    }
+    TotalActiveGroups = ActiveGroups.Num();
+}
+
+void ACrowdSimulationManager::UpdateGroupLOD(FCrowd_GroupData& Group, float DistanceToPlayer)
+{
+    // LOD 0 (close): Full simulation — movement, animation, collision
+    // LOD 1 (medium): Simplified movement, no animation
+    // LOD 2 (far): Static, no movement
+    for (AActor* Member : Group.Members)
+    {
+        if (!Member) continue;
+
+        if (DistanceToPlayer <= LODDistanceClose)
+        {
+            Member->SetActorTickEnabled(true);
+            Member->SetActorHiddenInGame(false);
+        }
+        else if (DistanceToPlayer <= LODDistanceMedium)
+        {
+            Member->SetActorTickEnabled(false);
+            Member->SetActorHiddenInGame(false);
+        }
+        else
+        {
+            Member->SetActorTickEnabled(false);
+            Member->SetActorHiddenInGame(true); // Cull far agents
+        }
     }
 }
 
-int32 UCrowdSimulationManager::GetActiveAgentCount() const
+void ACrowdSimulationManager::UpdateGroupBehavior(FCrowd_GroupData& Group, float DeltaTime)
 {
-    return ActiveAgentCount;
+    if (Group.bIsFleeing)
+    {
+        // Move all members toward flee target
+        for (AActor* Member : Group.Members)
+        {
+            if (Member)
+            {
+                MoveAgentToward(Member, Group.GroupCenter, 400.f, DeltaTime);
+            }
+        }
+
+        // Check if fled far enough
+        float DistFromCenter = FVector::Dist(Group.GroupCenter, GetActorLocation());
+        if (DistFromCenter > SimulationRadius * 0.5f)
+        {
+            Group.bIsFleeing = false;
+        }
+    }
+    else
+    {
+        // Idle wandering — move leader, others follow
+        if (Group.Leader)
+        {
+            float DistToTarget = FVector::Dist(Group.Leader->GetActorLocation(), Group.GroupCenter);
+            if (DistToTarget < 100.f)
+            {
+                // Pick new wander target
+                Group.GroupCenter = GetRandomPointNearLocation(Group.Leader->GetActorLocation(), 500.f);
+            }
+            MoveAgentToward(Group.Leader, Group.GroupCenter, 150.f, DeltaTime);
+        }
+
+        // Non-leaders follow leader with offset
+        for (int32 i = 1; i < Group.Members.Num(); ++i)
+        {
+            AActor* Member = Group.Members[i];
+            if (Member && Group.Leader)
+            {
+                FVector FollowTarget = Group.Leader->GetActorLocation() +
+                    FVector(FMath::RandRange(-200.f, 200.f), FMath::RandRange(-200.f, 200.f), 0.f);
+                MoveAgentToward(Member, FollowTarget, 130.f, DeltaTime);
+            }
+        }
+    }
+}
+
+void ACrowdSimulationManager::UpdateGroupCohesion(FCrowd_GroupData& Group)
+{
+    if (Group.Members.Num() == 0) return;
+
+    // Recalculate group center
+    FVector Sum = FVector::ZeroVector;
+    int32 ValidCount = 0;
+    for (AActor* Member : Group.Members)
+    {
+        if (Member)
+        {
+            Sum += Member->GetActorLocation();
+            ValidCount++;
+        }
+    }
+    if (ValidCount > 0)
+    {
+        Group.GroupCenter = Sum / (float)ValidCount;
+    }
+}
+
+void ACrowdSimulationManager::MoveAgentToward(AActor* Agent, FVector Target, float Speed, float DeltaTime)
+{
+    if (!Agent) return;
+
+    FVector CurrentLoc = Agent->GetActorLocation();
+    FVector Direction = (Target - CurrentLoc).GetSafeNormal();
+    FVector NewLoc = CurrentLoc + Direction * Speed * DeltaTime;
+
+    // Keep Z (don't fall through ground in simple mode)
+    NewLoc.Z = CurrentLoc.Z;
+
+    Agent->SetActorLocation(NewLoc, true);
+
+    // Face movement direction
+    if (!Direction.IsNearlyZero())
+    {
+        FRotator NewRot = Direction.Rotation();
+        Agent->SetActorRotation(NewRot);
+    }
+}
+
+FVector ACrowdSimulationManager::GetRandomPointNearLocation(FVector Center, float Radius) const
+{
+    float Angle = FMath::RandRange(0.f, 360.f);
+    float Dist = FMath::RandRange(50.f, Radius);
+    return Center + FVector(
+        FMath::Cos(FMath::DegreesToRadians(Angle)) * Dist,
+        FMath::Sin(FMath::DegreesToRadians(Angle)) * Dist,
+        0.f
+    );
+}
+
+float ACrowdSimulationManager::GetDistanceToPlayer(FVector Location) const
+{
+    AActor* Player = GetPlayerActor();
+    if (!Player) return LODDistanceFar + 1.f;
+    return FVector::Dist(Location, Player->GetActorLocation());
+}
+
+AActor* ACrowdSimulationManager::GetPlayerActor() const
+{
+    UWorld* World = GetWorld();
+    if (!World) return nullptr;
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return nullptr;
+    return PC->GetPawn();
+}
+
+void ACrowdSimulationManager::RemoveDeadAgentsFromGroup(FCrowd_GroupData& Group)
+{
+    Group.Members.RemoveAll([](AActor* A) { return A == nullptr || !IsValid(A); });
+}
+
+int32 ACrowdSimulationManager::RegisterNewGroup(ECrowd_AgentType AgentType, FVector Center)
+{
+    FCrowd_GroupData NewGroup;
+    NewGroup.GroupID = NextGroupID++;
+    NewGroup.GroupType = AgentType;
+    NewGroup.GroupCenter = Center;
+    NewGroup.bIsFleeing = false;
+    ActiveGroups.Add(NewGroup);
+    return ActiveGroups.Num() - 1;
 }
