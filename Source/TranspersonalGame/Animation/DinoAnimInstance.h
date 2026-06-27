@@ -4,53 +4,55 @@
 #include "Animation/AnimInstance.h"
 #include "DinoAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_DinoLocomotionState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walk        UMETA(DisplayName = "Walk"),
-    Run         UMETA(DisplayName = "Run"),
-    Attack      UMETA(DisplayName = "Attack"),
-    Roar        UMETA(DisplayName = "Roar"),
-    Death       UMETA(DisplayName = "Death"),
-    Eat         UMETA(DisplayName = "Eat"),
-    Sleep       UMETA(DisplayName = "Sleep")
-};
-
+/**
+ * FAnim_DinoLocomotionState
+ * Locomotion state data for dinosaur animation blending.
+ */
 USTRUCT(BlueprintType)
-struct FAnim_DinoAnimData
+struct FAnim_DinoLocomotionState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
     float Speed = 0.f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
     float Direction = 0.f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
-    bool bIsInAir = false;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
+    bool bIsMoving = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
     bool bIsAttacking = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
     bool bIsRoaring = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|Dinosaur")
     bool bIsDead = false;
+};
 
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
-    bool bIsEating = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Dino")
-    EAnim_DinoLocomotionState LocomotionState = EAnim_DinoLocomotionState::Idle;
+/**
+ * EAnim_DinoGait
+ * Locomotion gait enum for dinosaur movement states.
+ */
+UENUM(BlueprintType)
+enum class EAnim_DinoGait : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Walk        UMETA(DisplayName = "Walk"),
+    Trot        UMETA(DisplayName = "Trot"),
+    Run         UMETA(DisplayName = "Run"),
+    Sprint      UMETA(DisplayName = "Sprint"),
+    Attack      UMETA(DisplayName = "Attack"),
+    Roar        UMETA(DisplayName = "Roar"),
+    Dead        UMETA(DisplayName = "Dead"),
 };
 
 /**
  * UDinoAnimInstance
- * Animation instance for all dinosaur pawns.
- * Drives locomotion blend space, attack montages, and IK foot placement.
+ * Animation instance for all dinosaur characters.
+ * Drives locomotion blend spaces, attack montages, and IK foot placement.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoAnimInstance : public UAnimInstance
@@ -63,80 +65,62 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    /** Current locomotion state driving the state machine */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    EAnim_DinoLocomotionState LocomotionState;
+    // ── Locomotion State ─────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Dinosaur",
+              meta = (AllowPrivateAccess = "true"))
+    FAnim_DinoLocomotionState LocomotionState;
 
-    /** Packed animation data updated every frame */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    FAnim_DinoAnimData AnimData;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Dinosaur",
+              meta = (AllowPrivateAccess = "true"))
+    EAnim_DinoGait CurrentGait = EAnim_DinoGait::Idle;
 
-    /** Ground speed (cm/s) used by blend space */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    float GroundSpeed;
+    // ── Speed thresholds (tunable per species via Blueprint) ─────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float WalkSpeedThreshold = 50.f;
 
-    /** Movement direction (-180 to 180) for strafe blend */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    float MovementDirection;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float TrotSpeedThreshold = 200.f;
 
-    /** True when the pawn is airborne */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsInAir;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float RunSpeedThreshold = 450.f;
 
-    /** True when attack montage is playing */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsAttacking;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Thresholds")
+    float SprintSpeedThreshold = 700.f;
 
-    /** True when roar montage is playing */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsRoaring;
+    // ── IK Foot Placement ────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK",
+              meta = (AllowPrivateAccess = "true"))
+    FVector LeftFootIKLocation = FVector::ZeroVector;
 
-    /** True when death state is active */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsDead;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK",
+              meta = (AllowPrivateAccess = "true"))
+    FVector RightFootIKLocation = FVector::ZeroVector;
 
-    /** Foot IK alpha — 1.0 = full IK, 0.0 = disabled */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
-    float FootIKAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK")
+    bool bEnableFootIK = true;
 
-    /** Left foot IK target location in world space */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
-    FVector LeftFootIKLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK")
+    float FootIKTraceDistance = 100.f;
 
-    /** Right foot IK target location in world space */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
-    FVector RightFootIKLocation;
+    // ── Functions ────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void SetAttacking(bool bAttacking);
 
-    /** Play an attack montage — called by AI behavior tree */
-    UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
-    void TriggerAttack();
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void SetRoaring(bool bRoaring);
 
-    /** Play a roar montage */
-    UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
-    void TriggerRoar();
+    UFUNCTION(BlueprintCallable, Category = "Animation|Dinosaur")
+    void SetDead(bool bDead);
 
-    /** Transition to death state */
-    UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
-    void TriggerDeath();
+    UFUNCTION(BlueprintPure, Category = "Animation|Dinosaur")
+    EAnim_DinoGait GetCurrentGait() const { return CurrentGait; }
 
-    /** Update foot IK for uneven terrain */
-    UFUNCTION(BlueprintCallable, Category = "Anim|IK")
-    void UpdateFootIK(float DeltaSeconds);
+private:
+    void UpdateLocomotionState(float DeltaSeconds);
+    void UpdateGait();
+    void UpdateFootIK();
+    void TraceFootIK(const FName& FootSocketName, FVector& OutIKLocation);
 
-protected:
-    /** Cached owning pawn */
     UPROPERTY()
-    APawn* OwnerPawn;
-
-    /** Resolve locomotion state from speed and flags */
-    EAnim_DinoLocomotionState ResolveLocomotionState() const;
-
-    /** Trace foot to ground and return adjusted location */
-    FVector TraceFootToGround(const FName& FootSocketName) const;
-
-    /** Walk speed threshold (cm/s) */
-    static constexpr float WalkSpeedThreshold = 150.f;
-
-    /** Run speed threshold (cm/s) */
-    static constexpr float RunSpeedThreshold = 400.f;
+    class APawn* OwnerPawn = nullptr;
 };
