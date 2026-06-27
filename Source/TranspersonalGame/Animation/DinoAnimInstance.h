@@ -13,12 +13,12 @@ enum class EAnim_DinoLocomotionState : uint8
     Attack      UMETA(DisplayName = "Attack"),
     Roar        UMETA(DisplayName = "Roar"),
     Death       UMETA(DisplayName = "Death"),
-    Eating      UMETA(DisplayName = "Eating"),
-    Sleeping    UMETA(DisplayName = "Sleeping")
+    Eat         UMETA(DisplayName = "Eat"),
+    Sleep       UMETA(DisplayName = "Sleep")
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_DinoLocomotionData
+struct FAnim_DinoAnimData
 {
     GENERATED_BODY()
 
@@ -48,8 +48,9 @@ struct FAnim_DinoLocomotionData
 };
 
 /**
- * Animation Instance for all dinosaur characters.
- * Drives locomotion blend space, attack montages, and procedural IK.
+ * UDinoAnimInstance
+ * Animation instance for all dinosaur pawns.
+ * Drives locomotion blend space, attack montages, and IK foot placement.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoAnimInstance : public UAnimInstance
@@ -62,75 +63,80 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    /** Current locomotion data updated every frame from owning pawn */
+    /** Current locomotion state driving the state machine */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    FAnim_DinoLocomotionData LocomotionData;
+    EAnim_DinoLocomotionState LocomotionState;
 
-    /** Ground speed used for blend space */
+    /** Packed animation data updated every frame */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    float GroundSpeed = 0.f;
+    FAnim_DinoAnimData AnimData;
 
-    /** Direction (-180 to 180) for strafe blend */
+    /** Ground speed (cm/s) used by blend space */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    float MovementDirection = 0.f;
+    float GroundSpeed;
 
-    /** Whether the dino is currently in the air */
+    /** Movement direction (-180 to 180) for strafe blend */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsInAir = false;
+    float MovementDirection;
 
-    /** Whether the dino is performing an attack */
+    /** True when the pawn is airborne */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsAttacking = false;
+    bool bIsInAir;
 
-    /** Whether the dino is roaring */
+    /** True when attack montage is playing */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsRoaring = false;
+    bool bIsAttacking;
 
-    /** Whether the dino is dead */
+    /** True when roar montage is playing */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsDead = false;
+    bool bIsRoaring;
 
-    /** Whether the dino is eating */
+    /** True when death state is active */
     UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    bool bIsEating = false;
+    bool bIsDead;
 
-    /** Current locomotion state enum */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Dino", meta = (AllowPrivateAccess = "true"))
-    EAnim_DinoLocomotionState LocomotionState = EAnim_DinoLocomotionState::Idle;
+    /** Foot IK alpha — 1.0 = full IK, 0.0 = disabled */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
+    float FootIKAlpha;
 
-    /** Trigger attack montage — called by Combat AI */
+    /** Left foot IK target location in world space */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
+    FVector LeftFootIKLocation;
+
+    /** Right foot IK target location in world space */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK", meta = (AllowPrivateAccess = "true"))
+    FVector RightFootIKLocation;
+
+    /** Play an attack montage — called by AI behavior tree */
     UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
     void TriggerAttack();
 
-    /** Trigger roar montage — called by NPC Behavior */
+    /** Play a roar montage */
     UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
     void TriggerRoar();
 
-    /** Trigger death montage — called by health system */
+    /** Transition to death state */
     UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
     void TriggerDeath();
 
-    /** Set eating state */
-    UFUNCTION(BlueprintCallable, Category = "Anim|Dino")
-    void SetEating(bool bEating);
+    /** Update foot IK for uneven terrain */
+    UFUNCTION(BlueprintCallable, Category = "Anim|IK")
+    void UpdateFootIK(float DeltaSeconds);
 
 protected:
     /** Cached owning pawn */
     UPROPERTY()
-    class APawn* OwnerPawn = nullptr;
+    APawn* OwnerPawn;
 
-    /** Cached character movement component */
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComp = nullptr;
+    /** Resolve locomotion state from speed and flags */
+    EAnim_DinoLocomotionState ResolveLocomotionState() const;
 
-    /** Determine locomotion state from current speed and flags */
-    EAnim_DinoLocomotionState DetermineLocomotionState() const;
+    /** Trace foot to ground and return adjusted location */
+    FVector TraceFootToGround(const FName& FootSocketName) const;
 
-    /** Walk speed threshold */
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Dino|Thresholds")
-    float WalkSpeedThreshold = 50.f;
+    /** Walk speed threshold (cm/s) */
+    static constexpr float WalkSpeedThreshold = 150.f;
 
-    /** Run speed threshold */
-    UPROPERTY(EditDefaultsOnly, Category = "Anim|Dino|Thresholds")
-    float RunSpeedThreshold = 300.f;
+    /** Run speed threshold (cm/s) */
+    static constexpr float RunSpeedThreshold = 400.f;
 };
