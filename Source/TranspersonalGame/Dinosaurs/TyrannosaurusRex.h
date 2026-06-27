@@ -6,48 +6,55 @@
 
 /**
  * ATyrannosaurusRex
- * Apex predator. Solitary carnivore. High health, devastating attack, large detection radius.
- * Slow turn rate but charges at high speed when attacking.
+ * Apex predator — large territory, high damage, slow turn rate, roar ability.
+ * Inherits state machine from ADinosaurBase.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATyrannosaurusRex : public ADinosaurBase
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	ATyrannosaurusRex();
+    ATyrannosaurusRex();
 
-	/** Roar ability — stuns nearby prey for a short duration */
-	UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-	void PerformRoar();
+    /** Roar that frightens nearby prey — triggers flee state on smaller dinos */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void PerformRoar();
 
-	/** Charge attack — accelerates toward target, deals bonus damage on impact */
-	UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-	void StartCharge();
+    /** Stomp attack — area damage in front of TRex */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void StompAttack();
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void PerformAttack(AActor* Target) override;
-	virtual void OnDeath() override;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-	/** Duration of roar stun effect on nearby actors (seconds) */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
-	float RoarStunDuration;
+    /** Radius of roar fear effect (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarFearRadius = 2000.0f;
 
-	/** Charge speed multiplier applied during charge attack */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
-	float ChargeSpeedMultiplier;
+    /** Stomp damage radius (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompRadius = 400.0f;
 
-	/** Bonus damage dealt when charge connects */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
-	float ChargeBonusDamage;
+    /** Stomp damage amount */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompDamage = 80.0f;
 
-	/** Radius of roar stun effect */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Abilities")
-	float RoarRadius;
+    /** Cooldown between roars (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarCooldown = 15.0f;
+
+    /** Time since last roar */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
+    float TimeSinceLastRoar = 0.0f;
+
+    /** Whether stomp is on cooldown */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
+    bool bStompOnCooldown = false;
 
 private:
-	bool bIsCharging;
-	float ChargeTimer;
-	static constexpr float MaxChargeDuration = 3.0f;
+    FTimerHandle StompCooldownTimer;
+
+    void ResetStompCooldown();
 };
