@@ -1,487 +1,273 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
+// PerformanceManager.cpp
+// Agent #04 — Performance Optimizer
+// Enforces 60fps PC / 30fps console frame budget.
+// Controls LOD distances, tick intervals, shadow quality, texture streaming.
 
 #include "PerformanceManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformApplicationMisc.h"
-#include "HAL/PlatformMemory.h"
-#include "RHI.h"
-#include "RenderingThread.h"
-#include "Stats/StatsData.h"
-#include "GameFramework/GameUserSettings.h"
-#include "Misc/ConfigCacheIni.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 
-DECLARE_CYCLE_STAT(TEXT("Performance Manager Tick"), STAT_PerformanceManagerTick, STATGROUP_Game);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Draw Calls"), STAT_DrawCalls, STATGROUP_Rendering);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Triangle Count"), STAT_TriangleCount, STATGROUP_Rendering);
-
-UPerformanceManager::UPerformanceManager()
+APerformanceManager::APerformanceManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // Tick every frame
-    PrimaryComponentTick.bTickEvenWhenPaused = false;
-    
-    // Initialize default quality settings
-    CurrentQualitySettings.ScreenPercentage = 100.0f;
-    CurrentQualitySettings.ShadowQuality = 3;
-    CurrentQualitySettings.PostProcessQuality = 3;
-    CurrentQualitySettings.TextureQuality = 3;
-    CurrentQualitySettings.EffectsQuality = 3;
-    CurrentQualitySettings.ViewDistanceScale = 1.0f;
-    CurrentQualitySettings.PhysicsLODBias = 0;
-    CurrentQualitySettings.AIUpdateScale = 1.0f;
-    
-    // Reserve space for frame rate history
-    FrameRateHistory.Reserve(120); // 2 seconds at 60fps
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.5f; // Self-ticks at 2Hz — low overhead
 }
 
-void UPerformanceManager::BeginPlay()
+void APerformanceManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Initializing performance optimization system"));
-    
-    DetectPlatformProfile();
-    InitializePerformanceSystem();
-    
-    // Register core systems with their budgets
-    RegisterCriticalSystem(TEXT("Physics"), PhysicsBudgetMs);
-    RegisterCriticalSystem(TEXT("AI"), AIBudgetMs);
-    RegisterCriticalSystem(TEXT("Rendering"), RenderThreadBudgetMs);
-    RegisterCriticalSystem(TEXT("GameLogic"), GameThreadBudgetMs);
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: System initialized for %s profile, target %d fps"), 
-           *UEnum::GetValueAsString(CurrentPlatformProfile), TargetFrameRate);
+    ApplyQualityTier(QualityTier);
+    ApplyConsoleCommands();
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Initialized. Target: %.0f FPS. Tier: %d"),
+           TargetFPS_PC, (int32)QualityTier);
 }
 
-void UPerformanceManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void APerformanceManager::Tick(float DeltaTime)
 {
-    SCOPE_CYCLE_COUNTER(STAT_PerformanceManagerTick);
-    
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics();
-    
-    // Update monitoring timer
-    MonitoringTimer += DeltaTime;
-    
-    // Check if we need to perform optimization
-    if (MonitoringTimer >= MonitoringFrequency)
+    Super::Tick(DeltaTime);
+
+    UpdateFrameStats(DeltaTime);
+
+    TimeSinceLastTickUpdate += DeltaTime;
+    if (TimeSinceLastTickUpdate >= TickUpdateInterval)
     {
-        MonitoringTimer = 0.0f;
-        
-        if (ShouldOptimizePerformance())
-        {
-            ApplyPerformanceOptimizations();
-        }
-        
-        if (bEnablePerformanceLogging)
-        {
-            LogPerformanceData();
-        }
+        TimeSinceLastTickUpdate = 0.0f;
+        UpdateTickIntervalsForAllActors();
     }
 }
 
-void UPerformanceManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+// ============================================================
+// UpdateFrameStats — rolling average FPS
+// ============================================================
+void APerformanceManager::UpdateFrameStats(float DeltaTime)
 {
-    // Close performance log file if open
-    if (PerformanceLogFile.IsValid())
-    {
-        PerformanceLogFile->Close();
-        PerformanceLogFile.Reset();
-    }
-    
-    Super::EndPlay(EndPlayReason);
-}
+    FrameTimeAccumulator += DeltaTime * 1000.0f; // ms
+    FrameCount++;
 
-void UPerformanceManager::InitializePerformanceSystem()
-{
-    // Set target frame rate based on platform
-    switch (CurrentPlatformProfile)
+    if (FrameCount >= 60)
     {
-        case EPlatformProfile::HighEndPC:
-        case EPlatformProfile::MidRangePC:
-            SetTargetFrameRate(60, true);
-            break;
-            
-        case EPlatformProfile::NextGenConsole:
-            SetTargetFrameRate(30, true);
-            break;
-            
-        case EPlatformProfile::LowEndPC:
-        case EPlatformProfile::Mobile:
-            SetTargetFrameRate(30, true);
-            // Start with reduced quality settings
-            CurrentQualitySettings.ScreenPercentage = 75.0f;
-            CurrentQualitySettings.ShadowQuality = 1;
-            CurrentQualitySettings.PostProcessQuality = 1;
-            CurrentQualitySettings.ViewDistanceScale = 0.7f;
-            break;
-    }
-    
-    // Apply initial quality settings
-    ApplyQualitySettings();
-    
-    // Initialize performance logging if enabled
-    if (bEnablePerformanceLogging)
-    {
-        FString LogFileName = FString::Printf(TEXT("PerformanceLog_%s.csv"), 
-                                            *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")));
-        FString LogFilePath = FPaths::ProjectLogDir() / LogFileName;
-        
-        PerformanceLogFile = TSharedPtr<FArchive>(IFileManager::Get().CreateFileWriter(*LogFilePath));
-        if (PerformanceLogFile.IsValid())
+        FrameStats.LastFrameTimeMs = FrameTimeAccumulator / FrameCount;
+        FrameStats.AverageFPS = (FrameStats.LastFrameTimeMs > 0.0f)
+            ? (1000.0f / FrameStats.LastFrameTimeMs)
+            : 0.0f;
+        FrameTimeAccumulator = 0.0f;
+        FrameCount = 0;
+
+        if (!IsFrameBudgetHealthy())
         {
-            FString Header = TEXT("Timestamp,FPS,FrameTime,GameThread,RenderThread,GPU,Physics,AI,Memory,DrawCalls,Triangles,PerformanceHealth\\n");
-            PerformanceLogFile->Serialize(TCHAR_TO_UTF8(*Header), Header.Len());
+            UE_LOG(LogTemp, Warning,
+                TEXT("[PerformanceManager] Frame budget exceeded! FPS=%.1f (target=%.1f). "
+                     "Active dinos=%d, crowd=%d"),
+                FrameStats.AverageFPS, TargetFPS_PC,
+                FrameStats.ActiveDinoCount, FrameStats.ActiveCrowdCount);
         }
     }
 }
 
-FPerformanceMetrics UPerformanceManager::GetCurrentPerformanceMetrics() const
+// ============================================================
+// UpdateTickIntervalsForAllActors — LOD-based tick throttling
+// ============================================================
+void APerformanceManager::UpdateTickIntervalsForAllActors()
 {
-    return CurrentMetrics;
-}
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-void UPerformanceManager::SetTargetFrameRate(int32 TargetFPS, bool bEnableAdaptiveScaling)
-{
-    TargetFrameRate = TargetFPS;
-    TargetFrameTimeMs = 1000.0f / TargetFPS;
-    this->bEnableAdaptiveScaling = bEnableAdaptiveScaling;
-    
-    // Update engine frame rate settings
-    if (UGameUserSettings* UserSettings = UGameUserSettings::GetGameUserSettings())
+    // Get player location for distance checks
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+
+    int32 DinoCount = 0;
+    int32 NearCrowd = 0;
+    int32 MidCrowd = 0;
+    int32 DormantCrowd = 0;
+
+    for (TActorIterator<AActor> It(World); It; ++It)
     {
-        UserSettings->SetFrameRateLimit(TargetFPS);
-        UserSettings->ApplySettings(false);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Target frame rate set to %d fps (%.2f ms)"), 
-           TargetFPS, TargetFrameTimeMs);
-}
+        AActor* Actor = *It;
+        if (!Actor || Actor == this) continue;
 
-void UPerformanceManager::ForceOptimizationPass()
-{
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Forcing optimization pass"));
-    ApplyPerformanceOptimizations();
-}
+        FString ClassName = Actor->GetClass()->GetName();
+        bool bIsDino = ClassName.Contains(TEXT("Dino")) || ClassName.Contains(TEXT("TRex"))
+                    || ClassName.Contains(TEXT("Raptor")) || ClassName.Contains(TEXT("Brach"))
+                    || ClassName.Contains(TEXT("Tyrann")) || ClassName.Contains(TEXT("Veloci"));
+        bool bIsCrowd = ClassName.Contains(TEXT("Crowd")) || ClassName.Contains(TEXT("NPC"))
+                     || ClassName.Contains(TEXT("Primitive"));
 
-void UPerformanceManager::RegisterCriticalSystem(const FString& SystemName, float BudgetMs)
-{
-    SystemBudgets.Add(SystemName, BudgetMs);
-    SystemPerformance.Add(SystemName, 0.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("PerformanceManager: Registered system '%s' with budget %.2f ms"), 
-           *SystemName, BudgetMs);
-}
-
-void UPerformanceManager::ReportSystemPerformance(const FString& SystemName, float ExecutionTimeMs)
-{
-    if (SystemPerformance.Contains(SystemName))
-    {
-        SystemPerformance[SystemName] = ExecutionTimeMs;
-        
-        // Check if system is over budget
-        if (SystemBudgets.Contains(SystemName))
+        if (bIsDino)
         {
-            float Budget = SystemBudgets[SystemName];
-            if (ExecutionTimeMs > Budget * 1.2f) // 20% tolerance
+            Actor->SetActorTickInterval(TickBudget.DinosaurTickInterval);
+            DinoCount++;
+        }
+        else if (bIsCrowd && PlayerPawn)
+        {
+            float Dist = GetDistanceToPlayer(Actor);
+            if (Dist < TickBudget.NearDistanceThreshold)
             {
-                UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: System '%s' over budget: %.2f ms (budget: %.2f ms)"), 
-                       *SystemName, ExecutionTimeMs, Budget);
+                Actor->SetActorTickEnabled(true);
+                Actor->SetActorTickInterval(TickBudget.CrowdNearTickInterval);
+                NearCrowd++;
+            }
+            else if (Dist < TickBudget.FarDistanceThreshold)
+            {
+                Actor->SetActorTickEnabled(true);
+                Actor->SetActorTickInterval(TickBudget.CrowdMidTickInterval);
+                MidCrowd++;
+            }
+            else
+            {
+                Actor->SetActorTickEnabled(false); // Dormant
+                DormantCrowd++;
             }
         }
     }
+
+    FrameStats.ActiveDinoCount = DinoCount;
+    FrameStats.ActiveCrowdCount = NearCrowd + MidCrowd;
+    FrameStats.DormantCrowdCount = DormantCrowd;
 }
 
-FQualitySettings UPerformanceManager::GetRecommendedQualitySettings() const
+// ============================================================
+// ApplyQualityTier
+// ============================================================
+void APerformanceManager::ApplyQualityTier(EPerf_QualityTier NewTier)
 {
-    return CurrentQualitySettings;
+    QualityTier = NewTier;
+    switch (NewTier)
+    {
+        case EPerf_QualityTier::Low:    ApplyQualityPreset_Low();    break;
+        case EPerf_QualityTier::Medium: ApplyQualityPreset_Medium(); break;
+        case EPerf_QualityTier::High:   ApplyQualityPreset_High();   break;
+        case EPerf_QualityTier::Ultra:  ApplyQualityPreset_Ultra();  break;
+    }
+    ApplyConsoleCommands();
 }
 
-void UPerformanceManager::DetectPlatformProfile()
+void APerformanceManager::ApplyQualityPreset_Low()
 {
-    // Detect platform based on hardware capabilities
-    FString PlatformName = UGameplayStatics::GetPlatformName();
-    
-    if (PlatformName.Contains(TEXT("Windows")) || PlatformName.Contains(TEXT("Mac")) || PlatformName.Contains(TEXT("Linux")))
-    {
-        // PC platform - detect performance tier
-        uint32 TotalPhysicalMemory = FPlatformMemory::GetConstants().TotalPhysicalGB;
-        
-        if (TotalPhysicalMemory >= 16)
-        {
-            CurrentPlatformProfile = EPlatformProfile::HighEndPC;
-        }
-        else if (TotalPhysicalMemory >= 8)
-        {
-            CurrentPlatformProfile = EPlatformProfile::MidRangePC;
-        }
-        else
-        {
-            CurrentPlatformProfile = EPlatformProfile::LowEndPC;
-        }
-    }
-    else if (PlatformName.Contains(TEXT("XSX")) || PlatformName.Contains(TEXT("PS5")))
-    {
-        CurrentPlatformProfile = EPlatformProfile::NextGenConsole;
-    }
-    else
-    {
-        CurrentPlatformProfile = EPlatformProfile::Mobile;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Detected platform profile: %s"), 
-           *UEnum::GetValueAsString(CurrentPlatformProfile));
+    StaticMeshLODScale    = 0.7f;
+    SkeletalMeshLODScale  = 0.7f;
+    MaxShadowResolution   = 512;
+    TextureStreamingPoolMB = 512;
+    TickBudget.DinosaurTickInterval  = 0.1f;  // 10Hz
+    TickBudget.CrowdNearTickInterval = 0.2f;  // 5Hz
+    TickBudget.CrowdMidTickInterval  = 1.0f;  // 1Hz
+    TickBudget.NearDistanceThreshold = 300.0f;
+    TickBudget.FarDistanceThreshold  = 1000.0f;
 }
 
-void UPerformanceManager::UpdatePerformanceMetrics()
+void APerformanceManager::ApplyQualityPreset_Medium()
 {
-    // Get current frame rate
-    float DeltaTime = GetWorld()->GetDeltaSeconds();
-    if (DeltaTime > 0.0f)
-    {
-        float CurrentFPS = 1.0f / DeltaTime;
-        CurrentMetrics.CurrentFPS = CurrentFPS;
-        CurrentMetrics.FrameTimeMs = DeltaTime * 1000.0f;
-        
-        // Add to history for averaging
-        FrameRateHistory.Add(CurrentFPS);
-        if (FrameRateHistory.Num() > 120) // Keep last 2 seconds
-        {
-            FrameRateHistory.RemoveAt(0);
-        }
-    }
-    
-    // Gather engine stats
-    GatherEngineStats();
-    
-    // Calculate performance health (0-100)
-    float TargetFPS = static_cast<float>(TargetFrameRate);
-    float HealthRatio = FMath::Clamp(CurrentMetrics.CurrentFPS / TargetFPS, 0.0f, 1.0f);
-    CurrentMetrics.PerformanceHealth = HealthRatio * 100.0f;
-    
-    // Track consecutive frames above/below target
-    if (CurrentMetrics.CurrentFPS < TargetFPS * 0.9f) // 10% tolerance
-    {
-        FramesBelowTarget++;
-        FramesAboveTarget = 0;
-    }
-    else if (CurrentMetrics.CurrentFPS > TargetFPS * 1.1f)
-    {
-        FramesAboveTarget++;
-        FramesBelowTarget = 0;
-    }
-    else
-    {
-        FramesBelowTarget = 0;
-        FramesAboveTarget = 0;
-    }
+    StaticMeshLODScale    = 1.0f;
+    SkeletalMeshLODScale  = 1.0f;
+    MaxShadowResolution   = 1024;
+    TextureStreamingPoolMB = 768;
+    TickBudget.DinosaurTickInterval  = 0.05f; // 20Hz
+    TickBudget.CrowdNearTickInterval = 0.1f;  // 10Hz
+    TickBudget.CrowdMidTickInterval  = 0.5f;  // 2Hz
+    TickBudget.NearDistanceThreshold = 500.0f;
+    TickBudget.FarDistanceThreshold  = 1500.0f;
 }
 
-bool UPerformanceManager::ShouldOptimizePerformance() const
+void APerformanceManager::ApplyQualityPreset_High()
 {
-    if (!bEnableAdaptiveScaling)
-    {
-        return false;
-    }
-    
-    // Optimize if we've had too many frames below target
-    if (FramesBelowTarget >= FramesToleranceBeforeScaling)
-    {
-        return true;
-    }
-    
-    // Also check if any critical system is over budget
-    for (const auto& SystemPair : SystemPerformance)
-    {
-        const FString& SystemName = SystemPair.Key;
-        float Performance = SystemPair.Value;
-        
-        if (SystemBudgets.Contains(SystemName))
-        {
-            float Budget = SystemBudgets[SystemName];
-            if (Performance > Budget * 1.5f) // 50% over budget
-            {
-                return true;
-            }
-        }
-    }
-    
-    return false;
+    StaticMeshLODScale    = 1.0f;
+    SkeletalMeshLODScale  = 1.0f;
+    MaxShadowResolution   = 2048;
+    TextureStreamingPoolMB = 1024;
+    TickBudget.DinosaurTickInterval  = 0.05f; // 20Hz
+    TickBudget.CrowdNearTickInterval = 0.1f;  // 10Hz
+    TickBudget.CrowdMidTickInterval  = 0.5f;  // 2Hz
+    TickBudget.NearDistanceThreshold = 500.0f;
+    TickBudget.FarDistanceThreshold  = 2000.0f;
 }
 
-void UPerformanceManager::ApplyPerformanceOptimizations()
+void APerformanceManager::ApplyQualityPreset_Ultra()
 {
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Applying performance optimizations"));
-    
-    float CurrentFPS = CurrentMetrics.CurrentFPS;
-    float TargetFPS = static_cast<float>(TargetFrameRate);
-    
-    // Calculate scaling factor based on performance deficit
-    float PerformanceRatio = CurrentFPS / TargetFPS;
-    float ScaleFactor = FMath::Clamp(PerformanceRatio, 0.5f, 1.0f);
-    
-    // Apply quality scaling
-    ScaleQualitySettings(ScaleFactor);
-    
-    // Apply engine-level optimizations
-    ApplyEngineOptimizations();
-    
-    LastOptimizationTime = GetWorld()->GetTimeSeconds();
-    FramesBelowTarget = 0; // Reset counter after optimization
+    StaticMeshLODScale    = 1.5f;
+    SkeletalMeshLODScale  = 1.5f;
+    MaxShadowResolution   = 4096;
+    TextureStreamingPoolMB = 2048;
+    TickBudget.DinosaurTickInterval  = 0.033f; // 30Hz
+    TickBudget.CrowdNearTickInterval = 0.05f;  // 20Hz
+    TickBudget.CrowdMidTickInterval  = 0.2f;   // 5Hz
+    TickBudget.NearDistanceThreshold = 800.0f;
+    TickBudget.FarDistanceThreshold  = 3000.0f;
 }
 
-void UPerformanceManager::ScaleQualitySettings(float ScaleFactor)
+// ============================================================
+// ApplyConsoleCommands — push all settings to UE5 renderer
+// ============================================================
+void APerformanceManager::ApplyConsoleCommands()
 {
-    // Scale screen percentage
-    float NewScreenPercentage = FMath::Clamp(
-        CurrentQualitySettings.ScreenPercentage * ScaleFactor, 
-        MinScreenPercentage, 
-        100.0f
-    );
-    CurrentQualitySettings.ScreenPercentage = NewScreenPercentage;
-    
-    // Scale view distance
-    CurrentQualitySettings.ViewDistanceScale = FMath::Clamp(ScaleFactor, 0.3f, 1.0f);
-    
-    // Adjust quality levels based on performance
-    if (ScaleFactor < 0.7f)
-    {
-        CurrentQualitySettings.ShadowQuality = FMath::Max(0, CurrentQualitySettings.ShadowQuality - 1);
-        CurrentQualitySettings.PostProcessQuality = FMath::Max(0, CurrentQualitySettings.PostProcessQuality - 1);
-        CurrentQualitySettings.EffectsQuality = FMath::Max(0, CurrentQualitySettings.EffectsQuality - 1);
-    }
-    else if (ScaleFactor > 1.1f && FramesAboveTarget > 60) // 1 second of good performance
-    {
-        // Gradually increase quality if performance allows
-        CurrentQualitySettings.ShadowQuality = FMath::Min(3, CurrentQualitySettings.ShadowQuality + 1);
-        CurrentQualitySettings.PostProcessQuality = FMath::Min(3, CurrentQualitySettings.PostProcessQuality + 1);
-    }
-    
-    ApplyQualitySettings();
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Quality scaled - Screen: %.1f%%, ViewDist: %.2f, Shadow: %d"), 
-           NewScreenPercentage, CurrentQualitySettings.ViewDistanceScale, CurrentQualitySettings.ShadowQuality);
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // LOD
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.StaticMeshLODDistanceScale %.2f"), StaticMeshLODScale));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.SkeletalMeshLODDistanceScale %.2f"), SkeletalMeshLODScale));
+
+    // Shadows
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.Shadow.MaxResolution %d"), MaxShadowResolution));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        TEXT("r.Shadow.RadiusThreshold 0.03"));
+
+    // Texture streaming
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        FString::Printf(TEXT("r.Streaming.PoolSize %d"), TextureStreamingPoolMB));
+
+    // Occlusion
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.HZBOcclusion 1"));
+
+    // Sky performance
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+
+    // Lumen
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.Reflections.Allow 1"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.DynamicGlobalIlluminationMethod 1"));
+
+    // Niagara GPU particle budget
+    UKismetSystemLibrary::ExecuteConsoleCommand(World,
+        TEXT("fx.Niagara.MaxGPUParticlesSpawnPerFrame 2000"));
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Console commands applied. "
+        "LOD=%.1f Shadow=%d Streaming=%dMB"),
+        StaticMeshLODScale, MaxShadowResolution, TextureStreamingPoolMB);
 }
 
-void UPerformanceManager::ApplyQualitySettings()
+// ============================================================
+// Public API
+// ============================================================
+void APerformanceManager::SetTargetFPS(float NewTargetFPS)
 {
-    // Apply screen percentage
-    static IConsoleVariable* ScreenPercentageCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
-    if (ScreenPercentageCVar)
-    {
-        ScreenPercentageCVar->Set(CurrentQualitySettings.ScreenPercentage);
-    }
-    
-    // Apply shadow quality
-    static IConsoleVariable* ShadowQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.ShadowQuality"));
-    if (ShadowQualityCVar)
-    {
-        ShadowQualityCVar->Set(CurrentQualitySettings.ShadowQuality);
-    }
-    
-    // Apply post-process quality
-    static IConsoleVariable* PostProcessCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.PostProcessQuality"));
-    if (PostProcessCVar)
-    {
-        PostProcessCVar->Set(CurrentQualitySettings.PostProcessQuality);
-    }
-    
-    // Apply effects quality
-    static IConsoleVariable* EffectsCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.EffectsQuality"));
-    if (EffectsCVar)
-    {
-        EffectsCVar->Set(CurrentQualitySettings.EffectsQuality);
-    }
-    
-    // Apply view distance scale
-    static IConsoleVariable* ViewDistanceCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ViewDistanceScale"));
-    if (ViewDistanceCVar)
-    {
-        ViewDistanceCVar->Set(CurrentQualitySettings.ViewDistanceScale);
-    }
+    TargetFPS_PC = FMath::Clamp(NewTargetFPS, 20.0f, 144.0f);
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Target FPS set to %.0f"), TargetFPS_PC);
 }
 
-void UPerformanceManager::ApplyEngineOptimizations()
+FPerf_FrameStats APerformanceManager::GetFrameStats() const
 {
-    // Apply physics optimizations if physics is over budget
-    if (SystemPerformance.Contains(TEXT("Physics")))
-    {
-        float PhysicsTime = SystemPerformance[TEXT("Physics")];
-        if (PhysicsTime > PhysicsBudgetMs * 1.2f)
-        {
-            // Reduce physics simulation frequency
-            static IConsoleVariable* PhysicsSubstepsCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("p.MaxSubsteps"));
-            if (PhysicsSubstepsCVar)
-            {
-                int32 CurrentSubsteps = PhysicsSubstepsCVar->GetInt();
-                PhysicsSubstepsCVar->Set(FMath::Max(1, CurrentSubsteps - 1));
-            }
-        }
-    }
-    
-    // Apply AI optimizations if AI is over budget
-    if (SystemPerformance.Contains(TEXT("AI")))
-    {
-        float AITime = SystemPerformance[TEXT("AI")];
-        if (AITime > AIBudgetMs * 1.2f)
-        {
-            // Reduce AI update frequency
-            CurrentQualitySettings.AIUpdateScale = FMath::Max(0.5f, CurrentQualitySettings.AIUpdateScale * 0.9f);
-        }
-    }
+    return FrameStats;
 }
 
-void UPerformanceManager::LogPerformanceData()
+bool APerformanceManager::IsFrameBudgetHealthy() const
 {
-    if (PerformanceLogFile.IsValid())
-    {
-        FString LogEntry = FString::Printf(
-            TEXT("%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.2f\\n"),
-            *FDateTime::Now().ToString(),
-            CurrentMetrics.CurrentFPS,
-            CurrentMetrics.FrameTimeMs,
-            CurrentMetrics.GameThreadMs,
-            CurrentMetrics.RenderThreadMs,
-            CurrentMetrics.GPUTimeMs,
-            CurrentMetrics.PhysicsTimeMs,
-            CurrentMetrics.AITimeMs,
-            CurrentMetrics.MemoryUsageMB,
-            CurrentMetrics.DrawCalls,
-            CurrentMetrics.TriangleCount,
-            CurrentMetrics.PerformanceHealth
-        );
-        
-        PerformanceLogFile->Serialize(TCHAR_TO_UTF8(*LogEntry), LogEntry.Len());
-        PerformanceLogFile->Flush();
-    }
+    if (FrameStats.AverageFPS <= 0.0f) return true; // Not enough data yet
+    return FrameStats.AverageFPS >= (TargetFPS_PC * 0.9f); // 10% tolerance
 }
 
-void UPerformanceManager::GatherEngineStats()
+float APerformanceManager::GetDistanceToPlayer(AActor* Actor) const
 {
-    // Get memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f);
-    
-    // Get rendering stats (simplified - in real implementation would use proper stat gathering)
-    CurrentMetrics.DrawCalls = 1000; // Placeholder - would get from actual rendering stats
-    CurrentMetrics.TriangleCount = 500000; // Placeholder
-    
-    // Thread times (simplified - would use actual profiling data)
-    CurrentMetrics.GameThreadMs = 8.0f; // Placeholder
-    CurrentMetrics.RenderThreadMs = 10.0f; // Placeholder
-    CurrentMetrics.GPUTimeMs = 12.0f; // Placeholder
-    
-    // Get system performance if available
-    if (SystemPerformance.Contains(TEXT("Physics")))
-    {
-        CurrentMetrics.PhysicsTimeMs = SystemPerformance[TEXT("Physics")];
-    }
-    
-    if (SystemPerformance.Contains(TEXT("AI")))
-    {
-        CurrentMetrics.AITimeMs = SystemPerformance[TEXT("AI")];
-    }
+    if (!Actor) return 0.0f;
+    UWorld* World = GetWorld();
+    if (!World) return 0.0f;
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+    if (!PlayerPawn) return 0.0f;
+    return FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
 }
