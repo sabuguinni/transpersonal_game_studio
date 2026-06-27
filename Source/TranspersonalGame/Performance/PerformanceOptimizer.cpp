@@ -1,175 +1,160 @@
 // PerformanceOptimizer.cpp
-// Runtime performance manager — 60fps PC / 30fps console targets
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260622_003
+// Prehistoric Dinosaur Survival Game — Performance Optimizer Implementation
+// Agent #5 — Procedural World Generator
 
 #include "PerformanceOptimizer.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
-APerf_PerformanceOptimizer::APerf_PerformanceOptimizer()
+UPerformanceOptimizer::UPerformanceOptimizer()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Check every 0.5s to reduce overhead
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every second
+
+    TargetFrameRate = 60.0f;
+    CurrentLODLevel = 0;
+    bDynamicLODEnabled = true;
+    MaxVisibleActors = 500;
+    CullDistance = 10000.0f;
+    FrameTimeThresholdMS = 16.67f; // 60fps target
 }
 
-void APerf_PerformanceOptimizer::BeginPlay()
+void UPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Apply initial quality preset on game start
-    ApplyQualityPreset(CurrentQualityLevel);
+    InitializeOptimizer();
 }
 
-void APerf_PerformanceOptimizer::Tick(float DeltaTime)
+void UPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    UpdateFrameStats(DeltaTime);
-
-    if (bEnableDynamicResolution)
+    if (bDynamicLODEnabled)
     {
-        ApplyDynamicResolutionScaling();
+        UpdateDynamicLOD(DeltaTime);
+    }
+
+    UpdateFrameTimeHistory(DeltaTime);
+}
+
+void UPerformanceOptimizer::InitializeOptimizer()
+{
+    FrameTimeHistory.Reserve(60);
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Initialized — Target: %.1f fps, MaxActors: %d, CullDist: %.0f"),
+        TargetFrameRate, MaxVisibleActors, CullDistance);
+}
+
+void UPerformanceOptimizer::UpdateDynamicLOD(float DeltaTime)
+{
+    float AvgFrameTime = GetAverageFrameTimeMS();
+    float TargetFrameTimeMS = 1000.0f / TargetFrameRate;
+
+    if (AvgFrameTime > TargetFrameTimeMS * 1.2f && CurrentLODLevel < 3)
+    {
+        // Performance below target — increase LOD aggressiveness
+        CurrentLODLevel++;
+        ApplyLODLevel(CurrentLODLevel);
+        UE_LOG(LogTemp, Warning, TEXT("[PerformanceOptimizer] LOD increased to %d (avg frame: %.2fms)"),
+            CurrentLODLevel, AvgFrameTime);
+    }
+    else if (AvgFrameTime < TargetFrameTimeMS * 0.8f && CurrentLODLevel > 0)
+    {
+        // Performance headroom — reduce LOD aggressiveness
+        CurrentLODLevel--;
+        ApplyLODLevel(CurrentLODLevel);
+        UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] LOD decreased to %d (avg frame: %.2fms)"),
+            CurrentLODLevel, AvgFrameTime);
     }
 }
 
-void APerf_PerformanceOptimizer::UpdateFrameStats(float DeltaTime)
-{
-    CurrentFrameStats.FrameTimeMs = DeltaTime * 1000.0f;
-
-    // Rolling average FPS
-    AccumulatedTime += DeltaTime;
-    FrameCount++;
-    if (AccumulatedTime >= 1.0f)
-    {
-        AverageFPS = static_cast<float>(FrameCount) / AccumulatedTime;
-        AccumulatedTime = 0.0f;
-        FrameCount = 0;
-    }
-
-    CurrentFrameStats.bBudgetExceeded = (CurrentFrameStats.FrameTimeMs > FrameBudgetMs);
-}
-
-void APerf_PerformanceOptimizer::ApplyDynamicResolutionScaling()
-{
-    if (!IsFrameBudgetExceeded())
-    {
-        return;
-    }
-
-    // Reduce resolution scale when over budget
-    float CurrentScale = FMath::Clamp(AverageFPS / TargetFPS_PC, MinResolutionScale, MaxResolutionScale);
-    FString Cmd = FString::Printf(TEXT("r.ScreenPercentage %d"), FMath::RoundToInt(CurrentScale * 100.0f));
-    ExecuteConsoleCommand(Cmd);
-}
-
-void APerf_PerformanceOptimizer::ApplyQualityPreset(EPerf_QualityLevel Level)
-{
-    CurrentQualityLevel = Level;
-
-    switch (Level)
-    {
-    case EPerf_QualityLevel::Low:
-        // Console / low-end PC — 30fps target
-        FrameBudgetMs = 33.33f;
-        ExecuteConsoleCommand(TEXT("r.ShadowQuality 1"));
-        ExecuteConsoleCommand(TEXT("r.TextureQuality 1"));
-        ExecuteConsoleCommand(TEXT("r.PostProcessAAQuality 2"));
-        ExecuteConsoleCommand(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor 4"));
-        ExecuteConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 2.0"));
-        ExecuteConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 0.75"));
-        ExecuteConsoleCommand(TEXT("r.Shadow.CSM.MaxCascades 2"));
-        ExecuteConsoleCommand(TEXT("r.VolumetricFog.GridSizeZ 32"));
-        break;
-
-    case EPerf_QualityLevel::Medium:
-        // Mid-range PC — 60fps target
-        FrameBudgetMs = 16.67f;
-        ExecuteConsoleCommand(TEXT("r.ShadowQuality 2"));
-        ExecuteConsoleCommand(TEXT("r.TextureQuality 2"));
-        ExecuteConsoleCommand(TEXT("r.PostProcessAAQuality 4"));
-        ExecuteConsoleCommand(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor 2"));
-        ExecuteConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 1.0"));
-        ExecuteConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.0"));
-        ExecuteConsoleCommand(TEXT("r.Shadow.CSM.MaxCascades 3"));
-        ExecuteConsoleCommand(TEXT("r.VolumetricFog.GridSizeZ 64"));
-        break;
-
-    case EPerf_QualityLevel::High:
-        // High-end PC — 60fps with full quality
-        FrameBudgetMs = 16.67f;
-        ExecuteConsoleCommand(TEXT("r.ShadowQuality 4"));
-        ExecuteConsoleCommand(TEXT("r.TextureQuality 3"));
-        ExecuteConsoleCommand(TEXT("r.PostProcessAAQuality 6"));
-        ExecuteConsoleCommand(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor 2"));
-        ExecuteConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 1.0"));
-        ExecuteConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.0"));
-        ExecuteConsoleCommand(TEXT("r.Shadow.CSM.MaxCascades 4"));
-        ExecuteConsoleCommand(TEXT("r.VolumetricFog.GridSizeZ 64"));
-        break;
-
-    case EPerf_QualityLevel::Ultra:
-        // Enthusiast PC — uncapped, maximum fidelity
-        FrameBudgetMs = 11.11f; // ~90fps target
-        ExecuteConsoleCommand(TEXT("r.ShadowQuality 5"));
-        ExecuteConsoleCommand(TEXT("r.TextureQuality 4"));
-        ExecuteConsoleCommand(TEXT("r.PostProcessAAQuality 6"));
-        ExecuteConsoleCommand(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor 1"));
-        ExecuteConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 0.5"));
-        ExecuteConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.25"));
-        ExecuteConsoleCommand(TEXT("r.Shadow.CSM.MaxCascades 4"));
-        ExecuteConsoleCommand(TEXT("r.VolumetricFog.GridSizeZ 128"));
-        break;
-    }
-}
-
-void APerf_PerformanceOptimizer::ForceUpdateLODs()
+void UPerformanceOptimizer::ApplyLODLevel(int32 LODLevel)
 {
     UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
+    if (!World) return;
 
-    int32 UpdatedCount = 0;
-    for (TActorIterator<AActor> It(World); It; ++It)
-    {
-        AActor* Actor = *It;
-        if (!Actor)
-        {
-            continue;
-        }
+    // Scale cull distance based on LOD level
+    float LODCullMultiplier = 1.0f - (LODLevel * 0.15f); // 15% reduction per LOD level
+    float EffectiveCullDistance = CullDistance * LODCullMultiplier;
 
-        TArray<UStaticMeshComponent*> MeshComps;
-        Actor->GetComponents<UStaticMeshComponent>(MeshComps);
-        for (UStaticMeshComponent* Comp : MeshComps)
+    // Apply to all static mesh actors in world
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+
+    int32 CulledCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+
+        UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+        if (MeshComp)
         {
-            if (Comp)
-            {
-                Comp->MarkRenderStateDirty();
-                UpdatedCount++;
-            }
+            MeshComp->SetCullDistance(EffectiveCullDistance);
+            CulledCount++;
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Applied LOD %d to %d mesh components (cull dist: %.0f)"),
+        LODLevel, CulledCount, EffectiveCullDistance);
 }
 
-float APerf_PerformanceOptimizer::GetCurrentFPS() const
+void UPerformanceOptimizer::UpdateFrameTimeHistory(float DeltaTime)
 {
-    return AverageFPS;
-}
+    float FrameTimeMS = DeltaTime * 1000.0f;
+    FrameTimeHistory.Add(FrameTimeMS);
 
-bool APerf_PerformanceOptimizer::IsFrameBudgetExceeded() const
-{
-    return CurrentFrameStats.bBudgetExceeded;
-}
-
-void APerf_PerformanceOptimizer::ExecuteConsoleCommand(const FString& Command)
-{
-    UWorld* World = GetWorld();
-    if (World)
+    // Keep rolling window of 60 frames
+    if (FrameTimeHistory.Num() > 60)
     {
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, Command);
+        FrameTimeHistory.RemoveAt(0);
     }
+}
+
+float UPerformanceOptimizer::GetAverageFrameTimeMS() const
+{
+    if (FrameTimeHistory.Num() == 0) return 16.67f;
+
+    float Total = 0.0f;
+    for (float FT : FrameTimeHistory)
+    {
+        Total += FT;
+    }
+    return Total / FrameTimeHistory.Num();
+}
+
+float UPerformanceOptimizer::GetCurrentFPS() const
+{
+    float AvgFrameTime = GetAverageFrameTimeMS();
+    if (AvgFrameTime <= 0.0f) return 60.0f;
+    return 1000.0f / AvgFrameTime;
+}
+
+void UPerformanceOptimizer::SetTargetFrameRate(float InTargetFPS)
+{
+    TargetFrameRate = FMath::Clamp(InTargetFPS, 15.0f, 144.0f);
+    FrameTimeThresholdMS = 1000.0f / TargetFrameRate;
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Target FPS set to %.1f (threshold: %.2fms)"),
+        TargetFrameRate, FrameTimeThresholdMS);
+}
+
+void UPerformanceOptimizer::SetDynamicLODEnabled(bool bEnabled)
+{
+    bDynamicLODEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Dynamic LOD %s"),
+        bEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
+}
+
+FString UPerformanceOptimizer::GetPerformanceReport() const
+{
+    return FString::Printf(
+        TEXT("FPS: %.1f | FrameTime: %.2fms | LOD: %d | DynamicLOD: %s | CullDist: %.0f"),
+        GetCurrentFPS(),
+        GetAverageFrameTimeMS(),
+        CurrentLODLevel,
+        bDynamicLODEnabled ? TEXT("ON") : TEXT("OFF"),
+        CullDistance
+    );
 }
