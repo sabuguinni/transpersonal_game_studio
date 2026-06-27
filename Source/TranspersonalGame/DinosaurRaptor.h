@@ -1,101 +1,107 @@
-// DinosaurRaptor.h — Velociraptor subclass of ADinosaurBase
-// Agent #4 Performance Optimizer — Cycle 012
-// Pack-hunting raptor with coordinated attack AI
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DinosaurBase.h"
 #include "DinosaurRaptor.generated.h"
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ARaptorCharacter : public ADinosaurBase
+/**
+ * AVelociraptorDinosaur — pack predator
+ * Fast, low-health flanking predator. Works in groups of 3.
+ * Agent #12 (Combat AI) reads PackRole and PackLeader to coordinate flanking.
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Velociraptor"))
+class TRANSPERSONALGAME_API AVelociraptorDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
 
 public:
-    ARaptorCharacter();
+    AVelociraptorDinosaur();
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Pack coordination
+    // ── Pack coordination ────────────────────────────────────────────────────
+
+    /** Role in the pack: 0=Leader, 1=LeftFlanker, 2=RightFlanker */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    float PackCoordinationRadius = 1200.0f;
+    int32 PackRole;
 
+    /** Reference to the pack leader (nullptr if this IS the leader) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    int32 MaxPackSize = 6;
+    AVelociraptorDinosaur* PackLeader;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raptor|Pack")
-    int32 CurrentPackCount = 0;
-
+    /** Registered pack members (leader only) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    bool bIsPackLeader = false;
+    TArray<AVelociraptorDinosaur*> PackMembers;
 
-    // Raptor-specific movement
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    float SprintSpeedMultiplier = 1.6f;
+    /** Maximum pack size before splitting */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    int32 MaxPackSize;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    float JumpStrength = 650.0f;
+    // ── Jump attack ──────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Movement")
-    bool bCanLeapAtTarget = true;
-
-    // Leap attack
+    /** Jump attack damage (base) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapAttackRange = 350.0f;
+    float JumpAttackDamage;
 
+    /** Horizontal distance to trigger jump attack */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapAttackDamage = 45.0f;
+    float JumpAttackRange;
 
+    /** Cooldown between jump attacks (seconds) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float LeapCooldown = 4.0f;
+    float JumpAttackCooldown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float ClawSlashDamage = 25.0f;
+    /** True while jump attack is in progress */
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Combat")
+    bool bIsJumping;
 
-    // Stealth / flanking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Behavior")
-    bool bUseFlankingBehavior = true;
+    // ── Flanking ─────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Behavior")
-    float FlankAngleDegrees = 90.0f;
+    /** Flanking offset from target (set by AI controller) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    FVector FlankOffset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Behavior")
-    float StalkingDistance = 800.0f;
+    /** Coordination radius — raptors within this range share target info */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    float CoordinationRadius;
 
-    // LOD performance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Performance")
-    float LOD0_Distance = 1500.0f;
+    // ── Methods ──────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Performance")
-    float LOD1_Distance = 3500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Performance")
-    float LOD2_Distance = 7000.0f;
-
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void ScanForPackMembers();
-
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void CoordinatePackAttack(AActor* Target);
-
+    /**
+     * Perform a leap attack at the target actor.
+     * Launches the raptor with AddImpulse toward the target.
+     * Called by Agent #12 Behavior Tree via UFUNCTION.
+     */
     UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    bool TryLeapAttack(AActor* Target);
+    void PerformJumpAttack(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void PerformClawSlash();
+    /**
+     * Coordinate flanking positions with pack members.
+     * Leader calls this; flankers receive updated FlankOffset.
+     * Called by Agent #12 Behavior Tree.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    void CoordinateFlank(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Behavior")
-    FVector CalculateFlankPosition(AActor* Target);
+    /**
+     * Register a new pack member with the leader.
+     * Returns true if pack is not full.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    bool RegisterPackMember(AVelociraptorDinosaur* NewMember);
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Performance")
-    void ApplyLODSettings();
+    /**
+     * Get the computed world-space flanking position for this raptor.
+     * Flankers call this to know where to move.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    FVector GetFlankPosition() const;
 
-protected:
-    float LeapCooldownRemaining = 0.0f;
-    bool bIsLeaping = false;
-    TArray<ARaptorCharacter*> PackMembers;
+private:
+    float JumpAttackTimer;
+
+    FTimerHandle JumpResetTimer;
+
+    void ResetJumpState();
 };
