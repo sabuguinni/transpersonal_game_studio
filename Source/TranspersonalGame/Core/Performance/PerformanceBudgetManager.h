@@ -1,209 +1,158 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "PerformanceBudgetManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPerformanceBudget, Log, All);
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums & Structs — must be at global scope (UHT rule)
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Performance Budget Categories for the Jurassic Survival Game
- * Each category has specific frame time allocations
- */
 UENUM(BlueprintType)
-enum class EPerformanceBudgetCategory : uint8
+enum class EPerf_QualityTier : uint8
 {
-    // Core Systems (8.5ms @ 60fps target)
-    GameThread_Core         UMETA(DisplayName = "Game Thread - Core"),
-    GameThread_AI           UMETA(DisplayName = "Game Thread - AI & Behavior"),
-    GameThread_Physics      UMETA(DisplayName = "Game Thread - Physics"),
-    
-    // Rendering (8.5ms @ 60fps target) 
-    RenderThread_Geometry   UMETA(DisplayName = "Render Thread - Geometry"),
-    RenderThread_Lighting   UMETA(DisplayName = "Render Thread - Lighting"),
-    RenderThread_Effects    UMETA(DisplayName = "Render Thread - VFX"),
-    
-    // GPU (16.67ms @ 60fps target)
-    GPU_BasePass           UMETA(DisplayName = "GPU - Base Pass"),
-    GPU_Shadows            UMETA(DisplayName = "GPU - Shadow Rendering"),
-    GPU_PostProcess        UMETA(DisplayName = "GPU - Post Processing"),
-    GPU_Nanite             UMETA(DisplayName = "GPU - Nanite Rendering"),
-    GPU_Lumen              UMETA(DisplayName = "GPU - Lumen GI"),
-    
-    // Memory Systems
-    Memory_Streaming       UMETA(DisplayName = "Memory - Asset Streaming"),
-    Memory_AI              UMETA(DisplayName = "Memory - AI Data"),
-    
-    MAX                    UMETA(Hidden)
+    Low      UMETA(DisplayName = "Low (30fps Console)"),
+    Medium   UMETA(DisplayName = "Medium (45fps)"),
+    High     UMETA(DisplayName = "High (60fps PC)"),
+    Ultra    UMETA(DisplayName = "Ultra (120fps)"),
 };
 
-/**
- * Performance Budget Entry
- */
+UENUM(BlueprintType)
+enum class EPerf_BudgetStatus : uint8
+{
+    OK          UMETA(DisplayName = "Within Budget"),
+    Warning     UMETA(DisplayName = "Near Limit"),
+    OverBudget  UMETA(DisplayName = "Over Budget"),
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceBudgetEntry
+struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
+    /** Target frame time in milliseconds (16.67ms = 60fps, 33.33ms = 30fps) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerformanceBudgetCategory Category;
+    float TargetFrameTimeMs = 16.67f;
 
+    /** Maximum dynamic lights allowed in scene */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetTimeMS_PC = 0.0f;
+    int32 MaxDynamicLights = 4;
 
+    /** Maximum draw calls per frame */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetTimeMS_Console = 0.0f;
+    int32 MaxDrawCalls = 2000;
 
+    /** Maximum triangles per frame (millions) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CurrentTimeMS = 0.0f;
+    float MaxTrianglesMillion = 3.0f;
 
+    /** Maximum shadow-casting lights */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float WarningThresholdPercent = 80.0f;
+    int32 MaxShadowCasters = 2;
 
+    /** Minimum LOD screen size threshold */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CriticalThresholdPercent = 95.0f;
-
-    FPerformanceBudgetEntry()
-    {
-        Category = EPerformanceBudgetCategory::GameThread_Core;
-        TargetTimeMS_PC = 0.0f;
-        TargetTimeMS_Console = 0.0f;
-        CurrentTimeMS = 0.0f;
-        WarningThresholdPercent = 80.0f;
-        CriticalThresholdPercent = 95.0f;
-    }
+    float MinLODScreenSize = 0.0002f;
 };
 
-/**
- * Performance Metrics for Dinosaur-specific systems
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurPerformanceMetrics
+struct FPerf_RuntimeStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 TotalDinosaursInScene = 0;
+    /** Current frame time in ms (smoothed over 30 frames) */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float SmoothedFrameTimeMs = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 ActiveAIDinosaurs = 0;
+    /** Current dynamic light count in scene */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DynamicLightCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 VisibleDinosaurs = 0;
+    /** Current visible actor count */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 VisibleActorCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    float AverageAITickTime = 0.0f;
+    /** Overall budget status */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_BudgetStatus BudgetStatus = EPerf_BudgetStatus::OK;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    float TotalAIMemoryMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 ActiveBehaviorTrees = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 DinosaursInLOD0 = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 DinosaursInLOD1 = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Performance")
-    int32 DinosaursInLOD2 = 0;
+    /** Frames since last budget violation */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 FramesSinceViolation = 0;
 };
 
-/**
- * Performance Budget Manager
- * Manages frame time budgets and provides real-time performance monitoring
- * specifically tailored for the Jurassic Survival game requirements
- */
-UCLASS()
-class TRANSPERSONALGAME_API UPerformanceBudgetManager : public UWorldSubsystem
+// ─────────────────────────────────────────────────────────────────────────────
+// APerf_BudgetManager — world actor that enforces frame budgets at runtime
+// ─────────────────────────────────────────────────────────────────────────────
+
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Budget Manager"))
+class TRANSPERSONALGAME_API APerf_BudgetManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+    APerf_BudgetManager();
 
-    // Performance Budget Management
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // ── Budget Configuration ──
+
+    /** Frame budget for current quality tier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget FrameBudget;
+
+    /** Active quality tier — drives budget thresholds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
+
+    /** How often (seconds) to run the full budget audit */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float AuditIntervalSeconds = 1.0f;
+
+    // ── Runtime Stats (read-only) ──
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
+    FPerf_RuntimeStats RuntimeStats;
+
+    // ── Public API ──
+
+    /** Set quality tier and update budget thresholds accordingly */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void InitializePerformanceBudgets();
+    void SetQualityTier(EPerf_QualityTier NewTier);
 
+    /** Force an immediate budget audit — returns current status */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics(float DeltaTime);
+    EPerf_BudgetStatus RunBudgetAudit();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceBudgetExceeded(EPerformanceBudgetCategory Category) const;
+    /** Returns true if scene is within all budget limits */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    bool IsWithinBudget() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime() const { return CurrentFrameTime; }
+    /** Get recommended LOD bias for current performance state */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    float GetRecommendedLODBias() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetTargetFrameTime() const;
+    /** Apply console variable overrides for current quality tier */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
+    void ApplyQualityConsoleVars();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FDinosaurPerformanceMetrics GetDinosaurMetrics() const { return DinosaurMetrics; }
-
-    // Performance Scaling
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ScalePerformanceForDinosaurCount(int32 DinosaurCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyEmergencyPerformanceScaling();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void RestoreNormalPerformanceScaling();
-
-    // Debugging and Visualization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceHUD(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceReport();
-
-protected:
-    // Performance budgets for different categories
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Budgets")
-    TArray<FPerformanceBudgetEntry> PerformanceBudgets;
-
-    // Current performance metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFrameTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FDinosaurPerformanceMetrics DinosaurMetrics;
-
-    // Performance scaling state
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bEmergencyScalingActive = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PerformanceScaleFactor = 1.0f;
+    /** Log current performance stats to output log */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
+    void LogPerformanceStats() const;
 
 private:
-    // Internal tracking
-    TArray<float> FrameTimeHistory;
-    int32 FrameHistoryIndex = 0;
-    static constexpr int32 MaxFrameHistory = 120; // 2 seconds at 60fps
+    // ── Internal ──
 
-    // Performance monitoring
-    void UpdateFrameTimeHistory(float FrameTime);
-    void UpdateDinosaurMetrics();
-    void CheckPerformanceThresholds();
-    
-    // Platform detection
-    bool IsConsole() const;
-    bool IsPC() const;
-    
-    // Emergency scaling
-    void ReduceAITickFrequency();
-    void ReduceRenderingQuality();
-    void RestoreAITickFrequency();
-    void RestoreRenderingQuality();
+    float TimeSinceLastAudit = 0.0f;
+
+    /** Smoothed frame time accumulator (ring buffer of 30 samples) */
+    TArray<float> FrameTimeSamples;
+    int32 FrameSampleIndex = 0;
+    static constexpr int32 FrameSampleCount = 30;
+
+    void UpdateFrameTimeSamples(float DeltaTime);
+    void UpdateDynamicLightCount();
+    void ApplyBudgetThresholdsForTier(EPerf_QualityTier Tier, FPerf_FrameBudget& OutBudget) const;
+    void ExecuteConsoleCommand(const FString& Command) const;
 };
