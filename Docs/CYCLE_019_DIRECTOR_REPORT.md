@@ -1,62 +1,105 @@
-# Studio Director — Cycle PROD_CYCLE_AUTO_20260617_013 Report
+# Studio Director — Cycle 019 Production Report
+**Cycle ID:** PROD_CYCLE_AUTO_20260627_012  
+**Date:** 2026-06-27  
+**Budget Used:** ~$90.08/$100  
+**Agent:** #01 — Studio Director
 
-## VISUAL FEEDBACK APPLIED
-- **Issue detected:** Rogue orange/red PointLight dominating left 40% of viewport. No dinosaurs or vegetation. Only 2–3 white cube placeholders. Black sky in some frames.
-- **Action directed to Agent #8:** All PointLights >500 intensity clamped to 300 lux with InverseSquareFalloff. DirectionalLight corrected to daylight white at intensity 10.0 with AtmosphereSunLight=true.
-- **Action directed to Agent #9/#12:** Spawn 3 dino placeholder actors (TRex_Savana_001, Raptor_Forest_001, Brach_Plains_001) if count < 3.
+---
 
-## Scene State (Cycle 013)
-- Bridge: CONNECTED
-- Map: MinPlayableMap
-- Lighting fix: PointLights clamped, DirectionalLight corrected
-- Dino placeholders: Verified/spawned (TRex_Savana_001, Raptor_Forest_001, Brach_Plains_001)
-- Map saved: True
+## CYCLE SUMMARY
 
-## Agent Task Assignments
+### UE5 Bridge Status
+- ✅ Bridge validated (cmd_23171) — `bridge_ok` confirmed
+- ✅ CAP enforcement applied (cmd_23172) — sun pitch, fog dedup, SkyLight movable, FastSkyLUT=1
+- ✅ Scene improvements deployed (cmd_23173) — rock landmarks spawned, actor inventory verified
+
+### Asset Generation
+- ❌ `generate_image` — API 401 (key expired) — **FALLBACK EXECUTED**: CAP enforcement + scene setup via ue5_execute
+
+---
+
+## MILESTONE 1 STATUS — "WALK AROUND"
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| ThirdPersonCharacter (WASD) | 🔄 In Progress | TranspersonalCharacter exists in codebase |
+| Camera boom + follow camera | 🔄 In Progress | Defined in character header |
+| Landscape with terrain | ✅ Basic | Ground mesh present, hills added in prev cycles |
+| Player walk/run/jump | 🔄 In Progress | ACharacter base used |
+| Static dinosaur meshes | ✅ Partial | 5 dino placeholders (TRex, 3 Raptors, Brachio) |
+| Directional light + sky | ✅ Done | Sun pitch -45°, SkyAtmosphere, fog active |
+
+---
+
+## AGENT TASK ASSIGNMENTS — CYCLE 019
+
+### Agent #3 — Core Systems Programmer
+**PRIORITY**: Implement `TranspersonalCharacter.cpp` with full movement
+- WASD input bindings
+- Sprint (Shift) — stamina drain
+- Jump (Space)
+- Camera boom (SpringArmComponent, 300 units)
+- FollowCamera (CameraComponent)
+- Use `ACharacter` base class — NO custom movement system
 
 ### Agent #5 — Procedural World Generator
-**PRIORITY:** Add terrain height variation using Landscape or displacement.
-- If Landscape exists: add at least 3 hills with height >500 units
-- If no Landscape: spawn displaced StaticMesh terrain sections
-- Target: visible terrain undulation in screenshot
-
-### Agent #6 — Environment Artist
-**PRIORITY:** Add 10+ trees and 5+ rocks around dino positions.
-- Use cone/cylinder primitives if no foliage assets available
-- Place vegetation within 2000 units of origin
-- Label format: Tree_Forest_001, Rock_Savana_001
-
-### Agent #8 — Lighting & Atmosphere
-**PRIORITY:** Confirm rogue PointLight is gone. Set SkyAtmosphere.
-- Delete any PointLight with intensity > 500 that remains
-- Ensure SkyAtmosphere actor exists
-- Ensure ExponentialHeightFog actor exists with density 0.02
+**PRIORITY**: Create actual Landscape actor in MinPlayableMap
+- Use `unreal.LandscapeFactory` or heightmap import
+- Minimum 1009×1009 resolution
+- Add height variation (hills, valleys, river bed)
+- Apply basic grass/rock material
 
 ### Agent #9 — Character Artist
-**PRIORITY:** Ensure PlayerStart is at origin. Verify TranspersonalCharacter BP exists.
-- Check /Game/Blueprints/BP_TranspersonalCharacter
-- If missing, create minimal ACharacter Blueprint with capsule + mesh
+**PRIORITY**: Ensure dinosaur meshes have collision
+- Verify each dino placeholder has `StaticMeshComponent` with collision enabled
+- Set `bGenerateOverlapEvents = True`
+- Add basic materials (not flat grey)
 
 ### Agent #12 — Combat & Enemy AI
-**PRIORITY:** Add basic patrol movement to TRex_Savana_001.
-- Use Python to set a simple timeline or AIController
-- Even a slow rotation counts as "alive" behaviour
+**PRIORITY**: Implement Survival HUD
+- Health bar (red)
+- Hunger bar (orange)
+- Thirst bar (blue)
+- Stamina bar (green)
+- Use UMG Widget Blueprint
 
-## Budget Status
-- Spent: ~$88.07 / $100
-- Remaining: ~$11.93
-- Priority: Visible improvements only — no new systems
+### Agent #18 — QA & Testing
+**PRIORITY**: Verify MinPlayableMap loads without crash
+- Check all actor references are valid
+- Verify PlayerStart exists
+- Confirm character spawns correctly
+
+---
+
+## TECHNICAL DECISIONS
+
+1. **Using ACharacter base** — NOT custom movement. UE5's `UCharacterMovementComponent` handles all physics.
+2. **Placeholder meshes** — Basic shapes (cubes/spheres) until proper dinosaur assets are available.
+3. **MinPlayableMap** — All Milestone 1 work targets this single map for focus.
+4. **No spiritual content** — All mechanics are survival-based (hunger, thirst, stamina, fear).
+
+---
 
 ## DELIVERABLES THIS CYCLE
-- [UE5_CMD] Bridge validation — confirmed connected
-- [UE5_CMD] CAP audit — actor count and type distribution logged
-- [UE5_CMD] Lighting fix — PointLights clamped, DirectionalLight corrected
-- [UE5_CMD] Dino spawn audit — TRex/Raptor/Brach placeholders verified/created, map saved
-- [IMAGE] Concept art — primitive human vs T-Rex in jungle clearing
-- [FILE] CYCLE_019_DIRECTOR_REPORT.md — this report
+
+| Type | Action | Result |
+|------|--------|--------|
+| **[UE5_CMD]** | `cmd_23171` — Bridge validation + actor inventory | ✅ `bridge_ok` |
+| **[IMAGE]** | Prehistoric hunter concept art | ❌ API 401 — fallback executed |
+| **[UE5_CMD]** | `cmd_23172` — CAP enforcement (sun -45°, fog dedup, SkyLight, FastSkyLUT=1, saved) | ✅ |
+| **[UE5_CMD]** | `cmd_23173` — Rock landmarks + dino/character verification | ✅ |
+| **[FILE]** | `CYCLE_019_DIRECTOR_REPORT.md` — This report | ✅ |
+
+---
 
 ## NEXT CYCLE PRIORITIES
-1. Agent #6: Add vegetation (trees/rocks) around dino positions
-2. Agent #8: Confirm clean lighting — no rogue orange light
-3. Agent #5: Add terrain height variation
-4. Agent #12: Basic dino movement (even slow rotation)
+
+1. **Agent #3**: `TranspersonalCharacter.cpp` — full movement implementation
+2. **Agent #5**: Real Landscape with height variation
+3. **Agent #12**: Survival HUD widget
+4. **Agent #18**: Full playtest validation of MinPlayableMap
+
+---
+
+*Studio Director — Transpersonal Game Studio*  
+*"A delayed game is eventually good. A rushed game is forever bad." — Miyamoto*
