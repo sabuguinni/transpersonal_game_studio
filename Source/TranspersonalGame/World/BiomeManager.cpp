@@ -1,180 +1,136 @@
-// BiomeManager.cpp
+// BiomeManager.cpp — Biome classification and terrain query system
 // Engine Architect #02 — Transpersonal Game Studio
-// Manages biome classification, terrain queries, and biome-driven
-// foliage/fauna spawning for the procedural prehistoric world.
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
 
 UBiomeManager::UBiomeManager()
 {
-    // Default biome thresholds (altitude-based)
-    BiomeAltitudeThresholds.Add(EBiomeType::CoastalShallows,    -200.0f);
-    BiomeAltitudeThresholds.Add(EBiomeType::TropicalJungle,      200.0f);
-    BiomeAltitudeThresholds.Add(EBiomeType::Savanna,             600.0f);
-    BiomeAltitudeThresholds.Add(EBiomeType::TemperateForest,    1200.0f);
-    BiomeAltitudeThresholds.Add(EBiomeType::AlpineMeadow,       2000.0f);
-    BiomeAltitudeThresholds.Add(EBiomeType::VolcanicBadlands,   3000.0f);
-
-    // Default biome temperatures (Celsius)
-    BiomeTemperatures.Add(EBiomeType::CoastalShallows,    28.0f);
-    BiomeTemperatures.Add(EBiomeType::TropicalJungle,     35.0f);
-    BiomeTemperatures.Add(EBiomeType::Savanna,            32.0f);
-    BiomeTemperatures.Add(EBiomeType::TemperateForest,    18.0f);
-    BiomeTemperatures.Add(EBiomeType::AlpineMeadow,        8.0f);
-    BiomeTemperatures.Add(EBiomeType::VolcanicBadlands,   55.0f);
-
-    // Default biome humidity (0-1)
-    BiomeHumidity.Add(EBiomeType::CoastalShallows,    0.9f);
-    BiomeHumidity.Add(EBiomeType::TropicalJungle,     0.95f);
-    BiomeHumidity.Add(EBiomeType::Savanna,            0.3f);
-    BiomeHumidity.Add(EBiomeType::TemperateForest,    0.6f);
-    BiomeHumidity.Add(EBiomeType::AlpineMeadow,       0.5f);
-    BiomeHumidity.Add(EBiomeType::VolcanicBadlands,   0.1f);
-
-    // Foliage density per biome (0-1)
-    BiomeFoliageDensity.Add(EBiomeType::CoastalShallows,    0.4f);
-    BiomeFoliageDensity.Add(EBiomeType::TropicalJungle,     1.0f);
-    BiomeFoliageDensity.Add(EBiomeType::Savanna,            0.3f);
-    BiomeFoliageDensity.Add(EBiomeType::TemperateForest,    0.7f);
-    BiomeFoliageDensity.Add(EBiomeType::AlpineMeadow,       0.2f);
-    BiomeFoliageDensity.Add(EBiomeType::VolcanicBadlands,   0.05f);
+    // Initialize biome definitions
+    InitializeBiomeDefinitions();
 }
 
-void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
+void UBiomeManager::InitializeBiomeDefinitions()
 {
-    Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — %d biomes registered"), BiomeAltitudeThresholds.Num());
+    BiomeDefinitions.Empty();
+
+    // Jungle biome
+    FEng_BiomeDefinition Jungle;
+    Jungle.BiomeType = EEng_BiomeType::Jungle;
+    Jungle.DisplayName = FText::FromString(TEXT("Jungle"));
+    Jungle.TemperatureMin = 25.f;
+    Jungle.TemperatureMax = 38.f;
+    Jungle.HumidityMin = 0.7f;
+    Jungle.HumidityMax = 1.0f;
+    Jungle.ElevationMin = 0.f;
+    Jungle.ElevationMax = 300.f;
+    Jungle.VegetationDensity = 0.9f;
+    Jungle.FoliageColor = FLinearColor(0.05f, 0.35f, 0.05f, 1.f);
+    BiomeDefinitions.Add(EEng_BiomeType::Jungle, Jungle);
+
+    // Savanna biome
+    FEng_BiomeDefinition Savanna;
+    Savanna.BiomeType = EEng_BiomeType::Savanna;
+    Savanna.DisplayName = FText::FromString(TEXT("Savanna"));
+    Savanna.TemperatureMin = 20.f;
+    Savanna.TemperatureMax = 40.f;
+    Savanna.HumidityMin = 0.2f;
+    Savanna.HumidityMax = 0.5f;
+    Savanna.ElevationMin = 0.f;
+    Savanna.ElevationMax = 200.f;
+    Savanna.VegetationDensity = 0.3f;
+    Savanna.FoliageColor = FLinearColor(0.6f, 0.5f, 0.1f, 1.f);
+    BiomeDefinitions.Add(EEng_BiomeType::Savanna, Savanna);
+
+    // Swamp biome
+    FEng_BiomeDefinition Swamp;
+    Swamp.BiomeType = EEng_BiomeType::Swamp;
+    Swamp.DisplayName = FText::FromString(TEXT("Swamp"));
+    Swamp.TemperatureMin = 18.f;
+    Swamp.TemperatureMax = 30.f;
+    Swamp.HumidityMin = 0.8f;
+    Swamp.HumidityMax = 1.0f;
+    Swamp.ElevationMin = -10.f;
+    Swamp.ElevationMax = 50.f;
+    Swamp.VegetationDensity = 0.7f;
+    Swamp.FoliageColor = FLinearColor(0.1f, 0.25f, 0.1f, 1.f);
+    BiomeDefinitions.Add(EEng_BiomeType::Swamp, Swamp);
+
+    // Volcanic biome
+    FEng_BiomeDefinition Volcanic;
+    Volcanic.BiomeType = EEng_BiomeType::Volcanic;
+    Volcanic.DisplayName = FText::FromString(TEXT("Volcanic Highlands"));
+    Volcanic.TemperatureMin = 30.f;
+    Volcanic.TemperatureMax = 80.f;
+    Volcanic.HumidityMin = 0.0f;
+    Volcanic.HumidityMax = 0.2f;
+    Volcanic.ElevationMin = 400.f;
+    Volcanic.ElevationMax = 2000.f;
+    Volcanic.VegetationDensity = 0.05f;
+    Volcanic.FoliageColor = FLinearColor(0.3f, 0.1f, 0.0f, 1.f);
+    BiomeDefinitions.Add(EEng_BiomeType::Volcanic, Volcanic);
+
+    // Coastal biome
+    FEng_BiomeDefinition Coastal;
+    Coastal.BiomeType = EEng_BiomeType::Coastal;
+    Coastal.DisplayName = FText::FromString(TEXT("Coastal"));
+    Coastal.TemperatureMin = 15.f;
+    Coastal.TemperatureMax = 28.f;
+    Coastal.HumidityMin = 0.5f;
+    Coastal.HumidityMax = 0.8f;
+    Coastal.ElevationMin = -5.f;
+    Coastal.ElevationMax = 80.f;
+    Coastal.VegetationDensity = 0.4f;
+    Coastal.FoliageColor = FLinearColor(0.2f, 0.45f, 0.15f, 1.f);
+    BiomeDefinitions.Add(EEng_BiomeType::Coastal, Coastal);
 }
 
-void UBiomeManager::Deinitialize()
+EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    BiomeAltitudeThresholds.Empty();
-    BiomeTemperatures.Empty();
-    BiomeHumidity.Empty();
-    BiomeFoliageDensity.Empty();
-    Super::Deinitialize();
+    float Elevation = WorldLocation.Z;
+    float NormalizedX = FMath::Frac(FMath::Abs(WorldLocation.X) / 10000.f);
+    float NormalizedY = FMath::Frac(FMath::Abs(WorldLocation.Y) / 10000.f);
+
+    // Simple noise-based biome assignment using position
+    float HumidityEstimate = FMath::Sin(WorldLocation.X * 0.0001f) * 0.5f + 0.5f;
+    float TempEstimate = FMath::Cos(WorldLocation.Y * 0.0001f) * 0.5f + 0.5f;
+
+    if (Elevation > 400.f)
+        return EEng_BiomeType::Volcanic;
+    if (Elevation < 20.f && HumidityEstimate > 0.6f)
+        return EEng_BiomeType::Coastal;
+    if (HumidityEstimate > 0.7f && Elevation < 300.f)
+        return (Elevation < 50.f) ? EEng_BiomeType::Swamp : EEng_BiomeType::Jungle;
+    if (HumidityEstimate < 0.35f)
+        return EEng_BiomeType::Savanna;
+
+    return EEng_BiomeType::Jungle;
 }
 
-EBiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+FEng_BiomeDefinition UBiomeManager::GetBiomeDefinition(EEng_BiomeType BiomeType) const
 {
-    float Altitude = WorldLocation.Z;
-
-    // Walk thresholds from lowest to highest
-    EBiomeType Result = EBiomeType::TropicalJungle; // default
-
-    // Coastal if below sea level
-    if (Altitude < 0.0f) return EBiomeType::CoastalShallows;
-
-    // Altitude-based classification
-    if (Altitude < 200.0f)  return EBiomeType::TropicalJungle;
-    if (Altitude < 600.0f)  return EBiomeType::Savanna;
-    if (Altitude < 1200.0f) return EBiomeType::TemperateForest;
-    if (Altitude < 2000.0f) return EBiomeType::AlpineMeadow;
-
-    return EBiomeType::VolcanicBadlands;
+    const FEng_BiomeDefinition* Found = BiomeDefinitions.Find(BiomeType);
+    if (Found)
+        return *Found;
+    return FEng_BiomeDefinition();
 }
 
-FBiomeData UBiomeManager::GetBiomeData(EBiomeType BiomeType) const
+float UBiomeManager::GetVegetationDensityAt(const FVector& WorldLocation) const
 {
-    FBiomeData Data;
-    Data.BiomeType = BiomeType;
-
-    if (const float* Temp = BiomeTemperatures.Find(BiomeType))
-        Data.Temperature = *Temp;
-    else
-        Data.Temperature = 25.0f;
-
-    if (const float* Hum = BiomeHumidity.Find(BiomeType))
-        Data.Humidity = *Hum;
-    else
-        Data.Humidity = 0.5f;
-
-    if (const float* Density = BiomeFoliageDensity.Find(BiomeType))
-        Data.FoliageDensity = *Density;
-    else
-        Data.FoliageDensity = 0.5f;
-
-    // Biome display names
-    switch (BiomeType)
-    {
-        case EBiomeType::CoastalShallows:  Data.BiomeName = TEXT("Coastal Shallows");  break;
-        case EBiomeType::TropicalJungle:   Data.BiomeName = TEXT("Tropical Jungle");   break;
-        case EBiomeType::Savanna:          Data.BiomeName = TEXT("Cretaceous Savanna"); break;
-        case EBiomeType::TemperateForest:  Data.BiomeName = TEXT("Temperate Forest");  break;
-        case EBiomeType::AlpineMeadow:     Data.BiomeName = TEXT("Alpine Meadow");     break;
-        case EBiomeType::VolcanicBadlands: Data.BiomeName = TEXT("Volcanic Badlands"); break;
-        default:                           Data.BiomeName = TEXT("Unknown Biome");     break;
-    }
-
-    return Data;
+    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    return GetBiomeDefinition(Biome).VegetationDensity;
 }
 
-float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+FLinearColor UBiomeManager::GetFoliageColorAt(const FVector& WorldLocation) const
 {
-    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    if (const float* Temp = BiomeTemperatures.Find(Biome))
-        return *Temp;
-    return 25.0f;
+    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    return GetBiomeDefinition(Biome).FoliageColor;
 }
 
-float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+TArray<EEng_BiomeType> UBiomeManager::GetAllBiomeTypes() const
 {
-    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    if (const float* Hum = BiomeHumidity.Find(Biome))
-        return *Hum;
-    return 0.5f;
-}
-
-float UBiomeManager::GetFoliageDensityAtLocation(const FVector& WorldLocation) const
-{
-    EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    if (const float* Density = BiomeFoliageDensity.Find(Biome))
-        return *Density;
-    return 0.5f;
-}
-
-bool UBiomeManager::IsBiomeSuitableForSpecies(EBiomeType Biome, const FName& SpeciesName) const
-{
-    // Carnivores (T-Rex, Raptor) prefer jungle/savanna
-    if (SpeciesName == TEXT("TRex") || SpeciesName == TEXT("Velociraptor"))
-    {
-        return (Biome == EBiomeType::TropicalJungle || Biome == EBiomeType::Savanna);
-    }
-
-    // Herbivores (Brachiosaurus, Triceratops) prefer jungle/savanna/temperate
-    if (SpeciesName == TEXT("Brachiosaurus") || SpeciesName == TEXT("Triceratops")
-        || SpeciesName == TEXT("Parasaurolophus"))
-    {
-        return (Biome == EBiomeType::TropicalJungle
-             || Biome == EBiomeType::Savanna
-             || Biome == EBiomeType::TemperateForest);
-    }
-
-    // Default: most biomes are suitable
-    return (Biome != EBiomeType::VolcanicBadlands);
-}
-
-TArray<EBiomeType> UBiomeManager::GetAllBiomeTypes() const
-{
-    TArray<EBiomeType> AllBiomes;
-    BiomeAltitudeThresholds.GetKeys(AllBiomes);
-    return AllBiomes;
-}
-
-void UBiomeManager::SetBiomeTemperature(EBiomeType BiomeType, float Temperature)
-{
-    BiomeTemperatures.Add(BiomeType, Temperature);
-}
-
-void UBiomeManager::SetBiomeHumidity(EBiomeType BiomeType, float Humidity)
-{
-    BiomeHumidity.Add(BiomeType, FMath::Clamp(Humidity, 0.0f, 1.0f));
-}
-
-void UBiomeManager::SetBiomeFoliageDensity(EBiomeType BiomeType, float Density)
-{
-    BiomeFoliageDensity.Add(BiomeType, FMath::Clamp(Density, 0.0f, 1.0f));
+    TArray<EEng_BiomeType> Result;
+    BiomeDefinitions.GetKeys(Result);
+    return Result;
 }
