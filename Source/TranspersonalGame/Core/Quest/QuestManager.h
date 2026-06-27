@@ -1,6 +1,6 @@
-// QuestManager.h
-// Quest & Tutorial System — Agent #04 Performance Optimizer | Cycle 013
-// Prehistoric survival game — NO spiritual/mystical content
+// QuestManager.h — Tutorial Quest System for Prehistoric Survival Game
+// Agent #4 — Performance Optimizer | Cycle PROD_CYCLE_AUTO_20260627_005
+// Manages quest states, objectives, and tutorial flow (Find Water, Hunt Prey, etc.)
 
 #pragma once
 
@@ -8,10 +8,10 @@
 #include "GameFramework/Actor.h"
 #include "QuestManager.generated.h"
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ── ENUMS (global scope — UHT requirement) ────────────────────────────────
 
 UENUM(BlueprintType)
-enum class EPerf_QuestState : uint8
+enum class EQuest_State : uint8
 {
     Inactive    UMETA(DisplayName = "Inactive"),
     Active      UMETA(DisplayName = "Active"),
@@ -20,19 +20,19 @@ enum class EPerf_QuestState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EPerf_QuestType : uint8
+enum class EQuest_Type : uint8
 {
     Tutorial    UMETA(DisplayName = "Tutorial"),
     Survival    UMETA(DisplayName = "Survival"),
     Exploration UMETA(DisplayName = "Exploration"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Crafting    UMETA(DisplayName = "Crafting")
+    Hunt        UMETA(DisplayName = "Hunt"),
+    Craft       UMETA(DisplayName = "Craft")
 };
 
-// ─── Structs ──────────────────────────────────────────────────────────────────
+// ── STRUCTS (global scope — UHT requirement) ──────────────────────────────
 
 USTRUCT(BlueprintType)
-struct FPerf_QuestObjective
+struct FQuest_Objective
 {
     GENERATED_BODY()
 
@@ -43,17 +43,25 @@ struct FPerf_QuestObjective
     FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bCompleted = false;
+    bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TargetLocation = FVector::ZeroVector;
+    float TargetValue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float ProximityRadius = 500.0f;
+    float CurrentValue;
+
+    FQuest_Objective()
+        : ObjectiveID(TEXT(""))
+        , Description(TEXT(""))
+        , bCompleted(false)
+        , TargetValue(1.0f)
+        , CurrentValue(0.0f)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_QuestData
+struct FQuest_Data
 {
     GENERATED_BODY()
 
@@ -61,124 +69,120 @@ struct FPerf_QuestData
     FString QuestID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestName;
+    FString QuestTitle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString Description;
+    FString QuestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EPerf_QuestType QuestType = EPerf_QuestType::Tutorial;
+    EQuest_Type QuestType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EPerf_QuestState State = EPerf_QuestState::Inactive;
+    EQuest_State QuestState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FPerf_QuestObjective> Objectives;
+    TArray<FQuest_Objective> Objectives;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit = 0.0f; // 0 = no time limit
+    float TimeLimit;  // 0 = no time limit
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsMainQuest = false;
+    float ElapsedTime;
+
+    FQuest_Data()
+        : QuestID(TEXT(""))
+        , QuestTitle(TEXT(""))
+        , QuestDescription(TEXT(""))
+        , QuestType(EQuest_Type::Tutorial)
+        , QuestState(EQuest_State::Inactive)
+        , TimeLimit(0.0f)
+        , ElapsedTime(0.0f)
+    {}
 };
 
-// ─── Delegates ────────────────────────────────────────────────────────────────
+// ── QUEST MANAGER ACTOR ───────────────────────────────────────────────────
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPerf_OnQuestActivated, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPerf_OnQuestCompleted, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPerf_OnQuestFailed, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPerf_OnObjectiveCompleted, const FString&, QuestID, const FString&, ObjectiveID);
-
-// ─── QuestManager Actor ───────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API APerf_QuestManager : public AActor
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Survival")
+class TRANSPERSONALGAME_API AQuestManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    APerf_QuestManager();
+    AQuestManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
 public:
-    // ── Quest Registry ────────────────────────────────────────────────────────
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quests")
-    TArray<FPerf_QuestData> AllQuests;
+    // ── Active Quest Registry ─────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
+    TArray<FQuest_Data> ActiveQuests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quests")
-    FString ActiveQuestID;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
+    TArray<FQuest_Data> CompletedQuests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quests")
-    TArray<FString> CompletedQuestIDs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bAutoStartTutorial;
 
-    // ── Tutorial Quest ────────────────────────────────────────────────────────
-
-    /** Location of the water source for the tutorial quest */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    FVector TutorialWaterLocation = FVector(8000.0f, 0.0f, 0.0f);
-
-    /** Radius within which the player is considered to have found water */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    float TutorialWaterRadius = 800.0f;
-
-    // ── Delegates ─────────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FPerf_OnQuestActivated OnQuestActivated;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FPerf_OnQuestCompleted OnQuestCompleted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FPerf_OnQuestFailed OnQuestFailed;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FPerf_OnObjectiveCompleted OnObjectiveCompleted;
-
-    // ── Methods ───────────────────────────────────────────────────────────────
-
-    /** Activate a quest by ID. Returns false if quest not found or already active. */
+    // ── Quest Management ──────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool ActivateQuest(const FString& QuestID);
+    void StartQuest(const FString& QuestID);
 
-    /** Mark a specific objective as complete */
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
+    void CompleteObjective(const FString& QuestID, const FString& ObjectiveID, float Value = 1.0f);
 
-    /** Force-complete a quest (all objectives done) */
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CompleteQuest(const FString& QuestID);
-
-    /** Fail the active quest */
     UFUNCTION(BlueprintCallable, Category = "Quest")
     void FailQuest(const FString& QuestID);
 
-    /** Get quest data by ID */
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool GetQuestData(const FString& QuestID, FPerf_QuestData& OutData) const;
+    UFUNCTION(BlueprintPure, Category = "Quest")
+    bool IsQuestActive(const FString& QuestID) const;
 
-    /** Check if a quest is complete */
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool IsQuestComplete(const FString& QuestID) const;
+    UFUNCTION(BlueprintPure, Category = "Quest")
+    bool IsQuestCompleted(const FString& QuestID) const;
 
-    /** Initialize the tutorial quest "Find Water" */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Tutorial")
-    void InitTutorialQuest();
+    UFUNCTION(BlueprintPure, Category = "Quest")
+    FQuest_Data GetQuestData(const FString& QuestID) const;
 
-    /** Called each tick to check proximity objectives */
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CheckProximityObjectives(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintPure, Category = "Quest")
+    FString GetActiveQuestObjectiveText() const;
+
+    // ── Tutorial Quest Triggers ───────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest|Tutorial")
+    void OnPlayerReachedWaterSource();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Tutorial")
+    void OnPlayerDrank(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Tutorial")
+    void OnPlayerHungerLow(float HungerValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Tutorial")
+    void OnPlayerCraftedTool();
+
+    // ── Survival Stat Hooks (called by SurvivalComponent) ────────────────
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnThirstChanged(float NewThirst);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnHungerChanged(float NewHunger);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Survival")
+    void OnPlayerTookDamage(float DamageAmount);
 
 private:
-    /** Internal: check if all objectives in a quest are complete */
-    bool AreAllObjectivesComplete(const FPerf_QuestData& Quest) const;
+    // ── Internal Quest Builders ───────────────────────────────────────────
+    FQuest_Data BuildTutorialFindWater() const;
+    FQuest_Data BuildTutorialFindFood() const;
+    FQuest_Data BuildTutorialCraftTool() const;
+    FQuest_Data BuildTutorialFindShelter() const;
 
-    /** Internal: find quest index by ID */
-    int32 FindQuestIndex(const FString& QuestID) const;
+    void CheckQuestCompletion(FQuest_Data& Quest);
+    void OnQuestCompleted(const FQuest_Data& Quest);
+    int32 FindQuestIndex(const TArray<FQuest_Data>& QuestList, const FString& QuestID) const;
 
-    float ElapsedTime = 0.0f;
+    // ── Tutorial sequence tracking ────────────────────────────────────────
+    int32 TutorialStepIndex;
+    static const TArray<FString> TutorialSequence;
 };
