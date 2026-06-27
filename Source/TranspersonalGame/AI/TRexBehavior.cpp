@@ -1,277 +1,382 @@
-// TRexBehavior.cpp
-// Agent #11 — NPC Behavior Agent
-// T-Rex AI: patrol 5000u radius, chase at 3000u, attack at 300u
-
 #include "TRexBehavior.h"
-#include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
-// ============================================================
-// ATRexAIController
-// ============================================================
-
-ATRexAIController::ATRexAIController()
+// ─────────────────────────────────────────────────────────────────────────────
+ATRexBehaviorController::ATRexBehaviorController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Perception component
-    PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComponent"));
+    // Set up AI Perception (sight)
+    PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
+    SetPerceptionComponent(*PerceptionComponent);
 
-    // Sight config
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = 3000.0f;
-    SightConfig->LoseSightRadius = 3500.0f;
-    SightConfig->PeripheralVisionAngleDegrees = 60.0f;
+    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = SightRange;
+    SightConfig->LoseSightRadius = SightRange * 1.2f;
+    SightConfig->PeripheralVisionAngleDegrees = SightAngleDegrees * 0.5f;
     SightConfig->SetMaxAge(5.0f);
     SightConfig->DetectionByAffiliation.bDetectEnemies = true;
     SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
     SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+
     PerceptionComponent->ConfigureSense(*SightConfig);
-
-    // Hearing config
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = 2000.0f;
-    HearingConfig->SetMaxAge(3.0f);
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    PerceptionComponent->ConfigureSense(*HearingConfig);
-
     PerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-    PerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ATRexAIController::OnTargetPerceptionUpdated);
-
-    // Blackboard + BT
-    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-
-    // State
-    CurrentState = ENPC_TRexState::Idle;
-    PatrolRadius = 5000.0f;
-    ChaseRange = 3000.0f;
-    AttackRange = 300.0f;
-    PatrolSpeed = 300.0f;
-    ChaseSpeed = 600.0f;
-    PatrolWaitTime = 3.0f;
-    bIsWaiting = false;
-    WaitTimer = 0.0f;
-    TargetActor = nullptr;
 }
 
-void ATRexAIController::BeginPlay()
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::BeginPlay()
 {
     Super::BeginPlay();
 
-    HomeLocation = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
-
-    if (TRexBehaviorTree)
+    if (PerceptionComponent)
     {
-        RunBehaviorTree(TRexBehaviorTree);
+        PerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(
+            this, &ATRexBehaviorController::OnTargetPerceptionUpdated);
     }
 
-    // Start patrol immediately
-    SetState(ENPC_TRexState::Patrolling);
-    PickNewPatrolPoint();
+    // Generate default patrol waypoints if none assigned
+    if (PatrolWaypoints.Num() == 0)
+    {
+        FVector Origin = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+        const float R = PatrolRadius * 0.3f;
+        const TArray<FVector> Offsets = {
+            FVector(R, 0, 0), FVector(0, R, 0),
+            FVector(-R, 0, 0), FVector(0, -R, 0)
+        };
+        for (const FVector& Offset : Offsets)
+        {
+            FNPC_TRexPatrolPoint WP;
+            WP.Location = Origin + Offset;
+            WP.WaitTime = FMath::RandRange(1.5f, 3.5f);
+            WP.bRoarOnArrival = (FMath::RandRange(0, 3) == 0);
+            PatrolWaypoints.Add(WP);
+        }
+    }
+
+    SetState(ENPC_TRexState::Patrol);
 }
 
-void ATRexAIController::Tick(float DeltaTime)
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::OnPossess(APawn* InPawn)
+{
+    Super::OnPossess(InPawn);
+
+    // Set movement speed for patrol
+    if (ACharacter* Char = Cast<ACharacter>(InPawn))
+    {
+        if (UCharacterMovementComponent* Move = Char->GetCharacterMovement())
+        {
+            Move->MaxWalkSpeed = PatrolMoveSpeed;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::OnUnPossess()
+{
+    Super::OnUnPossess();
+    CurrentTarget = nullptr;
+    CurrentState = ENPC_TRexState::Patrol;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!GetPawn()) return;
+    // Update attack cooldown
+    if (AttackCooldownTimer > 0.0f)
+    {
+        AttackCooldownTimer -= DeltaTime;
+    }
 
+    // State machine tick
     switch (CurrentState)
     {
-        case ENPC_TRexState::Idle:
-            TickIdle(DeltaTime);
-            break;
-        case ENPC_TRexState::Patrolling:
-            TickPatrol(DeltaTime);
-            break;
-        case ENPC_TRexState::Chasing:
-            TickChase(DeltaTime);
-            break;
-        case ENPC_TRexState::Attacking:
-            TickAttack(DeltaTime);
-            break;
-        case ENPC_TRexState::Returning:
-            TickReturn(DeltaTime);
-            break;
+    case ENPC_TRexState::Patrol:
+        TryDetectPlayer();
+        UpdatePatrol(DeltaTime);
+        break;
+
+    case ENPC_TRexState::Alert:
+        TryDetectPlayer();
+        break;
+
+    case ENPC_TRexState::Chase:
+        UpdateChase(DeltaTime);
+        break;
+
+    case ENPC_TRexState::Attack:
+        UpdateAttack(DeltaTime);
+        break;
+
+    case ENPC_TRexState::Roar:
+        // Roar handled by animation — transition back after 2s via anim notify
+        break;
+
+    case ENPC_TRexState::Rest:
+        // Idle — check for nearby player
+        TryDetectPlayer();
+        break;
     }
 }
 
-void ATRexAIController::TickIdle(float DeltaTime)
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::SetState(ENPC_TRexState NewState)
 {
-    WaitTimer += DeltaTime;
-    if (WaitTimer >= PatrolWaitTime)
-    {
-        WaitTimer = 0.0f;
-        SetState(ENPC_TRexState::Patrolling);
-        PickNewPatrolPoint();
-    }
-}
+    if (CurrentState == NewState) return;
 
-void ATRexAIController::TickPatrol(float DeltaTime)
-{
-    if (!GetPawn()) return;
-
-    // Check if player is within chase range
-    if (TargetActor)
-    {
-        float DistToTarget = FVector::Dist(GetPawn()->GetActorLocation(), TargetActor->GetActorLocation());
-        if (DistToTarget <= ChaseRange)
-        {
-            SetState(ENPC_TRexState::Chasing);
-            return;
-        }
-    }
-
-    // Check if we reached patrol point
-    float DistToGoal = FVector::Dist(GetPawn()->GetActorLocation(), CurrentPatrolTarget);
-    if (DistToGoal < 200.0f)
-    {
-        SetState(ENPC_TRexState::Idle);
-    }
-}
-
-void ATRexAIController::TickChase(float DeltaTime)
-{
-    if (!GetPawn() || !TargetActor) 
-    {
-        SetState(ENPC_TRexState::Returning);
-        return;
-    }
-
-    float DistToTarget = FVector::Dist(GetPawn()->GetActorLocation(), TargetActor->GetActorLocation());
-    float DistFromHome = FVector::Dist(GetPawn()->GetActorLocation(), HomeLocation);
-
-    // Attack range reached
-    if (DistToTarget <= AttackRange)
-    {
-        SetState(ENPC_TRexState::Attacking);
-        return;
-    }
-
-    // Lost target or too far from home
-    if (DistToTarget > ChaseRange * 1.5f || DistFromHome > PatrolRadius * 1.5f)
-    {
-        TargetActor = nullptr;
-        SetState(ENPC_TRexState::Returning);
-        return;
-    }
-
-    MoveToActor(TargetActor, AttackRange * 0.8f);
-}
-
-void ATRexAIController::TickAttack(float DeltaTime)
-{
-    if (!GetPawn() || !TargetActor)
-    {
-        SetState(ENPC_TRexState::Patrolling);
-        return;
-    }
-
-    float DistToTarget = FVector::Dist(GetPawn()->GetActorLocation(), TargetActor->GetActorLocation());
-
-    // Target escaped attack range
-    if (DistToTarget > AttackRange * 1.5f)
-    {
-        SetState(ENPC_TRexState::Chasing);
-        return;
-    }
-
-    // Face the target
-    FVector Dir = (TargetActor->GetActorLocation() - GetPawn()->GetActorLocation()).GetSafeNormal();
-    FRotator LookAt = Dir.Rotation();
-    GetPawn()->SetActorRotation(FMath::RInterpTo(GetPawn()->GetActorRotation(), LookAt, DeltaTime, 5.0f));
-}
-
-void ATRexAIController::TickReturn(float DeltaTime)
-{
-    if (!GetPawn()) return;
-
-    float DistFromHome = FVector::Dist(GetPawn()->GetActorLocation(), HomeLocation);
-    if (DistFromHome < 300.0f)
-    {
-        SetState(ENPC_TRexState::Idle);
-        return;
-    }
-
-    MoveToLocation(HomeLocation, 200.0f);
-}
-
-void ATRexAIController::SetState(ENPC_TRexState NewState)
-{
     CurrentState = NewState;
 
-    APawn* Pawn = GetPawn();
-    if (!Pawn) return;
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
 
-    UCharacterMovementComponent* Movement = Pawn->FindComponentByClass<UCharacterMovementComponent>();
-    if (Movement)
+    // Adjust movement speed per state
+    if (ACharacter* Char = Cast<ACharacter>(MyPawn))
     {
-        switch (NewState)
+        if (UCharacterMovementComponent* Move = Char->GetCharacterMovement())
         {
-            case ENPC_TRexState::Patrolling:
-            case ENPC_TRexState::Returning:
-                Movement->MaxWalkSpeed = PatrolSpeed;
+            switch (NewState)
+            {
+            case ENPC_TRexState::Patrol:
+            case ENPC_TRexState::Alert:
+            case ENPC_TRexState::Rest:
+                Move->MaxWalkSpeed = PatrolMoveSpeed;
                 break;
-            case ENPC_TRexState::Chasing:
-            case ENPC_TRexState::Attacking:
-                Movement->MaxWalkSpeed = ChaseSpeed;
+            case ENPC_TRexState::Chase:
+                Move->MaxWalkSpeed = ChaseMoveSpeed;
                 break;
-            default:
-                Movement->MaxWalkSpeed = 0.0f;
+            case ENPC_TRexState::Attack:
+            case ENPC_TRexState::Roar:
+                Move->MaxWalkSpeed = 0.0f;
+                StopMovement();
                 break;
+            }
         }
     }
 
-    if (BlackboardComponent)
+    // Update blackboard
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
     {
-        BlackboardComponent->SetValueAsEnum(TEXT("TRexState"), (uint8)NewState);
+        BB->SetValueAsEnum(BB_AIState, static_cast<uint8>(NewState));
     }
 }
 
-void ATRexAIController::PickNewPatrolPoint()
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::TryDetectPlayer()
 {
-    UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-    if (!NavSys) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    FNavLocation NavLoc;
-    bool bFound = NavSys->GetRandomReachablePointInRadius(HomeLocation, PatrolRadius, NavLoc);
-    if (bFound)
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0);
+    if (!PlayerChar) return;
+
+    const float DistSq = FVector::DistSquared(MyPawn->GetActorLocation(), PlayerChar->GetActorLocation());
+    const float SightRangeSq = SightRange * SightRange;
+    const float AttackRangeSq = AttackRange * AttackRange;
+
+    if (DistSq <= AttackRangeSq)
     {
-        CurrentPatrolTarget = NavLoc.Location;
-        MoveToLocation(CurrentPatrolTarget, 150.0f);
+        CurrentTarget = PlayerChar;
+        SetState(ENPC_TRexState::Attack);
     }
-}
-
-void ATRexAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
-{
-    if (!Actor) return;
-
-    // Only react to player pawns
-    if (!Actor->ActorHasTag(TEXT("Player"))) return;
-
-    if (Stimulus.WasSuccessfullySensed())
+    else if (DistSq <= SightRangeSq && IsPlayerInSightCone(PlayerChar))
     {
-        TargetActor = Actor;
-        if (CurrentState == ENPC_TRexState::Idle || CurrentState == ENPC_TRexState::Patrolling)
+        if (CurrentTarget == nullptr)
         {
-            SetState(ENPC_TRexState::Chasing);
+            // First detection — roar
+            CurrentTarget = PlayerChar;
+            SetState(ENPC_TRexState::Roar);
+        }
+        else
+        {
+            CurrentTarget = PlayerChar;
+            SetState(ENPC_TRexState::Chase);
+        }
+    }
+    else if (CurrentState == ENPC_TRexState::Chase || CurrentState == ENPC_TRexState::Alert)
+    {
+        // Lost sight — return to patrol
+        if (DistSq > SightRangeSq * 1.44f) // 1.2x sight range squared
+        {
+            CurrentTarget = nullptr;
+            SetState(ENPC_TRexState::Patrol);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+bool ATRexBehaviorController::IsPlayerInSightCone(AActor* Player) const
+{
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn || !Player) return false;
+
+    const FVector ToPlayer = (Player->GetActorLocation() - MyPawn->GetActorLocation()).GetSafeNormal();
+    const FVector Forward = MyPawn->GetActorForwardVector();
+    const float DotProduct = FVector::DotProduct(Forward, ToPlayer);
+    const float HalfAngleCos = FMath::Cos(FMath::DegreesToRadians(SightAngleDegrees * 0.5f));
+
+    return DotProduct >= HalfAngleCos;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::UpdatePatrol(float DeltaTime)
+{
+    if (PatrolWaypoints.Num() == 0) return;
+
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    if (bWaitingAtWaypoint)
+    {
+        WaypointWaitTimer -= DeltaTime;
+        if (WaypointWaitTimer <= 0.0f)
+        {
+            bWaitingAtWaypoint = false;
+            AdvancePatrolWaypoint();
+        }
+        return;
+    }
+
+    const FNPC_TRexPatrolPoint& WP = PatrolWaypoints[CurrentWaypointIndex];
+    const float DistToWP = FVector::Dist(MyPawn->GetActorLocation(), WP.Location);
+
+    if (DistToWP < 200.0f)
+    {
+        // Arrived at waypoint
+        bWaitingAtWaypoint = true;
+        WaypointWaitTimer = WP.WaitTime;
+
+        if (WP.bRoarOnArrival)
+        {
+            SetState(ENPC_TRexState::Roar);
         }
     }
     else
     {
-        // Lost perception — keep chasing for a bit then give up
-        if (CurrentState == ENPC_TRexState::Chasing)
+        // Move toward waypoint
+        MoveToLocation(WP.Location, 150.0f, true, true, false, true);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::AdvancePatrolWaypoint()
+{
+    CurrentWaypointIndex = (CurrentWaypointIndex + 1) % PatrolWaypoints.Num();
+
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
+    {
+        BB->SetValueAsVector(BB_PatrolLocation, PatrolWaypoints[CurrentWaypointIndex].Location);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::UpdateChase(float DeltaTime)
+{
+    if (!CurrentTarget) 
+    {
+        SetState(ENPC_TRexState::Patrol);
+        return;
+    }
+
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    const float Dist = FVector::Dist(MyPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
+
+    if (Dist <= AttackRange)
+    {
+        SetState(ENPC_TRexState::Attack);
+        return;
+    }
+
+    if (Dist > SightRange * 1.2f)
+    {
+        CurrentTarget = nullptr;
+        SetState(ENPC_TRexState::Patrol);
+        return;
+    }
+
+    MoveToActor(CurrentTarget, AttackRange * 0.8f, true, true, false);
+
+    if (UBlackboardComponent* BB = GetBlackboardComponent())
+    {
+        BB->SetValueAsObject(BB_TargetActor, CurrentTarget);
+        BB->SetValueAsFloat(BB_DistanceToTarget, Dist);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::UpdateAttack(float DeltaTime)
+{
+    if (!CurrentTarget)
+    {
+        SetState(ENPC_TRexState::Patrol);
+        return;
+    }
+
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return;
+
+    const float Dist = FVector::Dist(MyPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
+
+    if (Dist > AttackRange * 1.5f)
+    {
+        SetState(ENPC_TRexState::Chase);
+        return;
+    }
+
+    // Execute attack on cooldown
+    if (AttackCooldownTimer <= 0.0f)
+    {
+        AttackCooldownTimer = AttackCooldown;
+
+        // Apply damage via UE5 damage system
+        UGameplayStatics::ApplyDamage(
+            CurrentTarget,
+            AttackDamage,
+            this,
+            MyPawn,
+            nullptr
+        );
+
+        UE_LOG(LogTemp, Log, TEXT("TRex ATTACK: dealt %.0f damage to %s"),
+            AttackDamage, *CurrentTarget->GetName());
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+void ATRexBehaviorController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+{
+    if (!Actor) return;
+
+    // Only react to player character
+    if (!Cast<ACharacter>(Actor)) return;
+
+    if (Stimulus.WasSuccessfullySensed())
+    {
+        CurrentTarget = Actor;
+        if (CurrentState == ENPC_TRexState::Patrol || CurrentState == ENPC_TRexState::Rest)
         {
-            // TargetActor remains set — TickChase will handle distance falloff
+            SetState(ENPC_TRexState::Alert);
         }
+    }
+    else
+    {
+        // Lost perception — don't immediately drop target, let distance check handle it
+        UE_LOG(LogTemp, Log, TEXT("TRex lost sight of %s"), *Actor->GetName());
     }
 }
