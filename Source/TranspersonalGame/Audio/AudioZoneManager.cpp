@@ -1,65 +1,289 @@
-#include "AudioZoneManager.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
+// AudioZoneManager.cpp
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260627_012
+// Full implementation of ambient audio zones, screen shake, and proximity dialogue.
 
-UAudioZoneManager::UAudioZoneManager()
+#include "AudioZoneManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
+
+AAudioZoneManager::AAudioZoneManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    CurrentVolume = 0.0f;
-    TargetVolume = 0.0f;
-    bPlayerInZone = false;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Root component
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->InitSphereRadius(1000.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    // Ambient audio component
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+    AmbientAudioComponent->bIsUISound = false;
 }
 
-void UAudioZoneManager::BeginPlay()
+// ─────────────────────────────────────────────────────────────────────────────
+// BeginPlay
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentVolume = 0.0f;
-    TargetVolume = 0.0f;
-}
 
-void UAudioZoneManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Smoothly blend volume toward target
-    if (!FMath::IsNearlyEqual(CurrentVolume, TargetVolume, 0.001f))
+    // Sync sphere radius from config
+    if (TriggerSphere)
     {
-        CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, TransitionSpeed);
+        TriggerSphere->SetSphereRadius(ZoneConfig.TriggerRadius);
+        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudioZoneManager::OnPlayerEnterZone);
+        TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudioZoneManager::OnPlayerExitZone);
+    }
+
+    // Load and assign ambient sound if available
+    if (ZoneConfig.AmbientLoop.IsValid() && AmbientAudioComponent)
+    {
+        USoundBase* Sound = ZoneConfig.AmbientLoop.LoadSynchronous();
+        if (Sound)
+        {
+            AmbientAudioComponent->SetSound(Sound);
+        }
     }
 }
 
-void UAudioZoneManager::EnterZone(AActor* PlayerActor)
+// ─────────────────────────────────────────────────────────────────────────────
+// EndPlay
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (!PlayerActor) return;
+    GetWorldTimerManager().ClearTimer(DialogueTimerHandle);
+    Super::EndPlay(EndPlayReason);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tick
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Screen shake: check proximity of any large dinosaur pawns
+    if (bEnableScreenShake && bPlayerInZone)
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (PC && PC->GetPawn())
+        {
+            FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
+            FVector MyLoc = GetActorLocation();
+            float Dist = FVector::Dist(PlayerLoc, MyLoc);
+
+            if (Dist < ScreenShakeConfig.TriggerRadius)
+            {
+                // Intensity scales with proximity
+                float ProximityFactor = 1.0f - (Dist / ScreenShakeConfig.TriggerRadius);
+                float FinalIntensity = ScreenShakeConfig.ShakeIntensity * ProximityFactor;
+
+                if (FinalIntensity > 0.1f)
+                {
+                    PC->ClientStartCameraShake(
+                        UCameraShakeBase::StaticClass(),
+                        FinalIntensity
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone Overlap Callbacks
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::OnPlayerEnterZone(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    APlayerController* PC = Cast<APlayerController>(PlayerChar->GetController());
+    if (!PC) return;
+
     bPlayerInZone = true;
-    TargetVolume = ZoneConfig.AmbientVolume;
+    FadeInAmbient();
 
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Player entered zone type %d — danger=%.2f"),
-        (int32)ZoneConfig.ZoneType, ZoneConfig.DangerLevel);
+    // Auto-start dialogue if configured
+    if (DialogueLines.Num() > 0 && !bDialogueActive)
+    {
+        StartDialogue();
+    }
 }
 
-void UAudioZoneManager::ExitZone(AActor* PlayerActor)
+void AAudioZoneManager::OnPlayerExitZone(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex)
 {
-    if (!PlayerActor) return;
+    if (!OtherActor) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    APlayerController* PC = Cast<APlayerController>(PlayerChar->GetController());
+    if (!PC) return;
+
     bPlayerInZone = false;
-    TargetVolume = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Player exited zone type %d"),
-        (int32)ZoneConfig.ZoneType);
+    FadeOutAmbient();
+    StopDialogue();
 }
 
-float UAudioZoneManager::GetCurrentDangerLevel() const
+// ─────────────────────────────────────────────────────────────────────────────
+// Intensity Control
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::SetIntensity(EAudio_IntensityLevel NewIntensity)
 {
-    return bPlayerInZone ? ZoneConfig.DangerLevel : 0.0f;
+    if (CurrentIntensity == NewIntensity) return;
+    CurrentIntensity = NewIntensity;
+
+    if (!AmbientAudioComponent) return;
+
+    switch (NewIntensity)
+    {
+        case EAudio_IntensityLevel::Calm:
+            AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.Volume);
+            AmbientAudioComponent->SetPitchMultiplier(1.0f);
+            break;
+
+        case EAudio_IntensityLevel::Tense:
+            AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.Volume * 0.7f);
+            AmbientAudioComponent->SetPitchMultiplier(0.95f);
+            break;
+
+        case EAudio_IntensityLevel::Combat:
+            AmbientAudioComponent->SetVolumeMultiplier(ZoneConfig.Volume * 0.3f);
+            AmbientAudioComponent->SetPitchMultiplier(0.85f);
+            break;
+
+        case EAudio_IntensityLevel::Flee:
+            AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+            break;
+    }
 }
 
-EAudio_ZoneType UAudioZoneManager::GetZoneType() const
+// ─────────────────────────────────────────────────────────────────────────────
+// Ambient Fade
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::FadeInAmbient(float FadeTime)
 {
-    return ZoneConfig.ZoneType;
+    if (!AmbientAudioComponent) return;
+    float Time = (FadeTime < 0.0f) ? ZoneConfig.FadeInTime : FadeTime;
+    AmbientAudioComponent->FadeIn(Time, ZoneConfig.Volume);
 }
 
-void UAudioZoneManager::SetMusicIntensity(float NewIntensity)
+void AAudioZoneManager::FadeOutAmbient(float FadeTime)
 {
-    ZoneConfig.MusicIntensity = FMath::Clamp(NewIntensity, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Music intensity set to %.2f"), ZoneConfig.MusicIntensity);
+    if (!AmbientAudioComponent) return;
+    float Time = (FadeTime < 0.0f) ? ZoneConfig.FadeOutTime : FadeTime;
+    AmbientAudioComponent->FadeOut(Time, 0.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen Shake
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::TriggerScreenShakeAtLocation(FVector DinosaurLocation, float DinosaurMass)
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
+    float Dist = FVector::Dist(PlayerLoc, DinosaurLocation);
+
+    if (Dist > ScreenShakeConfig.TriggerRadius) return;
+
+    float ProximityFactor = 1.0f - (Dist / ScreenShakeConfig.TriggerRadius);
+    float MassFactor = FMath::Clamp(DinosaurMass, 0.1f, 3.0f);
+    float FinalIntensity = ScreenShakeConfig.ShakeIntensity * ProximityFactor * MassFactor;
+
+    if (FinalIntensity > 0.05f)
+    {
+        PC->ClientStartCameraShake(UCameraShakeBase::StaticClass(), FinalIntensity);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dialogue System
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AAudioZoneManager::StartDialogue()
+{
+    if (DialogueLines.Num() == 0) return;
+
+    bDialogueActive = true;
+    CurrentDialogueIndex = 0;
+    AdvanceDialogueInternal();
+}
+
+void AAudioZoneManager::AdvanceDialogue()
+{
+    AdvanceDialogueInternal();
+}
+
+void AAudioZoneManager::StopDialogue()
+{
+    bDialogueActive = false;
+    GetWorldTimerManager().ClearTimer(DialogueTimerHandle);
+}
+
+void AAudioZoneManager::AdvanceDialogueInternal()
+{
+    if (!bDialogueActive) return;
+    if (CurrentDialogueIndex >= DialogueLines.Num())
+    {
+        StopDialogue();
+        return;
+    }
+
+    const FAudio_DialogueLine& Line = DialogueLines[CurrentDialogueIndex];
+
+    // Play audio if asset is loaded
+    if (Line.AudioAsset.IsValid())
+    {
+        USoundBase* Sound = Line.AudioAsset.LoadSynchronous();
+        if (Sound)
+        {
+            UGameplayStatics::PlaySound2D(GetWorld(), Sound, Line.Duration > 0.0f ? 1.0f : 0.0f);
+        }
+    }
+
+    CurrentDialogueIndex++;
+
+    // Schedule next line
+    float Delay = FMath::Max(Line.Duration, 1.0f);
+    GetWorldTimerManager().SetTimer(
+        DialogueTimerHandle,
+        this,
+        &AAudioZoneManager::AdvanceDialogueInternal,
+        Delay,
+        false
+    );
 }
