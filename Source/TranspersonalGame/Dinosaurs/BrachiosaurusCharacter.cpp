@@ -1,291 +1,297 @@
-// BrachiosaurusCharacter.cpp
-// Agent #04 — Performance Optimizer | PROD_CYCLE_AUTO_20260624_004
-// Passive herbivore: herd behaviour, stampede when threatened, gentle giant stats
-
-#include "BrachiosaurusCharacter.h"
+#include "Dinosaurs/BrachiosaurusCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
 ABrachiosaurusCharacter::ABrachiosaurusCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.4f; // Large dino — slower tick than raptor
 
-    // Enormous herbivore — largest land animal in the world
-    GetCapsuleComponent()->InitCapsuleSize(120.0f, 350.0f);
+    // ── Base stats ────────────────────────────────────────────────────────
+    MaxHealth = 3000.0f;
+    CurrentHealth = 3000.0f;
+    BaseDamage = 0.0f;       // Herbivore — no offensive damage
+    WalkSpeed = 200.0f;      // Slow walker
+    RunSpeed = 360.0f;       // Flee speed = WalkSpeed * FleeSpeedMultiplier (1.8)
+    DetectionRadius = 2500.0f;
+    AttackRange = 400.0f;    // Stomp range
+    BehaviorTickInterval = 0.4f;
+    DinosaurSpecies = TEXT("Brachiosaurus");
 
-    // Slow, deliberate movement — not a predator
+    // Movement component setup
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-    MoveComp->MaxWalkSpeed = 280.0f;          // Gentle grazing pace
-    MoveComp->MaxAcceleration = 150.0f;
-    MoveComp->BrakingDecelerationWalking = 200.0f;
-    MoveComp->GravityScale = 1.2f;            // Heavy — gravity pulls harder
-    MoveComp->JumpZVelocity = 0.0f;           // Cannot jump
-    MoveComp->bCanWalkOffLedges = false;       // Stays on safe terrain
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = WalkSpeed;
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate = FRotator(0.0f, 60.0f, 0.0f); // Slow turning — large body
+        MoveComp->GravityScale = 1.0f;
+        MoveComp->JumpZVelocity = 0.0f; // Cannot jump
+        MoveComp->bCanWalkOffLedges = false; // Stays on safe ground
+    }
 
-    // Survival stats — massive herbivore
-    MaxHealth = 2500.0f;
-    CurrentHealth = 2500.0f;
-    MaxStamina = 600.0f;
-    CurrentStamina = 600.0f;
-    MoveSpeed = 280.0f;
-    StaminaRegenRate = 8.0f;
-
-    // Brachiosaur-specific stats
-    HerdRadius = 3500.0f;
-    ThreatDetectRadius = 1800.0f;
-    StampedeSpeed = 650.0f;
-    StampedeDamage = 500.0f;
-    StampedeDuration = 12.0f;
-    bIsStampeding = false;
-    bIsLeadingHerd = false;
-    HerdMemberCount = 0;
-    GrazingCooldown = 8.0f;
-    bIsGrazing = false;
-
-    // Mesh scale hint — actual mesh set in Blueprint
-    GetMesh()->SetRelativeScale3D(FVector(2.8f, 2.8f, 2.8f));
+    // Cull distance — visible at long range (large creature)
+    SetCullDistance(10000.0f);
 }
 
 void ABrachiosaurusCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Elect herd leader — first Brachiosaur in scene
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABrachiosaurusCharacter::StaticClass(), AllActors);
+    // Initial herd setup
+    UpdateHerdMembers();
+    ElectHerdLeader();
 
-    if (AllActors.Num() > 0 && AllActors[0] == this)
-    {
-        bIsLeadingHerd = true;
-        UE_LOG(LogTemp, Log, TEXT("BrachiosaurusCharacter: [%s] elected as HERD LEADER"), *GetActorLabel());
-    }
+    // Start grazing
+    bIsGrazing = true;
+    GrazeTimer = GrazeDuration;
 
-    // Start grazing routine
-    GetWorldTimerManager().SetTimer(
-        GrazingTimerHandle,
-        this,
-        &ABrachiosaurusCharacter::UpdateGrazingState,
-        GrazingCooldown,
-        true
-    );
-
-    // Herd cohesion check — every 3 seconds
-    GetWorldTimerManager().SetTimer(
-        HerdCohesionTimerHandle,
-        this,
-        &ABrachiosaurusCharacter::MaintainHerdCohesion,
-        3.0f,
-        true
-    );
-
-    // Threat scan — every 2 seconds
-    GetWorldTimerManager().SetTimer(
-        ThreatScanTimerHandle,
-        this,
-        &ABrachiosaurusCharacter::ScanForThreats,
-        2.0f,
-        true
-    );
+    UE_LOG(LogTemp, Log, TEXT("BrachiosaurusCharacter [%s] spawned. HerdLeader=%s, HerdSize=%d"),
+        *GetActorLabel(), bIsHerdLeader ? TEXT("YES") : TEXT("NO"), HerdMembers.Num());
 }
 
 void ABrachiosaurusCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Stamina recovery when not stampeding
-    if (!bIsStampeding && CurrentStamina < MaxStamina)
+    // Update herd every 5 seconds
+    HerdUpdateTimer += DeltaTime;
+    if (HerdUpdateTimer >= 5.0f)
     {
-        CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + StaminaRegenRate * DeltaTime);
+        HerdUpdateTimer = 0.0f;
+        UpdateHerdMembers();
+        ElectHerdLeader();
     }
 
-    // Stamina drain during stampede
-    if (bIsStampeding)
+    // Check for carnivores every tick
+    CheckForCarnivores();
+
+    if (bIsFleeing)
     {
-        CurrentStamina = FMath::Max(0.0f, CurrentStamina - 25.0f * DeltaTime);
-        if (CurrentStamina <= 0.0f)
-        {
-            EndStampede();
-        }
-    }
-}
-
-void ABrachiosaurusCharacter::UpdateGrazingState()
-{
-    if (bIsStampeding) return;
-
-    bIsGrazing = !bIsGrazing;
-
-    if (bIsGrazing)
-    {
-        // Slow to grazing speed
-        GetCharacterMovement()->MaxWalkSpeed = 80.0f;
-        UE_LOG(LogTemp, Verbose, TEXT("BrachiosaurusCharacter: [%s] began grazing"), *GetActorLabel());
+        UpdateFleeState(DeltaTime);
     }
     else
     {
-        // Resume normal walk speed
-        GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
-        UE_LOG(LogTemp, Verbose, TEXT("BrachiosaurusCharacter: [%s] resumed walking"), *GetActorLabel());
+        UpdateGrazingState(DeltaTime);
     }
 }
 
-void ABrachiosaurusCharacter::MaintainHerdCohesion()
+void ABrachiosaurusCharacter::UpdateHerdMembers()
 {
-    if (!bIsLeadingHerd || bIsStampeding) return;
-
-    TArray<AActor*> HerdMembers;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABrachiosaurusCharacter::StaticClass(), HerdMembers);
-
-    HerdMemberCount = 0;
-    FVector LeaderPos = GetActorLocation();
-
-    for (AActor* Member : HerdMembers)
-    {
-        if (!IsValid(Member) || Member == this) continue;
-
-        float Dist = FVector::Dist(LeaderPos, Member->GetActorLocation());
-        if (Dist <= HerdRadius)
-        {
-            HerdMemberCount++;
-        }
-        else if (Dist > HerdRadius * 1.5f)
-        {
-            // Straggler — nudge back toward herd
-            FVector DirectionToLeader = (LeaderPos - Member->GetActorLocation()).GetSafeNormal();
-            ABrachiosaurusCharacter* MemberBrachio = Cast<ABrachiosaurusCharacter>(Member);
-            if (IsValid(MemberBrachio) && !MemberBrachio->bIsStampeding)
-            {
-                MemberBrachio->AddMovementInput(DirectionToLeader, 0.6f);
-            }
-        }
-    }
-
-    UE_LOG(LogTemp, Verbose, TEXT("BrachiosaurusCharacter: Herd cohesion — %d members within radius %.0f"),
-        HerdMemberCount, HerdRadius);
-}
-
-void ABrachiosaurusCharacter::ScanForThreats()
-{
-    if (bIsStampeding) return;
+    HerdMembers.Empty();
 
     TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
-
-    FVector MyPos = GetActorLocation();
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABrachiosaurusCharacter::StaticClass(), NearbyActors);
 
     for (AActor* Actor : NearbyActors)
     {
-        if (!IsValid(Actor) || Actor == this) continue;
+        if (Actor == this) continue;
 
-        // Ignore other Brachiosauruses
-        if (Cast<ABrachiosaurusCharacter>(Actor)) continue;
+        ABrachiosaurusCharacter* Other = Cast<ABrachiosaurusCharacter>(Actor);
+        if (!Other || !Other->IsAlive()) continue;
 
-        float Dist = FVector::Dist(MyPos, Actor->GetActorLocation());
-        if (Dist <= ThreatDetectRadius)
+        float Dist = FVector::Dist(GetActorLocation(), Other->GetActorLocation());
+        if (Dist <= HerdRadius && HerdMembers.Num() < MaxHerdSize)
         {
-            // Threat detected — trigger stampede
-            UE_LOG(LogTemp, Warning, TEXT("BrachiosaurusCharacter: [%s] THREAT DETECTED at dist=%.0f — STAMPEDE!"),
-                *GetActorLabel(), Dist);
-            TriggerStampede(Actor->GetActorLocation());
-            return;
+            HerdMembers.Add(Other);
         }
     }
 }
 
-void ABrachiosaurusCharacter::TriggerStampede(FVector ThreatLocation)
+void ABrachiosaurusCharacter::ElectHerdLeader()
 {
-    if (bIsStampeding) return;
-
-    bIsStampeding = true;
-    bIsGrazing = false;
-
-    // Direction AWAY from threat
-    FVector FleeDirection = (GetActorLocation() - ThreatLocation).GetSafeNormal();
-    FleeDirection.Z = 0.0f;
-
-    // Boost movement speed
-    GetCharacterMovement()->MaxWalkSpeed = StampedeSpeed;
-    GetCharacterMovement()->MaxAcceleration = 800.0f;
-
-    // Apply initial burst velocity
-    LaunchCharacter(FleeDirection * StampedeSpeed * 0.8f, true, false);
-
-    // Alert herd members if leader
-    if (bIsLeadingHerd)
+    // Leader = first Brachio in herd with lowest actor name (deterministic)
+    bIsHerdLeader = true;
+    for (ABrachiosaurusCharacter* Member : HerdMembers)
     {
-        AlertHerd(ThreatLocation);
+        if (Member && Member->GetActorLabel() < GetActorLabel())
+        {
+            bIsHerdLeader = false;
+            break;
+        }
     }
-
-    // End stampede after duration
-    GetWorldTimerManager().SetTimer(
-        StampedeTimerHandle,
-        this,
-        &ABrachiosaurusCharacter::EndStampede,
-        StampedeDuration,
-        false
-    );
-
-    UE_LOG(LogTemp, Warning, TEXT("BrachiosaurusCharacter: [%s] STAMPEDE STARTED — fleeing from (%.0f,%.0f,%.0f)"),
-        *GetActorLabel(), ThreatLocation.X, ThreatLocation.Y, ThreatLocation.Z);
 }
 
-void ABrachiosaurusCharacter::EndStampede()
+void ABrachiosaurusCharacter::CheckForCarnivores()
 {
-    bIsStampeding = false;
+    if (bIsFleeing) return; // Already fleeing
 
-    // Restore normal movement
-    GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
-    GetCharacterMovement()->MaxAcceleration = 150.0f;
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADinosaurBase::StaticClass(), NearbyActors);
 
-    UE_LOG(LogTemp, Log, TEXT("BrachiosaurusCharacter: [%s] stampede ended — resuming normal behaviour"), *GetActorLabel());
+    for (AActor* Actor : NearbyActors)
+    {
+        if (Actor == this) continue;
+
+        ADinosaurBase* OtherDino = Cast<ADinosaurBase>(Actor);
+        if (!OtherDino || !OtherDino->IsAlive()) continue;
+
+        // Check if it's a carnivore (non-Brachio dino = potential threat)
+        if (OtherDino->IsA(ABrachiosaurusCharacter::StaticClass())) continue;
+
+        float Dist = FVector::Dist(GetActorLocation(), OtherDino->GetActorLocation());
+        if (Dist <= CarnivoreDetectionRadius)
+        {
+            // Flee away from threat
+            FleeDirection = (GetActorLocation() - OtherDino->GetActorLocation()).GetSafeNormal();
+            bIsFleeing = true;
+            FleeTimer = FleeDuration;
+
+            // Alert herd
+            AlertHerd(OtherDino->GetActorLocation());
+
+            // Speed up
+            UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+            if (MoveComp)
+            {
+                MoveComp->MaxWalkSpeed = WalkSpeed * FleeSpeedMultiplier;
+            }
+
+            UE_LOG(LogTemp, Log, TEXT("Brachio [%s] FLEEING from %s (dist=%.0f)"),
+                *GetActorLabel(), *OtherDino->GetActorLabel(), Dist);
+            break;
+        }
+    }
+
+    // Also check player
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (Player)
+    {
+        float PlayerDist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+        if (PlayerDist <= CarnivoreDetectionRadius * 0.6f) // Player triggers flee at 60% range
+        {
+            FleeDirection = (GetActorLocation() - Player->GetActorLocation()).GetSafeNormal();
+            bIsFleeing = true;
+            FleeTimer = FleeDuration * 0.7f;
+            AlertHerd(Player->GetActorLocation());
+
+            UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+            if (MoveComp)
+            {
+                MoveComp->MaxWalkSpeed = WalkSpeed * FleeSpeedMultiplier;
+            }
+        }
+    }
+}
+
+void ABrachiosaurusCharacter::UpdateFleeState(float DeltaTime)
+{
+    FleeTimer -= DeltaTime;
+    if (FleeTimer <= 0.0f)
+    {
+        // Stop fleeing
+        bIsFleeing = false;
+        UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+        if (MoveComp)
+        {
+            MoveComp->MaxWalkSpeed = WalkSpeed;
+        }
+        bIsGrazing = true;
+        GrazeTimer = GrazeDuration;
+        return;
+    }
+
+    // Move in flee direction
+    if (!FleeDirection.IsNearlyZero())
+    {
+        AddMovementInput(FleeDirection, 1.0f);
+    }
+}
+
+void ABrachiosaurusCharacter::UpdateGrazingState(float DeltaTime)
+{
+    GrazeTimer -= DeltaTime;
+    if (GrazeTimer <= 0.0f)
+    {
+        bIsGrazing = !bIsGrazing;
+        GrazeTimer = bIsGrazing ? GrazeDuration : 4.0f; // 4s walking between graze spots
+
+        if (!bIsGrazing)
+        {
+            // Pick a random wander direction near current position
+            FVector WanderDir = FVector(
+                FMath::RandRange(-1.0f, 1.0f),
+                FMath::RandRange(-1.0f, 1.0f),
+                0.0f
+            ).GetSafeNormal();
+            AddMovementInput(WanderDir, 0.5f);
+        }
+    }
+
+    if (!bIsGrazing)
+    {
+        // Slowly wander
+        FVector Forward = GetActorForwardVector();
+        AddMovementInput(Forward, 0.3f);
+    }
+}
+
+void ABrachiosaurusCharacter::PerformStomp()
+{
+    float Now = GetWorld()->GetTimeSeconds();
+    if (Now - LastStompTime < StompCooldown) return;
+    LastStompTime = Now;
+
+    FVector StompOrigin = GetActorLocation();
+
+    // Damage all actors within StompRadius
+    TArray<AActor*> HitActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), HitActors);
+
+    for (AActor* Actor : HitActors)
+    {
+        if (Actor == this) continue;
+        float Dist = FVector::Dist(StompOrigin, Actor->GetActorLocation());
+        if (Dist <= StompRadius)
+        {
+            FDamageEvent DmgEvent;
+            Actor->TakeDamage(StompDamage, DmgEvent, GetController(), this);
+            UE_LOG(LogTemp, Log, TEXT("Brachio STOMP hit %s for %.0f dmg"), *Actor->GetActorLabel(), StompDamage);
+        }
+    }
+
+    // Debug sphere
+    DrawDebugSphere(GetWorld(), StompOrigin, StompRadius, 16, FColor::Orange, false, 1.5f);
 }
 
 void ABrachiosaurusCharacter::AlertHerd(FVector ThreatLocation)
 {
-    TArray<AActor*> HerdMembers;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABrachiosaurusCharacter::StaticClass(), HerdMembers);
-
-    int32 AlertedCount = 0;
-    for (AActor* Member : HerdMembers)
+    for (ABrachiosaurusCharacter* Member : HerdMembers)
     {
-        if (!IsValid(Member) || Member == this) continue;
+        if (!Member || !Member->IsAlive()) continue;
 
-        float Dist = FVector::Dist(GetActorLocation(), Member->GetActorLocation());
-        if (Dist <= HerdRadius * 1.2f)
+        // Propagate flee state to herd members
+        Member->FleeDirection = (Member->GetActorLocation() - ThreatLocation).GetSafeNormal();
+        Member->bIsFleeing = true;
+        Member->FleeTimer = Member->FleeDuration * 0.8f;
+
+        UCharacterMovementComponent* MoveComp = Member->GetCharacterMovement();
+        if (MoveComp)
         {
-            ABrachiosaurusCharacter* MemberBrachio = Cast<ABrachiosaurusCharacter>(Member);
-            if (IsValid(MemberBrachio) && !MemberBrachio->bIsStampeding)
-            {
-                MemberBrachio->TriggerStampede(ThreatLocation);
-                AlertedCount++;
-            }
+            MoveComp->MaxWalkSpeed = Member->WalkSpeed * Member->FleeSpeedMultiplier;
         }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("BrachiosaurusCharacter: Herd alert sent to %d members"), AlertedCount);
+    UE_LOG(LogTemp, Log, TEXT("Brachio [%s] alerted %d herd members to flee"),
+        *GetActorLabel(), HerdMembers.Num());
 }
 
-float ABrachiosaurusCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-    AController* EventInstigator, AActor* DamageCauser)
+void ABrachiosaurusCharacter::OnDeath()
 {
-    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    Super::OnDeath();
 
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - ActualDamage);
-
-    // Damage triggers stampede
-    if (ActualDamage > 0.0f && !bIsStampeding && IsValid(DamageCauser))
+    // Notify herd leader is gone — trigger re-election
+    for (ABrachiosaurusCharacter* Member : HerdMembers)
     {
-        TriggerStampede(DamageCauser->GetActorLocation());
+        if (Member)
+        {
+            Member->UpdateHerdMembers();
+            Member->ElectHerdLeader();
+        }
     }
 
-    if (CurrentHealth <= 0.0f)
-    {
-        UE_LOG(LogTemp, Log, TEXT("BrachiosaurusCharacter: [%s] has died"), *GetActorLabel());
-        // Death handled by Blueprint or GameMode
-    }
-
-    return ActualDamage;
+    UE_LOG(LogTemp, Log, TEXT("Brachio [%s] died. Herd re-electing leader."), *GetActorLabel());
 }
