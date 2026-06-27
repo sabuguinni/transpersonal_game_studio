@@ -1,176 +1,146 @@
-// SurvivalComponent.cpp
-// Core Systems Programmer #03 — Survival stat system for prehistoric survival game
-// Handles: health, hunger, thirst, stamina, fear, body temperature decay/recovery
+// SurvivalComponent.cpp — Core Systems Programmer #03
+// Implements survival stats: health, hunger, thirst, stamina, temperature, fear.
+// Ticks every second to drain stats and apply starvation/dehydration damage.
 
-#include "Core/Survival/SurvivalComponent.h"
-#include "GameFramework/Actor.h"
+#include "SurvivalComponent.h"
+#include "Math/UnrealMathUtility.h"
 
 USurvivalComponent::USurvivalComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Tick every 100ms for performance
-
-    // Initialize default stats
-    Stats.Health = 100.0f;
-    Stats.MaxHealth = 100.0f;
-    Stats.Hunger = 100.0f;
-    Stats.MaxHunger = 100.0f;
-    Stats.Thirst = 100.0f;
-    Stats.MaxThirst = 100.0f;
-    Stats.Stamina = 100.0f;
-    Stats.MaxStamina = 100.0f;
-    Stats.BodyTemperature = 37.0f;
-    Stats.Fear = 0.0f;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.1f; // 10 Hz tick, drain applied per second via accumulator
 }
 
 void USurvivalComponent::BeginPlay()
 {
-    Super::BeginPlay();
+	Super::BeginPlay();
+
+	// Reset all stats to full on spawn
+	Health = 100.f;
+	Hunger = 100.f;
+	Thirst = 100.f;
+	Stamina = 100.f;
+	Temperature = 37.f;
+	Fear = 0.f;
+	DrainAccumulator = 0.f;
 }
 
 void USurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!IsAlive())
-    {
-        return;
-    }
+	if (!IsAlive())
+	{
+		return;
+	}
 
-    TickHunger(DeltaTime);
-    TickThirst(DeltaTime);
-    TickStamina(DeltaTime);
-    TickFear(DeltaTime);
-    TickStarvationDamage(DeltaTime);
+	// Accumulate time — apply drain every 1 second
+	DrainAccumulator += DeltaTime;
+	if (DrainAccumulator >= 1.0f)
+	{
+		ApplySurvivalDrain(DrainAccumulator);
+		DrainAccumulator = 0.f;
+	}
+
+	// Stamina regeneration (continuous, not per-second)
+	if (Stamina < 100.f)
+	{
+		Stamina = FMath::Min(100.f, Stamina + StaminaRegenRate * DeltaTime);
+	}
+
+	// Fear decay — fear fades over time when no threat is present
+	if (Fear > 0.f)
+	{
+		Fear = FMath::Max(0.f, Fear - 5.f * DeltaTime);
+	}
+
+	ClampStats();
 }
 
-// ============================================================
-// Stat Modifiers
-// ============================================================
-
-void USurvivalComponent::ApplyDamage(float Amount)
+void USurvivalComponent::ApplySurvivalDrain(float DeltaSeconds)
 {
-    if (Amount <= 0.0f) return;
-    Stats.Health = FMath::Max(0.0f, Stats.Health - Amount);
+	// Hunger drain
+	Hunger = FMath::Max(0.f, Hunger - HungerDrainRate * DeltaSeconds);
+
+	// Thirst drain
+	Thirst = FMath::Max(0.f, Thirst - ThirstDrainRate * DeltaSeconds);
+
+	// Starvation damage — health drains when hunger or thirst hits critical
+	if (Hunger <= CriticalHungerThreshold)
+	{
+		Health = FMath::Max(0.f, Health - HealthDrainWhenStarving * DeltaSeconds);
+	}
+	if (Thirst <= CriticalThirstThreshold)
+	{
+		// Dehydration is more dangerous than starvation
+		Health = FMath::Max(0.f, Health - HealthDrainWhenStarving * 2.f * DeltaSeconds);
+	}
+
+	// Temperature effects — hypothermia/hyperthermia
+	if (Temperature < 35.f || Temperature > 40.f)
+	{
+		Health = FMath::Max(0.f, Health - 0.5f * DeltaSeconds);
+	}
 }
 
-void USurvivalComponent::Eat(float NutritionValue)
+bool USurvivalComponent::ApplyDamage(float DamageAmount)
 {
-    if (NutritionValue <= 0.0f) return;
-    Stats.Hunger = FMath::Min(Stats.MaxHunger, Stats.Hunger + NutritionValue);
+	if (!IsAlive() || DamageAmount <= 0.f)
+	{
+		return false;
+	}
+
+	Health = FMath::Max(0.f, Health - DamageAmount);
+	return Health <= 0.f; // Returns true if this damage killed the character
 }
 
-void USurvivalComponent::Drink(float HydrationValue)
+void USurvivalComponent::EatFood(float Amount)
 {
-    if (HydrationValue <= 0.0f) return;
-    Stats.Thirst = FMath::Min(Stats.MaxThirst, Stats.Thirst + HydrationValue);
+	if (Amount <= 0.f) return;
+	Hunger = FMath::Min(100.f, Hunger + Amount);
 }
 
-void USurvivalComponent::Rest(float StaminaRestored)
+void USurvivalComponent::DrinkWater(float Amount)
 {
-    if (StaminaRestored <= 0.0f) return;
-    Stats.Stamina = FMath::Min(Stats.MaxStamina, Stats.Stamina + StaminaRestored);
+	if (Amount <= 0.f) return;
+	Thirst = FMath::Min(100.f, Thirst + Amount);
 }
 
-void USurvivalComponent::AddFear(float FearAmount)
+bool USurvivalComponent::DrainStamina(float Amount)
 {
-    if (FearAmount <= 0.0f) return;
-    Stats.Fear = FMath::Min(100.0f, Stats.Fear + FearAmount);
+	if (Amount <= 0.f) return true;
+	if (Stamina < Amount)
+	{
+		Stamina = 0.f;
+		return false; // Not enough stamina
+	}
+	Stamina -= Amount;
+	return true;
 }
 
-void USurvivalComponent::ReduceFear(float FearAmount)
+void USurvivalComponent::SetFear(float FearLevel)
 {
-    if (FearAmount <= 0.0f) return;
-    Stats.Fear = FMath::Max(0.0f, Stats.Fear - FearAmount);
+	Fear = FMath::Clamp(FearLevel, 0.f, 100.f);
 }
 
-void USurvivalComponent::SetSprinting(bool bSprint)
+FSurvivalStats USurvivalComponent::GetStats() const
 {
-    // Can only sprint if stamina is above 10%
-    if (bSprint && Stats.Stamina < (Stats.MaxStamina * 0.1f))
-    {
-        bIsSprinting = false;
-        return;
-    }
-    bIsSprinting = bSprint;
+	FSurvivalStats Stats;
+	Stats.Health = Health;
+	Stats.Hunger = Hunger;
+	Stats.Thirst = Thirst;
+	Stats.Stamina = Stamina;
+	Stats.Temperature = Temperature;
+	Stats.Fear = Fear;
+	return Stats;
 }
 
-// ============================================================
-// Status Query
-// ============================================================
-
-ECore_SurvivalStatus USurvivalComponent::GetSurvivalStatus() const
+void USurvivalComponent::ClampStats()
 {
-    if (Stats.Health <= 0.0f)
-        return ECore_SurvivalStatus::Dead;
-
-    if (Stats.Health < 20.0f || Stats.Hunger < 10.0f || Stats.Thirst < 10.0f)
-        return ECore_SurvivalStatus::Critical;
-
-    if (Stats.Stamina < 15.0f)
-        return ECore_SurvivalStatus::Exhausted;
-
-    if (Stats.Hunger < 30.0f)
-        return ECore_SurvivalStatus::Hungry;
-
-    if (Stats.Thirst < 30.0f)
-        return ECore_SurvivalStatus::Thirsty;
-
-    return ECore_SurvivalStatus::Healthy;
-}
-
-// ============================================================
-// Private Tick Helpers
-// ============================================================
-
-void USurvivalComponent::TickHunger(float DeltaTime)
-{
-    Stats.Hunger = FMath::Max(0.0f, Stats.Hunger - (HungerDecayRate * DeltaTime));
-}
-
-void USurvivalComponent::TickThirst(float DeltaTime)
-{
-    Stats.Thirst = FMath::Max(0.0f, Stats.Thirst - (ThirstDecayRate * DeltaTime));
-}
-
-void USurvivalComponent::TickStamina(float DeltaTime)
-{
-    if (bIsSprinting)
-    {
-        Stats.Stamina = FMath::Max(0.0f, Stats.Stamina - (StaminaDrainRate * DeltaTime));
-        // Auto-stop sprint when stamina depleted
-        if (Stats.Stamina <= 0.0f)
-        {
-            bIsSprinting = false;
-        }
-    }
-    else
-    {
-        // Recover stamina when not sprinting
-        Stats.Stamina = FMath::Min(Stats.MaxStamina, Stats.Stamina + (StaminaRecoveryRate * DeltaTime));
-    }
-}
-
-void USurvivalComponent::TickFear(float DeltaTime)
-{
-    // Fear naturally decays over time when not threatened
-    if (Stats.Fear > 0.0f)
-    {
-        Stats.Fear = FMath::Max(0.0f, Stats.Fear - (FearDecayRate * DeltaTime));
-    }
-}
-
-void USurvivalComponent::TickStarvationDamage(float DeltaTime)
-{
-    // Take health damage when starving
-    if (Stats.Hunger <= 0.0f)
-    {
-        ApplyDamage(StarvationDamageRate * DeltaTime);
-    }
-
-    // Take health damage when dehydrated (faster than starvation)
-    if (Stats.Thirst <= 0.0f)
-    {
-        ApplyDamage(DehydrationDamageRate * DeltaTime);
-    }
+	Health = FMath::Clamp(Health, 0.f, 100.f);
+	Hunger = FMath::Clamp(Hunger, 0.f, 100.f);
+	Thirst = FMath::Clamp(Thirst, 0.f, 100.f);
+	Stamina = FMath::Clamp(Stamina, 0.f, 100.f);
+	Temperature = FMath::Clamp(Temperature, 20.f, 45.f);
+	Fear = FMath::Clamp(Fear, 0.f, 100.f);
 }
