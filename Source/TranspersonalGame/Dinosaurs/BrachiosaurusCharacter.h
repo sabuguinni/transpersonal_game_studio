@@ -1,14 +1,14 @@
-// BrachiosaurusCharacter.h
-// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260624_002
-// Brachiosaurus — large herbivore subclass of ADinosaurBase
-// Species: Brachiosaurus | MaxHealth: 3000 | AttackDamage: 20 (tail swipe) | MaxWalkSpeed: 300
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Dinosaurs/DinosaurBase.h"
 #include "BrachiosaurusCharacter.generated.h"
 
+/**
+ * ABrachiosaurusCharacter
+ * Large herbivore dinosaur — herd behaviour, flees carnivores, high HP.
+ * Biome: River/Wetland zone. Herd size: 2-4 individuals.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ABrachiosaurusCharacter : public ADinosaurBase
 {
@@ -20,66 +20,90 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ── Tail Swipe Attack ──────────────────────────────────────────────────
-    /** Perform a wide-arc tail swipe dealing AoE damage to nearby threats */
-    UFUNCTION(BlueprintCallable, Category = "Brachiosaurus|Combat")
-    void PerformTailSwipe();
+    // ── Herd System ──────────────────────────────────────────────────────
+    /** Radius within which other Brachiosaurus are considered herd members */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Herd")
+    float HerdRadius = 3000.0f;
 
-    // ── Passive Flee Behaviour ─────────────────────────────────────────────
-    /** Evaluate nearby threats and trigger flee if within FleeRadius */
-    UFUNCTION(BlueprintCallable, Category = "Brachiosaurus|Behaviour")
-    void EvaluateFleeResponse();
+    /** Maximum herd size this individual will join */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Herd")
+    int32 MaxHerdSize = 4;
 
-    /** Stomp the ground, creating a shockwave that knocks back small creatures */
-    UFUNCTION(BlueprintCallable, Category = "Brachiosaurus|Combat")
-    void PerformGroundStomp();
-
-    /** Emit a low-frequency rumble to warn herd members of danger */
-    UFUNCTION(BlueprintCallable, Category = "Brachiosaurus|Social")
-    void EmitHerdWarning();
-
-    // ── Properties ────────────────────────────────────────────────────────
-    /** Radius within which the Brachiosaurus detects threats and begins fleeing */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachiosaurus|Behaviour")
-    float FleeRadius;
-
-    /** Radius of the tail swipe AoE damage zone */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachiosaurus|Combat")
-    float TailSwipeRadius;
-
-    /** Knockback impulse applied by ground stomp */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachiosaurus|Combat")
-    float StompKnockbackImpulse;
-
-    /** Minimum time between tail swipe attacks (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachiosaurus|Combat")
-    float TailSwipeCooldown;
-
-    /** Whether this Brachiosaurus is currently fleeing */
-    UPROPERTY(BlueprintReadOnly, Category = "Brachiosaurus|State")
-    bool bIsFleeing;
-
-    /** Current flee target location */
-    UPROPERTY(BlueprintReadOnly, Category = "Brachiosaurus|State")
-    FVector FleeTargetLocation;
-
-    /** Nearby herd members (other Brachiosaurus within DetectionRange) */
-    UPROPERTY(BlueprintReadOnly, Category = "Brachiosaurus|Social")
+    /** Current herd members (populated at BeginPlay + updated every 5s) */
+    UPROPERTY(BlueprintReadOnly, Category = "Brachio|Herd")
     TArray<ABrachiosaurusCharacter*> HerdMembers;
 
-protected:
-    /** Timer handle for periodic flee evaluation */
-    FTimerHandle FleeEvaluationTimer;
+    /** Is this the herd leader? (elected by proximity order) */
+    UPROPERTY(BlueprintReadOnly, Category = "Brachio|Herd")
+    bool bIsHerdLeader = false;
 
-    /** Timer handle for tail swipe cooldown */
-    FTimerHandle TailSwipeCooldownTimer;
+    // ── Flee System ──────────────────────────────────────────────────────
+    /** Distance at which Brachio detects and flees carnivores */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Flee")
+    float CarnivoreDetectionRadius = 2500.0f;
 
-    /** Whether the tail swipe is currently on cooldown */
-    bool bTailSwipeReady;
+    /** Speed multiplier when fleeing (applied to base WalkSpeed) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Flee")
+    float FleeSpeedMultiplier = 1.8f;
 
-    /** Scan for nearby herd members and populate HerdMembers array */
+    /** Duration to keep fleeing after losing sight of carnivore (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Flee")
+    float FleeDuration = 12.0f;
+
+    /** Is currently fleeing? */
+    UPROPERTY(BlueprintReadOnly, Category = "Brachio|Flee")
+    bool bIsFleeing = false;
+
+    // ── Stomp Attack ─────────────────────────────────────────────────────
+    /** Stomp radius — damages anything within this range when triggered */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Combat")
+    float StompRadius = 400.0f;
+
+    /** Stomp damage (defensive only — Brachio doesn't hunt) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Combat")
+    float StompDamage = 120.0f;
+
+    /** Cooldown between stomps (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Combat")
+    float StompCooldown = 6.0f;
+
+    // ── Grazing ──────────────────────────────────────────────────────────
+    /** Is currently grazing (idle animation state) */
+    UPROPERTY(BlueprintReadOnly, Category = "Brachio|Behaviour")
+    bool bIsGrazing = false;
+
+    /** Time spent grazing before moving to next point (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Brachio|Behaviour")
+    float GrazeDuration = 8.0f;
+
+    // ── Public API ───────────────────────────────────────────────────────
+    /** Perform defensive stomp — damages nearby actors in StompRadius */
+    UFUNCTION(BlueprintCallable, Category = "Brachio|Combat")
+    void PerformStomp();
+
+    /** Alert herd members to flee in direction away from threat */
+    UFUNCTION(BlueprintCallable, Category = "Brachio|Herd")
+    void AlertHerd(FVector ThreatLocation);
+
+    /** Update herd membership list */
+    UFUNCTION(BlueprintCallable, Category = "Brachio|Herd")
     void UpdateHerdMembers();
 
-    /** Broadcast flee direction to all herd members */
-    void CoordinateHerdFlee(const FVector& ThreatLocation);
+    /** Check for nearby carnivores and trigger flee if found */
+    UFUNCTION(BlueprintCallable, Category = "Brachio|Flee")
+    void CheckForCarnivores();
+
+protected:
+    virtual void OnDeath() override;
+
+private:
+    float LastStompTime = 0.0f;
+    float FleeTimer = 0.0f;
+    float HerdUpdateTimer = 0.0f;
+    float GrazeTimer = 0.0f;
+    FVector FleeDirection = FVector::ZeroVector;
+
+    void UpdateFleeState(float DeltaTime);
+    void UpdateGrazingState(float DeltaTime);
+    void ElectHerdLeader();
 };
