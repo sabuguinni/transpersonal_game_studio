@@ -1,240 +1,239 @@
 #include "QuestStampedeSystem.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
-AQuest_StampedeManager::AQuest_StampedeManager()
+// ============================================================
+// AQuestStampedeTrigger — Implementation
+// ============================================================
+
+AQuestStampedeTrigger::AQuestStampedeTrigger()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
 
-    QuestState        = EQuest_StampedeState::Inactive;
-    TimeLimit         = 90.0f;
-    TimeRemaining     = 90.0f;
-    HighGroundMinZ    = 350.0f;
-    HighGroundRadius  = 400.0f;
-    HighGroundCenter  = FVector(1200.0f, -800.0f, 400.0f);
-    CampLocation      = FVector(-500.0f, 300.0f, 100.0f);
-    CampDangerRadius  = 600.0f;
-    HerdActor         = nullptr;
-    bHerdTriggered    = false;
+    TriggerVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerVolume"));
+    TriggerVolume->SetBoxExtent(FVector(2000.0f, 2000.0f, 400.0f));
+    TriggerVolume->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerVolume;
 
-    // Define objectives
-    FQuest_StampedeObjective Obj1;
-    Obj1.ObjectiveText  = TEXT("Reach high ground before the herd overruns camp");
-    Obj1.bCompleted     = false;
-    Obj1.TargetLocation = HighGroundCenter;
-    Objectives.Add(Obj1);
+    DebugMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebugMarker"));
+    DebugMarker->SetupAttachment(RootComponent);
 
-    FQuest_StampedeObjective Obj2;
-    Obj2.ObjectiveText  = TEXT("Survive until the herd passes");
-    Obj2.bCompleted     = false;
-    Obj2.TargetLocation = HighGroundCenter;
-    Objectives.Add(Obj2);
+    CurrentPhase = EQuest_StampedePhase::Inactive;
+    RemainingTime = EscapeTimeLimit;
 }
 
-void AQuest_StampedeManager::BeginPlay()
+void AQuestStampedeTrigger::BeginPlay()
 {
     Super::BeginPlay();
-    // Quest starts automatically on BeginPlay for prototype testing
-    StartQuest();
+    InitialiseObjectives();
+    TriggerVolume->OnComponentBeginOverlap.AddDynamic(this, &AQuestStampedeTrigger::OnTriggerOverlapBegin);
 }
 
-void AQuest_StampedeManager::Tick(float DeltaTime)
+void AQuestStampedeTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (QuestState == EQuest_StampedeState::Active)
-    {
-        CheckQuestConditions(DeltaTime);
-    }
-}
-
-void AQuest_StampedeManager::StartQuest()
-{
-    if (QuestState != EQuest_StampedeState::Inactive)
-    {
+    if (CurrentPhase != EQuest_StampedePhase::Escaping)
         return;
-    }
 
-    QuestState    = EQuest_StampedeState::Active;
-    TimeRemaining = TimeLimit;
+    RemainingTime -= DeltaTime;
 
-    // Reset objectives
-    for (FQuest_StampedeObjective& Obj : Objectives)
-    {
-        Obj.bCompleted = false;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE_STARTED: Player has %.0f seconds to reach high ground"), TimeLimit);
-
-    // Trigger the herd stampede immediately
-    TriggerHerdStampede();
-}
-
-void AQuest_StampedeManager::TriggerHerdStampede()
-{
-    if (bHerdTriggered)
-    {
-        return;
-    }
-
-    bHerdTriggered = true;
-
-    // If we have a herd actor reference, call TriggerFlee on it
-    // CrowdHerdBehaviorActor exposes TriggerFlee(FVector ThreatLocation, float ThreatRadius)
-    if (HerdActor)
-    {
-        // Call via UFunction reflection — works with ACrowd_HerdBehaviorActor
-        FVector ThreatLocation = CampLocation;
-        UFunction* FleeFunc = HerdActor->FindFunction(TEXT("TriggerFlee"));
-        if (FleeFunc)
-        {
-            struct { FVector Loc; float Radius; } Params;
-            Params.Loc    = ThreatLocation;
-            Params.Radius = 800.0f;
-            HerdActor->ProcessEvent(FleeFunc, &Params);
-            UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE: TriggerFlee called on HerdActor"));
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE: No HerdActor assigned — herd flee simulated"));
-    }
-}
-
-void AQuest_StampedeManager::CheckQuestConditions(float DeltaTime)
-{
-    TimeRemaining -= DeltaTime;
-
-    APawn* Player = GetPlayerPawn();
-    if (!Player)
-    {
-        return;
-    }
-
-    // SUCCESS: Player reached high ground
-    if (IsPlayerOnHighGround())
-    {
-        if (Objectives.IsValidIndex(0) && !Objectives[0].bCompleted)
-        {
-            Objectives[0].bCompleted = true;
-            UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE_OBJ1_COMPLETE: Player on high ground"));
-        }
-
-        // Wait for herd to pass (time runs out = herd passed)
-        if (TimeRemaining <= 0.0f)
-        {
-            if (Objectives.IsValidIndex(1))
-            {
-                Objectives[1].bCompleted = true;
-            }
-            CompleteQuest(true);
-        }
-        return;
-    }
-
-    // FAIL: Herd reached camp while player is still in danger zone
-    if (IsHerdNearCamp() && TimeRemaining < TimeLimit * 0.5f)
-    {
-        FVector PlayerLoc = Player->GetActorLocation();
-        float DistToCamp  = FVector::Dist(PlayerLoc, CampLocation);
-        if (DistToCamp < CampDangerRadius)
-        {
-            CompleteQuest(false);
-            return;
-        }
-    }
-
-    // FAIL: Time ran out and player never reached high ground
-    if (TimeRemaining <= 0.0f)
-    {
-        CompleteQuest(false);
-    }
-}
-
-void AQuest_StampedeManager::CompleteQuest(bool bSuccess)
-{
-    if (QuestState != EQuest_StampedeState::Active)
-    {
-        return;
-    }
-
-    QuestState = bSuccess ? EQuest_StampedeState::Succeeded : EQuest_StampedeState::Failed;
-
-    if (bSuccess)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE_SUCCESS: Player survived the stampede!"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE_FAILED: Player was caught in the stampede."));
-    }
-}
-
-bool AQuest_StampedeManager::IsPlayerOnHighGround() const
-{
-    APawn* Player = GetPlayerPawn();
-    if (!Player)
-    {
-        return false;
-    }
-
-    FVector PlayerLoc = Player->GetActorLocation();
-    float HorizDist   = FVector::Dist2D(PlayerLoc, HighGroundCenter);
-
-    return (PlayerLoc.Z >= HighGroundMinZ && HorizDist <= HighGroundRadius);
-}
-
-bool AQuest_StampedeManager::IsHerdNearCamp() const
-{
-    if (!HerdActor)
-    {
-        // Simulate: herd is "near camp" when half the time has elapsed
-        return (TimeRemaining < TimeLimit * 0.5f);
-    }
-
-    FVector HerdLoc = HerdActor->GetActorLocation();
-    float Dist      = FVector::Dist(HerdLoc, CampLocation);
-    return (Dist < CampDangerRadius * 2.0f);
-}
-
-float AQuest_StampedeManager::GetTimeRemainingNormalized() const
-{
-    if (TimeLimit <= 0.0f)
-    {
-        return 0.0f;
-    }
-    return FMath::Clamp(TimeRemaining / TimeLimit, 0.0f, 1.0f);
-}
-
-void AQuest_StampedeManager::ResetQuest()
-{
-    QuestState     = EQuest_StampedeState::Inactive;
-    TimeRemaining  = TimeLimit;
-    bHerdTriggered = false;
-
-    for (FQuest_StampedeObjective& Obj : Objectives)
-    {
-        Obj.bCompleted = false;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("QUEST_STAMPEDE_RESET"));
-}
-
-APawn* AQuest_StampedeManager::GetPlayerPawn() const
-{
+    // Check safe zone every tick
     UWorld* World = GetWorld();
-    if (!World)
+    if (World)
     {
-        return nullptr;
+        APlayerController* PC = World->GetFirstPlayerController();
+        if (PC && PC->GetPawn())
+        {
+            CheckSafeZoneReached(PC->GetPawn());
+        }
     }
 
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC)
+    if (RemainingTime <= 0.0f)
     {
-        return nullptr;
+        FailQuest();
     }
+}
 
-    return PC->GetPawn();
+void AQuestStampedeTrigger::InitialiseObjectives()
+{
+    Objectives.Empty();
+
+    FQuest_StampedeObjective Obj0;
+    Obj0.ObjectiveName = TEXT("Escape the Stampede Corridor");
+    Obj0.Description   = TEXT("Reach high ground before the herd crushes you. You have 60 seconds.");
+    Obj0.bCompleted    = false;
+    Obj0.bOptional     = false;
+    Objectives.Add(Obj0);
+
+    FQuest_StampedeObjective Obj1;
+    Obj1.ObjectiveName = TEXT("Avoid the Sentinel Parasaurolophus");
+    Obj1.Description   = TEXT("Three dominant animals lead the herd. Stay clear of them.");
+    Obj1.bCompleted    = false;
+    Obj1.bOptional     = true;
+    Objectives.Add(Obj1);
+
+    FQuest_StampedeObjective Obj2;
+    Obj2.ObjectiveName = TEXT("Reach the High Ground Safe Zone");
+    Obj2.Description   = TEXT("Climb to the broken ridge north of the river crossing.");
+    Obj2.bCompleted    = false;
+    Obj2.bOptional     = false;
+    Objectives.Add(Obj2);
+}
+
+void AQuestStampedeTrigger::OnTriggerOverlapBegin(
+    UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor) return;
+    if (bQuestAlreadyCompleted) return;
+    if (CurrentPhase != EQuest_StampedePhase::Inactive) return;
+
+    // Only trigger for player character
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    APlayerController* PC = Cast<APlayerController>(PlayerChar->GetController());
+    if (!PC) return;
+
+    ActivateStampedeQuest(OtherActor);
+}
+
+void AQuestStampedeTrigger::ActivateStampedeQuest(AActor* PlayerActor)
+{
+    if (CurrentPhase != EQuest_StampedePhase::Inactive) return;
+
+    CurrentPhase = EQuest_StampedePhase::Triggered;
+    RemainingTime = EscapeTimeLimit;
+    bTickActive = true;
+    SetActorTickEnabled(true);
+
+    UE_LOG(LogTemp, Warning, TEXT("=== QUEST ACTIVATED: Survive the Stampede ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Objective: Reach safe zone at (%.0f, %.0f, %.0f) within %.0f seconds"),
+        SafeZoneLocation.X, SafeZoneLocation.Y, SafeZoneLocation.Z, EscapeTimeLimit);
+
+    // Brief delay then transition to Escaping
+    CurrentPhase = EQuest_StampedePhase::Escaping;
+
+    UE_LOG(LogTemp, Warning, TEXT("Quest Phase: ESCAPING — Timer started: %.1f seconds"), RemainingTime);
+}
+
+void AQuestStampedeTrigger::CheckSafeZoneReached(AActor* PlayerActor)
+{
+    if (!PlayerActor) return;
+    if (CurrentPhase != EQuest_StampedePhase::Escaping) return;
+
+    if (IsPlayerInSafeZone(PlayerActor))
+    {
+        CompleteObjective(0); // Escape corridor
+        CompleteObjective(2); // Reach high ground
+        CompleteQuest();
+    }
+}
+
+void AQuestStampedeTrigger::CompleteObjective(int32 ObjectiveIndex)
+{
+    if (!Objectives.IsValidIndex(ObjectiveIndex)) return;
+    if (Objectives[ObjectiveIndex].bCompleted) return;
+
+    Objectives[ObjectiveIndex].bCompleted = true;
+    UE_LOG(LogTemp, Warning, TEXT("Objective COMPLETE: %s"),
+        *Objectives[ObjectiveIndex].ObjectiveName);
+}
+
+void AQuestStampedeTrigger::FailQuest()
+{
+    CurrentPhase = EQuest_StampedePhase::Crushed;
+    SetActorTickEnabled(false);
+
+    UE_LOG(LogTemp, Error, TEXT("=== QUEST FAILED: Survive the Stampede — Player crushed by herd ==="));
+}
+
+void AQuestStampedeTrigger::CompleteQuest()
+{
+    CurrentPhase = EQuest_StampedePhase::Completed;
+    bQuestAlreadyCompleted = true;
+    SetActorTickEnabled(false);
+
+    UE_LOG(LogTemp, Warning, TEXT("=== QUEST COMPLETE: Survive the Stampede ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Time remaining: %.1f seconds"), RemainingTime);
+}
+
+float AQuestStampedeTrigger::GetEscapeProgressPercent() const
+{
+    if (EscapeTimeLimit <= 0.0f) return 0.0f;
+    float Elapsed = EscapeTimeLimit - RemainingTime;
+    return FMath::Clamp(Elapsed / EscapeTimeLimit, 0.0f, 1.0f);
+}
+
+bool AQuestStampedeTrigger::IsPlayerInSafeZone(AActor* PlayerActor) const
+{
+    if (!PlayerActor) return false;
+    float Dist = FVector::Dist(PlayerActor->GetActorLocation(), SafeZoneLocation);
+    return Dist <= SafeZoneRadius;
+}
+
+void AQuestStampedeTrigger::ResetQuest()
+{
+    CurrentPhase = EQuest_StampedePhase::Inactive;
+    bQuestAlreadyCompleted = false;
+    RemainingTime = EscapeTimeLimit;
+    SetActorTickEnabled(false);
+    InitialiseObjectives();
+    UE_LOG(LogTemp, Warning, TEXT("Quest RESET: Survive the Stampede"));
+}
+
+// ============================================================
+// AQuestSafeZoneMarker — Implementation
+// ============================================================
+
+AQuestSafeZoneMarker::AQuestSafeZoneMarker()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    MarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MarkerMesh"));
+    RootComponent = MarkerMesh;
+
+    SafeVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("SafeVolume"));
+    SafeVolume->SetupAttachment(RootComponent);
+    SafeVolume->SetBoxExtent(FVector(500.0f, 500.0f, 300.0f));
+    SafeVolume->SetCollisionProfileName(TEXT("Trigger"));
+
+    bIsActive = false;
+}
+
+void AQuestSafeZoneMarker::BeginPlay()
+{
+    Super::BeginPlay();
+    SafeVolume->OnComponentBeginOverlap.AddDynamic(this, &AQuestSafeZoneMarker::OnSafeZoneOverlap);
+    SetActorHiddenInGame(!bIsActive);
+}
+
+void AQuestSafeZoneMarker::ActivateMarker()
+{
+    bIsActive = true;
+    SetActorHiddenInGame(false);
+    UE_LOG(LogTemp, Warning, TEXT("SafeZoneMarker ACTIVATED at %s"), *GetActorLocation().ToString());
+}
+
+void AQuestSafeZoneMarker::DeactivateMarker()
+{
+    bIsActive = false;
+    SetActorHiddenInGame(true);
+}
+
+void AQuestSafeZoneMarker::OnSafeZoneOverlap(
+    UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor || !bIsActive) return;
+
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    UE_LOG(LogTemp, Warning, TEXT("Player reached SafeZone! Quest completion triggered."));
 }
