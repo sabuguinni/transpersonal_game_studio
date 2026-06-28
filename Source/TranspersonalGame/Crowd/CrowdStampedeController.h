@@ -1,7 +1,3 @@
-// CrowdStampedeController.h
-// Agent #13 — Crowd & Traffic Simulation
-// Stampede system: herbivore herds react to predator presence with panic flight
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,147 +7,113 @@
 UENUM(BlueprintType)
 enum class ECrowd_StampedeState : uint8
 {
-    Calm        UMETA(DisplayName = "Calm"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Panic       UMETA(DisplayName = "Panic"),
-    Dispersing  UMETA(DisplayName = "Dispersing"),
-    Regrouping  UMETA(DisplayName = "Regrouping")
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_TribalReaction : uint8
-{
     Idle        UMETA(DisplayName = "Idle"),
-    Flee        UMETA(DisplayName = "Flee"),
-    Defend      UMETA(DisplayName = "Defend"),
-    ProtectYoung UMETA(DisplayName = "ProtectYoung"),
-    Scatter     UMETA(DisplayName = "Scatter")
+    Grazing     UMETA(DisplayName = "Grazing"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Stampeding  UMETA(DisplayName = "Stampeding"),
+    Dispersing  UMETA(DisplayName = "Dispersing")
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_HerdAgent
+struct FCrowd_HerdMember
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Position;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
+    AActor* MemberActor = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Velocity;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
+    FVector CurrentVelocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_StampedeState State;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
+    float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float PanicRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float SeparationWeight;
-
-    FCrowd_HerdAgent()
-        : Position(FVector::ZeroVector)
-        , Velocity(FVector::ZeroVector)
-        , State(ECrowd_StampedeState::Calm)
-        , PanicRadius(800.0f)
-        , SeparationWeight(1.5f)
-    {}
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
+    ECrowd_StampedeState State = ECrowd_StampedeState::Grazing;
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_TribalAgent
+struct FCrowd_StampedeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Position;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    int32 HerdSize = 20;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_TribalReaction Reaction;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float StampedeSpeed = 1200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector FleeTarget;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float PanicRadius = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    bool bIsProtector;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float SeparationForce = 150.0f;
 
-    FCrowd_TribalAgent()
-        : Position(FVector::ZeroVector)
-        , Reaction(ECrowd_TribalReaction::Idle)
-        , FleeTarget(FVector::ZeroVector)
-        , bIsProtector(false)
-    {}
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float CohesionForce = 80.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float AlignmentForce = 120.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float TrampleDamage = 45.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdStampedeController : public AActor
+class TRANSPERSONALGAME_API ACrowd_StampedeController : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ACrowdStampedeController();
+    ACrowd_StampedeController();
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Stampede trigger — called when predator enters herd radius
     UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void TriggerStampede(FVector PredatorLocation, float PredatorThreatRadius);
+    void TriggerStampede(FVector PanicOrigin, FVector FleeDirection);
 
-    // Update herd flocking behavior (separation, alignment, cohesion)
     UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void UpdateHerdFlocking(float DeltaTime);
+    void AddHerdMember(AActor* Member);
 
-    // Tribal camp reaction to nearby stampede
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Tribal")
-    void TriggerTribalReaction(FVector StampedeDirection);
-
-    // Get current stampede state
-    UFUNCTION(BlueprintPure, Category = "Crowd|Stampede")
-    ECrowd_StampedeState GetStampedeState() const { return CurrentStampedeState; }
-
-    // Calm the herd after threat passes
     UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void CalmHerd();
+    void SetStampedeConfig(const FCrowd_StampedeConfig& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
+    ECrowd_StampedeState GetHerdState() const { return CurrentHerdState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
+    int32 GetHerdSize() const { return HerdMembers.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
+    void DisbandHerd();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
+    FVector ComputeFlockingForce(const FCrowd_HerdMember& Member);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 HerdSize;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Stampede", meta = (AllowPrivateAccess = "true"))
+    ECrowd_StampedeState CurrentHerdState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float StampedeSpeed;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    FCrowd_StampedeConfig StampedeConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float CalmSpeed;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    TArray<FCrowd_HerdMember> HerdMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float PanicDecayTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float SeparationDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float CohesionStrength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float AlignmentStrength;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
-    ECrowd_StampedeState CurrentStampedeState;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
     FVector StampedeDirection;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
-    float PanicTimer;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float StampedeTimer;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_HerdAgent> HerdAgents;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|State")
-    TArray<FCrowd_TribalAgent> TribalAgents;
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
+    float MaxStampedeDuration;
 
 private:
-    FVector ComputeSeparationForce(int32 AgentIndex) const;
-    FVector ComputeAlignmentForce(int32 AgentIndex) const;
-    FVector ComputeCohesionForce(int32 AgentIndex) const;
+    void UpdateHerdBehavior(float DeltaTime);
+    void ApplyFlockingToMembers(float DeltaTime);
+    void CheckPlayerProximity();
+    void TransitionToState(ECrowd_StampedeState NewState);
 };
