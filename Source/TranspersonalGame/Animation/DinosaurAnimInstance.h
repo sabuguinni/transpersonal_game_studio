@@ -4,120 +4,126 @@
 #include "Animation/AnimInstance.h"
 #include "DinosaurAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_DinoLocomotionState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Trotting    UMETA(DisplayName = "Trotting"),
-    Running     UMETA(DisplayName = "Running"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Roaring     UMETA(DisplayName = "Roaring"),
-    Eating      UMETA(DisplayName = "Eating"),
-    Dead        UMETA(DisplayName = "Dead")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinoBodySize : uint8
-{
-    Small       UMETA(DisplayName = "Small"),    // Velociraptor
-    Medium      UMETA(DisplayName = "Medium"),   // Dilophosaurus
-    Large       UMETA(DisplayName = "Large"),    // T-Rex
-    Massive     UMETA(DisplayName = "Massive")   // Brachiosaurus
-};
-
 /**
  * UDinosaurAnimInstance
- * AnimInstance for all dinosaur pawns in the prehistoric survival game.
- * Drives locomotion blend spaces, attack montages, and procedural IK.
+ * AnimInstance subclass for all dinosaur pawns.
+ * Drives locomotion blend space, attack montages, and death/ragdoll transitions.
+ * Used by: TRex, Raptor, Brachiosaurus, and any future dino species.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    UDinosaurAnimInstance();
+	UDinosaurAnimInstance();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+	virtual void NativeInitializeAnimation() override;
+	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ─── Locomotion State ───────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    EAnim_DinoLocomotionState LocomotionState;
+	// ─── Locomotion ───────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float GroundSpeed;
+	/** Ground speed in cm/s, drives the locomotion blend space X axis */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	float GroundSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float Direction;
+	/** Movement direction in degrees relative to actor forward (-180..180) */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	float MovementDirection;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    bool bIsMoving;
+	/** True while the dino is airborne (jump / fall) */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    bool bIsInAir;
+	/** True when the dino is actively chasing a target */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsChasing;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    bool bIsDead;
+	/** True when the dino is in idle patrol mode */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsPatrolling;
 
-    // ─── Body & Species ─────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Species")
-    EAnim_DinoBodySize BodySize;
+	// ─── Combat ───────────────────────────────────────────────────────────────
 
-    /** Normalised [0-1] aggression level — drives blend between patrol and hunt anims */
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behaviour")
-    float AggressionLevel;
+	/** True when the dino is within melee strike range */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+	bool bIsAttacking;
 
-    /** Normalised [0-1] health ratio — drives limping / wounded blend */
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behaviour")
-    float HealthRatio;
+	/** True when the dino has taken a lethal hit and is dying */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+	bool bIsDying;
 
-    // ─── Procedural IK ──────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    FVector LeftFootIKTarget;
+	/** Normalised health (0..1) — used to blend wounded locomotion */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+	float HealthNormalized;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    FVector RightFootIKTarget;
+	/** True when the dino is roaring (aggression / territory warning) */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+	bool bIsRoaring;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    float IKFootBlendWeight;
+	// ─── Foot IK ──────────────────────────────────────────────────────────────
 
-    // ─── Head Look-At ────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|LookAt")
-    FRotator HeadLookAtRotation;
+	/** Left foot IK target offset in world space */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	FVector LeftFootIKTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|LookAt")
-    float HeadLookAtWeight;
+	/** Right foot IK target offset in world space */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	FVector RightFootIKTarget;
 
-    // ─── Tail Physics ────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Physics")
-    float TailSwayAmount;
+	/** Pelvis vertical offset to keep the body level on uneven terrain */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+	float PelvisOffset;
 
-    // ─── Attack / Montage Triggers ───────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Dino|Animation")
-    void TriggerAttackMontage();
+	// ─── Species ──────────────────────────────────────────────────────────────
 
-    UFUNCTION(BlueprintCallable, Category = "Dino|Animation")
-    void TriggerRoarMontage();
+	/** Species tag — used to select the correct blend space asset at runtime */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Species")
+	FName SpeciesTag;
 
-    UFUNCTION(BlueprintCallable, Category = "Dino|Animation")
-    void TriggerDeathMontage();
+	/** Walk speed threshold (cm/s) — below this the dino plays idle */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Species")
+	float WalkThreshold;
 
-protected:
-    /** Cached owning pawn */
-    UPROPERTY()
-    APawn* OwnerPawn;
+	/** Run speed threshold (cm/s) — above this the dino plays full sprint */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Anim|Species")
+	float RunThreshold;
 
-    /** Cached movement component */
-    UPROPERTY()
-    UCharacterMovementComponent* MovementComponent;
+	// ─── Blueprint events ─────────────────────────────────────────────────────
+
+	/** Called from BT when the dino should play its roar montage */
+	UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+	void TriggerRoar();
+
+	/** Called from BT when the dino should play its attack montage */
+	UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+	void TriggerAttack();
+
+	/** Called when health reaches 0 — transitions to death state */
+	UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+	void TriggerDeath();
 
 private:
-    void UpdateLocomotionState();
-    void UpdateIKTargets(float DeltaSeconds);
-    void UpdateHeadLookAt(float DeltaSeconds);
-    void UpdateTailSway(float DeltaSeconds);
+	/** Cached owning pawn */
+	UPROPERTY()
+	class APawn* OwnerPawn;
 
-    float TailSwayTime;
+	/** Cached movement component */
+	UPROPERTY()
+	class UCharacterMovementComponent* MovementComp;
+
+	/** Smooth interpolation of GroundSpeed to avoid jitter */
+	float SmoothedSpeed;
+
+	/** Internal timer for roar cooldown */
+	float RoarCooldown;
+
+	/** Update locomotion variables from movement component */
+	void UpdateLocomotion(float DeltaSeconds);
+
+	/** Update foot IK targets via line traces */
+	void UpdateFootIK();
+
+	/** Compute movement direction angle relative to actor forward */
+	float ComputeMovementDirection() const;
 };
