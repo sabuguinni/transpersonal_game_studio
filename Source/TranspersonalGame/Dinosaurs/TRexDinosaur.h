@@ -1,13 +1,14 @@
-// TRexDinosaur.h
-// Transpersonal Game Studio — Core Systems Programmer (#03)
-// Tyrannosaurus Rex — apex predator, aggressive, high HP, devastating attack
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Dinosaurs/DinosaurBase.h"
 #include "TRexDinosaur.generated.h"
 
+/**
+ * ATRexDinosaur — Tyrannosaurus Rex species implementation.
+ * Apex predator: high health, massive attack damage, wide detection radius,
+ * slow turn rate, cannot jump. Hunts large prey, territorial vs other carnivores.
+ */
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
 class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 {
@@ -16,71 +17,45 @@ class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 public:
     ATRexDinosaur();
 
-    // TRex-specific: roar ability that frightens nearby prey
+    /** Roar ability — stuns nearby prey and triggers flee in herbivores */
     UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
     void PerformRoar();
 
-    // TRex-specific: stomp attack — AoE damage in melee range
+    /** Stomp attack — AoE damage in front of TRex when target is very close */
     UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
     void PerformStomp();
-
-    // Called when TRex detects player — triggers aggressive chase
-    UFUNCTION(BlueprintNativeEvent, Category = "TRex|AI")
-    void OnPlayerDetected(AActor* PlayerActor);
-    virtual void OnPlayerDetected_Implementation(AActor* PlayerActor);
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Roar cooldown timer
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
-    float RoarCooldownRemaining;
+    /** Override attack to use stomp at close range */
+    virtual void PerformAttack(AActor* Target) override;
 
-    // Stomp cooldown timer
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
-    float StompCooldownRemaining;
-
-    // Roar radius — all prey within this range gain FearLevel boost
+    /** Roar cooldown in seconds */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float RoarRadius;
+    float RoarCooldown = 15.0f;
 
-    // Roar fear amount added to prey
+    /** Stomp AoE radius in cm */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float RoarFearAmount;
+    float StompRadius = 300.0f;
 
-    // Stomp radius — AoE damage radius
+    /** Stomp AoE damage */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float StompRadius;
+    float StompDamage = 80.0f;
 
-    // Stomp damage dealt to all actors in radius
+    /** Roar AoE radius — prey within this range will flee */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float StompDamage;
+    float RoarRadius = 2000.0f;
 
-    // Roar cooldown duration in seconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float RoarCooldownDuration;
+    /** Blueprint event: roar VFX/SFX trigger */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnRoar();
 
-    // Stomp cooldown duration in seconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float StompCooldownDuration;
-
-    // Whether TRex is currently in a territorial patrol
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    bool bIsPatrolling;
-
-    // Territory center — TRex patrols within TerritoryRadius of this point
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory")
-    FVector TerritoryCenter;
-
-    // Territory radius — TRex stays within this range of TerritoryCenter
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Territory")
-    float TerritoryRadius;
+    /** Blueprint event: stomp VFX/SFX trigger */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TRex|Events")
+    void OnStomp();
 
 private:
-    FTimerHandle RoarCooldownTimer;
-    FTimerHandle StompCooldownTimer;
-
-    void ResetRoarCooldown();
-    void ResetStompCooldown();
+    float RoarTimer = 0.0f;
 };
