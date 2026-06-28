@@ -1,329 +1,304 @@
 // BiomeManager.cpp
 // Engine Architect #02 — Transpersonal Game Studio
-// Cycle: PROD_CYCLE_AUTO_20260628_003
-// Manages biome zones, transitions, and environmental conditions for the prehistoric world.
+// Biome classification, transition, and environmental parameter system
+// Priority: P1 — World Generation
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "GameFramework/Actor.h"
-#include "Components/BillboardComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
-#include "TimerManager.h"
-#include "Net/UnrealNetwork.h"
 
 // ============================================================
-// UBiomeDataAsset
-// ============================================================
-
-UBiomeDataAsset::UBiomeDataAsset()
-{
-    BiomeName = TEXT("Unknown Biome");
-    BiomeType = EBiomeType::Forest;
-    AmbientTemperature = 25.f;
-    Humidity = 0.5f;
-    FoliageDensity = 0.7f;
-    DangerLevel = 1;
-    bHasWater = false;
-    FogDensity = 0.02f;
-    WindIntensity = 0.3f;
-}
-
-// ============================================================
-// ABiomeZone
-// ============================================================
-
-ABiomeZone::ABiomeZone()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
-    SetRootComponent(SceneRoot);
-
-    ZoneRadius = 5000.f;
-    BiomeType = EBiomeType::Forest;
-    BiomeData = nullptr;
-
-#if WITH_EDITORONLY_DATA
-    // Billboard for editor visibility
-    UBillboardComponent* Billboard = CreateEditorOnlyDefaultSubobject<UBillboardComponent>(TEXT("Billboard"));
-    if (Billboard)
-    {
-        Billboard->SetupAttachment(SceneRoot);
-    }
-#endif
-}
-
-void ABiomeZone::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-bool ABiomeZone::IsLocationInZone(const FVector& WorldLocation) const
-{
-    float Dist2D = FVector::Dist2D(WorldLocation, GetActorLocation());
-    return Dist2D <= ZoneRadius;
-}
-
-float ABiomeZone::GetBlendWeight(const FVector& WorldLocation) const
-{
-    float Dist2D = FVector::Dist2D(WorldLocation, GetActorLocation());
-    if (Dist2D >= ZoneRadius) return 0.f;
-
-    // Smooth falloff at zone edges (20% blend zone)
-    float BlendStart = ZoneRadius * 0.8f;
-    if (Dist2D <= BlendStart) return 1.f;
-
-    float BlendRange = ZoneRadius - BlendStart;
-    float DistInBlend = Dist2D - BlendStart;
-    return 1.f - (DistInBlend / BlendRange);
-}
-
-// ============================================================
-// ABiomeManager
+// Constructor
 // ============================================================
 
 ABiomeManager::ABiomeManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f; // Update every second
+    PrimaryActorTick.TickInterval = 2.0f; // Update every 2 seconds — not every frame
 
-    SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
-    SetRootComponent(SceneRoot);
+    // Default biome parameters
+    CurrentBiomeType = EBiomeType::Grassland;
+    TransitionBlendAlpha = 0.0f;
+    bBiomeTransitionActive = false;
+    WorldSizeKm = 4.0f;
+    BiomeSeed = 42;
 
-    // Default time of day — midday
-    CurrentTimeOfDay = 12.f;
-    DayDurationSeconds = 1200.f; // 20 real minutes = 1 game day
-    bDayNightCycleEnabled = true;
-    GlobalTemperatureModifier = 1.0f;
-    GlobalHumidityModifier = 1.0f;
-    CurrentWeather = EWeatherType::Clear;
-    WeatherTransitionProgress = 0.f;
-    bIsTransitioningWeather = false;
+    // Default environmental parameters
+    CurrentTemperatureCelsius = 28.0f;
+    CurrentHumidityPercent = 65.0f;
+    CurrentWindSpeedKmh = 15.0f;
+    CurrentVisibilityMeters = 1000.0f;
+    bIsRaining = false;
+    RainIntensity = 0.0f;
 
-    bReplicates = true;
+    // Survival impact defaults
+    TemperatureHeatStressThreshold = 38.0f;
+    TemperatureColdStressThreshold = 10.0f;
+    HumidityDehydrationModifier = 1.0f;
 }
+
+// ============================================================
+// Lifecycle
+// ============================================================
 
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Discover all BiomeZones in the world
-    TArray<AActor*> FoundZones;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ABiomeZone::StaticClass(), FoundZones);
-    for (AActor* ZoneActor : FoundZones)
-    {
-        if (ABiomeZone* Zone = Cast<ABiomeZone>(ZoneActor))
-        {
-            RegisteredBiomeZones.Add(Zone);
-        }
-    }
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Discovered %d biome zones"), RegisteredBiomeZones.Num());
-
-    // Start weather update timer
-    GetWorldTimerManager().SetTimer(
-        WeatherUpdateTimer,
-        this,
-        &ABiomeManager::UpdateWeather,
-        60.f,
-        true
-    );
+    InitializeBiomeMap();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with seed %d, world size %.1f km²"), BiomeSeed, WorldSizeKm * WorldSizeKm);
 }
 
 void ABiomeManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bDayNightCycleEnabled)
+    // Update biome transitions
+    if (bBiomeTransitionActive)
     {
-        AdvanceTimeOfDay(DeltaTime);
-    }
-
-    if (bIsTransitioningWeather)
-    {
-        WeatherTransitionProgress += DeltaTime / 30.f; // 30s transition
-        if (WeatherTransitionProgress >= 1.f)
+        TransitionBlendAlpha = FMath::Clamp(TransitionBlendAlpha + DeltaTime * 0.1f, 0.0f, 1.0f);
+        if (TransitionBlendAlpha >= 1.0f)
         {
-            WeatherTransitionProgress = 1.f;
-            bIsTransitioningWeather = false;
-            CurrentWeather = TargetWeather;
+            bBiomeTransitionActive = false;
+            CurrentBiomeType = TargetBiomeType;
+            OnBiomeTransitionComplete(CurrentBiomeType);
         }
     }
+
+    // Update environmental simulation
+    UpdateEnvironmentalParameters(DeltaTime);
 }
 
-void ABiomeManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+// ============================================================
+// Biome Initialization
+// ============================================================
+
+void ABiomeManager::InitializeBiomeMap()
 {
-    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(ABiomeManager, CurrentTimeOfDay);
-    DOREPLIFETIME(ABiomeManager, CurrentWeather);
-    DOREPLIFETIME(ABiomeManager, WeatherTransitionProgress);
+    // Define the 6 core biomes for the Cretaceous world
+    // Each biome has distinct survival parameters
+
+    FBiomeData GrasslandBiome;
+    GrasslandBiome.BiomeType = EBiomeType::Grassland;
+    GrasslandBiome.DisplayName = FText::FromString(TEXT("Cretaceous Grassland"));
+    GrasslandBiome.BaseTemperature = 28.0f;
+    GrasslandBiome.BaseHumidity = 60.0f;
+    GrasslandBiome.BaseWindSpeed = 20.0f;
+    GrasslandBiome.FoliageDensity = 0.4f;
+    GrasslandBiome.DinosaurDensityMultiplier = 1.0f;
+    GrasslandBiome.PlayerMovementSpeedModifier = 1.0f;
+    GrasslandBiome.bAllowsFireCrafting = true;
+    GrasslandBiome.ResourceTypes = { TEXT("Flint"), TEXT("Grass"), TEXT("Berries") };
+    BiomeDataMap.Add(EBiomeType::Grassland, GrasslandBiome);
+
+    FBiomeData ForestBiome;
+    ForestBiome.BiomeType = EBiomeType::Forest;
+    ForestBiome.DisplayName = FText::FromString(TEXT("Cretaceous Forest"));
+    ForestBiome.BaseTemperature = 24.0f;
+    ForestBiome.BaseHumidity = 80.0f;
+    ForestBiome.BaseWindSpeed = 5.0f;
+    ForestBiome.FoliageDensity = 0.9f;
+    ForestBiome.DinosaurDensityMultiplier = 1.5f;
+    ForestBiome.PlayerMovementSpeedModifier = 0.75f; // Dense foliage slows movement
+    ForestBiome.bAllowsFireCrafting = true;
+    ForestBiome.ResourceTypes = { TEXT("Wood"), TEXT("Mushrooms"), TEXT("Vines"), TEXT("Insects") };
+    BiomeDataMap.Add(EBiomeType::Forest, ForestBiome);
+
+    FBiomeData SwampBiome;
+    SwampBiome.BiomeType = EBiomeType::Swamp;
+    SwampBiome.DisplayName = FText::FromString(TEXT("Cretaceous Swamp"));
+    SwampBiome.BaseTemperature = 32.0f;
+    SwampBiome.BaseHumidity = 95.0f;
+    SwampBiome.BaseWindSpeed = 3.0f;
+    SwampBiome.FoliageDensity = 0.7f;
+    SwampBiome.DinosaurDensityMultiplier = 2.0f; // Dangerous zone
+    SwampBiome.PlayerMovementSpeedModifier = 0.5f; // Mud severely slows movement
+    SwampBiome.bAllowsFireCrafting = false; // Too wet
+    SwampBiome.ResourceTypes = { TEXT("Clay"), TEXT("Reeds"), TEXT("Fish"), TEXT("Mud") };
+    BiomeDataMap.Add(EBiomeType::Swamp, SwampBiome);
+
+    FBiomeData DesertBiome;
+    DesertBiome.BiomeType = EBiomeType::Desert;
+    DesertBiome.DisplayName = FText::FromString(TEXT("Cretaceous Desert"));
+    DesertBiome.BaseTemperature = 42.0f;
+    DesertBiome.BaseHumidity = 15.0f;
+    DesertBiome.BaseWindSpeed = 35.0f;
+    DesertBiome.FoliageDensity = 0.05f;
+    DesertBiome.DinosaurDensityMultiplier = 0.3f; // Sparse life
+    DesertBiome.PlayerMovementSpeedModifier = 0.9f;
+    DesertBiome.bAllowsFireCrafting = true;
+    DesertBiome.ResourceTypes = { TEXT("Sandstone"), TEXT("Bones"), TEXT("Cactus") };
+    BiomeDataMap.Add(EBiomeType::Desert, DesertBiome);
+
+    FBiomeData VolcanicBiome;
+    VolcanicBiome.BiomeType = EBiomeType::Volcanic;
+    VolcanicBiome.DisplayName = FText::FromString(TEXT("Volcanic Badlands"));
+    VolcanicBiome.BaseTemperature = 55.0f;
+    VolcanicBiome.BaseHumidity = 20.0f;
+    VolcanicBiome.BaseWindSpeed = 40.0f;
+    VolcanicBiome.FoliageDensity = 0.02f;
+    VolcanicBiome.DinosaurDensityMultiplier = 0.1f; // Almost no life
+    VolcanicBiome.PlayerMovementSpeedModifier = 0.8f;
+    VolcanicBiome.bAllowsFireCrafting = true;
+    VolcanicBiome.ResourceTypes = { TEXT("Obsidian"), TEXT("Sulfur"), TEXT("Basalt") };
+    BiomeDataMap.Add(EBiomeType::Volcanic, VolcanicBiome);
+
+    FBiomeData RiverbankBiome;
+    RiverbankBiome.BiomeType = EBiomeType::Riverbank;
+    RiverbankBiome.DisplayName = FText::FromString(TEXT("Cretaceous Riverbank"));
+    RiverbankBiome.BaseTemperature = 26.0f;
+    RiverbankBiome.BaseHumidity = 75.0f;
+    RiverbankBiome.BaseWindSpeed = 10.0f;
+    RiverbankBiome.FoliageDensity = 0.6f;
+    RiverbankBiome.DinosaurDensityMultiplier = 1.8f; // Water attracts dinosaurs
+    RiverbankBiome.PlayerMovementSpeedModifier = 0.85f;
+    RiverbankBiome.bAllowsFireCrafting = true;
+    RiverbankBiome.ResourceTypes = { TEXT("Fish"), TEXT("Water"), TEXT("Clay"), TEXT("Reeds"), TEXT("Flint") };
+    BiomeDataMap.Add(EBiomeType::Riverbank, RiverbankBiome);
+
+    // Set initial biome
+    if (BiomeDataMap.Contains(CurrentBiomeType))
+    {
+        ApplyBiomeParameters(BiomeDataMap[CurrentBiomeType]);
+    }
 }
+
+// ============================================================
+// Biome Query
+// ============================================================
 
 EBiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    ABiomeZone* DominantZone = GetDominantBiomeZone(WorldLocation);
-    if (DominantZone)
-    {
-        return DominantZone->BiomeType;
-    }
-    return EBiomeType::Plains; // Default biome
+    // Simplified biome determination based on world position
+    // In full implementation this would sample a biome noise map
+    float X = WorldLocation.X / 100.0f; // Convert cm to meters
+    float Y = WorldLocation.Y / 100.0f;
+
+    // Use distance from origin and angle to determine biome zones
+    float Distance = FMath::Sqrt(X * X + Y * Y);
+    float Angle = FMath::Atan2(Y, X) * (180.0f / PI);
+
+    // Zone assignment based on distance rings and angular sectors
+    if (Distance < 500.0f) return EBiomeType::Grassland;       // Center: grassland
+    if (Distance < 1000.0f && Angle > 0.0f) return EBiomeType::Forest;     // NE: forest
+    if (Distance < 1000.0f && Angle <= 0.0f) return EBiomeType::Riverbank; // SE: riverbank
+    if (Distance < 1500.0f && Angle > 90.0f) return EBiomeType::Swamp;     // NW: swamp
+    if (Distance < 1500.0f && Angle < -90.0f) return EBiomeType::Desert;   // SW: desert
+    return EBiomeType::Volcanic; // Outer ring: volcanic badlands
+
 }
 
-ABiomeZone* ABiomeManager::GetDominantBiomeZone(const FVector& WorldLocation) const
+FBiomeData ABiomeManager::GetBiomeData(EBiomeType BiomeType) const
 {
-    ABiomeZone* BestZone = nullptr;
-    float BestWeight = 0.f;
-
-    for (ABiomeZone* Zone : RegisteredBiomeZones)
+    if (BiomeDataMap.Contains(BiomeType))
     {
-        if (!Zone) continue;
-        float Weight = Zone->GetBlendWeight(WorldLocation);
-        if (Weight > BestWeight)
-        {
-            BestWeight = Weight;
-            BestZone = Zone;
-        }
+        return BiomeDataMap[BiomeType];
     }
-    return BestZone;
+    return FBiomeData(); // Return default empty struct
 }
 
-TArray<ABiomeZone*> ABiomeManager::GetBiomeZonesAtLocation(const FVector& WorldLocation) const
+float ABiomeManager::GetPlayerSurvivalModifier(const FVector& PlayerLocation) const
 {
-    TArray<ABiomeZone*> Result;
-    for (ABiomeZone* Zone : RegisteredBiomeZones)
-    {
-        if (Zone && Zone->IsLocationInZone(WorldLocation))
-        {
-            Result.Add(Zone);
-        }
-    }
-    return Result;
-}
+    EBiomeType BiomeAtLocation = GetBiomeAtLocation(PlayerLocation);
+    if (!BiomeDataMap.Contains(BiomeAtLocation)) return 1.0f;
 
-float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
-{
-    ABiomeZone* Zone = GetDominantBiomeZone(WorldLocation);
-    float BaseTemp = 25.f;
-    if (Zone && Zone->BiomeData)
+    const FBiomeData& Data = BiomeDataMap[BiomeAtLocation];
+
+    // Calculate composite survival modifier
+    float ThermalStress = 1.0f;
+    if (Data.BaseTemperature > TemperatureHeatStressThreshold)
     {
-        BaseTemp = Zone->BiomeData->AmbientTemperature;
+        ThermalStress = 1.0f + (Data.BaseTemperature - TemperatureHeatStressThreshold) * 0.05f;
+    }
+    else if (Data.BaseTemperature < TemperatureColdStressThreshold)
+    {
+        ThermalStress = 1.0f + (TemperatureColdStressThreshold - Data.BaseTemperature) * 0.03f;
     }
 
-    // Apply time-of-day temperature variation
-    float TimeNormalized = CurrentTimeOfDay / 24.f;
-    float TempVariation = FMath::Sin(TimeNormalized * PI * 2.f - PI * 0.5f) * 10.f;
+    float HumidityStress = 1.0f + FMath::Abs(Data.BaseHumidity - 50.0f) * 0.005f;
 
-    return (BaseTemp + TempVariation) * GlobalTemperatureModifier;
+    return ThermalStress * HumidityStress;
 }
 
-float ABiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+// ============================================================
+// Biome Transition
+// ============================================================
+
+void ABiomeManager::TriggerBiomeTransition(EBiomeType NewBiome)
 {
-    ABiomeZone* Zone = GetDominantBiomeZone(WorldLocation);
-    float BaseHumidity = 0.5f;
-    if (Zone && Zone->BiomeData)
+    if (NewBiome == CurrentBiomeType) return;
+
+    TargetBiomeType = NewBiome;
+    bBiomeTransitionActive = true;
+    TransitionBlendAlpha = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transitioning from %d to %d"),
+        (int32)CurrentBiomeType, (int32)NewBiome);
+}
+
+void ABiomeManager::OnBiomeTransitionComplete(EBiomeType NewBiome)
+{
+    if (BiomeDataMap.Contains(NewBiome))
     {
-        BaseHumidity = Zone->BiomeData->Humidity;
+        ApplyBiomeParameters(BiomeDataMap[NewBiome]);
     }
 
-    // Rain increases humidity
-    if (CurrentWeather == EWeatherType::Rain || CurrentWeather == EWeatherType::Storm)
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transition complete — now in biome %d"), (int32)NewBiome);
+    OnBiomeChanged.Broadcast(NewBiome);
+}
+
+void ABiomeManager::ApplyBiomeParameters(const FBiomeData& BiomeData)
+{
+    CurrentTemperatureCelsius = BiomeData.BaseTemperature;
+    CurrentHumidityPercent = BiomeData.BaseHumidity;
+    CurrentWindSpeedKmh = BiomeData.BaseWindSpeed;
+}
+
+// ============================================================
+// Environmental Simulation
+// ============================================================
+
+void ABiomeManager::UpdateEnvironmentalParameters(float DeltaTime)
+{
+    // Gentle drift simulation — parameters fluctuate slightly over time
+    float TimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    // Temperature oscillation (simulates day/night cycle influence)
+    float TempVariation = FMath::Sin(TimeSeconds * 0.01f) * 3.0f;
+    CurrentTemperatureCelsius = FMath::Clamp(
+        CurrentTemperatureCelsius + TempVariation * DeltaTime * 0.1f,
+        -10.0f, 60.0f
+    );
+
+    // Wind variation
+    float WindVariation = FMath::Sin(TimeSeconds * 0.05f + 1.5f) * 5.0f;
+    CurrentWindSpeedKmh = FMath::Clamp(
+        CurrentWindSpeedKmh + WindVariation * DeltaTime * 0.1f,
+        0.0f, 80.0f
+    );
+}
+
+// ============================================================
+// Resource Query
+// ============================================================
+
+TArray<FString> ABiomeManager::GetAvailableResourcesAtLocation(const FVector& WorldLocation) const
+{
+    EBiomeType BiomeAtLocation = GetBiomeAtLocation(WorldLocation);
+    if (BiomeDataMap.Contains(BiomeAtLocation))
     {
-        BaseHumidity = FMath::Min(1.f, BaseHumidity + 0.3f);
+        return BiomeDataMap[BiomeAtLocation].ResourceTypes;
     }
-
-    return BaseHumidity * GlobalHumidityModifier;
+    return TArray<FString>();
 }
 
-void ABiomeManager::SetWeather(EWeatherType NewWeather, bool bImmediate)
+bool ABiomeManager::CanCraftFireAtLocation(const FVector& WorldLocation) const
 {
-    if (CurrentWeather == NewWeather) return;
-
-    TargetWeather = NewWeather;
-    if (bImmediate)
+    EBiomeType BiomeAtLocation = GetBiomeAtLocation(WorldLocation);
+    if (BiomeDataMap.Contains(BiomeAtLocation))
     {
-        CurrentWeather = NewWeather;
-        WeatherTransitionProgress = 1.f;
-        bIsTransitioningWeather = false;
+        return BiomeDataMap[BiomeAtLocation].bAllowsFireCrafting;
     }
-    else
-    {
-        WeatherTransitionProgress = 0.f;
-        bIsTransitioningWeather = true;
-    }
-    OnWeatherChanged(CurrentWeather, NewWeather);
-}
-
-void ABiomeManager::AdvanceTimeOfDay(float DeltaTime)
-{
-    float HoursPerSecond = 24.f / DayDurationSeconds;
-    CurrentTimeOfDay += HoursPerSecond * DeltaTime;
-    if (CurrentTimeOfDay >= 24.f)
-    {
-        CurrentTimeOfDay -= 24.f;
-        OnNewDay();
-    }
-}
-
-void ABiomeManager::UpdateWeather()
-{
-    if (bIsTransitioningWeather) return;
-
-    // Random weather transitions based on current weather
-    int32 Roll = FMath::RandRange(0, 9);
-    EWeatherType NewWeather = CurrentWeather;
-
-    switch (CurrentWeather)
-    {
-    case EWeatherType::Clear:
-        if (Roll < 2) NewWeather = EWeatherType::Cloudy;
-        break;
-    case EWeatherType::Cloudy:
-        if (Roll < 3) NewWeather = EWeatherType::Rain;
-        else if (Roll < 5) NewWeather = EWeatherType::Clear;
-        break;
-    case EWeatherType::Rain:
-        if (Roll < 2) NewWeather = EWeatherType::Storm;
-        else if (Roll < 4) NewWeather = EWeatherType::Cloudy;
-        break;
-    case EWeatherType::Storm:
-        if (Roll < 4) NewWeather = EWeatherType::Rain;
-        break;
-    case EWeatherType::Fog:
-        if (Roll < 5) NewWeather = EWeatherType::Clear;
-        break;
-    default:
-        break;
-    }
-
-    if (NewWeather != CurrentWeather)
-    {
-        SetWeather(NewWeather, false);
-    }
-}
-
-void ABiomeManager::OnWeatherChanged_Implementation(EWeatherType OldWeather, EWeatherType NewWeather)
-{
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather changed from %d to %d"), (int32)OldWeather, (int32)NewWeather);
-}
-
-void ABiomeManager::OnNewDay_Implementation()
-{
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: New day started. Time: %.1f"), CurrentTimeOfDay);
-}
-
-bool ABiomeManager::IsNightTime() const
-{
-    return CurrentTimeOfDay < 6.f || CurrentTimeOfDay > 20.f;
-}
-
-float ABiomeManager::GetDayProgress() const
-{
-    return CurrentTimeOfDay / 24.f;
-}
-
-FString ABiomeManager::GetTimeOfDayString() const
-{
-    int32 Hours = FMath::FloorToInt(CurrentTimeOfDay);
-    int32 Minutes = FMath::FloorToInt((CurrentTimeOfDay - Hours) * 60.f);
-    return FString::Printf(TEXT("%02d:%02d"), Hours, Minutes);
+    return false;
 }
