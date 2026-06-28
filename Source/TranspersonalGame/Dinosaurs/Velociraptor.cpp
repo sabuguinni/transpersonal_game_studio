@@ -1,214 +1,167 @@
-#include "Velociraptor.h"
+// Velociraptor.cpp — Velociraptor implementation
+// Agent #4 Performance Optimizer — Transpersonal Game Studio
+// Pack predator: coordinated hunting, leap attacks, flanking maneuvers
+
+#include "Dinosaurs/Velociraptor.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
-#include "TimerManager.h"
 
 AVelociraptor::AVelociraptor()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Species stats — fast, fragile pack hunter
-    // HP set via DinosaurBase properties
-    // Speed: 800 cm/s (~29 km/h sprint — realistic dromaeosaurid)
-    if (GetCharacterMovement())
+    // === SPECIES IDENTITY ===
+    // Species set via DinosaurBase properties (set in BeginPlay to avoid CDO issues)
+
+    // === PHYSICAL STATS ===
+    // Health/damage set in BeginPlay
+
+    // === CAPSULE — small, agile predator ===
+    UCapsuleComponent* Capsule = GetCapsuleComponent();
+    if (Capsule)
     {
-        GetCharacterMovement()->MaxWalkSpeed = 800.0f;
-        GetCharacterMovement()->MaxAcceleration = 2048.0f;
-        GetCharacterMovement()->BrakingDecelerationWalking = 1024.0f;
-        GetCharacterMovement()->RotationRate = FRotator(0.0f, 360.0f, 0.0f); // Agile turning
-        GetCharacterMovement()->bOrientRotationToMovement = true;
-        GetCharacterMovement()->JumpZVelocity = 600.0f; // Can leap
-        GetCharacterMovement()->AirControl = 0.3f;
+        Capsule->SetCapsuleHalfHeight(80.0f);
+        Capsule->SetCapsuleRadius(40.0f);
     }
 
-    // Pack leader by default — overridden when joining a pack
-    bIsPackLeader = true;
-    PackLeader = nullptr;
+    // === MOVEMENT — fast sprint, stealthy stalk ===
+    UCharacterMovementComponent* Movement = GetCharacterMovement();
+    if (Movement)
+    {
+        Movement->MaxWalkSpeed = 600.0f;
+        Movement->MaxAcceleration = 2400.0f;
+        Movement->JumpZVelocity = 700.0f;
+        Movement->AirControl = 0.4f;
+        Movement->bCanWalkOffLedges = true;
+    }
+
+    // === PACK BEHAVIOR ===
+    bIsPackLeader = false;
+    PackSize = 3;
+    PackCommunicationRadius = 3000.0f;
+
+    // === COMBAT ===
+    LeapAttackRange = 400.0f;
+    LeapAttackDamage = 65.0f;
+    LeapCooldown = 4.0f;
+    ClawSlashDamage = 45.0f;
+    bIsFlankingTarget = false;
+
+    // === MOVEMENT MODES ===
+    SprintSpeed = 1200.0f;
+    StalkSpeed = 150.0f;
+    bIsStalking = false;
+
+    // === INTELLIGENCE ===
+    FlankingAngleOffset = 90.0f;
+    bCanOpenDoors = false;
+    ProblemSolvingScore = 0.85f;
+
+    // === INTERNAL STATE ===
+    LeapCooldownTimer = 0.0f;
+    bLeapOnCooldown = false;
+    FlankingDestination = FVector::ZeroVector;
 }
 
 void AVelociraptor::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Scan for nearby pack members every 5 seconds
-    GetWorldTimerManager().SetTimer(
-        PackScanTimer,
-        this,
-        &AVelociraptor::ScanForPackMembers,
-        5.0f,
-        true,
-        1.0f
-    );
+    // Set species-specific stats after Super::BeginPlay
+    // (DinosaurBase properties initialized here to avoid CDO null issues)
+    MaxHealth = 350.0f;
+    CurrentHealth = MaxHealth;
+    AttackDamage = ClawSlashDamage;
+    bIsPackAnimal = true;
+    bIsAggressive = true;
+    DetectionRadius = 1800.0f;
+    AttackRange = 180.0f;
+    WalkSpeed = 400.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor::BeginPlay — %s initialized. PackLeader=%s, PackSize=%d"),
+        *GetName(),
+        bIsPackLeader ? TEXT("YES") : TEXT("NO"),
+        PackSize);
 }
 
 void AVelociraptor::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Decrement leap cooldown
-    if (LeapCooldownRemaining > 0.0f)
+    // Leap cooldown timer
+    if (bLeapOnCooldown)
     {
-        LeapCooldownRemaining -= DeltaTime;
-    }
-}
-
-void AVelociraptor::SetPackLeader(AVelociraptor* Leader)
-{
-    if (!Leader || Leader == this)
-    {
-        return;
-    }
-
-    PackLeader = Leader;
-    bIsPackLeader = false;
-
-    // Register with leader's pack
-    if (!Leader->PackMembers.Contains(this))
-    {
-        Leader->PackMembers.Add(this);
-    }
-}
-
-void AVelociraptor::ScanForPackMembers()
-{
-    if (!bIsPackLeader)
-    {
-        return; // Only leader manages pack
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Find nearby Velociraptors within pack radius
-    TArray<FOverlapResult> Overlaps;
-    FCollisionShape Sphere = FCollisionShape::MakeSphere(PackDetectionRadius);
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
-
-    World->OverlapMultiByChannel(
-        Overlaps,
-        GetActorLocation(),
-        FQuat::Identity,
-        ECC_Pawn,
-        Sphere,
-        Params
-    );
-
-    PackMembers.Empty();
-    for (const FOverlapResult& Overlap : Overlaps)
-    {
-        AVelociraptor* OtherRaptor = Cast<AVelociraptor>(Overlap.GetActor());
-        if (OtherRaptor && OtherRaptor != this)
+        LeapCooldownTimer -= DeltaTime;
+        if (LeapCooldownTimer <= 0.0f)
         {
-            PackMembers.AddUnique(OtherRaptor);
-            OtherRaptor->SetPackLeader(this);
+            bLeapOnCooldown = false;
+            LeapCooldownTimer = 0.0f;
         }
     }
 
-    if (PackMembers.Num() > 0)
+    // Pack coordination update (only leader coordinates)
+    if (bIsPackLeader && PackMembers.Num() > 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("Velociraptor pack: %s leading %d members"),
-            *GetName(), PackMembers.Num());
+        UpdatePackCoordination(DeltaTime);
     }
 }
 
-void AVelociraptor::CallPackToHunt(AActor* Target)
-{
-    if (!Target || !bIsPackLeader)
-    {
-        return;
-    }
+// === PACK BEHAVIOR ===
 
-    // Signal all pack members to hunt the same target
+void AVelociraptor::SignalPackToAttack(AActor* Target)
+{
+    if (!Target) return;
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Signaling pack to attack %s"),
+        *GetName(), *Target->GetName());
+
+    // Signal all pack members to engage the same target
     for (AVelociraptor* Member : PackMembers)
     {
-        if (Member && IsValid(Member))
+        if (Member && Member != this && !Member->IsPendingKill())
         {
-            Member->ExecuteFlankingManeuver(Target);
+            // Assign flanking positions at different angles
+            float AngleOffset = FMath::RandRange(45.0f, 135.0f);
+            Member->BeginFlankingManeuver(Target, AngleOffset);
         }
     }
 
-    // Leader attacks from front
+    // Leader attacks directly
     PerformLeapAttack(Target);
 }
 
-void AVelociraptor::ExecuteFlankingManeuver(AActor* Target)
+void AVelociraptor::JoinPack(AVelociraptor* PackLeader)
 {
-    if (!Target)
-    {
-        return;
-    }
+    if (!PackLeader || PackLeader == this) return;
 
-    // Calculate flanking position offset from target
-    // Each pack member takes a different angle based on their index
-    int32 MemberIndex = 0;
-    if (PackLeader)
-    {
-        MemberIndex = PackLeader->PackMembers.IndexOfByKey(this);
-    }
+    bIsPackLeader = false;
+    PackLeader->PackMembers.AddUnique(this);
 
-    float AngleOffset = FlankingAngle * MemberIndex;
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector DirectionToTarget = (TargetLocation - GetActorLocation()).GetSafeNormal();
-
-    // Rotate direction by flank angle
-    FRotator FlankRotation(0.0f, AngleOffset, 0.0f);
-    FVector FlankDirection = FlankRotation.RotateVector(DirectionToTarget);
-    FVector FlankPosition = TargetLocation - (FlankDirection * 300.0f); // 3m from target
-
-    // Move to flanking position then attack
-    CoordinateFlankPosition(Target);
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Joined pack led by %s"),
+        *GetName(), *PackLeader->GetName());
 }
 
-void AVelociraptor::CoordinateFlankPosition(AActor* Target)
+void AVelociraptor::LeavePackFormation()
 {
-    if (!Target)
-    {
-        return;
-    }
+    bIsFlankingTarget = false;
+    FlankingDestination = FVector::ZeroVector;
 
-    // Once in range, perform leap attack
-    float DistToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-    if (DistToTarget <= LeapAttackRange)
-    {
-        PerformLeapAttack(Target);
-    }
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Left pack formation"), *GetName());
 }
+
+// === COMBAT ===
 
 void AVelociraptor::PerformLeapAttack(AActor* Target)
 {
-    if (!Target || LeapCooldownRemaining > 0.0f)
-    {
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
+    if (!Target || bLeapOnCooldown) return;
 
     float DistToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-    if (DistToTarget > LeapAttackRange * 1.5f)
-    {
-        return; // Out of leap range
-    }
+    if (DistToTarget > LeapAttackRange) return;
 
-    // Apply leap impulse toward target
-    FVector LeapDirection = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    FVector LeapVelocity = LeapDirection * 900.0f + FVector(0.0f, 0.0f, 400.0f);
-
-    if (GetCharacterMovement())
-    {
-        GetCharacterMovement()->Launch(LeapVelocity);
-    }
-
-    // Apply damage
+    // Apply leap damage
     UGameplayStatics::ApplyDamage(
         Target,
         LeapAttackDamage,
@@ -217,9 +170,155 @@ void AVelociraptor::PerformLeapAttack(AActor* Target)
         UDamageType::StaticClass()
     );
 
-    // Set cooldown
-    LeapCooldownRemaining = LeapAttackCooldown;
+    // Launch toward target
+    FVector LaunchDir = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+    LaunchDir.Z = 0.5f; // Arc upward
+    LaunchCharacter(LaunchDir * 800.0f, true, true);
 
-    UE_LOG(LogTemp, Log, TEXT("Velociraptor %s performed leap attack on %s for %.1f damage"),
+    // Start cooldown
+    bLeapOnCooldown = true;
+    LeapCooldownTimer = LeapCooldown;
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Leap attack on %s — %.0f damage"),
         *GetName(), *Target->GetName(), LeapAttackDamage);
+}
+
+void AVelociraptor::PerformClawSlash(AActor* Target)
+{
+    if (!Target) return;
+
+    float DistToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+    if (DistToTarget > AttackRange) return;
+
+    UGameplayStatics::ApplyDamage(
+        Target,
+        ClawSlashDamage,
+        GetController(),
+        this,
+        UDamageType::StaticClass()
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Claw slash on %s — %.0f damage"),
+        *GetName(), *Target->GetName(), ClawSlashDamage);
+}
+
+void AVelociraptor::BeginFlankingManeuver(AActor* Target, float AngleOffset)
+{
+    if (!Target) return;
+
+    bIsFlankingTarget = true;
+    FlankingAngleOffset = AngleOffset;
+    CalculateFlankingPosition(Target);
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Flanking at %.0f deg offset"),
+        *GetName(), AngleOffset);
+}
+
+// === MOVEMENT MODES ===
+
+void AVelociraptor::EnterStalkMode()
+{
+    bIsStalking = true;
+
+    UCharacterMovementComponent* Movement = GetCharacterMovement();
+    if (Movement)
+    {
+        Movement->MaxWalkSpeed = StalkSpeed;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Entered stalk mode (%.0f cm/s)"),
+        *GetName(), StalkSpeed);
+}
+
+void AVelociraptor::ExitStalkMode()
+{
+    bIsStalking = false;
+
+    UCharacterMovementComponent* Movement = GetCharacterMovement();
+    if (Movement)
+    {
+        Movement->MaxWalkSpeed = SprintSpeed;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Exited stalk mode — sprint %.0f cm/s"),
+        *GetName(), SprintSpeed);
+}
+
+// === OVERRIDES ===
+
+void AVelociraptor::OnTargetDetected(AActor* Target)
+{
+    if (!Target) return;
+
+    Super::OnTargetDetected(Target);
+
+    // Pack leader coordinates the hunt
+    if (bIsPackLeader && PackMembers.Num() > 0)
+    {
+        // Enter stalk mode first, then signal pack
+        EnterStalkMode();
+
+        UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Pack leader detected target %s — initiating coordinated hunt"),
+            *GetName(), *Target->GetName());
+
+        // After brief stalk delay, signal pack (would use timer in full implementation)
+        SignalPackToAttack(Target);
+    }
+    else
+    {
+        // Solo raptor — leap attack directly
+        PerformLeapAttack(Target);
+    }
+}
+
+void AVelociraptor::OnDeath()
+{
+    Super::OnDeath();
+
+    // Notify pack members of death
+    for (AVelociraptor* Member : PackMembers)
+    {
+        if (Member && !Member->IsPendingKill())
+        {
+            Member->PackMembers.Remove(this);
+            // If leader died, first member becomes new leader
+            if (bIsPackLeader && Member->PackMembers.Num() > 0)
+            {
+                Member->bIsPackLeader = true;
+                UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Promoted to pack leader after leader death"),
+                    *Member->GetName());
+                break;
+            }
+        }
+    }
+
+    PackMembers.Empty();
+
+    UE_LOG(LogTemp, Log, TEXT("AVelociraptor [%s]: Died. Pack disbanded/reassigned."), *GetName());
+}
+
+// === PRIVATE HELPERS ===
+
+void AVelociraptor::UpdatePackCoordination(float DeltaTime)
+{
+    // Remove dead/invalid pack members
+    PackMembers.RemoveAll([](AVelociraptor* M) {
+        return !M || M->IsPendingKill();
+    });
+}
+
+void AVelociraptor::CalculateFlankingPosition(AActor* Target)
+{
+    if (!Target) return;
+
+    FVector TargetLoc = Target->GetActorLocation();
+    FVector ToTarget = (TargetLoc - GetActorLocation()).GetSafeNormal();
+
+    // Rotate direction by flanking angle
+    FRotator FlankRot(0.0f, FlankingAngleOffset, 0.0f);
+    FVector FlankDir = FlankRot.RotateVector(ToTarget);
+
+    // Position 300cm from target at flanking angle
+    FlankingDestination = TargetLoc + FlankDir * (-300.0f);
+    FlankingDestination.Z = TargetLoc.Z;
 }
