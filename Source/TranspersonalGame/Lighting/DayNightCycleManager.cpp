@@ -1,71 +1,57 @@
 #include "DayNightCycleManager.h"
-#include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
+#include "EngineUtils.h"
 
 ADayNightCycleManager::ADayNightCycleManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10x per second for smooth transitions
 
-    // Default: start at 8:00 AM (morning)
-    CurrentTimeOfDay = 8.0f;
-    TimeScale = 60.0f; // 1 real minute = 1 game hour
-    bCycleActive = true;
-
-    CurrentTimeOfDayEnum = ELight_TimeOfDay::Morning;
-    PreviousTimeOfDayEnum = ELight_TimeOfDay::Morning;
-    TimeSinceLastSunriseCheck = 0.0f;
-
-    // Dawn preset — warm pink/orange, low sun
-    DawnSettings.SunColor = FLinearColor(1.0f, 0.55f, 0.3f, 1.0f);
+    // Dawn preset — warm pink-orange at horizon
+    DawnSettings.SunColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f);
     DawnSettings.SunIntensity = 3.0f;
     DawnSettings.SunPitchAngle = -5.0f;
-    DawnSettings.FogColor = FLinearColor(0.9f, 0.6f, 0.5f, 1.0f);
-    DawnSettings.FogDensity = 0.04f;
-    DawnSettings.AmbientIntensity = 0.5f;
+    DawnSettings.FogColor = FLinearColor(0.8f, 0.5f, 0.4f, 1.0f);
+    DawnSettings.FogDensity = 0.08f;
+    DawnSettings.SkyLightIntensity = 0.8f;
+    DawnSettings.AmbientTemperature = 18.0f;
 
-    // Midday preset — bright white/yellow, high sun
-    MiddaySettings.SunColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
-    MiddaySettings.SunIntensity = 10.0f;
-    MiddaySettings.SunPitchAngle = -75.0f;
-    MiddaySettings.FogColor = FLinearColor(0.78f, 0.85f, 0.92f, 1.0f);
-    MiddaySettings.FogDensity = 0.01f;
-    MiddaySettings.AmbientIntensity = 1.5f;
+    // Midday preset — bright white-yellow
+    MiddaySettings.SunColor = FLinearColor(1.0f, 0.98f, 0.9f, 1.0f);
+    MiddaySettings.SunIntensity = 12.0f;
+    MiddaySettings.SunPitchAngle = -80.0f;
+    MiddaySettings.FogColor = FLinearColor(0.5f, 0.7f, 1.0f, 1.0f);
+    MiddaySettings.FogDensity = 0.02f;
+    MiddaySettings.SkyLightIntensity = 2.5f;
+    MiddaySettings.AmbientTemperature = 32.0f;
 
-    // Dusk preset — deep amber/orange, low sun
-    DuskSettings.SunColor = FLinearColor(1.0f, 0.45f, 0.15f, 1.0f);
+    // Dusk preset — deep orange-red
+    DuskSettings.SunColor = FLinearColor(1.0f, 0.4f, 0.1f, 1.0f);
     DuskSettings.SunIntensity = 4.0f;
     DuskSettings.SunPitchAngle = -8.0f;
-    DuskSettings.FogColor = FLinearColor(0.85f, 0.5f, 0.3f, 1.0f);
-    DuskSettings.FogDensity = 0.05f;
-    DuskSettings.AmbientIntensity = 0.4f;
+    DuskSettings.FogColor = FLinearColor(0.9f, 0.4f, 0.2f, 1.0f);
+    DuskSettings.FogDensity = 0.1f;
+    DuskSettings.SkyLightIntensity = 0.6f;
+    DuskSettings.AmbientTemperature = 25.0f;
 
-    // Night preset — deep blue/indigo, moon light
-    NightSettings.SunColor = FLinearColor(0.15f, 0.2f, 0.45f, 1.0f);
+    // Night preset — deep blue moonlight
+    NightSettings.SunColor = FLinearColor(0.1f, 0.15f, 0.4f, 1.0f);
     NightSettings.SunIntensity = 0.5f;
-    NightSettings.SunPitchAngle = -180.0f;
-    NightSettings.FogColor = FLinearColor(0.05f, 0.05f, 0.15f, 1.0f);
-    NightSettings.FogDensity = 0.03f;
-    NightSettings.AmbientIntensity = 0.1f;
+    NightSettings.SunPitchAngle = -45.0f; // Moon angle
+    NightSettings.FogColor = FLinearColor(0.05f, 0.08f, 0.2f, 1.0f);
+    NightSettings.FogDensity = 0.06f;
+    NightSettings.SkyLightIntensity = 0.3f;
+    NightSettings.AmbientTemperature = 14.0f;
 }
 
 void ADayNightCycleManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Auto-find sun light if not set
-    if (!SunLight)
-    {
-        TArray<AActor*> FoundLights;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), FoundLights);
-        if (FoundLights.Num() > 0)
-        {
-            SunLight = Cast<ADirectionalLight>(FoundLights[0]);
-        }
-    }
-
-    ApplyLightingForCurrentTime();
+    AutoFindLightingActors();
+    ApplyTimePreset(GetCurrentTimeOfDay());
 }
 
 void ADayNightCycleManager::Tick(float DeltaTime)
@@ -74,103 +60,154 @@ void ADayNightCycleManager::Tick(float DeltaTime)
 
     if (!bCycleActive) return;
 
-    UpdateSunPosition(DeltaTime);
-    UpdateLightingColors();
-
-    // Check for time of day transitions
-    ELight_TimeOfDay NewTOD = ClassifyTimeOfDay(CurrentTimeOfDay);
-    if (NewTOD != CurrentTimeOfDayEnum)
-    {
-        PreviousTimeOfDayEnum = CurrentTimeOfDayEnum;
-        CurrentTimeOfDayEnum = NewTOD;
-        OnTimeOfDayChanged(NewTOD);
-
-        // Fire sunrise/sunset events
-        if (NewTOD == ELight_TimeOfDay::Dawn)
-        {
-            OnSunrise();
-        }
-        else if (NewTOD == ELight_TimeOfDay::Dusk)
-        {
-            OnSunset();
-        }
-    }
-}
-
-void ADayNightCycleManager::UpdateSunPosition(float DeltaTime)
-{
     // Advance time
-    float HoursPerSecond = TimeScale / 3600.0f;
-    CurrentTimeOfDay += DeltaTime * HoursPerSecond;
-
-    // Wrap around 24 hours
-    if (CurrentTimeOfDay >= 24.0f)
+    float HoursPerSecond = TimeSpeedMultiplier / 3600.0f;
+    CurrentTimeHours += DeltaTime * HoursPerSecond;
+    if (CurrentTimeHours >= 24.0f)
     {
-        CurrentTimeOfDay -= 24.0f;
+        CurrentTimeHours -= 24.0f;
     }
 
-    if (!SunLight) return;
-
-    // Map 0-24h to sun pitch angle
-    // 6:00 = sunrise (pitch -5), 12:00 = noon (pitch -75), 18:00 = sunset (pitch -5), 0:00 = midnight (below horizon)
-    float NormalizedTime = CurrentTimeOfDay / 24.0f;
-    float SunAngle = NormalizedTime * 360.0f - 90.0f; // -90 at midnight, 90 at noon
-    float SunPitch = -FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 75.0f;
-
-    // Clamp: never go above -5 degrees (always casting downward shadows)
-    SunPitch = FMath::Clamp(SunPitch, -85.0f, -5.0f);
-
-    FRotator CurrentRot = SunLight->GetActorRotation();
-    SunLight->SetActorRotation(FRotator(SunPitch, CurrentRot.Yaw, CurrentRot.Roll));
+    UpdateLighting(DeltaTime);
 }
 
-void ADayNightCycleManager::UpdateLightingColors()
+void ADayNightCycleManager::AutoFindLightingActors()
 {
-    if (!SunLight) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    UDirectionalLightComponent* LightComp = SunLight->GetComponentByClass<UDirectionalLightComponent>();
-    if (!LightComp) return;
+    // Find DirectionalLight (sun)
+    if (!SunLight)
+    {
+        for (TActorIterator<ADirectionalLight> It(World); It; ++It)
+        {
+            SunLight = *It;
+            break;
+        }
+    }
 
-    // Determine which presets to blend between
+    // Find ExponentialHeightFog
+    if (!HeightFog)
+    {
+        for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
+        {
+            HeightFog = *It;
+            break;
+        }
+    }
+
+    // Find SkyLight
+    if (!SkyLightActor)
+    {
+        for (TActorIterator<ASkyLight> It(World); It; ++It)
+        {
+            SkyLightActor = *It;
+            break;
+        }
+    }
+}
+
+ELight_TimeOfDay ADayNightCycleManager::GetCurrentTimeOfDay() const
+{
+    if (CurrentTimeHours >= 5.0f && CurrentTimeHours < 7.0f)   return ELight_TimeOfDay::Dawn;
+    if (CurrentTimeHours >= 7.0f && CurrentTimeHours < 10.0f)  return ELight_TimeOfDay::Morning;
+    if (CurrentTimeHours >= 10.0f && CurrentTimeHours < 14.0f) return ELight_TimeOfDay::Midday;
+    if (CurrentTimeHours >= 14.0f && CurrentTimeHours < 17.0f) return ELight_TimeOfDay::Afternoon;
+    if (CurrentTimeHours >= 17.0f && CurrentTimeHours < 20.0f) return ELight_TimeOfDay::Dusk;
+    if (CurrentTimeHours >= 20.0f || CurrentTimeHours < 2.0f)  return ELight_TimeOfDay::Night;
+    return ELight_TimeOfDay::MidNight;
+}
+
+float ADayNightCycleManager::GetNormalizedTimeOfDay() const
+{
+    return CurrentTimeHours / 24.0f;
+}
+
+void ADayNightCycleManager::SetTimeOfDay(float NewHours)
+{
+    CurrentTimeHours = FMath::Clamp(NewHours, 0.0f, 24.0f);
+    ApplyTimePreset(GetCurrentTimeOfDay());
+}
+
+void ADayNightCycleManager::ApplyTimePreset(ELight_TimeOfDay TimeOfDay)
+{
+    switch (TimeOfDay)
+    {
+        case ELight_TimeOfDay::Dawn:
+        case ELight_TimeOfDay::Morning:
+            ApplySettings(DawnSettings);
+            break;
+        case ELight_TimeOfDay::Midday:
+        case ELight_TimeOfDay::Afternoon:
+            ApplySettings(MiddaySettings);
+            break;
+        case ELight_TimeOfDay::Dusk:
+            ApplySettings(DuskSettings);
+            break;
+        case ELight_TimeOfDay::Night:
+        case ELight_TimeOfDay::MidNight:
+            ApplySettings(NightSettings);
+            break;
+        default:
+            ApplySettings(MiddaySettings);
+            break;
+    }
+}
+
+float ADayNightCycleManager::GetAmbientTemperature() const
+{
+    ELight_TimeOfDay TOD = GetCurrentTimeOfDay();
+    switch (TOD)
+    {
+        case ELight_TimeOfDay::Dawn:    return DawnSettings.AmbientTemperature;
+        case ELight_TimeOfDay::Midday:  return MiddaySettings.AmbientTemperature;
+        case ELight_TimeOfDay::Dusk:    return DuskSettings.AmbientTemperature;
+        case ELight_TimeOfDay::Night:   return NightSettings.AmbientTemperature;
+        default:                        return MiddaySettings.AmbientTemperature;
+    }
+}
+
+void ADayNightCycleManager::UpdateLighting(float DeltaTime)
+{
+    // Determine blend between presets based on time
     FLight_TimeOfDaySettings TargetSettings;
 
-    if (CurrentTimeOfDay >= 5.0f && CurrentTimeOfDay < 8.0f)
+    if (CurrentTimeHours >= 5.0f && CurrentTimeHours < 10.0f)
     {
-        // Dawn to Morning
-        float Alpha = (CurrentTimeOfDay - 5.0f) / 3.0f;
-        TargetSettings = InterpolateSettings(DawnSettings, MiddaySettings, Alpha * 0.5f);
+        float Alpha = (CurrentTimeHours - 5.0f) / 5.0f;
+        TargetSettings = InterpolateSettings(DawnSettings, MiddaySettings, Alpha);
     }
-    else if (CurrentTimeOfDay >= 8.0f && CurrentTimeOfDay < 16.0f)
+    else if (CurrentTimeHours >= 10.0f && CurrentTimeHours < 17.0f)
     {
-        // Morning to Afternoon
-        float Alpha = (CurrentTimeOfDay - 8.0f) / 8.0f;
-        TargetSettings = InterpolateSettings(MiddaySettings, DuskSettings, Alpha * 0.3f);
+        TargetSettings = MiddaySettings;
     }
-    else if (CurrentTimeOfDay >= 16.0f && CurrentTimeOfDay < 20.0f)
+    else if (CurrentTimeHours >= 17.0f && CurrentTimeHours < 20.0f)
     {
-        // Afternoon to Night
-        float Alpha = (CurrentTimeOfDay - 16.0f) / 4.0f;
+        float Alpha = (CurrentTimeHours - 17.0f) / 3.0f;
+        TargetSettings = InterpolateSettings(MiddaySettings, DuskSettings, Alpha);
+    }
+    else if (CurrentTimeHours >= 20.0f && CurrentTimeHours < 22.0f)
+    {
+        float Alpha = (CurrentTimeHours - 20.0f) / 2.0f;
         TargetSettings = InterpolateSettings(DuskSettings, NightSettings, Alpha);
     }
     else
     {
-        // Night
         TargetSettings = NightSettings;
     }
 
-    LightComp->SetIntensity(TargetSettings.SunIntensity);
-    LightComp->SetLightColor(TargetSettings.SunColor);
-}
+    // Compute sun yaw from time (full 360 over 24h)
+    float SunYaw = (CurrentTimeHours / 24.0f) * 360.0f;
+    TargetSettings.SunPitchAngle = FMath::Clamp(TargetSettings.SunPitchAngle, -85.0f, -5.0f);
 
-ELight_TimeOfDay ADayNightCycleManager::ClassifyTimeOfDay(float TimeHours) const
-{
-    if (TimeHours >= 5.0f && TimeHours < 7.0f)   return ELight_TimeOfDay::Dawn;
-    if (TimeHours >= 7.0f && TimeHours < 11.0f)  return ELight_TimeOfDay::Morning;
-    if (TimeHours >= 11.0f && TimeHours < 14.0f) return ELight_TimeOfDay::Midday;
-    if (TimeHours >= 14.0f && TimeHours < 17.0f) return ELight_TimeOfDay::Afternoon;
-    if (TimeHours >= 17.0f && TimeHours < 20.0f) return ELight_TimeOfDay::Dusk;
-    if (TimeHours >= 20.0f && TimeHours < 23.0f) return ELight_TimeOfDay::Night;
-    return ELight_TimeOfDay::Midnight;
+    ApplySettings(TargetSettings);
+
+    // Update sun rotation
+    if (SunLight)
+    {
+        FRotator NewRot(TargetSettings.SunPitchAngle, SunYaw, 0.0f);
+        SunLight->SetActorRotation(NewRot);
+    }
 }
 
 FLight_TimeOfDaySettings ADayNightCycleManager::InterpolateSettings(
@@ -179,33 +216,57 @@ FLight_TimeOfDaySettings ADayNightCycleManager::InterpolateSettings(
     float Alpha) const
 {
     FLight_TimeOfDaySettings Result;
-    Result.SunColor = FMath::Lerp(A.SunColor, B.SunColor, Alpha);
+    Result.SunColor = FLinearColor(
+        FMath::Lerp(A.SunColor.R, B.SunColor.R, Alpha),
+        FMath::Lerp(A.SunColor.G, B.SunColor.G, Alpha),
+        FMath::Lerp(A.SunColor.B, B.SunColor.B, Alpha),
+        1.0f
+    );
     Result.SunIntensity = FMath::Lerp(A.SunIntensity, B.SunIntensity, Alpha);
     Result.SunPitchAngle = FMath::Lerp(A.SunPitchAngle, B.SunPitchAngle, Alpha);
-    Result.FogColor = FMath::Lerp(A.FogColor, B.FogColor, Alpha);
+    Result.FogColor = FLinearColor(
+        FMath::Lerp(A.FogColor.R, B.FogColor.R, Alpha),
+        FMath::Lerp(A.FogColor.G, B.FogColor.G, Alpha),
+        FMath::Lerp(A.FogColor.B, B.FogColor.B, Alpha),
+        1.0f
+    );
     Result.FogDensity = FMath::Lerp(A.FogDensity, B.FogDensity, Alpha);
-    Result.AmbientIntensity = FMath::Lerp(A.AmbientIntensity, B.AmbientIntensity, Alpha);
+    Result.SkyLightIntensity = FMath::Lerp(A.SkyLightIntensity, B.SkyLightIntensity, Alpha);
+    Result.AmbientTemperature = FMath::Lerp(A.AmbientTemperature, B.AmbientTemperature, Alpha);
     return Result;
 }
 
-void ADayNightCycleManager::SetTimeOfDay(float NewTime)
+void ADayNightCycleManager::ApplySettings(const FLight_TimeOfDaySettings& Settings)
 {
-    CurrentTimeOfDay = FMath::Clamp(NewTime, 0.0f, 24.0f);
-    ApplyLightingForCurrentTime();
-}
+    // Apply to DirectionalLight
+    if (SunLight)
+    {
+        UDirectionalLightComponent* DLC = SunLight->GetComponent();
+        if (DLC)
+        {
+            DLC->SetIntensity(Settings.SunIntensity);
+            DLC->SetLightColor(Settings.SunColor);
+        }
+    }
 
-ELight_TimeOfDay ADayNightCycleManager::GetCurrentTimeOfDayEnum() const
-{
-    return CurrentTimeOfDayEnum;
-}
+    // Apply to ExponentialHeightFog
+    if (HeightFog)
+    {
+        UExponentialHeightFogComponent* FogComp = HeightFog->GetComponent();
+        if (FogComp)
+        {
+            FogComp->SetFogDensity(Settings.FogDensity);
+            FogComp->SetFogInscatteringColor(Settings.FogColor);
+        }
+    }
 
-float ADayNightCycleManager::GetNormalizedTime() const
-{
-    return CurrentTimeOfDay / 24.0f;
-}
-
-void ADayNightCycleManager::ApplyLightingForCurrentTime()
-{
-    UpdateLightingColors();
-    CurrentTimeOfDayEnum = ClassifyTimeOfDay(CurrentTimeOfDay);
+    // Apply to SkyLight
+    if (SkyLightActor)
+    {
+        USkyLightComponent* SLC = SkyLightActor->GetLightComponent();
+        if (SLC)
+        {
+            SLC->SetIntensity(Settings.SkyLightIntensity);
+        }
+    }
 }
