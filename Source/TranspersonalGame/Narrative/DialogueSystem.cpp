@@ -1,163 +1,50 @@
-// DialogueSystem.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// PROD_CYCLE_AUTO_20260627_008
-
 #include "DialogueSystem.h"
 #include "Components/BoxComponent.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
-// ── Constructor ──────────────────────────────────────────────────────────────
+// ============================================================
+// ANarr_DialogueTrigger — Implementation
+// ============================================================
 
 ANarr_DialogueTrigger::ANarr_DialogueTrigger()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Root trigger volume
+    // Create trigger volume
     TriggerVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerVolume"));
-    RootComponent = TriggerVolume;
-    TriggerVolume->SetBoxExtent(FVector(TriggerRadius, TriggerRadius, 200.0f));
+    TriggerVolume->SetBoxExtent(FVector(200.0f, 200.0f, 100.0f));
     TriggerVolume->SetCollisionProfileName(TEXT("Trigger"));
-    TriggerVolume->SetGenerateOverlapEvents(true);
-
-    // Defaults
-    NPCName = TEXT("Unknown NPC");
-    NPCRole = ENarr_NPCRole::Scout;
-    CurrentState = ENarr_DialogueTriggerState::Idle;
-    CurrentLineIndex = 0;
-    bHasBeenTriggered = false;
-    CooldownTimer = 0.0f;
-    LineTimer = 0.0f;
-    bPlayerInsideTrigger = false;
+    TriggerVolume->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnOverlapBegin);
+    RootComponent = TriggerVolume;
 }
-
-// ── BeginPlay ────────────────────────────────────────────────────────────────
 
 void ANarr_DialogueTrigger::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    TriggerVolume->OnComponentBeginOverlap.AddDynamic(
-        this, &ANarr_DialogueTrigger::OnTriggerBeginOverlap);
-    TriggerVolume->OnComponentEndOverlap.AddDynamic(
-        this, &ANarr_DialogueTrigger::OnTriggerEndOverlap);
-
-    // Update box extent from TriggerRadius
-    TriggerVolume->SetBoxExtent(FVector(TriggerRadius, TriggerRadius, 200.0f));
+    DialogueState = ENarr_DialogueState::Idle;
+    CurrentLineIndex = 0;
+    TimeSinceLastDialogue = 0.0f;
 }
-
-// ── Tick ─────────────────────────────────────────────────────────────────────
 
 void ANarr_DialogueTrigger::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    switch (CurrentState)
+    // Advance cooldown timer
+    if (DialogueState == ENarr_DialogueState::Cooldown)
     {
-    case ENarr_DialogueTriggerState::Playing:
-    {
-        LineTimer -= DeltaTime;
-        if (LineTimer <= 0.0f)
+        TimeSinceLastDialogue += DeltaTime;
+        if (TimeSinceLastDialogue >= DialogueSequence.CooldownSeconds)
         {
-            AdvanceLine();
+            DialogueState = ENarr_DialogueState::Idle;
+            TimeSinceLastDialogue = 0.0f;
         }
-        break;
-    }
-    case ENarr_DialogueTriggerState::Cooldown:
-    {
-        CooldownTimer -= DeltaTime;
-        if (CooldownTimer <= 0.0f)
-        {
-            CurrentState = ENarr_DialogueTriggerState::Idle;
-            // If player still inside, re-trigger (for non-one-shot sequences)
-            if (bPlayerInsideTrigger && !DialogueSequence.bPlayOnce)
-            {
-                StartDialogue();
-            }
-        }
-        break;
-    }
-    default:
-        break;
     }
 }
 
-// ── StartDialogue ────────────────────────────────────────────────────────────
-
-void ANarr_DialogueTrigger::StartDialogue()
-{
-    if (DialogueSequence.Lines.Num() == 0)
-    {
-        return;
-    }
-
-    if (DialogueSequence.bPlayOnce && bHasBeenTriggered)
-    {
-        return;
-    }
-
-    CurrentLineIndex = 0;
-    CurrentState = ENarr_DialogueTriggerState::Playing;
-    bHasBeenTriggered = true;
-
-    const FNarr_DialogueLine& FirstLine = DialogueSequence.Lines[0];
-    LineTimer = FirstLine.DisplayDuration;
-
-    OnDialogueStarted(FirstLine);
-}
-
-// ── AdvanceLine ──────────────────────────────────────────────────────────────
-
-void ANarr_DialogueTrigger::AdvanceLine()
-{
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= DialogueSequence.Lines.Num())
-    {
-        EndDialogue();
-        return;
-    }
-
-    const FNarr_DialogueLine& NextLine = DialogueSequence.Lines[CurrentLineIndex];
-    LineTimer = NextLine.DisplayDuration;
-
-    OnDialogueLineChanged(NextLine, CurrentLineIndex);
-}
-
-// ── EndDialogue ──────────────────────────────────────────────────────────────
-
-void ANarr_DialogueTrigger::EndDialogue()
-{
-    CurrentState = ENarr_DialogueTriggerState::Cooldown;
-    CooldownTimer = DialogueSequence.CooldownSeconds;
-    CurrentLineIndex = 0;
-
-    OnDialogueEnded();
-}
-
-// ── IsPlayerInRange ──────────────────────────────────────────────────────────
-
-bool ANarr_DialogueTrigger::IsPlayerInRange() const
-{
-    return bPlayerInsideTrigger;
-}
-
-// ── GetCurrentLine ───────────────────────────────────────────────────────────
-
-FNarr_DialogueLine ANarr_DialogueTrigger::GetCurrentLine() const
-{
-    if (DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
-    {
-        return DialogueSequence.Lines[CurrentLineIndex];
-    }
-    return FNarr_DialogueLine();
-}
-
-// ── Overlap Callbacks ────────────────────────────────────────────────────────
-
-void ANarr_DialogueTrigger::OnTriggerBeginOverlap(
+void ANarr_DialogueTrigger::OnOverlapBegin(
     UPrimitiveComponent* OverlappedComp,
     AActor* OtherActor,
     UPrimitiveComponent* OtherComp,
@@ -165,52 +52,84 @@ void ANarr_DialogueTrigger::OnTriggerBeginOverlap(
     bool bFromSweep,
     const FHitResult& SweepResult)
 {
-    // Only react to player character
+    // Only respond to player characters
     if (!OtherActor || !OtherActor->IsA(ACharacter::StaticClass()))
     {
         return;
     }
 
-    // Check it's the local player
-    ACharacter* Character = Cast<ACharacter>(OtherActor);
-    if (!Character || !Character->IsPlayerControlled())
+    if (DialogueState == ENarr_DialogueState::Idle)
     {
-        return;
+        OnPlayerEnterRange(OtherActor);
     }
-
-    bPlayerInsideTrigger = true;
-    CurrentState = ENarr_DialogueTriggerState::PlayerNearby;
-
-    // Auto-start dialogue when player enters
-    StartDialogue();
 }
 
-void ANarr_DialogueTrigger::OnTriggerEndOverlap(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex)
+void ANarr_DialogueTrigger::OnPlayerEnterRange_Implementation(AActor* PlayerActor)
 {
-    if (!OtherActor || !OtherActor->IsA(ACharacter::StaticClass()))
+    if (DialogueSequence.Lines.Num() == 0)
     {
         return;
     }
 
-    ACharacter* Character = Cast<ACharacter>(OtherActor);
-    if (!Character || !Character->IsPlayerControlled())
+    DialogueState = ENarr_DialogueState::Greeting;
+    bHasBeenActivated = true;
+    CurrentLineIndex = 0;
+
+    // Immediately transition to active
+    DialogueState = ENarr_DialogueState::Active;
+}
+
+void ANarr_DialogueTrigger::OnDialogueLineComplete_Implementation(int32 LineIndex)
+{
+    AdvanceDialogue();
+}
+
+void ANarr_DialogueTrigger::AdvanceDialogue()
+{
+    if (DialogueSequence.Lines.Num() == 0)
     {
         return;
     }
 
-    bPlayerInsideTrigger = false;
+    CurrentLineIndex++;
 
-    // If dialogue is playing, end it when player leaves
-    if (CurrentState == ENarr_DialogueTriggerState::Playing)
+    if (CurrentLineIndex >= DialogueSequence.Lines.Num())
     {
-        EndDialogue();
+        // Sequence complete
+        DialogueState = ENarr_DialogueState::Completed;
+
+        if (DialogueSequence.bRepeatable)
+        {
+            DialogueState = ENarr_DialogueState::Cooldown;
+            TimeSinceLastDialogue = 0.0f;
+        }
     }
-    else if (CurrentState == ENarr_DialogueTriggerState::PlayerNearby)
+}
+
+void ANarr_DialogueTrigger::ResetDialogue()
+{
+    CurrentLineIndex = 0;
+    TimeSinceLastDialogue = 0.0f;
+    DialogueState = ENarr_DialogueState::Idle;
+}
+
+FText ANarr_DialogueTrigger::GetCurrentLineText() const
+{
+    if (DialogueSequence.Lines.IsValidIndex(CurrentLineIndex))
     {
-        CurrentState = ENarr_DialogueTriggerState::Idle;
+        return DialogueSequence.Lines[CurrentLineIndex].LineText;
+    }
+    return FText::GetEmpty();
+}
+
+FString ANarr_DialogueTrigger::GetNPCDisplayName() const
+{
+    switch (NPCRole)
+    {
+        case ENarr_NPCRole::ElderTracker:   return TEXT("Elder Tracker");
+        case ENarr_NPCRole::ChiefHunter:    return TEXT("Chief Hunter");
+        case ENarr_NPCRole::Craftmaster:    return TEXT("Craftmaster");
+        case ENarr_NPCRole::ScoutRanger:    return TEXT("Scout Ranger");
+        default:                            return TEXT("Survivor");
     }
 }
