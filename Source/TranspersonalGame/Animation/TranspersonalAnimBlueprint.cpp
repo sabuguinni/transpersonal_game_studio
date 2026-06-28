@@ -1,123 +1,211 @@
-#include "TranspersonalAnimBlueprint.h"
+// TranspersonalAnimBlueprint.cpp
+// Animation Agent #10 — Cycle PROD_CYCLE_AUTO_20260628_011
+// UAnimInstance implementation for the TranspersonalCharacter.
+// Drives locomotion blend space, jump states, foot IK, and survival-state overlays.
 
+#include "TranspersonalAnimBlueprint.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-UTranspersonalAnimBlueprint::UTranspersonalAnimBlueprint()
+// Construction
+// ─────────────────────────────────────────────────────────────────────────────
+
+UTranspersonalAnimBlueprint::UTranspersonalAnimBlueprint(const FObjectInitializer& ObjectInitializer)
+    : Super(ObjectInitializer)
+    , GroundSpeed(0.f)
+    , MovementDirection(0.f)
+    , bIsRunning(false)
+    , bIsSprinting(false)
+    , bIsCrouching(false)
+    , bIsInAir(false)
+    , VerticalVelocity(0.f)
+    , TimeInAir(0.f)
+    , bJustLanded(false)
+    , LandImpactAlpha(0.f)
+    , bIsInjured(false)
+    , InjuryBlendAlpha(0.f)
+    , bIsExhausted(false)
+    , ExhaustionBlendAlpha(0.f)
+    , bIsCarrying(false)
+    , CarryBlendAlpha(0.f)
+    , LeftFootIKAlpha(0.f)
+    , RightFootIKAlpha(0.f)
+    , PelvisOffset(FVector::ZeroVector)
+    , RunThreshold(200.f)
+    , SprintThreshold(450.f)
+    , LandImpactDecayRate(3.f)
+    , OwnerCharacter(nullptr)
+    , OwnerMovement(nullptr)
+    , bWasInAir(false)
+    , AirTime(0.f)
 {
-	// Default constructor — nothing to initialise here; UE5 calls
-	// NativeInitializeAnimation() once the owning pawn is set.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NativeInitializeAnimation
+// ─────────────────────────────────────────────────────────────────────────────
+
 void UTranspersonalAnimBlueprint::NativeInitializeAnimation()
 {
-	Super::NativeInitializeAnimation();
+    Super::NativeInitializeAnimation();
 
-	APawn* Pawn = TryGetPawnOwner();
-	if (!Pawn) { return; }
+    APawn* Pawn = TryGetPawnOwner();
+    if (!Pawn) return;
 
-	OwnerCharacter    = Cast<ACharacter>(Pawn);
-	MovementComponent = OwnerCharacter
-	                  ? OwnerCharacter->GetCharacterMovement()
-	                  : nullptr;
+    OwnerCharacter = Cast<ACharacter>(Pawn);
+    if (OwnerCharacter)
+    {
+        OwnerMovement = OwnerCharacter->GetCharacterMovement();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NativeUpdateAnimation — called every frame
+// ─────────────────────────────────────────────────────────────────────────────
+
 void UTranspersonalAnimBlueprint::NativeUpdateAnimation(float DeltaSeconds)
 {
-	Super::NativeUpdateAnimation(DeltaSeconds);
+    Super::NativeUpdateAnimation(DeltaSeconds);
 
-	// Re-cache on first valid tick (handles hot-reload / PIE re-entry)
-	if (!OwnerCharacter || !MovementComponent)
-	{
-		NativeInitializeAnimation();
-		return;
-	}
+    if (!OwnerCharacter || !OwnerMovement) return;
 
-	// ── Velocity & speed ─────────────────────────────────────────────────
-	const FVector Velocity = MovementComponent->Velocity;
-	GroundSpeed            = Velocity.Size2D();          // horizontal speed
-	VerticalVelocity       = Velocity.Z;
+    UpdateLocomotionState(DeltaSeconds);
+    UpdateJumpState(DeltaSeconds);
+    UpdateSurvivalOverlays(DeltaSeconds);
+}
 
-	// ── Movement direction (relative to actor forward) ───────────────────
-	if (GroundSpeed > 1.f)
-	{
-		const FRotator ActorRot  = OwnerCharacter->GetActorRotation();
-		const FVector  VelNorm   = Velocity.GetSafeNormal2D();
-		const FVector  Forward   = ActorRot.Vector();
-		const FVector  Right     = FRotationMatrix(ActorRot).GetScaledAxis(EAxis::Y);
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateLocomotionState
+// ─────────────────────────────────────────────────────────────────────────────
 
-		const float DotForward = FVector::DotProduct(VelNorm, Forward);
-		const float DotRight   = FVector::DotProduct(VelNorm, Right);
-		MovementDirection = FMath::RadiansToDegrees(FMath::Atan2(DotRight, DotForward));
-	}
-	else
-	{
-		MovementDirection = 0.f;
-	}
+void UTranspersonalAnimBlueprint::UpdateLocomotionState(float DeltaSeconds)
+{
+    // Velocity in XY plane
+    const FVector Velocity = OwnerCharacter->GetVelocity();
+    const FVector VelocityXY(Velocity.X, Velocity.Y, 0.f);
+    GroundSpeed = VelocityXY.Size();
 
-	// ── Air state ────────────────────────────────────────────────────────
-	const bool bCurrentlyInAir = MovementComponent->IsFalling();
+    // Movement direction relative to actor facing (for strafing blend)
+    if (GroundSpeed > 5.f)
+    {
+        const FRotator ActorRot = OwnerCharacter->GetActorRotation();
+        const FVector ForwardDir = ActorRot.Vector();
+        const FVector RightDir = FRotationMatrix(ActorRot).GetScaledAxis(EAxis::Y);
 
-	// Detect landing (was in air last frame, now on ground)
-	bJustLanded = bWasInAir && !bCurrentlyInAir;
-	bWasInAir   = bCurrentlyInAir;
-	bIsInAir    = bCurrentlyInAir;
+        const FVector NormVel = VelocityXY.GetSafeNormal();
+        const float ForwardDot = FVector::DotProduct(ForwardDir, NormVel);
+        const float RightDot   = FVector::DotProduct(RightDir, NormVel);
 
-	if (bIsInAir)
-	{
-		TimeInAir += DeltaSeconds;
-	}
-	else
-	{
-		TimeInAir = 0.f;
-	}
+        // Angle in degrees: positive = right strafe, negative = left strafe
+        MovementDirection = FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
+    }
+    else
+    {
+        MovementDirection = 0.f;
+    }
 
-	// ── Locomotion flags ─────────────────────────────────────────────────
-	bIsRunning   = GroundSpeed > WalkSpeedThreshold;
-	bIsSprinting = GroundSpeed > SprintSpeedThreshold;
-	bIsCrouching = MovementComponent->IsCrouching();
+    // Locomotion tier flags
+    bIsRunning   = (GroundSpeed >= RunThreshold);
+    bIsSprinting = (GroundSpeed >= SprintThreshold);
+    bIsCrouching = OwnerMovement->IsCrouching();
+}
 
-	// ── Survival state — read from character if it exposes these floats ──
-	// We use a soft interface: try to find properties via reflection.
-	// If the character doesn't expose them, we default to 0.
-	// This keeps the AnimInstance decoupled from a specific character class.
-	static const FName PropHealth   = TEXT("Health");
-	static const FName PropStamina  = TEXT("Stamina");
-	static const FName PropFear     = TEXT("Fear");
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateJumpState
+// ─────────────────────────────────────────────────────────────────────────────
 
-	// Health → InjuryAlpha  (low health = more injury animation)
-	if (float* HealthPtr = reinterpret_cast<float*>(
-		OwnerCharacter->GetClass()->FindPropertyByName(PropHealth)
-		? OwnerCharacter->GetClass()->FindPropertyByName(PropHealth)
-		  ->ContainerPtrToValuePtr<float>(OwnerCharacter)
-		: nullptr))
-	{
-		const float NormHealth = FMath::Clamp(*HealthPtr / 100.f, 0.f, 1.f);
-		InjuryAlpha = FMath::InterpEaseIn(0.f, 1.f, 1.f - NormHealth, 2.f);
-	}
+void UTranspersonalAnimBlueprint::UpdateJumpState(float DeltaSeconds)
+{
+    const bool bCurrentlyInAir = OwnerMovement->IsFalling();
+    bIsInAir = bCurrentlyInAir;
+    VerticalVelocity = OwnerCharacter->GetVelocity().Z;
 
-	// Stamina → FatigueAlpha
-	if (float* StaminaPtr = reinterpret_cast<float*>(
-		OwnerCharacter->GetClass()->FindPropertyByName(PropStamina)
-		? OwnerCharacter->GetClass()->FindPropertyByName(PropStamina)
-		  ->ContainerPtrToValuePtr<float>(OwnerCharacter)
-		: nullptr))
-	{
-		const float NormStamina = FMath::Clamp(*StaminaPtr / 100.f, 0.f, 1.f);
-		FatigueAlpha = FMath::InterpEaseIn(0.f, 1.f, 1.f - NormStamina, 2.f);
-	}
+    if (bCurrentlyInAir)
+    {
+        AirTime += DeltaSeconds;
+        TimeInAir = AirTime;
+        bJustLanded = false;
+    }
+    else
+    {
+        // Detect landing transition
+        if (bWasInAir && !bCurrentlyInAir)
+        {
+            bJustLanded = true;
+            // Scale impact alpha by air time (clamped to 0-1)
+            LandImpactAlpha = FMath::Clamp(AirTime / 1.5f, 0.2f, 1.f);
+        }
+        AirTime = 0.f;
+        TimeInAir = 0.f;
+    }
 
-	// Fear → FearAlpha
-	if (float* FearPtr = reinterpret_cast<float*>(
-		OwnerCharacter->GetClass()->FindPropertyByName(PropFear)
-		? OwnerCharacter->GetClass()->FindPropertyByName(PropFear)
-		  ->ContainerPtrToValuePtr<float>(OwnerCharacter)
-		: nullptr))
-	{
-		FearAlpha = FMath::Clamp(*FearPtr / 100.f, 0.f, 1.f);
-	}
+    // Decay land impact alpha over time
+    if (LandImpactAlpha > 0.f)
+    {
+        LandImpactAlpha = FMath::Max(0.f, LandImpactAlpha - DeltaSeconds * LandImpactDecayRate);
+        if (LandImpactAlpha <= 0.f)
+        {
+            bJustLanded = false;
+        }
+    }
+
+    bWasInAir = bCurrentlyInAir;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateSurvivalOverlays
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTranspersonalAnimBlueprint::UpdateSurvivalOverlays(float DeltaSeconds)
+{
+    // Injury overlay — blend in/out smoothly
+    const float InjuryTarget = bIsInjured ? 1.f : 0.f;
+    InjuryBlendAlpha = FMath::FInterpTo(InjuryBlendAlpha, InjuryTarget, DeltaSeconds, 2.f);
+
+    // Exhaustion overlay
+    const float ExhaustTarget = bIsExhausted ? 1.f : 0.f;
+    ExhaustionBlendAlpha = FMath::FInterpTo(ExhaustionBlendAlpha, ExhaustTarget, DeltaSeconds, 1.5f);
+
+    // Carry overlay
+    const float CarryTarget = bIsCarrying ? 1.f : 0.f;
+    CarryBlendAlpha = FMath::FInterpTo(CarryBlendAlpha, CarryTarget, DeltaSeconds, 3.f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SetSurvivalState — called by character/survival system
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTranspersonalAnimBlueprint::SetSurvivalState(bool bInjured, bool bExhausted, bool bCarrying)
+{
+    bIsInjured   = bInjured;
+    bIsExhausted = bExhausted;
+    bIsCarrying  = bCarrying;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SetFootIKData — called by FootIKComponent each tick
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTranspersonalAnimBlueprint::SetFootIKData(
+    float LeftAlpha,
+    float RightAlpha,
+    const FVector& InPelvisOffset)
+{
+    LeftFootIKAlpha  = FMath::Clamp(LeftAlpha,  0.f, 1.f);
+    RightFootIKAlpha = FMath::Clamp(RightAlpha, 0.f, 1.f);
+    PelvisOffset     = InPelvisOffset;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetLocomotionBlendParams — convenience for Blueprint blend space queries
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTranspersonalAnimBlueprint::GetLocomotionBlendParams(float& OutSpeed, float& OutDirection) const
+{
+    OutSpeed     = GroundSpeed;
+    OutDirection = MovementDirection;
 }
