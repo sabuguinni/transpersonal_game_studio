@@ -2,114 +2,168 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "QuestTypes.h"
 #include "QuestStampedeSystem.generated.h"
 
 // ============================================================
-// Quest: "The Stampede"
-// Player must reach high ground before the fleeing herd
-// overruns their camp. Wires to CrowdHerdBehavior::TriggerFlee.
+// EQuest_StampedePhase — phases of the Survive the Stampede quest
 // ============================================================
-
 UENUM(BlueprintType)
-enum class EQuest_StampedeState : uint8
+enum class EQuest_StampedePhase : uint8
 {
-    Inactive     UMETA(DisplayName = "Inactive"),
-    Active       UMETA(DisplayName = "Active"),
-    Succeeded    UMETA(DisplayName = "Succeeded"),
-    Failed       UMETA(DisplayName = "Failed")
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Triggered       UMETA(DisplayName = "Triggered"),       // Player entered danger zone
+    Escaping        UMETA(DisplayName = "Escaping"),        // Countdown active
+    Escaped         UMETA(DisplayName = "Escaped"),         // Reached safe zone in time
+    Crushed         UMETA(DisplayName = "Crushed"),         // Failed — time ran out
+    Completed       UMETA(DisplayName = "Completed")        // Reward collected
 };
 
+// ============================================================
+// FQuest_StampedeObjective — single objective entry
+// ============================================================
 USTRUCT(BlueprintType)
 struct FQuest_StampedeObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString ObjectiveText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    FString ObjectiveName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TargetLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    bool bCompleted = false;
 
-    FQuest_StampedeObjective()
-        : ObjectiveText(TEXT("Reach high ground"))
-        , bCompleted(false)
-        , TargetLocation(FVector::ZeroVector)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    bool bOptional = false;
 };
 
+// ============================================================
+// AQuestStampedeTrigger — overlap box that starts the quest
+// ============================================================
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_StampedeManager : public AActor
+class TRANSPERSONALGAME_API AQuestStampedeTrigger : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AQuest_StampedeManager();
+    AQuestStampedeTrigger();
 
+    // --- Components ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede",
+        meta = (AllowPrivateAccess = "true"))
+    UBoxComponent* TriggerVolume;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede",
+        meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* DebugMarker;
+
+    // --- Quest State ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
+    EQuest_StampedePhase CurrentPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    float EscapeTimeLimit = 60.0f;          // seconds to reach safe zone
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
+    float RemainingTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    FVector SafeZoneLocation = FVector(3000.0f, -1500.0f, 400.0f);  // High ground
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    float SafeZoneRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    bool bQuestAlreadyCompleted = false;
+
+    // --- Objectives ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
+    TArray<FQuest_StampedeObjective> Objectives;
+
+    // --- Audio ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede|Audio")
+    FString TriggerVoiceURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782653080550_QuestNPC_Elder.mp3";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede|Audio")
+    FString CompletionVoiceURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782653095161_QuestNPC_Elder.mp3";
+
+    // --- UE5 Lifecycle ---
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // --- Quest State ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|State")
-    EQuest_StampedeState QuestState;
+    // --- Quest API ---
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void ActivateStampedeQuest(AActor* PlayerActor);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float TimeLimit;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void CheckSafeZoneReached(AActor* PlayerActor);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|State")
-    float TimeRemaining;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void CompleteObjective(int32 ObjectiveIndex);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float HighGroundMinZ;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void FailQuest();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float HighGroundRadius;
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void CompleteQuest();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    FVector HighGroundCenter;
+    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
+    float GetEscapeProgressPercent() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    FVector CampLocation;
+    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
+    bool IsPlayerInSafeZone(AActor* PlayerActor) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float CampDangerRadius;
-
-    // --- Herd reference (set by CrowdHerdBehavior) ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Herd")
-    AActor* HerdActor;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Herd")
-    bool bHerdTriggered;
-
-    // --- Objectives ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Objectives")
-    TArray<FQuest_StampedeObjective> Objectives;
-
-    // --- UFUNCTIONs ---
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void StartQuest();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void TriggerHerdStampede();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void CompleteQuest(bool bSuccess);
-
-    UFUNCTION(BlueprintPure, Category = "Quest")
-    bool IsPlayerOnHighGround() const;
-
-    UFUNCTION(BlueprintPure, Category = "Quest")
-    bool IsHerdNearCamp() const;
-
-    UFUNCTION(BlueprintPure, Category = "Quest")
-    float GetTimeRemainingNormalized() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
+    UFUNCTION(CallInEditor, Category = "Quest|Stampede")
     void ResetQuest();
 
 private:
-    void CheckQuestConditions(float DeltaTime);
-    APawn* GetPlayerPawn() const;
+    UFUNCTION()
+    void OnTriggerOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    void InitialiseObjectives();
+    bool bTickActive = false;
+};
+
+// ============================================================
+// AQuestSafeZoneMarker — destination actor on high ground
+// ============================================================
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuestSafeZoneMarker : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AQuestSafeZoneMarker();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|SafeZone",
+        meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* MarkerMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|SafeZone",
+        meta = (AllowPrivateAccess = "true"))
+    UBoxComponent* SafeVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|SafeZone")
+    bool bIsActive = false;
+
+    virtual void BeginPlay() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|SafeZone")
+    void ActivateMarker();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|SafeZone")
+    void DeactivateMarker();
+
+private:
+    UFUNCTION()
+    void OnSafeZoneOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
 };
