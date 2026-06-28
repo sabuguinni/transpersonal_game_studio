@@ -1,189 +1,218 @@
-// PerformanceBudgetConfig.h
-// Performance Optimizer #04 — Frame budget constants and LOD thresholds
-// Target: 60fps PC (16.67ms) / 30fps Console (33.33ms)
-// Cycle: PROD_CYCLE_AUTO_20260626_002
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "PerformanceBudgetConfig.generated.h"
 
-// ============================================================
-// ENUMS — Perf_ prefix to avoid collision with other agents
-// ============================================================
+/**
+ * Performance budget configuration for Transpersonal Game Studio.
+ * Targets: 60fps on high-end PC (RTX 3070+, i7-10th gen+, 16GB RAM)
+ *          30fps on console baseline (PS5/XSX equivalent)
+ *
+ * Agent #4 — Performance Optimizer
+ */
 
 UENUM(BlueprintType)
-enum class EPerf_TargetPlatform : uint8
+enum class EPerf_QualityTier : uint8
 {
-    PC_High     UMETA(DisplayName = "PC High-End"),
-    PC_Mid      UMETA(DisplayName = "PC Mid-Range"),
-    Console     UMETA(DisplayName = "Console"),
-    Mobile      UMETA(DisplayName = "Mobile")
-};
-
-UENUM(BlueprintType)
-enum class EPerf_BudgetStatus : uint8
-{
-    Comfortable UMETA(DisplayName = "Comfortable (>4ms headroom)"),
-    Tight       UMETA(DisplayName = "Tight (1-4ms headroom)"),
-    OverBudget  UMETA(DisplayName = "Over Budget (<1ms headroom)")
-};
-
-// ============================================================
-// STRUCTS — Frame budget breakdown
-// ============================================================
-
-USTRUCT(BlueprintType)
-struct FPerf_FrameBudget
-{
-    GENERATED_BODY()
-
-    // Total frame budget in milliseconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TotalBudgetMs = 16.67f; // 60fps
-
-    // Rendering sub-budgets (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LumenGIBudgetMs = 4.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float ShadowBudgetMs = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float SkeletalMeshBudgetMs = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float StaticMeshBudgetMs = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float ParticlesBudgetMs = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GameThreadBudgetMs = 4.0f;
-
-    // Computed headroom
-    float GetHeadroomMs() const
-    {
-        return TotalBudgetMs - (LumenGIBudgetMs + ShadowBudgetMs +
-               SkeletalMeshBudgetMs + StaticMeshBudgetMs +
-               ParticlesBudgetMs + GameThreadBudgetMs);
-    }
+    Low         UMETA(DisplayName = "Low (30fps Console)"),
+    Medium      UMETA(DisplayName = "Medium (45fps Mid PC)"),
+    High        UMETA(DisplayName = "High (60fps PC)"),
+    Ultra       UMETA(DisplayName = "Ultra (60fps+ High-End PC)")
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_LODThresholds
+struct TRANSPERSONALGAME_API FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    // Distance at which dinosaur LOD1 kicks in (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DinoLOD1Distance = 1500.0f;
+    /** Target frames per second */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float TargetFPS = 60.0f;
 
-    // Distance at which dinosaur LOD2 kicks in (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DinoLOD2Distance = 4000.0f;
+    /** Max CPU game thread time in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MaxGameThreadMs = 6.0f;
 
-    // Distance at which dinosaur culls entirely (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DinoCullDistance = 8000.0f;
+    /** Max CPU render thread time in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MaxRenderThreadMs = 5.0f;
 
-    // Foliage cull distance (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float FoliageCullDistance = 5000.0f;
+    /** Max GPU time in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MaxGPUMs = 10.0f;
 
-    // NPC URO (Update Rate Optimization) distance threshold (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float NPCURODistance = 2000.0f;
+    /** Max draw calls per frame */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    int32 MaxDrawCalls = 2000;
 
-    // Max simultaneous animated skeletal meshes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxAnimatedSkeletalMeshes = 12;
+    /** Max triangle count per frame (millions) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MaxTrianglesM = 8.0f;
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_ShadowBudget
+struct TRANSPERSONALGAME_API FPerf_ShadowBudget
 {
     GENERATED_BODY()
 
-    // Max shadow cascade count (3 = good balance)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    /** Max CSM cascade count */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
     int32 MaxCSMCascades = 3;
 
-    // Max shadow map resolution
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    /** Max shadow map resolution */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
     int32 MaxShadowResolution = 2048;
 
-    // Max dynamic shadow-casting lights in scene
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
-    int32 MaxDynamicShadowLights = 4;
+    /** Shadow distance scale */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
+    float ShadowDistanceScale = 1.0f;
 
-    // Distance beyond which shadows are culled (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
-    float ShadowCullDistance = 6000.0f;
+    /** Radius threshold for shadow casting (smaller = fewer shadow casters) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
+    float RadiusThreshold = 0.03f;
 };
 
-// ============================================================
-// MAIN CONFIG CLASS
-// ============================================================
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_LumenBudget
+{
+    GENERATED_BODY()
 
-UCLASS(BlueprintType, Blueprintable, Config = Game)
-class TRANSPERSONALGAME_API UPerf_PerformanceBudgetConfig : public UObject
+    /** Enable Lumen Global Illumination */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    bool bEnableLumenGI = true;
+
+    /** Enable Lumen Reflections */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    bool bEnableLumenReflections = true;
+
+    /** Max GI trace distance in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    float MaxGITraceDistance = 8000.0f;
+
+    /** Max roughness for reflection traces (lower = fewer traces) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    float MaxReflectionRoughness = 0.4f;
+
+    /** Enable FastSkyLUT (significant GPU savings) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    bool bFastSkyLUT = true;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_ParticleBudget
+{
+    GENERATED_BODY()
+
+    /** Max CPU particles per emitter */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Particles")
+    int32 MaxCPUParticlesPerEmitter = 500;
+
+    /** Max GPU particles spawned per frame */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Particles")
+    int32 MaxGPUParticlesPerFrame = 2000;
+
+    /** Niagara system LOD bias */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Particles")
+    float NiagaraLODBias = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_StreamingBudget
+{
+    GENERATED_BODY()
+
+    /** Texture streaming pool size in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    int32 TexturePoolSizeMB = 2048;
+
+    /** Max temp memory for streaming in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    int32 MaxTempMemoryMB = 50;
+
+    /** View distance scale (1.0 = default, lower = less streaming) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    float ViewDistanceScale = 1.0f;
+
+    /** Static mesh LOD distance scale */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    float StaticMeshLODDistanceScale = 1.0f;
+
+    /** Foliage LOD distance scale */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
+    float FoliageLODDistanceScale = 1.5f;
+};
+
+/**
+ * UPerf_BudgetConfig — Runtime performance budget manager.
+ * Stores and applies per-quality-tier performance settings.
+ * Callable from Blueprint to switch quality tiers at runtime.
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Performance")
+class TRANSPERSONALGAME_API UPerf_BudgetConfig : public UObject
 {
     GENERATED_BODY()
 
 public:
-    UPerf_PerformanceBudgetConfig();
+    UPerf_BudgetConfig();
 
-    // --- Platform target ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Platform")
-    EPerf_TargetPlatform TargetPlatform = EPerf_TargetPlatform::PC_High;
+    /** Current quality tier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
 
-    // --- Frame budgets per platform ---
+    /** Frame budget for current tier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget PCHighBudget;
+    FPerf_FrameBudget FrameBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget ConsoleBudget;
-
-    // --- LOD thresholds ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    FPerf_LODThresholds LODThresholds;
-
-    // --- Shadow budget ---
+    /** Shadow budget for current tier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
     FPerf_ShadowBudget ShadowBudget;
 
-    // --- Max actor counts (enforced by CAP system) ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
-    int32 MaxDinosInScene = 12;
+    /** Lumen budget for current tier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Lumen")
+    FPerf_LumenBudget LumenBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
-    int32 MaxFoliageActors = 500;
+    /** Particle budget for current tier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Particles")
+    FPerf_ParticleBudget ParticleBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
-    int32 MaxParticleSystemsActive = 20;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|CAP")
-    int32 MaxDynamicLights = 8;
-
-    // --- Streaming ---
+    /** Streaming budget for current tier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
-    int32 TextureStreamingPoolMB = 2048;
+    FPerf_StreamingBudget StreamingBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
-    float WorldPartitionStreamingRadius = 15000.0f;
+    /**
+     * Apply all budget settings as console variable commands.
+     * Call this after changing QualityTier to push settings to the renderer.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
+    void ApplyBudgetSettings();
 
-    // --- Blueprint callable helpers ---
+    /**
+     * Switch to a new quality tier and immediately apply settings.
+     * @param NewTier — Target quality tier
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameBudget GetActiveBudget() const;
+    void SetQualityTier(EPerf_QualityTier NewTier);
 
+    /**
+     * Get the frame budget for a specific quality tier (does not apply).
+     * @param Tier — Quality tier to query
+     * @param OutBudget — Output frame budget struct
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_BudgetStatus EvaluateBudgetStatus(float MeasuredFrameMs) const;
+    void GetFrameBudgetForTier(EPerf_QualityTier Tier, FPerf_FrameBudget& OutBudget) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FString GetPerformanceReport() const;
+    /**
+     * Check if current frame time is within budget.
+     * @param GameThreadMs — Measured game thread time
+     * @param RenderThreadMs — Measured render thread time
+     * @param GPUMs — Measured GPU time
+     * @return True if all times are within budget
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    bool IsWithinBudget(float GameThreadMs, float RenderThreadMs, float GPUMs) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyConsoleCommandsForPlatform();
+private:
+    /** Configure budget structs for the given tier */
+    void ConfigureTierBudgets(EPerf_QualityTier Tier);
 };
