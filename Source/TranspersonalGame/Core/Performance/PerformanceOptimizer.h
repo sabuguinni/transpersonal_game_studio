@@ -1,133 +1,97 @@
-// PerformanceOptimizer.h — Agent #04 Performance Optimizer
-// Guarantees 60fps PC / 30fps console via dynamic LOD, cull distance, and tick throttling
-// Prefix: Perf_ for all types
+// PerformanceOptimizer.h
+// Agent #4 — Performance Optimizer
+// Cycle: PROD_CYCLE_AUTO_20260628_007
+// Monitors and enforces 60fps PC / 30fps console frame budget.
+// Manages LOD distances, culling, streaming, and dynamic quality scaling.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
+#include "Engine/EngineTypes.h"
 #include "PerformanceOptimizer.generated.h"
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
+// Forward declarations
+class UDinosaurBase;
+class USurvivalComponent;
 
+// Performance tier — determines quality/performance tradeoff
 UENUM(BlueprintType)
 enum class EPerf_QualityTier : uint8
 {
     Ultra       UMETA(DisplayName = "Ultra (PC High-End)"),
-    High        UMETA(DisplayName = "High (PC Mid-Range)"),
+    High        UMETA(DisplayName = "High (PC Mid)"),
     Medium      UMETA(DisplayName = "Medium (Console)"),
-    Low         UMETA(DisplayName = "Low (Console Budget)"),
+    Low         UMETA(DisplayName = "Low (Console Min)"),
     Potato      UMETA(DisplayName = "Potato (Minimum Spec)")
 };
 
+// Frame budget status
 UENUM(BlueprintType)
-enum class EPerf_ActorCategory : uint8
+enum class EPerf_FrameBudgetStatus : uint8
 {
-    DinosaurPawn    UMETA(DisplayName = "Dinosaur Pawn"),
-    Vegetation      UMETA(DisplayName = "Vegetation / Foliage"),
-    Rock            UMETA(DisplayName = "Rock / Terrain Prop"),
-    Structure       UMETA(DisplayName = "Structure / Building"),
-    Particle        UMETA(DisplayName = "Particle / VFX"),
-    Light           UMETA(DisplayName = "Dynamic Light"),
-    Generic         UMETA(DisplayName = "Generic Actor")
+    Green       UMETA(DisplayName = "Green (>50fps)"),
+    Yellow      UMETA(DisplayName = "Yellow (30-50fps)"),
+    Red         UMETA(DisplayName = "Red (<30fps — Critical)")
 };
 
-// ─── Structs ─────────────────────────────────────────────────────────────────
-
+// Performance snapshot — captured every N seconds
 USTRUCT(BlueprintType)
-struct FPerf_CullDistanceEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_ActorCategory Category = EPerf_ActorCategory::Generic;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullDistance = 10000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistanceScale = 1.0f;
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_FrameBudget
-{
-    GENERATED_BODY()
-
-    // Target frame time in milliseconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameTimeMs = 16.67f; // 60fps
-
-    // Game thread budget (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GameThreadBudgetMs = 6.0f;
-
-    // Render thread budget (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float RenderThreadBudgetMs = 8.0f;
-
-    // GPU budget (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GPUBudgetMs = 14.0f;
-
-    // Max dynamic lights in scene
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDynamicLights = 20;
-
-    // Max simultaneous particle systems
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxParticleSystems = 50;
-
-    // Max visible dinosaur pawns
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxVisibleDinosaurs = 15;
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_TickProfile
-{
-    GENERATED_BODY()
-
-    // Class name being profiled
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FName ClassName;
-
-    // Recommended tick interval (0 = every frame, 0.1 = 10Hz, 2.0 = 0.5Hz)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float RecommendedTickInterval = 0.0f;
-
-    // Average tick cost in microseconds (measured)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float AvgTickCostUs = 0.0f;
-
-    // Whether this component should use async tick
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseAsyncTick = false;
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_FrameSample
+struct FPerf_FrameSnapshot
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadMs = 0.0f;
+    float AverageFPS = 0.f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadMs = 0.0f;
+    float MinFPS = 0.f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUMs = 0.0f;
+    float FrameTimeMS = 0.f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FPS = 0.0f;
+    int32 DrawCallCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float DeltaTimeMs = 0.0f;
+    int32 VisibleActorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUTimeMS = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_FrameBudgetStatus BudgetStatus = EPerf_FrameBudgetStatus::Green;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CaptureTimestamp = 0.f;
 };
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// LOD configuration per actor category
+USTRUCT(BlueprintType)
+struct FPerf_LODConfig
+{
+    GENERATED_BODY()
+
+    // Distance at which LOD0 transitions to LOD1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD0Distance = 1500.f;
+
+    // Distance at which LOD1 transitions to LOD2
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LOD1Distance = 3000.f;
+
+    // Distance at which actor is culled entirely
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullDistance = 8000.f;
+
+    // Disable AI/physics beyond this distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float AIDisableDistance = 5000.f;
+
+    // Disable tick beyond this distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float TickDisableDistance = 6000.f;
+};
 
 UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "Performance Optimizer")
 class TRANSPERSONALGAME_API UPerformanceOptimizer : public UActorComponent
@@ -137,95 +101,120 @@ class TRANSPERSONALGAME_API UPerformanceOptimizer : public UActorComponent
 public:
     UPerformanceOptimizer();
 
+protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ─── Configuration ───────────────────────────────────────────────────────
+    // === QUALITY TIER ===
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Quality")
+    EPerf_QualityTier CurrentQualityTier = EPerf_QualityTier::High;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    FPerf_FrameBudget FrameBudget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    TArray<FPerf_CullDistanceEntry> CullDistanceTable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    TArray<FPerf_TickProfile> TickProfiles;
-
-    // How often to run the full optimization pass (seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config", meta = (ClampMin = "1.0", ClampMax = "30.0"))
-    float OptimizationPassInterval = 5.0f;
-
-    // Enable dynamic quality scaling based on FPS
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    bool bEnableDynamicQuality = true;
-
-    // FPS threshold below which we drop quality tier
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config", meta = (ClampMin = "20.0", ClampMax = "60.0"))
-    float FPSDropThreshold = 45.0f;
-
-    // FPS threshold above which we raise quality tier
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config", meta = (ClampMin = "30.0", ClampMax = "120.0"))
-    float FPSRaiseThreshold = 58.0f;
-
-    // ─── Runtime State ───────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    FPerf_FrameSample CurrentFrame;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    float AverageFPS = 60.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    int32 FrameSampleCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    bool bIsUnderBudget = true;
-
-    // ─── Functions ───────────────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
+    UFUNCTION(BlueprintCallable, Category = "Performance|Quality")
     void SetQualityTier(EPerf_QualityTier NewTier);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void RunOptimizationPass();
+    UFUNCTION(BlueprintCallable, Category = "Performance|Quality")
+    void AutoDetectQualityTier();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyCullDistances();
+    // === FRAME BUDGET ===
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ThrottleSurvivalTick(float DesiredHz = 0.5f);
+    // Target FPS — 60 for PC, 30 for console
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float TargetFPS = 60.f;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ThrottleCharacterTick(float DesiredHz = 10.0f);
+    // Minimum acceptable FPS before quality scaling kicks in
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float MinAcceptableFPS = 45.f;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameSample GetCurrentFrameStats() const;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Budget")
+    FPerf_FrameSnapshot LastSnapshot;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FString GetPerformanceReport() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
+    FPerf_FrameSnapshot CaptureFrameSnapshot();
 
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    bool IsFrameUnderBudget() const { return bIsUnderBudget; }
+    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
+    EPerf_FrameBudgetStatus GetCurrentBudgetStatus() const;
 
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    float GetTargetFPS() const;
+    // === LOD MANAGEMENT ===
 
-    UFUNCTION(CallInEditor, Category = "Performance")
-    void PrintPerformanceReport();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig DinosaurLODConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig FoliageLODConfig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODConfig PropLODConfig;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void ApplyLODSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void SetDinosaurAIDistanceCull(float Distance);
+
+    // === DYNAMIC QUALITY SCALING ===
+
+    // Enable automatic quality reduction when FPS drops below MinAcceptableFPS
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
+    bool bEnableDynamicQualityScaling = true;
+
+    // How often to sample FPS for dynamic scaling (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|DynamicScaling")
+    float SamplingInterval = 3.f;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance|DynamicScaling")
+    void EvaluateAndScaleQuality();
+
+    // === SURVIVAL TIMER OPTIMIZATION ===
+
+    // Optimal timer interval for SurvivalComponent (seconds)
+    // 5s = 0.2 calls/sec vs 60fps tick = 300x reduction in survival stat overhead
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Survival")
+    float OptimalSurvivalTimerInterval = 5.f;
+
+    // Maximum number of active SurvivalComponents before staggering timers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Survival")
+    int32 MaxSimultaneousSurvivalTimers = 50;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance|Survival")
+    float GetOptimalSurvivalInterval(int32 ActiveActorCount) const;
+
+    // === CONSOLE COMMANDS ===
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance|Debug")
+    void ApplyPCHighSettings();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance|Debug")
+    void ApplyConsoleSettings();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance|Debug")
+    void PrintPerformanceBudget();
+
+    // === DELEGATES ===
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQualityTierChanged, EPerf_QualityTier, NewTier);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBudgetStatusChanged, EPerf_FrameBudgetStatus, NewStatus);
+
+    UPROPERTY(BlueprintAssignable, Category = "Performance|Events")
+    FOnQualityTierChanged OnQualityTierChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Performance|Events")
+    FOnBudgetStatusChanged OnBudgetStatusChanged;
 
 private:
-    float TimeSinceLastOptPass = 0.0f;
-    float FPSAccumulator = 0.0f;
-    int32 FPSFrameCount = 0;
-    float FPSAverageWindow = 3.0f; // Average over 3 seconds
+    // Internal sampling state
+    float TimeSinceLastSample = 0.f;
+    float FPSAccumulator = 0.f;
+    int32 FPSSampleCount = 0;
+    float MinFPSThisInterval = 9999.f;
+    EPerf_FrameBudgetStatus LastBudgetStatus = EPerf_FrameBudgetStatus::Green;
 
-    void SampleFrameTime(float DeltaTime);
-    void CheckBudgetViolations();
-    void AutoAdjustQuality();
-    void ApplyQualityTierCVars(EPerf_QualityTier Tier);
-    void InitializeDefaultCullDistances();
-    void InitializeDefaultTickProfiles();
+    // Apply console variables for a given quality tier
+    void ApplyConsoleVariables(EPerf_QualityTier Tier);
+
+    // Stagger survival timers to avoid frame spikes
+    void StaggerSurvivalTimers();
 };
