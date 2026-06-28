@@ -1,273 +1,259 @@
+// DinosaurAudioComponent.cpp
+// Audio Agent #16 — PROD_CYCLE_AUTO_20260628_005
+// Dinosaur audio system: state-driven sound playback with distance attenuation
+// Species-specific footstep intervals, idle breathing, roars, and death sounds
+
 #include "DinosaurAudioComponent.h"
-#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
 #include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "Camera/CameraShakeBase.h"
 
 UDinosaurAudioComponent::UDinosaurAudioComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    DinosaurSpecies = EAudio_DinosaurSpecies::TRex;
-    CurrentThreatLevel = 0.0f;
-    SoundCooldownTime = 2.0f;
-    LastSoundTime = 0.0f;
-    bUseDistanceAttenuation = true;
-    MinPitchVariation = 0.8f;
-    MaxPitchVariation = 1.2f;
-    
-    // Set default audio component properties
-    bAutoActivate = false;
-    bStopWhenOwnerDestroyed = true;
-    VolumeMultiplier = 1.0f;
-    PitchMultiplier = 1.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+
+    // Species-specific footstep intervals (larger = slower steps)
+    // Defaults for generic — overridden in BeginPlay based on Species
+    FootstepInterval = 0.6f;
+    IdleBreathInterval = 4.0f;
+    MaxHearingDistance = 5000.0f;
 }
 
 void UDinosaurAudioComponent::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeSpeciesSoundSets();
-    
-    // Create breathing audio component
-    if (!BreathingComponent)
+
+    // Adjust timing based on species
+    switch (Species)
     {
-        BreathingComponent = NewObject<UAudioComponent>(this);
-        if (BreathingComponent)
-        {
-            BreathingComponent->bAutoActivate = false;
-            BreathingComponent->bStopWhenOwnerDestroyed = true;
-            BreathingComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-            BreathingComponent->RegisterComponent();
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Initialized for species %d"), (int32)DinosaurSpecies);
-}
-
-void UDinosaurAudioComponent::PlayDinosaurSound(EAudio_DinosaurSoundType SoundType, float VolumeMultiplier, float PitchVariation)
-{
-    if (!CanPlaySound())
-    {
-        return;
-    }
-    
-    USoundBase* Sound = GetSoundForType(SoundType);
-    if (!Sound)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DinosaurAudioComponent: No sound found for type %d"), (int32)SoundType);
-        return;
-    }
-    
-    // Calculate volume based on threat level
-    float FinalVolume = CalculateVolumeFromThreat(VolumeMultiplier);
-    
-    // Calculate pitch with variation
-    float BasePitch = CalculatePitchFromThreat(1.0f);
-    float PitchRange = FMath::RandRange(-PitchVariation, PitchVariation);
-    float FinalPitch = FMath::Clamp(BasePitch + PitchRange, MinPitchVariation, MaxPitchVariation);
-    
-    // Play the sound
-    SetSound(Sound);
-    SetVolumeMultiplier(FinalVolume);
-    SetPitchMultiplier(FinalPitch);
-    Play();
-    
-    LastSoundTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Played %d sound with volume %f, pitch %f"), 
-           (int32)SoundType, FinalVolume, FinalPitch);
-}
-
-void UDinosaurAudioComponent::SetDinosaurSpecies(EAudio_DinosaurSpecies Species)
-{
-    DinosaurSpecies = Species;
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Species set to %d"), (int32)Species);
-}
-
-void UDinosaurAudioComponent::PlayFootstepSound(float VolumeMultiplier)
-{
-    PlayDinosaurSound(EAudio_DinosaurSoundType::Footstep, VolumeMultiplier, 0.05f);
-}
-
-void UDinosaurAudioComponent::StartBreathingLoop()
-{
-    if (!BreathingComponent)
-    {
-        return;
-    }
-    
-    USoundBase* BreathingSound = GetSoundForType(EAudio_DinosaurSoundType::Breathing);
-    if (BreathingSound)
-    {
-        BreathingComponent->SetSound(BreathingSound);
-        BreathingComponent->SetVolumeMultiplier(0.3f);
-        BreathingComponent->SetPitchMultiplier(1.0f);
-        BreathingComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Started breathing loop"));
-    }
-}
-
-void UDinosaurAudioComponent::StopBreathingLoop()
-{
-    if (BreathingComponent && BreathingComponent->IsPlaying())
-    {
-        BreathingComponent->Stop();
-        UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Stopped breathing loop"));
-    }
-}
-
-void UDinosaurAudioComponent::SetThreatLevel(float ThreatLevel)
-{
-    CurrentThreatLevel = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Threat level set to %f"), CurrentThreatLevel);
-}
-
-bool UDinosaurAudioComponent::IsPlayingDinosaurSound() const
-{
-    return IsPlaying();
-}
-
-void UDinosaurAudioComponent::SetAudioDistance(float Distance)
-{
-    if (bUseDistanceAttenuation)
-    {
-        FAudio_DinosaurSoundSet* SoundSet = SpeciesSoundSets.Find(DinosaurSpecies);
-        if (SoundSet)
-        {
-            float DistanceRatio = FMath::Clamp(Distance / SoundSet->MaxAudibleDistance, 0.0f, 1.0f);
-            float AttenuatedVolume = 1.0f - DistanceRatio;
-            SetVolumeMultiplier(AttenuatedVolume);
-        }
-    }
-}
-
-void UDinosaurAudioComponent::InitializeSpeciesSoundSets()
-{
-    // Initialize T-Rex sound set
-    FAudio_DinosaurSoundSet TRexSounds;
-    TRexSounds.BaseVolume = 1.0f;
-    TRexSounds.BasePitch = 0.8f;
-    TRexSounds.MaxAudibleDistance = 8000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::TRex, TRexSounds);
-    
-    // Initialize Velociraptor sound set
-    FAudio_DinosaurSoundSet RaptorSounds;
-    RaptorSounds.BaseVolume = 0.7f;
-    RaptorSounds.BasePitch = 1.2f;
-    RaptorSounds.MaxAudibleDistance = 3000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::Velociraptor, RaptorSounds);
-    
-    // Initialize Triceratops sound set
-    FAudio_DinosaurSoundSet TriceratopsSounds;
-    TriceratopsSounds.BaseVolume = 0.9f;
-    TriceratopsSounds.BasePitch = 0.7f;
-    TriceratopsSounds.MaxAudibleDistance = 6000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::Triceratops, TriceratopsSounds);
-    
-    // Initialize Brachiosaurus sound set
-    FAudio_DinosaurSoundSet BrachiosaurusSounds;
-    BrachiosaurusSounds.BaseVolume = 1.2f;
-    BrachiosaurusSounds.BasePitch = 0.5f;
-    BrachiosaurusSounds.MaxAudibleDistance = 10000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::Brachiosaurus, BrachiosaurusSounds);
-    
-    // Initialize Ankylosaurus sound set
-    FAudio_DinosaurSoundSet AnkylosaurusSounds;
-    AnkylosaurusSounds.BaseVolume = 0.8f;
-    AnkylosaurusSounds.BasePitch = 0.9f;
-    AnkylosaurusSounds.MaxAudibleDistance = 4000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::Ankylosaurus, AnkylosaurusSounds);
-    
-    // Initialize Parasaurolophus sound set
-    FAudio_DinosaurSoundSet ParasaurolophSounds;
-    ParasaurolophSounds.BaseVolume = 0.8f;
-    ParasaurolophSounds.BasePitch = 1.1f;
-    ParasaurolophSounds.MaxAudibleDistance = 7000.0f;
-    SpeciesSoundSets.Add(EAudio_DinosaurSpecies::Parasaurolophus, ParasaurolophSounds);
-    
-    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioComponent: Species sound sets initialized"));
-}
-
-USoundBase* UDinosaurAudioComponent::GetSoundForType(EAudio_DinosaurSoundType SoundType)
-{
-    FAudio_DinosaurSoundSet* SoundSet = SpeciesSoundSets.Find(DinosaurSpecies);
-    if (!SoundSet)
-    {
-        return nullptr;
-    }
-    
-    TSoftObjectPtr<USoundBase>* SoundPtr = nullptr;
-    
-    switch (SoundType)
-    {
-        case EAudio_DinosaurSoundType::Idle:
-            SoundPtr = &SoundSet->IdleSound;
+        case EAudio_DinoSpecies::TRex:
+            FootstepInterval = 1.2f;   // Slow, heavy
+            IdleBreathInterval = 5.0f;
+            MaxHearingDistance = 8000.0f;
             break;
-        case EAudio_DinosaurSoundType::Alert:
-            SoundPtr = &SoundSet->AlertSound;
+        case EAudio_DinoSpecies::Raptor:
+            FootstepInterval = 0.35f;  // Fast, light
+            IdleBreathInterval = 2.5f;
+            MaxHearingDistance = 3000.0f;
             break;
-        case EAudio_DinosaurSoundType::Aggressive:
-            SoundPtr = &SoundSet->AggressiveSound;
+        case EAudio_DinoSpecies::Triceratops:
+            FootstepInterval = 0.9f;
+            IdleBreathInterval = 4.5f;
+            MaxHearingDistance = 4000.0f;
             break;
-        case EAudio_DinosaurSoundType::Pain:
-            SoundPtr = &SoundSet->PainSound;
+        case EAudio_DinoSpecies::Brachiosaurus:
+            FootstepInterval = 1.8f;   // Very slow, massive
+            IdleBreathInterval = 6.0f;
+            MaxHearingDistance = 10000.0f;
             break;
-        case EAudio_DinosaurSoundType::Death:
-            SoundPtr = &SoundSet->DeathSound;
-            break;
-        case EAudio_DinosaurSoundType::Footstep:
-            SoundPtr = &SoundSet->FootstepSound;
-            break;
-        case EAudio_DinosaurSoundType::Breathing:
-            SoundPtr = &SoundSet->BreathingSound;
+        case EAudio_DinoSpecies::Pterodactyl:
+            FootstepInterval = 0.4f;
+            IdleBreathInterval = 3.0f;
+            MaxHearingDistance = 6000.0f;
             break;
         default:
-            return nullptr;
+            break;
     }
-    
-    if (SoundPtr && !SoundPtr->IsNull())
-    {
-        return SoundPtr->LoadSynchronous();
-    }
-    
-    return nullptr;
+
+    // Stagger timers so all dinos don't sync up
+    FootstepTimer = FMath::RandRange(0.0f, FootstepInterval);
+    BreathTimer = FMath::RandRange(0.0f, IdleBreathInterval);
 }
 
-float UDinosaurAudioComponent::CalculateVolumeFromThreat(float BaseVolume)
+void UDinosaurAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    FAudio_DinosaurSoundSet* SoundSet = SpeciesSoundSets.Find(DinosaurSpecies);
-    if (!SoundSet)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Only process audio if player is within hearing range
+    if (PlayerDistanceMeters > MaxHearingDistance)
     {
-        return BaseVolume;
+        return;
     }
-    
-    // Increase volume with threat level
-    float ThreatMultiplier = 1.0f + (CurrentThreatLevel * 0.5f);
-    return BaseVolume * SoundSet->BaseVolume * ThreatMultiplier;
+
+    // Tick idle audio (breathing + footsteps when moving)
+    TickIdleAudio(DeltaTime);
 }
 
-float UDinosaurAudioComponent::CalculatePitchFromThreat(float BasePitch)
+void UDinosaurAudioComponent::TickIdleAudio(float DeltaTime)
 {
-    FAudio_DinosaurSoundSet* SoundSet = SpeciesSoundSets.Find(DinosaurSpecies);
-    if (!SoundSet)
+    // Breathing — only when idle or alert
+    if (CurrentState == EAudio_DinoState::Idle || CurrentState == EAudio_DinoState::Alert)
     {
-        return BasePitch;
+        BreathTimer -= DeltaTime;
+        if (BreathTimer <= 0.0f)
+        {
+            if (SoundSet.IdleBreath)
+            {
+                float VolMult = FMath::GetMappedRangeValueClamped(
+                    FVector2D(0.0f, MaxHearingDistance),
+                    FVector2D(1.0f, 0.1f),
+                    PlayerDistanceMeters
+                );
+                PlaySoundAtOwner(SoundSet.IdleBreath, VolMult);
+            }
+            BreathTimer = IdleBreathInterval + FMath::RandRange(-0.5f, 0.5f);
+        }
     }
-    
-    // Slightly increase pitch with threat level
-    float ThreatPitchShift = CurrentThreatLevel * 0.2f;
-    return BasePitch * SoundSet->BasePitch * (1.0f + ThreatPitchShift);
+
+    // Footsteps — only when moving (aggressive or fleeing)
+    if (CurrentState == EAudio_DinoState::Aggressive || CurrentState == EAudio_DinoState::Fleeing)
+    {
+        FootstepTimer -= DeltaTime;
+        if (FootstepTimer <= 0.0f)
+        {
+            PlayFootstep();
+            FootstepTimer = FootstepInterval;
+        }
+    }
 }
 
-bool UDinosaurAudioComponent::CanPlaySound() const
+void UDinosaurAudioComponent::SetDinoState(EAudio_DinoState NewState)
 {
-    if (!GetWorld())
+    if (CurrentState == NewState) return;
+
+    EAudio_DinoState PrevState = CurrentState;
+    CurrentState = NewState;
+
+    // Trigger state-change sounds
+    switch (NewState)
     {
-        return false;
+        case EAudio_DinoState::Alert:
+            PlayAlert();
+            break;
+        case EAudio_DinoState::Aggressive:
+            PlayRoar();
+            break;
+        case EAudio_DinoState::Dead:
+            PlayDeath();
+            break;
+        case EAudio_DinoState::Feeding:
+            if (SoundSet.Feeding)
+            {
+                PlaySoundAtOwner(SoundSet.Feeding, 0.8f);
+            }
+            break;
+        default:
+            break;
     }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    return (CurrentTime - LastSoundTime) >= SoundCooldownTime;
+}
+
+void UDinosaurAudioComponent::SetDinoSpecies(EAudio_DinoSpecies NewSpecies)
+{
+    Species = NewSpecies;
+    // Re-run BeginPlay timing adjustments
+    BeginPlay();
+}
+
+void UDinosaurAudioComponent::PlayRoar()
+{
+    if (!SoundSet.Roar) return;
+
+    // Roars are always loud — ignore distance attenuation partially
+    float VolMult = FMath::GetMappedRangeValueClamped(
+        FVector2D(0.0f, MaxHearingDistance),
+        FVector2D(1.5f, 0.4f),
+        PlayerDistanceMeters
+    );
+    PlaySoundAtOwner(SoundSet.Roar, VolMult);
+
+    // Trigger ground rumble for large species
+    if (Species == EAudio_DinoSpecies::TRex || Species == EAudio_DinoSpecies::Brachiosaurus)
+    {
+        float RumbleIntensity = FMath::GetMappedRangeValueClamped(
+            FVector2D(0.0f, 3000.0f),
+            FVector2D(1.0f, 0.0f),
+            PlayerDistanceMeters
+        );
+        TriggerGroundRumble(RumbleIntensity);
+    }
+}
+
+void UDinosaurAudioComponent::PlayFootstep()
+{
+    if (!SoundSet.Footstep) return;
+
+    float VolMult = FMath::GetMappedRangeValueClamped(
+        FVector2D(0.0f, MaxHearingDistance),
+        FVector2D(1.2f, 0.05f),
+        PlayerDistanceMeters
+    );
+
+    // T-Rex footsteps trigger rumble at close range
+    if (Species == EAudio_DinoSpecies::TRex && PlayerDistanceMeters < 1500.0f)
+    {
+        float RumbleIntensity = FMath::GetMappedRangeValueClamped(
+            FVector2D(0.0f, 1500.0f),
+            FVector2D(0.8f, 0.0f),
+            PlayerDistanceMeters
+        );
+        TriggerGroundRumble(RumbleIntensity * 0.5f);
+    }
+
+    PlaySoundAtOwner(SoundSet.Footstep, VolMult);
+}
+
+void UDinosaurAudioComponent::PlayDeath()
+{
+    if (!SoundSet.Death) return;
+    PlaySoundAtOwner(SoundSet.Death, 1.2f);
+}
+
+void UDinosaurAudioComponent::PlayAlert()
+{
+    if (!SoundSet.AlertCall) return;
+
+    float VolMult = FMath::GetMappedRangeValueClamped(
+        FVector2D(0.0f, MaxHearingDistance),
+        FVector2D(1.0f, 0.2f),
+        PlayerDistanceMeters
+    );
+    PlaySoundAtOwner(SoundSet.AlertCall, VolMult);
+}
+
+void UDinosaurAudioComponent::UpdatePlayerDistance(float DistanceMeters)
+{
+    PlayerDistanceMeters = DistanceMeters;
+}
+
+void UDinosaurAudioComponent::TriggerGroundRumble(float Intensity)
+{
+    if (Intensity <= 0.01f) return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    UWorld* World = Owner->GetWorld();
+    if (!World) return;
+
+    // Get the player controller to apply camera shake
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    // Apply camera shake proportional to intensity
+    // The shake class would be set in Blueprint — here we just log the trigger
+    // In full implementation: PC->ClientStartCameraShake(ShakeClass, Intensity);
+    // For now, use console rumble command as fallback
+    FString RumbleCmd = FString::Printf(TEXT("r.MotionBlurAmount %f"), Intensity * 0.3f);
+    // Note: actual camera shake requires a UCameraShakeBase subclass assigned in BP
+}
+
+void UDinosaurAudioComponent::PlaySoundAtOwner(USoundCue* Cue, float VolumeMultiplier)
+{
+    if (!Cue) return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    UGameplayStatics::PlaySoundAtLocation(
+        Owner,
+        Cue,
+        Owner->GetActorLocation(),
+        VolumeMultiplier,
+        1.0f,   // PitchMultiplier
+        0.0f,   // StartTime
+        nullptr, // AttenuationSettings — use Cue's built-in
+        nullptr  // Concurrency
+    );
 }
