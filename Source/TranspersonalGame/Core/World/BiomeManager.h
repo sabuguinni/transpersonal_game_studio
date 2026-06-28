@@ -1,6 +1,6 @@
-// BiomeManager.h — Biome System for Prehistoric Dinosaur Survival Game
-// Agent #05 — Procedural World Generator
-// Manages biome zones, transitions, environmental conditions per biome
+// BiomeManager.h — Agent #05 Procedural World Generator
+// Manages biome zones, transitions, and environmental properties
+// Cycle: PROD_CYCLE_AUTO_20260628_006
 
 #pragma once
 
@@ -9,68 +9,101 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ── Biome Type Enum ────────────────────────────────────────────────────────
+// Biome type enum — unique prefix World_ to avoid conflicts
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    RiverValley     UMETA(DisplayName = "River Valley"),
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    VolcanicHighlands UMETA(DisplayName = "Volcanic Highlands"),
-    CoastalSwamp    UMETA(DisplayName = "Coastal Swamp"),
-    RockyBadlands   UMETA(DisplayName = "Rocky Badlands"),
+    Jungle      UMETA(DisplayName = "Jungle"),
+    Plains      UMETA(DisplayName = "Plains"),
+    Badlands    UMETA(DisplayName = "Badlands"),
+    RiverValley UMETA(DisplayName = "River Valley"),
+    Coastal     UMETA(DisplayName = "Coastal"),
+    Cave        UMETA(DisplayName = "Cave")
 };
 
-// ── Biome Environmental Data ───────────────────────────────────────────────
+// Biome environmental properties
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData
+struct FWorld_BiomeProperties
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Plains;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown");
+    FString BiomeName = TEXT("Plains");
 
-    // Temperature range in Celsius
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
-    float MinTemperature = 15.0f;
+    // Temperature in Celsius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment")
+    float AmbientTemperature = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
-    float MaxTemperature = 35.0f;
-
-    // Humidity 0-1 (affects thirst drain rate)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    // Humidity 0-1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment")
     float Humidity = 0.5f;
 
-    // Danger level 0-1 (affects dinosaur aggression radius)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
-    float DangerLevel = 0.3f;
+    // Fog density 0-1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment")
+    float FogDensity = 0.02f;
 
-    // Resource density 0-1 (food, water, crafting materials)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
-    float ResourceDensity = 0.5f;
+    // Wind speed m/s
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment")
+    float WindSpeed = 5.0f;
 
-    // Fog density override for this biome
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
-    float FogDensityMultiplier = 1.0f;
+    // Vegetation density 0-1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Vegetation")
+    float VegetationDensity = 0.5f;
 
-    // Ambient sound tag for this biome
+    // Predator spawn rate multiplier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Danger")
+    float PredatorSpawnMultiplier = 1.0f;
+
+    // Ambient sound category
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Audio")
-    FName AmbientSoundTag = NAME_None;
+    FString AmbientSoundCategory = TEXT("jungle_ambient");
 
-    // World bounds of this biome zone (XY center + radius)
+    // Biome center location in world
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
-    FVector ZoneCenter = FVector::ZeroVector;
+    FVector BiomeCenter = FVector::ZeroVector;
 
+    // Biome radius in cm
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|World")
-    float ZoneRadius = 2000.0f;
+    float BiomeRadius = 5000.0f;
+
+    // Sky color tint for this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor SkyColorTint = FLinearColor(0.5f, 0.7f, 1.0f, 1.0f);
+
+    // Fog color for this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor FogColor = FLinearColor(0.6f, 0.7f, 0.8f, 1.0f);
 };
 
-// ── BiomeManager Actor ─────────────────────────────────────────────────────
-UCLASS(ClassGroup = "TranspersonalGame|World", meta = (DisplayName = "Biome Manager"))
+// Biome transition data
+USTRUCT(BlueprintType)
+struct FWorld_BiomeTransition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EWorld_BiomeType FromBiome = EWorld_BiomeType::Plains;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    EWorld_BiomeType ToBiome = EWorld_BiomeType::Jungle;
+
+    // 0 = fully in FromBiome, 1 = fully in ToBiome
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    float BlendAlpha = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Transition")
+    bool bIsTransitioning = false;
+};
+
+/**
+ * ABiomeManager — manages biome zones and environmental transitions
+ * Placed in the level to define biome boundaries and properties.
+ * Provides query API for other systems (audio, AI, weather, vegetation).
+ */
+UCLASS(ClassGroup = "World", meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -78,57 +111,82 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // ── Biome Registry ─────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeData> RegisteredBiomes;
+    // --- Biome Query API ---
 
-    // ── Query API ──────────────────────────────────────────────────────────
-
-    /** Returns the biome type at the given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    // Get biome at a world location
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns full biome data at the given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    FWorld_BiomeData GetBiomeDataAtLocation(const FVector& WorldLocation) const;
+    // Get full biome properties at a world location
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FWorld_BiomeProperties GetBiomePropertiesAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns temperature at location (interpolated at biome boundaries) */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    // Get current transition data for a location
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FWorld_BiomeTransition GetBiomeTransitionAtLocation(const FVector& WorldLocation) const;
+
+    // Get temperature at location (accounts for biome + time of day)
+    UFUNCTION(BlueprintCallable, Category = "Biome|Environment")
     float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns danger level at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    // Get danger level at location (0-1, based on predator spawn rate)
+    UFUNCTION(BlueprintCallable, Category = "Biome|Danger")
     float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
 
-    /** Returns resource density at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    float GetResourceDensityAtLocation(const FVector& WorldLocation) const;
+    // Register a biome zone
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Setup")
+    void RegisterBiomeZone(const FWorld_BiomeProperties& BiomeProperties);
 
-    // ── Initialization ─────────────────────────────────────────────────────
+    // Clear all registered biomes
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Setup")
+    void ClearAllBiomes();
 
-    /** Initializes all default biomes for the MinPlayableMap */
+    // Initialize default biomes for the MinPlayableMap
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Setup")
     void InitializeDefaultBiomes();
 
-    /** Returns number of registered biomes */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    int32 GetBiomeCount() const { return RegisteredBiomes.Num(); }
+    // Debug: draw biome boundaries in viewport
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
+    void DrawBiomeBoundaries();
+
+    // --- Properties ---
+
+    // All registered biome zones
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Zones")
+    TArray<FWorld_BiomeProperties> BiomeZones;
+
+    // Transition blend distance (overlap between biomes)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Transition")
+    float TransitionBlendDistance = 500.0f;
+
+    // Default biome when no zone matches
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EWorld_BiomeType DefaultBiome = EWorld_BiomeType::Plains;
+
+    // Enable debug visualization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
+    bool bDebugVisualization = false;
+
+    // Tick interval for biome updates (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Performance")
+    float BiomeUpdateInterval = 1.0f;
 
 private:
-    /** Find the closest biome to a world location */
-    int32 FindClosestBiomeIndex(const FVector& WorldLocation) const;
+    // Find nearest biome to a location
+    int32 FindNearestBiomeIndex(const FVector& WorldLocation) const;
 
-    /** Interpolation blend radius between biomes */
-    UPROPERTY(EditAnywhere, Category = "Biomes|Transition", meta = (AllowPrivateAccess = "true"))
-    float BiomeBlendRadius = 500.0f;
+    // Find second nearest biome (for blending)
+    int32 FindSecondNearestBiomeIndex(const FVector& WorldLocation, int32 ExcludeIndex) const;
 
-    /** Whether biomes have been initialized */
-    UPROPERTY(VisibleAnywhere, Category = "Biomes|State", meta = (AllowPrivateAccess = "true"))
-    bool bBiomesInitialized = false;
+    // Timer for biome updates
+    float BiomeUpdateTimer = 0.0f;
+
+    // Cached player location for performance
+    FVector CachedPlayerLocation = FVector::ZeroVector;
+
+    // Current player biome
+    EWorld_BiomeType CurrentPlayerBiome = EWorld_BiomeType::Plains;
 };
