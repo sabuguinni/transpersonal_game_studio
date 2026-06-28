@@ -1,190 +1,214 @@
-// CrowdSimulationManager.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Prehistoric survival game — tribal crowd and dinosaur herd simulation
+// CrowdSimulationManager.cpp — Agent #13 Crowd & Traffic Simulation
+// Prehistoric crowd simulation: herds, packs, stampedes, migration
 
 #include "CrowdSimulationManager.h"
+#include "CrowdBehaviorTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
-#include "AIController.h"
 
 UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    MaxAgents = 200;
-    LOD0Radius = 500.0f;
-    LOD1Radius = 1500.0f;
-    LOD2Radius = 3000.0f;
-    TickInterval = 0.1f;
-    bStampedeActive = false;
-    StampedeDirection = FVector(1.0f, 0.0f, 0.0f);
-    StampedeSpeed = 800.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for performance
+
+    MaxAgents = 500;
+    StampedeRadius = 2000.0f;
+    StampedeSpeedMultiplier = 2.5f;
+    LODDistanceFull = 2000.0f;
+    LODDistanceMedium = 5000.0f;
+    LODDistanceLow = 10000.0f;
+    bDebugDraw = false;
+    NextGroupID = 0;
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void UCrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initialized — MaxAgents: %d, LOD radii: %.0f/%.0f/%.0f"),
-        MaxAgents, LOD0Radius, LOD1Radius, LOD2Radius);
+    Super::BeginPlay();
+
+    // Start crowd update timer at 5Hz (every 0.2s) for group-level decisions
+    GetWorld()->GetTimerManager().SetTimer(
+        CrowdUpdateTimer,
+        this,
+        &UCrowdSimulationManager::UpdateCrowdGroups,
+        0.2f,
+        true
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Manager initialized. MaxAgents=%d"), MaxAgents);
 }
 
-void UCrowdSimulationManager::Deinitialize()
+void UCrowdSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    ActiveAgents.Empty();
-    HerdGroups.Empty();
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Deinitialized"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Update LOD levels based on player distance
+    UpdateLODLevels();
 }
 
-void UCrowdSimulationManager::RegisterCrowdAgent(AActor* Agent, ECrowd_AgentType AgentType)
+int32 UCrowdSimulationManager::RegisterCrowdGroup(const FCrowd_GroupData& GroupData)
 {
-    if (!Agent) return;
+    FCrowd_GroupData NewGroup = GroupData;
+    NewGroup.GroupID = NextGroupID++;
+    ActiveGroups.Add(NewGroup.GroupID, NewGroup);
 
-    FCrowd_AgentData NewAgent;
-    NewAgent.AgentActor = Agent;
-    NewAgent.AgentType = AgentType;
-    NewAgent.CurrentLOD = ECrowd_LODLevel::LOD0_FullDetail;
-    NewAgent.bIsInStampede = false;
-    NewAgent.CurrentSpeed = (AgentType == ECrowd_AgentType::Herbivore_Herd) ? 300.0f : 150.0f;
-    NewAgent.HomeLocation = Agent->GetActorLocation();
-    NewAgent.TargetLocation = Agent->GetActorLocation();
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group registered: ID=%d Type=%d AgentCount=%d"),
+        NewGroup.GroupID, (int32)NewGroup.GroupType, NewGroup.AgentCount);
 
-    ActiveAgents.Add(NewAgent);
-    UE_LOG(LogTemp, Verbose, TEXT("[CrowdSim] Registered agent: %s (Type: %d)"),
-        *Agent->GetName(), (int32)AgentType);
+    return NewGroup.GroupID;
 }
 
-void UCrowdSimulationManager::UnregisterCrowdAgent(AActor* Agent)
+void UCrowdSimulationManager::UnregisterCrowdGroup(int32 GroupID)
 {
-    if (!Agent) return;
-    ActiveAgents.RemoveAll([Agent](const FCrowd_AgentData& Data) {
-        return Data.AgentActor == Agent;
-    });
-}
-
-void UCrowdSimulationManager::UpdateAgentLOD(FCrowd_AgentData& AgentData, const FVector& PlayerLocation)
-{
-    if (!AgentData.AgentActor.IsValid()) return;
-
-    float Distance = FVector::Dist(AgentData.AgentActor->GetActorLocation(), PlayerLocation);
-
-    ECrowd_LODLevel NewLOD;
-    if (Distance <= LOD0Radius)
-        NewLOD = ECrowd_LODLevel::LOD0_FullDetail;
-    else if (Distance <= LOD1Radius)
-        NewLOD = ECrowd_LODLevel::LOD1_Medium;
-    else if (Distance <= LOD2Radius)
-        NewLOD = ECrowd_LODLevel::LOD2_Low;
-    else
-        NewLOD = ECrowd_LODLevel::LOD3_Culled;
-
-    if (NewLOD != AgentData.CurrentLOD)
+    if (ActiveGroups.Contains(GroupID))
     {
-        AgentData.CurrentLOD = NewLOD;
-        // Adjust tick rate based on LOD
-        switch (NewLOD)
-        {
-        case ECrowd_LODLevel::LOD0_FullDetail:
-            AgentData.CurrentSpeed *= 1.0f; // Full simulation
-            break;
-        case ECrowd_LODLevel::LOD1_Medium:
-            AgentData.CurrentSpeed *= 0.8f; // Reduced fidelity
-            break;
-        case ECrowd_LODLevel::LOD2_Low:
-            AgentData.CurrentSpeed *= 0.5f; // Minimal simulation
-            break;
-        case ECrowd_LODLevel::LOD3_Culled:
-            // Agent invisible — skip simulation entirely
-            break;
-        }
+        ActiveGroups.Remove(GroupID);
+        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d unregistered"), GroupID);
     }
 }
 
-void UCrowdSimulationManager::TriggerStampede(const FVector& Origin, const FVector& Direction, float Radius)
+void UCrowdSimulationManager::TriggerStampede(FVector ThreatLocation, float ThreatRadius)
 {
-    if (bStampedeActive) return;
+    UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] STAMPEDE TRIGGERED at %s radius=%.0f"),
+        *ThreatLocation.ToString(), ThreatRadius);
 
-    bStampedeActive = true;
-    StampedeDirection = Direction.GetSafeNormal();
-    StampedeOrigin = Origin;
-
-    int32 AffectedCount = 0;
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    for (auto& Pair : ActiveGroups)
     {
-        if (!Agent.AgentActor.IsValid()) continue;
-        float DistToOrigin = FVector::Dist(Agent.AgentActor->GetActorLocation(), Origin);
-        if (DistToOrigin <= Radius && Agent.AgentType == ECrowd_AgentType::Herbivore_Herd)
+        FCrowd_GroupData& Group = Pair.Value;
+        float DistToThreat = FVector::Dist(Group.GroupCenter, ThreatLocation);
+
+        if (DistToThreat <= ThreatRadius)
         {
-            Agent.bIsInStampede = true;
-            Agent.TargetLocation = Agent.AgentActor->GetActorLocation() + Direction * 5000.0f;
-            AffectedCount++;
+            Group.CurrentState = ECrowd_BehaviorState::Stampeding;
+            Group.GroupThreatLevel = 1.0f;
+
+            // Calculate flee direction away from threat
+            FVector FleeDir = (Group.GroupCenter - ThreatLocation).GetSafeNormal();
+            Group.MigrationTarget = Group.GroupCenter + FleeDir * 5000.0f;
+
+            UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d entering stampede, fleeing to %s"),
+                Group.GroupID, *Group.MigrationTarget.ToString());
         }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[CrowdSim] STAMPEDE TRIGGERED — Origin: %s, Direction: %s, Affected: %d"),
-        *Origin.ToString(), *Direction.ToString(), AffectedCount);
+    OnStampedeTriggered.Broadcast(ThreatLocation, ThreatRadius);
 }
 
-void UCrowdSimulationManager::StopStampede()
+void UCrowdSimulationManager::SetGroupBehaviorState(int32 GroupID, ECrowd_BehaviorState NewState)
 {
-    bStampedeActive = false;
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    if (FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
     {
-        Agent.bIsInStampede = false;
+        Group->CurrentState = NewState;
+        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Group %d state -> %d"), GroupID, (int32)NewState);
     }
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Stampede stopped"));
 }
 
-void UCrowdSimulationManager::RegisterHerdGroup(const FCrowd_HerdGroup& HerdGroup)
+FCrowd_GroupData UCrowdSimulationManager::GetGroupData(int32 GroupID) const
 {
-    HerdGroups.Add(HerdGroup);
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd registered: %s (%d members)"),
-        *HerdGroup.HerdName.ToString(), HerdGroup.Members.Num());
+    if (const FCrowd_GroupData* Group = ActiveGroups.Find(GroupID))
+    {
+        return *Group;
+    }
+    return FCrowd_GroupData();
+}
+
+TArray<int32> UCrowdSimulationManager::GetGroupsInRadius(FVector Center, float Radius) const
+{
+    TArray<int32> Result;
+    for (const auto& Pair : ActiveGroups)
+    {
+        if (FVector::Dist(Pair.Value.GroupCenter, Center) <= Radius)
+        {
+            Result.Add(Pair.Key);
+        }
+    }
+    return Result;
 }
 
 int32 UCrowdSimulationManager::GetActiveAgentCount() const
 {
-    return ActiveAgents.Num();
-}
-
-int32 UCrowdSimulationManager::GetAgentCountByType(ECrowd_AgentType AgentType) const
-{
-    int32 Count = 0;
-    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    int32 Total = 0;
+    for (const auto& Pair : ActiveGroups)
     {
-        if (Agent.AgentType == AgentType) Count++;
+        Total += Pair.Value.AgentCount;
     }
-    return Count;
+    return Total;
 }
 
-void UCrowdSimulationManager::TickCrowdSimulation(float DeltaTime)
+void UCrowdSimulationManager::UpdateCrowdGroups()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
 
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    if (!PC || !PC->GetPawn()) return;
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
 
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-
-    for (FCrowd_AgentData& Agent : ActiveAgents)
+    for (auto& Pair : ActiveGroups)
     {
-        if (!Agent.AgentActor.IsValid()) continue;
+        FCrowd_GroupData& Group = Pair.Value;
 
-        // Update LOD based on distance to player
-        UpdateAgentLOD(Agent, PlayerLocation);
-
-        // Skip culled agents
-        if (Agent.CurrentLOD == ECrowd_LODLevel::LOD3_Culled) continue;
-
-        // Stampede movement
-        if (Agent.bIsInStampede)
+        // Decay threat level over time
+        if (Group.GroupThreatLevel > 0.0f)
         {
-            FVector CurrentLoc = Agent.AgentActor->GetActorLocation();
-            FVector MoveDir = (Agent.TargetLocation - CurrentLoc).GetSafeNormal();
-            FVector NewLoc = CurrentLoc + MoveDir * StampedeSpeed * DeltaTime;
-            Agent.AgentActor->SetActorLocation(NewLoc, true);
+            Group.GroupThreatLevel = FMath::Max(0.0f, Group.GroupThreatLevel - 0.05f);
+        }
+
+        // Transition from stampede back to fleeing when threat decays
+        if (Group.CurrentState == ECrowd_BehaviorState::Stampeding && Group.GroupThreatLevel < 0.3f)
+        {
+            Group.CurrentState = ECrowd_BehaviorState::Fleeing;
+        }
+        else if (Group.CurrentState == ECrowd_BehaviorState::Fleeing && Group.GroupThreatLevel <= 0.0f)
+        {
+            Group.CurrentState = ECrowd_BehaviorState::Wandering;
+        }
+
+        // Debug draw group centers
+        if (bDebugDraw)
+        {
+            FColor DebugColor = FColor::Green;
+            if (Group.CurrentState == ECrowd_BehaviorState::Stampeding) DebugColor = FColor::Red;
+            else if (Group.CurrentState == ECrowd_BehaviorState::Fleeing) DebugColor = FColor::Orange;
+            else if (Group.CurrentState == ECrowd_BehaviorState::Migrating) DebugColor = FColor::Yellow;
+
+            DrawDebugSphere(GetWorld(), Group.GroupCenter, 100.0f, 8, DebugColor, false, 0.25f);
         }
     }
+}
+
+void UCrowdSimulationManager::UpdateLODLevels()
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+
+    for (auto& Pair : ActiveGroups)
+    {
+        FCrowd_GroupData& Group = Pair.Value;
+        float Dist = FVector::Dist(Group.GroupCenter, PlayerLoc);
+
+        // LOD assignment based on distance (stored implicitly via group state)
+        // Full LOD: < LODDistanceFull
+        // Medium LOD: < LODDistanceMedium
+        // Low LOD: < LODDistanceLow
+        // Dormant: >= LODDistanceLow
+        // (Actual LOD switching handled by individual agent actors)
+    }
+}
+
+void UCrowdSimulationManager::SpawnHerdAtLocation(FVector Location, ECrowd_AgentType HerdType, int32 Count)
+{
+    FCrowd_GroupData NewGroup;
+    NewGroup.GroupType = HerdType;
+    NewGroup.GroupCenter = Location;
+    NewGroup.AgentCount = FMath::Clamp(Count, 1, MaxAgents);
+    NewGroup.CurrentState = ECrowd_BehaviorState::Grazing;
+    NewGroup.GroupThreatLevel = 0.0f;
+
+    int32 ID = RegisterCrowdGroup(NewGroup);
+    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd spawned: ID=%d Type=%d Count=%d at %s"),
+        ID, (int32)HerdType, Count, *Location.ToString());
 }
