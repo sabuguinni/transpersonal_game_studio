@@ -1,24 +1,20 @@
-// QuestManager.h
-// Agent #14 — Quest & Mission Designer
-// PROD_CYCLE_AUTO_20260628_007
-// Manages active quests, objective tracking, and quest state transitions
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Quest/QuestTypes.h"
+#include "Quest/QuestSystemTypes.h"
 #include "QuestManager.generated.h"
 
-// Forward declarations
-class ATranspersonalCharacter;
-class UQuestObjectiveComponent;
+// ============================================================
+// Quest Manager — Agent #14 Quest & Mission Designer
+// Manages all active quests, evaluates objectives each tick,
+// broadcasts events on state transitions.
+// ============================================================
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, const FQuest_QuestData&, QuestData);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestObjectiveUpdated, FName, QuestID, const FQuest_ObjectiveData&, Objective);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, FName, QuestID, bool, bSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStateChanged, const FQuest_Event&, QuestEvent);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveUpdated, const FQuest_Event&, ObjectiveEvent);
 
-UCLASS(ClassGroup = "Quest", BlueprintType, Blueprintable)
+UCLASS(ClassGroup = (Quest), meta = (DisplayName = "Quest Manager"))
 class TRANSPERSONALGAME_API AQuestManager : public AActor
 {
     GENERATED_BODY()
@@ -26,118 +22,98 @@ class TRANSPERSONALGAME_API AQuestManager : public AActor
 public:
     AQuestManager();
 
+protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── Quest Lifecycle ───────────────────────────────────────────────────
+public:
+    // ─── Quest Registry ───────────────────────────────────────
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Lifecycle")
-    bool StartQuest(FName QuestID);
+    /** All quests defined for this level */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Registry")
+    TArray<FQuest_Definition> QuestRegistry;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Lifecycle")
-    bool AbandonQuest(FName QuestID);
+    /** IDs of currently active quests */
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
+    TArray<FString> ActiveQuestIDs;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Lifecycle")
-    bool CompleteQuest(FName QuestID, bool bSuccess);
+    /** IDs of completed quests (persists across level) */
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Registry")
+    TArray<FString> CompletedQuestIDs;
 
-    // ─── Objective Tracking ────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-    void UpdateObjectiveProgress(FName QuestID, FName ObjectiveID, int32 ProgressDelta);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-    void MarkObjectiveComplete(FName QuestID, FName ObjectiveID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-    bool IsObjectiveComplete(FName QuestID, FName ObjectiveID) const;
-
-    // ─── Query ─────────────────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Query")
-    bool IsQuestActive(FName QuestID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Query")
-    EQuest_Status GetQuestStatus(FName QuestID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Query")
-    TArray<FQuest_QuestData> GetActiveQuests() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Query")
-    int32 GetActiveQuestCount() const;
-
-    // ─── Stampede Integration ──────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Events")
-    void OnStampedeWitnessed(FVector StampedeLocation, FVector ThreatLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Events")
-    void OnPlayerEscapedStampedePath();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|Events")
-    void OnPredatorTracked(FVector PredatorLocation);
-
-    // ─── Delegates ─────────────────────────────────────────────────────────
+    // ─── Events ───────────────────────────────────────────────
 
     UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestStarted OnQuestStarted;
+    FOnQuestStateChanged OnQuestStateChanged;
 
     UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestObjectiveUpdated OnQuestObjectiveUpdated;
+    FOnObjectiveUpdated OnObjectiveUpdated;
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestCompleted OnQuestCompleted;
+    // ─── Public API ───────────────────────────────────────────
 
-    // ─── Configuration ─────────────────────────────────────────────────────
+    /** Activate a quest by ID */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool ActivateQuest(const FString& QuestID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float ObjectiveCheckInterval = 0.5f;
+    /** Mark a quest as failed */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool FailQuest(const FString& QuestID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float StampedeWitnessRadius = 2000.0f;
+    /** Manually complete a quest (for scripted sequences) */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool CompleteQuest(const FString& QuestID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    float PredatorTrackRadius = 800.0f;
+    /** Increment counter for a CollectResource or KillTarget objective */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void NotifyObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Amount = 1);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Config")
-    int32 MaxActiveQuests = 5;
+    /** Called when player enters a trigger volume (by actor label) */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void NotifyTriggerEntered(const FString& TriggerActorLabel);
 
-    // ─── Quest Library (pre-defined quests loaded at start) ────────────────
+    /** Called when player reaches a location (checks ReachLocation objectives) */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void NotifyPlayerLocation(const FVector& PlayerLocation);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Library")
-    TArray<FQuest_QuestData> QuestLibrary;
+    /** Get quest by ID (returns nullptr if not found) */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    FQuest_Definition GetQuestByID(const FString& QuestID, bool& bFound) const;
+
+    /** Is a specific quest active? */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestActive(const FString& QuestID) const;
+
+    /** Is a specific quest completed? */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    bool IsQuestCompleted(const FString& QuestID) const;
+
+    // ─── Built-in Quest Definitions ───────────────────────────
+
+    /** Initialize the 3 built-in quests for MinPlayableMap */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest|Setup")
+    void InitializeBuiltInQuests();
 
 private:
-    // Active quest state map: QuestID → QuestData
-    UPROPERTY()
-    TMap<FName, FQuest_QuestData> ActiveQuests;
+    /** Evaluate all active quest objectives each tick */
+    void TickActiveQuests(float DeltaTime);
 
-    // Completed quest IDs (for tracking history)
-    UPROPERTY()
-    TArray<FName> CompletedQuestIDs;
+    /** Evaluate a single objective */
+    bool EvaluateObjective(FQuest_Objective& Objective, float DeltaTime, const FVector& PlayerLocation);
 
-    // Objective progress cache: QuestID_ObjectiveID → current progress
-    UPROPERTY()
-    TMap<FName, int32> ObjectiveProgressCache;
+    /** Check if all objectives in a quest are complete */
+    bool AreAllObjectivesComplete(const FQuest_Definition& Quest) const;
 
-    // Timer for periodic objective checks
-    FTimerHandle ObjectiveCheckTimer;
+    /** Broadcast a quest event */
+    void BroadcastQuestEvent(const FString& QuestID, const FString& ObjectiveID, EQuest_State NewState, const FString& Description);
 
-    // Reference to player character
-    UPROPERTY()
-    ATranspersonalCharacter* PlayerCharacter;
+    /** Find quest index by ID */
+    int32 FindQuestIndex(const FString& QuestID) const;
 
-    // Internal helpers
-    FQuest_QuestData* FindQuestInLibrary(FName QuestID);
-    FQuest_ObjectiveData* FindObjectiveInQuest(FQuest_QuestData& Quest, FName ObjectiveID);
-    void CheckAllObjectivesForQuest(FName QuestID);
-    void PeriodicObjectiveCheck();
-    bool AreAllRequiredObjectivesComplete(const FQuest_QuestData& Quest) const;
-    FName MakeProgressKey(FName QuestID, FName ObjectiveID) const;
+    /** Cached player pawn location (updated each tick) */
+    FVector CachedPlayerLocation;
 
-    // Predefined quest builders
-    void BuildQuestLibrary();
-    FQuest_QuestData BuildQuest_EscapeStampede();
-    FQuest_QuestData BuildQuest_TrackThePredator();
-    FQuest_QuestData BuildQuest_RescueMissingHunters();
-    FQuest_QuestData BuildQuest_SalvageSupplies();
+    /** Tick accumulator for objective evaluation (evaluate every 0.2s) */
+    float ObjectiveTickAccumulator;
+
+    static constexpr float ObjectiveTickInterval = 0.2f;
 };
