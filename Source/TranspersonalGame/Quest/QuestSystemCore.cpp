@@ -1,369 +1,498 @@
 #include "QuestSystemCore.h"
 #include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 // ============================================================
-// AQuestTriggerVolume Implementation
+// AQuestTriggerVolume — Implementation
 // ============================================================
 
 AQuestTriggerVolume::AQuestTriggerVolume()
-    : bStartsQuest(true)
-    , bCompletesObjective(true)
-    , bOneTimeUse(true)
-    , bHasTriggered(false)
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
-    TriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerBox"));
-    TriggerBox->SetBoxExtent(FVector(150.f, 150.f, 100.f));
-    TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerBox;
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(300.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuestTriggerVolume::OnSphereBeginOverlap);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AQuestTriggerVolume::OnSphereEndOverlap);
+
+    LinkedQuestID = TEXT("");
+    LinkedObjectiveID = TEXT("");
+    TriggerType = EQuest_TriggerType::ProximityEnter;
+    TriggerRadius = 300.0f;
+    bSingleUse = true;
+    bHasTriggered = false;
 }
 
 void AQuestTriggerVolume::BeginPlay()
 {
     Super::BeginPlay();
-    TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &AQuestTriggerVolume::OnOverlapBegin);
+    TriggerSphere->SetSphereRadius(TriggerRadius);
 }
 
-void AQuestTriggerVolume::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+void AQuestTriggerVolume::Tick(float DeltaTime)
 {
-    if (!OtherActor) return;
-    if (bOneTimeUse && bHasTriggered) return;
+    Super::Tick(DeltaTime);
 
-    // Only respond to player character
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
+#if WITH_EDITOR
+    // Draw debug sphere in editor for visibility
+    DrawDebugSphere(GetWorld(), GetActorLocation(), TriggerRadius, 16,
+        bHasTriggered ? FColor::Green : FColor::Yellow, false, -1.0f, 0, 2.0f);
+#endif
+}
+
+void AQuestTriggerVolume::ActivateTrigger()
+{
+    if (bSingleUse && bHasTriggered)
+    {
+        return;
+    }
 
     bHasTriggered = true;
 
-    // Find QuestManagerComponent on GameState or GameMode
-    UWorld* World = GetWorld();
-    if (!World) return;
+    // Find QuestManager in world and notify it
+    TArray<AActor*> FoundManagers;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AQuestManager::StaticClass(), FoundManagers);
 
-    AGameStateBase* GS = World->GetGameState();
-    if (!GS) return;
-
-    UQuestManagerComponent* QuestMgr = GS->FindComponentByClass<UQuestManagerComponent>();
-    if (!QuestMgr) return;
-
-    if (bStartsQuest && !QuestID.IsEmpty())
+    for (AActor* ManagerActor : FoundManagers)
     {
-        QuestMgr->StartQuest(QuestID);
-        UE_LOG(LogTemp, Log, TEXT("QuestTrigger: Started quest '%s'"), *QuestID);
+        AQuestManager* Manager = Cast<AQuestManager>(ManagerActor);
+        if (Manager && !LinkedQuestID.IsEmpty())
+        {
+            if (TriggerType == EQuest_TriggerType::ProximityEnter)
+            {
+                // Start quest if not already active
+                EQuest_State State = Manager->GetQuestState(LinkedQuestID);
+                if (State == EQuest_State::Available)
+                {
+                    Manager->StartQuest(LinkedQuestID);
+                }
+                // Complete objective if quest is active
+                else if (State == EQuest_State::Active && !LinkedObjectiveID.IsEmpty())
+                {
+                    Manager->CompleteObjective(LinkedQuestID, LinkedObjectiveID);
+                }
+            }
+        }
     }
 
-    if (bCompletesObjective && !QuestID.IsEmpty() && !ObjectiveID.IsEmpty())
-    {
-        QuestMgr->AdvanceObjective(QuestID, ObjectiveID, 1);
-        UE_LOG(LogTemp, Log, TEXT("QuestTrigger: Advanced objective '%s' in quest '%s'"), *ObjectiveID, *QuestID);
-    }
+    UE_LOG(LogTemp, Log, TEXT("QuestTriggerVolume activated: Quest=%s Objective=%s"),
+        *LinkedQuestID, *LinkedObjectiveID);
 }
 
-// ============================================================
-// UQuestManagerComponent Implementation
-// ============================================================
-
-UQuestManagerComponent::UQuestManagerComponent()
+void AQuestTriggerVolume::ResetTrigger()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    bHasTriggered = false;
 }
 
-void UQuestManagerComponent::BeginPlay()
+bool AQuestTriggerVolume::IsPlayerInRange() const
+{
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+    if (!Player)
+    {
+        return false;
+    }
+    float Dist = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
+    return Dist <= TriggerRadius;
+}
+
+void AQuestTriggerVolume::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!OtherActor)
+    {
+        return;
+    }
+
+    // Only trigger for player character
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (Character && UGameplayStatics::GetPlayerCharacter(GetWorld(), 0) == Character)
+    {
+        if (TriggerType == EQuest_TriggerType::ProximityEnter)
+        {
+            ActivateTrigger();
+        }
+    }
+}
+
+void AQuestTriggerVolume::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!OtherActor)
+    {
+        return;
+    }
+
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (Character && UGameplayStatics::GetPlayerCharacter(GetWorld(), 0) == Character)
+    {
+        if (TriggerType == EQuest_TriggerType::ProximityExit)
+        {
+            ActivateTrigger();
+        }
+    }
+}
+
+// ============================================================
+// AQuestManager — Implementation
+// ============================================================
+
+AQuestManager::AQuestManager()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    ActiveQuestID = TEXT("");
+    TotalQuestsCompleted = 0;
+}
+
+void AQuestManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultQuests();
-}
 
-void UQuestManagerComponent::InitializeDefaultQuests()
-{
-    QuestDefinitions.Empty();
-    BuildRaptorDenQuest();
-    BuildFirstHuntQuest();
-    BuildSurvivalNightQuest();
-    UE_LOG(LogTemp, Log, TEXT("QuestManager: Initialized %d quest definitions"), QuestDefinitions.Num());
-}
+    // -------------------------------------------------------
+    // Register built-in quests for the MinPlayableMap
+    // -------------------------------------------------------
 
-void UQuestManagerComponent::BuildRaptorDenQuest()
-{
-    FQuest_Data Quest;
-    Quest.QuestID = TEXT("QUEST_RAPTOR_DEN");
-    Quest.QuestName = TEXT("The Raptor Den");
-    Quest.Description = TEXT("A pack of raptors has been spotted near the eastern valley. Track them to their den and destroy the nest before the pack grows.");
-    Quest.Status = EQuest_Status::Inactive;
-    Quest.bIsMainQuest = false;
-
-    // Objective 1: Reach the eastern valley
-    FQuest_Objective Obj1;
-    Obj1.ObjectiveID = TEXT("OBJ_REACH_VALLEY");
-    Obj1.Description = TEXT("Track the raptor pack to the eastern valley");
-    Obj1.ObjectiveType = EQuest_ObjectiveType::Reach;
-    Obj1.RequiredCount = 1;
-    Obj1.CurrentCount = 0;
-    Obj1.bIsCompleted = false;
-    Quest.Objectives.Add(Obj1);
-
-    // Objective 2: Find the nest
-    FQuest_Objective Obj2;
-    Obj2.ObjectiveID = TEXT("OBJ_FIND_NEST");
-    Obj2.Description = TEXT("Locate the raptor nest site");
-    Obj2.ObjectiveType = EQuest_ObjectiveType::Reach;
-    Obj2.RequiredCount = 1;
-    Obj2.CurrentCount = 0;
-    Obj2.bIsCompleted = false;
-    Quest.Objectives.Add(Obj2);
-
-    // Objective 3: Destroy eggs
-    FQuest_Objective Obj3;
-    Obj3.ObjectiveID = TEXT("OBJ_DESTROY_EGGS");
-    Obj3.Description = TEXT("Destroy the raptor eggs (0/4)");
-    Obj3.ObjectiveType = EQuest_ObjectiveType::Destroy;
-    Obj3.RequiredCount = 4;
-    Obj3.CurrentCount = 0;
-    Obj3.bIsCompleted = false;
-    Quest.Objectives.Add(Obj3);
-
-    // Objective 4: Escape
-    FQuest_Objective Obj4;
-    Obj4.ObjectiveID = TEXT("OBJ_ESCAPE");
-    Obj4.Description = TEXT("Escape from the raptor territory");
-    Obj4.ObjectiveType = EQuest_ObjectiveType::Reach;
-    Obj4.RequiredCount = 1;
-    Obj4.CurrentCount = 0;
-    Obj4.bIsCompleted = false;
-    Quest.Objectives.Add(Obj4);
-
-    // Reward
-    Quest.Reward.ExperiencePoints = 250;
-    Quest.Reward.ItemRewards.Add(TEXT("RaptorClaw_x3"));
-    Quest.Reward.ItemRewards.Add(TEXT("RaptorHide_x2"));
-    Quest.Reward.UnlockedArea = TEXT("EasternValley");
-
-    QuestDefinitions.Add(Quest);
-}
-
-void UQuestManagerComponent::BuildFirstHuntQuest()
-{
-    FQuest_Data Quest;
-    Quest.QuestID = TEXT("QUEST_FIRST_HUNT");
-    Quest.QuestName = TEXT("First Blood");
-    Quest.Description = TEXT("The tribe needs food. Hunt a herbivore dinosaur and bring back meat to the camp.");
-    Quest.Status = EQuest_Status::Inactive;
-    Quest.bIsMainQuest = true;
-
-    FQuest_Objective Obj1;
-    Obj1.ObjectiveID = TEXT("OBJ_FIND_PREY");
-    Obj1.Description = TEXT("Locate a herbivore dinosaur");
-    Obj1.ObjectiveType = EQuest_ObjectiveType::Reach;
-    Obj1.RequiredCount = 1;
-    Obj1.CurrentCount = 0;
-    Obj1.bIsCompleted = false;
-    Quest.Objectives.Add(Obj1);
-
-    FQuest_Objective Obj2;
-    Obj2.ObjectiveID = TEXT("OBJ_KILL_PREY");
-    Obj2.Description = TEXT("Kill the dinosaur");
-    Obj2.ObjectiveType = EQuest_ObjectiveType::Kill;
-    Obj2.RequiredCount = 1;
-    Obj2.CurrentCount = 0;
-    Obj2.bIsCompleted = false;
-    Quest.Objectives.Add(Obj2);
-
-    FQuest_Objective Obj3;
-    Obj3.ObjectiveID = TEXT("OBJ_COLLECT_MEAT");
-    Obj3.Description = TEXT("Collect meat from the carcass");
-    Obj3.ObjectiveType = EQuest_ObjectiveType::Collect;
-    Obj3.RequiredCount = 3;
-    Obj3.CurrentCount = 0;
-    Obj3.bIsCompleted = false;
-    Quest.Objectives.Add(Obj3);
-
-    FQuest_Objective Obj4;
-    Obj4.ObjectiveID = TEXT("OBJ_RETURN_CAMP");
-    Obj4.Description = TEXT("Return to camp with the meat");
-    Obj4.ObjectiveType = EQuest_ObjectiveType::Reach;
-    Obj4.RequiredCount = 1;
-    Obj4.CurrentCount = 0;
-    Obj4.bIsCompleted = false;
-    Quest.Objectives.Add(Obj4);
-
-    Quest.Reward.ExperiencePoints = 150;
-    Quest.Reward.ItemRewards.Add(TEXT("DinoMeat_x3"));
-    Quest.Reward.ItemRewards.Add(TEXT("Bone_x2"));
-
-    QuestDefinitions.Add(Quest);
-}
-
-void UQuestManagerComponent::BuildSurvivalNightQuest()
-{
-    FQuest_Data Quest;
-    Quest.QuestID = TEXT("QUEST_SURVIVE_NIGHT");
-    Quest.QuestName = TEXT("Survive the Dark");
-    Quest.Description = TEXT("Predators are most active at night. Build a fire, fortify your position, and survive until dawn.");
-    Quest.Status = EQuest_Status::Inactive;
-    Quest.bIsMainQuest = false;
-
-    FQuest_Objective Obj1;
-    Obj1.ObjectiveID = TEXT("OBJ_BUILD_FIRE");
-    Obj1.Description = TEXT("Build a campfire");
-    Obj1.ObjectiveType = EQuest_ObjectiveType::Collect;
-    Obj1.RequiredCount = 1;
-    Obj1.CurrentCount = 0;
-    Obj1.bIsCompleted = false;
-    Quest.Objectives.Add(Obj1);
-
-    FQuest_Objective Obj2;
-    Obj2.ObjectiveID = TEXT("OBJ_SURVIVE_NIGHT");
-    Obj2.Description = TEXT("Survive until dawn (5 minutes)");
-    Obj2.ObjectiveType = EQuest_ObjectiveType::Survive;
-    Obj2.RequiredCount = 300; // seconds
-    Obj2.CurrentCount = 0;
-    Obj2.bIsCompleted = false;
-    Quest.Objectives.Add(Obj2);
-
-    Quest.Reward.ExperiencePoints = 200;
-    Quest.Reward.ItemRewards.Add(TEXT("FlintStone_x2"));
-    Quest.Reward.UnlockedArea = TEXT("NorthernForest");
-
-    QuestDefinitions.Add(Quest);
-}
-
-bool UQuestManagerComponent::StartQuest(const FString& QuestID)
-{
-    // Check if already active
-    if (IsQuestActive(QuestID))
+    // QUEST 1: Stampede Warning — warn the eastern camp
     {
-        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest '%s' is already active"), *QuestID);
+        FQuest_Definition Q;
+        Q.QuestID = TEXT("Q_StampedeWarning");
+        Q.QuestTitle = TEXT("Stampede Warning");
+        Q.QuestDescription = TEXT("The Iguanodon herd is moving fast. Warn the eastern camp before the stampede reaches the river crossing.");
+        Q.State = EQuest_State::Available;
+        Q.bHasTimeLimit = true;
+        Q.TimeLimit = 180.0f; // 3 minutes
+        Q.RewardDescription = TEXT("Camp shelter unlocked. Tribal elder shares knowledge of safe river crossings.");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_ReachCamp");
+        Obj1.Description = TEXT("Reach the tribal camp before the herd blocks the path");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::ReachLocation;
+        Obj1.TargetLocation = FVector(-500.0f, 800.0f, 100.0f);
+        Obj1.ProximityRadius = 400.0f;
+        Obj1.RequiredCount = 1;
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_WarnElder");
+        Obj2.Description = TEXT("Speak to the tribal elder");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::WarnNPC;
+        Obj2.TargetLocation = FVector(-500.0f, 800.0f, 100.0f);
+        Obj2.ProximityRadius = 200.0f;
+        Obj2.RequiredCount = 1;
+
+        Q.Objectives.Add(Obj1);
+        Q.Objectives.Add(Obj2);
+        QuestRegistry.Add(Q);
+    }
+
+    // QUEST 2: Observe the Herd Migration
+    {
+        FQuest_Definition Q;
+        Q.QuestID = TEXT("Q_HerdObservation");
+        Q.QuestTitle = TEXT("Track the Migration");
+        Q.QuestDescription = TEXT("Follow the Iguanodon herd along the migration path. Observe their behaviour at each waypoint without disturbing them.");
+        Q.State = EQuest_State::Available;
+        Q.bHasTimeLimit = false;
+        Q.RewardDescription = TEXT("Migration route mapped. New area unlocked: River Delta.");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_Waypoint1");
+        Obj1.Description = TEXT("Reach the first observation point near the herd");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::ObserveCreature;
+        Obj1.TargetLocation = FVector(3000.0f, 1500.0f, 100.0f);
+        Obj1.ProximityRadius = 600.0f;
+        Obj1.RequiredCount = 1;
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_Waypoint2");
+        Obj2.Description = TEXT("Follow the herd to the river crossing");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::FollowTrail;
+        Obj2.TargetLocation = FVector(4500.0f, 2500.0f, 100.0f);
+        Obj2.ProximityRadius = 500.0f;
+        Obj2.RequiredCount = 1;
+
+        FQuest_Objective Obj3;
+        Obj3.ObjectiveID = TEXT("OBJ_Waypoint3");
+        Obj3.Description = TEXT("Observe the herd at the valley exit");
+        Obj3.ObjectiveType = EQuest_ObjectiveType::ObserveCreature;
+        Obj3.TargetLocation = FVector(6000.0f, 3500.0f, 100.0f);
+        Obj3.ProximityRadius = 500.0f;
+        Obj3.RequiredCount = 1;
+
+        Q.Objectives.Add(Obj1);
+        Q.Objectives.Add(Obj2);
+        Q.Objectives.Add(Obj3);
+        QuestRegistry.Add(Q);
+    }
+
+    // QUEST 3: Predator Threat — escape before the predator arrives
+    {
+        FQuest_Definition Q;
+        Q.QuestID = TEXT("Q_PredatorEscape");
+        Q.QuestTitle = TEXT("Predator at the River");
+        Q.QuestDescription = TEXT("A large predator has been spotted following the herd. Help the camp pack supplies and move to higher ground before nightfall.");
+        Q.State = EQuest_State::Locked; // Unlocks after Q_StampedeWarning completes
+        Q.bHasTimeLimit = true;
+        Q.TimeLimit = 240.0f; // 4 minutes
+        Q.RewardDescription = TEXT("New camp location established. Crafting bench unlocked.");
+
+        FQuest_Objective Obj1;
+        Obj1.ObjectiveID = TEXT("OBJ_CollectSupplies");
+        Obj1.Description = TEXT("Collect 3 supply bundles from the camp");
+        Obj1.ObjectiveType = EQuest_ObjectiveType::CollectResource;
+        Obj1.TargetLocation = FVector(-500.0f, 800.0f, 100.0f);
+        Obj1.ProximityRadius = 300.0f;
+        Obj1.RequiredCount = 3;
+
+        FQuest_Objective Obj2;
+        Obj2.ObjectiveID = TEXT("OBJ_EscapeToHighGround");
+        Obj2.Description = TEXT("Reach the high ground before the predator arrives");
+        Obj2.ObjectiveType = EQuest_ObjectiveType::EscapeArea;
+        Obj2.TargetLocation = FVector(-2000.0f, -1500.0f, 500.0f);
+        Obj2.ProximityRadius = 400.0f;
+        Obj2.RequiredCount = 1;
+
+        Q.Objectives.Add(Obj1);
+        Q.Objectives.Add(Obj2);
+        QuestRegistry.Add(Q);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager initialized with %d quests"), QuestRegistry.Num());
+}
+
+void AQuestManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    CheckTimeLimits(DeltaTime);
+}
+
+bool AQuestManager::StartQuest(const FString& QuestID)
+{
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest not found: %s"), *QuestID);
         return false;
     }
 
-    // Find definition
-    for (const FQuest_Data& Def : QuestDefinitions)
+    FQuest_Definition& Quest = QuestRegistry[Idx];
+    if (Quest.State != EQuest_State::Available)
     {
-        if (Def.QuestID == QuestID)
-        {
-            FQuest_Data NewQuest = Def;
-            NewQuest.Status = EQuest_Status::Active;
-            ActiveQuests.Add(NewQuest);
-            UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' started"), *QuestID);
-            return true;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest %s not available (state=%d)"), *QuestID, (int32)Quest.State);
+        return false;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest definition '%s' not found"), *QuestID);
-    return false;
+    Quest.State = EQuest_State::Active;
+    ActiveQuestID = QuestID;
+    QuestStartTimes.Add(QuestID, GetWorld()->GetTimeSeconds());
+    QuestElapsedTimes.Add(QuestID, 0.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest STARTED — %s"), *Quest.QuestTitle);
+    return true;
 }
 
-bool UQuestManagerComponent::AdvanceObjective(const FString& QuestID, const FString& ObjectiveID, int32 Count)
+bool AQuestManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID)
 {
-    FQuest_Data* Quest = FindActiveQuest(QuestID);
-    if (!Quest) return false;
+    int32 QIdx = FindQuestIndex(QuestID);
+    if (QIdx == INDEX_NONE)
+    {
+        return false;
+    }
 
-    for (FQuest_Objective& Obj : Quest->Objectives)
+    FQuest_Definition& Quest = QuestRegistry[QIdx];
+    if (Quest.State != EQuest_State::Active)
+    {
+        return false;
+    }
+
+    for (FQuest_Objective& Obj : Quest.Objectives)
     {
         if (Obj.ObjectiveID == ObjectiveID && !Obj.bIsCompleted)
         {
-            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + Count, Obj.RequiredCount);
+            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + 1, Obj.RequiredCount);
             if (Obj.CurrentCount >= Obj.RequiredCount)
             {
                 Obj.bIsCompleted = true;
-                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective '%s' completed in quest '%s'"), *ObjectiveID, *QuestID);
+                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective COMPLETE — %s / %s"), *QuestID, *ObjectiveID);
             }
-            CheckQuestCompletion(*Quest);
+
+            // Check if all objectives done
+            if (AreAllObjectivesComplete(Quest))
+            {
+                Quest.State = EQuest_State::Completed;
+                TotalQuestsCompleted++;
+                UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest COMPLETED — %s"), *Quest.QuestTitle);
+
+                // Unlock dependent quests
+                if (QuestID == TEXT("Q_StampedeWarning"))
+                {
+                    int32 PredIdx = FindQuestIndex(TEXT("Q_PredatorEscape"));
+                    if (PredIdx != INDEX_NONE && QuestRegistry[PredIdx].State == EQuest_State::Locked)
+                    {
+                        QuestRegistry[PredIdx].State = EQuest_State::Available;
+                        UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest UNLOCKED — Q_PredatorEscape"));
+                    }
+                }
+            }
             return true;
         }
     }
     return false;
 }
 
-bool UQuestManagerComponent::CompleteQuest(const FString& QuestID)
+bool AQuestManager::FailQuest(const FString& QuestID)
 {
-    FQuest_Data* Quest = FindActiveQuest(QuestID);
-    if (!Quest) return false;
-
-    Quest->Status = EQuest_Status::Completed;
-    CompletedQuests.Add(*Quest);
-
-    // Remove from active
-    ActiveQuests.RemoveAll([&QuestID](const FQuest_Data& Q) {
-        return Q.QuestID == QuestID;
-    });
-
-    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' COMPLETED. Reward: %d XP"), *QuestID, Quest->Reward.ExperiencePoints);
-    return true;
-}
-
-bool UQuestManagerComponent::FailQuest(const FString& QuestID)
-{
-    FQuest_Data* Quest = FindActiveQuest(QuestID);
-    if (!Quest) return false;
-
-    Quest->Status = EQuest_Status::Failed;
-    ActiveQuests.RemoveAll([&QuestID](const FQuest_Data& Q) {
-        return Q.QuestID == QuestID;
-    });
-
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest '%s' FAILED"), *QuestID);
-    return true;
-}
-
-FQuest_Data UQuestManagerComponent::GetQuestData(const FString& QuestID) const
-{
-    for (const FQuest_Data& Q : ActiveQuests)
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
     {
-        if (Q.QuestID == QuestID) return Q;
+        return false;
     }
-    for (const FQuest_Data& Q : CompletedQuests)
-    {
-        if (Q.QuestID == QuestID) return Q;
-    }
-    return FQuest_Data();
-}
 
-bool UQuestManagerComponent::IsQuestActive(const FString& QuestID) const
-{
-    for (const FQuest_Data& Q : ActiveQuests)
+    FQuest_Definition& Quest = QuestRegistry[Idx];
+    if (Quest.State == EQuest_State::Active)
     {
-        if (Q.QuestID == QuestID) return true;
+        Quest.State = EQuest_State::Failed;
+        UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest FAILED — %s"), *Quest.QuestTitle);
+        return true;
     }
     return false;
 }
 
-void UQuestManagerComponent::RegisterQuestDefinition(const FQuest_Data& QuestDef)
+EQuest_State AQuestManager::GetQuestState(const FString& QuestID) const
 {
-    // Remove existing definition with same ID if present
-    QuestDefinitions.RemoveAll([&QuestDef](const FQuest_Data& Q) {
-        return Q.QuestID == QuestDef.QuestID;
-    });
-    QuestDefinitions.Add(QuestDef);
-}
-
-FQuest_Data* UQuestManagerComponent::FindActiveQuest(const FString& QuestID)
-{
-    for (FQuest_Data& Q : ActiveQuests)
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
     {
-        if (Q.QuestID == QuestID) return &Q;
+        return EQuest_State::Locked;
     }
-    return nullptr;
+    return QuestRegistry[Idx].State;
 }
 
-void UQuestManagerComponent::CheckQuestCompletion(FQuest_Data& Quest)
+FQuest_Definition AQuestManager::GetQuestDefinition(const FString& QuestID) const
 {
-    bool bAllComplete = true;
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx != INDEX_NONE)
+    {
+        return QuestRegistry[Idx];
+    }
+    return FQuest_Definition();
+}
+
+void AQuestManager::RegisterQuest(const FQuest_Definition& QuestDef)
+{
+    // Prevent duplicates
+    int32 Existing = FindQuestIndex(QuestDef.QuestID);
+    if (Existing != INDEX_NONE)
+    {
+        QuestRegistry[Existing] = QuestDef;
+    }
+    else
+    {
+        QuestRegistry.Add(QuestDef);
+    }
+}
+
+TArray<FString> AQuestManager::GetActiveQuestIDs() const
+{
+    TArray<FString> Result;
+    for (const FQuest_Definition& Q : QuestRegistry)
+    {
+        if (Q.State == EQuest_State::Active)
+        {
+            Result.Add(Q.QuestID);
+        }
+    }
+    return Result;
+}
+
+int32 AQuestManager::GetObjectiveProgress(const FString& QuestID, const FString& ObjectiveID) const
+{
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
+    {
+        return 0;
+    }
+    for (const FQuest_Objective& Obj : QuestRegistry[Idx].Objectives)
+    {
+        if (Obj.ObjectiveID == ObjectiveID)
+        {
+            return Obj.CurrentCount;
+        }
+    }
+    return 0;
+}
+
+float AQuestManager::GetQuestTimeRemaining(const FString& QuestID) const
+{
+    int32 Idx = FindQuestIndex(QuestID);
+    if (Idx == INDEX_NONE)
+    {
+        return 0.0f;
+    }
+    const FQuest_Definition& Quest = QuestRegistry[Idx];
+    if (!Quest.bHasTimeLimit || Quest.State != EQuest_State::Active)
+    {
+        return Quest.TimeLimit;
+    }
+
+    const float* StartTime = QuestStartTimes.Find(QuestID);
+    if (!StartTime)
+    {
+        return Quest.TimeLimit;
+    }
+
+    float Elapsed = GetWorld()->GetTimeSeconds() - *StartTime;
+    return FMath::Max(0.0f, Quest.TimeLimit - Elapsed);
+}
+
+void AQuestManager::CheckTimeLimits(float DeltaTime)
+{
+    for (FQuest_Definition& Quest : QuestRegistry)
+    {
+        if (Quest.State != EQuest_State::Active || !Quest.bHasTimeLimit)
+        {
+            continue;
+        }
+
+        const float* StartTime = QuestStartTimes.Find(Quest.QuestID);
+        if (!StartTime)
+        {
+            continue;
+        }
+
+        float Elapsed = GetWorld()->GetTimeSeconds() - *StartTime;
+        if (Elapsed >= Quest.TimeLimit)
+        {
+            Quest.State = EQuest_State::Failed;
+            UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest TIMED OUT — %s"), *Quest.QuestTitle);
+        }
+    }
+}
+
+bool AQuestManager::AreAllObjectivesComplete(const FQuest_Definition& Quest) const
+{
     for (const FQuest_Objective& Obj : Quest.Objectives)
     {
         if (!Obj.bIsCompleted)
         {
-            bAllComplete = false;
-            break;
+            return false;
         }
     }
+    return Quest.Objectives.Num() > 0;
+}
 
-    if (bAllComplete)
+int32 AQuestManager::FindQuestIndex(const FString& QuestID) const
+{
+    for (int32 i = 0; i < QuestRegistry.Num(); ++i)
     {
-        CompleteQuest(Quest.QuestID);
+        if (QuestRegistry[i].QuestID == QuestID)
+        {
+            return i;
+        }
     }
+    return INDEX_NONE;
 }
