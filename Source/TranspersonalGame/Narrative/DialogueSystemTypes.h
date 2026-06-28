@@ -1,154 +1,172 @@
-// DialogueSystemTypes.h
-// Agent #15 — Narrative & Dialogue Agent
-// Cycle: PROD_CYCLE_AUTO_20260628_003
-// Shared types for the dialogue tree system — all 3 quest NPCs use these structs.
-// MUST be included before DialogueManager.h
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Quest/QuestSystemTypes.h"
 #include "DialogueSystemTypes.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-// ENarr_DialogueNodeType — what kind of node this is in the tree
-// ─────────────────────────────────────────────────────────────
+// ============================================================
+// DIALOGUE SYSTEM TYPES — Agent #15 Narrative & Dialogue
+// All types prefixed with Narr_ to avoid conflicts
+// ============================================================
+
 UENUM(BlueprintType)
-enum class ENarr_DialogueNodeType : uint8
+enum class ENarr_DialogueState : uint8
 {
-    NPCSpeech       UMETA(DisplayName = "NPC Speech"),       // NPC delivers a line
-    PlayerChoice    UMETA(DisplayName = "Player Choice"),    // Player selects a response
-    QuestTrigger    UMETA(DisplayName = "Quest Trigger"),    // Starts/advances a quest
-    QuestComplete   UMETA(DisplayName = "Quest Complete"),   // Marks quest complete
-    Conditional     UMETA(DisplayName = "Conditional"),      // Branch on game state
-    End             UMETA(DisplayName = "End")               // Conversation closes
+    Idle            UMETA(DisplayName = "Idle"),
+    Greeting        UMETA(DisplayName = "Greeting"),
+    QuestOffer      UMETA(DisplayName = "Quest Offer"),
+    QuestActive     UMETA(DisplayName = "Quest Active"),
+    QuestComplete   UMETA(DisplayName = "Quest Complete"),
+    QuestFailed     UMETA(DisplayName = "Quest Failed"),
+    Lore            UMETA(DisplayName = "Lore"),
+    Farewell        UMETA(DisplayName = "Farewell")
 };
 
-// ─────────────────────────────────────────────────────────────
-// ENarr_NPCEmotion — drives animation state on the NPC
-// ─────────────────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class ENarr_NPCEmotion : uint8
+enum class ENarr_NPCRole : uint8
 {
-    Neutral     UMETA(DisplayName = "Neutral"),
-    Urgent      UMETA(DisplayName = "Urgent"),
-    Fearful     UMETA(DisplayName = "Fearful"),
-    Grieving    UMETA(DisplayName = "Grieving"),
-    Relieved    UMETA(DisplayName = "Relieved"),
-    Angry       UMETA(DisplayName = "Angry"),
-    Grateful    UMETA(DisplayName = "Grateful")
+    TribalElder     UMETA(DisplayName = "Tribal Elder"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    Watcher         UMETA(DisplayName = "Watcher"),
+    Villager        UMETA(DisplayName = "Villager"),
+    Survivor        UMETA(DisplayName = "Survivor")
 };
 
-// ─────────────────────────────────────────────────────────────
-// ENarr_QuestDialogueID — links dialogue trees to quest givers
-// ─────────────────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class ENarr_QuestDialogueID : uint8
+enum class ENarr_DialogueCondition : uint8
 {
-    None                UMETA(DisplayName = "None"),
-    Quest1_Stampede     UMETA(DisplayName = "Quest 1 — Stampede Warning"),
-    Quest2_DefendCamp   UMETA(DisplayName = "Quest 2 — Defend the Camp"),
-    Quest3_LostChild    UMETA(DisplayName = "Quest 3 — Find the Lost Child"),
-    Quest3_ChildFound   UMETA(DisplayName = "Quest 3 — Child Found Reaction"),
-    Quest1_Complete     UMETA(DisplayName = "Quest 1 — Completion Debrief"),
-    Quest2_Complete     UMETA(DisplayName = "Quest 2 — Completion Debrief"),
-    Quest3_Complete     UMETA(DisplayName = "Quest 3 — Completion Debrief")
+    Always              UMETA(DisplayName = "Always"),
+    QuestNotStarted     UMETA(DisplayName = "Quest Not Started"),
+    QuestActive         UMETA(DisplayName = "Quest Active"),
+    QuestCompleted      UMETA(DisplayName = "Quest Completed"),
+    QuestFailed         UMETA(DisplayName = "Quest Failed"),
+    PlayerHasItem       UMETA(DisplayName = "Player Has Item"),
+    PlayerHealthLow     UMETA(DisplayName = "Player Health Low"),
+    TimeOfDay_Day       UMETA(DisplayName = "Time of Day: Day"),
+    TimeOfDay_Night     UMETA(DisplayName = "Time of Day: Night"),
+    DinosaurNearby      UMETA(DisplayName = "Dinosaur Nearby")
 };
 
-// ─────────────────────────────────────────────────────────────
-// FNarr_PlayerOption — one selectable response in a choice node
-// ─────────────────────────────────────────────────────────────
+// A single line of dialogue with condition and audio reference
 USTRUCT(BlueprintType)
-struct FNarr_PlayerOption
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    // Text shown on the choice button
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText OptionText;
+    // Unique ID for this line (used for audio cue lookup)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName LineID;
 
-    // Node ID to jump to when this option is selected
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 NextNodeID = -1;
+    // The spoken text
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LineText;
 
-    // If true, this option is only shown when a condition is met
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bConditional = false;
+    // Condition that must be true for this line to play
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueCondition Condition = ENarr_DialogueCondition::Always;
 
-    // Condition tag — evaluated by DialogueManager at runtime
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName ConditionTag = NAME_None;
+    // Optional quest ID this line is associated with
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName AssociatedQuestID;
+
+    // Audio asset path (e.g. /Game/Audio/Dialogue/TribalElder_Greeting)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString AudioAssetPath;
+
+    // Subtitle display duration in seconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float SubtitleDuration = 4.0f;
+
+    // Should this line trigger a quest offer?
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bTriggersQuestOffer = false;
+
+    // Quest ID to offer if bTriggersQuestOffer is true
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName QuestToOffer;
 };
 
-// ─────────────────────────────────────────────────────────────
-// FNarr_DialogueNode — one node in a dialogue tree
-// ─────────────────────────────────────────────────────────────
+// A node in the dialogue tree — one NPC utterance + player response options
 USTRUCT(BlueprintType)
 struct FNarr_DialogueNode
 {
     GENERATED_BODY()
 
-    // Unique ID within this dialogue tree (0 = root)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 NodeID = 0;
+    // Unique node ID
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName NodeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_DialogueNodeType NodeType = ENarr_DialogueNodeType::NPCSpeech;
+    // The NPC line spoken at this node
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FNarr_DialogueLine NPCLine;
 
-    // The spoken/displayed text
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText SpeechText;
+    // Player response options (empty = end of conversation)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FString> PlayerResponses;
 
-    // NPC emotional state while delivering this line
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_NPCEmotion Emotion = ENarr_NPCEmotion::Neutral;
+    // Which node each player response leads to (parallel array to PlayerResponses)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FName> ResponseNextNodes;
 
-    // Audio asset path (pre-baked ElevenLabs MP3 URL stored as metadata)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioURL;
+    // Is this a terminal node (ends the conversation)?
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsTerminal = false;
 
-    // For NPCSpeech: auto-advance to this node after speech ends (-1 = wait)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 AutoNextNodeID = -1;
-
-    // For PlayerChoice: list of options shown to player
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_PlayerOption> PlayerOptions;
-
-    // For QuestTrigger: which quest to start/advance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_QuestDialogueID QuestLink = ENarr_QuestDialogueID::None;
-
-    // Camera focus hint — offset from NPC for cinematic framing
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FVector CameraFocusOffset = FVector(200.f, 0.f, 60.f);
+    // State this node transitions the dialogue to
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueState TransitionState = ENarr_DialogueState::Idle;
 };
 
-// ─────────────────────────────────────────────────────────────
-// FNarr_DialogueTree — a complete conversation for one NPC
-// ─────────────────────────────────────────────────────────────
+// Complete dialogue tree for one NPC
 USTRUCT(BlueprintType)
 struct FNarr_DialogueTree
 {
     GENERATED_BODY()
 
-    // Which quest NPC owns this tree
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_QuestDialogueID DialogueID = ENarr_QuestDialogueID::None;
+    // NPC identifier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName NPCID;
 
-    // Actor tag to bind this tree to a spawned NPC in the level
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName NPCActorTag = NAME_None;
+    // NPC display name
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCName;
 
-    // All nodes in this tree, keyed by NodeID
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    // NPC role
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole NPCRole = ENarr_NPCRole::Villager;
+
+    // Entry node ID (first node to play when player enters dialogue range)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName EntryNodeID;
+
+    // All nodes in this dialogue tree
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueNode> Nodes;
 
-    // Node to start from (usually 0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    int32 RootNodeID = 0;
+    // Dialogue radius — player must be within this distance to trigger
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DialogueRadius = 250.0f;
+};
 
-    // True once the player has completed this dialogue at least once
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
-    bool bCompleted = false;
+// Event broadcast when a dialogue line is spoken
+USTRUCT(BlueprintType)
+struct FNarr_DialogueEvent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FName NPCID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FName NodeID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FString LineText;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    ENarr_DialogueState NewState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    float Timestamp = 0.0f;
 };
