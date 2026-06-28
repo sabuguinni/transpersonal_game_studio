@@ -1,286 +1,369 @@
 // BiomeManager.cpp
-// Transpersonal Game Studio — Engine Architect #02
-// Manages biome zones, transitions, and environmental parameters for the prehistoric world.
+// Engine Architect #02 — Transpersonal Game Studio
+// Manages biome detection, transitions, and environmental parameters
+// for the prehistoric survival world.
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "TimerManager.h"
-#include "DrawDebugHelpers.h"
 
 UBiomeManager::UBiomeManager()
 {
-    // Default biome transition parameters
-    BiomeTransitionBlendRadius = 2000.0f;
-    bEnableBiomeDebugDraw = false;
-    CurrentDominantBiome = EEng_BiomeType::Jungle;
-    BiomeUpdateInterval = 1.0f;
-    bBiomesInitialized = false;
+    // Default biome parameters
+    CurrentBiome = EBiomeType::Forest;
+    PreviousBiome = EBiomeType::Forest;
+    BiomeTransitionAlpha = 1.f;
+    bIsTransitioning = false;
+    TransitionDuration = 5.f;
+    BiomeCheckInterval = 2.f;
+
+    // Default weather
+    CurrentWeather = EWeatherType::Clear;
+    WeatherIntensity = 0.f;
+    TemperatureCelsius = 28.f;
+    HumidityPercent = 60.f;
+    WindSpeed = 5.f;
+    WindDirection = FVector(1.f, 0.f, 0.f);
+
+    // Day/night
+    TimeOfDay = 12.f;
+    DayLengthMinutes = 20.f;
+    bIsDaytime = true;
 }
 
 void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    InitializeDefaultBiomes();
-    bBiomesInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome zones"), BiomeZones.Num());
+
+    // Start biome check timer
+    GetWorld()->GetTimerManager().SetTimer(
+        BiomeCheckTimerHandle,
+        this,
+        &UBiomeManager::UpdateBiomeForPlayerPosition,
+        BiomeCheckInterval,
+        true
+    );
+
+    // Start day/night cycle timer (updates every real second)
+    GetWorld()->GetTimerManager().SetTimer(
+        DayNightTimerHandle,
+        this,
+        &UBiomeManager::AdvanceDayNightCycle,
+        1.f,
+        true
+    );
+
+    // Start weather change timer (every 5 real minutes)
+    GetWorld()->GetTimerManager().SetTimer(
+        WeatherTimerHandle,
+        this,
+        &UBiomeManager::RandomizeWeather,
+        300.f,
+        true
+    );
+
+    // Initialize biome data table
+    InitializeBiomeData();
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager initialized — prehistoric world active"));
 }
 
 void UBiomeManager::Deinitialize()
 {
-    BiomeZones.Empty();
+    GetWorld()->GetTimerManager().ClearTimer(BiomeCheckTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(DayNightTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(WeatherTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(TransitionTimerHandle);
+
     Super::Deinitialize();
 }
 
-void UBiomeManager::InitializeDefaultBiomes()
+void UBiomeManager::InitializeBiomeData()
 {
-    // Jungle biome — dense vegetation, high humidity, warm
-    FEng_BiomeZone JungleBiome;
-    JungleBiome.BiomeType = EEng_BiomeType::Jungle;
-    JungleBiome.BiomeName = TEXT("Cretaceous Jungle");
-    JungleBiome.CenterLocation = FVector(0.0f, 0.0f, 0.0f);
-    JungleBiome.Radius = 8000.0f;
-    JungleBiome.Temperature = 32.0f;
-    JungleBiome.Humidity = 0.85f;
-    JungleBiome.FogDensity = 0.04f;
-    JungleBiome.FogColor = FLinearColor(0.6f, 0.8f, 0.5f, 1.0f);
-    JungleBiome.AmbientLightIntensity = 0.7f;
-    JungleBiome.VegetationDensity = 0.9f;
-    JungleBiome.bHasWater = true;
-    JungleBiome.WaterLevel = -50.0f;
-    JungleBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Velociraptor);
-    JungleBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Spinosaurus);
-    BiomeZones.Add(JungleBiome);
+    // Forest biome
+    FBiomeData ForestData;
+    ForestData.BiomeType = EBiomeType::Forest;
+    ForestData.DisplayName = TEXT("Cretaceous Forest");
+    ForestData.BaseTemperature = 22.f;
+    ForestData.BaseHumidity = 75.f;
+    ForestData.TreeDensity = 0.8f;
+    ForestData.GrassDensity = 0.6f;
+    ForestData.RockDensity = 0.2f;
+    ForestData.FogDensity = 0.15f;
+    ForestData.AmbientColorTint = FLinearColor(0.2f, 0.5f, 0.1f, 1.f);
+    ForestData.CommonDinoSpecies.Add(EDinoSpecies::Raptor);
+    ForestData.CommonDinoSpecies.Add(EDinoSpecies::Stegosaurus);
+    BiomeDataMap.Add(EBiomeType::Forest, ForestData);
 
-    // Plains biome — open grassland, moderate temperature
-    FEng_BiomeZone PlainsBiome;
-    PlainsBiome.BiomeType = EEng_BiomeType::Plains;
-    PlainsBiome.BiomeName = TEXT("Prehistoric Savanna");
-    PlainsBiome.CenterLocation = FVector(12000.0f, 0.0f, 0.0f);
-    PlainsBiome.Radius = 10000.0f;
-    PlainsBiome.Temperature = 28.0f;
-    PlainsBiome.Humidity = 0.35f;
-    PlainsBiome.FogDensity = 0.01f;
-    PlainsBiome.FogColor = FLinearColor(0.9f, 0.85f, 0.7f, 1.0f);
-    PlainsBiome.AmbientLightIntensity = 1.0f;
-    PlainsBiome.VegetationDensity = 0.4f;
-    PlainsBiome.bHasWater = false;
-    PlainsBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::TyrannosaurusRex);
-    PlainsBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Triceratops);
-    PlainsBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Brachiosaurus);
-    BiomeZones.Add(PlainsBiome);
+    // Plains biome
+    FBiomeData PlainsData;
+    PlainsData.BiomeType = EBiomeType::Plains;
+    PlainsData.DisplayName = TEXT("Open Savanna");
+    PlainsData.BaseTemperature = 32.f;
+    PlainsData.BaseHumidity = 40.f;
+    PlainsData.TreeDensity = 0.1f;
+    PlainsData.GrassDensity = 0.9f;
+    PlainsData.RockDensity = 0.1f;
+    PlainsData.FogDensity = 0.05f;
+    PlainsData.AmbientColorTint = FLinearColor(0.6f, 0.5f, 0.1f, 1.f);
+    PlainsData.CommonDinoSpecies.Add(EDinoSpecies::Brachiosaurus);
+    PlainsData.CommonDinoSpecies.Add(EDinoSpecies::Triceratops);
+    BiomeDataMap.Add(EBiomeType::Plains, PlainsData);
 
-    // Swamp biome — murky water, high fog, dangerous
-    FEng_BiomeZone SwampBiome;
-    SwampBiome.BiomeType = EEng_BiomeType::Swamp;
-    SwampBiome.BiomeName = TEXT("Primordial Swamp");
-    SwampBiome.CenterLocation = FVector(-8000.0f, 5000.0f, -100.0f);
-    SwampBiome.Radius = 6000.0f;
-    SwampBiome.Temperature = 35.0f;
-    SwampBiome.Humidity = 0.95f;
-    SwampBiome.FogDensity = 0.08f;
-    SwampBiome.FogColor = FLinearColor(0.4f, 0.5f, 0.3f, 1.0f);
-    SwampBiome.AmbientLightIntensity = 0.5f;
-    SwampBiome.VegetationDensity = 0.7f;
-    SwampBiome.bHasWater = true;
-    SwampBiome.WaterLevel = 0.0f;
-    SwampBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Spinosaurus);
-    BiomeZones.Add(SwampBiome);
+    // Swamp biome
+    FBiomeData SwampData;
+    SwampData.BiomeType = EBiomeType::Swamp;
+    SwampData.DisplayName = TEXT("Primordial Swamp");
+    SwampData.BaseTemperature = 28.f;
+    SwampData.BaseHumidity = 95.f;
+    SwampData.TreeDensity = 0.5f;
+    SwampData.GrassDensity = 0.4f;
+    SwampData.RockDensity = 0.05f;
+    SwampData.FogDensity = 0.6f;
+    SwampData.AmbientColorTint = FLinearColor(0.1f, 0.3f, 0.15f, 1.f);
+    SwampData.CommonDinoSpecies.Add(EDinoSpecies::TRex);
+    BiomeDataMap.Add(EBiomeType::Swamp, SwampData);
 
-    // Volcanic biome — extreme heat, ash, dangerous terrain
-    FEng_BiomeZone VolcanicBiome;
-    VolcanicBiome.BiomeType = EEng_BiomeType::Volcanic;
-    VolcanicBiome.BiomeName = TEXT("Volcanic Badlands");
-    VolcanicBiome.CenterLocation = FVector(0.0f, -15000.0f, 500.0f);
-    VolcanicBiome.Radius = 5000.0f;
-    VolcanicBiome.Temperature = 55.0f;
-    VolcanicBiome.Humidity = 0.1f;
-    VolcanicBiome.FogDensity = 0.06f;
-    VolcanicBiome.FogColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
-    VolcanicBiome.AmbientLightIntensity = 0.8f;
-    VolcanicBiome.VegetationDensity = 0.05f;
-    VolcanicBiome.bHasWater = false;
-    VolcanicBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Ankylosaurus);
-    BiomeZones.Add(VolcanicBiome);
+    // Desert biome
+    FBiomeData DesertData;
+    DesertData.BiomeType = EBiomeType::Desert;
+    DesertData.DisplayName = TEXT("Arid Badlands");
+    DesertData.BaseTemperature = 45.f;
+    DesertData.BaseHumidity = 10.f;
+    DesertData.TreeDensity = 0.02f;
+    DesertData.GrassDensity = 0.05f;
+    DesertData.RockDensity = 0.7f;
+    DesertData.FogDensity = 0.02f;
+    DesertData.AmbientColorTint = FLinearColor(0.8f, 0.6f, 0.2f, 1.f);
+    DesertData.CommonDinoSpecies.Add(EDinoSpecies::Pterodactyl);
+    BiomeDataMap.Add(EBiomeType::Desert, DesertData);
 
-    // Coastal biome — beaches, cliffs, ocean edge
-    FEng_BiomeZone CoastalBiome;
-    CoastalBiome.BiomeType = EEng_BiomeType::Coastal;
-    CoastalBiome.BiomeName = TEXT("Cretaceous Coast");
-    CoastalBiome.CenterLocation = FVector(-5000.0f, -10000.0f, 0.0f);
-    CoastalBiome.Radius = 7000.0f;
-    CoastalBiome.Temperature = 26.0f;
-    CoastalBiome.Humidity = 0.6f;
-    CoastalBiome.FogDensity = 0.02f;
-    CoastalBiome.FogColor = FLinearColor(0.7f, 0.85f, 0.9f, 1.0f);
-    CoastalBiome.AmbientLightIntensity = 0.95f;
-    CoastalBiome.VegetationDensity = 0.3f;
-    CoastalBiome.bHasWater = true;
-    CoastalBiome.WaterLevel = -200.0f;
-    CoastalBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Pterodactyl);
-    BiomeZones.Add(CoastalBiome);
+    // Volcanic biome
+    FBiomeData VolcanicData;
+    VolcanicData.BiomeType = EBiomeType::Volcanic;
+    VolcanicData.DisplayName = TEXT("Volcanic Highlands");
+    VolcanicData.BaseTemperature = 55.f;
+    VolcanicData.BaseHumidity = 30.f;
+    VolcanicData.TreeDensity = 0.05f;
+    VolcanicData.GrassDensity = 0.02f;
+    VolcanicData.RockDensity = 0.9f;
+    VolcanicData.FogDensity = 0.4f;
+    VolcanicData.AmbientColorTint = FLinearColor(0.7f, 0.2f, 0.05f, 1.f);
+    VolcanicData.CommonDinoSpecies.Add(EDinoSpecies::TRex);
+    BiomeDataMap.Add(EBiomeType::Volcanic, VolcanicData);
 
-    // Mountain biome — rocky, cold, high altitude
-    FEng_BiomeZone MountainBiome;
-    MountainBiome.BiomeType = EEng_BiomeType::Mountain;
-    MountainBiome.BiomeName = TEXT("Highland Peaks");
-    MountainBiome.CenterLocation = FVector(8000.0f, -8000.0f, 1000.0f);
-    MountainBiome.Radius = 6000.0f;
-    MountainBiome.Temperature = 12.0f;
-    MountainBiome.Humidity = 0.3f;
-    MountainBiome.FogDensity = 0.03f;
-    MountainBiome.FogColor = FLinearColor(0.8f, 0.85f, 0.9f, 1.0f);
-    MountainBiome.AmbientLightIntensity = 0.9f;
-    MountainBiome.VegetationDensity = 0.2f;
-    MountainBiome.bHasWater = false;
-    MountainBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Pterodactyl);
-    MountainBiome.DominantDinosaurs.Add(EEng_DinosaurSpecies::Stegosaurus);
-    BiomeZones.Add(MountainBiome);
+    // River biome
+    FBiomeData RiverData;
+    RiverData.BiomeType = EBiomeType::River;
+    RiverData.DisplayName = TEXT("River Delta");
+    RiverData.BaseTemperature = 24.f;
+    RiverData.BaseHumidity = 85.f;
+    RiverData.TreeDensity = 0.6f;
+    RiverData.GrassDensity = 0.7f;
+    RiverData.RockDensity = 0.3f;
+    RiverData.FogDensity = 0.2f;
+    RiverData.AmbientColorTint = FLinearColor(0.1f, 0.4f, 0.5f, 1.f);
+    RiverData.CommonDinoSpecies.Add(EDinoSpecies::Brachiosaurus);
+    RiverData.CommonDinoSpecies.Add(EDinoSpecies::Stegosaurus);
+    BiomeDataMap.Add(EBiomeType::River, RiverData);
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: %d biomes initialized"), BiomeDataMap.Num());
 }
 
-EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+EBiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    float ClosestDistance = MAX_FLT;
-    EEng_BiomeType DominantBiome = EEng_BiomeType::Jungle;
+    // Biome determination based on world position using noise-like logic
+    // In production this would sample a biome map texture or PCG data
+    float X = WorldLocation.X / 10000.f;
+    float Y = WorldLocation.Y / 10000.f;
+    float Z = WorldLocation.Z;
 
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    // Altitude-based biome selection
+    if (Z > 3000.f)
     {
-        float Distance = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
-        if (Distance < Zone.Radius && Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            DominantBiome = Zone.BiomeType;
-        }
+        return EBiomeType::Volcanic;
     }
 
-    return DominantBiome;
+    // Simple grid-based biome zones for prototype
+    int32 GridX = FMath::FloorToInt(X);
+    int32 GridY = FMath::FloorToInt(Y);
+    int32 BiomeIndex = FMath::Abs(GridX * 7 + GridY * 13) % 6;
+
+    switch (BiomeIndex)
+    {
+    case 0: return EBiomeType::Forest;
+    case 1: return EBiomeType::Plains;
+    case 2: return EBiomeType::Swamp;
+    case 3: return EBiomeType::Desert;
+    case 4: return EBiomeType::Volcanic;
+    case 5: return EBiomeType::River;
+    default: return EBiomeType::Forest;
+    }
 }
 
-FEng_BiomeZone UBiomeManager::GetBiomeZoneAtLocation(const FVector& WorldLocation) const
+void UBiomeManager::UpdateBiomeForPlayerPosition()
 {
-    float ClosestDistance = MAX_FLT;
-    FEng_BiomeZone Result;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    EBiomeType NewBiome = GetBiomeAtLocation(PlayerLocation);
+
+    if (NewBiome != CurrentBiome)
     {
-        float Distance = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
-        if (Distance < Zone.Radius && Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            Result = Zone;
-        }
+        TransitionToBiome(NewBiome);
     }
 
-    return Result;
+    // Update environmental conditions
+    UpdateEnvironmentalConditions(PlayerLocation);
 }
 
-float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+void UBiomeManager::TransitionToBiome(EBiomeType NewBiome)
 {
-    // Blend temperatures from nearby biomes
-    float TotalWeight = 0.0f;
-    float BlendedTemp = 28.0f; // default
+    if (bIsTransitioning) return;
 
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    PreviousBiome = CurrentBiome;
+    CurrentBiome = NewBiome;
+    bIsTransitioning = true;
+    BiomeTransitionAlpha = 0.f;
+
+    // Start transition timer
+    GetWorld()->GetTimerManager().SetTimer(
+        TransitionTimerHandle,
+        this,
+        &UBiomeManager::TickBiomeTransition,
+        0.05f,
+        true
+    );
+
+    OnBiomeChanged.Broadcast(PreviousBiome, CurrentBiome);
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transitioning from %d to %d"),
+        (int32)PreviousBiome, (int32)CurrentBiome);
+}
+
+void UBiomeManager::TickBiomeTransition()
+{
+    BiomeTransitionAlpha += 0.05f / TransitionDuration;
+
+    if (BiomeTransitionAlpha >= 1.f)
     {
-        float Distance = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
-        if (Distance < Zone.Radius + BiomeTransitionBlendRadius)
-        {
-            float Weight = FMath::Max(0.0f, 1.0f - (Distance / (Zone.Radius + BiomeTransitionBlendRadius)));
-            BlendedTemp += Zone.Temperature * Weight;
-            TotalWeight += Weight;
-        }
+        BiomeTransitionAlpha = 1.f;
+        bIsTransitioning = false;
+        GetWorld()->GetTimerManager().ClearTimer(TransitionTimerHandle);
+    }
+}
+
+void UBiomeManager::UpdateEnvironmentalConditions(const FVector& PlayerLocation)
+{
+    const FBiomeData* BiomeData = BiomeDataMap.Find(CurrentBiome);
+    if (!BiomeData) return;
+
+    // Blend temperature with time-of-day modifier
+    float TimeModifier = FMath::Sin((TimeOfDay / 24.f) * PI * 2.f - PI * 0.5f) * 8.f;
+    TemperatureCelsius = BiomeData->BaseTemperature + TimeModifier;
+
+    // Weather affects humidity
+    if (CurrentWeather == EWeatherType::Rain || CurrentWeather == EWeatherType::Storm)
+    {
+        HumidityPercent = FMath::Min(100.f, BiomeData->BaseHumidity + 20.f);
+    }
+    else
+    {
+        HumidityPercent = BiomeData->BaseHumidity;
+    }
+}
+
+void UBiomeManager::AdvanceDayNightCycle()
+{
+    // DayLengthMinutes = real minutes per full day cycle
+    float HoursPerRealSecond = 24.f / (DayLengthMinutes * 60.f);
+    TimeOfDay += HoursPerRealSecond;
+
+    if (TimeOfDay >= 24.f)
+    {
+        TimeOfDay -= 24.f;
     }
 
-    if (TotalWeight > 0.0f)
+    bool bWasDaytime = bIsDaytime;
+    bIsDaytime = (TimeOfDay >= 6.f && TimeOfDay < 20.f);
+
+    if (bWasDaytime != bIsDaytime)
     {
-        BlendedTemp /= TotalWeight;
+        OnDayNightChanged.Broadcast(bIsDaytime);
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: %s"), bIsDaytime ? TEXT("Dawn") : TEXT("Dusk"));
+    }
+}
+
+void UBiomeManager::RandomizeWeather()
+{
+    // Weather probability based on current biome
+    float RainChance = 0.3f;
+
+    const FBiomeData* BiomeData = BiomeDataMap.Find(CurrentBiome);
+    if (BiomeData)
+    {
+        // High humidity biomes have more rain
+        RainChance = BiomeData->BaseHumidity / 200.f;
     }
 
-    return BlendedTemp;
-}
+    float Roll = FMath::FRand();
 
-float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    float TotalWeight = 0.0f;
-    float BlendedHumidity = 0.5f;
-
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    EWeatherType NewWeather;
+    if (Roll < RainChance * 0.3f)
     {
-        float Distance = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
-        if (Distance < Zone.Radius + BiomeTransitionBlendRadius)
-        {
-            float Weight = FMath::Max(0.0f, 1.0f - (Distance / (Zone.Radius + BiomeTransitionBlendRadius)));
-            BlendedHumidity += Zone.Humidity * Weight;
-            TotalWeight += Weight;
-        }
+        NewWeather = EWeatherType::Storm;
+        WeatherIntensity = FMath::FRandRange(0.6f, 1.f);
+    }
+    else if (Roll < RainChance)
+    {
+        NewWeather = EWeatherType::Rain;
+        WeatherIntensity = FMath::FRandRange(0.2f, 0.7f);
+    }
+    else if (Roll < RainChance + 0.15f)
+    {
+        NewWeather = EWeatherType::Fog;
+        WeatherIntensity = FMath::FRandRange(0.3f, 0.8f);
+    }
+    else
+    {
+        NewWeather = EWeatherType::Clear;
+        WeatherIntensity = 0.f;
     }
 
-    if (TotalWeight > 0.0f)
+    if (NewWeather != CurrentWeather)
     {
-        BlendedHumidity /= TotalWeight;
+        CurrentWeather = NewWeather;
+        OnWeatherChanged.Broadcast(CurrentWeather, WeatherIntensity);
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather changed to %d (intensity=%.2f)"),
+            (int32)CurrentWeather, WeatherIntensity);
     }
-
-    return FMath::Clamp(BlendedHumidity, 0.0f, 1.0f);
 }
 
-bool UBiomeManager::IsLocationInBiome(const FVector& WorldLocation, EEng_BiomeType BiomeType) const
+FBiomeData UBiomeManager::GetCurrentBiomeData() const
 {
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    const FBiomeData* Data = BiomeDataMap.Find(CurrentBiome);
+    if (Data)
     {
-        if (Zone.BiomeType == BiomeType)
-        {
-            float Distance = FVector::Dist2D(WorldLocation, Zone.CenterLocation);
-            if (Distance < Zone.Radius)
-            {
-                return true;
-            }
-        }
+        return *Data;
     }
-    return false;
+    return FBiomeData();
 }
 
-TArray<EEng_DinosaurSpecies> UBiomeManager::GetDinosaursForBiome(EEng_BiomeType BiomeType) const
+float UBiomeManager::GetSunAngle() const
 {
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    // Returns sun pitch angle based on time of day
+    // 6:00 = sunrise (0 deg), 12:00 = noon (-90 deg), 20:00 = sunset (0 deg)
+    if (TimeOfDay >= 6.f && TimeOfDay <= 20.f)
     {
-        if (Zone.BiomeType == BiomeType)
-        {
-            return Zone.DominantDinosaurs;
-        }
+        float DayProgress = (TimeOfDay - 6.f) / 14.f;
+        return FMath::Lerp(0.f, -180.f, DayProgress);
     }
-    return TArray<EEng_DinosaurSpecies>();
-}
-
-void UBiomeManager::RegisterBiomeZone(const FEng_BiomeZone& NewZone)
-{
-    // Check for duplicate
-    for (int32 i = 0; i < BiomeZones.Num(); ++i)
-    {
-        if (BiomeZones[i].BiomeType == NewZone.BiomeType &&
-            FVector::Dist(BiomeZones[i].CenterLocation, NewZone.CenterLocation) < 100.0f)
-        {
-            BiomeZones[i] = NewZone; // Update existing
-            return;
-        }
-    }
-    BiomeZones.Add(NewZone);
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered new biome zone '%s'"), *NewZone.BiomeName);
-}
-
-int32 UBiomeManager::GetBiomeZoneCount() const
-{
-    return BiomeZones.Num();
-}
-
-FLinearColor UBiomeManager::GetFogColorAtLocation(const FVector& WorldLocation) const
-{
-    FEng_BiomeZone Zone = GetBiomeZoneAtLocation(WorldLocation);
-    return Zone.FogColor;
-}
-
-float UBiomeManager::GetFogDensityAtLocation(const FVector& WorldLocation) const
-{
-    FEng_BiomeZone Zone = GetBiomeZoneAtLocation(WorldLocation);
-    return Zone.FogDensity;
+    return -10.f; // Night — below horizon
 }
