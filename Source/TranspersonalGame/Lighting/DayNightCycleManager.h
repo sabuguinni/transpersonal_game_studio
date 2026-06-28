@@ -5,6 +5,9 @@
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "DayNightCycleManager.generated.h"
 
 UENUM(BlueprintType)
@@ -21,36 +24,36 @@ enum class ELight_TimeOfDay : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FLight_TimePreset
+struct FLight_TimeOfDaySettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    ELight_TimeOfDay TimeOfDay = ELight_TimeOfDay::Midday;
+    float SunPitch = -45.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunPitchDegrees = -45.0f;
+    float SunYaw = -60.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunYawDegrees = 0.0f;
+    float SunIntensity = 8.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+    FLinearColor SunColor = FLinearColor(1.0f, 0.88f, 0.65f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float SunIntensity = 10.0f;
+    float FogDensity = 0.025f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    FLinearColor FogInscatteringColor = FLinearColor(0.4f, 0.5f, 0.6f, 1.0f);
+    FLinearColor FogColor = FLinearColor(0.6f, 0.75f, 0.9f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float FogDensity = 0.02f;
+    float SkyLightIntensity = 1.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float AmbientBrightness = 1.0f;
+    FLinearColor SkyLightColor = FLinearColor(0.5f, 0.6f, 0.8f, 1.0f);
 };
 
-UCLASS(ClassGroup = (Lighting), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ADayNightCycleManager : public AActor
 {
     GENERATED_BODY()
@@ -65,65 +68,66 @@ protected:
 public:
     // Current time of day in hours (0-24)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
-    float CurrentTimeHours = 12.0f;
+    float CurrentTimeOfDay = 8.0f;
 
-    // Speed multiplier for time progression (1.0 = real time, 60.0 = 1 min = 1 hour)
+    // Speed multiplier for day/night cycle (1.0 = real time, 60.0 = 1 min per hour)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
-    float TimeSpeedMultiplier = 60.0f;
+    float TimeScale = 60.0f;
 
-    // Whether the cycle is actively running
+    // Whether the cycle is active
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
     bool bCycleActive = true;
 
     // Reference to the directional light (sun)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|References")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
     ADirectionalLight* SunLight = nullptr;
 
     // Reference to the sky light
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|References")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
     ASkyLight* SkyLightActor = nullptr;
 
-    // Reference to the exponential height fog
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|References")
+    // Reference to the height fog
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
     AExponentialHeightFog* HeightFog = nullptr;
 
-    // Presets for different times of day
+    // Preset settings for each time of day
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|Presets")
-    TArray<FLight_TimePreset> TimePresets;
+    FLight_TimeOfDaySettings DawnSettings;
 
-    // Current time of day enum
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Day Night Cycle")
-    ELight_TimeOfDay CurrentTimeOfDayEnum = ELight_TimeOfDay::Midday;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|Presets")
+    FLight_TimeOfDaySettings MiddaySettings;
 
-    // Get current time as 0-1 normalized value
-    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
-    float GetNormalizedTime() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|Presets")
+    FLight_TimeOfDaySettings GoldenHourSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle|Presets")
+    FLight_TimeOfDaySettings NightSettings;
 
     // Get current time of day enum
     UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
-    ELight_TimeOfDay GetCurrentTimeOfDay() const;
+    ELight_TimeOfDay GetCurrentTimeOfDayEnum() const;
 
-    // Set time directly (0-24 hours)
+    // Get current time as formatted string (HH:MM)
     UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
-    void SetTimeOfDay(float NewTimeHours);
+    FString GetTimeAsString() const;
 
-    // Jump to a preset time
+    // Set time directly (0-24)
     UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
-    void SetTimePreset(ELight_TimeOfDay TargetTime);
+    void SetTimeOfDay(float NewTime);
 
-    // Auto-find scene references
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Day Night Cycle")
-    void AutoFindSceneReferences();
-
-    // Apply current lighting based on time
+    // Apply a specific preset immediately
     UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
-    void ApplyLightingForCurrentTime();
+    void ApplyTimePreset(ELight_TimeOfDay TimePreset);
+
+    // Toggle cycle on/off
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    void SetCycleActive(bool bActive);
 
 private:
-    void UpdateSunPosition(float TimeHours);
-    void UpdateFogSettings(float TimeHours);
-    void UpdateSkyLight(float TimeHours);
-    FLinearColor LerpColor(const FLinearColor& A, const FLinearColor& B, float Alpha) const;
+    void UpdateLighting(float DeltaTime);
+    void InterpolateLightingSettings(const FLight_TimeOfDaySettings& From, const FLight_TimeOfDaySettings& To, float Alpha);
+    FLight_TimeOfDaySettings GetSettingsForTime(float TimeHours) const;
+    void ApplySettings(const FLight_TimeOfDaySettings& Settings);
     void InitializeDefaultPresets();
-    float TimeAccumulator = 0.0f;
+    void AutoFindLightActors();
 };
