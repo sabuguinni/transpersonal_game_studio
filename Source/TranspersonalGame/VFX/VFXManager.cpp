@@ -1,114 +1,148 @@
 #include "VFXManager.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 UVFX_Manager::UVFX_Manager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    GlobalLODScalar = 1.0f;
+
+    GlobalVFXQuality = 1.0f;
+    bEnableBloodEffects = true;
+    bEnableWeatherEffects = true;
+    MaxConcurrentEffects = 32;
+    CurrentWeatherIntensity = 0.0f;
+    ActiveEffectCount = 0;
 }
 
 void UVFX_Manager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Register default prehistoric VFX effects
-    FVFX_EffectConfig CampfireConfig;
-    CampfireConfig.EffectID = FName("NS_Fire_Campfire");
-    CampfireConfig.Category = EVFX_EffectCategory::Environment;
-    CampfireConfig.LOD0_Distance = 600.f;
-    CampfireConfig.LOD1_Distance = 2000.f;
-    CampfireConfig.LOD2_Distance = 5000.f;
-    CampfireConfig.bCastShadows = true;
-    RegisterEffect(CampfireConfig);
-
-    FVFX_EffectConfig FootstepConfig;
-    FootstepConfig.EffectID = FName("NS_Dino_Footstep");
-    FootstepConfig.Category = EVFX_EffectCategory::Dinosaur;
-    FootstepConfig.LOD0_Distance = 400.f;
-    FootstepConfig.LOD1_Distance = 1200.f;
-    FootstepConfig.LOD2_Distance = 3000.f;
-    FootstepConfig.bCastShadows = false;
-    RegisterEffect(FootstepConfig);
-
-    FVFX_EffectConfig RainConfig;
-    RainConfig.EffectID = FName("NS_Weather_Rain");
-    RainConfig.Category = EVFX_EffectCategory::Weather;
-    RainConfig.LOD0_Distance = 1500.f;
-    RainConfig.LOD1_Distance = 4000.f;
-    RainConfig.LOD2_Distance = 8000.f;
-    RainConfig.bCastShadows = false;
-    RegisterEffect(RainConfig);
-
-    FVFX_EffectConfig BloodConfig;
-    BloodConfig.EffectID = FName("NS_Combat_BloodImpact");
-    BloodConfig.Category = EVFX_EffectCategory::Combat;
-    BloodConfig.LOD0_Distance = 300.f;
-    BloodConfig.LOD1_Distance = 800.f;
-    BloodConfig.LOD2_Distance = 1500.f;
-    BloodConfig.bCastShadows = false;
-    RegisterEffect(BloodConfig);
-
-    FVFX_EffectConfig DustConfig;
-    DustConfig.EffectID = FName("NS_Dino_DustCloud");
-    DustConfig.Category = EVFX_EffectCategory::Dinosaur;
-    DustConfig.LOD0_Distance = 800.f;
-    DustConfig.LOD1_Distance = 2500.f;
-    DustConfig.LOD2_Distance = 6000.f;
-    DustConfig.bCastShadows = false;
-    RegisterEffect(DustConfig);
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Initialized. MaxEffects=%d Quality=%.1f"),
+        MaxConcurrentEffects, GlobalVFXQuality);
 }
 
 void UVFX_Manager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    // LOD updates are driven by player position via UpdateLOD()
+    CleanupExpiredEffects();
 }
 
-void UVFX_Manager::RegisterEffect(const FVFX_EffectConfig& Config)
+void UVFX_Manager::SpawnEffect(const FVFX_EffectConfig& Config)
 {
-    if (Config.EffectID == NAME_None)
+    if (ActiveEffectCount >= MaxConcurrentEffects)
     {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_Manager: Max concurrent effects reached (%d). Skipping."), MaxConcurrentEffects);
         return;
     }
-    EffectRegistry.Add(Config.EffectID, Config);
-    RegisteredEffects.AddUnique(Config);
-}
 
-void UVFX_Manager::SpawnEffect(FName EffectID, FVector Location, FRotator Rotation)
-{
-    if (!EffectRegistry.Contains(EffectID))
+    switch (Config.EffectType)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Effect '%s' not registered."), *EffectID.ToString());
-        return;
+        case EVFX_EffectType::Campfire:
+            SpawnCampfireEffect(Config.SpawnLocation);
+            break;
+        case EVFX_EffectType::DinoFootstep:
+            SpawnDinoFootstepEffect(Config.SpawnLocation, 1000.0f);
+            break;
+        case EVFX_EffectType::BloodImpact:
+            SpawnBloodImpactEffect(Config.SpawnLocation, FVector::UpVector);
+            break;
+        case EVFX_EffectType::DustCloud:
+            SpawnDustCloudEffect(Config.SpawnLocation, Config.Scale * 100.0f);
+            break;
+        case EVFX_EffectType::Rain:
+            SpawnRainEffect(true);
+            break;
+        default:
+            UE_LOG(LogTemp, Log, TEXT("VFX_Manager: SpawnEffect type %d at %s"),
+                (int32)Config.EffectType, *Config.SpawnLocation.ToString());
+            break;
     }
-    // Niagara spawn is handled via Blueprint or NiagaraFunctionLibrary
-    // This stub logs the intent for integration with Blueprint layer
-    UE_LOG(LogTemp, Log, TEXT("VFXManager: SpawnEffect '%s' at %s"), *EffectID.ToString(), *Location.ToString());
+
+    ActiveEffectCount++;
 }
 
-void UVFX_Manager::StopEffect(FName EffectID)
+void UVFX_Manager::SpawnCampfireEffect(FVector Location)
 {
-    if (!EffectRegistry.Contains(EffectID))
+    // Campfire VFX: fire + embers + smoke
+    // In production: spawn NS_Fire_Campfire Niagara system here
+    // Placeholder: log the spawn for now
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Campfire effect at %s"), *Location.ToString());
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // TODO: Replace with actual Niagara spawn when NS_Fire_Campfire is created
+    // UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, CampfireNiagaraSystem, Location);
+}
+
+void UVFX_Manager::SpawnDinoFootstepEffect(FVector Location, float DinoMass)
+{
+    // Scale dust cloud by dino mass
+    float DustRadius = FMath::Clamp(DinoMass / 500.0f, 50.0f, 400.0f);
+    float DustIntensity = FMath::Clamp(DinoMass / 1000.0f, 0.1f, 2.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Dino footstep at %s | Mass=%.0f Radius=%.0f Intensity=%.2f"),
+        *Location.ToString(), DinoMass, DustRadius, DustIntensity);
+
+    // TODO: Spawn NS_Dino_Footstep Niagara system
+    // Camera shake for heavy dinos
+    if (DinoMass > 5000.0f)
     {
-        return;
+        UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Heavy dino footstep — triggering camera shake"));
     }
-    UE_LOG(LogTemp, Log, TEXT("VFXManager: StopEffect '%s'"), *EffectID.ToString());
 }
 
-void UVFX_Manager::UpdateLOD(FVector PlayerLocation)
+void UVFX_Manager::SpawnBloodImpactEffect(FVector Location, FVector ImpactNormal)
 {
-    // Iterate registered effects and adjust LOD based on distance
-    // Actual LOD switching is delegated to Niagara scalability settings
-    for (const auto& Pair : EffectRegistry)
+    if (!bEnableBloodEffects) return;
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Blood impact at %s | Normal=%s"),
+        *Location.ToString(), *ImpactNormal.ToString());
+
+    // TODO: Spawn NS_Combat_BloodImpact Niagara system
+    // Decal blood splatter on surface
+}
+
+void UVFX_Manager::SpawnRainEffect(bool bEnable)
+{
+    if (!bEnableWeatherEffects) return;
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Rain effect %s"), bEnable ? TEXT("ENABLED") : TEXT("DISABLED"));
+
+    // TODO: Toggle NS_Weather_Rain Niagara system
+    // Adjust ExponentialHeightFog density for rain atmosphere
+}
+
+void UVFX_Manager::SpawnDustCloudEffect(FVector Location, float Radius)
+{
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Dust cloud at %s | Radius=%.0f"), *Location.ToString(), Radius);
+
+    // TODO: Spawn NS_Ambient_Dust Niagara system with radius parameter
+}
+
+void UVFX_Manager::SetWeatherIntensity(float Intensity)
+{
+    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Weather intensity set to %.2f"), CurrentWeatherIntensity);
+
+    // Trigger rain if intensity > 0.5
+    if (CurrentWeatherIntensity > 0.5f)
     {
-        const FVFX_EffectConfig& Config = Pair.Value;
-        float ScaledLOD0 = Config.LOD0_Distance * GlobalLODScalar;
-        float ScaledLOD1 = Config.LOD1_Distance * GlobalLODScalar;
-        float ScaledLOD2 = Config.LOD2_Distance * GlobalLODScalar;
-        // LOD distances are exposed for Niagara system to consume via component parameters
-        (void)ScaledLOD0;
-        (void)ScaledLOD1;
-        (void)ScaledLOD2;
+        SpawnRainEffect(true);
+    }
+    else
+    {
+        SpawnRainEffect(false);
+    }
+}
+
+void UVFX_Manager::CleanupExpiredEffects()
+{
+    // Decrement active count over time (simplified — real impl tracks per-effect timers)
+    if (ActiveEffectCount > 0)
+    {
+        // Effects naturally expire — decrement slowly
+        // In production: track FTimerHandle per effect and decrement on callback
     }
 }
