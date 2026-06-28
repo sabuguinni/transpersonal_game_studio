@@ -1,0 +1,86 @@
+{
+  "registry_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260628_005",
+  "agent": "Environment Artist #06",
+  "description": "Registry of Cretaceous environment props generated and placed in MinPlayableMap",
+  "biome_center": { "x": 50000, "y": 50000, "z": 100 },
+
+  "meshy_assets": [
+    {
+      "asset_name": "cretaceous_mossy_fallen_log",
+      "category": "Props",
+      "status": "SUCCEEDED",
+      "task_id": "019f0d09-4f09-704b-a273-f146e6aac089",
+      "glb_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1782630174389_Cretaceous_era_mossy_fallen_log__prehist.glb",
+      "thumbnail_url": "https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019f0d09-4f09-704b-a273-f146e6aac089/output/preview.png",
+      "prompt": "Cretaceous era mossy fallen log, prehistoric forest prop, game-ready low-poly, realistic PBR textures, Unreal Engine 5 style, horizontal log with bark texture and green moss patches, 3 meters long",
+      "polycount_target": 8000,
+      "credits_used": 5,
+      "ue5_import_path": "/Game/Environment/Props/FallenLog_Cretaceous",
+      "notes": "Import GLB via AssetTools into /Game/Environment/Props/ — replace FallenLog_Placeholder_XX actors"
+    }
+  ],
+
+  "procedural_props_placed": [
+    {
+      "label_prefix": "FallenLog_Placeholder",
+      "count": 3,
+      "mesh": "/Engine/BasicShapes/Cylinder",
+      "scale": { "x": 0.3, "y": 3.0, "z": 0.3 },
+      "positions": [
+        { "x": 50200, "y": 50100, "z": 100 },
+        { "x": 49700, "y": 50400, "z": 100 },
+        { "x": 50500, "y": 49800, "z": 100 }
+      ],
+      "replace_with": "cretaceous_mossy_fallen_log"
+    },
+    {
+      "label_prefix": "MossyBoulder_Cluster",
+      "count": 5,
+      "mesh": "/Engine/BasicShapes/Sphere",
+      "scale_range": { "min": 0.8, "max": 1.6 },
+      "positions": [
+        { "x": 50800, "y": 50300, "z": 100 },
+        { "x": 50850, "y": 50350, "z": 150 },
+        { "x": 50780, "y": 50280, "z": 130 },
+        { "x": 49400, "y": 49600, "z": 100 },
+        { "x": 49350, "y": 49580, "z": 140 }
+      ]
+    },
+    {
+      "label_prefix": "Fern_Placeholder",
+      "count": 8,
+      "mesh": "/Engine/BasicShapes/Cone",
+      "scale_range": { "min": 0.4, "max": 0.7 },
+      "positions": [
+        { "x": 50100, "y": 50200, "z": 100 },
+        { "x": 50150, "y": 50180, "z": 100 },
+        { "x": 49800, "y": 50300, "z": 100 },
+        { "x": 49820, "y": 50320, "z": 100 },
+        { "x": 50400, "y": 49900, "z": 100 },
+        { "x": 50420, "y": 49920, "z": 100 },
+        { "x": 49900, "y": 49750, "z": 100 },
+        { "x": 50600, "y": 50600, "z": 100 }
+      ]
+    }
+  ],
+
+  "atmosphere_settings": {
+    "fog_density": 0.035,
+    "fog_height_falloff": 0.2,
+    "fog_inscattering_color": { "r": 0.6, "g": 0.85, "b": 0.6, "a": 1.0 },
+    "fog_start_distance": 500.0,
+    "fog_cutoff_distance": 80000.0,
+    "sun_pitch": -45.0,
+    "sky_atmosphere_fast_sky_lut": 1,
+    "sky_light_real_time_capture": true
+  },
+
+  "next_cycle_priorities": [
+    "Import FallenLog GLB from Meshy URL into /Game/Environment/Props/",
+    "Replace FallenLog_Placeholder_XX actors with real mesh",
+    "Generate second Cretaceous prop: mossy boulder (Meshy)",
+    "Add Niagara particle system for jungle dust/pollen motes",
+    "Place additional vegetation: cycads, tree ferns, giant horsetails"
+  ]
+}
