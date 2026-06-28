@@ -1,7 +1,6 @@
-// BiomeManager.cpp
-// Transpersonal Game Studio — Engine Architect #02
-// Full implementation of the Biome system for the prehistoric survival world.
-// Manages biome classification, blending, and environmental parameter queries.
+// BiomeManager.cpp — Full implementation of biome classification and query system
+// Engine Architect #02 — PROD_CYCLE_AUTO_20260628_006
+// Prehistoric survival game — NO spiritual content
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
@@ -9,324 +8,255 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-// ============================================================
-// Constructor
-// ============================================================
+DEFINE_LOG_CATEGORY_STATIC(LogBiomeManager, Log, All);
 
-UBiomeManager::UBiomeManager()
-{
-    // Default biome table — populated at runtime from data assets
-    // These defaults ensure the system works even without external data
-    BiomeTable.Empty();
-
-    // Register default biomes so the system is never empty
-    FEng_BiomeDefinition Forest;
-    Forest.BiomeID = EEng_BiomeType::TropicalForest;
-    Forest.DisplayName = FText::FromString(TEXT("Tropical Forest"));
-    Forest.TemperatureRange = FVector2D(20.0f, 35.0f);
-    Forest.HumidityRange    = FVector2D(0.6f, 1.0f);
-    Forest.AltitudeRange    = FVector2D(0.0f, 400.0f);
-    Forest.FoliageDensity   = 0.85f;
-    Forest.DangerLevel      = 0.6f;
-    Forest.bHasPredators    = true;
-    BiomeTable.Add(Forest);
-
-    FEng_BiomeDefinition Plains;
-    Plains.BiomeID = EEng_BiomeType::OpenPlains;
-    Plains.DisplayName = FText::FromString(TEXT("Open Plains"));
-    Plains.TemperatureRange = FVector2D(15.0f, 40.0f);
-    Plains.HumidityRange    = FVector2D(0.2f, 0.5f);
-    Plains.AltitudeRange    = FVector2D(0.0f, 200.0f);
-    Plains.FoliageDensity   = 0.25f;
-    Plains.DangerLevel      = 0.4f;
-    Plains.bHasPredators    = true;
-    BiomeTable.Add(Plains);
-
-    FEng_BiomeDefinition Swamp;
-    Swamp.BiomeID = EEng_BiomeType::Swampland;
-    Swamp.DisplayName = FText::FromString(TEXT("Swampland"));
-    Swamp.TemperatureRange = FVector2D(18.0f, 30.0f);
-    Swamp.HumidityRange    = FVector2D(0.8f, 1.0f);
-    Swamp.AltitudeRange    = FVector2D(-20.0f, 50.0f);
-    Swamp.FoliageDensity   = 0.7f;
-    Swamp.DangerLevel      = 0.75f;
-    Swamp.bHasPredators    = true;
-    BiomeTable.Add(Swamp);
-
-    FEng_BiomeDefinition Volcanic;
-    Volcanic.BiomeID = EEng_BiomeType::VolcanicBadlands;
-    Volcanic.DisplayName = FText::FromString(TEXT("Volcanic Badlands"));
-    Volcanic.TemperatureRange = FVector2D(35.0f, 80.0f);
-    Volcanic.HumidityRange    = FVector2D(0.0f, 0.2f);
-    Volcanic.AltitudeRange    = FVector2D(200.0f, 1200.0f);
-    Volcanic.FoliageDensity   = 0.05f;
-    Volcanic.DangerLevel      = 0.95f;
-    Volcanic.bHasPredators    = false;
-    BiomeTable.Add(Volcanic);
-
-    FEng_BiomeDefinition Coastal;
-    Coastal.BiomeID = EEng_BiomeType::CoastalShallows;
-    Coastal.DisplayName = FText::FromString(TEXT("Coastal Shallows"));
-    Coastal.TemperatureRange = FVector2D(18.0f, 28.0f);
-    Coastal.HumidityRange    = FVector2D(0.7f, 1.0f);
-    Coastal.AltitudeRange    = FVector2D(-50.0f, 20.0f);
-    Coastal.FoliageDensity   = 0.3f;
-    Coastal.DangerLevel      = 0.5f;
-    Coastal.bHasPredators    = true;
-    BiomeTable.Add(Coastal);
-
-    FEng_BiomeDefinition Mountain;
-    Mountain.BiomeID = EEng_BiomeType::MountainRidge;
-    Mountain.DisplayName = FText::FromString(TEXT("Mountain Ridge"));
-    Mountain.TemperatureRange = FVector2D(-5.0f, 15.0f);
-    Mountain.HumidityRange    = FVector2D(0.3f, 0.6f);
-    Mountain.AltitudeRange    = FVector2D(600.0f, 2000.0f);
-    Mountain.FoliageDensity   = 0.15f;
-    Mountain.DangerLevel      = 0.55f;
-    Mountain.bHasPredators    = false;
-    BiomeTable.Add(Mountain);
-
-    // Noise scale for biome sampling
-    BiomeNoiseScale = 0.0005f;
-    BlendRadius     = 500.0f;
-}
-
-// ============================================================
-// UGameInstanceSubsystem interface
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// UBiomeManager — UWorldSubsystem implementation
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized — %d biomes registered"), BiomeTable.Num());
+
+    // Register all biome definitions on startup
+    RegisterDefaultBiomes();
+
+    UE_LOG(LogBiomeManager, Log, TEXT("BiomeManager initialized — %d biomes registered"), BiomeRegistry.Num());
 }
 
 void UBiomeManager::Deinitialize()
 {
-    BiomeTable.Empty();
+    BiomeRegistry.Empty();
     Super::Deinitialize();
 }
 
-// ============================================================
-// Core biome query
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Biome Registration
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBiomeManager::RegisterDefaultBiomes()
+{
+    // JUNGLE BIOME — hot, humid, dense vegetation
+    {
+        FEng_BiomeDefinition Jungle;
+        Jungle.BiomeID        = EEng_BiomeType::Jungle;
+        Jungle.DisplayName    = FText::FromString(TEXT("Prehistoric Jungle"));
+        Jungle.MinTemperature = 25.0f;
+        Jungle.MaxTemperature = 38.0f;
+        Jungle.MinHumidity    = 0.75f;
+        Jungle.MaxHumidity    = 1.0f;
+        Jungle.MinAltitude    = 0.0f;
+        Jungle.MaxAltitude    = 400.0f;
+        Jungle.FoliageDensity = 0.9f;
+        Jungle.DangerLevel    = 0.7f;
+        Jungle.AmbientColor   = FLinearColor(0.1f, 0.35f, 0.05f, 1.0f);
+        Jungle.FogDensity     = 0.04f;
+        BiomeRegistry.Add(EEng_BiomeType::Jungle, Jungle);
+    }
+
+    // SAVANNA BIOME — warm, dry, open plains
+    {
+        FEng_BiomeDefinition Savanna;
+        Savanna.BiomeID        = EEng_BiomeType::Savanna;
+        Savanna.DisplayName    = FText::FromString(TEXT("Prehistoric Savanna"));
+        Savanna.MinTemperature = 20.0f;
+        Savanna.MaxTemperature = 40.0f;
+        Savanna.MinHumidity    = 0.1f;
+        Savanna.MaxHumidity    = 0.4f;
+        Savanna.MinAltitude    = 0.0f;
+        Savanna.MaxAltitude    = 300.0f;
+        Savanna.FoliageDensity = 0.3f;
+        Savanna.DangerLevel    = 0.5f;
+        Savanna.AmbientColor   = FLinearColor(0.7f, 0.55f, 0.2f, 1.0f);
+        Savanna.FogDensity     = 0.01f;
+        BiomeRegistry.Add(EEng_BiomeType::Savanna, Savanna);
+    }
+
+    // SWAMP BIOME — cool, very humid, murky
+    {
+        FEng_BiomeDefinition Swamp;
+        Swamp.BiomeID        = EEng_BiomeType::Swamp;
+        Swamp.DisplayName    = FText::FromString(TEXT("Prehistoric Swamp"));
+        Swamp.MinTemperature = 15.0f;
+        Swamp.MaxTemperature = 28.0f;
+        Swamp.MinHumidity    = 0.8f;
+        Swamp.MaxHumidity    = 1.0f;
+        Swamp.MinAltitude    = -20.0f;
+        Swamp.MaxAltitude    = 50.0f;
+        Swamp.FoliageDensity = 0.6f;
+        Swamp.DangerLevel    = 0.8f;
+        Swamp.AmbientColor   = FLinearColor(0.15f, 0.25f, 0.1f, 1.0f);
+        Swamp.FogDensity     = 0.08f;
+        BiomeRegistry.Add(EEng_BiomeType::Swamp, Swamp);
+    }
+
+    // VOLCANIC BIOME — extreme heat, low humidity, barren
+    {
+        FEng_BiomeDefinition Volcanic;
+        Volcanic.BiomeID        = EEng_BiomeType::Volcanic;
+        Volcanic.DisplayName    = FText::FromString(TEXT("Volcanic Badlands"));
+        Volcanic.MinTemperature = 35.0f;
+        Volcanic.MaxTemperature = 80.0f;
+        Volcanic.MinHumidity    = 0.0f;
+        Volcanic.MaxHumidity    = 0.15f;
+        Volcanic.MinAltitude    = 200.0f;
+        Volcanic.MaxAltitude    = 2000.0f;
+        Volcanic.FoliageDensity = 0.05f;
+        Volcanic.DangerLevel    = 1.0f;
+        Volcanic.AmbientColor   = FLinearColor(0.6f, 0.15f, 0.02f, 1.0f);
+        Volcanic.FogDensity     = 0.06f;
+        BiomeRegistry.Add(EEng_BiomeType::Volcanic, Volcanic);
+    }
+
+    // COASTAL BIOME — temperate, moderate humidity, beaches
+    {
+        FEng_BiomeDefinition Coastal;
+        Coastal.BiomeID        = EEng_BiomeType::Coastal;
+        Coastal.DisplayName    = FText::FromString(TEXT("Prehistoric Coast"));
+        Coastal.MinTemperature = 18.0f;
+        Coastal.MaxTemperature = 30.0f;
+        Coastal.MinHumidity    = 0.5f;
+        Coastal.MaxHumidity    = 0.8f;
+        Coastal.MinAltitude    = -5.0f;
+        Coastal.MaxAltitude    = 80.0f;
+        Coastal.FoliageDensity = 0.4f;
+        Coastal.DangerLevel    = 0.4f;
+        Coastal.AmbientColor   = FLinearColor(0.4f, 0.6f, 0.7f, 1.0f);
+        Coastal.FogDensity     = 0.03f;
+        BiomeRegistry.Add(EEng_BiomeType::Coastal, Coastal);
+    }
+
+    // HIGHLAND BIOME — cold, low humidity, rocky terrain
+    {
+        FEng_BiomeDefinition Highland;
+        Highland.BiomeID        = EEng_BiomeType::Highland;
+        Highland.DisplayName    = FText::FromString(TEXT("Highland Plateau"));
+        Highland.MinTemperature = 0.0f;
+        Highland.MaxTemperature = 18.0f;
+        Highland.MinHumidity    = 0.2f;
+        Highland.MaxHumidity    = 0.5f;
+        Highland.MinAltitude    = 500.0f;
+        Highland.MaxAltitude    = 3000.0f;
+        Highland.FoliageDensity = 0.15f;
+        Highland.DangerLevel    = 0.6f;
+        Highland.AmbientColor   = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
+        Highland.FogDensity     = 0.05f;
+        BiomeRegistry.Add(EEng_BiomeType::Highland, Highland);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Biome Query — classify a world position into a biome
+// ─────────────────────────────────────────────────────────────────────────────
 
 EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Sample noise to determine temperature and humidity at location
-    const float T = SampleTemperature(WorldLocation);
-    const float H = SampleHumidity(WorldLocation);
-    const float A = WorldLocation.Z; // Altitude in cm (UE units)
+    // Sample altitude from Z coordinate (scaled: 1 UE unit = 1 cm, so /100 = metres)
+    const float AltitudeMetres = WorldLocation.Z / 100.0f;
 
-    // Find best matching biome
-    float BestScore = -1.0f;
-    EEng_BiomeType BestBiome = EEng_BiomeType::OpenPlains;
+    // Sample humidity and temperature using Perlin-like noise approximation
+    // (deterministic based on XY position — no random seed needed)
+    const float NX = WorldLocation.X * 0.0001f;
+    const float NY = WorldLocation.Y * 0.0001f;
 
-    for (const FEng_BiomeDefinition& Def : BiomeTable)
+    // Simple sinusoidal approximation for biome blending
+    const float HumidityRaw   = (FMath::Sin(NX * 2.3f + 0.5f) * FMath::Cos(NY * 1.7f + 1.2f) + 1.0f) * 0.5f;
+    const float TemperatureRaw = (FMath::Sin(NX * 1.1f - 0.8f) * FMath::Sin(NY * 2.9f + 0.3f) + 1.0f) * 0.5f;
+
+    const float Humidity    = FMath::Clamp(HumidityRaw, 0.0f, 1.0f);
+    const float Temperature = FMath::Lerp(0.0f, 50.0f, FMath::Clamp(TemperatureRaw, 0.0f, 1.0f));
+
+    // Altitude-first classification
+    if (AltitudeMetres > 500.0f)  return EEng_BiomeType::Highland;
+    if (AltitudeMetres > 200.0f && Temperature > 35.0f) return EEng_BiomeType::Volcanic;
+    if (AltitudeMetres < 0.0f)    return EEng_BiomeType::Coastal;
+
+    // Humidity + temperature matrix
+    if (Temperature > 25.0f && Humidity > 0.7f) return EEng_BiomeType::Jungle;
+    if (Temperature > 15.0f && Humidity < 0.15f && AltitudeMetres < 50.0f) return EEng_BiomeType::Swamp;
+    if (Temperature > 20.0f && Humidity < 0.4f) return EEng_BiomeType::Savanna;
+    if (Humidity > 0.5f && AltitudeMetres < 80.0f) return EEng_BiomeType::Coastal;
+
+    // Default fallback
+    return EEng_BiomeType::Savanna;
+}
+
+bool UBiomeManager::GetBiomeDefinition(EEng_BiomeType BiomeType, FEng_BiomeDefinition& OutDefinition) const
+{
+    if (const FEng_BiomeDefinition* Found = BiomeRegistry.Find(BiomeType))
     {
-        float Score = ScoreBiomeMatch(Def, T, H, A);
-        if (Score > BestScore)
-        {
-            BestScore = Score;
-            BestBiome = Def.BiomeID;
-        }
+        OutDefinition = *Found;
+        return true;
     }
-
-    return BestBiome;
+    return false;
 }
 
-FEng_BiomeDefinition UBiomeManager::GetBiomeDefinition(EEng_BiomeType BiomeType) const
+FLinearColor UBiomeManager::GetBiomeAmbientColor(const FVector& WorldLocation) const
 {
-    for (const FEng_BiomeDefinition& Def : BiomeTable)
+    const EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def;
+    if (GetBiomeDefinition(Biome, Def))
     {
-        if (Def.BiomeID == BiomeType)
-        {
-            return Def;
-        }
+        return Def.AmbientColor;
     }
-
-    // Return default if not found
-    return BiomeTable.Num() > 0 ? BiomeTable[0] : FEng_BiomeDefinition();
+    return FLinearColor::White;
 }
 
-TArray<FEng_BiomeBlendWeight> UBiomeManager::GetBiomeBlendWeightsAtLocation(const FVector& WorldLocation) const
+float UBiomeManager::GetBiomeDangerLevel(const FVector& WorldLocation) const
 {
-    TArray<FEng_BiomeBlendWeight> Result;
-
-    const float T = SampleTemperature(WorldLocation);
-    const float H = SampleHumidity(WorldLocation);
-    const float A = WorldLocation.Z;
-
-    float TotalScore = 0.0f;
-    TArray<TPair<EEng_BiomeType, float>> Scores;
-
-    for (const FEng_BiomeDefinition& Def : BiomeTable)
+    const EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def;
+    if (GetBiomeDefinition(Biome, Def))
     {
-        float Score = ScoreBiomeMatch(Def, T, H, A);
-        if (Score > 0.01f)
-        {
-            Scores.Add(TPair<EEng_BiomeType, float>(Def.BiomeID, Score));
-            TotalScore += Score;
-        }
+        return Def.DangerLevel;
     }
+    return 0.5f;
+}
 
-    if (TotalScore <= 0.0f)
+float UBiomeManager::GetBiomeFoliageDensity(const FVector& WorldLocation) const
+{
+    const EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    FEng_BiomeDefinition Def;
+    if (GetBiomeDefinition(Biome, Def))
     {
-        FEng_BiomeBlendWeight Default;
-        Default.BiomeType = EEng_BiomeType::OpenPlains;
-        Default.Weight    = 1.0f;
-        Result.Add(Default);
-        return Result;
+        return Def.FoliageDensity;
     }
-
-    // Normalize weights
-    for (const TPair<EEng_BiomeType, float>& Pair : Scores)
-    {
-        FEng_BiomeBlendWeight BW;
-        BW.BiomeType = Pair.Key;
-        BW.Weight    = Pair.Value / TotalScore;
-        Result.Add(BW);
-    }
-
-    // Sort descending by weight
-    Result.Sort([](const FEng_BiomeBlendWeight& A, const FEng_BiomeBlendWeight& B)
-    {
-        return A.Weight > B.Weight;
-    });
-
-    return Result;
+    return 0.5f;
 }
 
-// ============================================================
-// Environmental parameter queries
-// ============================================================
-
-float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+TArray<EEng_BiomeType> UBiomeManager::GetAllRegisteredBiomes() const
 {
-    return SampleTemperature(WorldLocation);
+    TArray<EEng_BiomeType> Keys;
+    BiomeRegistry.GetKeys(Keys);
+    return Keys;
 }
 
-float UBiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    return SampleHumidity(WorldLocation);
-}
-
-float UBiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
-    return Def.DangerLevel;
-}
-
-float UBiomeManager::GetFoliageDensityAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
-    return Def.FoliageDensity;
-}
-
-bool UBiomeManager::HasPredatorsAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeDefinition Def = GetBiomeDefinition(Biome);
-    return Def.bHasPredators;
-}
-
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
 // Debug visualization
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-void UBiomeManager::DrawBiomeDebug(const FVector& Center, float Radius, int32 GridResolution)
+void UBiomeManager::DebugDrawBiomeBoundaries(float Duration) const
 {
-#if ENABLE_DRAW_DEBUG
     UWorld* World = GetWorld();
     if (!World) return;
 
-    const float Step = (Radius * 2.0f) / FMath::Max(GridResolution, 1);
+    // Sample a grid of points and draw colored spheres
+    const float GridStep  = 500.0f;
+    const float GridRange = 5000.0f;
 
-    for (int32 X = 0; X < GridResolution; ++X)
+    for (float X = -GridRange; X <= GridRange; X += GridStep)
     {
-        for (int32 Y = 0; Y < GridResolution; ++Y)
+        for (float Y = -GridRange; Y <= GridRange; Y += GridStep)
         {
-            FVector SamplePos = Center + FVector(
-                -Radius + X * Step,
-                -Radius + Y * Step,
-                0.0f
-            );
-
-            EEng_BiomeType Biome = GetBiomeAtLocation(SamplePos);
-            FColor DebugColor = GetBiomeDebugColor(Biome);
-
-            DrawDebugPoint(World, SamplePos, 10.0f, DebugColor, false, 5.0f);
+            const FVector SamplePos(X, Y, 0.0f);
+            const EEng_BiomeType Biome = GetBiomeAtLocation(SamplePos);
+            FEng_BiomeDefinition Def;
+            FColor DebugColor = FColor::White;
+            if (GetBiomeDefinition(Biome, Def))
+            {
+                DebugColor = Def.AmbientColor.ToFColor(true);
+            }
+            DrawDebugSphere(World, SamplePos, 50.0f, 6, DebugColor, false, Duration);
         }
-    }
-#endif
-}
-
-// ============================================================
-// Private helpers
-// ============================================================
-
-float UBiomeManager::SampleTemperature(const FVector& WorldLocation) const
-{
-    // Pseudo-noise using sine waves — deterministic, no external dependency
-    const float NX = WorldLocation.X * BiomeNoiseScale;
-    const float NY = WorldLocation.Y * BiomeNoiseScale;
-    const float AltitudeCooldown = FMath::Max(0.0f, WorldLocation.Z / 100.0f) * 0.006f; // -0.6°C per 100m
-
-    float BaseTemp = 25.0f
-        + FMath::Sin(NX * 1.3f + 0.7f) * 12.0f
-        + FMath::Sin(NY * 0.9f + 1.2f) * 8.0f
-        + FMath::Sin((NX + NY) * 2.1f) * 5.0f;
-
-    return BaseTemp - AltitudeCooldown;
-}
-
-float UBiomeManager::SampleHumidity(const FVector& WorldLocation) const
-{
-    const float NX = WorldLocation.X * BiomeNoiseScale;
-    const float NY = WorldLocation.Y * BiomeNoiseScale;
-
-    float H = 0.5f
-        + FMath::Sin(NX * 0.7f + 2.3f) * 0.25f
-        + FMath::Sin(NY * 1.1f + 0.5f) * 0.2f
-        + FMath::Sin((NX - NY) * 1.8f) * 0.1f;
-
-    return FMath::Clamp(H, 0.0f, 1.0f);
-}
-
-float UBiomeManager::ScoreBiomeMatch(const FEng_BiomeDefinition& Def, float Temperature, float Humidity, float Altitude) const
-{
-    // Score how well the sample matches this biome's ranges
-    // Returns 0 if outside range, 1 if perfectly centered
-
-    auto RangeScore = [](float Value, FVector2D Range) -> float
-    {
-        if (Value < Range.X || Value > Range.Y) return 0.0f;
-        const float Mid   = (Range.X + Range.Y) * 0.5f;
-        const float HalfW = (Range.Y - Range.X) * 0.5f;
-        if (HalfW <= 0.0f) return 1.0f;
-        return 1.0f - FMath::Abs(Value - Mid) / HalfW;
-    };
-
-    const float TScore = RangeScore(Temperature, Def.TemperatureRange);
-    const float HScore = RangeScore(Humidity,    Def.HumidityRange);
-    const float AScore = RangeScore(Altitude,    Def.AltitudeRange);
-
-    // All three must match — multiplicative
-    return TScore * HScore * AScore;
-}
-
-FColor UBiomeManager::GetBiomeDebugColor(EEng_BiomeType BiomeType) const
-{
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::TropicalForest:   return FColor(34,  139, 34);   // Forest green
-        case EEng_BiomeType::OpenPlains:        return FColor(189, 183, 107);  // Khaki
-        case EEng_BiomeType::Swampland:         return FColor(85,  107, 47);   // Dark olive
-        case EEng_BiomeType::VolcanicBadlands:  return FColor(178, 34,  34);   // Firebrick
-        case EEng_BiomeType::CoastalShallows:   return FColor(64,  164, 223);  // Sky blue
-        case EEng_BiomeType::MountainRidge:     return FColor(169, 169, 169);  // Grey
-        default:                                return FColor::White;
     }
 }
