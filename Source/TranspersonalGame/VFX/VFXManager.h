@@ -5,13 +5,16 @@
 #include "VFXManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_EffectCategory : uint8
+enum class EVFX_EffectType : uint8
 {
-    Environment     UMETA(DisplayName = "Environment"),
-    Dinosaur        UMETA(DisplayName = "Dinosaur"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Weather         UMETA(DisplayName = "Weather"),
-    Crafting        UMETA(DisplayName = "Crafting")
+    Campfire        UMETA(DisplayName = "Campfire"),
+    Rain            UMETA(DisplayName = "Rain"),
+    DinoFootstep    UMETA(DisplayName = "DinoFootstep"),
+    BloodImpact     UMETA(DisplayName = "BloodImpact"),
+    DustCloud       UMETA(DisplayName = "DustCloud"),
+    VolcanicAsh     UMETA(DisplayName = "VolcanicAsh"),
+    WaterSplash     UMETA(DisplayName = "WaterSplash"),
+    Sparks          UMETA(DisplayName = "Sparks")
 };
 
 USTRUCT(BlueprintType)
@@ -20,34 +23,30 @@ struct FVFX_EffectConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FName EffectID;
+    EVFX_EffectType EffectType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EffectCategory Category;
+    FVector SpawnLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float LOD0_Distance;
+    float Scale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float LOD1_Distance;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float LOD2_Distance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bCastShadows;
+    bool bLooping;
 
     FVFX_EffectConfig()
-        : EffectID(NAME_None)
-        , Category(EVFX_EffectCategory::Environment)
-        , LOD0_Distance(500.f)
-        , LOD1_Distance(1500.f)
-        , LOD2_Distance(4000.f)
-        , bCastShadows(false)
+        : EffectType(EVFX_EffectType::Campfire)
+        , SpawnLocation(FVector::ZeroVector)
+        , Scale(1.0f)
+        , Duration(5.0f)
+        , bLooping(false)
     {}
 };
 
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UVFX_Manager : public UActorComponent
 {
     GENERATED_BODY()
@@ -55,28 +54,48 @@ class TRANSPERSONALGAME_API UVFX_Manager : public UActorComponent
 public:
     UVFX_Manager();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void RegisterEffect(const FVFX_EffectConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnEffect(FName EffectID, FVector Location, FRotator Rotation);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(FName EffectID);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateLOD(FVector PlayerLocation);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Config")
-    TArray<FVFX_EffectConfig> RegisteredEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Config")
-    float GlobalLODScalar;
-
-protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnEffect(const FVFX_EffectConfig& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnCampfireEffect(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnDinoFootstepEffect(FVector Location, float DinoMass);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnBloodImpactEffect(FVector Location, FVector ImpactNormal);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnRainEffect(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnDustCloudEffect(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetWeatherIntensity(float Intensity);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
+    float GlobalVFXQuality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
+    bool bEnableBloodEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
+    bool bEnableWeatherEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
+    int32 MaxConcurrentEffects;
+
 private:
-    TMap<FName, FVFX_EffectConfig> EffectRegistry;
+    UPROPERTY()
+    float CurrentWeatherIntensity;
+
+    UPROPERTY()
+    int32 ActiveEffectCount;
+
+    void CleanupExpiredEffects();
 };
