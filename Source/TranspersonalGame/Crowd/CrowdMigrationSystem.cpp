@@ -1,137 +1,114 @@
-// CrowdMigrationSystem.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Cycle: PROD_CYCLE_AUTO_20260627_009
-
 #include "CrowdMigrationSystem.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "Math/UnrealMathUtility.h"
 
 ACrowdMigrationSystem::ACrowdMigrationSystem()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // LOD distances (units)
-    LOD0_Distance = 500.0f;
-    LOD1_Distance = 2000.0f;
-    LOD2_Distance = 5000.0f;
-
-    // Agent caps per LOD tier
-    MaxAgentsLOD0 = 12;
-    MaxAgentsLOD1 = 40;
-    MaxAgentsLOD2 = 200;
-
-    // Alarm radius — herd scatters if threat enters this range
-    AlarmRadius = 800.0f;
+    HerdSize = 20;
+    MigrationRadius = 2000.f;
+    FleeRadius = 800.f;
+    MigrationDestination = FVector(5000.f, 5000.f, 0.f);
+    ElapsedTime = 0.f;
+    bMigrationActive = false;
 }
 
 void ACrowdMigrationSystem::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeMigrationPath();
+    FVector Origin = GetActorLocation();
+    InitializeHerd(HerdSize, Origin, MigrationDestination);
 }
 
 void ACrowdMigrationSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    AdvanceHerdAlongPath(DeltaTime);
+    ElapsedTime += DeltaTime;
+
+    if (bMigrationActive)
+    {
+        UpdateAgentPositions(DeltaTime);
+    }
 }
 
-void ACrowdMigrationSystem::InitializeMigrationPath()
+void ACrowdMigrationSystem::InitializeHerd(int32 InHerdSize, FVector Origin, FVector Destination)
 {
-    MigrationPath.Empty();
+    Agents.Empty();
+    HerdSize = InHerdSize;
+    MigrationDestination = Destination;
 
-    // West Forest → River → Eastern Plains
-    TArray<FVector> PathPositions = {
-        FVector(-2000.0f,    0.0f, 100.0f),  // WP0: West forest edge
-        FVector(-1200.0f,  400.0f, 100.0f),  // WP1: Forest clearing
-        FVector( -400.0f,  600.0f, 100.0f),  // WP2: Pre-river approach
-        FVector(  200.0f,  800.0f, 100.0f),  // WP3: River crossing
-        FVector(  900.0f,  700.0f, 100.0f),  // WP4: Eastern bank
-        FVector( 1600.0f,  500.0f, 100.0f),  // WP5: Eastern plains
-        FVector( 2200.0f,  200.0f, 100.0f),  // WP6: Grazing grounds
-    };
-
-    for (int32 i = 0; i < PathPositions.Num(); ++i)
+    for (int32 i = 0; i < HerdSize; i++)
     {
-        FCrowd_MigrationWaypoint WP;
-        WP.WorldPosition   = PathPositions[i];
-        WP.WaypointIndex   = i;
-        WP.ArrivalRadius   = 200.0f;
-        MigrationPath.Add(WP);
+        FCrowd_MigrationAgent Agent;
+        float OffsetX = FMath::RandRange(-MigrationRadius * 0.3f, MigrationRadius * 0.3f);
+        float OffsetY = FMath::RandRange(-MigrationRadius * 0.3f, MigrationRadius * 0.3f);
+        Agent.CurrentLocation = Origin + FVector(OffsetX, OffsetY, 0.f);
+        Agent.TargetLocation = Destination + FVector(
+            FMath::RandRange(-200.f, 200.f),
+            FMath::RandRange(-200.f, 200.f),
+            0.f
+        );
+        Agent.MoveSpeed = FMath::RandRange(250.f, 400.f);
+        Agent.State = ECrowd_MigrationState::Migrating;
+        Agent.HerdID = 0;
+        Agent.bIsLeader = (i == 0);
+        Agents.Add(Agent);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("CrowdMigration: Initialized %d waypoints"), MigrationPath.Num());
+    bMigrationActive = true;
+    UE_LOG(LogTemp, Log, TEXT("CrowdMigrationSystem: Herd of %d initialized"), HerdSize);
 }
 
-void ACrowdMigrationSystem::AdvanceHerdAlongPath(float DeltaTime)
+void ACrowdMigrationSystem::TriggerFlee(FVector ThreatLocation)
 {
-    if (MigrationPath.Num() == 0) return;
-
-    for (FCrowd_AgentState& Agent : ActiveAgents)
+    for (FCrowd_MigrationAgent& Agent : Agents)
     {
-        if (!Agent.bIsActive) continue;
+        FVector FleeDir = (Agent.CurrentLocation - ThreatLocation).GetSafeNormal();
+        Agent.TargetLocation = Agent.CurrentLocation + FleeDir * FleeRadius;
+        Agent.State = ECrowd_MigrationState::Fleeing;
+        Agent.MoveSpeed = FMath::RandRange(500.f, 700.f);
+    }
+    UE_LOG(LogTemp, Log, TEXT("CrowdMigrationSystem: Flee triggered from threat at %s"), *ThreatLocation.ToString());
+}
 
-        // Alarmed agents scatter — skip normal migration
-        if (Agent.bIsAlarmed) continue;
+void ACrowdMigrationSystem::UpdateAgentPositions(float DeltaTime)
+{
+    for (FCrowd_MigrationAgent& Agent : Agents)
+    {
+        if (Agent.State == ECrowd_MigrationState::Idle)
+            continue;
 
-        // Clamp waypoint index
-        if (Agent.CurrentWaypointIndex >= MigrationPath.Num())
+        FVector Direction = (Agent.TargetLocation - Agent.CurrentLocation).GetSafeNormal();
+        float Distance = FVector::Dist(Agent.CurrentLocation, Agent.TargetLocation);
+
+        if (Distance > 50.f)
         {
-            Agent.CurrentWaypointIndex = 0; // Loop migration
+            Agent.CurrentLocation += Direction * Agent.MoveSpeed * DeltaTime;
         }
-
-        // Advance toward current waypoint (conceptual — actual movement via BT/NavMesh)
-        // This tick updates agent state for Blueprint/BT queries
+        else
+        {
+            // Reached target — transition to idle or dispersing
+            if (Agent.State == ECrowd_MigrationState::Fleeing)
+            {
+                Agent.State = ECrowd_MigrationState::Dispersing;
+            }
+            else
+            {
+                Agent.State = ECrowd_MigrationState::Idle;
+            }
+        }
     }
-}
-
-ECrowd_LODTier ACrowdMigrationSystem::CalculateLODTier(FVector AgentLocation, FVector PlayerLocation) const
-{
-    const float Distance = FVector::Dist(AgentLocation, PlayerLocation);
-
-    if (Distance <= LOD0_Distance)
-    {
-        return ECrowd_LODTier::LOD0_Individual;
-    }
-    else if (Distance <= LOD1_Distance)
-    {
-        return ECrowd_LODTier::LOD1_Group;
-    }
-    else
-    {
-        return ECrowd_LODTier::LOD2_Billboard;
-    }
-}
-
-void ACrowdMigrationSystem::TriggerAlarm(FVector AlarmSource, float Radius)
-{
-    int32 AlarmedCount = 0;
-    for (FCrowd_AgentState& Agent : ActiveAgents)
-    {
-        // Mark agents within alarm radius as alarmed
-        // Actual distance check would use agent actor location
-        Agent.bIsAlarmed = true;
-        ++AlarmedCount;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("CrowdMigration: ALARM triggered — %d agents alarmed"), AlarmedCount);
-    ScatterHerd(AlarmSource);
-}
-
-void ACrowdMigrationSystem::ScatterHerd(FVector ThreatLocation)
-{
-    // Scatter: agents flee away from threat
-    // Direction = AgentLocation - ThreatLocation (normalized)
-    // Applied via NavMesh move request in Behavior Tree
-    UE_LOG(LogTemp, Warning, TEXT("CrowdMigration: Herd scattering from threat at %s"), *ThreatLocation.ToString());
 }
 
 int32 ACrowdMigrationSystem::GetActiveAgentCount() const
 {
     int32 Count = 0;
-    for (const FCrowd_AgentState& Agent : ActiveAgents)
+    for (const FCrowd_MigrationAgent& Agent : Agents)
     {
-        if (Agent.bIsActive) ++Count;
+        if (Agent.State != ECrowd_MigrationState::Idle)
+        {
+            Count++;
+        }
     }
     return Count;
 }
