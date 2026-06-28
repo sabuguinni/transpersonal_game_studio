@@ -1,278 +1,176 @@
-#include "Narrative/DialogueManager.h"
+// DialogueManager.cpp
+// Agent #15 — Narrative & Dialogue Agent
+// Full implementation of UNarr_DialogueManagerComponent
+
+#include "DialogueManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
-UNarr_DialogueManager::UNarr_DialogueManager()
+UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    GlobalVoiceVolume = 1.0f;
-    bIsPlayingDialogue = false;
-    CurrentLineIndex = 0;
-    LineTimer = 0.0f;
+    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5s — not every frame
 }
 
-void UNarr_DialogueManager::BeginPlay()
+void UNarr_DialogueManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
-    PopulateDefaultDialogue();
+
+    // Seed the dialogue library with default lines (text only — audio assigned via Blueprint)
+    FNarr_DialogueLine DangerLine;
+    DangerLine.Trigger = ENarr_DialogueTrigger::DangerNear;
+    DangerLine.Speaker = ENarr_CharacterRole::HunterElder;
+    DangerLine.LineText = TEXT("Something is wrong. The birds stopped singing. Move to high ground — now.");
+    DangerLine.CooldownSeconds = 90.0f;
+    DangerLine.Priority = 2.0f;
+    DialogueLibrary.Add(DangerLine);
+
+    FNarr_DialogueLine HungerLine;
+    HungerLine.Trigger = ENarr_DialogueTrigger::PlayerLowHunger;
+    HungerLine.Speaker = ENarr_CharacterRole::HuntCaller;
+    HungerLine.LineText = TEXT("The river bends east past the dead tree — that is where the herd crosses at dawn.");
+    HungerLine.CooldownSeconds = 120.0f;
+    HungerLine.Priority = 1.0f;
+    DialogueLibrary.Add(HungerLine);
+
+    FNarr_DialogueLine StampedeWarning;
+    StampedeWarning.Trigger = ENarr_DialogueTrigger::StampedeWarning;
+    StampedeWarning.Speaker = ENarr_CharacterRole::TrailReader;
+    StampedeWarning.LineText = TEXT("The stampede is coming. I felt it in the ground — thousands of them. Run for the rocks!");
+    StampedeWarning.CooldownSeconds = 180.0f;
+    StampedeWarning.Priority = 3.0f;
+    DialogueLibrary.Add(StampedeWarning);
+
+    FNarr_DialogueLine NestLine;
+    NestLine.Trigger = ENarr_DialogueTrigger::NestDiscovered;
+    NestLine.Speaker = ENarr_CharacterRole::HunterElder;
+    NestLine.LineText = TEXT("Do not touch the eggs. The mother is never far. She watches from the tree line.");
+    NestLine.CooldownSeconds = 300.0f;
+    NestLine.Priority = 1.5f;
+    DialogueLibrary.Add(NestLine);
+
+    FNarr_DialogueLine CampLine;
+    CampLine.Trigger = ENarr_DialogueTrigger::CampFound;
+    CampLine.Speaker = ENarr_CharacterRole::ScoutLeader;
+    CampLine.LineText = TEXT("We found the old camp — bones of those who came before us. This place will be our home now.");
+    CampLine.CooldownSeconds = 600.0f;
+    CampLine.Priority = 1.0f;
+    DialogueLibrary.Add(CampLine);
+
+    FNarr_DialogueLine SurvivalLine;
+    SurvivalLine.Trigger = ENarr_DialogueTrigger::DangerNear;
+    SurvivalLine.Speaker = ENarr_CharacterRole::SurvivalElder;
+    SurvivalLine.LineText = TEXT("The beast that hunts at night remembers faces. Make yourself dangerous. Make yourself loud.");
+    SurvivalLine.CooldownSeconds = 90.0f;
+    SurvivalLine.Priority = 1.8f;
+    DialogueLibrary.Add(SurvivalLine);
 }
 
-void UNarr_DialogueManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNarr_DialogueManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    ElapsedTime += DeltaTime;
 
-    if (!bIsPlayingDialogue) return;
-
-    LineTimer -= DeltaTime;
-    if (LineTimer <= 0.0f)
+    // Auto-clear playing state after estimated duration
+    if (CurrentState.bIsPlaying && ElapsedTime - CurrentState.LastPlayedTime > 20.0f)
     {
-        AdvanceToNextLine();
+        CurrentState.bIsPlaying = false;
     }
 }
 
-void UNarr_DialogueManager::PlaySequence(FName SequenceID)
+void UNarr_DialogueManagerComponent::TriggerDialogue(ENarr_DialogueTrigger Trigger)
 {
-    if (!HasSequence(SequenceID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Sequence '%s' not found"), *SequenceID.ToString());
-        return;
-    }
+    if (Trigger == ENarr_DialogueTrigger::None) return;
 
-    // Stop any active dialogue
-    if (bIsPlayingDialogue)
-    {
-        StopDialogue();
-    }
+    // Global cooldown check
+    if (CurrentState.bIsPlaying) return;
+    if (ElapsedTime - CurrentState.LastPlayedTime < GlobalCooldownSeconds) return;
 
-    ActiveSequence = GetSequence(SequenceID);
-    ActiveSequenceID = SequenceID;
-    CurrentLineIndex = 0;
-    bIsPlayingDialogue = true;
+    // Trigger-specific cooldown check
+    if (IsTriggerOnCooldown(Trigger)) return;
 
-    OnDialogueStarted.Broadcast(SequenceID, ActiveSequence.Lines.Num() > 0 ? ActiveSequence.Lines[0].Speaker : ENarr_SpeakerRole::Narrator);
-
-    if (ActiveSequence.Lines.Num() > 0)
+    FNarr_DialogueLine* BestLine = FindBestLine(Trigger);
+    if (BestLine)
     {
-        DisplayLine(ActiveSequence.Lines[0]);
-    }
-    else
-    {
-        StopDialogue();
+        PlayLine(*BestLine);
     }
 }
 
-void UNarr_DialogueManager::StopDialogue()
+void UNarr_DialogueManagerComponent::RegisterDialogueLine(FNarr_DialogueLine Line)
 {
-    if (!bIsPlayingDialogue) return;
-
-    FName EndedID = ActiveSequenceID;
-    bIsPlayingDialogue = false;
-    ActiveSequenceID = NAME_None;
-    CurrentLineIndex = 0;
-    LineTimer = 0.0f;
-
-    OnDialogueEnded.Broadcast(EndedID);
+    DialogueLibrary.Add(Line);
 }
 
-void UNarr_DialogueManager::SkipCurrentLine()
+FNarr_DialogueState UNarr_DialogueManagerComponent::GetDialogueState() const
 {
-    if (!bIsPlayingDialogue) return;
-    LineTimer = 0.0f;
-    AdvanceToNextLine();
+    return CurrentState;
 }
 
-bool UNarr_DialogueManager::HasSequence(FName SequenceID) const
+bool UNarr_DialogueManagerComponent::IsTriggerOnCooldown(ENarr_DialogueTrigger Trigger) const
 {
-    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
+    const float* LastTime = TriggerCooldownMap.Find(Trigger);
+    if (!LastTime) return false;
+
+    // Find cooldown for this trigger
+    float CooldownDuration = 120.0f;
+    for (const FNarr_DialogueLine& Line : DialogueLibrary)
     {
-        if (Seq.SequenceID == SequenceID) return true;
-    }
-    return false;
-}
-
-FNarr_DialogueSequence UNarr_DialogueManager::GetSequence(FName SequenceID) const
-{
-    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
-    {
-        if (Seq.SequenceID == SequenceID) return Seq;
-    }
-    return FNarr_DialogueSequence();
-}
-
-void UNarr_DialogueManager::TriggerByContext(ENarr_DialogueTrigger TriggerType)
-{
-    // Find first sequence that has lines matching this trigger
-    for (const FNarr_DialogueSequence& Seq : DialogueLibrary)
-    {
-        for (const FNarr_DialogueLine& Line : Seq.Lines)
+        if (Line.Trigger == Trigger)
         {
-            if (Line.Trigger == TriggerType)
-            {
-                PlaySequence(Seq.SequenceID);
-                return;
-            }
-        }
-    }
-}
-
-void UNarr_DialogueManager::RegisterSequence(const FNarr_DialogueSequence& Sequence)
-{
-    // Replace if exists
-    for (int32 i = 0; i < DialogueLibrary.Num(); ++i)
-    {
-        if (DialogueLibrary[i].SequenceID == Sequence.SequenceID)
-        {
-            DialogueLibrary[i] = Sequence;
-            return;
-        }
-    }
-    DialogueLibrary.Add(Sequence);
-}
-
-void UNarr_DialogueManager::AdvanceToNextLine()
-{
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= ActiveSequence.Lines.Num())
-    {
-        if (ActiveSequence.bLoops && ActiveSequence.Lines.Num() > 0)
-        {
-            CurrentLineIndex = 0;
-            DisplayLine(ActiveSequence.Lines[0]);
-        }
-        else
-        {
-            StopDialogue();
-        }
-        return;
-    }
-
-    // Pause between lines
-    if (ActiveSequence.PauseBetweenLines > 0.0f)
-    {
-        LineTimer = ActiveSequence.PauseBetweenLines;
-        // We'll display the next line after the pause
-        // For simplicity, display immediately and let timer handle duration
-    }
-
-    DisplayLine(ActiveSequence.Lines[CurrentLineIndex]);
-}
-
-void UNarr_DialogueManager::DisplayLine(const FNarr_DialogueLine& Line)
-{
-    LineTimer = Line.DisplayDuration;
-    OnLineDisplayed.Broadcast(Line, CurrentLineIndex);
-
-    // Play voice audio if available
-    if (!Line.VoiceAudio.IsNull())
-    {
-        USoundBase* Sound = Line.VoiceAudio.LoadSynchronous();
-        if (Sound && GetOwner())
-        {
-            UGameplayStatics::PlaySoundAtLocation(
-                GetWorld(),
-                Sound,
-                GetOwner()->GetActorLocation(),
-                GlobalVoiceVolume
-            );
+            CooldownDuration = Line.CooldownSeconds;
+            break;
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: [%s] %s"),
+    return (ElapsedTime - *LastTime) < CooldownDuration;
+}
+
+void UNarr_DialogueManagerComponent::StopDialogue()
+{
+    CurrentState.bIsPlaying = false;
+}
+
+FNarr_DialogueLine* UNarr_DialogueManagerComponent::FindBestLine(ENarr_DialogueTrigger Trigger)
+{
+    FNarr_DialogueLine* BestLine = nullptr;
+    float BestPriority = -1.0f;
+
+    for (FNarr_DialogueLine& Line : DialogueLibrary)
+    {
+        if (Line.Trigger != Trigger) continue;
+        if (Line.Priority > BestPriority)
+        {
+            BestPriority = Line.Priority;
+            BestLine = &Line;
+        }
+    }
+
+    return BestLine;
+}
+
+void UNarr_DialogueManagerComponent::PlayLine(FNarr_DialogueLine& Line)
+{
+    CurrentState.LastTrigger = Line.Trigger;
+    CurrentState.LastPlayedTime = ElapsedTime;
+    CurrentState.bIsPlaying = true;
+    CurrentState.CurrentLineText = Line.LineText;
+
+    TriggerCooldownMap.Add(Line.Trigger, ElapsedTime);
+
+    // Play audio if asset is assigned
+    if (Line.VoiceAsset && GetOwner())
+    {
+        UGameplayStatics::PlaySoundAtLocation(
+            GetWorld(),
+            Line.VoiceAsset,
+            GetOwner()->GetActorLocation(),
+            1.0f,  // Volume
+            1.0f,  // Pitch
+            0.0f   // StartTime
+        );
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Narrative] Playing line: [%s] '%s'"),
         *UEnum::GetValueAsString(Line.Speaker),
-        *Line.LineText.ToString());
-}
-
-void UNarr_DialogueManager::PopulateDefaultDialogue()
-{
-    // Danger sequence — raptors spotted
-    FNarr_DialogueSequence DangerSeq;
-    DangerSeq.SequenceID = FName("SEQ_RaptorDanger");
-    DangerSeq.bLoops = false;
-    DangerSeq.PauseBetweenLines = 1.5f;
-
-    FNarr_DialogueLine Line1;
-    Line1.LineID = FName("LINE_RaptorDanger_01");
-    Line1.Speaker = ENarr_SpeakerRole::TrailReader;
-    Line1.LineText = FText::FromString(TEXT("Three raptors — circling from the east. Stay low."));
-    Line1.Trigger = ENarr_DialogueTrigger::DangerNear;
-    Line1.DisplayDuration = 4.0f;
-    DangerSeq.Lines.Add(Line1);
-
-    FNarr_DialogueLine Line2;
-    Line2.LineID = FName("LINE_RaptorDanger_02");
-    Line2.Speaker = ENarr_SpeakerRole::ScoutLeader;
-    Line2.LineText = FText::FromString(TEXT("River crossing — north. Move now, do not run."));
-    Line2.Trigger = ENarr_DialogueTrigger::DangerNear;
-    Line2.DisplayDuration = 4.0f;
-    DangerSeq.Lines.Add(Line2);
-
-    RegisterSequence(DangerSeq);
-
-    // Stampede warning sequence
-    FNarr_DialogueSequence StampedeSeq;
-    StampedeSeq.SequenceID = FName("SEQ_StampedeWarning");
-    StampedeSeq.bLoops = false;
-    StampedeSeq.PauseBetweenLines = 1.0f;
-
-    FNarr_DialogueLine SLine1;
-    SLine1.LineID = FName("LINE_Stampede_01");
-    SLine1.Speaker = ENarr_SpeakerRole::HunterElder;
-    SLine1.LineText = FText::FromString(TEXT("The ground shakes. Hundreds of them — from the north ridge. Climb!"));
-    SLine1.Trigger = ENarr_DialogueTrigger::DangerNear;
-    SLine1.DisplayDuration = 5.0f;
-    StampedeSeq.Lines.Add(SLine1);
-
-    RegisterSequence(StampedeSeq);
-
-    // Discovery sequence — nest found
-    FNarr_DialogueSequence NestSeq;
-    NestSeq.SequenceID = FName("SEQ_NestDiscovery");
-    NestSeq.bLoops = false;
-    NestSeq.PauseBetweenLines = 2.0f;
-
-    FNarr_DialogueLine NLine1;
-    NLine1.LineID = FName("LINE_Nest_01");
-    NLine1.Speaker = ENarr_SpeakerRole::ScoutLeader;
-    NLine1.LineText = FText::FromString(TEXT("Forty eggs. The mother is close. We take nothing. We leave no trace."));
-    NLine1.Trigger = ENarr_DialogueTrigger::Discovery;
-    NLine1.DisplayDuration = 5.0f;
-    NestSeq.Lines.Add(NLine1);
-
-    FNarr_DialogueLine NLine2;
-    NLine2.LineID = FName("LINE_Nest_02");
-    NLine2.Speaker = ENarr_SpeakerRole::HunterElder;
-    NLine2.LineText = FText::FromString(TEXT("Mark this place. We return when the season turns."));
-    NLine2.Trigger = ENarr_DialogueTrigger::Discovery;
-    NLine2.DisplayDuration = 4.0f;
-    NestSeq.Lines.Add(NLine2);
-
-    RegisterSequence(NestSeq);
-
-    // Survivor backstory — idle campfire
-    FNarr_DialogueSequence SurvivorSeq;
-    SurvivorSeq.SequenceID = FName("SEQ_SurvivorMemory");
-    SurvivorSeq.bLoops = false;
-    SurvivorSeq.PauseBetweenLines = 2.5f;
-
-    FNarr_DialogueLine SVLine1;
-    SVLine1.LineID = FName("LINE_Survivor_01");
-    SVLine1.Speaker = ENarr_SpeakerRole::Survivor;
-    SVLine1.LineText = FText::FromString(TEXT("Three winters ago, my father's tribe crossed the northern plains during migration. Only four survived. I was one of them."));
-    SVLine1.Trigger = ENarr_DialogueTrigger::Idle;
-    SVLine1.DisplayDuration = 7.0f;
-    SurvivorSeq.Lines.Add(SVLine1);
-
-    FNarr_DialogueLine SVLine2;
-    SVLine2.LineID = FName("LINE_Survivor_02");
-    SVLine2.Speaker = ENarr_SpeakerRole::Survivor;
-    SVLine2.LineText = FText::FromString(TEXT("That is why we wait. We always wait for the herd to pass."));
-    SVLine2.Trigger = ENarr_DialogueTrigger::Idle;
-    SVLine2.DisplayDuration = 5.0f;
-    SurvivorSeq.Lines.Add(SVLine2);
-
-    RegisterSequence(SurvivorSeq);
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Populated %d default sequences"), DialogueLibrary.Num());
+        *Line.LineText);
 }
