@@ -1,129 +1,149 @@
-// TyrannosaurusRex.cpp — Tyrannosaurus Rex species implementation
-// Agent #03 — Core Systems Programmer — Cycle AUTO_20260628_010
+// TyrannosaurusRex.cpp
+// Apex predator implementation — inherits from ADinosaurBase
+// Stats: 500hp, 80 damage, 1800 detection, 350/650 move/sprint speed
 
 #include "Dinosaurs/TyrannosaurusRex.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 ATyrannosaurusRex::ATyrannosaurusRex()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    // ---- Identity ----
+    Species = EEng_DinoSpecies::TyrannosaurusRex;
+    SpeciesDisplayName = TEXT("Tyrannosaurus Rex");
+    bIsCarnivore = true;
+    bIsPackHunter = false;
 
-    // ── Species identity ──────────────────────────────────────────────────
-    Species    = EEng_DinosaurSpecies::TRex;
-    Diet       = EEng_DinosaurDiet::Carnivore;
-    MaxHealth  = 500.0f;
-    Health     = 500.0f;
-    AttackDamage = 25.0f;
-    AttackRange  = 200.0f;   // cm — bite reach
-    AttackCooldown = 3.0f;   // seconds between bites
+    // ---- Stats override ----
+    DinoStats.MaxHealth       = 500.0f;
+    DinoStats.CurrentHealth   = 500.0f;
+    DinoStats.MaxHunger       = 100.0f;
+    DinoStats.CurrentHunger   = 75.0f;
+    DinoStats.AttackDamage    = 80.0f;
+    DinoStats.AttackRange     = 350.0f;
+    DinoStats.DetectionRadius = 1800.0f;
+    DinoStats.MoveSpeed       = 350.0f;
+    DinoStats.SprintSpeed     = 650.0f;
+    DinoStats.Mass            = 8000.0f;
 
-    // ── Movement ──────────────────────────────────────────────────────────
-    WalkSpeed = 400.0f;
-    RunSpeed  = 550.0f;
+    // ---- Capsule sizing for large biped ----
+    GetCapsuleComponent()->InitCapsuleSize(80.0f, 180.0f);
 
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
-    {
-        Move->MaxWalkSpeed          = WalkSpeed;
-        Move->JumpZVelocity         = 0.0f;   // TRex cannot jump
-        Move->bCanWalkOffLedges     = true;
-        Move->NavAgentProps.AgentRadius = 120.0f;
-        Move->NavAgentProps.AgentHeight = 600.0f;
-        Move->RotationRate          = FRotator(0.0f, 180.0f, 0.0f);
-        Move->bOrientRotationToMovement = true;
-    }
+    // ---- Movement ----
+    GetCharacterMovement()->MaxWalkSpeed = DinoStats.MoveSpeed;
+    GetCharacterMovement()->JumpZVelocity = 0.0f;   // TRex cannot jump
+    GetCharacterMovement()->bCanWalkOffLedges = true;
+    GetCharacterMovement()->Mass = DinoStats.Mass;
 
-    // ── Capsule ───────────────────────────────────────────────────────────
-    if (UCapsuleComponent* Cap = GetCapsuleComponent())
-    {
-        Cap->SetCapsuleHalfHeight(300.0f);
-        Cap->SetCapsuleRadius(120.0f);
-    }
+    // ---- Hunger decay — slower for large predator ----
+    HungerDecayRate = 1.2f;
 
-    // ── Hunger / thirst decay (slower for apex predator) ─────────────────
-    HungerDecayRate = 1.5f;
-    ThirstDecayRate = 1.0f;
+    // ---- AI update interval — slightly slower for performance ----
+    AIUpdateInterval = 0.6f;
 }
 
 void ATyrannosaurusRex::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Record home territory centre
-    HomeLocation = GetActorLocation();
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s spawned — Health: %.0f, Detection: %.0f cm"),
+        *GetName(), DinoStats.CurrentHealth, DinoStats.DetectionRadius);
 }
 
-void ATyrannosaurusRex::Tick(float DeltaTime)
+void ATyrannosaurusRex::TriggerRoar()
 {
-    Super::Tick(DeltaTime);
-
-    // ── Charge locomotion ─────────────────────────────────────────────────
-    if (bIsCharging)
-    {
-        ChargeTimeRemaining -= DeltaTime;
-
-        if (ChargeTimeRemaining <= 0.0f)
-        {
-            // End charge — restore normal speed
-            bIsCharging = false;
-            if (UCharacterMovementComponent* Move = GetCharacterMovement())
-            {
-                Move->MaxWalkSpeed = RunSpeed;
-            }
-        }
-        else
-        {
-            // Apply charge velocity
-            const float ChargeSpeed = RunSpeed * ChargeSpeedMultiplier;
-            AddMovementInput(ChargeDirection, 1.0f);
-            if (UCharacterMovementComponent* Move = GetCharacterMovement())
-            {
-                Move->MaxWalkSpeed = ChargeSpeed;
-            }
-        }
-    }
-}
-
-void ATyrannosaurusRex::PerformRoar()
-{
-    const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    float Now = GetWorld()->GetTimeSeconds();
     if (Now - LastRoarTime < RoarCooldown)
     {
-        return;   // Still on cooldown
+        return; // Cooldown not elapsed
     }
     LastRoarTime = Now;
 
-    // Find all actors within roar radius and apply brief stun
-    // (Stun is communicated via gameplay tag / event — simplified here)
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s ROARS — applying fear in %.0f cm radius"), *GetName(), DinoStats.DetectionRadius);
+
+    // Apply fear to player if in range
     TArray<AActor*> OverlappingActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), OverlappingActors);
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        GetActorLocation(),
+        DinoStats.DetectionRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        APawn::StaticClass(),
+        TArray<AActor*>{ this },
+        OverlappingActors
+    );
 
     for (AActor* Actor : OverlappingActors)
     {
-        if (Actor == this) continue;
-        const float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist <= RoarRadius)
+        if (Actor && Actor->ActorHasTag(FName("Player")))
         {
-            // Notify actor of roar stun (Blueprint event or interface call)
-            // For now log the effect — full stun requires GameplayAbilities
-            UE_LOG(LogTemp, Log, TEXT("TRex ROAR stuns %s for %.1fs"), *Actor->GetName(), RoarStunDuration);
+            UE_LOG(LogTemp, Log, TEXT("[TRex] Roar reached player: %s"), *Actor->GetName());
+            // Fear mechanic hook — TranspersonalCharacter SurvivalComponent handles fear stat
+            // Actor->TakeDamage(0, FDamageEvent(), nullptr, this);  // placeholder for fear event
+        }
+    }
+}
+
+void ATyrannosaurusRex::PerformStomp()
+{
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s STOMPS — radius: %.0f cm, damage: %.0f"),
+        *GetName(), StompRadius, StompDamage);
+
+    TArray<AActor*> HitActors;
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        GetActorLocation(),
+        StompRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        APawn::StaticClass(),
+        TArray<AActor*>{ this },
+        HitActors
+    );
+
+    for (AActor* Actor : HitActors)
+    {
+        if (Actor && Actor != this)
+        {
+            UGameplayStatics::ApplyDamage(Actor, StompDamage, GetController(), this, nullptr);
+            UE_LOG(LogTemp, Log, TEXT("[TRex] Stomp hit: %s for %.0f damage"), *Actor->GetName(), StompDamage);
         }
     }
 
 #if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), GetActorLocation(), RoarRadius, 16, FColor::Orange, false, 2.0f);
+    // Debug sphere in editor
+    DrawDebugSphere(GetWorld(), GetActorLocation(), StompRadius, 12, FColor::Orange, false, 2.0f);
 #endif
 }
 
-void ATyrannosaurusRex::BeginCharge(FVector TargetLocation)
+void ATyrannosaurusRex::OnDinoDeath_Implementation()
 {
-    if (bIsCharging) return;
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s has died — collapsing"), *GetName());
 
-    const FVector ToTarget = (TargetLocation - GetActorLocation()).GetSafeNormal();
-    ChargeDirection     = ToTarget;
-    ChargeTimeRemaining = ChargeDuration;
-    bIsCharging         = true;
+    // Disable collision and movement (base class handles this too, but explicit for TRex)
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    GetCharacterMovement()->DisableMovement();
 
-    UE_LOG(LogTemp, Log, TEXT("TRex begins charge toward %s"), *TargetLocation.ToString());
+    // Ragdoll mesh
+    if (GetMesh())
+    {
+        GetMesh()->SetSimulatePhysics(true);
+        GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    }
+
+    // Set dead state
+    BehaviorState = EEng_DinoBehaviorState::Dead;
+}
+
+void ATyrannosaurusRex::OnDinoSpotTarget_Implementation(AActor* SpottedTarget)
+{
+    if (!SpottedTarget) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[TRex] %s spotted target: %s"), *GetName(), *SpottedTarget->GetName());
+
+    // Trigger roar when first spotting prey
+    TriggerRoar();
+
+    // Transition to hunting
+    SetBehaviorState(EEng_DinoBehaviorState::Hunting);
+    CurrentTarget = SpottedTarget;
 }
