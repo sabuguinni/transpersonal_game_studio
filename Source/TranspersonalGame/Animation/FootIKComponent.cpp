@@ -1,189 +1,162 @@
+// FootIKComponent.cpp
+// Agent #10 — Animation Agent | PROD_CYCLE_AUTO_20260628_009
+// Per-foot IK solving: traces terrain, adjusts foot placement and pelvis offset
+
 #include "FootIKComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor
-// ─────────────────────────────────────────────────────────────────────────────
+#include "Engine/World.h"
 
 UFootIKComponent::UFootIKComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostUpdateWork; // run after anim update
-}
+    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay — cache owner references
-// ─────────────────────────────────────────────────────────────────────────────
+    // Default socket names for a humanoid skeleton
+    LeftFootSocketName  = FName("foot_l");
+    RightFootSocketName = FName("foot_r");
+
+    // Trace configuration
+    TraceStartOffset  = 50.0f;
+    TraceEndOffset    = 75.0f;
+    TraceChannel      = ECollisionChannel::ECC_Visibility;
+
+    // Interpolation speeds
+    FootInterpSpeed   = 15.0f;
+    PelvisInterpSpeed = 8.0f;
+
+    // Limits
+    MaxPelvisOffset   = 25.0f;
+    MaxFootOffset     = 15.0f;
+
+    // Debug
+    bShowDebugTraces  = false;
+
+    // Internal state
+    CachedCharacter       = nullptr;
+    CachedSkeletalMesh    = nullptr;
+    CurrentPelvisOffset   = 0.0f;
+}
 
 void UFootIKComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    CachedCharacter = Cast<ACharacter>(GetOwner());
+    if (CachedCharacter)
     {
-        OwnerMesh = OwnerCharacter->GetMesh();
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-    }
-
-    if (!OwnerCharacter || !OwnerMesh || !MovementComponent)
-    {
-        UE_LOG(LogTemp, Warning,
-               TEXT("UFootIKComponent: Owner is not a valid ACharacter — IK disabled."));
-        SetComponentTickEnabled(false);
-        bIKEnabled = false;
+        CachedSkeletalMesh = CachedCharacter->GetMesh();
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TickComponent — main IK update
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UFootIKComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-                                     FActorComponentTickFunction* ThisTickFunction)
+void UFootIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!bIKEnabled || !OwnerCharacter || !OwnerMesh || !MovementComponent)
+    if (!CachedCharacter || !CachedSkeletalMesh)
     {
-        bIKActive = false;
         return;
     }
 
-    // Disable IK when moving fast or in the air to avoid foot-sliding artefacts
-    const float CurrentSpeed = MovementComponent->Velocity.Size();
-    const bool bIsGrounded = MovementComponent->IsMovingOnGround();
-
-    bIKActive = bIsGrounded && (CurrentSpeed <= MaxSpeedForIK);
-
-    if (!bIKActive)
+    // Skip IK when airborne — let the anim instance handle that
+    UCharacterMovementComponent* MovComp = CachedCharacter->GetCharacterMovement();
+    if (MovComp && MovComp->IsFalling())
     {
-        // Smoothly blend out IK when we go above speed threshold
+        // Smoothly blend out foot IK while airborne
         LeftFootData.BlendAlpha  = FMath::FInterpTo(LeftFootData.BlendAlpha,  0.0f, DeltaTime, FootInterpSpeed);
         RightFootData.BlendAlpha = FMath::FInterpTo(RightFootData.BlendAlpha, 0.0f, DeltaTime, FootInterpSpeed);
+        CurrentPelvisOffset      = FMath::FInterpTo(CurrentPelvisOffset, 0.0f, DeltaTime, PelvisInterpSpeed);
         return;
     }
 
+    // Solve each foot
     SolveFootIK(LeftFootSocketName,  LeftFootData,  DeltaTime);
     SolveFootIK(RightFootSocketName, RightFootData, DeltaTime);
 
-    // Pelvis correction: lower the pelvis by the larger of the two foot offsets
-    // so the lower foot is always grounded rather than floating.
-    const float TargetPelvisOffset = FMath::Min(LeftFootData.PelvisOffset,
-                                                RightFootData.PelvisOffset);
-    const float ClampedPelvis = FMath::Clamp(TargetPelvisOffset,
-                                             -MaxPelvisOffset, 0.0f);
-
-    // Write the same pelvis value into both structs so AnimInstance can read either
-    LeftFootData.PelvisOffset  = FMath::FInterpTo(LeftFootData.PelvisOffset,
-                                                   ClampedPelvis, DeltaTime,
-                                                   PelvisInterpSpeed);
-    RightFootData.PelvisOffset = LeftFootData.PelvisOffset;
+    // Pelvis offset = push pelvis down so the lower foot stays grounded
+    float DesiredPelvisOffset = FMath::Min(LeftFootData.PelvisOffset, RightFootData.PelvisOffset);
+    DesiredPelvisOffset = FMath::Clamp(DesiredPelvisOffset, -MaxPelvisOffset, 0.0f);
+    CurrentPelvisOffset = FMath::FInterpTo(CurrentPelvisOffset, DesiredPelvisOffset, DeltaTime, PelvisInterpSpeed);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SolveFootIK — trace + smooth for one foot
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UFootIKComponent::SolveFootIK(const FName& SocketName,
-                                    FAnim_FootIKData& OutData,
-                                    float DeltaTime)
+void UFootIKComponent::SolveFootIK(const FName& SocketName, FAnim_FootIKData& OutData, float DeltaTime)
 {
-    if (!OwnerMesh)
+    if (!CachedSkeletalMesh)
     {
         return;
     }
 
-    const FVector SocketLocation = OwnerMesh->GetSocketLocation(SocketName);
+    // Get current socket world location
+    FVector SocketLocation = CachedSkeletalMesh->GetSocketLocation(SocketName);
 
-    FHitResult Hit;
-    const bool bHit = TraceForGround(SocketLocation, Hit);
+    // Build trace start/end (vertical line trace)
+    FVector TraceStart = SocketLocation + FVector(0.0f, 0.0f,  TraceStartOffset);
+    FVector TraceEnd   = SocketLocation + FVector(0.0f, 0.0f, -TraceEndOffset);
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(CachedCharacter);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        TraceChannel,
+        QueryParams
+    );
+
+#if ENABLE_DRAW_DEBUG
+    if (bShowDebugTraces)
+    {
+        DrawDebugLine(GetWorld(), TraceStart, TraceEnd,
+            bHit ? FColor::Green : FColor::Red,
+            false, -1.0f, 0, 1.5f);
+        if (bHit)
+        {
+            DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 5.0f, 8, FColor::Yellow, false, -1.0f);
+        }
+    }
+#endif
 
     if (bHit)
     {
-        // Smooth target location
-        OutData.TargetLocation = FMath::VInterpTo(OutData.TargetLocation,
-                                                   Hit.ImpactPoint,
-                                                   DeltaTime,
-                                                   FootInterpSpeed);
+        // How far does the foot need to move from its current position?
+        float FootHeightDelta = HitResult.ImpactPoint.Z - SocketLocation.Z;
+        FootHeightDelta = FMath::Clamp(FootHeightDelta, -MaxFootOffset, MaxFootOffset);
 
-        // Smooth surface normal
-        OutData.SurfaceNormal = FMath::VInterpTo(OutData.SurfaceNormal,
-                                                  Hit.ImpactNormal,
-                                                  DeltaTime,
-                                                  FootInterpSpeed);
+        // Target foot location in component space (only Z matters for basic IK)
+        FVector TargetWorld = SocketLocation;
+        TargetWorld.Z = HitResult.ImpactPoint.Z;
 
-        // Height delta between hit point and socket (negative = foot needs to go down)
-        const float HeightDelta = Hit.ImpactPoint.Z - SocketLocation.Z;
-        OutData.PelvisOffset = FMath::Min(OutData.PelvisOffset, HeightDelta);
-
-        // Blend in IK
-        OutData.BlendAlpha = FMath::FInterpTo(OutData.BlendAlpha, 1.0f,
-                                               DeltaTime, FootInterpSpeed);
-        OutData.bIsGrounded = true;
-
-        if (bDrawDebugTraces)
-        {
-            DrawDebugSphere(GetWorld(), Hit.ImpactPoint, 5.0f, 8,
-                            FColor::Green, false, -1.0f, 0, 1.0f);
-            DrawDebugLine(GetWorld(), SocketLocation, Hit.ImpactPoint,
-                          FColor::Yellow, false, -1.0f, 0, 0.5f);
-        }
+        // Smooth interpolation
+        OutData.TargetLocation = FMath::VInterpTo(OutData.TargetLocation, TargetWorld, DeltaTime, FootInterpSpeed);
+        OutData.SurfaceNormal  = FMath::VInterpTo(OutData.SurfaceNormal, HitResult.ImpactNormal, DeltaTime, FootInterpSpeed);
+        OutData.PelvisOffset   = FootHeightDelta < 0.0f ? FootHeightDelta : 0.0f;
+        OutData.bIsGrounded    = true;
+        OutData.BlendAlpha     = FMath::FInterpTo(OutData.BlendAlpha, 1.0f, DeltaTime, FootInterpSpeed);
     }
     else
     {
         // No ground found — blend out
-        OutData.BlendAlpha = FMath::FInterpTo(OutData.BlendAlpha, 0.0f,
-                                               DeltaTime, FootInterpSpeed);
         OutData.bIsGrounded = false;
+        OutData.BlendAlpha  = FMath::FInterpTo(OutData.BlendAlpha, 0.0f, DeltaTime, FootInterpSpeed);
         OutData.PelvisOffset = 0.0f;
-
-        if (bDrawDebugTraces)
-        {
-            const FVector TraceEnd = SocketLocation - FVector(0.0f, 0.0f, TraceEndOffset);
-            DrawDebugLine(GetWorld(), SocketLocation, TraceEnd,
-                          FColor::Red, false, -1.0f, 0, 0.5f);
-        }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TraceForGround — single downward line trace
-// ─────────────────────────────────────────────────────────────────────────────
-
-bool UFootIKComponent::TraceForGround(const FVector& SocketWorldLocation,
-                                       FHitResult& OutHit) const
+float UFootIKComponent::GetPelvisOffset() const
 {
-    if (!GetWorld())
-    {
-        return false;
-    }
-
-    const FVector TraceStart = SocketWorldLocation + FVector(0.0f, 0.0f,  TraceStartOffset);
-    const FVector TraceEnd   = SocketWorldLocation - FVector(0.0f, 0.0f,  TraceEndOffset);
-
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(GetOwner());
-    Params.bTraceComplex = false;
-
-    return GetWorld()->LineTraceSingleByChannel(OutHit, TraceStart, TraceEnd,
-                                                TraceChannel, Params);
+    return CurrentPelvisOffset;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SetIKEnabled — runtime toggle
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UFootIKComponent::SetIKEnabled(bool bEnabled)
+FAnim_FootIKData UFootIKComponent::GetLeftFootData() const
 {
-    bIKEnabled = bEnabled;
-    if (!bEnabled)
-    {
-        LeftFootData.BlendAlpha  = 0.0f;
-        RightFootData.BlendAlpha = 0.0f;
-        bIKActive = false;
-    }
+    return LeftFootData;
+}
+
+FAnim_FootIKData UFootIKComponent::GetRightFootData() const
+{
+    return RightFootData;
 }
