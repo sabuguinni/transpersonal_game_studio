@@ -1,188 +1,135 @@
 #include "AudioZoneManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 
-// ============================================================
-//  AAudio_ZoneActor — Implementation
-// ============================================================
-
-AAudio_ZoneActor::AAudio_ZoneActor()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    ZoneBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("ZoneBounds"));
-    RootComponent = ZoneBounds;
-
-    ZoneBounds->SetBoxExtent(FVector(1000.0f, 1000.0f, 500.0f));
-    ZoneBounds->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-    ZoneBounds->SetGenerateOverlapEvents(true);
-}
-
-void AAudio_ZoneActor::BeginPlay()
-{
-    Super::BeginPlay();
-
-    ZoneBounds->OnActorBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnPlayerEnterZone);
-    ZoneBounds->OnActorEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnPlayerExitZone);
-}
-
-void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    ZoneBounds->OnActorBeginOverlap.RemoveDynamic(this, &AAudio_ZoneActor::OnPlayerEnterZone);
-    ZoneBounds->OnActorEndOverlap.RemoveDynamic(this, &AAudio_ZoneActor::OnPlayerExitZone);
-
-    Super::EndPlay(EndPlayReason);
-}
-
-void AAudio_ZoneActor::ActivateZone()
-{
-    if (bZoneActive)
-    {
-        return;
-    }
-    bZoneActive = true;
-    // Blueprint or MetaSound graph handles actual sound playback via event
-    // This function is the hook — BP_AudioZoneActor overrides and calls PlaySound
-}
-
-void AAudio_ZoneActor::DeactivateZone()
-{
-    if (!bZoneActive)
-    {
-        return;
-    }
-    bZoneActive = false;
-    // Blueprint hook for fade-out logic
-}
-
-void AAudio_ZoneActor::OnPlayerEnterZone(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!OtherActor)
-    {
-        return;
-    }
-
-    // Check if the overlapping actor is the player character
-    ACharacter* AsCharacter = Cast<ACharacter>(OtherActor);
-    if (!AsCharacter)
-    {
-        return;
-    }
-
-    APlayerController* PC = Cast<APlayerController>(AsCharacter->GetController());
-    if (PC && PC->IsLocalController())
-    {
-        ActivateZone();
-    }
-}
-
-void AAudio_ZoneActor::OnPlayerExitZone(AActor* OverlappedActor, AActor* OtherActor)
-{
-    if (!OtherActor)
-    {
-        return;
-    }
-
-    ACharacter* AsCharacter = Cast<ACharacter>(OtherActor);
-    if (!AsCharacter)
-    {
-        return;
-    }
-
-    APlayerController* PC = Cast<APlayerController>(AsCharacter->GetController());
-    if (PC && PC->IsLocalController())
-    {
-        DeactivateZone();
-    }
-}
-
-// ============================================================
-//  AAudio_DinoTrigger — Implementation
-// ============================================================
-
-AAudio_DinoTrigger::AAudio_DinoTrigger()
+AAudio_ZoneManager::AAudio_ZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Default T-Rex profile
-    DinoProfile.SpeciesName       = FName("TRex");
-    DinoProfile.RoarRadius        = 3000.0f;
-    DinoProfile.FootstepRadius    = 1500.0f;
-    DinoProfile.FootstepInterval  = 0.8f;
-    DinoProfile.GroundShakeIntensity = 0.6f;
+    // Trigger sphere for zone detection
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    // Ambient audio component
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
+
+    // Music layer audio component
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    MusicAudioComponent->bAutoActivate = false;
+    MusicAudioComponent->SetVolumeMultiplier(0.0f);
 }
 
-void AAudio_DinoTrigger::BeginPlay()
+void AAudio_ZoneManager::BeginPlay()
 {
     Super::BeginPlay();
-    TimeSinceLastRoar      = 0.0f;
-    TimeSinceLastFootstep  = 0.0f;
+
+    // Bind overlap events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerEnterZone);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneManager::OnPlayerExitZone);
+
+    // Set sphere radius from config
+    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
+
+    // Assign sounds if set
+    if (AmbientSound && AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetSound(AmbientSound);
+    }
+    if (MusicLayer && MusicAudioComponent)
+    {
+        MusicAudioComponent->SetSound(MusicLayer);
+    }
 }
 
-void AAudio_DinoTrigger::Tick(float DeltaTime)
+void AAudio_ZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    float DistToPlayer = GetDistanceToPlayer();
-
-    // Footstep audio tick
-    if (DistToPlayer <= DinoProfile.FootstepRadius)
+    // Smooth blend toward target intensity
+    if (FMath::Abs(CurrentIntensity - TargetIntensity) > 0.001f)
     {
-        TimeSinceLastFootstep += DeltaTime;
-        if (TimeSinceLastFootstep >= DinoProfile.FootstepInterval)
+        float BlendSpeed = bPlayerInZone
+            ? (1.0f / FMath::Max(ZoneConfig.FadeInTime, 0.1f))
+            : (1.0f / FMath::Max(ZoneConfig.FadeOutTime, 0.1f));
+
+        CurrentIntensity = FMath::FInterpTo(CurrentIntensity, TargetIntensity, DeltaTime, BlendSpeed);
+
+        // Apply volume to audio components
+        if (AmbientAudioComponent)
         {
-            TriggerFootstep();
-            TimeSinceLastFootstep = 0.0f;
+            AmbientAudioComponent->SetVolumeMultiplier(CurrentIntensity * ZoneConfig.AmbientVolume);
         }
-    }
-
-    // Roar audio tick
-    if (DistToPlayer <= DinoProfile.RoarRadius)
-    {
-        TimeSinceLastRoar += DeltaTime;
-        if (TimeSinceLastRoar >= RoarIntervalSeconds)
+        if (MusicAudioComponent)
         {
-            TriggerRoar();
-            TimeSinceLastRoar = 0.0f;
+            MusicAudioComponent->SetVolumeMultiplier(CurrentIntensity * ZoneConfig.MusicIntensity);
         }
     }
 }
 
-void AAudio_DinoTrigger::TriggerRoar()
+void AAudio_ZoneManager::OnPlayerEnterZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
 {
-    // Blueprint event hook — BP_DinoAudioTrigger plays the roar SoundCue here
-    // C++ side logs for validation
-    UE_LOG(LogTemp, Log, TEXT("AAudio_DinoTrigger: Roar triggered for species %s"),
-           *DinoProfile.SpeciesName.ToString());
+    if (!OtherActor) return;
+
+    // Check if the overlapping actor is the player character
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (!Character) return;
+
+    APlayerController* PC = Cast<APlayerController>(Character->GetController());
+    if (!PC) return;
+
+    bPlayerInZone = true;
+    TargetIntensity = 1.0f;
+
+    // Start audio playback if not already playing
+    if (AmbientAudioComponent && !AmbientAudioComponent->IsPlaying())
+    {
+        AmbientAudioComponent->Play();
+    }
+    if (MusicAudioComponent && ZoneConfig.MusicIntensity > 0.0f && !MusicAudioComponent->IsPlaying())
+    {
+        MusicAudioComponent->Play();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player entered zone type %d"), (int32)ZoneConfig.ZoneType);
 }
 
-void AAudio_DinoTrigger::TriggerFootstep()
+void AAudio_ZoneManager::OnPlayerExitZone(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    // Blueprint event hook — BP_DinoAudioTrigger plays footstep + camera shake
-    UE_LOG(LogTemp, Log, TEXT("AAudio_DinoTrigger: Footstep triggered for species %s (shake=%.2f)"),
-           *DinoProfile.SpeciesName.ToString(), DinoProfile.GroundShakeIntensity);
+    if (!OtherActor) return;
+
+    ACharacter* Character = Cast<ACharacter>(OtherActor);
+    if (!Character) return;
+
+    APlayerController* PC = Cast<APlayerController>(Character->GetController());
+    if (!PC) return;
+
+    bPlayerInZone = false;
+    TargetIntensity = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZone: Player exited zone type %d"), (int32)ZoneConfig.ZoneType);
 }
 
-float AAudio_DinoTrigger::GetDistanceToPlayer() const
+void AAudio_ZoneManager::SetZoneActive(bool bActive)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (bActive)
     {
-        return TNumericLimits<float>::Max();
+        TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     }
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC)
+    else
     {
-        return TNumericLimits<float>::Max();
+        TriggerSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        bPlayerInZone = false;
+        TargetIntensity = 0.0f;
     }
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn)
-    {
-        return TNumericLimits<float>::Max();
-    }
-
-    return FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
 }
