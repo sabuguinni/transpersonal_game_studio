@@ -1,24 +1,25 @@
 // PerformanceOptimizer.h
-// Agent #4 — Performance Optimizer
-// Guarantees 60fps PC / 30fps console via dynamic LOD, culling, and budget enforcement
+// Agent #04 — Performance Optimizer | Cycle AUTO_20260628_005
+// Manages runtime performance budgets, LOD control, and timer-based survival tick
+// Target: 60fps PC / 30fps console
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "Engine/EngineTypes.h"
 #include "PerformanceOptimizer.generated.h"
 
 // Forward declarations
 class UStaticMeshComponent;
-class USkeletalMeshComponent;
+class ADirectionalLight;
 
 UENUM(BlueprintType)
 enum class EPerf_QualityTier : uint8
 {
     Ultra       UMETA(DisplayName = "Ultra (PC High-End)"),
     High        UMETA(DisplayName = "High (PC Mid-Range)"),
-    Medium      UMETA(DisplayName = "Medium (PC Low / Console)"),
+    Medium      UMETA(DisplayName = "Medium (Console)"),
     Low         UMETA(DisplayName = "Low (Performance Mode)")
 };
 
@@ -31,25 +32,25 @@ struct FPerf_FrameBudget
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float TargetFrameTimeMs = 16.67f; // 60fps
 
-    // GPU budget (ms) — rendering, shadows, reflections
+    // GPU budget in milliseconds
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float GPUBudgetMs = 10.0f;
 
-    // CPU budget (ms) — AI, physics, game logic
+    // CPU budget in milliseconds
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CPUBudgetMs = 5.0f;
+    float CPUBudgetMs = 6.0f;
 
     // Shadow budget (ms)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float ShadowBudgetMs = 3.0f;
 
-    // Max dynamic lights in scene
+    // Max draw calls per frame
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDynamicLights = 8;
+    int32 MaxDrawCalls = 2000;
 
-    // Max visible dinosaurs (full LOD)
+    // Max triangles per frame (millions)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxVisibleDinosaurs = 12;
+    float MaxTrianglesMillion = 8.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -57,28 +58,28 @@ struct FPerf_LODSettings
 {
     GENERATED_BODY()
 
-    // Distance at which LOD0 transitions to LOD1 (meters)
+    // Distance at which LOD0->LOD1 transition occurs
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD0Distance = 15.0f;
+    float LOD0Distance = 1500.0f;
 
-    // Distance at which LOD1 transitions to LOD2
+    // Distance at which LOD1->LOD2 transition occurs
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD1Distance = 40.0f;
+    float LOD1Distance = 4000.0f;
 
-    // Distance at which LOD2 transitions to LOD3 (lowest)
+    // Distance at which actors are culled entirely
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LOD2Distance = 80.0f;
+    float CullDistance = 12000.0f;
 
-    // Cull distance for small props (rocks, debris)
+    // Scale multiplier for LOD distances (1.0 = default)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float SmallPropCullDistance = 50.0f;
+    float LODDistanceScale = 1.5f;
 
-    // Cull distance for foliage
+    // Whether to use HLOD (Hierarchical LOD) for distant clusters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float FoliageCullDistance = 120.0f;
+    bool bUseHLOD = true;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Performance), meta = (BlueprintSpawnableComponent), DisplayName = "Performance Optimizer")
 class TRANSPERSONALGAME_API UPerformanceOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -86,80 +87,80 @@ class TRANSPERSONALGAME_API UPerformanceOptimizer : public UActorComponent
 public:
     UPerformanceOptimizer();
 
-    // Current quality tier — set at startup based on hardware
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
-
-    // Frame budget configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    // === FRAME BUDGET ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
     FPerf_FrameBudget FrameBudget;
 
-    // LOD settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    // === LOD SETTINGS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
     FPerf_LODSettings LODSettings;
 
-    // Current measured FPS (updated every second)
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    // === QUALITY TIER ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Quality")
+    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
 
-    // Current GPU frame time in ms
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentGPUTimeMs = 0.0f;
+    // === SURVIVAL TICK TIMER INTERVAL ===
+    // Replaces per-frame Tick for survival stats — fires every N seconds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Timers", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float SurvivalTickInterval = 0.5f;
 
-    // Whether dynamic quality scaling is active
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bDynamicQualityScaling = true;
+    // === SHADOW OPTIMIZATION ===
+    // Small props (radius < this value) have shadows disabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows", meta = (ClampMin = "50.0"))
+    float SmallPropShadowRadiusThreshold = 150.0f;
 
-    // Minimum FPS before quality is reduced
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinFPSThreshold = 45.0f;
+    // Max shadow cascade count
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows", meta = (ClampMin = "1", ClampMax = "4"))
+    int32 MaxShadowCascades = 3;
 
-    // FPS above which quality can be increased
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFPSThreshold = 70.0f;
+    // === RUNTIME STATS (read-only) ===
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats", meta = (AllowPrivateAccess = "true"))
+    float CurrentFrameTimeMs = 0.0f;
 
-    // Apply current quality tier settings to the engine
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentActorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats", meta = (AllowPrivateAccess = "true"))
+    bool bIsUnderBudget = true;
+
+    // === PUBLIC API ===
+
+    // Apply quality tier settings (console vars + LOD distances)
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyQualityTier(EPerf_QualityTier NewTier);
+
+    // Apply LOD settings to all StaticMesh actors in the level
+    UFUNCTION(BlueprintCallable, Category = "Performance|LOD")
+    void ApplyLODSettingsToLevel();
+
+    // Disable shadow casting on small props below radius threshold
+    UFUNCTION(BlueprintCallable, Category = "Performance|Shadows")
+    void OptimizeSmallPropShadows();
+
+    // Get current frame time in ms
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance|Stats")
+    float GetCurrentFrameTimeMs() const { return CurrentFrameTimeMs; }
+
+    // Check if we are within frame budget
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance|Stats")
+    bool IsWithinFrameBudget() const { return bIsUnderBudget; }
+
+    // Apply all optimizations for current quality tier
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void ApplyQualitySettings();
+    void ApplyAllOptimizations();
 
-    // Force a specific quality tier
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetQualityTier(EPerf_QualityTier NewTier);
-
-    // Get recommended quality tier based on current hardware
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_QualityTier GetRecommendedQualityTier() const;
-
-    // Apply LOD bias to a static mesh component
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeStaticMesh(UStaticMeshComponent* MeshComp, float ImportanceScale = 1.0f);
-
-    // Apply LOD bias to a skeletal mesh (dinosaur, character)
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeSkeletalMesh(USkeletalMeshComponent* MeshComp, float ImportanceScale = 1.0f);
-
-    // Run full scene performance audit — logs results
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void RunPerformanceAudit();
-
-    // UActorComponent interface
+protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Accumulated time for FPS measurement
-    float FPSAccumulator = 0.0f;
-    int32 FPSFrameCount = 0;
+    // Timer handle for survival tick
+    FTimerHandle SurvivalTickTimerHandle;
 
-    // Time since last quality adjustment
-    float TimeSinceLastQualityAdjust = 0.0f;
+    // Apply console variables for a given quality tier
+    void ApplyConsoleVarsForTier(EPerf_QualityTier Tier);
 
-    // Minimum seconds between quality adjustments (prevent thrashing)
-    static constexpr float QualityAdjustCooldown = 5.0f;
-
-    // Apply console variable settings for a given tier
-    void ApplyConsoleVariables(EPerf_QualityTier Tier);
-
-    // Check if FPS is below threshold and reduce quality if needed
-    void UpdateDynamicQuality(float DeltaTime);
+    // Internal frame time tracking
+    float FrameTimeAccumulator = 0.0f;
+    int32 FrameCount = 0;
 };
