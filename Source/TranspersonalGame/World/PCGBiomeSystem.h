@@ -1,156 +1,170 @@
-// PCGBiomeSystem.h
-// Prehistoric Dinosaur Survival Game — PCG Biome System
-// Agent #5 — Procedural World Generator
-// Defines biome zones, terrain variation, and procedural placement rules
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "SharedTypes.h"
 #include "PCGBiomeSystem.generated.h"
 
-// Biome types for the prehistoric world
+// === BIOME TYPES ===
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    DenseJungle     UMETA(DisplayName = "Dense Jungle"),
-    RiverDelta      UMETA(DisplayName = "River Delta"),
-    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    Swampland       UMETA(DisplayName = "Swampland"),
-    VolcanicField   UMETA(DisplayName = "Volcanic Field"),
+    RiverDelta       UMETA(DisplayName = "River Delta"),
+    RockyHighlands   UMETA(DisplayName = "Rocky Highlands"),
+    DenseForest      UMETA(DisplayName = "Dense Forest"),
+    OpenSavanna      UMETA(DisplayName = "Open Savanna"),
+    VolcanicPlains   UMETA(DisplayName = "Volcanic Plains"),
+    CoastalMarsh     UMETA(DisplayName = "Coastal Marsh"),
+    COUNT            UMETA(Hidden)
 };
 
-// Biome configuration data
+// === BIOME ZONE DATA ===
 USTRUCT(BlueprintType)
-struct FWorld_BiomeConfig
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenPlains;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::OpenSavanna;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector WorldCenter = FVector::ZeroVector;
+    FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 3000.0f;
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.5f;
+    float VegetationDensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float WaterPresence = 0.0f;
+    float WaterLevel = -50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeTint = FLinearColor::White;
+    FLinearColor FogColor = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TerrainRoughness = 0.5f;
+    float FogDensity = 0.02f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FName> AllowedDinosaurSpecies;
+    float AmbientTemperature = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    bool bHasWater = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    bool bHasVolcanicActivity = false;
 };
 
-// PCG placement point for procedural asset spawning
-USTRUCT(BlueprintType)
-struct FWorld_PCGPoint
+// === WEATHER STATE ===
+UENUM(BlueprintType)
+enum class EWorld_WeatherState : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "PCG")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "PCG")
-    FRotator Rotation = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadWrite, Category = "PCG")
-    FVector Scale = FVector::OneVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "PCG")
-    EWorld_BiomeType Biome = EWorld_BiomeType::OpenPlains;
-
-    UPROPERTY(BlueprintReadWrite, Category = "PCG")
-    float Density = 1.0f;
+    Clear       UMETA(DisplayName = "Clear"),
+    Overcast    UMETA(DisplayName = "Overcast"),
+    LightRain   UMETA(DisplayName = "Light Rain"),
+    HeavyRain   UMETA(DisplayName = "Heavy Rain"),
+    Thunderstorm UMETA(DisplayName = "Thunderstorm"),
+    Fog         UMETA(DisplayName = "Fog"),
+    COUNT       UMETA(Hidden)
 };
 
 /**
- * UPCGBiomeSystem — Manages procedural biome zones and placement rules
- * Defines the geographic structure of the prehistoric world.
- * Biomes determine vegetation, dinosaur species, terrain, and weather.
+ * APCGBiomeSystem
+ * Manages procedural biome zones, weather transitions, and environmental audio triggers.
+ * Agent #5 — Procedural World Generator
  */
-UCLASS(ClassGroup = "World", meta = (BlueprintSpawnableComponent), BlueprintType)
-class TRANSPERSONALGAME_API UPCGBiomeSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
+class TRANSPERSONALGAME_API APCGBiomeSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UPCGBiomeSystem();
+    APCGBiomeSystem();
 
-    // Biome configuration array — define all biomes in the world
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Biomes")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
+    // === BIOME ZONES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Zones")
+    TArray<FWorld_BiomeZone> BiomeZones;
 
-    // Maximum number of PCG points to generate per biome
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Generation")
-    int32 MaxPointsPerBiome = 200;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State")
+    EWorld_BiomeType CurrentPlayerBiome = EWorld_BiomeType::OpenSavanna;
 
-    // Random seed for deterministic generation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Generation")
-    int32 WorldSeed = 42;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State")
+    int32 CurrentBiomeIndex = -1;
 
-    // Minimum distance between placed objects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Generation")
-    float MinPlacementDistance = 150.0f;
+    // === WEATHER ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EWorld_WeatherState CurrentWeather = EWorld_WeatherState::Clear;
 
-    // Whether to use Poisson disk sampling for placement
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Generation")
-    bool bUsePoissonDiskSampling = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WeatherTransitionDuration = 30.0f;
 
-    // Get biome type at a world location
-    UFUNCTION(BlueprintCallable, Category = "PCG|Biomes")
-    EWorld_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float RainIntensity = 0.0f;
 
-    // Get biome config for a given type
-    UFUNCTION(BlueprintCallable, Category = "PCG|Biomes")
-    FWorld_BiomeConfig GetBiomeConfig(EWorld_BiomeType BiomeType) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    bool bEnableWeatherCycle = true;
 
-    // Generate PCG placement points for a biome
-    UFUNCTION(BlueprintCallable, Category = "PCG|Generation")
-    TArray<FWorld_PCGPoint> GenerateBiomePoints(const FWorld_BiomeConfig& Config) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WeatherCycleIntervalMin = 120.0f;
 
-    // Generate all biome points for the entire world
-    UFUNCTION(BlueprintCallable, Category = "PCG|Generation")
-    TArray<FWorld_PCGPoint> GenerateAllWorldPoints() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WeatherCycleIntervalMax = 300.0f;
 
-    // Check if a location is valid for placement (no overlap)
-    UFUNCTION(BlueprintCallable, Category = "PCG|Generation")
-    bool IsValidPlacementLocation(FVector Location, const TArray<FWorld_PCGPoint>& ExistingPoints) const;
+    // === DAY/NIGHT ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
+    float DayDurationSeconds = 600.0f;
 
-    // Get vegetation density multiplier for a biome
-    UFUNCTION(BlueprintPure, Category = "PCG|Biomes")
-    float GetVegetationDensity(EWorld_BiomeType BiomeType) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
+    float CurrentTimeOfDay = 0.5f;
 
-    // Get water presence factor for a biome (0-1)
-    UFUNCTION(BlueprintPure, Category = "PCG|Biomes")
-    float GetWaterPresence(EWorld_BiomeType BiomeType) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
+    bool bEnableDayNightCycle = true;
 
-    // Initialize default biome configurations for the prehistoric world
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "PCG|Setup")
-    void InitializeDefaultBiomes();
+    // === AUDIO TRIGGERS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TMap<EWorld_BiomeType, FName> BiomeAmbientSoundCues;
 
-    // Debug: draw biome boundaries in editor
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "PCG|Debug")
-    void DrawBiomeBoundaries();
+    // === FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void InitializeBiomeZones();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FWorld_BiomeZone GetBiomeZoneData(EWorld_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void UpdatePlayerBiome(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void SetWeatherState(EWorld_WeatherState NewWeather);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void TriggerRandomWeatherTransition();
+
+    UFUNCTION(BlueprintCallable, Category = "DayNight")
+    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintCallable, Category = "DayNight")
+    bool IsNightTime() const;
+
+    UFUNCTION(BlueprintCallable, Category = "DayNight")
+    FLinearColor GetSkyColorForTime(float TimeOfDay) const;
+
+    UFUNCTION(CallInEditor, Category = "Debug")
+    void DebugDrawBiomeZones();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    // Internal Poisson disk sampling
-    TArray<FVector2D> GeneratePoissonDiskSamples(FVector2D AreaMin, FVector2D AreaMax, float MinDist, int32 MaxSamples) const;
+    float WeatherTimer = 0.0f;
+    float NextWeatherChange = 0.0f;
 
-    // Cached biome lookup for performance
-    mutable TMap<EWorld_BiomeType, int32> BiomeIndexCache;
-    void RebuildBiomeCache() const;
+    void TickDayNightCycle(float DeltaTime);
+    void TickWeatherCycle(float DeltaTime);
+    void ApplyBiomeAtmosphere(const FWorld_BiomeZone& Zone);
+    void SetupDefaultBiomeZones();
 };
