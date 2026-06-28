@@ -1,264 +1,254 @@
-// DinosaurAnimInstance.cpp
-// Animation Agent #10 — Cycle 005
-// Full implementation of UAnimInstance for all dinosaur species.
-// Drives locomotion blend spaces, attack montages, and foot IK.
-
 #include "DinosaurAnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 #include "Kismet/KismetMathLibrary.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────────────────────────────────────
+
 UDinosaurAnimInstance::UDinosaurAnimInstance()
+	: GroundSpeed(0.f)
+	, MovementDirection(0.f)
+	, bIsInAir(false)
+	, bIsChasing(false)
+	, bIsPatrolling(true)
+	, bIsAttacking(false)
+	, bIsDying(false)
+	, HealthNormalized(1.f)
+	, bIsRoaring(false)
+	, LeftFootIKTarget(FVector::ZeroVector)
+	, RightFootIKTarget(FVector::ZeroVector)
+	, PelvisOffset(0.f)
+	, SpeciesTag(NAME_None)
+	, WalkThreshold(150.f)
+	, RunThreshold(500.f)
+	, OwnerPawn(nullptr)
+	, MovementComp(nullptr)
+	, SmoothedSpeed(0.f)
+	, RoarCooldown(0.f)
 {
-    // Locomotion defaults
-    GroundSpeed        = 0.f;
-    Direction          = 0.f;
-    bIsInAir           = false;
-    bIsAttacking       = false;
-    bIsRoaring         = false;
-    bIsEating          = false;
-    bIsDead            = false;
-    bIsAggressive      = false;
-
-    // IK defaults
-    LeftFootIKOffset   = FVector::ZeroVector;
-    RightFootIKOffset  = FVector::ZeroVector;
-    LeftFootRotation   = FRotator::ZeroRotator;
-    RightFootRotation  = FRotator::ZeroRotator;
-    IKTraceDistance    = 80.f;
-    IKInterpSpeed      = 15.f;
-
-    // State defaults
-    LocomotionState    = EAnim_DinoLocomotionState::Idle;
-    BodySize           = EAnim_DinoBodySize::Large;
-
-    // Blend space defaults
-    WalkPlayRate       = 1.f;
-    RunPlayRate        = 1.f;
-    TurnRate           = 0.f;
-
-    // Internal
-    CachedCharacter    = nullptr;
-    CachedMovement     = nullptr;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NativeInitializeAnimation
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinosaurAnimInstance::NativeInitializeAnimation()
 {
-    Super::NativeInitializeAnimation();
+	Super::NativeInitializeAnimation();
 
-    APawn* Pawn = TryGetPawnOwner();
-    if (!Pawn) return;
+	OwnerPawn = TryGetPawnOwner();
+	if (!OwnerPawn)
+	{
+		return;
+	}
 
-    CachedCharacter = Cast<ACharacter>(Pawn);
-    if (CachedCharacter)
-    {
-        CachedMovement = CachedCharacter->GetCharacterMovement();
-    }
+	// Try to get movement component — works for both ACharacter and APawn subclasses
+	MovementComp = Cast<UCharacterMovementComponent>(
+		OwnerPawn->GetMovementComponent());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NativeUpdateAnimation — called every frame
+// ─────────────────────────────────────────────────────────────────────────────
 
 void UDinosaurAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-    Super::NativeUpdateAnimation(DeltaSeconds);
+	Super::NativeUpdateAnimation(DeltaSeconds);
 
-    if (!CachedCharacter || !CachedMovement) return;
+	if (!OwnerPawn)
+	{
+		OwnerPawn = TryGetPawnOwner();
+		if (!OwnerPawn) return;
+	}
 
-    // ── Ground Speed ──────────────────────────────────────────────
-    FVector Velocity = CachedCharacter->GetVelocity();
-    Velocity.Z = 0.f;
-    GroundSpeed = Velocity.Size();
+	if (!MovementComp)
+	{
+		MovementComp = Cast<UCharacterMovementComponent>(
+			OwnerPawn->GetMovementComponent());
+	}
 
-    // ── Direction (for strafing blend spaces) ─────────────────────
-    Direction = CalculateDirection(CachedCharacter->GetVelocity(),
-                                   CachedCharacter->GetActorRotation());
+	// Tick roar cooldown
+	if (RoarCooldown > 0.f)
+	{
+		RoarCooldown -= DeltaSeconds;
+	}
 
-    // ── Air state ─────────────────────────────────────────────────
-    bIsInAir = CachedMovement->IsFalling();
-
-    // ── Turn rate (yaw delta per second) ──────────────────────────
-    TurnRate = CachedMovement->GetLastUpdateRotation().Yaw - CachedCharacter->GetActorRotation().Yaw;
-
-    // ── Locomotion state machine ───────────────────────────────────
-    UpdateLocomotionState();
-
-    // ── Foot IK ───────────────────────────────────────────────────
-    UpdateFootIK(DeltaSeconds);
-
-    // ── Play rate scaling by body size ────────────────────────────
-    UpdatePlayRates();
+	UpdateLocomotion(DeltaSeconds);
+	UpdateFootIK();
 }
 
-void UDinosaurAnimInstance::UpdateLocomotionState()
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateLocomotion
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateLocomotion(float DeltaSeconds)
 {
-    if (bIsDead)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Dead;
-        return;
-    }
-    if (bIsAttacking)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Attacking;
-        return;
-    }
-    if (bIsRoaring)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Roaring;
-        return;
-    }
-    if (bIsEating)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Eating;
-        return;
-    }
-    if (bIsInAir)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Running;
-        return;
-    }
+	if (!OwnerPawn) return;
 
-    // Speed thresholds vary by body size
-    float WalkThreshold  = GetWalkThreshold();
-    float TrotThreshold  = GetTrotThreshold();
+	const FVector Velocity = OwnerPawn->GetVelocity();
+	const float RawSpeed = Velocity.Size2D();
 
-    if (GroundSpeed < 10.f)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Idle;
-    }
-    else if (GroundSpeed < WalkThreshold)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Walking;
-    }
-    else if (GroundSpeed < TrotThreshold)
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Trotting;
-    }
-    else
-    {
-        LocomotionState = EAnim_DinoLocomotionState::Running;
-    }
+	// Smooth speed to avoid animation jitter on rapid velocity changes
+	const float SmoothRate = 8.f;
+	SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, RawSpeed, DeltaSeconds, SmoothRate);
+	GroundSpeed = SmoothedSpeed;
+
+	// Air state
+	if (MovementComp)
+	{
+		bIsInAir = MovementComp->IsFalling();
+	}
+
+	// Movement direction (degrees, -180..180)
+	MovementDirection = ComputeMovementDirection();
+
+	// Locomotion mode flags
+	if (!bIsDying && !bIsAttacking)
+	{
+		bIsChasing = (GroundSpeed >= RunThreshold);
+		bIsPatrolling = (GroundSpeed > WalkThreshold && GroundSpeed < RunThreshold);
+	}
 }
 
-float UDinosaurAnimInstance::GetWalkThreshold() const
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateFootIK — line trace per foot socket
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateFootIK()
 {
-    switch (BodySize)
-    {
-        case EAnim_DinoBodySize::Small:   return 150.f;
-        case EAnim_DinoBodySize::Medium:  return 200.f;
-        case EAnim_DinoBodySize::Large:   return 300.f;
-        case EAnim_DinoBodySize::Massive: return 400.f;
-        default:                          return 200.f;
-    }
+	if (!OwnerPawn || bIsInAir || bIsDying) return;
+
+	USkeletalMeshComponent* Mesh = OwnerPawn->FindComponentByClass<USkeletalMeshComponent>();
+	if (!Mesh) return;
+
+	UWorld* World = OwnerPawn->GetWorld();
+	if (!World) return;
+
+	const float TraceUp   = 60.f;
+	const float TraceDown = 80.f;
+	const float InterpSpeed = 12.f;
+	const float DeltaTime = World->GetDeltaSeconds();
+
+	// Helper lambda — traces from a foot socket and returns the hit Z offset
+	auto TraceFootSocket = [&](const FName& SocketName, FVector& OutTarget) -> bool
+	{
+		if (!Mesh->DoesSocketExist(SocketName)) return false;
+
+		const FVector SocketLoc = Mesh->GetSocketLocation(SocketName);
+		const FVector Start = SocketLoc + FVector(0.f, 0.f, TraceUp);
+		const FVector End   = SocketLoc - FVector(0.f, 0.f, TraceDown);
+
+		FHitResult Hit;
+		FCollisionQueryParams Params;
+		Params.AddIgnoredActor(OwnerPawn);
+
+		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		{
+			const float ZOffset = Hit.ImpactPoint.Z - SocketLoc.Z;
+			OutTarget = FMath::VInterpTo(OutTarget,
+				FVector(0.f, 0.f, ZOffset), DeltaTime, InterpSpeed);
+			return true;
+		}
+		return false;
+	};
+
+	FVector NewLeft  = LeftFootIKTarget;
+	FVector NewRight = RightFootIKTarget;
+
+	bool bLeftHit  = TraceFootSocket(FName("foot_l"), NewLeft);
+	bool bRightHit = TraceFootSocket(FName("foot_r"), NewRight);
+
+	LeftFootIKTarget  = NewLeft;
+	RightFootIKTarget = NewRight;
+
+	// Pelvis offset — lower pelvis to the lowest foot so neither foot floats
+	if (bLeftHit || bRightHit)
+	{
+		const float LowestFoot = FMath::Min(NewLeft.Z, NewRight.Z);
+		PelvisOffset = FMath::FInterpTo(PelvisOffset, LowestFoot, DeltaTime, InterpSpeed);
+	}
+	else
+	{
+		PelvisOffset = FMath::FInterpTo(PelvisOffset, 0.f, DeltaTime, InterpSpeed);
+	}
 }
 
-float UDinosaurAnimInstance::GetTrotThreshold() const
+// ─────────────────────────────────────────────────────────────────────────────
+// ComputeMovementDirection
+// ─────────────────────────────────────────────────────────────────────────────
+
+float UDinosaurAnimInstance::ComputeMovementDirection() const
 {
-    switch (BodySize)
-    {
-        case EAnim_DinoBodySize::Small:   return 400.f;
-        case EAnim_DinoBodySize::Medium:  return 500.f;
-        case EAnim_DinoBodySize::Large:   return 600.f;
-        case EAnim_DinoBodySize::Massive: return 700.f;
-        default:                          return 500.f;
-    }
+	if (!OwnerPawn) return 0.f;
+
+	const FVector Velocity = OwnerPawn->GetVelocity();
+	if (Velocity.SizeSquared2D() < 1.f) return 0.f;
+
+	const FRotator ActorRot = OwnerPawn->GetActorRotation();
+	const FVector ForwardDir = ActorRot.Vector();
+	const FVector RightDir   = FRotationMatrix(ActorRot).GetScaledAxis(EAxis::Y);
+
+	const FVector VelNorm = Velocity.GetSafeNormal2D();
+	const float   ForwardDot = FVector::DotProduct(ForwardDir, VelNorm);
+	const float   RightDot   = FVector::DotProduct(RightDir,   VelNorm);
+
+	return FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
 }
 
-void UDinosaurAnimInstance::UpdateFootIK(float DeltaSeconds)
+// ─────────────────────────────────────────────────────────────────────────────
+// Blueprint-callable combat triggers
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::TriggerRoar()
 {
-    if (!CachedCharacter) return;
-    if (bIsInAir || bIsDead) return;
+	if (bIsDying) return;
+	if (RoarCooldown > 0.f) return;
 
-    UWorld* World = CachedCharacter->GetWorld();
-    if (!World) return;
+	bIsRoaring = true;
+	RoarCooldown = 8.f; // seconds between roars
 
-    // Left foot IK trace
-    FVector LeftStart  = CachedCharacter->GetMesh()->GetSocketLocation(FName("LeftFootSocket"));
-    FVector LeftEnd    = LeftStart - FVector(0.f, 0.f, IKTraceDistance);
-    FHitResult LeftHit;
-    bool bLeftHit = World->LineTraceSingleByChannel(LeftHit, LeftStart, LeftEnd,
-                                                     ECC_Visibility);
-    if (bLeftHit)
-    {
-        FVector TargetLeft = FVector(0.f, 0.f, LeftHit.ImpactPoint.Z - LeftStart.Z);
-        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, TargetLeft,
-                                             DeltaSeconds, IKInterpSpeed);
-        FRotator SlopeLeft = UKismetMathLibrary::MakeRotFromZX(LeftHit.ImpactNormal,
-                                                                 CachedCharacter->GetActorForwardVector());
-        LeftFootRotation = FMath::RInterpTo(LeftFootRotation, SlopeLeft,
-                                             DeltaSeconds, IKInterpSpeed);
-    }
-    else
-    {
-        LeftFootIKOffset  = FMath::VInterpTo(LeftFootIKOffset,  FVector::ZeroVector, DeltaSeconds, IKInterpSpeed);
-        LeftFootRotation  = FMath::RInterpTo(LeftFootRotation,  FRotator::ZeroRotator, DeltaSeconds, IKInterpSpeed);
-    }
-
-    // Right foot IK trace
-    FVector RightStart = CachedCharacter->GetMesh()->GetSocketLocation(FName("RightFootSocket"));
-    FVector RightEnd   = RightStart - FVector(0.f, 0.f, IKTraceDistance);
-    FHitResult RightHit;
-    bool bRightHit = World->LineTraceSingleByChannel(RightHit, RightStart, RightEnd,
-                                                      ECC_Visibility);
-    if (bRightHit)
-    {
-        FVector TargetRight = FVector(0.f, 0.f, RightHit.ImpactPoint.Z - RightStart.Z);
-        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, TargetRight,
-                                              DeltaSeconds, IKInterpSpeed);
-        FRotator SlopeRight = UKismetMathLibrary::MakeRotFromZX(RightHit.ImpactNormal,
-                                                                  CachedCharacter->GetActorForwardVector());
-        RightFootRotation = FMath::RInterpTo(RightFootRotation, SlopeRight,
-                                              DeltaSeconds, IKInterpSpeed);
-    }
-    else
-    {
-        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, FVector::ZeroVector, DeltaSeconds, IKInterpSpeed);
-        RightFootRotation = FMath::RInterpTo(RightFootRotation, FRotator::ZeroRotator, DeltaSeconds, IKInterpSpeed);
-    }
+	// The Animation Blueprint state machine will reset bIsRoaring after the montage ends
+	// via a Notify — we set a timer here as a safety fallback
+	if (UWorld* World = GetWorld())
+	{
+		FTimerHandle RoarTimer;
+		World->GetTimerManager().SetTimer(RoarTimer, [this]()
+		{
+			bIsRoaring = false;
+		}, 3.5f, false);
+	}
 }
 
-void UDinosaurAnimInstance::UpdatePlayRates()
+void UDinosaurAnimInstance::TriggerAttack()
 {
-    // Larger dinosaurs animate slower — scale play rate inversely with size
-    float SpeedRatio = (GroundSpeed > 0.f) ? FMath::Clamp(GroundSpeed / GetTrotThreshold(), 0.5f, 2.f) : 1.f;
+	if (bIsDying) return;
 
-    float SizeScale = 1.f;
-    switch (BodySize)
-    {
-        case EAnim_DinoBodySize::Small:   SizeScale = 1.3f; break;
-        case EAnim_DinoBodySize::Medium:  SizeScale = 1.1f; break;
-        case EAnim_DinoBodySize::Large:   SizeScale = 0.9f; break;
-        case EAnim_DinoBodySize::Massive: SizeScale = 0.7f; break;
-        default:                          SizeScale = 1.0f; break;
-    }
+	bIsAttacking = true;
 
-    WalkPlayRate = SizeScale;
-    RunPlayRate  = SizeScale * SpeedRatio;
+	// Safety reset after attack window
+	if (UWorld* World = GetWorld())
+	{
+		FTimerHandle AttackTimer;
+		World->GetTimerManager().SetTimer(AttackTimer, [this]()
+		{
+			bIsAttacking = false;
+		}, 1.2f, false);
+	}
 }
 
-void UDinosaurAnimInstance::SetAttacking(bool bAttacking)
+void UDinosaurAnimInstance::TriggerDeath()
 {
-    bIsAttacking = bAttacking;
-}
-
-void UDinosaurAnimInstance::SetRoaring(bool bRoaring)
-{
-    bIsRoaring = bRoaring;
-}
-
-void UDinosaurAnimInstance::SetEating(bool bEating)
-{
-    bIsEating = bEating;
-}
-
-void UDinosaurAnimInstance::SetDead(bool bDead)
-{
-    bIsDead = bDead;
-}
-
-void UDinosaurAnimInstance::SetAggressive(bool bAggressive)
-{
-    bIsAggressive = bAggressive;
-}
-
-void UDinosaurAnimInstance::SetBodySize(EAnim_DinoBodySize NewSize)
-{
-    BodySize = NewSize;
+	bIsDying     = true;
+	bIsAttacking = false;
+	bIsRoaring   = false;
+	bIsChasing   = false;
+	bIsPatrolling = false;
+	GroundSpeed  = 0.f;
+	SmoothedSpeed = 0.f;
 }
