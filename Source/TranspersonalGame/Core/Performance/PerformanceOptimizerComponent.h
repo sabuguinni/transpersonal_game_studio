@@ -4,52 +4,96 @@
 #include "Components/ActorComponent.h"
 #include "PerformanceOptimizerComponent.generated.h"
 
-// LOD tier for dynamic quality scaling
+// Forward declarations
+class UStaticMeshComponent;
+
 UENUM(BlueprintType)
 enum class EPerf_QualityTier : uint8
 {
-    Ultra    UMETA(DisplayName = "Ultra (60fps PC)"),
-    High     UMETA(DisplayName = "High (60fps PC)"),
-    Medium   UMETA(DisplayName = "Medium (45fps PC / 60fps Console)"),
-    Low      UMETA(DisplayName = "Low (30fps Console)"),
-    Minimal  UMETA(DisplayName = "Minimal (Emergency)")
+    Ultra    UMETA(DisplayName = "Ultra (PC High-End)"),
+    High     UMETA(DisplayName = "High (PC Mid-Range)"),
+    Medium   UMETA(DisplayName = "Medium (Console)"),
+    Low      UMETA(DisplayName = "Low (Console Min)"),
 };
 
-// Per-frame budget snapshot
 USTRUCT(BlueprintType)
 struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFrameTimeMs = 16.67f;   // 60fps default
+    // Target FPS
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS = 60.0f;
 
+    // Max ms per frame (1000/TargetFPS)
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastFrameTimeMs = 0.0f;
+    float FrameBudgetMS = 16.67f;
 
+    // Current measured FPS (rolling average)
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GameThreadMs = 0.0f;
+    float CurrentFPS = 0.0f;
 
+    // Current frame time in ms
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderThreadMs = 0.0f;
+    float CurrentFrameMS = 0.0f;
 
+    // Is the game meeting its frame budget?
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUMs = 0.0f;
+    bool bMeetingBudget = true;
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bOverBudget = false;
+USTRUCT(BlueprintType)
+struct FPerf_LODSettings
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ConsecutiveOverBudgetFrames = 0;
+    // Global LOD distance scale multiplier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float LODDistanceScale = 1.0f;
+
+    // Foliage-specific LOD scale
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float FoliageLODScale = 1.5f;
+
+    // Max draw distance for small props (< 1m scale)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float SmallPropCullDistance = 5000.0f;
+
+    // Max draw distance for medium objects (1-5m scale)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MediumObjectCullDistance = 20000.0f;
+
+    // Max draw distance for large objects (dinosaurs, structures)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LargeObjectCullDistance = 50000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FPerf_ShadowSettings
+{
+    GENERATED_BODY()
+
+    // Max CSM cascades (3 = good balance for open world)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows", meta = (ClampMin = "1", ClampMax = "4"))
+    int32 MaxCSMCascades = 3;
+
+    // Shadow map resolution (1024, 2048, 4096)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 ShadowMapResolution = 2048;
+
+    // Distance at which dynamic shadows switch to static
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    float DynamicShadowDistance = 10000.0f;
 };
 
 /**
  * UPerf_PerformanceOptimizerComponent
- * Attaches to GameState or a dedicated manager actor.
- * Monitors frame time and dynamically scales quality to maintain target FPS.
- * Targets: 60fps on high-end PC, 30fps on console.
+ *
+ * Attaches to the GameMode or a manager actor.
+ * Monitors frame time, applies adaptive quality settings,
+ * and enforces LOD/culling budgets for 60fps PC / 30fps console targets.
  */
-UCLASS(ClassGroup = "TranspersonalGame|Performance", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "Performance Optimizer")
 class TRANSPERSONALGAME_API UPerf_PerformanceOptimizerComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -60,86 +104,72 @@ public:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // --- Configuration ---
+    // === PUBLIC API ===
 
-    /** Target frames per second. 60 for PC, 30 for console. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    float TargetFPS = 60.0f;
-
-    /** How many consecutive over-budget frames before downscaling quality. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    int32 DownscaleThresholdFrames = 10;
-
-    /** How many consecutive under-budget frames before upscaling quality. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    int32 UpscaleThresholdFrames = 120;
-
-    /** Enable dynamic resolution scaling (r.ScreenPercentage). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    bool bDynamicResolutionEnabled = true;
-
-    /** Minimum screen percentage allowed (50 = half resolution). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    float MinScreenPercentage = 60.0f;
-
-    /** Maximum screen percentage (100 = native). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Config")
-    float MaxScreenPercentage = 100.0f;
-
-    // --- Runtime State ---
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    FPerf_FrameBudget CurrentBudget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    EPerf_QualityTier CurrentTier = EPerf_QualityTier::High;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|State")
-    float CurrentScreenPercentage = 100.0f;
-
-    // --- Blueprint Events ---
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Performance")
-    void OnQualityTierChanged(EPerf_QualityTier NewTier, EPerf_QualityTier OldTier);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Performance")
-    void OnFrameBudgetExceeded(float OverrunMs);
-
-    // --- Public API ---
-
-    /** Force a specific quality tier immediately. */
+    /** Apply quality tier settings immediately */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetQualityTier(EPerf_QualityTier NewTier);
+    void ApplyQualityTier(EPerf_QualityTier Tier);
 
-    /** Get current frame budget snapshot. */
+    /** Force LOD settings update on all StaticMeshComponents in the world */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameBudget GetFrameBudget() const { return CurrentBudget; }
+    void RefreshLODSettings();
 
-    /** Returns true if currently over frame budget. */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsOverBudget() const { return CurrentBudget.bOverBudget; }
+    /** Get current frame budget status */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_FrameBudget GetFrameBudget() const { return CurrentFrameBudget; }
 
-    /** Log current performance stats to output log. */
+    /** Get current quality tier */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    EPerf_QualityTier GetCurrentQualityTier() const { return CurrentQualityTier; }
+
+    /** Manually trigger adaptive quality check */
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void LogPerformanceStats() const;
+    void RunAdaptiveQualityCheck();
+
+    // === SETTINGS ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    FPerf_FrameBudget TargetFrameBudget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    FPerf_LODSettings LODSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Shadows")
+    FPerf_ShadowSettings ShadowSettings;
+
+    /** Starting quality tier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_QualityTier InitialQualityTier = EPerf_QualityTier::High;
+
+    /** Enable adaptive quality (auto-downgrade when FPS drops) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bAdaptiveQuality = true;
+
+    /** How many seconds of low FPS before downgrading quality */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1.0", ClampMax = "10.0"))
+    float AdaptiveQualityGracePeriod = 3.0f;
+
+    /** FPS rolling average window (frames) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "10", ClampMax = "120"))
+    int32 FPSAveragingWindow = 60;
 
 private:
-    // Rolling average frame time (last 30 frames)
-    TArray<float> FrameTimeHistory;
-    static constexpr int32 FrameHistorySize = 30;
-    int32 FrameHistoryIndex = 0;
-    int32 UnderBudgetFrameCount = 0;
+    // Current state
+    EPerf_QualityTier CurrentQualityTier = EPerf_QualityTier::High;
+    FPerf_FrameBudget CurrentFrameBudget;
 
-    // Tick interval for quality checks (every 0.5s)
-    float QualityCheckAccumulator = 0.0f;
-    static constexpr float QualityCheckInterval = 0.5f;
+    // FPS rolling average
+    TArray<float> FPSSamples;
+    float AccumulatedLowFPSTime = 0.0f;
 
-    void UpdateFrameBudget(float DeltaTime);
-    void EvaluateQualityScaling();
-    void ApplyQualityTier(EPerf_QualityTier Tier);
-    void ApplyScreenPercentage(float Percentage);
-    float GetAverageFrameTimeMs() const;
+    // Internal helpers
+    void UpdateFPSAverage(float DeltaTime);
+    void CheckAdaptiveQuality(float DeltaTime);
+    void ApplyConsoleCVars(EPerf_QualityTier Tier);
+    void ApplyShadowCVars();
+    void ApplyLODCVars();
 
-    // Console command helpers
-    void ExecConsoleCommand(const FString& Command) const;
+    // Console variable helpers
+    static void SetCVar(const FString& CVarName, float Value);
+    static void SetCVar(const FString& CVarName, int32 Value);
 };
