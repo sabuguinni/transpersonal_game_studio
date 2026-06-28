@@ -1,64 +1,88 @@
 // DinosaurBase.cpp
-// Transpersonal Game Studio — Engine Architect #02
+// Engine Architect #02 — Transpersonal Game Studio
 // Base class for all dinosaur pawns in the prehistoric survival game.
 
 #include "DinosaurBase.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Perception/AIPerceptionStimuliSourceComponent.h"
-#include "Perception/AISense_Sight.h"
-#include "Perception/AISense_Hearing.h"
+#include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
 #include "AIController.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Capsule defaults — overridden per species
-    GetCapsuleComponent()->InitCapsuleSize(60.0f, 120.0f);
+    // --- Capsule ---
+    GetCapsuleComponent()->InitCapsuleSize(50.f, 100.f);
+    GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
 
-    // Movement defaults
-    GetCharacterMovement()->MaxWalkSpeed = 400.0f;
-    GetCharacterMovement()->MaxWalkSpeedCrouched = 200.0f;
-    GetCharacterMovement()->JumpZVelocity = 500.0f;
-    GetCharacterMovement()->GravityScale = 1.2f;
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 360.0f, 0.0f);
-    bUseControllerRotationYaw = false;
+    // --- Mesh ---
+    GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -100.f));
+    GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 
-    // AI Perception stimuli source
-    PerceptionStimuliSource = CreateDefaultSubobject<UAIPerceptionStimuliSourceComponent>(TEXT("PerceptionStimuliSource"));
-    PerceptionStimuliSource->RegisterForSense(TSubclassOf<UAISense>(UAISense_Sight::StaticClass()));
-    PerceptionStimuliSource->RegisterForSense(TSubclassOf<UAISense>(UAISense_Hearing::StaticClass()));
+    // --- Movement ---
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate = FRotator(0.f, 540.f, 0.f);
+        MoveComp->MaxWalkSpeed = 400.f;
+        MoveComp->JumpZVelocity = 600.f;
+        MoveComp->AirControl = 0.2f;
+        MoveComp->NavAgentProps.bCanCrouch = false;
+    }
 
-    // Default species stats
-    MaxHealth = 500.0f;
-    CurrentHealth = MaxHealth;
-    MaxStamina = 300.0f;
-    CurrentStamina = MaxStamina;
-    AttackDamage = 40.0f;
-    AttackRange = 200.0f;
-    DetectionRange = 2000.0f;
-    ChaseRange = 3000.0f;
-    WalkSpeed = 300.0f;
-    RunSpeed = 700.0f;
-    bIsCarnivore = true;
-    bIsHerbivore = false;
+    // --- AI Perception ---
+    AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComp"));
+
+    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = 2000.f;
+    SightConfig->LoseSightRadius = 2500.f;
+    SightConfig->PeripheralVisionAngleDegrees = 90.f;
+    SightConfig->SetMaxAge(5.f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+    AIPerceptionComp->ConfigureSense(*SightConfig);
+
+    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = 1500.f;
+    HearingConfig->SetMaxAge(3.f);
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    AIPerceptionComp->ConfigureSense(*HearingConfig);
+    AIPerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // --- Default Species Stats ---
+    Species = EDinoSpecies::Raptor;
+    DinoHealth = 100.f;
+    MaxDinoHealth = 100.f;
+    DinoStamina = 100.f;
+    MaxDinoStamina = 100.f;
+    HungerLevel = 50.f;
+    MaxHunger = 100.f;
+    AttackDamage = 25.f;
+    AttackRange = 150.f;
+    DetectionRange = 2000.f;
+    ChaseRange = 3000.f;
+    WalkSpeed = 200.f;
+    RunSpeed = 600.f;
+    bIsAggressive = false;
     bIsPackHunter = false;
-    bIsTerritorial = true;
-    DinosaurSpecies = EEng_DinosaurSpecies::TyrannosaurusRex;
-    CurrentBehaviorState = EEng_DinosaurBehavior::Idle;
-    StaminaRegenRate = 20.0f;
-    HungerDecayRate = 5.0f;
-    MaxHunger = 100.0f;
-    CurrentHunger = 50.0f;
-    bIsAlerted = false;
-    bIsAttacking = false;
-    LastKnownPlayerLocation = FVector::ZeroVector;
+    bIsPredator = true;
+    CurrentBehaviorState = EDinoBehaviorState::Idle;
+    PackSize = 1;
+
+    // --- Auto-possess by AI ---
+    AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }
 
 void ADinosaurBase::BeginPlay()
@@ -68,33 +92,52 @@ void ADinosaurBase::BeginPlay()
     // Apply species-specific stats
     ApplySpeciesStats();
 
-    // Start behavior update timer
+    // Start hunger drain timer
     GetWorldTimerManager().SetTimer(
-        BehaviorUpdateTimer,
+        HungerTimerHandle,
         this,
-        &ADinosaurBase::UpdateBehaviorState,
-        0.5f,
+        &ADinosaurBase::DrainHunger,
+        10.f,
         true
     );
 
-    // Start hunger decay timer
+    // Start stamina regen timer
     GetWorldTimerManager().SetTimer(
-        HungerDecayTimer,
+        StaminaRegenTimerHandle,
         this,
-        &ADinosaurBase::DecayHunger,
-        2.0f,
+        &ADinosaurBase::RegenStamina,
+        2.f,
         true
     );
+
+    // Bind perception delegate
+    if (AIPerceptionComp)
+    {
+        AIPerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &ADinosaurBase::OnPerceptionUpdated);
+    }
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Stamina regen when not running
-    if (CurrentStamina < MaxStamina && !bIsAttacking)
+    // Update movement speed based on behavior state
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
     {
-        CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + StaminaRegenRate * DeltaTime);
+        switch (CurrentBehaviorState)
+        {
+        case EDinoBehaviorState::Chasing:
+        case EDinoBehaviorState::Attacking:
+            MoveComp->MaxWalkSpeed = RunSpeed;
+            break;
+        case EDinoBehaviorState::Fleeing:
+            MoveComp->MaxWalkSpeed = RunSpeed * 1.2f;
+            break;
+        default:
+            MoveComp->MaxWalkSpeed = WalkSpeed;
+            break;
+        }
     }
 }
 
@@ -103,25 +146,17 @@ float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEv
 {
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - ActualDamage);
+    DinoHealth = FMath::Clamp(DinoHealth - ActualDamage, 0.f, MaxDinoHealth);
 
-    if (ActualDamage > 0.0f)
-    {
-        OnDinosaurDamaged(ActualDamage, DamageCauser);
-
-        // Alert the dinosaur when hit
-        bIsAlerted = true;
-        CurrentBehaviorState = EEng_DinosaurBehavior::Aggressive;
-
-        if (DamageCauser)
-        {
-            LastKnownPlayerLocation = DamageCauser->GetActorLocation();
-        }
-    }
-
-    if (CurrentHealth <= 0.0f)
+    if (DinoHealth <= 0.f)
     {
         OnDinosaurDeath();
+    }
+    else if (bIsPredator && ActualDamage > 0.f)
+    {
+        // Predators become aggressive when hurt
+        bIsAggressive = true;
+        SetBehaviorState(EDinoBehaviorState::Chasing);
     }
 
     return ActualDamage;
@@ -129,212 +164,201 @@ float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEv
 
 void ADinosaurBase::ApplySpeciesStats()
 {
-    switch (DinosaurSpecies)
+    switch (Species)
     {
-    case EEng_DinosaurSpecies::TyrannosaurusRex:
-        MaxHealth = 1500.0f;
-        AttackDamage = 120.0f;
-        AttackRange = 250.0f;
-        DetectionRange = 3000.0f;
-        WalkSpeed = 250.0f;
-        RunSpeed = 550.0f;
-        GetCapsuleComponent()->InitCapsuleSize(80.0f, 200.0f);
+    case EDinoSpecies::TRex:
+        MaxDinoHealth = 500.f;
+        DinoHealth = 500.f;
+        AttackDamage = 100.f;
+        AttackRange = 250.f;
+        DetectionRange = 2500.f;
+        ChaseRange = 4000.f;
+        WalkSpeed = 250.f;
+        RunSpeed = 700.f;
+        bIsAggressive = true;
+        bIsPredator = true;
         bIsPackHunter = false;
+        PackSize = 1;
+        GetCapsuleComponent()->InitCapsuleSize(100.f, 200.f);
         break;
 
-    case EEng_DinosaurSpecies::Velociraptor:
-        MaxHealth = 200.0f;
-        AttackDamage = 45.0f;
-        AttackRange = 150.0f;
-        DetectionRange = 2500.0f;
-        WalkSpeed = 400.0f;
-        RunSpeed = 900.0f;
-        GetCapsuleComponent()->InitCapsuleSize(35.0f, 80.0f);
+    case EDinoSpecies::Raptor:
+        MaxDinoHealth = 120.f;
+        DinoHealth = 120.f;
+        AttackDamage = 35.f;
+        AttackRange = 120.f;
+        DetectionRange = 2000.f;
+        ChaseRange = 3500.f;
+        WalkSpeed = 300.f;
+        RunSpeed = 800.f;
+        bIsAggressive = true;
+        bIsPredator = true;
         bIsPackHunter = true;
+        PackSize = 3;
+        GetCapsuleComponent()->InitCapsuleSize(40.f, 80.f);
         break;
 
-    case EEng_DinosaurSpecies::Triceratops:
-        MaxHealth = 1200.0f;
-        AttackDamage = 80.0f;
-        AttackRange = 300.0f;
-        DetectionRange = 1500.0f;
-        WalkSpeed = 280.0f;
-        RunSpeed = 500.0f;
-        GetCapsuleComponent()->InitCapsuleSize(90.0f, 160.0f);
-        bIsCarnivore = false;
-        bIsHerbivore = true;
-        bIsTerritorial = true;
-        break;
-
-    case EEng_DinosaurSpecies::Brachiosaurus:
-        MaxHealth = 3000.0f;
-        AttackDamage = 60.0f;
-        AttackRange = 400.0f;
-        DetectionRange = 1000.0f;
-        WalkSpeed = 200.0f;
-        RunSpeed = 380.0f;
-        GetCapsuleComponent()->InitCapsuleSize(120.0f, 300.0f);
-        bIsCarnivore = false;
-        bIsHerbivore = true;
-        bIsTerritorial = false;
-        break;
-
-    case EEng_DinosaurSpecies::Pterodactyl:
-        MaxHealth = 150.0f;
-        AttackDamage = 30.0f;
-        AttackRange = 200.0f;
-        DetectionRange = 4000.0f;
-        WalkSpeed = 200.0f;
-        RunSpeed = 1200.0f;
-        GetCapsuleComponent()->InitCapsuleSize(40.0f, 60.0f);
+    case EDinoSpecies::Triceratops:
+        MaxDinoHealth = 350.f;
+        DinoHealth = 350.f;
+        AttackDamage = 60.f;
+        AttackRange = 200.f;
+        DetectionRange = 1200.f;
+        ChaseRange = 2000.f;
+        WalkSpeed = 200.f;
+        RunSpeed = 500.f;
+        bIsAggressive = false;
+        bIsPredator = false;
         bIsPackHunter = false;
+        PackSize = 1;
+        GetCapsuleComponent()->InitCapsuleSize(80.f, 120.f);
         break;
 
-    case EEng_DinosaurSpecies::Stegosaurus:
-        MaxHealth = 900.0f;
-        AttackDamage = 55.0f;
-        AttackRange = 250.0f;
-        DetectionRange = 1200.0f;
-        WalkSpeed = 220.0f;
-        RunSpeed = 420.0f;
-        GetCapsuleComponent()->InitCapsuleSize(75.0f, 140.0f);
-        bIsCarnivore = false;
-        bIsHerbivore = true;
+    case EDinoSpecies::Brachiosaurus:
+        MaxDinoHealth = 800.f;
+        DinoHealth = 800.f;
+        AttackDamage = 80.f;
+        AttackRange = 400.f;
+        DetectionRange = 1500.f;
+        ChaseRange = 1500.f;
+        WalkSpeed = 150.f;
+        RunSpeed = 350.f;
+        bIsAggressive = false;
+        bIsPredator = false;
+        bIsPackHunter = false;
+        PackSize = 1;
+        GetCapsuleComponent()->InitCapsuleSize(150.f, 300.f);
         break;
 
-    case EEng_DinosaurSpecies::Spinosaurus:
-        MaxHealth = 1800.0f;
-        AttackDamage = 100.0f;
-        AttackRange = 280.0f;
-        DetectionRange = 2800.0f;
-        WalkSpeed = 300.0f;
-        RunSpeed = 600.0f;
-        GetCapsuleComponent()->InitCapsuleSize(90.0f, 220.0f);
+    case EDinoSpecies::Pterodactyl:
+        MaxDinoHealth = 80.f;
+        DinoHealth = 80.f;
+        AttackDamage = 20.f;
+        AttackRange = 100.f;
+        DetectionRange = 3000.f;
+        ChaseRange = 5000.f;
+        WalkSpeed = 100.f;
+        RunSpeed = 1200.f;
+        bIsAggressive = false;
+        bIsPredator = true;
+        bIsPackHunter = false;
+        PackSize = 1;
+        GetCapsuleComponent()->InitCapsuleSize(30.f, 60.f);
         break;
 
-    case EEng_DinosaurSpecies::Ankylosaurus:
-        MaxHealth = 1100.0f;
-        AttackDamage = 70.0f;
-        AttackRange = 200.0f;
-        DetectionRange = 1000.0f;
-        WalkSpeed = 180.0f;
-        RunSpeed = 350.0f;
-        GetCapsuleComponent()->InitCapsuleSize(85.0f, 130.0f);
-        bIsCarnivore = false;
-        bIsHerbivore = true;
+    case EDinoSpecies::Stegosaurus:
+        MaxDinoHealth = 300.f;
+        DinoHealth = 300.f;
+        AttackDamage = 50.f;
+        AttackRange = 180.f;
+        DetectionRange = 1000.f;
+        ChaseRange = 1500.f;
+        WalkSpeed = 180.f;
+        RunSpeed = 400.f;
+        bIsAggressive = false;
+        bIsPredator = false;
+        bIsPackHunter = false;
+        PackSize = 1;
+        GetCapsuleComponent()->InitCapsuleSize(70.f, 110.f);
         break;
 
     default:
         break;
     }
-
-    // Apply movement speeds
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-    CurrentHealth = MaxHealth;
-    CurrentStamina = MaxStamina;
 }
 
-void ADinosaurBase::UpdateBehaviorState()
+void ADinosaurBase::SetBehaviorState(EDinoBehaviorState NewState)
 {
-    // Basic state machine — full BehaviorTree integration handled by AI Controller
-    if (CurrentHealth <= 0.0f)
-    {
-        CurrentBehaviorState = EEng_DinosaurBehavior::Dead;
-        return;
-    }
+    if (CurrentBehaviorState == NewState) return;
 
-    if (CurrentHunger < 20.0f && bIsCarnivore)
-    {
-        CurrentBehaviorState = EEng_DinosaurBehavior::Hunting;
-        return;
-    }
-
-    if (bIsAlerted && CurrentBehaviorState != EEng_DinosaurBehavior::Aggressive)
-    {
-        CurrentBehaviorState = EEng_DinosaurBehavior::Alert;
-    }
+    CurrentBehaviorState = NewState;
+    OnBehaviorStateChanged(NewState);
 }
 
-void ADinosaurBase::DecayHunger()
+void ADinosaurBase::OnBehaviorStateChanged(EDinoBehaviorState NewState)
 {
-    CurrentHunger = FMath::Max(0.0f, CurrentHunger - HungerDecayRate * 2.0f);
+    // Override in Blueprint or subclass for custom behavior transitions
 }
 
-void ADinosaurBase::OnDinosaurDamaged_Implementation(float DamageAmount, AActor* DamageCauser)
+void ADinosaurBase::OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-    // Default: alert and face attacker
-    bIsAlerted = true;
-    if (DamageCauser)
+    if (!Actor) return;
+
+    // If we detect the player character
+    if (Actor->ActorHasTag(TEXT("Player")))
     {
-        FVector ToAttacker = DamageCauser->GetActorLocation() - GetActorLocation();
-        ToAttacker.Z = 0.0f;
-        FRotator LookAt = ToAttacker.Rotation();
-        SetActorRotation(LookAt);
+        if (Stimulus.WasSuccessfullySensed())
+        {
+            if (bIsPredator && (bIsAggressive || HungerLevel > 70.f))
+            {
+                SetBehaviorState(EDinoBehaviorState::Chasing);
+            }
+            else if (!bIsPredator)
+            {
+                SetBehaviorState(EDinoBehaviorState::Fleeing);
+            }
+        }
+        else
+        {
+            // Lost sight/hearing of player
+            if (CurrentBehaviorState == EDinoBehaviorState::Chasing)
+            {
+                SetBehaviorState(EDinoBehaviorState::Patrolling);
+            }
+        }
     }
 }
 
-void ADinosaurBase::OnDinosaurDeath_Implementation()
+void ADinosaurBase::DrainHunger()
 {
-    // Default death: disable collision, stop movement, set dead state
-    CurrentBehaviorState = EEng_DinosaurBehavior::Dead;
+    HungerLevel = FMath::Clamp(HungerLevel + 2.f, 0.f, MaxHunger);
+
+    // Very hungry predators become aggressive
+    if (bIsPredator && HungerLevel > 80.f)
+    {
+        bIsAggressive = true;
+    }
+}
+
+void ADinosaurBase::RegenStamina()
+{
+    if (CurrentBehaviorState != EDinoBehaviorState::Chasing &&
+        CurrentBehaviorState != EDinoBehaviorState::Attacking)
+    {
+        DinoStamina = FMath::Clamp(DinoStamina + 5.f, 0.f, MaxDinoStamina);
+    }
+}
+
+void ADinosaurBase::OnDinosaurDeath()
+{
+    // Stop timers
+    GetWorldTimerManager().ClearTimer(HungerTimerHandle);
+    GetWorldTimerManager().ClearTimer(StaminaRegenTimerHandle);
+
+    SetBehaviorState(EDinoBehaviorState::Dead);
+
+    // Disable collision and AI
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    GetCharacterMovement()->DisableMovement();
-    bIsAlerted = false;
-    bIsAttacking = false;
-
-    // Detach AI controller
     if (GetController())
     {
         GetController()->UnPossess();
     }
-}
 
-void ADinosaurBase::SetBehaviorState(EEng_DinosaurBehavior NewState)
-{
-    if (CurrentBehaviorState != NewState)
-    {
-        CurrentBehaviorState = NewState;
-        OnBehaviorStateChanged(NewState);
-    }
-}
-
-void ADinosaurBase::OnBehaviorStateChanged_Implementation(EEng_DinosaurBehavior NewState)
-{
-    // Apply movement speed based on state
-    switch (NewState)
-    {
-    case EEng_DinosaurBehavior::Idle:
-    case EEng_DinosaurBehavior::Grazing:
-    case EEng_DinosaurBehavior::Patrolling:
-        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-        break;
-
-    case EEng_DinosaurBehavior::Alert:
-    case EEng_DinosaurBehavior::Hunting:
-        GetCharacterMovement()->MaxWalkSpeed = (WalkSpeed + RunSpeed) * 0.5f;
-        break;
-
-    case EEng_DinosaurBehavior::Aggressive:
-    case EEng_DinosaurBehavior::Fleeing:
-        GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
-        break;
-
-    default:
-        break;
-    }
+    // Destroy after 30 seconds (corpse decay)
+    SetLifeSpan(30.f);
 }
 
 bool ADinosaurBase::IsAlive() const
 {
-    return CurrentHealth > 0.0f;
+    return DinoHealth > 0.f;
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
-    return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
+    return MaxDinoHealth > 0.f ? DinoHealth / MaxDinoHealth : 0.f;
 }
 
 float ADinosaurBase::GetStaminaPercent() const
 {
-    return (MaxStamina > 0.0f) ? (CurrentStamina / MaxStamina) : 0.0f;
+    return MaxDinoStamina > 0.f ? DinoStamina / MaxDinoStamina : 0.f;
 }
