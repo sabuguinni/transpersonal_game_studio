@@ -3,142 +3,186 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Sound/AmbientSound.h"
+#include "Sound/SoundBase.h"
 #include "AudioSystemManager.generated.h"
 
+// ============================================================
+// Audio Agent #16 — AudioSystemManager
+// Manages ambient audio zones, dialogue audio wiring,
+// and survival-context adaptive audio for MinPlayableMap.
+// All types prefixed Audio_ to avoid cross-agent collisions.
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EAudio_BiomeZone : uint8
+enum class EAudio_AmbientZone : uint8
 {
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    RiverBank       UMETA(DisplayName = "River Bank"),
-    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
-    VolcanicField   UMETA(DisplayName = "Volcanic Field"),
-    NightCampfire   UMETA(DisplayName = "Night Campfire")
+    Camp        UMETA(DisplayName = "Camp"),
+    Forest      UMETA(DisplayName = "Forest"),
+    River       UMETA(DisplayName = "River"),
+    OpenPlain   UMETA(DisplayName = "Open Plain"),
+    Cave        UMETA(DisplayName = "Cave"),
+    DangerZone  UMETA(DisplayName = "Danger Zone"),
 };
 
 UENUM(BlueprintType)
 enum class EAudio_ThreatLevel : uint8
 {
-    Safe        UMETA(DisplayName = "Safe — No Predators"),
-    Aware       UMETA(DisplayName = "Aware — Predator Nearby"),
-    Danger      UMETA(DisplayName = "Danger — Predator Engaged"),
-    Critical    UMETA(DisplayName = "Critical — Under Attack")
+    Safe        UMETA(DisplayName = "Safe"),
+    Cautious    UMETA(DisplayName = "Cautious"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Critical    UMETA(DisplayName = "Critical"),
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ZoneConfig
+struct FAudio_AmbientLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    EAudio_BiomeZone BiomeZone = EAudio_BiomeZone::OpenPlains;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    TSoftObjectPtr<USoundBase> SoundAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float AmbientVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    EAudio_AmbientZone Zone = EAudio_AmbientZone::Camp;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float ReverbAmount = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float BaseVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    float MusicIntensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float FadeInTime = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
-    bool bNocturnalSounds = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float FadeOutTime = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    bool bLooping = true;
+
+    // URL reference for TTS/Freesound assets loaded at runtime
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    FString ExternalAudioURL;
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ThreatState
+struct FAudio_DialogueEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Threat")
-    EAudio_ThreatLevel ThreatLevel = EAudio_ThreatLevel::Safe;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Threat")
-    float ThreatProximity = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    FString DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Threat")
-    FString PredatorSpecies = TEXT("None");
+    // Supabase TTS URL from ElevenLabs generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    FString AudioURL;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Threat")
-    float MusicTransitionSpeed = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    TSoftObjectPtr<USoundBase> AudioAsset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    bool bHasBeenPlayed = false;
 };
 
-/**
- * UAudio_SystemManager
- * Adaptive audio manager for the prehistoric survival game.
- * Controls ambient soundscapes, music intensity, and threat-reactive audio.
- */
 UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_SystemManager : public UActorComponent
+class TRANSPERSONALGAME_API UAudio_AmbientZoneComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UAudio_SystemManager();
+    UAudio_AmbientZoneComponent();
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    EAudio_AmbientZone ZoneType = EAudio_AmbientZone::Camp;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    float ZoneRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    TArray<FAudio_AmbientLayer> AmbientLayers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Zone")
+    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void SetThreatLevel(EAudio_ThreatLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    EAudio_ThreatLevel GetThreatLevel() const { return CurrentThreatLevel; }
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    void FadeToZone(EAudio_AmbientZone NewZone, float FadeTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
+    FString GetZoneName() const;
+
+protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Zone management
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    void SetBiomeZone(EAudio_BiomeZone NewZone);
+private:
+    UPROPERTY()
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Zone")
-    EAudio_BiomeZone GetCurrentBiomeZone() const { return CurrentZoneConfig.BiomeZone; }
+    float ThreatTransitionTimer = 0.0f;
+    bool bTransitioning = false;
+};
 
-    // Threat-reactive music
-    UFUNCTION(BlueprintCallable, Category = "Audio|Threat")
-    void UpdateThreatLevel(EAudio_ThreatLevel NewThreat, float Proximity, const FString& Species);
+UCLASS()
+class TRANSPERSONALGAME_API AAudio_AmbientSourceActor : public AActor
+{
+    GENERATED_BODY()
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Threat")
-    EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatState.ThreatLevel; }
+public:
+    AAudio_AmbientSourceActor();
 
-    // Day/night audio transitions
-    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
-    void SetTimeOfDay(float NormalizedTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    UAudio_AmbientZoneComponent* AmbientZoneComp;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
-    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    UAudioComponent* PrimaryAudioComp;
 
-    // Screen shake trigger (called by dinosaur proximity system)
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerFootstepRumble(float Intensity, float Duration);
+    // NPC dialogue entries wired from TTS generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    TArray<FAudio_DialogueEntry> DialogueEntries;
 
-    // Campfire audio
-    UFUNCTION(BlueprintCallable, Category = "Audio|Campfire")
-    void SetCampfireActive(bool bActive);
+    // Camp audio URLs from cycle 013 TTS generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString ScoutWarningURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606451163_ScoutWarning.mp3");
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Campfire")
-    bool IsCampfireActive() const { return bCampfireActive; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString ElderSurvivorURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606472094_ElderSurvivor.mp3");
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    FAudio_ZoneConfig CurrentZoneConfig;
+    // Previous cycle TTS URLs wired in
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString ElderTrackerURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606319109_ElderTracker.mp3");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    FAudio_ThreatState CurrentThreatState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString ChiefHunterURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606339713_ChiefHunter.mp3");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float MasterVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString CraftmasterURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606350360_Craftmaster.mp3");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float MusicVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|TTS")
+    FString ScoutRangerURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782606353494_ScoutRanger.mp3");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float SFXVolume = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDialogueEntry(int32 EntryIndex);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float AmbientVolume = 0.8f;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PopulateDefaultDialogueEntries();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    int32 GetDialogueCount() const { return DialogueEntries.Num(); }
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    float CurrentTimeOfDay = 0.5f;
-    bool bCampfireActive = false;
-    float ThreatTransitionAlpha = 0.0f;
-
-    void UpdateMusicIntensity(float DeltaTime);
-    void UpdateAmbientLayers(float DeltaTime);
-    float GetMusicTargetIntensity() const;
+    int32 CurrentDialogueIndex = 0;
+    float DialogueTimer = 0.0f;
+    bool bDialoguePlaying = false;
 };
