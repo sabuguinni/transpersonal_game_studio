@@ -4,171 +4,167 @@
 #include "CrowdBehaviorTypes.generated.h"
 
 // === CROWD BEHAVIOR TYPES — Agent #13 Crowd & Traffic Simulation ===
-// Prehistoric survival game crowd simulation types
+// Prehistoric survival crowd simulation: herds, packs, tribal groups
 
 UENUM(BlueprintType)
-enum class ECrowd_HerdState : uint8
+enum class ECrowd_AgentType : uint8
 {
-    Grazing       UMETA(DisplayName = "Grazing"),
-    Migrating     UMETA(DisplayName = "Migrating"),
-    Fleeing       UMETA(DisplayName = "Fleeing"),
-    Stampeding    UMETA(DisplayName = "Stampeding"),
-    Resting       UMETA(DisplayName = "Resting"),
-    Drinking      UMETA(DisplayName = "Drinking"),
-    Foraging      UMETA(DisplayName = "Foraging"),
-    Alert         UMETA(DisplayName = "Alert"),
+    None            UMETA(DisplayName = "None"),
+    DinosaurHerd    UMETA(DisplayName = "Dinosaur Herd"),
+    RaptorPack      UMETA(DisplayName = "Raptor Pack"),
+    TribalGroup     UMETA(DisplayName = "Tribal Group"),
+    MigrationHerd   UMETA(DisplayName = "Migration Herd"),
+    ScavengerGroup  UMETA(DisplayName = "Scavenger Group"),
+    FleeingPrey     UMETA(DisplayName = "Fleeing Prey")
 };
 
 UENUM(BlueprintType)
-enum class ECrowd_DinoSpecies : uint8
+enum class ECrowd_BehaviorState : uint8
 {
-    Triceratops   UMETA(DisplayName = "Triceratops"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Stegosaurus   UMETA(DisplayName = "Stegosaurus"),
-    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
-    Gallimimus    UMETA(DisplayName = "Gallimimus"),
-    Pachycephalosaurus UMETA(DisplayName = "Pachycephalosaurus"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Grazing     UMETA(DisplayName = "Grazing"),
+    Wandering   UMETA(DisplayName = "Wandering"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Stampeding  UMETA(DisplayName = "Stampeding"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Migrating   UMETA(DisplayName = "Migrating"),
+    Resting     UMETA(DisplayName = "Resting")
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_LODLevel : uint8
+{
+    Full        UMETA(DisplayName = "Full Simulation"),
+    Medium      UMETA(DisplayName = "Medium LOD"),
+    Low         UMETA(DisplayName = "Low LOD"),
+    Dormant     UMETA(DisplayName = "Dormant")
 };
 
 UENUM(BlueprintType)
 enum class ECrowd_ThreatLevel : uint8
 {
-    None          UMETA(DisplayName = "None"),
-    Low           UMETA(DisplayName = "Low"),
-    Medium        UMETA(DisplayName = "Medium"),
-    High          UMETA(DisplayName = "High"),
-    Critical      UMETA(DisplayName = "Critical — Stampede"),
-};
-
-UENUM(BlueprintType)
-enum class ECrowd_AgentRole : uint8
-{
-    Leader        UMETA(DisplayName = "Herd Leader"),
-    Scout         UMETA(DisplayName = "Scout"),
-    Juvenile      UMETA(DisplayName = "Juvenile"),
-    Elder         UMETA(DisplayName = "Elder"),
-    Sentinel      UMETA(DisplayName = "Sentinel"),
+    None        UMETA(DisplayName = "No Threat"),
+    Low         UMETA(DisplayName = "Low Threat"),
+    Medium      UMETA(DisplayName = "Medium Threat"),
+    High        UMETA(DisplayName = "High Threat"),
+    Panic       UMETA(DisplayName = "Full Panic")
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_HerdConfig
+struct FCrowd_AgentConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    ECrowd_DinoSpecies Species = ECrowd_DinoSpecies::Triceratops;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    ECrowd_AgentType AgentType = ECrowd_AgentType::DinosaurHerd;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    int32 HerdSize = 12;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 GroupSize = 10;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float SpreadRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float MoveSpeed = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float MigrationSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float FleeSpeed = 600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float StampedeSpeed = 900.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float SeparationRadius = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float ThreatDetectionRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float CohesionRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float WaterSourceRange = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float ThreatDetectionRadius = 1200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    bool bHasAlphaLeader = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float StampedeSpeedMultiplier = 2.5f;
+
+    FCrowd_AgentConfig()
+        : AgentType(ECrowd_AgentType::DinosaurHerd)
+        , GroupSize(10)
+        , MoveSpeed(300.0f)
+        , FleeSpeed(600.0f)
+        , SeparationRadius(150.0f)
+        , CohesionRadius(500.0f)
+        , ThreatDetectionRadius(1200.0f)
+        , StampedeSpeedMultiplier(2.5f)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_AgentData
+struct FCrowd_AgentState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    int32 AgentID = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    ECrowd_BehaviorState BehaviorState = ECrowd_BehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    ECrowd_AgentRole Role = ECrowd_AgentRole::Scout;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    ECrowd_ThreatLevel ThreatLevel = ECrowd_ThreatLevel::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    ECrowd_HerdState CurrentState = ECrowd_HerdState::Grazing;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    ECrowd_LODLevel LODLevel = ECrowd_LODLevel::Full;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    FVector CurrentVelocity = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    FVector FleeDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    FVector TargetLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    FVector ThreatLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float Health = 100.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    float ThreatDistance = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float StressLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float HungerLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float ThirstLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
     bool bIsLeader = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float SeparationWeight = 1.5f;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    int32 GroupID = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float CohesionWeight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Agent")
-    float AlignmentWeight = 1.2f;
+    FCrowd_AgentState()
+        : BehaviorState(ECrowd_BehaviorState::Idle)
+        , ThreatLevel(ECrowd_ThreatLevel::None)
+        , LODLevel(ECrowd_LODLevel::Full)
+        , FleeDirection(FVector::ZeroVector)
+        , ThreatLocation(FVector::ZeroVector)
+        , ThreatDistance(0.0f)
+        , bIsLeader(false)
+        , GroupID(-1)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_StampedeEvent
+struct FCrowd_GroupData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    FVector TriggerLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    int32 GroupID = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    FVector FleeDirection = FVector::ForwardVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    ECrowd_AgentType GroupType = ECrowd_AgentType::DinosaurHerd;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    float StampedeRadius = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    ECrowd_BehaviorState CurrentState = ECrowd_BehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    float Duration = 30.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    FVector GroupCenter = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    float TramplingDamage = 75.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    FVector MigrationTarget = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    bool bIsActive = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    int32 AgentCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    ECrowd_ThreatLevel ThreatLevel = ECrowd_ThreatLevel::High;
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Group")
+    float GroupThreatLevel = 0.0f;
 
-USTRUCT(BlueprintType)
-struct FCrowd_MigrationPath
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    TArray<FVector> Waypoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    int32 CurrentWaypointIndex = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    float WaypointAcceptanceRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    bool bIsLooping = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Migration")
-    float SeasonalCycleHours = 72.0f;
+    FCrowd_GroupData()
+        : GroupID(-1)
+        , GroupType(ECrowd_AgentType::DinosaurHerd)
+        , CurrentState(ECrowd_BehaviorState::Idle)
+        , GroupCenter(FVector::ZeroVector)
+        , MigrationTarget(FVector::ZeroVector)
+        , AgentCount(0)
+        , GroupThreatLevel(0.0f)
+    {}
 };
