@@ -1,304 +1,225 @@
-// CrowdStampedeController.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Full implementation of stampede trigger, panic propagation, player danger
-
 #include "CrowdStampedeController.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 #include "DrawDebugHelpers.h"
 
 ACrowdStampedeController::ACrowdStampedeController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    CurrentState = ECrowd_StampedeState::Idle;
-    LastTrigger = ECrowd_StampedeTrigger::None;
-    StampedeTimer = 0.0f;
-    StateTimer = 0.0f;
-    StampedeDirection = FVector(1.0f, 0.0f, 0.0f);
-    ThreatOrigin = FVector::ZeroVector;
+
+    SeparationWeight  = 2.5f;
+    AlignmentWeight   = 1.0f;
+    CohesionWeight    = 1.0f;
+    FleeWeight        = 4.0f;
+    NeighborRadius    = 400.f;
+    MaxStampedeSpeed  = 900.f;
+    FearDecayRate     = 0.3f;
+    MaxAgents         = 50;
+    CurrentState      = ECrowd_StampedeState::Idle;
+    PanicOrigin       = FVector::ZeroVector;
 }
 
 void ACrowdStampedeController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Cache player actor reference
-    ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (PlayerChar)
-    {
-        CachedPlayerActor = PlayerChar;
-    }
 }
 
 void ACrowdStampedeController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateStampedeState(DeltaTime);
-
-    if (CurrentState == ECrowd_StampedeState::Stampeding ||
-        CurrentState == ECrowd_StampedeState::Panic)
+    if (CurrentState == ECrowd_StampedeState::Idle || Agents.Num() == 0)
     {
-        UpdateAgentMovement(DeltaTime);
-
-        if (StampedeConfig.bPlayerDangerIfInPath)
-        {
-            CheckPlayerCollision();
-        }
-    }
-}
-
-void ACrowdStampedeController::TriggerStampede(ECrowd_StampedeTrigger Trigger, FVector ThreatLocation)
-{
-    if (RegisteredAgents.Num() < StampedeConfig.MinAgentsForStampede)
-    {
-        // Not enough agents — only trigger alert
-        TransitionToState(ECrowd_StampedeState::Alert);
         return;
     }
 
-    LastTrigger = Trigger;
-    ThreatOrigin = ThreatLocation;
+    UpdateFlockingBehavior(DeltaTime);
+    UpdateAgentMeshPositions();
 
-    // Calculate average herd centre
-    FVector HerdCentre = FVector::ZeroVector;
-    for (const FCrowd_StampedeAgent& Agent : RegisteredAgents)
+    // Decay fear over time
+    bool bAllCalm = true;
+    for (FCrowd_StampedeAgent& Agent : Agents)
     {
-        if (Agent.AgentActor)
+        Agent.FearLevel = FMath::Max(0.f, Agent.FearLevel - FearDecayRate * DeltaTime);
+        if (Agent.FearLevel > 0.1f) bAllCalm = false;
+    }
+
+    if (bAllCalm && CurrentState == ECrowd_StampedeState::Stampeding)
+    {
+        SetStampedeState(ECrowd_StampedeState::Dispersed);
+    }
+}
+
+void ACrowdStampedeController::TriggerStampede(FVector PanicSource, float PanicRadius)
+{
+    PanicOrigin = PanicSource;
+    SetStampedeState(ECrowd_StampedeState::Stampeding);
+
+    for (FCrowd_StampedeAgent& Agent : Agents)
+    {
+        float Dist = FVector::Dist(Agent.Location, PanicSource);
+        if (Dist < PanicRadius)
         {
-            HerdCentre += Agent.AgentActor->GetActorLocation();
+            float NormalizedDist = 1.0f - (Dist / PanicRadius);
+            Agent.FearLevel = FMath::Clamp(NormalizedDist * 1.5f, 0.f, 1.f);
         }
-    }
-    if (RegisteredAgents.Num() > 0)
-    {
-        HerdCentre /= RegisteredAgents.Num();
-    }
-
-    // Flee direction = away from threat
-    StampedeDirection = (HerdCentre - ThreatLocation).GetSafeNormal();
-
-    // Set all agents to panic
-    for (FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        if (Agent.AgentActor)
+        else
         {
-            Agent.PanicLevel = 1.0f;
-            Agent.FleeDirection = CalculateFleeDirection(ThreatLocation, Agent.AgentActor->GetActorLocation());
-            Agent.Speed = StampedeConfig.MaxStampedeSpeed;
-        }
-    }
-
-    TransitionToState(ECrowd_StampedeState::Stampeding);
-    StampedeTimer = StampedeConfig.StampedeDuration;
-
-    UE_LOG(LogTemp, Warning, TEXT("CrowdStampedeController: Stampede triggered! Trigger=%d, Agents=%d, Direction=%s"),
-        (int32)Trigger, RegisteredAgents.Num(), *StampedeDirection.ToString());
-}
-
-void ACrowdStampedeController::RegisterAgent(AActor* Agent, bool bIsLeader)
-{
-    if (!Agent) return;
-
-    // Check not already registered
-    for (const FCrowd_StampedeAgent& Existing : RegisteredAgents)
-    {
-        if (Existing.AgentActor == Agent) return;
-    }
-
-    FCrowd_StampedeAgent NewAgent;
-    NewAgent.AgentActor = Agent;
-    NewAgent.bIsLeader = bIsLeader;
-    NewAgent.PanicLevel = 0.0f;
-    NewAgent.Speed = 400.0f;
-    NewAgent.FleeDirection = FVector::ZeroVector;
-
-    RegisteredAgents.Add(NewAgent);
-}
-
-void ACrowdStampedeController::UnregisterAgent(AActor* Agent)
-{
-    RegisteredAgents.RemoveAll([Agent](const FCrowd_StampedeAgent& A)
-    {
-        return A.AgentActor == Agent;
-    });
-}
-
-void ACrowdStampedeController::PropagateAlertToNearbyAgents(FVector EpicentreLocation, float Radius)
-{
-    for (FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        if (!Agent.AgentActor) continue;
-
-        float Dist = FVector::Dist(Agent.AgentActor->GetActorLocation(), EpicentreLocation);
-        if (Dist <= Radius)
-        {
-            float PropagatedPanic = FMath::Clamp(1.0f - (Dist / Radius), 0.0f, 1.0f);
-            Agent.PanicLevel = FMath::Max(Agent.PanicLevel, PropagatedPanic * StampedeConfig.PanicPropagationSpeed);
+            // Propagate fear from neighbors — herd contagion
+            Agent.FearLevel = FMath::Max(Agent.FearLevel, 0.4f);
         }
     }
 }
 
-bool ACrowdStampedeController::IsPlayerInStampedePath(AActor* PlayerActor) const
+void ACrowdStampedeController::SpawnHerd(int32 HerdSize, FVector CenterLocation, float SpreadRadius)
 {
-    if (!PlayerActor || CurrentState != ECrowd_StampedeState::Stampeding) return false;
+    Agents.Empty();
+    int32 ActualSize = FMath::Min(HerdSize, MaxAgents);
 
-    FVector PlayerLoc = PlayerActor->GetActorLocation();
-
-    for (const FCrowd_StampedeAgent& Agent : RegisteredAgents)
+    for (int32 i = 0; i < ActualSize; ++i)
     {
-        if (!Agent.AgentActor) continue;
+        FCrowd_StampedeAgent NewAgent;
+        float Angle = (float)i / (float)ActualSize * 2.f * PI;
+        float Radius = FMath::FRandRange(SpreadRadius * 0.2f, SpreadRadius);
+        NewAgent.Location = CenterLocation + FVector(
+            FMath::Cos(Angle) * Radius,
+            FMath::Sin(Angle) * Radius,
+            0.f
+        );
+        NewAgent.Velocity = FVector::ZeroVector;
+        NewAgent.Speed = FMath::FRandRange(400.f, 600.f);
+        NewAgent.FearLevel = 0.f;
+        NewAgent.bIsLeader = (i == 0);
+        Agents.Add(NewAgent);
+    }
 
-        FVector AgentLoc = Agent.AgentActor->GetActorLocation();
-        float DistToPlayer = FVector::Dist(AgentLoc, PlayerLoc);
+    SetStampedeState(ECrowd_StampedeState::Idle);
+}
 
-        if (DistToPlayer < 300.0f)
+void ACrowdStampedeController::UpdateFlockingBehavior(float DeltaTime)
+{
+    for (int32 i = 0; i < Agents.Num(); ++i)
+    {
+        FCrowd_StampedeAgent& Agent = Agents[i];
+        FVector Force = ComputeFlockingForce(Agent, i);
+
+        // Integrate velocity
+        Agent.Velocity += Force * DeltaTime;
+
+        // Clamp to max speed based on fear
+        float CurrentMaxSpeed = FMath::Lerp(Agent.Speed, MaxStampedeSpeed, Agent.FearLevel);
+        if (Agent.Velocity.SizeSquared() > CurrentMaxSpeed * CurrentMaxSpeed)
         {
-            // Check if agent is moving toward player
-            FVector ToPlayer = (PlayerLoc - AgentLoc).GetSafeNormal();
-            float Dot = FVector::DotProduct(Agent.FleeDirection, ToPlayer);
-            if (Dot > 0.5f)
+            Agent.Velocity = Agent.Velocity.GetSafeNormal() * CurrentMaxSpeed;
+        }
+
+        Agent.Location += Agent.Velocity * DeltaTime;
+    }
+}
+
+FVector ACrowdStampedeController::ComputeFlockingForce(const FCrowd_StampedeAgent& Agent, int32 AgentIndex)
+{
+    FVector Separation = ComputeSeparation(Agent, AgentIndex) * SeparationWeight;
+    FVector Alignment  = ComputeAlignment(Agent, AgentIndex)  * AlignmentWeight;
+    FVector Cohesion   = ComputeCohesion(Agent, AgentIndex)   * CohesionWeight;
+    FVector Flee       = ComputeFlee(Agent)                   * FleeWeight * Agent.FearLevel;
+
+    return Separation + Alignment + Cohesion + Flee;
+}
+
+FVector ACrowdStampedeController::ComputeSeparation(const FCrowd_StampedeAgent& Agent, int32 AgentIndex)
+{
+    FVector Force = FVector::ZeroVector;
+    int32 Count = 0;
+    float MinSeparation = NeighborRadius * 0.3f;
+
+    for (int32 j = 0; j < Agents.Num(); ++j)
+    {
+        if (j == AgentIndex) continue;
+        float Dist = FVector::Dist(Agent.Location, Agents[j].Location);
+        if (Dist < MinSeparation && Dist > 0.f)
+        {
+            FVector Away = (Agent.Location - Agents[j].Location).GetSafeNormal();
+            Force += Away / Dist;
+            ++Count;
+        }
+    }
+
+    if (Count > 0) Force /= (float)Count;
+    return Force;
+}
+
+FVector ACrowdStampedeController::ComputeAlignment(const FCrowd_StampedeAgent& Agent, int32 AgentIndex)
+{
+    FVector AvgVelocity = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (int32 j = 0; j < Agents.Num(); ++j)
+    {
+        if (j == AgentIndex) continue;
+        float Dist = FVector::Dist(Agent.Location, Agents[j].Location);
+        if (Dist < NeighborRadius)
+        {
+            AvgVelocity += Agents[j].Velocity;
+            ++Count;
+        }
+    }
+
+    if (Count > 0)
+    {
+        AvgVelocity /= (float)Count;
+        return (AvgVelocity - Agent.Velocity).GetSafeNormal();
+    }
+    return FVector::ZeroVector;
+}
+
+FVector ACrowdStampedeController::ComputeCohesion(const FCrowd_StampedeAgent& Agent, int32 AgentIndex)
+{
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (int32 j = 0; j < Agents.Num(); ++j)
+    {
+        if (j == AgentIndex) continue;
+        float Dist = FVector::Dist(Agent.Location, Agents[j].Location);
+        if (Dist < NeighborRadius)
+        {
+            CenterOfMass += Agents[j].Location;
+            ++Count;
+        }
+    }
+
+    if (Count > 0)
+    {
+        CenterOfMass /= (float)Count;
+        return (CenterOfMass - Agent.Location).GetSafeNormal();
+    }
+    return FVector::ZeroVector;
+}
+
+FVector ACrowdStampedeController::ComputeFlee(const FCrowd_StampedeAgent& Agent)
+{
+    if (PanicOrigin.IsZero()) return FVector::ZeroVector;
+    return (Agent.Location - PanicOrigin).GetSafeNormal();
+}
+
+void ACrowdStampedeController::SetStampedeState(ECrowd_StampedeState NewState)
+{
+    CurrentState = NewState;
+}
+
+void ACrowdStampedeController::UpdateAgentMeshPositions()
+{
+    for (int32 i = 0; i < SpawnedMeshActors.Num() && i < Agents.Num(); ++i)
+    {
+        if (SpawnedMeshActors[i])
+        {
+            SpawnedMeshActors[i]->SetActorLocation(Agents[i].Location);
+            if (!Agents[i].Velocity.IsNearlyZero())
             {
-                return true;
+                FRotator FaceDir = Agents[i].Velocity.Rotation();
+                SpawnedMeshActors[i]->SetActorRotation(FaceDir);
             }
         }
     }
-
-    return false;
-}
-
-void ACrowdStampedeController::ForceSettle()
-{
-    for (FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        Agent.PanicLevel = 0.0f;
-        Agent.FleeDirection = FVector::ZeroVector;
-        Agent.Speed = 400.0f;
-    }
-    TransitionToState(ECrowd_StampedeState::Settled);
-    StampedeTimer = 0.0f;
-}
-
-int32 ACrowdStampedeController::GetActiveAgentCount() const
-{
-    int32 Count = 0;
-    for (const FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        if (Agent.AgentActor) Count++;
-    }
-    return Count;
-}
-
-float ACrowdStampedeController::GetAveragePanicLevel() const
-{
-    if (RegisteredAgents.Num() == 0) return 0.0f;
-
-    float Total = 0.0f;
-    for (const FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        Total += Agent.PanicLevel;
-    }
-    return Total / RegisteredAgents.Num();
-}
-
-// ---- Private ----
-
-void ACrowdStampedeController::UpdateStampedeState(float DeltaTime)
-{
-    StateTimer += DeltaTime;
-
-    switch (CurrentState)
-    {
-    case ECrowd_StampedeState::Stampeding:
-        StampedeTimer -= DeltaTime;
-        if (StampedeTimer <= 0.0f)
-        {
-            TransitionToState(ECrowd_StampedeState::Dispersing);
-        }
-        break;
-
-    case ECrowd_StampedeState::Dispersing:
-        // Gradually reduce panic
-        for (FCrowd_StampedeAgent& Agent : RegisteredAgents)
-        {
-            Agent.PanicLevel = FMath::Max(0.0f, Agent.PanicLevel - DeltaTime * 0.3f);
-            Agent.Speed = FMath::Lerp(Agent.Speed, 400.0f, DeltaTime * 0.5f);
-        }
-        if (GetAveragePanicLevel() < 0.05f)
-        {
-            TransitionToState(ECrowd_StampedeState::Settled);
-        }
-        break;
-
-    case ECrowd_StampedeState::Alert:
-        if (StateTimer > 5.0f)
-        {
-            TransitionToState(ECrowd_StampedeState::Idle);
-        }
-        break;
-
-    default:
-        break;
-    }
-}
-
-void ACrowdStampedeController::UpdateAgentMovement(float DeltaTime)
-{
-    for (FCrowd_StampedeAgent& Agent : RegisteredAgents)
-    {
-        if (!Agent.AgentActor || Agent.FleeDirection.IsNearlyZero()) continue;
-
-        // Add slight random deviation for natural look
-        FVector Deviation = FVector(
-            FMath::RandRange(-0.15f, 0.15f),
-            FMath::RandRange(-0.15f, 0.15f),
-            0.0f
-        );
-        FVector MoveDir = (Agent.FleeDirection + Deviation).GetSafeNormal();
-
-        FVector NewLocation = Agent.AgentActor->GetActorLocation() + MoveDir * Agent.Speed * DeltaTime;
-        Agent.AgentActor->SetActorLocation(NewLocation, true);
-
-        // Face movement direction
-        FRotator NewRot = MoveDir.Rotation();
-        Agent.AgentActor->SetActorRotation(NewRot);
-    }
-}
-
-void ACrowdStampedeController::CheckPlayerCollision()
-{
-    if (!CachedPlayerActor.IsValid()) return;
-
-    if (IsPlayerInStampedePath(CachedPlayerActor.Get()))
-    {
-        // Apply damage to player
-        ACharacter* PlayerChar = Cast<ACharacter>(CachedPlayerActor.Get());
-        if (PlayerChar)
-        {
-            UGameplayStatics::ApplyDamage(
-                PlayerChar,
-                StampedeConfig.PlayerDamagePerSecond * GetWorld()->GetDeltaSeconds(),
-                nullptr,
-                this,
-                nullptr
-            );
-        }
-    }
-}
-
-FVector ACrowdStampedeController::CalculateFleeDirection(FVector ThreatLocation, FVector AgentLocation) const
-{
-    FVector BaseDir = (AgentLocation - ThreatLocation).GetSafeNormal();
-    // Flatten to XY plane
-    BaseDir.Z = 0.0f;
-    return BaseDir.GetSafeNormal();
-}
-
-void ACrowdStampedeController::TransitionToState(ECrowd_StampedeState NewState)
-{
-    if (CurrentState == NewState) return;
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: State %d -> %d"), (int32)CurrentState, (int32)NewState);
-    CurrentState = NewState;
-    StateTimer = 0.0f;
 }
