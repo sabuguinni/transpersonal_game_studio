@@ -1,357 +1,460 @@
+// DinosaurBase.cpp
+// Engine Architect #02 — Transpersonal Game Studio
+// Full implementation of the DinosaurBase actor (APawn subclass)
+// Provides: species data, survival stats, patrol AI, threat response
+
 #include "DinosaurBase.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "AIController.h"
+#include "NavigationSystem.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "NavigationSystem.h"
-#include "AIController.h"
 
-// ============================================================
-// Constructor
-// ============================================================
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.05f; // 20Hz tick for AI — performance friendly
 
-    // Default movement setup
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
-    {
-        Move->MaxWalkSpeed = Stats.WalkSpeed;
-        Move->bOrientRotationToMovement = true;
-        Move->RotationRate = FRotator(0.f, 360.f, 0.f);
-        Move->bUseControllerDesiredRotation = false;
-        Move->GravityScale = 1.f;
-        Move->JumpZVelocity = 0.f; // Most dinos can't jump
-        Move->NavAgentProps.bCanJump = false;
-    }
+    // Capsule root
+    GetCapsuleComponent()->InitCapsuleSize(60.f, 120.f);
+    GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
 
-    // Don't use controller rotation
-    bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw   = false;
-    bUseControllerRotationRoll  = false;
+    // Skeletal mesh
+    GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -120.f));
+    GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+
+    // Perception sphere — detects player within AggroRadius
+    PerceptionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("PerceptionSphere"));
+    PerceptionSphere->SetupAttachment(RootComponent);
+    PerceptionSphere->InitSphereRadius(1500.f);
+    PerceptionSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+    PerceptionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADinosaurBase::OnPerceptionOverlapBegin);
+    PerceptionSphere->OnComponentEndOverlap.AddDynamic(this, &ADinosaurBase::OnPerceptionOverlapEnd);
+
+    // Movement defaults — overridden per species in BeginPlay
+    GetCharacterMovement()->MaxWalkSpeed = 400.f;
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->RotationRate = FRotator(0.f, 360.f, 0.f);
+    GetCharacterMovement()->JumpZVelocity = 600.f;
+    GetCharacterMovement()->GravityScale = 1.2f;
+
+    // Default species data
+    SpeciesData.SpeciesName = FName("UnknownDinosaur");
+    SpeciesData.MaxHealth = 200.f;
+    SpeciesData.MoveSpeed = 400.f;
+    SpeciesData.AttackDamage = 30.f;
+    SpeciesData.AggroRadius = 1500.f;
+    SpeciesData.AttackRadius = 200.f;
+    SpeciesData.Diet = EDinosaurDiet::Herbivore;
+    SpeciesData.SocialBehavior = EDinosaurSocial::Solitary;
+    SpeciesData.bIsNocturnal = false;
+
+    // Runtime state
+    CurrentHealth = SpeciesData.MaxHealth;
+    CurrentState = EDinosaurState::Idle;
+    bIsAlive = true;
+    PatrolRadius = 2000.f;
+    PatrolWaitTime = 3.f;
+    bIsWaiting = false;
+    ThreatActor = nullptr;
+    HomeLocation = FVector::ZeroVector;
+    LastKnownThreatLocation = FVector::ZeroVector;
 
     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Record spawn location as patrol origin
-    PatrolOrigin = GetActorLocation();
-    CurrentPatrolTarget = PatrolOrigin;
+    // Record home location for patrol
+    HomeLocation = GetActorLocation();
 
-    // Apply stats to movement
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
-    {
-        Move->MaxWalkSpeed = Stats.WalkSpeed;
-    }
+    // Apply species data to movement
+    GetCharacterMovement()->MaxWalkSpeed = SpeciesData.MoveSpeed;
+    PerceptionSphere->SetSphereRadius(SpeciesData.AggroRadius);
 
-    // Start in idle
-    SetBehaviourState(EDB_BehaviourState::Idle);
+    // Initialize health
+    CurrentHealth = SpeciesData.MaxHealth;
+
+    // Start patrol loop
+    GetWorldTimerManager().SetTimer(
+        PatrolTimerHandle,
+        this,
+        &ADinosaurBase::ChooseNextPatrolPoint,
+        PatrolWaitTime,
+        false
+    );
+
+    // Hunger/thirst tick every 10s
+    GetWorldTimerManager().SetTimer(
+        HungerTimerHandle,
+        this,
+        &ADinosaurBase::TickSurvivalNeeds,
+        10.f,
+        true
+    );
 }
 
-// ============================================================
-// Tick
-// ============================================================
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!IsAlive()) return;
-
-    // Tick attack cooldown
-    if (AttackCooldown > 0.f)
+    switch (CurrentState)
     {
-        AttackCooldown -= DeltaTime;
-    }
-
-    // Drain hunger slowly
-    Stats.Hunger = FMath::Max(0.f, Stats.Hunger - DeltaTime * 0.5f);
-
-    // State machine
-    switch (CurrentBehaviour)
-    {
-    case EDB_BehaviourState::Idle:
-        TickIdle(DeltaTime);
-        break;
-    case EDB_BehaviourState::Patrolling:
-        TickPatrol(DeltaTime);
-        break;
-    case EDB_BehaviourState::Hunting:
-    case EDB_BehaviourState::Attacking:
-        TickHunting(DeltaTime);
-        break;
-    default:
-        break;
-    }
-}
-
-// ============================================================
-// TakeDamage
-// ============================================================
-float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-                                 AController* EventInstigator, AActor* DamageCauser)
-{
-    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
-
-    Stats.CurrentHealth = FMath::Max(0.f, Stats.CurrentHealth - ActualDamage);
-
-    // React to damage — switch to hunting the attacker
-    if (DamageCauser && IsAlive())
-    {
-        CurrentTarget = DamageCauser;
-        SetBehaviourState(EDB_BehaviourState::Hunting);
-    }
-
-    if (!IsAlive())
-    {
-        Die();
-    }
-
-    return ActualDamage;
-}
-
-// ============================================================
-// SetBehaviourState
-// ============================================================
-void ADinosaurBase::SetBehaviourState(EDB_BehaviourState NewState)
-{
-    if (CurrentBehaviour == NewState) return;
-
-    CurrentBehaviour = NewState;
-
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
-    {
-        switch (NewState)
-        {
-        case EDB_BehaviourState::Hunting:
-        case EDB_BehaviourState::Fleeing:
-            Move->MaxWalkSpeed = Stats.RunSpeed;
+        case EDinosaurState::Patrolling:
+            TickPatrol(DeltaTime);
             break;
+        case EDinosaurState::Chasing:
+            TickChase(DeltaTime);
+            break;
+        case EDinosaurState::Fleeing:
+            TickFlee(DeltaTime);
+            break;
+        case EDinosaurState::Attacking:
+            TickAttack(DeltaTime);
+            break;
+        case EDinosaurState::Idle:
+        case EDinosaurState::Grazing:
+        case EDinosaurState::Sleeping:
         default:
-            Move->MaxWalkSpeed = Stats.WalkSpeed;
             break;
-        }
     }
 }
 
-// ============================================================
-// IsAlive / GetHealthPercent
-// ============================================================
-bool ADinosaurBase::IsAlive() const
+// ─── SURVIVAL NEEDS ───────────────────────────────────────────────────────────
+
+void ADinosaurBase::TickSurvivalNeeds()
 {
-    return Stats.CurrentHealth > 0.f;
-}
+    if (!bIsAlive) return;
 
-float ADinosaurBase::GetHealthPercent() const
-{
-    if (Stats.MaxHealth <= 0.f) return 0.f;
-    return Stats.CurrentHealth / Stats.MaxHealth;
-}
+    CurrentHunger = FMath::Clamp(CurrentHunger - 2.f, 0.f, 100.f);
+    CurrentThirst = FMath::Clamp(CurrentThirst - 3.f, 0.f, 100.f);
 
-// ============================================================
-// FindNearestThreat — sphere overlap for player detection
-// ============================================================
-AActor* ADinosaurBase::FindNearestThreat() const
-{
-    UWorld* World = GetWorld();
-    if (!World) return nullptr;
-
-    // Get the player pawn as primary threat
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (!PlayerPawn) return nullptr;
-
-    float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
-    if (DistSq <= FMath::Square(Stats.DetectionRadius))
+    // Starvation damage
+    if (CurrentHunger <= 0.f)
     {
-        return PlayerPawn;
+        ApplyDamage(5.f, nullptr);
     }
 
-    return nullptr;
-}
-
-// ============================================================
-// TickIdle — scan for threats, transition to patrol after wait
-// ============================================================
-void ADinosaurBase::TickIdle(float DeltaTime)
-{
-    PatrolWaitTimer += DeltaTime;
-
-    // Scan for threats every tick
-    if (Stats.bIsCarnivore)
+    // Seek food if herbivore and hungry
+    if (SpeciesData.Diet == EDinosaurDiet::Herbivore && CurrentHunger < 30.f)
     {
-        AActor* Threat = FindNearestThreat();
-        if (Threat)
+        if (CurrentState == EDinosaurState::Idle || CurrentState == EDinosaurState::Patrolling)
         {
-            CurrentTarget = Threat;
-            OnTargetDetected(Threat);
-            SetBehaviourState(EDB_BehaviourState::Hunting);
-            return;
+            SetState(EDinosaurState::Grazing);
         }
-    }
-
-    // After wait time, start patrolling
-    if (PatrolWaitTimer >= PatrolWaitTime)
-    {
-        PatrolWaitTimer = 0.f;
-        MoveToPatrolPoint();
-        SetBehaviourState(EDB_BehaviourState::Patrolling);
     }
 }
 
-// ============================================================
-// TickPatrol — move to patrol point, idle on arrival
-// ============================================================
-void ADinosaurBase::TickPatrol(float DeltaTime)
+// ─── DAMAGE & DEATH ───────────────────────────────────────────────────────────
+
+void ADinosaurBase::ApplyDamage(float DamageAmount, AActor* DamageSource)
 {
-    // Carnivores scan for prey while patrolling
-    if (Stats.bIsCarnivore)
+    if (!bIsAlive) return;
+
+    CurrentHealth = FMath::Clamp(CurrentHealth - DamageAmount, 0.f, SpeciesData.MaxHealth);
+
+    OnDamageReceived(DamageAmount, DamageSource);
+
+    if (CurrentHealth <= 0.f)
     {
-        AActor* Threat = FindNearestThreat();
-        if (Threat)
+        Die(DamageSource);
+    }
+    else if (DamageSource && CurrentState != EDinosaurState::Chasing && CurrentState != EDinosaurState::Attacking)
+    {
+        // Carnivores fight back; herbivores flee
+        if (SpeciesData.Diet == EDinosaurDiet::Carnivore)
         {
-            CurrentTarget = Threat;
-            OnTargetDetected(Threat);
-            SetBehaviourState(EDB_BehaviourState::Hunting);
-            return;
+            ThreatActor = DamageSource;
+            SetState(EDinosaurState::Chasing);
         }
-    }
-
-    // Check if we've reached the patrol target
-    float DistToTarget = FVector::Dist2D(GetActorLocation(), CurrentPatrolTarget);
-    if (DistToTarget < 150.f)
-    {
-        // Reached patrol point — go idle and wait
-        SetBehaviourState(EDB_BehaviourState::Idle);
-        PatrolWaitTimer = 0.f;
+        else
+        {
+            ThreatActor = DamageSource;
+            SetState(EDinosaurState::Fleeing);
+        }
     }
 }
 
-// ============================================================
-// TickHunting — chase and attack target
-// ============================================================
-void ADinosaurBase::TickHunting(float DeltaTime)
+void ADinosaurBase::Die(AActor* Killer)
 {
-    if (!CurrentTarget.IsValid())
-    {
-        SetBehaviourState(EDB_BehaviourState::Idle);
+    bIsAlive = false;
+    SetState(EDinosaurState::Dead);
+
+    // Stop all timers
+    GetWorldTimerManager().ClearTimer(PatrolTimerHandle);
+    GetWorldTimerManager().ClearTimer(HungerTimerHandle);
+
+    // Disable collision
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PerceptionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Disable movement
+    GetCharacterMovement()->DisableMovement();
+
+    // Ragdoll
+    GetMesh()->SetSimulatePhysics(true);
+    GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
+
+    OnDeath(Killer);
+
+    // Destroy after 30s (corpse decay)
+    SetLifeSpan(30.f);
+}
+
+// ─── STATE MACHINE ────────────────────────────────────────────────────────────
+
+void ADinosaurBase::SetState(EDinosaurState NewState)
+{
+    if (CurrentState == NewState) return;
+
+    EDinosaurState OldState = CurrentState;
+    CurrentState = NewState;
+
+    OnStateChanged(OldState, NewState);
+}
+
+// ─── PATROL ───────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::ChooseNextPatrolPoint()
+{
+    if (!bIsAlive || CurrentState == EDinosaurState::Chasing || CurrentState == EDinosaurState::Fleeing)
         return;
-    }
 
-    AActor* Target = CurrentTarget.Get();
-    float DistToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+    SetState(EDinosaurState::Patrolling);
 
-    // Lost target — return to patrol
-    if (DistToTarget > Stats.DetectionRadius * 1.5f)
+    UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+    if (!NavSys) return;
+
+    FNavLocation NavLoc;
+    bool bFound = NavSys->GetRandomReachablePointInRadius(HomeLocation, PatrolRadius, NavLoc);
+
+    if (bFound)
     {
-        CurrentTarget = nullptr;
-        SetBehaviourState(EDB_BehaviourState::Patrolling);
-        MoveToPatrolPoint();
-        return;
-    }
-
-    // In attack range — attack
-    if (DistToTarget <= Stats.AttackRadius)
-    {
-        PerformAttack(Target);
+        CurrentPatrolTarget = NavLoc.Location;
+        MoveToLocation(CurrentPatrolTarget);
     }
     else
     {
-        // Move toward target via AI controller
-        if (AAIController* AIC = Cast<AAIController>(GetController()))
-        {
-            AIC->MoveToActor(Target, Stats.AttackRadius * 0.8f);
-        }
+        // Retry after wait
+        GetWorldTimerManager().SetTimer(PatrolTimerHandle, this, &ADinosaurBase::ChooseNextPatrolPoint, PatrolWaitTime, false);
     }
 }
 
-// ============================================================
-// MoveToPatrolPoint — pick a random point within patrol radius
-// ============================================================
-void ADinosaurBase::MoveToPatrolPoint()
+void ADinosaurBase::TickPatrol(float DeltaTime)
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    if (bIsWaiting) return;
 
-    // Pick random point within patrol radius using NavMesh
-    UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
-    if (NavSys)
+    float DistToTarget = FVector::Dist(GetActorLocation(), CurrentPatrolTarget);
+    if (DistToTarget < 150.f)
     {
-        FNavLocation NavLoc;
-        if (NavSys->GetRandomReachablePointInRadius(PatrolOrigin, PatrolRadius, NavLoc))
-        {
-            CurrentPatrolTarget = NavLoc.Location;
-
-            if (AAIController* AIC = Cast<AAIController>(GetController()))
-            {
-                AIC->MoveToLocation(CurrentPatrolTarget, 100.f);
-            }
-            return;
-        }
-    }
-
-    // Fallback: random point without NavMesh
-    FVector RandomOffset = FMath::VRand() * PatrolRadius;
-    RandomOffset.Z = 0.f;
-    CurrentPatrolTarget = PatrolOrigin + RandomOffset;
-
-    if (AAIController* AIC = Cast<AAIController>(GetController()))
-    {
-        AIC->MoveToLocation(CurrentPatrolTarget, 100.f);
+        // Reached patrol point — wait then choose next
+        bIsWaiting = true;
+        SetState(EDinosaurState::Idle);
+        GetWorldTimerManager().SetTimer(
+            PatrolTimerHandle,
+            this,
+            &ADinosaurBase::OnPatrolWaitComplete,
+            PatrolWaitTime,
+            false
+        );
     }
 }
 
-// ============================================================
-// PerformAttack
-// ============================================================
-void ADinosaurBase::PerformAttack(AActor* Target)
+void ADinosaurBase::OnPatrolWaitComplete()
 {
-    if (!Target || AttackCooldown > 0.f) return;
+    bIsWaiting = false;
+    ChooseNextPatrolPoint();
+}
 
-    AttackCooldown = AttackCooldownDuration;
-    SetBehaviourState(EDB_BehaviourState::Attacking);
+void ADinosaurBase::MoveToLocation(const FVector& Destination)
+{
+    AAIController* AIC = Cast<AAIController>(GetController());
+    if (AIC)
+    {
+        AIC->MoveToLocation(Destination, 50.f);
+    }
+}
 
-    // Apply damage
-    UGameplayStatics::ApplyDamage(
-        Target,
-        Stats.AttackDamage,
-        GetController(),
-        this,
-        UDamageType::StaticClass()
+// ─── CHASE ────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::TickChase(float DeltaTime)
+{
+    if (!ThreatActor || !bIsAlive) return;
+
+    float DistToThreat = FVector::Dist(GetActorLocation(), ThreatActor->GetActorLocation());
+
+    // Within attack range — switch to attacking
+    if (DistToThreat <= SpeciesData.AttackRadius)
+    {
+        SetState(EDinosaurState::Attacking);
+        return;
+    }
+
+    // Lost sight (> 2x aggro radius) — return to patrol
+    if (DistToThreat > SpeciesData.AggroRadius * 2.f)
+    {
+        ThreatActor = nullptr;
+        SetState(EDinosaurState::Patrolling);
+        ChooseNextPatrolPoint();
+        return;
+    }
+
+    LastKnownThreatLocation = ThreatActor->GetActorLocation();
+    MoveToLocation(LastKnownThreatLocation);
+}
+
+// ─── FLEE ─────────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::TickFlee(float DeltaTime)
+{
+    if (!ThreatActor || !bIsAlive) return;
+
+    float DistToThreat = FVector::Dist(GetActorLocation(), ThreatActor->GetActorLocation());
+
+    // Safe distance reached — resume patrol
+    if (DistToThreat > SpeciesData.AggroRadius * 1.5f)
+    {
+        ThreatActor = nullptr;
+        SetState(EDinosaurState::Patrolling);
+        ChooseNextPatrolPoint();
+        return;
+    }
+
+    // Move away from threat
+    FVector AwayDir = (GetActorLocation() - ThreatActor->GetActorLocation()).GetSafeNormal();
+    FVector FleeTarget = GetActorLocation() + AwayDir * 2000.f;
+    MoveToLocation(FleeTarget);
+}
+
+// ─── ATTACK ───────────────────────────────────────────────────────────────────
+
+void ADinosaurBase::TickAttack(float DeltaTime)
+{
+    if (!ThreatActor || !bIsAlive) return;
+
+    float DistToThreat = FVector::Dist(GetActorLocation(), ThreatActor->GetActorLocation());
+
+    // Target moved out of attack range — resume chase
+    if (DistToThreat > SpeciesData.AttackRadius * 1.5f)
+    {
+        SetState(EDinosaurState::Chasing);
+        return;
+    }
+
+    // Face the target
+    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), ThreatActor->GetActorLocation());
+    SetActorRotation(FRotator(0.f, LookAt.Yaw, 0.f));
+
+    // Perform attack (damage applied via Blueprint or animation notify)
+    PerformAttack();
+}
+
+void ADinosaurBase::PerformAttack()
+{
+    // Subclasses override this — base applies direct damage
+    if (!ThreatActor) return;
+
+    // Simple sphere overlap for melee hit
+    TArray<AActor*> OverlappingActors;
+    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        GetActorLocation() + GetActorForwardVector() * SpeciesData.AttackRadius * 0.5f,
+        SpeciesData.AttackRadius,
+        ObjectTypes,
+        nullptr,
+        TArray<AActor*>{ this },
+        OverlappingActors
     );
 
-    OnAttackLanded(Target, Stats.AttackDamage);
-
-    // Return to hunting after attack
-    SetBehaviourState(EDB_BehaviourState::Hunting);
+    for (AActor* Hit : OverlappingActors)
+    {
+        if (Hit == ThreatActor)
+        {
+            UGameplayStatics::ApplyDamage(Hit, SpeciesData.AttackDamage, GetController(), this, nullptr);
+            break;
+        }
+    }
 }
 
-// ============================================================
-// Die
-// ============================================================
-void ADinosaurBase::Die()
+// ─── PERCEPTION CALLBACKS ─────────────────────────────────────────────────────
+
+void ADinosaurBase::OnPerceptionOverlapBegin(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
 {
-    SetBehaviourState(EDB_BehaviourState::Idle);
+    if (!bIsAlive || OtherActor == this) return;
 
-    // Stop movement
-    if (UCharacterMovementComponent* Move = GetCharacterMovement())
+    // Only react to pawns (player or other dinos)
+    APawn* OtherPawn = Cast<APawn>(OtherActor);
+    if (!OtherPawn) return;
+
+    // Carnivores aggro on player
+    if (SpeciesData.Diet == EDinosaurDiet::Carnivore)
     {
-        Move->StopMovementImmediately();
-        Move->DisableMovement();
+        APlayerController* PC = Cast<APlayerController>(OtherPawn->GetController());
+        if (PC && CurrentState != EDinosaurState::Chasing && CurrentState != EDinosaurState::Attacking)
+        {
+            ThreatActor = OtherActor;
+            SetState(EDinosaurState::Chasing);
+        }
     }
+    // Herbivores flee from player
+    else if (SpeciesData.Diet == EDinosaurDiet::Herbivore)
+    {
+        APlayerController* PC = Cast<APlayerController>(OtherPawn->GetController());
+        if (PC && CurrentState != EDinosaurState::Fleeing)
+        {
+            ThreatActor = OtherActor;
+            SetState(EDinosaurState::Fleeing);
+        }
+    }
+}
 
-    // Disable collision
-    SetActorEnableCollision(false);
+void ADinosaurBase::OnPerceptionOverlapEnd(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex)
+{
+    if (OtherActor == ThreatActor)
+    {
+        // Only clear threat if we're not actively attacking
+        if (CurrentState == EDinosaurState::Chasing || CurrentState == EDinosaurState::Fleeing)
+        {
+            ThreatActor = nullptr;
+            SetState(EDinosaurState::Patrolling);
+            ChooseNextPatrolPoint();
+        }
+    }
+}
 
-    // Notify Blueprint
-    OnDinosaurDeath();
+// ─── BLUEPRINT EVENTS (default no-op implementations) ─────────────────────────
 
-    // Destroy after 10 seconds (corpse linger time)
-    SetLifeSpan(10.f);
+void ADinosaurBase::OnDamageReceived_Implementation(float DamageAmount, AActor* DamageSource)
+{
+    // Override in Blueprint for hit reactions, sounds, VFX
+}
+
+void ADinosaurBase::OnDeath_Implementation(AActor* Killer)
+{
+    // Override in Blueprint for death animations, loot spawning, sound
+}
+
+void ADinosaurBase::OnStateChanged_Implementation(EDinosaurState OldState, EDinosaurState NewState)
+{
+    // Override in Blueprint for animation state machine transitions
 }
