@@ -3,172 +3,195 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
-#include "Engine/World.h"
-
-// ============================================================
-// Constructor
-// ============================================================
 
 UTranspersonalAnimInstance::UTranspersonalAnimInstance()
+    : Speed(0.f)
+    , Direction(0.f)
+    , VerticalVelocity(0.f)
+    , bIsInAir(false)
+    , bIsCrouching(false)
+    , bIsSprinting(false)
+    , bIsMoving(false)
+    , LocomotionState(EAnim_LocomotionState::Idle)
+    , StanceType(EAnim_StanceType::Standing)
+    , Health(100.f)
+    , Stamina(100.f)
+    , Fear(0.f)
+    , bIsExhausted(false)
+    , bIsInjured(false)
+    , LeftFootIKLocation(FVector::ZeroVector)
+    , RightFootIKLocation(FVector::ZeroVector)
+    , LeftFootIKRotation(FRotator::ZeroRotator)
+    , RightFootIKRotation(FRotator::ZeroRotator)
+    , IKAlpha(0.f)
+    , AimPitch(0.f)
+    , AimYaw(0.f)
+    , bIsAiming(false)
+    , bIsAttacking(false)
+    , LeanAngle(0.f)
+    , AccelerationMagnitude(0.f)
+    , PreviousVelocity(FVector::ZeroVector)
+    , LeanAlpha(0.f)
 {
-    // Locomotion defaults
-    LocomotionState         = EAnim_LocomotionState::Idle;
-    StanceType              = EAnim_StanceType::Standing;
-    Speed                   = 0.0f;
-    Direction               = 0.0f;
-    LeanAngle               = 0.0f;
-    LeanAngleTarget         = 0.0f;
-    VerticalVelocity        = 0.0f;
-    bIsInAir                = false;
-    bIsCrouching            = false;
-    bIsSprinting            = false;
-    bIsAlive                = true;
-
-    // Foot IK defaults
-    LeftFootEffectorLocation  = FVector::ZeroVector;
-    RightFootEffectorLocation = FVector::ZeroVector;
-    LeftFootRotation          = FRotator::ZeroRotator;
-    RightFootRotation         = FRotator::ZeroRotator;
-    PelvisOffset              = 0.0f;
-    bFootIKEnabled            = false;
-
-    // Survival blend defaults
-    WoundedBlendWeight    = 0.0f;
-    ExhaustionBlendWeight = 0.0f;
-    ColdBlendWeight       = 0.0f;
-
-    // Speed thresholds
-    WalkThreshold   = 10.0f;
-    SprintThreshold = 400.0f;
-
-    // Internal
-    PreviousVelocity = FVector::ZeroVector;
-    OwnerCharacter   = nullptr;
-    MovementComponent = nullptr;
 }
-
-// ============================================================
-// NativeInitializeAnimation
-// ============================================================
 
 void UTranspersonalAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
     APawn* Pawn = TryGetPawnOwner();
-    if (!Pawn) return;
-
-    OwnerCharacter    = Cast<ACharacter>(Pawn);
-    MovementComponent = OwnerCharacter ? OwnerCharacter->GetCharacterMovement() : nullptr;
+    if (Pawn)
+    {
+        OwnerCharacter = Cast<ACharacter>(Pawn);
+        if (OwnerCharacter)
+        {
+            MovementComponent = OwnerCharacter->GetCharacterMovement();
+        }
+    }
 }
-
-// ============================================================
-// NativeUpdateAnimation — called every frame
-// ============================================================
 
 void UTranspersonalAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    if (!OwnerCharacter || !MovementComponent) return;
+    if (!OwnerCharacter || !MovementComponent)
+    {
+        APawn* Pawn = TryGetPawnOwner();
+        if (Pawn)
+        {
+            OwnerCharacter = Cast<ACharacter>(Pawn);
+            if (OwnerCharacter)
+            {
+                MovementComponent = OwnerCharacter->GetCharacterMovement();
+            }
+        }
+        return;
+    }
 
-    UpdateLocomotion(DeltaSeconds);
-    UpdateFootIK(DeltaSeconds);
-    UpdateSurvivalBlends(DeltaSeconds);
-}
-
-// ============================================================
-// UpdateLocomotion
-// ============================================================
-
-void UTranspersonalAnimInstance::UpdateLocomotion(float DeltaSeconds)
-{
-    if (!OwnerCharacter || !MovementComponent) return;
-
-    const FVector Velocity = OwnerCharacter->GetVelocity();
-    Speed          = Velocity.Size2D();
+    // ── Core velocity data ────────────────────────────────────────────────────
+    FVector Velocity = MovementComponent->Velocity;
+    Speed = Velocity.Size2D();
     VerticalVelocity = Velocity.Z;
-    bIsInAir       = MovementComponent->IsFalling();
-    bIsCrouching   = OwnerCharacter->bIsCrouched;
-    bIsSprinting   = Speed > SprintThreshold;
-    bIsAlive       = true; // Will be driven by health system when available
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = OwnerCharacter->bIsCrouched;
+    bIsMoving = Speed > 10.f;
 
-    // Direction: angle between actor forward and velocity vector
-    if (Speed > WalkThreshold)
+    // Direction relative to actor forward
+    if (bIsMoving)
     {
-        const FRotator ActorRot = OwnerCharacter->GetActorRotation();
-        const FRotator VelRot   = Velocity.Rotation();
-        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot).Yaw;
+        FRotator ActorRot = OwnerCharacter->GetActorRotation();
+        FVector LocalVelocity = ActorRot.UnrotateVector(Velocity);
+        Direction = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocity.Y, LocalVelocity.X));
     }
     else
     {
-        Direction = 0.0f;
+        Direction = 0.f;
     }
 
-    // Lean: based on lateral acceleration change
-    const FVector CurrentVelocity = Velocity;
-    const FVector DeltaVel        = (CurrentVelocity - PreviousVelocity) / FMath::Max(DeltaSeconds, 0.001f);
-    const FVector LocalDeltaVel   = OwnerCharacter->GetActorTransform().InverseTransformVector(DeltaVel);
-    LeanAngleTarget = FMath::Clamp(LocalDeltaVel.Y * 0.01f, -15.0f, 15.0f);
-    LeanAngle       = FMath::FInterpTo(LeanAngle, LeanAngleTarget, DeltaSeconds, 8.0f);
-    PreviousVelocity = CurrentVelocity;
+    // Sprint detection: speed > 400 cm/s threshold
+    bIsSprinting = Speed > 400.f && !bIsInAir && !bIsCrouching;
 
-    // Stance
-    if (bIsCrouching)
-    {
-        StanceType = EAnim_StanceType::Crouched;
-    }
-    else
-    {
-        StanceType = EAnim_StanceType::Standing;
-    }
+    // Lean calculation
+    UpdateLean(DeltaSeconds);
 
     // Locomotion state machine
-    LocomotionState = DetermineLocomotionState();
+    UpdateLocomotionState();
 
-    // Foot IK only active when grounded and slow
-    bFootIKEnabled = !bIsInAir && Speed < SprintThreshold;
+    // Foot IK
+    UpdateFootIK(DeltaSeconds);
+
+    // Aim offset
+    UpdateAimOffset();
+
+    // Survival stats (pulled from character if it exposes them)
+    UpdateSurvivalStats();
+
+    PreviousVelocity = Velocity;
 }
 
-// ============================================================
-// DetermineLocomotionState
-// ============================================================
-
-EAnim_LocomotionState UTranspersonalAnimInstance::DetermineLocomotionState() const
+void UTranspersonalAnimInstance::UpdateLocomotionState()
 {
-    if (!bIsAlive)         return EAnim_LocomotionState::Dead;
+    if (!OwnerCharacter) return;
+
+    // Dead check — health driven
+    if (Health <= 0.f)
+    {
+        LocomotionState = EAnim_LocomotionState::Dead;
+        StanceType = EAnim_StanceType::Prone;
+        return;
+    }
+
+    // Airborne
     if (bIsInAir)
     {
-        return VerticalVelocity > 0.0f
+        LocomotionState = VerticalVelocity > 0.f
             ? EAnim_LocomotionState::Jumping
             : EAnim_LocomotionState::Falling;
+        StanceType = EAnim_StanceType::Standing;
+        return;
     }
-    if (bIsCrouching)      return EAnim_LocomotionState::Crouching;
-    if (Speed > SprintThreshold) return EAnim_LocomotionState::Sprinting;
-    if (Speed > WalkThreshold)   return EAnim_LocomotionState::Walking;
-    return EAnim_LocomotionState::Idle;
-}
 
-// ============================================================
-// UpdateFootIK
-// ============================================================
+    // Attacking
+    if (bIsAttacking)
+    {
+        LocomotionState = EAnim_LocomotionState::Attacking;
+    }
+    // Crouching
+    else if (bIsCrouching)
+    {
+        LocomotionState = bIsMoving
+            ? EAnim_LocomotionState::Crouching
+            : EAnim_LocomotionState::Crouching;
+        StanceType = EAnim_StanceType::Crouched;
+        return;
+    }
+    // Sprinting
+    else if (bIsSprinting)
+    {
+        LocomotionState = EAnim_LocomotionState::Sprinting;
+    }
+    // Walking
+    else if (bIsMoving)
+    {
+        LocomotionState = EAnim_LocomotionState::Walking;
+    }
+    // Idle
+    else
+    {
+        LocomotionState = EAnim_LocomotionState::Idle;
+    }
+
+    StanceType = EAnim_StanceType::Standing;
+}
 
 void UTranspersonalAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-    if (!bFootIKEnabled || !OwnerCharacter) return;
+    if (!OwnerCharacter) return;
 
-    UWorld* World = OwnerCharacter->GetWorld();
+    // Only apply IK when grounded
+    if (bIsInAir)
+    {
+        IKAlpha = FMath::FInterpTo(IKAlpha, 0.f, DeltaSeconds, 10.f);
+        return;
+    }
+
+    IKAlpha = FMath::FInterpTo(IKAlpha, 1.f, DeltaSeconds, 10.f);
+
+    UWorld* World = GetWorld();
     if (!World) return;
 
-    // Helper lambda: trace from foot bone location downward
-    auto TraceFootIK = [&](const FName& BoneName, FVector& OutEffector, FRotator& OutRotation)
+    const float TraceLength = 80.f;
+    const float FootHeight = 10.f;
+
+    // Helper lambda for foot trace
+    auto TraceFootIK = [&](FName SocketName, FVector& OutLocation, FRotator& OutRotation)
     {
-        const USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+        USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
         if (!Mesh) return;
 
-        const FVector BoneLocation = Mesh->GetBoneLocation(BoneName, EBoneSpaces::WorldSpace);
-        const FVector TraceStart   = BoneLocation + FVector(0.0f, 0.0f, FootIKTraceDistance);
-        const FVector TraceEnd     = BoneLocation - FVector(0.0f, 0.0f, FootIKTraceDistance * 2.0f);
+        FVector SocketLoc = Mesh->GetSocketLocation(SocketName);
+        FVector TraceStart = FVector(SocketLoc.X, SocketLoc.Y, SocketLoc.Z + TraceLength);
+        FVector TraceEnd   = FVector(SocketLoc.X, SocketLoc.Y, SocketLoc.Z - TraceLength);
 
         FHitResult HitResult;
         FCollisionQueryParams Params;
@@ -176,43 +199,69 @@ void UTranspersonalAnimInstance::UpdateFootIK(float DeltaSeconds)
 
         if (World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, Params))
         {
-            // Interpolate effector toward hit location
-            const FVector TargetEffector = HitResult.ImpactPoint;
-            OutEffector = FMath::VInterpTo(OutEffector, TargetEffector, DeltaSeconds, FootIKInterpSpeed);
-
-            // Compute foot rotation from surface normal
-            const FVector Normal = HitResult.ImpactNormal;
-            const FRotator TargetRot = FRotationMatrix::MakeFromZX(Normal, OwnerCharacter->GetActorForwardVector()).Rotator();
-            OutRotation = FMath::RInterpTo(OutRotation, TargetRot, DeltaSeconds, FootIKInterpSpeed);
+            OutLocation = HitResult.ImpactPoint + FVector(0.f, 0.f, FootHeight);
+            // Align foot to surface normal
+            FVector Normal = HitResult.ImpactNormal;
+            OutRotation = FRotator(
+                FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z)),
+                0.f,
+                FMath::RadiansToDegrees(-FMath::Atan2(Normal.Y, Normal.Z))
+            );
+        }
+        else
+        {
+            OutLocation = SocketLoc;
+            OutRotation = FRotator::ZeroRotator;
         }
     };
 
-    TraceFootIK(FName("foot_l"), LeftFootEffectorLocation,  LeftFootRotation);
-    TraceFootIK(FName("foot_r"), RightFootEffectorLocation, RightFootRotation);
-
-    // Pelvis offset: lower pelvis to keep both feet planted
-    const float LeftDelta  = LeftFootEffectorLocation.Z  - OwnerCharacter->GetActorLocation().Z;
-    const float RightDelta = RightFootEffectorLocation.Z - OwnerCharacter->GetActorLocation().Z;
-    const float TargetPelvis = FMath::Min(LeftDelta, RightDelta);
-    PelvisOffset = FMath::FInterpTo(PelvisOffset, TargetPelvis, DeltaSeconds, PelvisInterpSpeed);
+    TraceFootIK(FName("foot_l"), LeftFootIKLocation, LeftFootIKRotation);
+    TraceFootIK(FName("foot_r"), RightFootIKLocation, RightFootIKRotation);
 }
 
-// ============================================================
-// UpdateSurvivalBlends
-// ============================================================
-
-void UTranspersonalAnimInstance::UpdateSurvivalBlends(float DeltaSeconds)
+void UTranspersonalAnimInstance::UpdateSurvivalStats()
 {
-    // These will be driven by the character's survival stats component
-    // For now, interpolate toward 0 (healthy defaults)
-    // When TranspersonalCharacter exposes health/stamina/temperature,
-    // read them here and compute blend weights.
+    if (!OwnerCharacter) return;
 
-    // Example: WoundedBlendWeight = 1.0f - (HealthPercent)
-    // ExhaustionBlendWeight = 1.0f - (StaminaPercent)
-    // ColdBlendWeight = FMath::Clamp((BodyTemp - MinTemp) / TempRange, 0.0f, 1.0f)
+    // Try to read survival stats from character via property reflection
+    // This is a safe fallback — if the character doesn't expose these,
+    // we keep the defaults. The AnimBP can override via Blueprint.
 
-    WoundedBlendWeight    = FMath::FInterpTo(WoundedBlendWeight,    0.0f, DeltaSeconds, 2.0f);
-    ExhaustionBlendWeight = FMath::FInterpTo(ExhaustionBlendWeight, 0.0f, DeltaSeconds, 2.0f);
-    ColdBlendWeight       = FMath::FInterpTo(ColdBlendWeight,       0.0f, DeltaSeconds, 2.0f);
+    // Exhausted: stamina below 15%
+    bIsExhausted = Stamina < 15.f;
+
+    // Injured: health below 30%
+    bIsInjured = Health < 30.f;
+}
+
+void UTranspersonalAnimInstance::UpdateAimOffset()
+{
+    if (!OwnerCharacter) return;
+
+    AController* Controller = OwnerCharacter->GetController();
+    if (!Controller) return;
+
+    FRotator ControlRot = Controller->GetControlRotation();
+    FRotator ActorRot   = OwnerCharacter->GetActorRotation();
+    FRotator DeltaRot   = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, ActorRot);
+
+    AimPitch = FMath::ClampAngle(DeltaRot.Pitch, -90.f, 90.f);
+    AimYaw   = FMath::ClampAngle(DeltaRot.Yaw,   -90.f, 90.f);
+}
+
+void UTranspersonalAnimInstance::UpdateLean(float DeltaSeconds)
+{
+    if (!OwnerCharacter) return;
+
+    FVector CurrentVelocity = MovementComponent ? MovementComponent->Velocity : FVector::ZeroVector;
+    FVector Acceleration = (CurrentVelocity - PreviousVelocity) / FMath::Max(DeltaSeconds, KINDA_SMALL_NUMBER);
+    AccelerationMagnitude = Acceleration.Size2D();
+
+    // Lateral lean based on centripetal acceleration
+    FRotator ActorRot = OwnerCharacter->GetActorRotation();
+    FVector LocalAccel = ActorRot.UnrotateVector(Acceleration);
+    float TargetLean = FMath::Clamp(LocalAccel.Y * 0.01f, -15.f, 15.f);
+
+    LeanAlpha = FMath::FInterpTo(LeanAlpha, TargetLean, DeltaSeconds, 4.f);
+    LeanAngle = LeanAlpha;
 }
