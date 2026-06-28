@@ -1,243 +1,313 @@
 // PerformanceOptimizerComponent.cpp
 // Agent #4 — Performance Optimizer
-// Targets: 60fps PC high-end / 30fps console
-// Strategy: rolling frame-time average -> tier downscale/upscale -> console commands
+// Transpersonal Game Studio
+// Target: 60fps PC High-End / 30fps Console
+// Strategy: Adaptive quality tiers, LOD enforcement, shadow budget management
 
 #include "PerformanceOptimizerComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
+
+// ============================================================
+// Constructor
+// ============================================================
 
 UPerf_PerformanceOptimizerComponent::UPerf_PerformanceOptimizerComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // Every frame — we need accurate timing
+    PrimaryComponentTick.TickInterval = 0.1f; // Check every 100ms — not every frame
 
-    // Pre-allocate frame history
-    FrameTimeHistory.SetNumZeroed(FrameHistorySize);
-    FrameHistoryIndex = 0;
+    // Default frame budget: 60fps PC target
+    TargetFrameBudget.TargetFPS = 60.0f;
+    TargetFrameBudget.FrameBudgetMS = 1000.0f / 60.0f; // 16.67ms
+
+    // Pre-size FPS sample buffer
+    FPSSamples.Reserve(120);
 }
+
+// ============================================================
+// BeginPlay
+// ============================================================
 
 void UPerf_PerformanceOptimizerComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Set initial budget based on target FPS
-    CurrentBudget.TargetFrameTimeMs = 1000.0f / FMath::Max(TargetFPS, 1.0f);
-    CurrentScreenPercentage = MaxScreenPercentage;
-
     // Apply initial quality tier
-    ApplyQualityTier(CurrentTier);
+    ApplyQualityTier(InitialQualityTier);
 
-    UE_LOG(LogTemp, Log, TEXT("[PerfOptimizer] Initialized. Target: %.1ffps (%.2fms budget). Tier: High"),
-        TargetFPS, CurrentBudget.TargetFrameTimeMs);
+    // Apply shadow and LOD CVars
+    ApplyShadowCVars();
+    ApplyLODCVars();
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Initialized. Tier=%d, TargetFPS=%.0f, Budget=%.2fms"),
+        (int32)InitialQualityTier, TargetFrameBudget.TargetFPS, TargetFrameBudget.FrameBudgetMS);
 }
+
+// ============================================================
+// TickComponent
+// ============================================================
 
 void UPerf_PerformanceOptimizerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    UpdateFrameBudget(DeltaTime);
+    UpdateFPSAverage(DeltaTime);
 
-    // Quality evaluation every 0.5 seconds to avoid thrashing
-    QualityCheckAccumulator += DeltaTime;
-    if (QualityCheckAccumulator >= QualityCheckInterval)
+    if (bAdaptiveQuality)
     {
-        QualityCheckAccumulator = 0.0f;
-        EvaluateQualityScaling();
+        CheckAdaptiveQuality(DeltaTime);
     }
 }
 
-void UPerf_PerformanceOptimizerComponent::UpdateFrameBudget(float DeltaTime)
+// ============================================================
+// UpdateFPSAverage — rolling window average
+// ============================================================
+
+void UPerf_PerformanceOptimizerComponent::UpdateFPSAverage(float DeltaTime)
 {
-    const float FrameMs = DeltaTime * 1000.0f;
+    if (DeltaTime <= 0.0f) return;
 
-    // Store in rolling history
-    FrameTimeHistory[FrameHistoryIndex] = FrameMs;
-    FrameHistoryIndex = (FrameHistoryIndex + 1) % FrameHistorySize;
+    float InstantFPS = 1.0f / DeltaTime;
+    FPSSamples.Add(InstantFPS);
 
-    CurrentBudget.LastFrameTimeMs = FrameMs;
-    CurrentBudget.bOverBudget = (FrameMs > CurrentBudget.TargetFrameTimeMs * 1.1f); // 10% headroom
-
-    if (CurrentBudget.bOverBudget)
+    // Keep rolling window
+    while (FPSSamples.Num() > FPSAveragingWindow)
     {
-        CurrentBudget.ConsecutiveOverBudgetFrames++;
-        const float OverrunMs = FrameMs - CurrentBudget.TargetFrameTimeMs;
-        if (CurrentBudget.ConsecutiveOverBudgetFrames == DownscaleThresholdFrames)
+        FPSSamples.RemoveAt(0);
+    }
+
+    // Compute average
+    float Sum = 0.0f;
+    for (float Sample : FPSSamples)
+    {
+        Sum += Sample;
+    }
+
+    CurrentFrameBudget.CurrentFPS = (FPSSamples.Num() > 0) ? (Sum / FPSSamples.Num()) : 0.0f;
+    CurrentFrameBudget.CurrentFrameMS = (CurrentFrameBudget.CurrentFPS > 0.0f) ? (1000.0f / CurrentFrameBudget.CurrentFPS) : 0.0f;
+    CurrentFrameBudget.bMeetingBudget = (CurrentFrameBudget.CurrentFPS >= TargetFrameBudget.TargetFPS * 0.9f); // 10% tolerance
+}
+
+// ============================================================
+// CheckAdaptiveQuality — downgrade if FPS is consistently low
+// ============================================================
+
+void UPerf_PerformanceOptimizerComponent::CheckAdaptiveQuality(float DeltaTime)
+{
+    if (FPSSamples.Num() < FPSAveragingWindow / 2)
+    {
+        return; // Not enough samples yet
+    }
+
+    bool bLowFPS = !CurrentFrameBudget.bMeetingBudget;
+
+    if (bLowFPS)
+    {
+        AccumulatedLowFPSTime += DeltaTime;
+
+        if (AccumulatedLowFPSTime >= AdaptiveQualityGracePeriod)
         {
-            OnFrameBudgetExceeded(OverrunMs);
+            // Downgrade quality tier
+            int32 CurrentTierInt = (int32)CurrentQualityTier;
+            if (CurrentTierInt < (int32)EPerf_QualityTier::Low)
+            {
+                EPerf_QualityTier NewTier = (EPerf_QualityTier)(CurrentTierInt + 1);
+                UE_LOG(LogTemp, Warning, TEXT("[PerformanceOptimizer] FPS=%.1f below target %.1f — downgrading quality tier %d -> %d"),
+                    CurrentFrameBudget.CurrentFPS, TargetFrameBudget.TargetFPS, CurrentTierInt, (int32)NewTier);
+                ApplyQualityTier(NewTier);
+            }
+            AccumulatedLowFPSTime = 0.0f;
         }
-        UnderBudgetFrameCount = 0;
     }
     else
     {
-        CurrentBudget.ConsecutiveOverBudgetFrames = 0;
-        UnderBudgetFrameCount++;
+        // FPS is good — reset accumulator
+        AccumulatedLowFPSTime = FMath::Max(0.0f, AccumulatedLowFPSTime - DeltaTime * 2.0f);
     }
 }
 
-void UPerf_PerformanceOptimizerComponent::EvaluateQualityScaling()
-{
-    const float AvgMs = GetAverageFrameTimeMs();
-    const float BudgetMs = CurrentBudget.TargetFrameTimeMs;
-
-    // --- Downscale logic ---
-    if (CurrentBudget.ConsecutiveOverBudgetFrames >= DownscaleThresholdFrames)
-    {
-        const EPerf_QualityTier OldTier = CurrentTier;
-        EPerf_QualityTier NewTier = CurrentTier;
-
-        if (AvgMs > BudgetMs * 2.0f && CurrentTier != EPerf_QualityTier::Minimal)
-        {
-            NewTier = EPerf_QualityTier::Minimal;
-        }
-        else if (AvgMs > BudgetMs * 1.5f && CurrentTier > EPerf_QualityTier::Low)
-        {
-            NewTier = static_cast<EPerf_QualityTier>(static_cast<uint8>(CurrentTier) + 1);
-        }
-        else if (AvgMs > BudgetMs * 1.1f && CurrentTier > EPerf_QualityTier::Medium)
-        {
-            NewTier = static_cast<EPerf_QualityTier>(static_cast<uint8>(CurrentTier) + 1);
-        }
-
-        if (NewTier != OldTier)
-        {
-            SetQualityTier(NewTier);
-        }
-    }
-    // --- Upscale logic (only after sustained good performance) ---
-    else if (UnderBudgetFrameCount >= UpscaleThresholdFrames && AvgMs < BudgetMs * 0.8f)
-    {
-        if (CurrentTier > EPerf_QualityTier::Ultra)
-        {
-            const EPerf_QualityTier OldTier = CurrentTier;
-            const EPerf_QualityTier NewTier = static_cast<EPerf_QualityTier>(static_cast<uint8>(CurrentTier) - 1);
-            SetQualityTier(NewTier);
-        }
-        UnderBudgetFrameCount = 0;
-    }
-}
-
-void UPerf_PerformanceOptimizerComponent::SetQualityTier(EPerf_QualityTier NewTier)
-{
-    if (NewTier == CurrentTier) return;
-
-    const EPerf_QualityTier OldTier = CurrentTier;
-    CurrentTier = NewTier;
-
-    ApplyQualityTier(NewTier);
-    OnQualityTierChanged(NewTier, OldTier);
-
-    UE_LOG(LogTemp, Warning, TEXT("[PerfOptimizer] Quality tier changed: %d -> %d (avg: %.2fms, budget: %.2fms)"),
-        static_cast<int32>(OldTier), static_cast<int32>(NewTier),
-        GetAverageFrameTimeMs(), CurrentBudget.TargetFrameTimeMs);
-}
+// ============================================================
+// ApplyQualityTier — apply all CVars for a given tier
+// ============================================================
 
 void UPerf_PerformanceOptimizerComponent::ApplyQualityTier(EPerf_QualityTier Tier)
 {
+    CurrentQualityTier = Tier;
+    ApplyConsoleCVars(Tier);
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Quality tier applied: %d"), (int32)Tier);
+}
+
+void UPerf_PerformanceOptimizerComponent::ApplyConsoleCVars(EPerf_QualityTier Tier)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
     switch (Tier)
     {
     case EPerf_QualityTier::Ultra:
-        ApplyScreenPercentage(100.0f);
-        ExecConsoleCommand(TEXT("r.Shadow.MaxResolution 2048"));
-        ExecConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.01"));
-        ExecConsoleCommand(TEXT("foliage.LODDistanceScale 1.5"));
-        ExecConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.5"));
-        ExecConsoleCommand(TEXT("r.MaxAnisotropy 16"));
+        SetCVar(TEXT("r.ScreenPercentage"), 100);
+        SetCVar(TEXT("r.Shadow.MaxResolution"), 4096);
+        SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 4);
+        SetCVar(TEXT("r.Lumen.Reflections.Allow"), 1);
+        SetCVar(TEXT("r.Nanite.MaxPixelsPerEdge"), 0.5f);
+        SetCVar(TEXT("foliage.LODDistanceScale"), 2.0f);
+        SetCVar(TEXT("r.LODDistanceFactor"), 1.5f);
+        SetCVar(TEXT("r.Streaming.PoolSize"), 4096);
         break;
 
     case EPerf_QualityTier::High:
-        ApplyScreenPercentage(100.0f);
-        ExecConsoleCommand(TEXT("r.Shadow.MaxResolution 1024"));
-        ExecConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.02"));
-        ExecConsoleCommand(TEXT("foliage.LODDistanceScale 1.0"));
-        ExecConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.0"));
-        ExecConsoleCommand(TEXT("r.MaxAnisotropy 8"));
+        SetCVar(TEXT("r.ScreenPercentage"), 100);
+        SetCVar(TEXT("r.Shadow.MaxResolution"), 2048);
+        SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 3);
+        SetCVar(TEXT("r.Lumen.Reflections.Allow"), 1);
+        SetCVar(TEXT("r.Nanite.MaxPixelsPerEdge"), 1.0f);
+        SetCVar(TEXT("foliage.LODDistanceScale"), 1.5f);
+        SetCVar(TEXT("r.LODDistanceFactor"), 1.0f);
+        SetCVar(TEXT("r.Streaming.PoolSize"), 2048);
         break;
 
     case EPerf_QualityTier::Medium:
-        ApplyScreenPercentage(85.0f);
-        ExecConsoleCommand(TEXT("r.Shadow.MaxResolution 512"));
-        ExecConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.04"));
-        ExecConsoleCommand(TEXT("foliage.LODDistanceScale 0.75"));
-        ExecConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 0.75"));
-        ExecConsoleCommand(TEXT("r.MaxAnisotropy 4"));
+        SetCVar(TEXT("r.ScreenPercentage"), 85);
+        SetCVar(TEXT("r.Shadow.MaxResolution"), 1024);
+        SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 2);
+        SetCVar(TEXT("r.Lumen.Reflections.Allow"), 0);
+        SetCVar(TEXT("r.Nanite.MaxPixelsPerEdge"), 2.0f);
+        SetCVar(TEXT("foliage.LODDistanceScale"), 1.0f);
+        SetCVar(TEXT("r.LODDistanceFactor"), 0.75f);
+        SetCVar(TEXT("r.Streaming.PoolSize"), 1024);
         break;
 
     case EPerf_QualityTier::Low:
-        ApplyScreenPercentage(70.0f);
-        ExecConsoleCommand(TEXT("r.Shadow.MaxResolution 256"));
-        ExecConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.08"));
-        ExecConsoleCommand(TEXT("foliage.LODDistanceScale 0.5"));
-        ExecConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 0.5"));
-        ExecConsoleCommand(TEXT("r.MaxAnisotropy 2"));
-        ExecConsoleCommand(TEXT("r.Lumen.Reflections.Allow 0"));
-        break;
-
-    case EPerf_QualityTier::Minimal:
-        ApplyScreenPercentage(60.0f);
-        ExecConsoleCommand(TEXT("r.Shadow.MaxResolution 128"));
-        ExecConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.15"));
-        ExecConsoleCommand(TEXT("foliage.LODDistanceScale 0.3"));
-        ExecConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 0.3"));
-        ExecConsoleCommand(TEXT("r.MaxAnisotropy 1"));
-        ExecConsoleCommand(TEXT("r.Lumen.Reflections.Allow 0"));
-        ExecConsoleCommand(TEXT("r.DynamicGlobalIlluminationMethod 0"));
+        SetCVar(TEXT("r.ScreenPercentage"), 70);
+        SetCVar(TEXT("r.Shadow.MaxResolution"), 512);
+        SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 1);
+        SetCVar(TEXT("r.Lumen.Reflections.Allow"), 0);
+        SetCVar(TEXT("r.Nanite.MaxPixelsPerEdge"), 4.0f);
+        SetCVar(TEXT("foliage.LODDistanceScale"), 0.5f);
+        SetCVar(TEXT("r.LODDistanceFactor"), 0.5f);
+        SetCVar(TEXT("r.Streaming.PoolSize"), 512);
         break;
     }
+
+    // Always-on performance settings regardless of tier
+    SetCVar(TEXT("r.HZBOcclusion"), 1);
+    SetCVar(TEXT("r.SkyAtmosphere.FastSkyLUT"), 1);
+    SetCVar(TEXT("r.DistanceFieldAO"), 1);
+    SetCVar(TEXT("r.VirtualTextureMemoryBudget"), 1024);
 }
 
-void UPerf_PerformanceOptimizerComponent::ApplyScreenPercentage(float Percentage)
-{
-    if (!bDynamicResolutionEnabled) return;
+// ============================================================
+// ApplyShadowCVars — apply shadow settings from struct
+// ============================================================
 
-    const float ClampedPct = FMath::Clamp(Percentage, MinScreenPercentage, MaxScreenPercentage);
-    CurrentScreenPercentage = ClampedPct;
-    ExecConsoleCommand(FString::Printf(TEXT("r.ScreenPercentage %.0f"), ClampedPct));
+void UPerf_PerformanceOptimizerComponent::ApplyShadowCVars()
+{
+    SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), ShadowSettings.MaxCSMCascades);
+    SetCVar(TEXT("r.Shadow.MaxResolution"), ShadowSettings.ShadowMapResolution);
 }
 
-float UPerf_PerformanceOptimizerComponent::GetAverageFrameTimeMs() const
-{
-    if (FrameTimeHistory.Num() == 0) return 0.0f;
+// ============================================================
+// ApplyLODCVars — apply LOD settings from struct
+// ============================================================
 
-    float Sum = 0.0f;
-    for (float T : FrameTimeHistory)
+void UPerf_PerformanceOptimizerComponent::ApplyLODCVars()
+{
+    SetCVar(TEXT("r.LODDistanceFactor"), LODSettings.LODDistanceScale);
+    SetCVar(TEXT("foliage.LODDistanceScale"), LODSettings.FoliageLODScale);
+}
+
+// ============================================================
+// RefreshLODSettings — update cull distances on all SMCs
+// ============================================================
+
+void UPerf_PerformanceOptimizerComponent::RefreshLODSettings()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    int32 Updated = 0;
+
+    for (TActorIterator<AActor> It(World); It; ++It)
     {
-        Sum += T;
-    }
-    return Sum / static_cast<float>(FrameTimeHistory.Num());
-}
+        AActor* Actor = *It;
+        if (!Actor) continue;
 
-void UPerf_PerformanceOptimizerComponent::ExecConsoleCommand(const FString& Command) const
-{
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
+        TArray<UStaticMeshComponent*> SMCs;
+        Actor->GetComponents<UStaticMeshComponent>(SMCs);
+
+        for (UStaticMeshComponent* SMC : SMCs)
         {
-            PC->ConsoleCommand(Command);
+            if (!SMC) continue;
+
+            // Determine cull distance based on actor scale
+            FVector Scale = Actor->GetActorScale3D();
+            float AvgScale = (Scale.X + Scale.Y + Scale.Z) / 3.0f;
+
+            float CullDist;
+            if (AvgScale < 1.0f)
+            {
+                CullDist = LODSettings.SmallPropCullDistance;
+            }
+            else if (AvgScale < 5.0f)
+            {
+                CullDist = LODSettings.MediumObjectCullDistance;
+            }
+            else
+            {
+                CullDist = LODSettings.LargeObjectCullDistance;
+            }
+
+            SMC->SetCullDistance(CullDist);
+            Updated++;
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] RefreshLODSettings: updated %d StaticMeshComponents"), Updated);
 }
 
-void UPerf_PerformanceOptimizerComponent::LogPerformanceStats() const
+// ============================================================
+// RunAdaptiveQualityCheck — callable from editor
+// ============================================================
+
+void UPerf_PerformanceOptimizerComponent::RunAdaptiveQualityCheck()
 {
-    const float AvgMs = GetAverageFrameTimeMs();
-    const float AvgFPS = AvgMs > 0.0f ? 1000.0f / AvgMs : 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceOptimizer] Manual quality check — FPS=%.1f, Budget=%.2fms, MeetingBudget=%s, Tier=%d"),
+        CurrentFrameBudget.CurrentFPS,
+        CurrentFrameBudget.CurrentFrameMS,
+        CurrentFrameBudget.bMeetingBudget ? TEXT("YES") : TEXT("NO"),
+        (int32)CurrentQualityTier);
 
-    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE OPTIMIZER STATS ==="));
-    UE_LOG(LogTemp, Log, TEXT("  Target FPS: %.1f (%.2fms budget)"), TargetFPS, CurrentBudget.TargetFrameTimeMs);
-    UE_LOG(LogTemp, Log, TEXT("  Current FPS: %.1f (%.2fms avg)"), AvgFPS, AvgMs);
-    UE_LOG(LogTemp, Log, TEXT("  Quality Tier: %d"), static_cast<int32>(CurrentTier));
-    UE_LOG(LogTemp, Log, TEXT("  Screen Percentage: %.0f%%"), CurrentScreenPercentage);
-    UE_LOG(LogTemp, Log, TEXT("  Over Budget: %s (%d consecutive frames)"),
-        CurrentBudget.bOverBudget ? TEXT("YES") : TEXT("NO"),
-        CurrentBudget.ConsecutiveOverBudgetFrames);
-    UE_LOG(LogTemp, Log, TEXT("==================================="));
+    // Re-apply current tier CVars
+    ApplyConsoleCVars(CurrentQualityTier);
+    ApplyShadowCVars();
+    ApplyLODCVars();
+    RefreshLODSettings();
+}
 
-    if (GEngine)
+// ============================================================
+// SetCVar helpers
+// ============================================================
+
+void UPerf_PerformanceOptimizerComponent::SetCVar(const FString& CVarName, float Value)
+{
+    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*CVarName);
+    if (CVar)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
-            FString::Printf(TEXT("[PerfOpt] FPS: %.1f | Tier: %d | Screen: %.0f%%"),
-                AvgFPS, static_cast<int32>(CurrentTier), CurrentScreenPercentage));
+        CVar->Set(Value, ECVF_SetByCode);
+    }
+}
+
+void UPerf_PerformanceOptimizerComponent::SetCVar(const FString& CVarName, int32 Value)
+{
+    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*CVarName);
+    if (CVar)
+    {
+        CVar->Set(Value, ECVF_SetByCode);
     }
 }
