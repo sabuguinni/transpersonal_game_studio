@@ -1,5 +1,3 @@
-// TyrannosaurusRex.h — Tyrannosaurus Rex species implementation
-// Agent #03 — Core Systems Programmer — Cycle AUTO_20260628_010
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,11 +6,21 @@
 
 /**
  * ATyrannosaurusRex
- * Apex predator. Solitary, territorial, ambush hunter.
- * Stats: 500 HP, 25 damage/hit, 400 walk / 550 run speed.
- * Behavior: patrols large territory, charges on sight, roars to stun prey.
+ *
+ * Apex predator. High health, devastating attack damage, large detection radius.
+ * Solitary hunter — does NOT use pack tactics.
+ * Behaviour: Patrols territory, attacks anything in range, flees only at <10% health.
+ *
+ * Stats:
+ *   Health:          500
+ *   Attack Damage:    80
+ *   Attack Range:    350 cm
+ *   Detection:      1800 cm
+ *   Move Speed:      350 cm/s
+ *   Sprint Speed:    650 cm/s
+ *   Mass:          8000 kg
  */
-UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Tyrannosaurus Rex"))
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|Dinosaurs")
 class TRANSPERSONALGAME_API ATyrannosaurusRex : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -21,58 +29,41 @@ public:
     ATyrannosaurusRex();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // ── Roar ability ─────────────────────────────────────────────────────────
-    /** Roar that briefly stuns nearby prey (radius 1200 cm, stun 2s) */
-    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
-    void PerformRoar();
+    // ---- TRex-specific properties ----
 
-    /** Radius of the roar stun effect in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
-    float RoarRadius = 1200.0f;
+    /** Roar cooldown in seconds — triggers fear response in nearby prey */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float RoarCooldown = 15.0f;
 
-    /** Duration of roar stun on prey (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
-    float RoarStunDuration = 2.0f;
+    /** Stomp radius — area-of-effect ground impact when charging */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float StompRadius = 400.0f;
 
-    /** Cooldown between roars (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
-    float RoarCooldown = 20.0f;
+    /** Stomp damage applied to actors within StompRadius */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behaviour")
+    float StompDamage = 40.0f;
 
-    // ── Charge attack ────────────────────────────────────────────────────────
-    /** Initiates a charge attack toward target location */
-    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
-    void BeginCharge(FVector TargetLocation);
-
-    /** Speed multiplier during charge (applied on top of run speed) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
-    float ChargeSpeedMultiplier = 1.5f;
-
-    /** Duration of charge in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Abilities")
-    float ChargeDuration = 2.5f;
-
-    // ── Territory ────────────────────────────────────────────────────────────
-    /** Radius of TRex territory in cm (default 8000 = 80m) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Territory")
-    float TerritoryRadius = 8000.0f;
-
-    /** Home base location (set on BeginPlay to spawn location) */
-    UPROPERTY(BlueprintReadOnly, Category="TRex|Territory")
-    FVector HomeLocation;
-
-protected:
-    /** Whether TRex is currently charging */
-    UPROPERTY(BlueprintReadOnly, Category="TRex|State")
+    /** Whether the TRex is currently in a charge state */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Behaviour")
     bool bIsCharging = false;
 
-    /** Time remaining in current charge */
-    float ChargeTimeRemaining = 0.0f;
+    // ---- TRex-specific functions ----
 
-    /** Timestamp of last roar */
+    /** Trigger a territorial roar — applies fear to nearby player/NPCs */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behaviour")
+    void TriggerRoar();
+
+    /** Stomp attack — area damage around current position */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void PerformStomp();
+
+    /** Override: on death, play collapse sequence */
+    virtual void OnDinoDeath_Implementation() override;
+
+    /** Override: on spotting target, trigger roar if cooldown elapsed */
+    virtual void OnDinoSpotTarget_Implementation(AActor* SpottedTarget) override;
+
+protected:
     float LastRoarTime = -999.0f;
-
-    /** Charge target direction (normalised) */
-    FVector ChargeDirection = FVector::ZeroVector;
 };
