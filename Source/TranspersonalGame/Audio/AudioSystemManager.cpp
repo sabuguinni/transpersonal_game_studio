@@ -1,221 +1,236 @@
-#include "AudioSystemManager.h"
-#include "Components/AudioComponent.h"
+// AudioSystemManager.cpp
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260628_001
+// Implementation: adaptive ambient layers, dialogue ducking, danger-reactive music
+
+#include "Audio/AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "EngineUtils.h"
 
-// ============================================================
-// UAudio_AmbientZoneComponent — Implementation
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// AAudio_AmbientZone
+// ─────────────────────────────────────────────────────────────────────────────
 
-UAudio_AmbientZoneComponent::UAudio_AmbientZoneComponent()
+AAudio_AmbientZone::AAudio_AmbientZone()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5s — not every frame
+    PrimaryActorTick.bCanEverTick = true;
+
+    PrimaryAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimaryAudioComponent"));
+    PrimaryAudioComponent->SetupAttachment(RootComponent);
+    PrimaryAudioComponent->bAutoActivate = false;
+    PrimaryAudioComponent->SetVolumeMultiplier(0.0f);
 }
 
-void UAudio_AmbientZoneComponent::BeginPlay()
+void AAudio_AmbientZone::BeginPlay()
 {
     Super::BeginPlay();
-    // Initialize audio components for each ambient layer
-    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
+    // Start silent; AudioSystemManager will activate zones as player enters
+    CurrentVolume = 0.0f;
+}
+
+void AAudio_AmbientZone::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bZoneActive && CurrentVolume < 1.0f)
     {
-        if (Layer.SoundAsset.IsValid())
+        // Fade in
+        CurrentVolume = FMath::Min(1.0f, CurrentVolume + DeltaTime / FMath::Max(0.1f, AmbientLayers.Num() > 0 ? AmbientLayers[0].FadeInTime : 2.0f));
+        if (PrimaryAudioComponent)
         {
-            UAudioComponent* AudioComp = NewObject<UAudioComponent>(GetOwner());
-            if (AudioComp)
+            PrimaryAudioComponent->SetVolumeMultiplier(CurrentVolume);
+        }
+    }
+    else if (!bZoneActive && CurrentVolume > 0.0f)
+    {
+        // Fade out
+        float FadeOut = (AmbientLayers.Num() > 0) ? AmbientLayers[0].FadeOutTime : 3.0f;
+        CurrentVolume = FMath::Max(0.0f, CurrentVolume - DeltaTime / FMath::Max(0.1f, FadeOut));
+        if (PrimaryAudioComponent)
+        {
+            PrimaryAudioComponent->SetVolumeMultiplier(CurrentVolume);
+            if (CurrentVolume <= 0.0f)
             {
-                AudioComp->RegisterComponent();
-                AudioComp->SetSound(Layer.SoundAsset.Get());
-                AudioComp->SetVolumeMultiplier(Layer.BaseVolume);
-                AudioComp->bAutoActivate = false;
-                ActiveAudioComponents.Add(AudioComp);
+                PrimaryAudioComponent->Stop();
             }
         }
     }
 }
 
-void UAudio_AmbientZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudio_AmbientZone::ActivateZone()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    if (bZoneActive) return;
+    bZoneActive = true;
 
-    if (bTransitioning)
+    if (PrimaryAudioComponent && AmbientLayers.Num() > 0 && AmbientLayers[0].SoundAsset)
     {
-        ThreatTransitionTimer -= DeltaTime;
-        if (ThreatTransitionTimer <= 0.0f)
-        {
-            bTransitioning = false;
-            ThreatTransitionTimer = 0.0f;
-        }
+        PrimaryAudioComponent->SetSound(AmbientLayers[0].SoundAsset);
+        PrimaryAudioComponent->Play();
     }
 }
 
-void UAudio_AmbientZoneComponent::SetThreatLevel(EAudio_ThreatLevel NewLevel)
+void AAudio_AmbientZone::DeactivateZone()
 {
-    if (NewLevel == CurrentThreatLevel) return;
-
-    EAudio_ThreatLevel OldLevel = CurrentThreatLevel;
-    CurrentThreatLevel = NewLevel;
-    bTransitioning = true;
-    ThreatTransitionTimer = 2.0f;
-
-    // Volume multiplier based on threat — danger suppresses ambient, heightens tension
-    float VolumeScale = 1.0f;
-    switch (NewLevel)
-    {
-        case EAudio_ThreatLevel::Safe:     VolumeScale = 1.0f;  break;
-        case EAudio_ThreatLevel::Cautious: VolumeScale = 0.7f;  break;
-        case EAudio_ThreatLevel::Danger:   VolumeScale = 0.3f;  break;
-        case EAudio_ThreatLevel::Critical: VolumeScale = 0.0f;  break; // Silence = maximum tension
-    }
-
-    for (UAudioComponent* Comp : ActiveAudioComponents)
-    {
-        if (Comp && Comp->IsActive())
-        {
-            Comp->SetVolumeMultiplier(VolumeScale);
-        }
-    }
+    bZoneActive = false;
+    // Fade handled in Tick
 }
 
-void UAudio_AmbientZoneComponent::FadeToZone(EAudio_AmbientZone NewZone, float FadeTime)
+bool AAudio_AmbientZone::IsPlayerInZone() const
 {
-    ZoneType = NewZone;
-    // Fade out current, fade in new — handled by volume interpolation in Tick
-    for (UAudioComponent* Comp : ActiveAudioComponents)
-    {
-        if (Comp)
-        {
-            Comp->FadeOut(FadeTime, 0.0f);
-        }
-    }
-    ActiveAudioComponents.Empty();
+    UWorld* World = GetWorld();
+    if (!World) return false;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn) return false;
+
+    float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
+    return DistSq <= (ZoneRadius * ZoneRadius);
 }
 
-FString UAudio_AmbientZoneComponent::GetZoneName() const
-{
-    switch (ZoneType)
-    {
-        case EAudio_AmbientZone::Camp:       return TEXT("Camp");
-        case EAudio_AmbientZone::Forest:     return TEXT("Forest");
-        case EAudio_AmbientZone::River:      return TEXT("River");
-        case EAudio_AmbientZone::OpenPlain:  return TEXT("Open Plain");
-        case EAudio_AmbientZone::Cave:       return TEXT("Cave");
-        case EAudio_AmbientZone::DangerZone: return TEXT("Danger Zone");
-        default:                             return TEXT("Unknown");
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// AAudio_SystemManager
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ============================================================
-// AAudio_AmbientSourceActor — Implementation
-// ============================================================
-
-AAudio_AmbientSourceActor::AAudio_AmbientSourceActor()
+AAudio_SystemManager::AAudio_SystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
 
-    AmbientZoneComp = CreateDefaultSubobject<UAudio_AmbientZoneComponent>(TEXT("AmbientZoneComp"));
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComp"));
-
-    PrimaryAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimaryAudioComp"));
-    PrimaryAudioComp->SetupAttachment(RootComponent);
-    PrimaryAudioComp->bAutoActivate = false;
+    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
+    MusicComponent->SetupAttachment(RootComponent);
+    MusicComponent->bAutoActivate = false;
+    MusicComponent->SetVolumeMultiplier(0.0f);
 }
 
-void AAudio_AmbientSourceActor::BeginPlay()
+void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    PopulateDefaultDialogueEntries();
+    DiscoverAmbientZones();
+    CurrentMusicVolume = 0.0f;
+    TargetMusicVolume = 0.8f;
 }
 
-void AAudio_AmbientSourceActor::Tick(float DeltaTime)
+void AAudio_SystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bDialoguePlaying)
+    // Update ambient zone activation based on player proximity
+    for (AAudio_AmbientZone* Zone : RegisteredZones)
     {
-        DialogueTimer -= DeltaTime;
-        if (DialogueTimer <= 0.0f)
+        if (!Zone) continue;
+        if (Zone->IsPlayerInZone())
         {
-            bDialoguePlaying = false;
-            DialogueTimer = 0.0f;
+            Zone->ActivateZone();
+        }
+        else
+        {
+            Zone->DeactivateZone();
+        }
+    }
+
+    // Smooth music volume toward target
+    UpdateMusicLayer(DeltaTime);
+}
+
+void AAudio_SystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    if (CurrentDangerLevel == NewLevel) return;
+    CurrentDangerLevel = NewLevel;
+
+    // Find matching music state and begin transition
+    for (const FAudio_MusicState& State : MusicStates)
+    {
+        if (State.DangerLevel == NewLevel && State.MusicAsset)
+        {
+            TargetMusicVolume = State.Volume;
+            if (MusicComponent)
+            {
+                MusicComponent->SetSound(State.MusicAsset);
+                MusicComponent->Play();
+            }
+            break;
         }
     }
 }
 
-void AAudio_AmbientSourceActor::PopulateDefaultDialogueEntries()
+void AAudio_SystemManager::OnDialogueStart()
 {
-    DialogueEntries.Empty();
+    if (bDialogueActive) return;
+    bDialogueActive = true;
+    ApplyDialogueDuck(true);
+}
 
-    // Wire all TTS-generated voice lines from cycles 012 and 013
-    TArray<TTuple<FString, FString, FString, float>> VoiceData = {
-        MakeTuple(
-            FString(TEXT("ElderTracker")),
-            FString(TEXT("Fresh tracks — three-toed, deep. T-Rex, this morning.")),
-            ElderTrackerURL,
-            8.0f
-        ),
-        MakeTuple(
-            FString(TEXT("ChiefHunter")),
-            FString(TEXT("We lost Darak at the river crossing. The Spinosaurus came from beneath.")),
-            ChiefHunterURL,
-            10.0f
-        ),
-        MakeTuple(
-            FString(TEXT("Craftmaster")),
-            FString(TEXT("Craft the spear tip first. Obsidian from the black ridge.")),
-            CraftmasterURL,
-            9.0f
-        ),
-        MakeTuple(
-            FString(TEXT("ScoutRanger")),
-            FString(TEXT("The herd moved south three days ago. Two hundred Parasaurolophus.")),
-            ScoutRangerURL,
-            11.0f
-        ),
-        MakeTuple(
-            FString(TEXT("ScoutWarning")),
-            FString(TEXT("Raptors hunt in packs along the water's edge at dusk. Freeze when you hear clicking.")),
-            ScoutWarningURL,
-            20.0f
-        ),
-        MakeTuple(
-            FString(TEXT("ElderSurvivor")),
-            FString(TEXT("Keep the fire low. High flame draws predators from three ridges away.")),
-            ElderSurvivorURL,
-            16.0f
-        ),
-    };
+void AAudio_SystemManager::OnDialogueEnd()
+{
+    if (!bDialogueActive) return;
+    bDialogueActive = false;
+    ApplyDialogueDuck(false);
+}
 
-    for (const auto& Entry : VoiceData)
+void AAudio_SystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+{
+    CurrentTimeOfDay = NewTime;
+    // Ambient zones will cross-fade based on time; future: filter layers by TimeOfDay
+}
+
+AAudio_SystemManager* AAudio_SystemManager::GetInstance(UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World) return nullptr;
+
+    for (TActorIterator<AAudio_SystemManager> It(World); It; ++It)
     {
-        FAudio_DialogueEntry DE;
-        DE.CharacterName = Entry.Get<0>();
-        DE.DialogueText  = Entry.Get<1>();
-        DE.AudioURL      = Entry.Get<2>();
-        DE.Duration      = Entry.Get<3>();
-        DE.bHasBeenPlayed = false;
-        DialogueEntries.Add(DE);
+        return *It; // Return first found
+    }
+    return nullptr;
+}
+
+void AAudio_SystemManager::DiscoverAmbientZones()
+{
+    RegisteredZones.Empty();
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (TActorIterator<AAudio_AmbientZone> It(World); It; ++It)
+    {
+        RegisteredZones.Add(*It);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Discovered %d ambient zones"), RegisteredZones.Num());
+}
+
+void AAudio_SystemManager::UpdateMusicLayer(float DeltaTime)
+{
+    if (!MusicComponent) return;
+
+    float Diff = TargetMusicVolume - CurrentMusicVolume;
+    if (FMath::Abs(Diff) > 0.001f)
+    {
+        float Step = MusicTransitionSpeed * DeltaTime;
+        CurrentMusicVolume = FMath::Clamp(CurrentMusicVolume + FMath::Sign(Diff) * Step, 0.0f, 1.0f);
+        MusicComponent->SetVolumeMultiplier(CurrentMusicVolume);
     }
 }
 
-void AAudio_AmbientSourceActor::PlayDialogueEntry(int32 EntryIndex)
+void AAudio_SystemManager::ApplyDialogueDuck(bool bDuck)
 {
-    if (!DialogueEntries.IsValidIndex(EntryIndex)) return;
-    if (bDialoguePlaying) return;
+    float TargetVol = bDuck ? DuckConfig.DuckVolume : 1.0f;
+    float FadeTime  = bDuck ? DuckConfig.DuckFadeTime : DuckConfig.RestoreFadeTime;
 
-    FAudio_DialogueEntry& Entry = DialogueEntries[EntryIndex];
-    Entry.bHasBeenPlayed = true;
-    bDialoguePlaying = true;
-    DialogueTimer = Entry.Duration;
-    CurrentDialogueIndex = EntryIndex;
-
-    // If a bound audio asset exists, play it via AudioComponent
-    if (Entry.AudioAsset.IsValid() && PrimaryAudioComp)
+    // Apply to all registered ambient zones
+    for (AAudio_AmbientZone* Zone : RegisteredZones)
     {
-        PrimaryAudioComp->SetSound(Entry.AudioAsset.Get());
-        PrimaryAudioComp->Play();
+        if (!Zone) continue;
+        UAudioComponent* Comp = Zone->PrimaryAudioComponent;
+        if (Comp)
+        {
+            Comp->AdjustVolume(FadeTime, TargetVol);
+        }
     }
-    // Otherwise the URL is available for Blueprint/UI to display subtitle + stream
+
+    // Apply to music component
+    if (MusicComponent)
+    {
+        MusicComponent->AdjustVolume(FadeTime, TargetVol);
+    }
 }
