@@ -1,14 +1,13 @@
+// Velociraptor.h — Velociraptor dinosaur implementation
+// Agent #4 Performance Optimizer — Transpersonal Game Studio
+// Pack predator with coordinated hunting behavior
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Dinosaurs/DinosaurBase.h"
 #include "Velociraptor.generated.h"
 
-/**
- * AVelociraptor — Pack hunter dinosaur
- * Fast, low-HP flanking predator. Hunts in coordinated packs of 3-6.
- * Species stats: 400 HP, 45 dmg, 800 cm/s sprint, 8000 kg detection radius
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVelociraptor : public ADinosaurBase
 {
@@ -17,55 +16,98 @@ class TRANSPERSONALGAME_API AVelociraptor : public ADinosaurBase
 public:
     AVelociraptor();
 
-    // Pack behavior
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
-    void SetPackLeader(AVelociraptor* Leader);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
-    void ExecuteFlankingManeuver(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
-    void CallPackToHunt(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Pack")
-    bool IsPackLeader() const { return bIsPackLeader; }
-
-    // Leap attack
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
-    void PerformLeapAttack(AActor* Target);
-
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Pack state
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Pack", meta = (AllowPrivateAccess = "true"))
-    AVelociraptor* PackLeader;
+    // === PACK BEHAVIOR ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
+    bool bIsPackLeader;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Pack", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
+    int32 PackSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
+    float PackCommunicationRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Pack")
     TArray<AVelociraptor*> PackMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
-    float PackDetectionRadius = 3000.0f;
+    // === ATTACK BEHAVIOR ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float LeapAttackRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
-    float FlankingAngle = 120.0f; // degrees offset from pack leader
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float LeapAttackDamage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float LeapAttackRange = 400.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float LeapCooldown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float LeapAttackDamage = 45.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    float ClawSlashDamage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float LeapAttackCooldown = 4.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Combat")
+    bool bIsFlankingTarget;
+
+    // === MOVEMENT ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Movement")
+    float SprintSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Movement")
+    float StalkSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|Movement")
+    bool bIsStalking;
+
+    // === INTELLIGENCE ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|AI")
+    float FlankingAngleOffset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|AI")
+    bool bCanOpenDoors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velociraptor|AI")
+    float ProblemSolvingScore;
+
+    // === FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void SignalPackToAttack(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void JoinPack(AVelociraptor* PackLeader);
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Pack")
+    void LeavePackFormation();
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    void PerformLeapAttack(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    void PerformClawSlash(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Combat")
+    void BeginFlankingManeuver(AActor* Target, float AngleOffset);
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Movement")
+    void EnterStalkMode();
+
+    UFUNCTION(BlueprintCallable, Category = "Velociraptor|Movement")
+    void ExitStalkMode();
+
+    UFUNCTION(BlueprintPure, Category = "Velociraptor|Pack")
+    bool IsPackLeader() const { return bIsPackLeader; }
+
+    UFUNCTION(BlueprintPure, Category = "Velociraptor|Pack")
+    int32 GetPackSize() const { return PackMembers.Num(); }
+
+protected:
+    virtual void OnTargetDetected(AActor* Target) override;
+    virtual void OnDeath() override;
 
 private:
-    bool bIsPackLeader = false;
-    float LeapCooldownRemaining = 0.0f;
+    float LeapCooldownTimer;
+    bool bLeapOnCooldown;
+    FVector FlankingDestination;
 
-    FTimerHandle PackScanTimer;
-
-    void ScanForPackMembers();
-    void CoordinateFlankPosition(AActor* Target);
+    void UpdatePackCoordination(float DeltaTime);
+    void CalculateFlankingPosition(AActor* Target);
 };
