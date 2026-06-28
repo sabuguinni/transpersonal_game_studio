@@ -1,201 +1,232 @@
-#include "DialogueSystem.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+// DialogueSystem.cpp
+// Agent #15 — Narrative & Dialogue
+// Cycle: PROD_CYCLE_AUTO_20260628_009
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+#include "DialogueSystem.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
+
+// ─── ANarr_DialogueTriggerVolume ──────────────────────────────────────────────
+
+ANarr_DialogueTriggerVolume::ANarr_DialogueTriggerVolume()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    ProximityTriggerRadius = 400.0f;
-    bDialogueActive = false;
-    LineTimer = 0.0f;
-    LineDisplayDuration = 5.0f;
+    PrimaryActorTick.bCanEverTick = false;
+    CurrentLineIndex = 0;
+
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(300.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    DebugMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebugMesh"));
+    DebugMesh->SetupAttachment(RootComponent);
+    DebugMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(
+        TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+    if (SphereMesh.Succeeded())
+    {
+        DebugMesh->SetStaticMesh(SphereMesh.Object);
+        DebugMesh->SetWorldScale3D(FVector(0.15f));
+    }
 }
 
-void UNarr_DialogueSystem::BeginPlay()
+void ANarr_DialogueTriggerVolume::BeginPlay()
 {
     Super::BeginPlay();
-    LoadDefaultDialogueLines();
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(
+        this, &ANarr_DialogueTriggerVolume::OnSphereOverlap);
 }
 
-void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ANarr_DialogueTriggerVolume::OnSphereOverlap(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    if (!OtherActor || OtherActor == this) return;
 
-    if (bDialogueActive)
+    // Only trigger for the player pawn
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor != PlayerPawn) return;
+
+    if (TriggerType == ENarr_DialogueTrigger::Proximity)
     {
-        LineTimer += DeltaTime;
-        if (LineTimer >= LineDisplayDuration)
-        {
-            LineTimer = 0.0f;
-            AdvanceDialogue();
-        }
+        TriggerDialogue(OtherActor);
     }
 }
 
-void UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
+void ANarr_DialogueTriggerVolume::TriggerDialogue(AActor* Instigator)
 {
-    for (const FNarr_DialogueSequence& Seq : RegisteredSequences)
-    {
-        if (Seq.SequenceID == SequenceID)
-        {
-            ActiveSequence = Seq;
-            ActiveSequence.CurrentLineIndex = 0;
-            ActiveSequence.bIsActive = true;
-            bDialogueActive = true;
-            LineTimer = 0.0f;
+    if (DialogueLines.Num() == 0) return;
 
-            if (ActiveSequence.Lines.Num() > 0)
-            {
-                LineDisplayDuration = ActiveSequence.Lines[0].DisplayDuration;
-            }
-            return;
-        }
+    if (CurrentLineIndex >= DialogueLines.Num())
+    {
+        if (bTriggered) return; // All lines played, already triggered
+        CurrentLineIndex = 0;
     }
-    UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Sequence '%s' not found"), *SequenceID);
-}
 
-void UNarr_DialogueSystem::AdvanceDialogue()
-{
-    if (!bDialogueActive) return;
+    FNarr_DialogueLine& Line = DialogueLines[CurrentLineIndex];
 
-    ActiveSequence.CurrentLineIndex++;
-
-    if (ActiveSequence.CurrentLineIndex >= ActiveSequence.Lines.Num())
+    if (Line.bPlayOnce && Line.bHasBeenPlayed) 
     {
-        EndDialogueSequence();
+        CurrentLineIndex++;
         return;
     }
 
-    const FNarr_DialogueLine& NextLine = ActiveSequence.Lines[ActiveSequence.CurrentLineIndex];
-    LineDisplayDuration = NextLine.DisplayDuration;
-    LineTimer = 0.0f;
+    // Log dialogue to screen (in editor, this shows as on-screen debug message)
+    UE_LOG(LogTemp, Log, TEXT("[DIALOGUE] %s: %s"), *Line.SpeakerName, *Line.DialogueText);
+
+    Line.bHasBeenPlayed = true;
+    bTriggered = true;
+    CurrentLineIndex++;
 }
 
-void UNarr_DialogueSystem::EndDialogueSequence()
+void ANarr_DialogueTriggerVolume::ResetTrigger()
 {
-    bDialogueActive = false;
-    ActiveSequence.bIsActive = false;
-    LineTimer = 0.0f;
-}
-
-bool UNarr_DialogueSystem::IsDialogueActive() const
-{
-    return bDialogueActive;
-}
-
-FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentLine() const
-{
-    if (bDialogueActive && ActiveSequence.Lines.IsValidIndex(ActiveSequence.CurrentLineIndex))
+    bTriggered = false;
+    CurrentLineIndex = 0;
+    for (FNarr_DialogueLine& Line : DialogueLines)
     {
-        return ActiveSequence.Lines[ActiveSequence.CurrentLineIndex];
-    }
-    return FNarr_DialogueLine();
-}
-
-void UNarr_DialogueSystem::TriggerContextualDialogue(ENarr_DialogueTrigger Trigger, const FString& ContextID)
-{
-    for (const FNarr_DialogueLine& Line : RegisteredLines)
-    {
-        if (Line.TriggerType == Trigger && !Line.bHasBeenPlayed)
-        {
-            // Build a one-shot sequence from this line
-            FNarr_DialogueSequence OneShotSeq;
-            OneShotSeq.SequenceID = TEXT("OneShot_") + Line.LineID;
-            OneShotSeq.Lines.Add(Line);
-            OneShotSeq.CurrentLineIndex = 0;
-            OneShotSeq.bIsActive = true;
-
-            ActiveSequence = OneShotSeq;
-            bDialogueActive = true;
-            LineTimer = 0.0f;
-            LineDisplayDuration = Line.DisplayDuration;
-
-            UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Triggered contextual line '%s' for context '%s'"),
-                *Line.LineID, *ContextID);
-            return;
-        }
-    }
-}
-
-void UNarr_DialogueSystem::RegisterDialogueLine(const FNarr_DialogueLine& Line)
-{
-    RegisteredLines.Add(Line);
-}
-
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
-{
-    // Remove existing sequence with same ID
-    RegisteredSequences.RemoveAll([&](const FNarr_DialogueSequence& Seq)
-    {
-        return Seq.SequenceID == Sequence.SequenceID;
-    });
-    RegisteredSequences.Add(Sequence);
-}
-
-void UNarr_DialogueSystem::LoadDefaultDialogueLines()
-{
-    // TrailReader — Danger trigger: predator tracks spotted
-    {
-        FNarr_DialogueLine Line;
-        Line.LineID = TEXT("trail_reader_tracks_001");
-        Line.SpeakerName = TEXT("TrailReader");
-        Line.SpeakerRole = ENarr_SpeakerRole::TrailReader;
-        Line.DialogueText = TEXT("Listen. The ground tells us things. Three claws, deep in the mud, fresh from this morning. The big hunter was here. Moving north. We go east, find the high ground, and we wait.");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782625717061_TrailReader.mp3");
-        Line.TriggerType = ENarr_DialogueTrigger::Danger;
-        Line.DisplayDuration = 8.0f;
         Line.bHasBeenPlayed = false;
-        RegisteredLines.Add(Line);
     }
-
-    // HuntCaller — QuestStart trigger: hunt begins
-    {
-        FNarr_DialogueLine Line;
-        Line.LineID = TEXT("hunt_caller_herd_001");
-        Line.SpeakerName = TEXT("HuntCaller");
-        Line.SpeakerRole = ENarr_SpeakerRole::HuntCaller;
-        Line.DialogueText = TEXT("The tribe needs meat. Two days without food. We take the old one at the edge. Fast, clean, and we run before the noise draws attention. Are you with me?");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782625720437_HuntCaller.mp3");
-        Line.TriggerType = ENarr_DialogueTrigger::QuestStart;
-        Line.DisplayDuration = 7.0f;
-        Line.bHasBeenPlayed = false;
-        RegisteredLines.Add(Line);
-    }
-
-    // CampKeeper — Danger trigger: flood warning
-    {
-        FNarr_DialogueLine Line;
-        Line.LineID = TEXT("camp_keeper_flood_001");
-        Line.SpeakerName = TEXT("CampKeeper");
-        Line.SpeakerRole = ENarr_SpeakerRole::CampKeeper;
-        Line.DialogueText = TEXT("We cannot stay here. The cave floods when the rains come. The water rises to my chest. We move the camp before the dark clouds reach us. Take what you can carry.");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782625739826_CampKeeper.mp3");
-        Line.TriggerType = ENarr_DialogueTrigger::Danger;
-        Line.DisplayDuration = 7.0f;
-        Line.bHasBeenPlayed = false;
-        RegisteredLines.Add(Line);
-    }
-
-    // RiverGuide — Discovery trigger: river crossing
-    {
-        FNarr_DialogueLine Line;
-        Line.LineID = TEXT("river_guide_crossing_001");
-        Line.SpeakerName = TEXT("RiverGuide");
-        Line.SpeakerRole = ENarr_SpeakerRole::RiverGuide;
-        Line.DialogueText = TEXT("You want to cross the river? Look at the current. Last season, two of our strongest swimmers tried at this point. Neither came back. There is a shallow crossing, three bends east.");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782625742553_RiverGuide.mp3");
-        Line.TriggerType = ENarr_DialogueTrigger::Discovery;
-        Line.DisplayDuration = 8.0f;
-        Line.bHasBeenPlayed = false;
-        RegisteredLines.Add(Line);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Loaded %d default dialogue lines"), RegisteredLines.Num());
 }
 
-void UNarr_DialogueSystem::CheckProximityTriggers()
+int32 ANarr_DialogueTriggerVolume::GetUnplayedLineCount() const
 {
-    // Proximity check stub — implemented via Blueprint overlap events
-    // NPCs with this component fire TriggerContextualDialogue on player overlap
+    int32 Count = 0;
+    for (const FNarr_DialogueLine& Line : DialogueLines)
+    {
+        if (!Line.bHasBeenPlayed) Count++;
+    }
+    return Count;
+}
+
+// ─── ANarr_LoreStone ─────────────────────────────────────────────────────────
+
+ANarr_LoreStone::ANarr_LoreStone()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    StoneMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StoneMesh"));
+    RootComponent = StoneMesh;
+
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> RockMesh(
+        TEXT("/Engine/BasicShapes/Cube.Cube"));
+    if (RockMesh.Succeeded())
+    {
+        StoneMesh->SetStaticMesh(RockMesh.Object);
+        StoneMesh->SetWorldScale3D(FVector(0.4f, 0.25f, 0.5f));
+    }
+
+    InteractSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractSphere"));
+    InteractSphere->SetupAttachment(RootComponent);
+    InteractSphere->SetSphereRadius(150.0f);
+    InteractSphere->SetCollisionProfileName(TEXT("Trigger"));
+}
+
+void ANarr_LoreStone::BeginPlay()
+{
+    Super::BeginPlay();
+    InteractSphere->OnComponentBeginOverlap.AddDynamic(
+        this, &ANarr_LoreStone::OnInteractOverlap);
+}
+
+void ANarr_LoreStone::OnInteractOverlap(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    if (!OtherActor || OtherActor == this) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor != PlayerPawn) return;
+
+    ReadLore(OtherActor);
+}
+
+void ANarr_LoreStone::ReadLore(AActor* Reader)
+{
+    if (bHasBeenRead && LoreData.bDiscovered) return;
+
+    LoreData.bDiscovered = true;
+    bHasBeenRead = true;
+
+    UE_LOG(LogTemp, Log, TEXT("[LORE] Discovered: %s — %s"),
+           *LoreData.Title, *LoreData.BodyText);
+}
+
+FString ANarr_LoreStone::GetLoreText() const
+{
+    return FString::Printf(TEXT("[%s] %s: %s"),
+        *LoreData.FragmentID, *LoreData.Title, *LoreData.BodyText);
+}
+
+// ─── ANarr_DialogueManager ───────────────────────────────────────────────────
+
+ANarr_DialogueManager* ANarr_DialogueManager::Instance = nullptr;
+
+ANarr_DialogueManager::ANarr_DialogueManager()
+{
+    PrimaryActorTick.bCanEverTick = false;
+}
+
+void ANarr_DialogueManager::BeginPlay()
+{
+    Super::BeginPlay();
+    Instance = this;
+    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Initialized. Ready to track lore and dialogue."));
+}
+
+void ANarr_DialogueManager::RegisterLoreDiscovery(const FNarr_LoreFragment& Fragment)
+{
+    // Check if already registered
+    for (const FNarr_LoreFragment& Existing : DiscoveredLore)
+    {
+        if (Existing.FragmentID == Fragment.FragmentID) return;
+    }
+    DiscoveredLore.Add(Fragment);
+    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Lore registered: %s"), *Fragment.FragmentID);
+}
+
+bool ANarr_DialogueManager::HasLoreBeenDiscovered(const FString& FragmentID) const
+{
+    for (const FNarr_LoreFragment& Fragment : DiscoveredLore)
+    {
+        if (Fragment.FragmentID == FragmentID) return true;
+    }
+    return false;
+}
+
+int32 ANarr_DialogueManager::GetTotalLoreCount() const
+{
+    // Total lore in the world — hardcoded to match placed LoreStones
+    return 12;
+}
+
+int32 ANarr_DialogueManager::GetDiscoveredLoreCount() const
+{
+    return DiscoveredLore.Num();
+}
+
+void ANarr_DialogueManager::LogDialoguePlayed(const FString& DialogueID)
+{
+    if (!PlayedDialogueIDs.Contains(DialogueID))
+    {
+        PlayedDialogueIDs.Add(DialogueID);
+    }
+}
+
+bool ANarr_DialogueManager::WasDialoguePlayed(const FString& DialogueID) const
+{
+    return PlayedDialogueIDs.Contains(DialogueID);
 }
