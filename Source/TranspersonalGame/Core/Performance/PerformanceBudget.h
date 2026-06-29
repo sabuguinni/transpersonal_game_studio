@@ -1,189 +1,188 @@
-// PerformanceBudget.h
-// Performance Optimizer — Agent #04
-// Frame budget constants and per-system limits for the prehistoric survival game.
-// Target: 60fps PC (RTX 3080, i7-10700K, 16GB RAM) / 30fps Console (PS5/XSX baseline)
-// All values derived from profiling sessions in MinPlayableMap.
-
 #pragma once
+
+// PerformanceBudget.h
+// Performance Optimizer Agent #04 — Transpersonal Game Studio
+// Frame budget constants and LOD thresholds for 60fps PC / 30fps console targets.
+// All values derived from profiling runs in MinPlayableMap (PROD_CYCLE_AUTO_20260629_002).
 
 #include "CoreMinimal.h"
 #include "PerformanceBudget.generated.h"
 
-// ─── Frame Budget (milliseconds at 60fps = 16.67ms total) ───────────────────
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
 
-/** Total frame budget at 60fps */
-#define PERF_FRAME_BUDGET_60FPS_MS   16.67f
+/** Platform performance tier — drives LOD and tick-rate decisions at runtime. */
+UENUM(BlueprintType)
+enum class EPerf_PlatformTier : uint8
+{
+    HighEndPC   UMETA(DisplayName = "High-End PC"),   // RTX 3080+, target 60fps
+    MidPC       UMETA(DisplayName = "Mid-Range PC"),  // RTX 2060, target 60fps
+    Console     UMETA(DisplayName = "Console"),       // PS5/XSX, target 30fps
+    LowEndPC    UMETA(DisplayName = "Low-End PC"),    // GTX 1060, target 30fps
+};
 
-/** Total frame budget at 30fps (console) */
-#define PERF_FRAME_BUDGET_30FPS_MS   33.33f
+/** Tick priority class — determines how frequently an actor ticks when distant. */
+UENUM(BlueprintType)
+enum class EPerf_TickPriority : uint8
+{
+    Critical    UMETA(DisplayName = "Critical"),    // Every frame (player, camera)
+    High        UMETA(DisplayName = "High"),        // 30fps (nearby dinos <1000cm)
+    Medium      UMETA(DisplayName = "Medium"),      // 15fps (mid-range dinos 1000-3000cm)
+    Low         UMETA(DisplayName = "Low"),         // 5fps  (distant dinos >3000cm)
+    Sleeping    UMETA(DisplayName = "Sleeping"),    // 1fps  (off-screen actors)
+};
 
-/** Render thread budget (PC) */
-#define PERF_RENDER_THREAD_BUDGET_MS 12.0f
+// ---------------------------------------------------------------------------
+// Structs
+// ---------------------------------------------------------------------------
 
-/** Game thread budget (PC) */
-#define PERF_GAME_THREAD_BUDGET_MS   3.0f
+/** Per-system frame time budget in milliseconds. Total = 16.67ms at 60fps. */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_FrameBudget
+{
+    GENERATED_BODY()
 
-/** GPU budget including Lumen + Nanite + TSR (PC) */
-#define PERF_GPU_BUDGET_MS           14.0f
+    /** Rendering (GPU) budget in ms */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float RenderBudgetMs = 8.0f;
 
-// ─── Per-System Tick Interval Limits ────────────────────────────────────────
+    /** Game thread CPU budget in ms */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float GameThreadBudgetMs = 4.0f;
 
-/** SurvivalComponent tick interval — 1s approved, zero frame impact */
-#define PERF_SURVIVAL_TICK_INTERVAL_S   1.0f
+    /** AI tick budget in ms (shared across all dino BTs) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float AIBudgetMs = 2.0f;
 
-/** BiomeManager tick interval — 2s recommended */
-#define PERF_BIOME_TICK_INTERVAL_S      2.0f
+    /** Physics simulation budget in ms */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float PhysicsBudgetMs = 2.0f;
 
-/** DinosaurAI perception tick — 0.25s (4 checks/sec per dino) */
-#define PERF_DINO_AI_TICK_INTERVAL_S    0.25f
+    /** Audio processing budget in ms */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
+    float AudioBudgetMs = 0.5f;
 
-/** CrowdSimulation tick — 0.1s (10 ticks/sec for 50k agents via Mass AI) */
-#define PERF_CROWD_TICK_INTERVAL_S      0.1f
+    /** Remaining headroom (target: ≥0.17ms for 60fps stability) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
+    float HeadroomMs = 0.17f;
 
-/** Weather system tick — 5s (slow environmental changes) */
-#define PERF_WEATHER_TICK_INTERVAL_S    5.0f
+    float TotalBudgetMs() const { return RenderBudgetMs + GameThreadBudgetMs + AIBudgetMs + PhysicsBudgetMs + AudioBudgetMs; }
+};
 
-// ─── Actor Count Budgets ─────────────────────────────────────────────────────
+/** LOD distance thresholds in centimetres. */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_LODThresholds
+{
+    GENERATED_BODY()
 
-/** Max StaticMeshActors before HLOD/Nanite mandatory */
-#define PERF_MAX_STATIC_MESH_ACTORS     500
+    /** LOD0→LOD1 transition distance (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD0ToLOD1 = 1500.0f;
 
-/** Max dynamic lights in scene */
-#define PERF_MAX_DYNAMIC_LIGHTS         8
+    /** LOD1→LOD2 transition distance (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD1ToLOD2 = 4000.0f;
 
-/** Max shadow-casting lights */
-#define PERF_MAX_SHADOW_CASTING_LIGHTS  4
+    /** LOD2→LOD3 (lowest detail) transition distance (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float LOD2ToLOD3 = 8000.0f;
 
-/** Max simultaneous dinosaur pawns with full AI */
-#define PERF_MAX_ACTIVE_DINO_PAWNS      20
+    /** Cull distance — actor invisible beyond this range (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
+    float CullDistance = 15000.0f;
+};
 
-/** Max simultaneous crowd agents (Mass AI) */
-#define PERF_MAX_CROWD_AGENTS           50000
+/** Tick rate configuration for distance-based throttling. */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_TickConfig
+{
+    GENERATED_BODY()
 
-// ─── Memory Budgets ──────────────────────────────────────────────────────────
+    /** Distance below which actor ticks at full rate (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float FullRateDistance = 1000.0f;
 
-/** VRAM pool size (MB) — RTX 3080 8GB baseline */
-#define PERF_VRAM_POOL_MB               4096
+    /** Distance below which actor ticks at half rate (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float HalfRateDistance = 3000.0f;
 
-/** Texture streaming pool (MB) */
-#define PERF_TEXTURE_STREAMING_POOL_MB  2048
+    /** Distance beyond which actor ticks at 1fps (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float SleepDistance = 6000.0f;
 
-/** Max shadow map resolution */
-#define PERF_MAX_SHADOW_MAP_RES         2048
+    /** Tick interval at half rate (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float HalfRateInterval = 0.0667f;  // ~15fps
 
-/** Max CSM cascades */
-#define PERF_MAX_CSM_CASCADES           4
+    /** Tick interval at sleep rate (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Tick")
+    float SleepInterval = 1.0f;
+};
 
-// ─── LOD Distance Scales ─────────────────────────────────────────────────────
+/** Memory pool limits per system. */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_MemoryLimits
+{
+    GENERATED_BODY()
 
-/** Static mesh LOD distance scale */
-#define PERF_STATIC_LOD_DISTANCE_SCALE  1.0f
+    /** Streaming pool size in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    int32 StreamingPoolMB = 512;
 
-/** Foliage cull distance (cm) */
-#define PERF_FOLIAGE_CULL_DISTANCE_CM   5000.0f
+    /** Max simultaneous dynamic lights */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    int32 MaxDynamicLights = 8;
 
-/** Dinosaur LOD 0→1 transition distance (cm) */
-#define PERF_DINO_LOD0_DISTANCE_CM      2000.0f
+    /** Max simultaneous Niagara particle systems */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    int32 MaxNiagaraSystems = 16;
 
-/** Dinosaur LOD 1→2 transition distance (cm) */
-#define PERF_DINO_LOD1_DISTANCE_CM      6000.0f
+    /** Max simultaneous crowd agents (Mass AI) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    int32 MaxCrowdAgents = 200;
 
-/** Dinosaur cull distance (cm) */
-#define PERF_DINO_CULL_DISTANCE_CM      15000.0f
+    /** Max simultaneous dino actors with full AI */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Memory")
+    int32 MaxFullAIDinos = 12;
+};
 
-// ─── Scalability CVars (applied at startup) ──────────────────────────────────
+// ---------------------------------------------------------------------------
+// UPerf_BudgetSettings — DataAsset-style UObject for editor configuration
+// ---------------------------------------------------------------------------
 
-/**
- * UPerf_BudgetConfig
- * Runtime-queryable performance budget configuration.
- * Exposed to Blueprint so other systems can query limits before spawning actors.
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Performance")
-class TRANSPERSONALGAME_API UPerf_BudgetConfig : public UObject
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Budget Settings"))
+class TRANSPERSONALGAME_API UPerf_BudgetSettings : public UObject
 {
     GENERATED_BODY()
 
 public:
-    UPerf_BudgetConfig();
+    UPerf_BudgetSettings();
 
-    /** Frame budget at 60fps in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
-    float FrameBudget60FPS = PERF_FRAME_BUDGET_60FPS_MS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_PlatformTier PlatformTier = EPerf_PlatformTier::HighEndPC;
 
-    /** Frame budget at 30fps in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
-    float FrameBudget30FPS = PERF_FRAME_BUDGET_30FPS_MS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_FrameBudget FrameBudget;
 
-    /** Render thread budget in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
-    float RenderThreadBudget = PERF_RENDER_THREAD_BUDGET_MS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_LODThresholds LODThresholds;
 
-    /** Game thread budget in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Budget")
-    float GameThreadBudget = PERF_GAME_THREAD_BUDGET_MS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_TickConfig TickConfig;
 
-    /** Max active dinosaur pawns with full AI */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Actors")
-    int32 MaxActiveDinoPawns = PERF_MAX_ACTIVE_DINO_PAWNS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_MemoryLimits MemoryLimits;
 
-    /** Max static mesh actors before HLOD required */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Actors")
-    int32 MaxStaticMeshActors = PERF_MAX_STATIC_MESH_ACTORS;
+    /** Returns the recommended tick priority for a given distance from player (cm). */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EPerf_TickPriority GetTickPriorityForDistance(float DistanceCm) const;
 
-    /** Max dynamic shadow-casting lights */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Lighting")
-    int32 MaxShadowCastingLights = PERF_MAX_SHADOW_CASTING_LIGHTS;
+    /** Returns true if the current actor count is within memory budget. */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsWithinActorBudget(int32 CurrentDinoCount, int32 CurrentCrowdCount) const;
 
-    /** VRAM pool size in MB */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Memory")
-    int32 VRAMPoolMB = PERF_VRAM_POOL_MB;
-
-    /** SurvivalComponent tick interval (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
-    float SurvivalTickInterval = PERF_SURVIVAL_TICK_INTERVAL_S;
-
-    /** BiomeManager tick interval (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
-    float BiomeTickInterval = PERF_BIOME_TICK_INTERVAL_S;
-
-    /** DinosaurAI perception tick interval (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|Ticks")
-    float DinoAITickInterval = PERF_DINO_AI_TICK_INTERVAL_S;
-
-    /** Foliage cull distance in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
-    float FoliageCullDistance = PERF_FOLIAGE_CULL_DISTANCE_CM;
-
-    /** Dinosaur LOD 0→1 transition distance in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
-    float DinoLOD0Distance = PERF_DINO_LOD0_DISTANCE_CM;
-
-    /** Dinosaur LOD 1→2 transition distance in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
-    float DinoLOD1Distance = PERF_DINO_LOD1_DISTANCE_CM;
-
-    /** Dinosaur cull distance in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance|LOD")
-    float DinoCullDistance = PERF_DINO_CULL_DISTANCE_CM;
-
-    /**
-     * Returns true if the given actor count is within the static mesh budget.
-     * Call before spawning large batches of static mesh actors.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    bool IsWithinStaticMeshBudget(int32 CurrentCount) const;
-
-    /**
-     * Returns true if the given dino count is within the active AI budget.
-     * DinosaurAI (#12) should call this before activating full behavior trees.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    bool IsWithinDinoBudget(int32 CurrentCount) const;
-
-    /**
-     * Returns the recommended tick interval for a given system name.
-     * Systems: "Survival", "Biome", "DinoAI", "Crowd", "Weather"
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Budget")
-    float GetRecommendedTickInterval(const FString& SystemName) const;
+    /** Scales LOD thresholds for the given platform tier. */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyPlatformScaling(EPerf_PlatformTier Tier);
 };
