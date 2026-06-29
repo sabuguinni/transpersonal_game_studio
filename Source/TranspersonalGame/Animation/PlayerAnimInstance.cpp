@@ -1,6 +1,7 @@
 // PlayerAnimInstance.cpp
 // Animation Agent #10 — Transpersonal Game Studio
-// Implements locomotion blend logic for the prehistoric human player character
+// Full implementation of the player character animation instance
+// Handles locomotion blending, survival states, combat, and foot IK
 
 #include "PlayerAnimInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -10,6 +11,7 @@
 
 UPlayerAnimInstance::UPlayerAnimInstance()
 {
+    // Locomotion defaults
     Speed = 0.0f;
     SmoothedSpeed = 0.0f;
     Direction = 0.0f;
@@ -17,33 +19,50 @@ UPlayerAnimInstance::UPlayerAnimInstance()
     bIsSprinting = false;
     bIsCrouching = false;
     bIsInAir = false;
+    LeanAmount = 0.0f;
+
+    // Survival state defaults
     bIsSneaking = false;
     bIsClimbing = false;
     FearLevel = 0.0f;
     StaminaLevel = 1.0f;
+
+    // Combat defaults
+    bIsInCombat = false;
     bIsAttacking = false;
     bIsBlocking = false;
     bIsHurt = false;
     bIsDead = false;
-    AimPitch = 0.0f;
-    AimYaw = 0.0f;
-    LeanAmount = 0.0f;
-    LeftFootIKAlpha = 1.0f;
-    RightFootIKAlpha = 1.0f;
-    LeftFootEffectorLocation = FVector::ZeroVector;
-    RightFootEffectorLocation = FVector::ZeroVector;
-    MovementState = EAnim_PlayerMovementState::Idle;
-    CombatState = EAnim_PlayerCombatState::Unarmed;
+    UpperBodyLayerWeight = 0.0f;
+
+    // Foot IK defaults
+    bEnableFootIK = true;
+    LeftFootIKOffset = FVector::ZeroVector;
+    RightFootIKOffset = FVector::ZeroVector;
+    LeftFootRotation = FRotator::ZeroRotator;
+    RightFootRotation = FRotator::ZeroRotator;
+    IKTraceDistance = 60.0f;
+
+    // Internal
+    OwnerCharacter = nullptr;
+    OwnerMovement = nullptr;
+    SpeedSmoothingRate = 8.0f;
+    LeanSmoothingRate = 5.0f;
+    PreviousVelocity = FVector::ZeroVector;
 }
 
 void UPlayerAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
-    if (OwnerCharacter)
+    APawn* OwnerPawn = TryGetPawnOwner();
+    if (OwnerPawn)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        OwnerCharacter = Cast<ACharacter>(OwnerPawn);
+        if (OwnerCharacter)
+        {
+            OwnerMovement = OwnerCharacter->GetCharacterMovement();
+        }
     }
 }
 
@@ -51,217 +70,228 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    if (!OwnerCharacter || !MovementComponent)
+    if (!OwnerCharacter || !OwnerMovement)
     {
-        OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
-        if (OwnerCharacter)
+        // Try to re-acquire owner references
+        APawn* OwnerPawn = TryGetPawnOwner();
+        if (OwnerPawn)
         {
-            MovementComponent = OwnerCharacter->GetCharacterMovement();
+            OwnerCharacter = Cast<ACharacter>(OwnerPawn);
+            if (OwnerCharacter)
+            {
+                OwnerMovement = OwnerCharacter->GetCharacterMovement();
+            }
         }
         return;
     }
 
-    UpdateLocomotionData(DeltaSeconds);
-    UpdateAimData();
-    UpdateFootIK();
-    UpdateMovementState();
-    UpdateCombatState();
+    // --- LOCOMOTION UPDATE ---
+    UpdateLocomotionState(DeltaSeconds);
+
+    // --- SURVIVAL STATE UPDATE ---
+    UpdateSurvivalState(DeltaSeconds);
+
+    // --- FOOT IK UPDATE ---
+    if (bEnableFootIK)
+    {
+        UpdateFootIK(DeltaSeconds);
+    }
+
+    // --- LEAN UPDATE ---
+    UpdateLean(DeltaSeconds);
 }
 
-void UPlayerAnimInstance::UpdateLocomotionData(float DeltaSeconds)
+void UPlayerAnimInstance::UpdateLocomotionState(float DeltaSeconds)
 {
-    if (!MovementComponent) return;
+    if (!OwnerCharacter || !OwnerMovement)
+        return;
 
-    // Raw speed from velocity magnitude
-    const FVector Velocity = MovementComponent->Velocity;
-    Speed = Velocity.Size();
+    FVector Velocity = OwnerMovement->Velocity;
+    float RawSpeed = Velocity.Size2D(); // horizontal speed only
 
-    // Smooth speed for blend space transitions
-    SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, Speed, DeltaSeconds, 8.0f);
+    // Smooth the speed for blend space transitions
+    SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, RawSpeed, DeltaSeconds, SpeedSmoothingRate);
+    Speed = SmoothedSpeed;
 
-    // Direction relative to character facing
-    if (OwnerCharacter && Speed > 1.0f)
+    // Moving threshold: 10 cm/s
+    bIsMoving = RawSpeed > 10.0f;
+
+    // In air
+    bIsInAir = OwnerMovement->IsFalling();
+
+    // Crouching
+    bIsCrouching = OwnerCharacter->bIsCrouched;
+
+    // Direction (for strafing blend spaces)
+    if (bIsMoving)
     {
-        const FRotator ActorRotation = OwnerCharacter->GetActorRotation();
-        const FVector VelocityNorm = Velocity.GetSafeNormal();
-        Direction = UKismetMathLibrary::NormalizedDeltaRotator(
-            VelocityNorm.Rotation(), ActorRotation).Yaw;
+        FRotator ActorRotation = OwnerCharacter->GetActorRotation();
+        FVector VelocityNorm = Velocity.GetSafeNormal2D();
+        FVector ForwardVector = ActorRotation.Vector();
+
+        // Calculate direction angle (-180 to 180)
+        Direction = UKismetMathLibrary::DegAtan2(
+            FVector::DotProduct(VelocityNorm, FVector::CrossProduct(FVector::UpVector, ForwardVector)),
+            FVector::DotProduct(VelocityNorm, ForwardVector)
+        );
     }
     else
     {
         Direction = FMath::FInterpTo(Direction, 0.0f, DeltaSeconds, 5.0f);
     }
 
-    // Boolean states
-    bIsMoving = Speed > 3.0f;
-    bIsInAir = MovementComponent->IsFalling();
-    bIsCrouching = MovementComponent->IsCrouching();
+    // Sprint detection: sprinting if speed > 400 cm/s (walk ~200, run ~400, sprint ~600+)
+    bIsSprinting = RawSpeed > 420.0f && !bIsCrouching && !bIsInAir;
 
-    // Lean: lateral lean based on angular velocity
-    const float AngularVelocityYaw = MovementComponent->GetLastUpdateRotation().Yaw;
-    LeanAmount = FMath::Clamp(AngularVelocityYaw * 0.05f, -1.0f, 1.0f);
-    LeanAmount = FMath::FInterpTo(LeanAmount, 0.0f, DeltaSeconds, 4.0f);
+    // Sneak: crouching while moving slowly
+    bIsSneaking = bIsCrouching && bIsMoving && RawSpeed < 180.0f;
 }
 
-void UPlayerAnimInstance::UpdateAimData()
+void UPlayerAnimInstance::UpdateSurvivalState(float DeltaSeconds)
 {
-    if (!OwnerCharacter) return;
+    // FearLevel and StaminaLevel are driven externally by the survival system
+    // Here we just clamp them to valid ranges
+    FearLevel = FMath::Clamp(FearLevel, 0.0f, 1.0f);
+    StaminaLevel = FMath::Clamp(StaminaLevel, 0.0f, 1.0f);
 
-    const AController* Controller = OwnerCharacter->GetController();
-    if (!Controller) return;
-
-    const FRotator ControlRotation = Controller->GetControlRotation();
-    const FRotator ActorRotation = OwnerCharacter->GetActorRotation();
-    const FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(ControlRotation, ActorRotation);
-
-    AimPitch = FMath::ClampAngle(DeltaRot.Pitch, -90.0f, 90.0f);
-    AimYaw = FMath::ClampAngle(DeltaRot.Yaw, -180.0f, 180.0f);
+    // Upper body layer weight: blend in combat layer when in combat
+    float TargetUpperBodyWeight = (bIsInCombat || bIsAttacking) ? 1.0f : 0.0f;
+    UpperBodyLayerWeight = FMath::FInterpTo(UpperBodyLayerWeight, TargetUpperBodyWeight, DeltaSeconds, 6.0f);
 }
 
-void UPlayerAnimInstance::UpdateFootIK()
+void UPlayerAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-    if (!OwnerCharacter) return;
+    if (!OwnerCharacter)
+        return;
 
-    // Only apply IK when on ground
+    // Don't do foot IK in air
     if (bIsInAir)
     {
-        LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, 0.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
-        RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, 0.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
+        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, FVector::ZeroVector, DeltaSeconds, 10.0f);
+        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, FVector::ZeroVector, DeltaSeconds, 10.0f);
         return;
     }
 
-    LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, 1.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
-    RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, 1.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+
+    // Bone socket names for foot traces
+    const FName LeftFootSocket = TEXT("foot_l");
+    const FName RightFootSocket = TEXT("foot_r");
+
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (!MeshComp)
+        return;
 
     // Trace for left foot
-    LeftFootEffectorLocation = CalculateFootIKOffset(TEXT("foot_l"));
+    FVector LeftFootLocation = MeshComp->GetSocketLocation(LeftFootSocket);
+    FVector LeftTraceStart = LeftFootLocation + FVector(0, 0, IKTraceDistance);
+    FVector LeftTraceEnd = LeftFootLocation - FVector(0, 0, IKTraceDistance);
+
+    FHitResult LeftHit;
+    FCollisionQueryParams LeftParams;
+    LeftParams.AddIgnoredActor(OwnerCharacter);
+
+    if (World->LineTraceSingleByChannel(LeftHit, LeftTraceStart, LeftTraceEnd, ECC_Visibility, LeftParams))
+    {
+        FVector TargetLeftOffset = FVector(0, 0, LeftHit.Location.Z - LeftFootLocation.Z);
+        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, TargetLeftOffset, DeltaSeconds, 12.0f);
+
+        // Foot rotation from surface normal
+        FVector Normal = LeftHit.Normal;
+        LeftFootRotation = FRotator(
+            FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z)),
+            0.0f,
+            FMath::RadiansToDegrees(FMath::Atan2(-Normal.Y, Normal.Z))
+        );
+    }
+    else
+    {
+        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, FVector::ZeroVector, DeltaSeconds, 12.0f);
+        LeftFootRotation = FMath::RInterpTo(LeftFootRotation, FRotator::ZeroRotator, DeltaSeconds, 12.0f);
+    }
 
     // Trace for right foot
-    RightFootEffectorLocation = CalculateFootIKOffset(TEXT("foot_r"));
-}
+    FVector RightFootLocation = MeshComp->GetSocketLocation(RightFootSocket);
+    FVector RightTraceStart = RightFootLocation + FVector(0, 0, IKTraceDistance);
+    FVector RightTraceEnd = RightFootLocation - FVector(0, 0, IKTraceDistance);
 
-FVector UPlayerAnimInstance::CalculateFootIKOffset(const FName& FootSocketName)
-{
-    if (!OwnerCharacter) return FVector::ZeroVector;
+    FHitResult RightHit;
+    FCollisionQueryParams RightParams;
+    RightParams.AddIgnoredActor(OwnerCharacter);
 
-    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-    if (!Mesh) return FVector::ZeroVector;
-
-    const FVector FootWorldLocation = Mesh->GetSocketLocation(FootSocketName);
-
-    FHitResult HitResult;
-    const FVector TraceStart = FootWorldLocation + FVector(0.0f, 0.0f, 50.0f);
-    const FVector TraceEnd = FootWorldLocation - FVector(0.0f, 0.0f, 75.0f);
-
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-
-    const bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
-
-    if (bHit)
+    if (World->LineTraceSingleByChannel(RightHit, RightTraceStart, RightTraceEnd, ECC_Visibility, RightParams))
     {
-        // Return offset in component space
-        const FVector HitOffset = HitResult.Location - FootWorldLocation;
-        return FVector(0.0f, 0.0f, HitOffset.Z);
+        FVector TargetRightOffset = FVector(0, 0, RightHit.Location.Z - RightFootLocation.Z);
+        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, TargetRightOffset, DeltaSeconds, 12.0f);
+
+        FVector Normal = RightHit.Normal;
+        RightFootRotation = FRotator(
+            FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z)),
+            0.0f,
+            FMath::RadiansToDegrees(FMath::Atan2(-Normal.Y, Normal.Z))
+        );
     }
-
-    return FVector::ZeroVector;
+    else
+    {
+        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, FVector::ZeroVector, DeltaSeconds, 12.0f);
+        RightFootRotation = FMath::RInterpTo(RightFootRotation, FRotator::ZeroRotator, DeltaSeconds, 12.0f);
+    }
 }
 
-void UPlayerAnimInstance::UpdateMovementState()
+void UPlayerAnimInstance::UpdateLean(float DeltaSeconds)
 {
-    if (bIsDead)
-    {
-        MovementState = EAnim_PlayerMovementState::Dead;
+    if (!OwnerCharacter || !OwnerMovement)
         return;
-    }
 
-    if (bIsClimbing)
-    {
-        MovementState = EAnim_PlayerMovementState::Climbing;
-        return;
-    }
+    FVector CurrentVelocity = OwnerMovement->Velocity;
+    FVector Acceleration = (CurrentVelocity - PreviousVelocity) / FMath::Max(DeltaSeconds, 0.001f);
+    PreviousVelocity = CurrentVelocity;
 
-    if (bIsInAir)
-    {
-        MovementState = EAnim_PlayerMovementState::Jumping;
-        return;
-    }
+    // Project lateral acceleration onto character right vector for lean
+    FVector RightVector = OwnerCharacter->GetActorRightVector();
+    float LateralAccel = FVector::DotProduct(Acceleration, RightVector);
 
-    if (bIsCrouching || bIsSneaking)
-    {
-        MovementState = EAnim_PlayerMovementState::Crouching;
-        return;
-    }
-
-    if (bIsSprinting && bIsMoving)
-    {
-        MovementState = EAnim_PlayerMovementState::Sprinting;
-        return;
-    }
-
-    if (bIsMoving)
-    {
-        MovementState = EAnim_PlayerMovementState::Walking;
-        return;
-    }
-
-    MovementState = EAnim_PlayerMovementState::Idle;
+    // Normalize to -1..1 range (max lean at ~600 cm/s² lateral accel)
+    float TargetLean = FMath::Clamp(LateralAccel / 600.0f, -1.0f, 1.0f);
+    LeanAmount = FMath::FInterpTo(LeanAmount, TargetLean, DeltaSeconds, LeanSmoothingRate);
 }
 
-void UPlayerAnimInstance::UpdateCombatState()
+void UPlayerAnimInstance::SetFearLevel(float NewFearLevel)
 {
-    if (bIsAttacking)
-    {
-        // Keep current combat state but flag attacking
-        return;
-    }
-    // Combat state is set externally via SetCombatState
+    FearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
 }
 
-void UPlayerAnimInstance::SetSprinting(bool bSprinting)
+void UPlayerAnimInstance::SetStaminaLevel(float NewStaminaLevel)
 {
-    bIsSprinting = bSprinting;
+    StaminaLevel = FMath::Clamp(NewStaminaLevel, 0.0f, 1.0f);
 }
 
-void UPlayerAnimInstance::SetSneaking(bool bSneaking)
+void UPlayerAnimInstance::SetCombatState(bool bInCombat, bool bAttacking, bool bBlocking)
 {
-    bIsSneaking = bSneaking;
-}
-
-void UPlayerAnimInstance::SetClimbing(bool bClimbing)
-{
-    bIsClimbing = bClimbing;
-}
-
-void UPlayerAnimInstance::SetFearLevel(float Fear)
-{
-    FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
-}
-
-void UPlayerAnimInstance::SetStaminaLevel(float Stamina)
-{
-    StaminaLevel = FMath::Clamp(Stamina, 0.0f, 1.0f);
-}
-
-void UPlayerAnimInstance::SetCombatState(EAnim_PlayerCombatState NewState)
-{
-    CombatState = NewState;
-}
-
-void UPlayerAnimInstance::TriggerAttack()
-{
-    bIsAttacking = true;
+    bIsInCombat = bInCombat;
+    bIsAttacking = bAttacking;
+    bIsBlocking = bBlocking;
 }
 
 void UPlayerAnimInstance::TriggerHurt()
 {
     bIsHurt = true;
+    // The AnimBP montage will reset this via notify
+    // We set a timer-based reset as fallback
+    GetWorld()->GetTimerManager().SetTimer(
+        HurtResetTimer,
+        [this]() { bIsHurt = false; },
+        0.5f,
+        false
+    );
 }
 
 void UPlayerAnimInstance::TriggerDeath()
 {
     bIsDead = true;
-    MovementState = EAnim_PlayerMovementState::Dead;
+    bIsInCombat = false;
+    bIsAttacking = false;
+    bIsBlocking = false;
 }
