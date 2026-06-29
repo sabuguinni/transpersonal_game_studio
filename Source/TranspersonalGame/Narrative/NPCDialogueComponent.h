@@ -1,112 +1,87 @@
-// NPCDialogueComponent.h
-// Agent #15 — Narrative & Dialogue Agent
-// NPC Social Dynamics and Dialogue System
-// Provides contextual dialogue, relationship tracking, and social interaction for NPCs
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
 #include "NPCDialogueComponent.generated.h"
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ============================================================
+// ENUMS — Global scope (UE5 UHT requirement)
+// Prefix: ENarr_ to avoid name collisions across agents
+// ============================================================
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueTrigger : uint8
 {
-    PlayerApproach       UMETA(DisplayName = "Player Approach"),
-    PlayerHelped         UMETA(DisplayName = "Player Helped Tribe"),
-    DinosaurNearby       UMETA(DisplayName = "Dinosaur Nearby"),
-    HunterReturned       UMETA(DisplayName = "Hunter Returned"),
-    ResourceFound        UMETA(DisplayName = "Resource Found"),
-    DangerDetected       UMETA(DisplayName = "Danger Detected"),
-    NightFalling         UMETA(DisplayName = "Night Falling"),
-    MigrationSeen        UMETA(DisplayName = "Migration Seen"),
-    PlayerFirstMeet      UMETA(DisplayName = "Player First Meeting"),
-    TradeOffer           UMETA(DisplayName = "Trade Offer"),
+    PlayerApproach          UMETA(DisplayName = "Player Approach"),
+    DinosaurNearby          UMETA(DisplayName = "Dinosaur Nearby"),
+    MigrationSeen           UMETA(DisplayName = "Migration Seen"),
+    PlayerCombatVictory     UMETA(DisplayName = "Player Combat Victory"),
+    PlayerNearDeath         UMETA(DisplayName = "Player Near Death"),
+    ResourceDiscovered      UMETA(DisplayName = "Resource Discovered"),
+    Nightfall               UMETA(DisplayName = "Nightfall"),
+    StormApproaching        UMETA(DisplayName = "Storm Approaching"),
+    TribeUnderAttack        UMETA(DisplayName = "Tribe Under Attack"),
+    QuestCompleted          UMETA(DisplayName = "Quest Completed")
 };
 
 UENUM(BlueprintType)
 enum class ENarr_NPCRelationship : uint8
 {
-    Hostile      UMETA(DisplayName = "Hostile"),
-    Wary         UMETA(DisplayName = "Wary"),
-    Neutral      UMETA(DisplayName = "Neutral"),
-    Friendly     UMETA(DisplayName = "Friendly"),
-    Trusted      UMETA(DisplayName = "Trusted"),
-    Allied       UMETA(DisplayName = "Allied"),
+    Hostile     UMETA(DisplayName = "Hostile"),
+    Wary        UMETA(DisplayName = "Wary"),
+    Neutral     UMETA(DisplayName = "Neutral"),
+    Friendly    UMETA(DisplayName = "Friendly"),
+    Trusted     UMETA(DisplayName = "Trusted"),
+    Allied      UMETA(DisplayName = "Allied")
 };
 
 UENUM(BlueprintType)
 enum class ENarr_NPCRole : uint8
 {
-    Elder        UMETA(DisplayName = "Elder"),
-    Scout        UMETA(DisplayName = "Scout"),
-    Hunter       UMETA(DisplayName = "Hunter"),
-    Tracker      UMETA(DisplayName = "Tracker"),
-    Crafter      UMETA(DisplayName = "Crafter"),
-    Guard        UMETA(DisplayName = "Guard"),
-    Gatherer     UMETA(DisplayName = "Gatherer"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Tracker     UMETA(DisplayName = "Tracker"),
+    Crafter     UMETA(DisplayName = "Crafter"),
+    Guard       UMETA(DisplayName = "Guard"),
+    Survivor    UMETA(DisplayName = "Survivor")
 };
 
-// ─── Structs ──────────────────────────────────────────────────────────────────
+// ============================================================
+// STRUCTS — Global scope
+// ============================================================
 
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText LineText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueTrigger Trigger;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueTrigger Trigger = ENarr_DialogueTrigger::PlayerApproach;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_NPCRelationship MinRelationship;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRelationship MinRelationshipRequired = ENarr_NPCRelationship::Neutral;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float CooldownSeconds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsContextual = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioAssetPath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bOneTimeOnly;
-
-    FNarr_DialogueLine()
-        : Trigger(ENarr_DialogueTrigger::PlayerApproach)
-        , MinRelationship(ENarr_NPCRelationship::Neutral)
-        , CooldownSeconds(30.0f)
-        , bOneTimeOnly(false)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float AudioCueDelay = 0.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FNarr_NPCKnowledge
-{
-    GENERATED_BODY()
+// ============================================================
+// DELEGATES
+// ============================================================
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
-    FString KnowledgeKey;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, FNarr_DialogueLine, Line, ENarr_NPCRelationship, Relationship);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRelationshipChanged, ENarr_NPCRelationship, OldRelationship, ENarr_NPCRelationship, NewRelationship);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
-    FString KnowledgeValue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
-    float AcquiredAtTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
-    bool bSharedWithPlayer;
-
-    FNarr_NPCKnowledge()
-        : AcquiredAtTime(0.0f)
-        , bSharedWithPlayer(false)
-    {}
-};
-
-// ─── Component ────────────────────────────────────────────────────────────────
+// ============================================================
+// COMPONENT CLASS
+// ============================================================
 
 UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UNPCDialogueComponent : public UActorComponent
@@ -116,89 +91,89 @@ class TRANSPERSONALGAME_API UNPCDialogueComponent : public UActorComponent
 public:
     UNPCDialogueComponent();
 
-    // ── NPC Identity ──────────────────────────────────────────────────────────
-
+    // ---- Identity ----
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    FString NPCName;
+    FText NPCName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
     ENarr_NPCRole NPCRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    FString TribeName;
-
-    // ── Relationship ──────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    // ---- Relationship ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Relationship")
     ENarr_NPCRelationship CurrentRelationship;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float RelationshipScore;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Relationship")
+    int32 TrustPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float RelationshipScoreMax;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Relationship")
+    int32 InteractionCount;
 
-    // ── Dialogue Data ─────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
-
+    // ---- Dialogue Config ----
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float DialogueTriggerRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanSpeak;
+    float DialogueCooldownSeconds;
 
-    // ── NPC Knowledge ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
-    TArray<FNarr_NPCKnowledge> KnowledgeBase;
+    // ---- State ----
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    bool bIsInDialogue;
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    bool bHasGreeted;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bHasMetPlayer;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
+    ENarr_DialogueTrigger LastTrigger;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float LastDialogueTime;
+    // ---- Delegates ----
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue|Events")
+    FOnDialogueTriggered OnDialogueTriggered;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FString LastSpokenLine;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue|Events")
+    FOnRelationshipChanged OnRelationshipChanged;
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    // ---- Public API ----
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void TriggerDialogue(ENarr_DialogueTrigger Trigger);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool TryTriggerDialogue(ENarr_DialogueTrigger Trigger);
+    void ModifyRelationship(int32 TrustDelta);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void ModifyRelationship(float Delta);
+    void NotifyDinosaurNearby(FName DinosaurSpecies, float Distance);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    ENarr_NPCRelationship GetRelationshipTier() const;
+    void NotifyPlayerCombatVictory();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddKnowledge(const FString& Key, const FString& Value);
+    void NotifyPlayerNearDeath();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FString GetKnowledge(const FString& Key) const;
+    void NotifyMigrationEvent();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> GetAvailableLines(ENarr_DialogueTrigger Trigger) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void MarkPlayerMet();
+    void NotifyNightfall();
 
     UFUNCTION(BlueprintPure, Category = "Dialogue")
-    bool CanTriggerDialogue(ENarr_DialogueTrigger Trigger) const;
+    ENarr_NPCRelationship GetCurrentRelationship() const { return CurrentRelationship; }
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    bool IsInDialogue() const { return bIsInDialogue; }
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    TMap<ENarr_DialogueTrigger, float> LastTriggerTimes;
-    TSet<int32> SpokenOneTimeLines;
+    FTimerHandle CooldownTimerHandle;
+    bool bCooldownActive;
 
-    void UpdateRelationshipTier();
-    bool IsLineCooledDown(const FNarr_DialogueLine& Line, ENarr_DialogueTrigger Trigger) const;
+    void InitialiseDialogueLines();
+    void StartDialogueCooldown();
+    void OnCooldownExpired();
+    FNarr_DialogueLine GetDialogueLineForTrigger(ENarr_DialogueTrigger Trigger);
+    void AddDialogueLine(ENarr_DialogueTrigger Trigger, ENarr_NPCRelationship MinRelationship, const FString& Text, bool bContextual);
 };
