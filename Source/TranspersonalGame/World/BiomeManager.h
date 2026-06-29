@@ -1,8 +1,3 @@
-// BiomeManager.h
-// Engine Architect #02 — Transpersonal Game Studio
-// Biome classification, transition, and environmental parameter system
-// Priority: P1 — World Generation
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,74 +5,76 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// Enums — must be at global scope (UE5 compilation rule)
-// ============================================================
-
+/**
+ * EEng_BiomeType — Prehistoric biome classifications
+ * Prefixed with Eng_ to avoid collision with other agents' types.
+ */
 UENUM(BlueprintType)
-enum class EBiomeType : uint8
+enum class EEng_BiomeType : uint8
 {
-    Grassland   UMETA(DisplayName = "Cretaceous Grassland"),
-    Forest      UMETA(DisplayName = "Cretaceous Forest"),
-    Swamp       UMETA(DisplayName = "Cretaceous Swamp"),
-    Desert      UMETA(DisplayName = "Cretaceous Desert"),
-    Volcanic    UMETA(DisplayName = "Volcanic Badlands"),
-    Riverbank   UMETA(DisplayName = "Cretaceous Riverbank"),
+    Jungle         UMETA(DisplayName = "Jungle"),
+    Savanna        UMETA(DisplayName = "Savanna"),
+    Swamp          UMETA(DisplayName = "Swamp"),
+    Volcanic       UMETA(DisplayName = "Volcanic"),
+    Coastal        UMETA(DisplayName = "Coastal"),
+    Forest         UMETA(DisplayName = "Forest"),
+    Plains         UMETA(DisplayName = "Plains"),
+    Desert         UMETA(DisplayName = "Desert"),
+    Unknown        UMETA(DisplayName = "Unknown")
 };
 
-// ============================================================
-// Structs — must be at global scope
-// ============================================================
-
+/**
+ * FEng_BiomeData — Runtime data for a single biome region.
+ * Stored per-cell in the biome grid.
+ */
 USTRUCT(BlueprintType)
-struct FBiomeData
+struct FEng_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Grassland;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Unknown;
 
+    /** Average temperature in Celsius */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FText DisplayName;
+    float Temperature = 25.0f;
 
-    // Environmental parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment", meta = (ClampMin = "-10.0", ClampMax = "60.0"))
-    float BaseTemperature = 28.0f;
+    /** Rainfall in mm/year (affects vegetation density) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Rainfall = 1200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float BaseHumidity = 60.0f;
+    /** Elevation in metres above sea level */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Elevation = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Environment", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float BaseWindSpeed = 15.0f;
+    /** Danger level 0-1 (affects dinosaur spawn density) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DangerLevel = 0.5f;
 
-    // Gameplay parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FoliageDensity = 0.5f;
+    /** World-space origin of this biome cell */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector WorldOrigin = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float DinosaurDensityMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay", meta = (ClampMin = "0.1", ClampMax = "2.0"))
-    float PlayerMovementSpeedModifier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
-    bool bAllowsFireCrafting = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Resources")
-    TArray<FString> ResourceTypes;
+    /** Radius of this biome cell in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 50000.0f;
 };
 
-// ============================================================
-// Delegate declarations
-// ============================================================
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeChanged, EBiomeType, NewBiome);
-
-// ============================================================
-// ABiomeManager
-// ============================================================
-
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
+/**
+ * ABiomeManager — World actor that owns and queries the biome grid.
+ *
+ * Responsibilities:
+ *   - Maintains a flat array of FEng_BiomeData cells covering the playable world
+ *   - Provides GetBiomeAtLocation() for any world-space query
+ *   - Exposes biome data to Blueprint for environment/AI systems
+ *   - Integrates with PCGWorldGenerator (forward-declared; no hard dependency)
+ *
+ * Architecture rules:
+ *   - Single instance per world (enforced via BeginPlay check)
+ *   - All cross-system queries go through this actor, never direct array access
+ *   - DinosaurBase, FoliageManager, and WeatherSystem query this actor for biome context
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -87,99 +84,77 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // ---- Biome Map ----
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State", meta = (AllowPrivateAccess = "true"))
-    TMap<EBiomeType, FBiomeData> BiomeDataMap;
-
-    // ---- Current State ----
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State")
-    EBiomeType CurrentBiomeType;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State")
-    EBiomeType TargetBiomeType;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TransitionBlendAlpha;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State")
-    bool bBiomeTransitionActive;
-
-    // ---- Environmental State ----
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment")
-    float CurrentTemperatureCelsius;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment")
-    float CurrentHumidityPercent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment")
-    float CurrentWindSpeedKmh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment")
-    float CurrentVisibilityMeters;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment")
-    bool bIsRaining;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float RainIntensity;
 
 public:
-    // ---- Configuration ----
+    virtual void Tick(float DeltaTime) override;
+
+    // ─── Biome Query API ─────────────────────────────────────────────────────
+
+    /**
+     * Returns the biome data for the cell closest to WorldLocation.
+     * Returns a default Unknown biome if no cells are registered.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    FEng_BiomeData GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    /**
+     * Returns the biome type enum for a world location (convenience wrapper).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    EEng_BiomeType GetBiomeTypeAtLocation(const FVector& WorldLocation) const;
+
+    /**
+     * Returns the danger level (0-1) at a world location.
+     * Used by DinosaurBase to scale spawn frequency.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+
+    // ─── Biome Registration ───────────────────────────────────────────────────
+
+    /**
+     * Registers a biome cell. Called by PCGWorldGenerator during world init.
+     * Safe to call at runtime — adds to the BiomeCells array.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Setup")
+    void RegisterBiomeCell(const FEng_BiomeData& BiomeData);
+
+    /**
+     * Clears all registered biome cells. Use when regenerating the world.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Setup")
+    void ClearAllBiomeCells();
+
+    /**
+     * Returns the total number of registered biome cells.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    int32 GetBiomeCellCount() const;
+
+    // ─── Default Biome Setup (Editor / Prototype) ─────────────────────────────
+
+    /**
+     * Populates a default set of biome cells for the MinPlayableMap.
+     * Called in BeginPlay if BiomeCells is empty (prototype fallback).
+     */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Setup")
+    void InitialiseDefaultBiomes();
+
+    // ─── Properties ──────────────────────────────────────────────────────────
+
+    /** All registered biome cells. Populated by PCGWorldGenerator or InitialiseDefaultBiomes. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Data")
+    TArray<FEng_BiomeData> BiomeCells;
+
+    /** World extents in cm used for biome grid queries (default: 200km × 200km). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float WorldSizeKm;
+    float WorldExtentCm = 200000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    int32 BiomeSeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float TemperatureHeatStressThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float TemperatureColdStressThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Survival")
-    float HumidityDehydrationModifier;
-
-    // ---- Delegates ----
-    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
-    FOnBiomeChanged OnBiomeChanged;
-
-    // ---- Public API ----
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FBiomeData GetBiomeData(EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetPlayerSurvivalModifier(const FVector& PlayerLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void TriggerBiomeTransition(EBiomeType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FString> GetAvailableResourcesAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool CanCraftFireAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintPure, Category = "Biome")
-    EBiomeType GetCurrentBiomeType() const { return CurrentBiomeType; }
-
-    UFUNCTION(BlueprintPure, Category = "Biome")
-    float GetCurrentTemperature() const { return CurrentTemperatureCelsius; }
-
-    UFUNCTION(BlueprintPure, Category = "Biome")
-    float GetCurrentHumidity() const { return CurrentHumidityPercent; }
-
-    UFUNCTION(BlueprintPure, Category = "Biome")
-    bool GetIsRaining() const { return bIsRaining; }
+    /** If true, draws debug spheres for each biome cell origin in-editor. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
+    bool bDrawDebugBiomes = false;
 
 private:
-    void InitializeBiomeMap();
-    void ApplyBiomeParameters(const FBiomeData& BiomeData);
-    void UpdateEnvironmentalParameters(float DeltaTime);
-    void OnBiomeTransitionComplete(EBiomeType NewBiome);
+    /** Finds the index of the nearest biome cell to WorldLocation. Returns -1 if empty. */
+    int32 FindNearestBiomeCellIndex(const FVector& WorldLocation) const;
 };
