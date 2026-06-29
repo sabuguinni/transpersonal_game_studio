@@ -1,341 +1,394 @@
-// QuestCraftingSystem.cpp — Agent #14 Quest & Mission Designer
-// Cycle: PROD_CYCLE_AUTO_20260628_010
-// Implements crafting-driven quest objectives for the survival game.
-
 #include "QuestCraftingSystem.h"
-#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "Engine/StaticMesh.h"
+#include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
 
-UQuestCraftingSystem::UQuestCraftingSystem()
+// ============================================================
+// AQuest_ResourcePickup
+// ============================================================
+
+AQuest_ResourcePickup::AQuest_ResourcePickup()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
+
+    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ResourceMesh"));
+    RootComponent = MeshComponent;
+
+    PickupRadius = CreateDefaultSubobject<USphereComponent>(TEXT("PickupRadius"));
+    PickupRadius->SetupAttachment(RootComponent);
+    PickupRadius->SetSphereRadius(120.0f);
+    PickupRadius->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 }
 
-void UQuestCraftingSystem::BeginPlay()
+void AQuest_ResourcePickup::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultMissions();
-    UE_LOG(LogTemp, Log, TEXT("[QuestCraftingSystem] Initialized with %d missions in database."), MissionDatabase.Num());
 }
 
-// ============================================================
-// MISSION DATABASE — 3 core crafting quests
-// ============================================================
-
-void UQuestCraftingSystem::InitializeDefaultMissions()
+bool AQuest_ResourcePickup::TryPickup(FQuest_PlayerInventory& OutInventory)
 {
-    MissionDatabase.Empty();
-
-    // ---- MISSION 1: Forge the First Axe ----
+    if (bHasBeenPickedUp)
     {
-        FQuest_CraftingMission M;
-        M.MissionID = FName("QUEST_FIRST_AXE");
-        M.MissionTitle = FText::FromString("Forge the First Axe");
-        M.MissionDescription = FText::FromString(
-            "The tribe needs tools. Gather flint stones from the river bend "
-            "and dry wood from the eastern fallen trees. Craft a Stone Axe "
-            "and return to the elder before nightfall.");
-        M.RewardItem = EQuest_CraftedItemType::StoneAxe;
-        M.CompletionNarrativeLine = FText::FromString(
-            "The Stone Axe is yours. With this blade, you can cut bone, "
-            "strip bark, and defend against smaller predators.");
-
-        // Objective 1: Gather 2 flint stones
-        FQuest_CraftingObjective Obj1;
-        Obj1.ObjectiveID = FName("OBJ_GATHER_FLINT");
-        Obj1.ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-        Obj1.TargetResource = EQuest_ResourceType::FlintStone;
-        Obj1.RequiredCount = 2;
-        Obj1.ObjectiveDescription = FText::FromString("Gather Flint Stones (0/2)");
-        M.Objectives.Add(Obj1);
-
-        // Objective 2: Gather 1 dry wood
-        FQuest_CraftingObjective Obj2;
-        Obj2.ObjectiveID = FName("OBJ_GATHER_WOOD");
-        Obj2.ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-        Obj2.TargetResource = EQuest_ResourceType::DryWood;
-        Obj2.RequiredCount = 1;
-        Obj2.ObjectiveDescription = FText::FromString("Gather Dry Wood (0/1)");
-        M.Objectives.Add(Obj2);
-
-        // Objective 3: Craft the stone axe
-        FQuest_CraftingObjective Obj3;
-        Obj3.ObjectiveID = FName("OBJ_CRAFT_AXE");
-        Obj3.ObjectiveType = EQuest_CraftingObjectiveType::CraftItem;
-        Obj3.TargetItem = EQuest_CraftedItemType::StoneAxe;
-        Obj3.RequiredCount = 1;
-        Obj3.ObjectiveDescription = FText::FromString("Craft a Stone Axe (0/1)");
-        M.Objectives.Add(Obj3);
-
-        MissionDatabase.Add(M);
+        return false;
     }
 
-    // ---- MISSION 2: Light the First Fire ----
+    bHasBeenPickedUp = true;
+
+    switch (ResourceType)
     {
-        FQuest_CraftingMission M;
-        M.MissionID = FName("QUEST_FIRST_FIRE");
-        M.MissionTitle = FText::FromString("Light the First Fire");
-        M.MissionDescription = FText::FromString(
-            "Night falls fast and the predators grow bold in darkness. "
-            "Gather three bundles of dry wood and build a campfire "
-            "near the camp perimeter. Fire keeps the hunters away.");
-        M.RewardItem = EQuest_CraftedItemType::Campfire;
-        M.CompletionNarrativeLine = FText::FromString(
-            "The fire burns. Tonight, the tribe sleeps safely. "
-            "But gather more wood — fires die, and so do the careless.");
-
-        // Objective 1: Gather 3 dry wood
-        FQuest_CraftingObjective Obj1;
-        Obj1.ObjectiveID = FName("OBJ_GATHER_WOOD_FIRE");
-        Obj1.ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-        Obj1.TargetResource = EQuest_ResourceType::DryWood;
-        Obj1.RequiredCount = 3;
-        Obj1.ObjectiveDescription = FText::FromString("Gather Dry Wood (0/3)");
-        M.Objectives.Add(Obj1);
-
-        // Objective 2: Build campfire
-        FQuest_CraftingObjective Obj2;
-        Obj2.ObjectiveID = FName("OBJ_BUILD_CAMPFIRE");
-        Obj2.ObjectiveType = EQuest_CraftingObjectiveType::CraftItem;
-        Obj2.TargetItem = EQuest_CraftedItemType::Campfire;
-        Obj2.RequiredCount = 1;
-        Obj2.ObjectiveDescription = FText::FromString("Build a Campfire (0/1)");
-        M.Objectives.Add(Obj2);
-
-        // Objective 3: Use the campfire (sit by it)
-        FQuest_CraftingObjective Obj3;
-        Obj3.ObjectiveID = FName("OBJ_USE_CAMPFIRE");
-        Obj3.ObjectiveType = EQuest_CraftingObjectiveType::UseItem;
-        Obj3.TargetItem = EQuest_CraftedItemType::Campfire;
-        Obj3.RequiredCount = 1;
-        Obj3.ObjectiveDescription = FText::FromString("Rest by the Campfire (0/1)");
-        M.Objectives.Add(Obj3);
-
-        MissionDatabase.Add(M);
+        case EQuest_ResourceType::Flint:
+            OutInventory.FlintCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Stick:
+            OutInventory.StickCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Leaf:
+            OutInventory.LeafCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Bone:
+            OutInventory.BoneCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Vine:
+            OutInventory.VineCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Clay:
+            OutInventory.ClayCount += PickupCount;
+            break;
+        case EQuest_ResourceType::Tinder:
+            OutInventory.TinderCount += PickupCount;
+            break;
+        default:
+            break;
     }
 
-    // ---- MISSION 3: Water from Stone ----
+    // Hide the actor after pickup
+    SetActorHiddenInGame(true);
+    SetActorEnableCollision(false);
+
+    return true;
+}
+
+FString AQuest_ResourcePickup::GetResourceDisplayName() const
+{
+    switch (ResourceType)
     {
-        FQuest_CraftingMission M;
-        M.MissionID = FName("QUEST_WATER_CONTAINER");
-        M.MissionTitle = FText::FromString("Water from Stone");
-        M.MissionDescription = FText::FromString(
-            "The dry season approaches. Without a way to carry water, "
-            "the tribe cannot follow the herds. Find a smooth river stone "
-            "and a broad leaf. Shape a water container — it will save lives.");
-        M.RewardItem = EQuest_CraftedItemType::WaterContainer;
-        M.CompletionNarrativeLine = FText::FromString(
-            "The container holds. Now you can carry water from the river "
-            "and follow the great herds into the open plains.");
-
-        // Objective 1: Gather 1 smooth stone (FlintStone variant)
-        FQuest_CraftingObjective Obj1;
-        Obj1.ObjectiveID = FName("OBJ_GATHER_STONE_WATER");
-        Obj1.ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-        Obj1.TargetResource = EQuest_ResourceType::FlintStone;
-        Obj1.RequiredCount = 1;
-        Obj1.ObjectiveDescription = FText::FromString("Gather a Smooth Stone (0/1)");
-        M.Objectives.Add(Obj1);
-
-        // Objective 2: Gather 1 large leaf
-        FQuest_CraftingObjective Obj2;
-        Obj2.ObjectiveID = FName("OBJ_GATHER_LEAF");
-        Obj2.ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-        Obj2.TargetResource = EQuest_ResourceType::Leaf;
-        Obj2.RequiredCount = 1;
-        Obj2.ObjectiveDescription = FText::FromString("Gather a Large Leaf (0/1)");
-        M.Objectives.Add(Obj2);
-
-        // Objective 3: Craft water container
-        FQuest_CraftingObjective Obj3;
-        Obj3.ObjectiveID = FName("OBJ_CRAFT_CONTAINER");
-        Obj3.ObjectiveType = EQuest_CraftingObjectiveType::CraftItem;
-        Obj3.TargetItem = EQuest_CraftedItemType::WaterContainer;
-        Obj3.RequiredCount = 1;
-        Obj3.ObjectiveDescription = FText::FromString("Craft a Water Container (0/1)");
-        M.Objectives.Add(Obj3);
-
-        // Objective 4: Fill it at the river (UseItem)
-        FQuest_CraftingObjective Obj4;
-        Obj4.ObjectiveID = FName("OBJ_FILL_CONTAINER");
-        Obj4.ObjectiveType = EQuest_CraftingObjectiveType::UseItem;
-        Obj4.TargetItem = EQuest_CraftedItemType::WaterContainer;
-        Obj4.RequiredCount = 1;
-        Obj4.ObjectiveDescription = FText::FromString("Fill the Container at the River (0/1)");
-        M.Objectives.Add(Obj4);
-
-        MissionDatabase.Add(M);
+        case EQuest_ResourceType::Flint:    return TEXT("Flint Rock");
+        case EQuest_ResourceType::Stick:    return TEXT("Wooden Stick");
+        case EQuest_ResourceType::Leaf:     return TEXT("Large Leaf");
+        case EQuest_ResourceType::Bone:     return TEXT("Animal Bone");
+        case EQuest_ResourceType::Vine:     return TEXT("Vine");
+        case EQuest_ResourceType::Clay:     return TEXT("Clay");
+        case EQuest_ResourceType::Tinder:   return TEXT("Dry Tinder");
+        default:                            return TEXT("Unknown Resource");
     }
 }
 
 // ============================================================
-// PUBLIC API
+// AQuest_CraftingSystemManager
 // ============================================================
 
-void UQuestCraftingSystem::StartMission(FName MissionID)
+AQuest_CraftingSystemManager::AQuest_CraftingSystemManager()
 {
-    // Check if already active or completed
-    for (const FQuest_CraftingMission& M : ActiveMissions)
+    PrimaryActorTick.bCanEverTick = true;
+}
+
+void AQuest_CraftingSystemManager::BeginPlay()
+{
+    Super::BeginPlay();
+    InitializeRecipes();
+}
+
+void AQuest_CraftingSystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (CraftingState == EQuest_CraftingState::Crafting)
     {
-        if (M.MissionID == MissionID)
+        if (SelectedRecipeIndex >= 0 && SelectedRecipeIndex < Recipes.Num())
         {
-            UE_LOG(LogTemp, Warning, TEXT("[QuestCraftingSystem] Mission %s already active."), *MissionID.ToString());
-            return;
+            CraftingProgress += DeltaTime;
+            float Required = Recipes[SelectedRecipeIndex].CraftingTimeSec;
+            if (CraftingProgress >= Required)
+            {
+                OnCraftingComplete();
+            }
+        }
+    }
+}
+
+void AQuest_CraftingSystemManager::InitializeRecipes()
+{
+    Recipes.Empty();
+
+    // ---- Recipe 1: Stone Axe (2 Flint + 1 Stick) ----
+    {
+        FQuest_CraftingRecipe StoneAxe;
+        StoneAxe.OutputItem = EQuest_CraftedItem::StoneAxe;
+        StoneAxe.RecipeName = TEXT("Stone Axe");
+        StoneAxe.Description = TEXT("A sharp flint head bound to a wooden handle. Essential for chopping wood and fighting off small predators.");
+        StoneAxe.CraftingTimeSec = 3.0f;
+
+        FQuest_CraftingIngredient Flint1;
+        Flint1.ResourceType = EQuest_ResourceType::Flint;
+        Flint1.RequiredCount = 2;
+        StoneAxe.Ingredients.Add(Flint1);
+
+        FQuest_CraftingIngredient Stick1;
+        Stick1.ResourceType = EQuest_ResourceType::Stick;
+        Stick1.RequiredCount = 1;
+        StoneAxe.Ingredients.Add(Stick1);
+
+        Recipes.Add(StoneAxe);
+    }
+
+    // ---- Recipe 2: Campfire (3 Sticks + 1 Tinder) ----
+    {
+        FQuest_CraftingRecipe Campfire;
+        Campfire.OutputItem = EQuest_CraftedItem::Campfire;
+        Campfire.RecipeName = TEXT("Campfire");
+        Campfire.Description = TEXT("A small fire that keeps predators away at night and allows cooking of raw meat. Place it near your shelter.");
+        Campfire.CraftingTimeSec = 4.0f;
+
+        FQuest_CraftingIngredient Stick2;
+        Stick2.ResourceType = EQuest_ResourceType::Stick;
+        Stick2.RequiredCount = 3;
+        Campfire.Ingredients.Add(Stick2);
+
+        FQuest_CraftingIngredient Tinder1;
+        Tinder1.ResourceType = EQuest_ResourceType::Tinder;
+        Tinder1.RequiredCount = 1;
+        Campfire.Ingredients.Add(Tinder1);
+
+        Recipes.Add(Campfire);
+    }
+
+    // ---- Recipe 3: Water Container (1 Clay + 1 Leaf) ----
+    {
+        FQuest_CraftingRecipe WaterContainer;
+        WaterContainer.OutputItem = EQuest_CraftedItem::WaterContainer;
+        WaterContainer.RecipeName = TEXT("Water Container");
+        WaterContainer.Description = TEXT("A clay bowl lined with large leaves. Holds enough water for one day of travel. Find a river to fill it.");
+        WaterContainer.CraftingTimeSec = 5.0f;
+
+        FQuest_CraftingIngredient Clay1;
+        Clay1.ResourceType = EQuest_ResourceType::Clay;
+        Clay1.RequiredCount = 1;
+        WaterContainer.Ingredients.Add(Clay1);
+
+        FQuest_CraftingIngredient Leaf1;
+        Leaf1.ResourceType = EQuest_ResourceType::Leaf;
+        Leaf1.RequiredCount = 1;
+        WaterContainer.Ingredients.Add(Leaf1);
+
+        Recipes.Add(WaterContainer);
+    }
+
+    // ---- Recipe 4: Bone-Tipped Spear (2 Sticks + 1 Bone + 1 Vine) ----
+    {
+        FQuest_CraftingRecipe BoneSpear;
+        BoneSpear.OutputItem = EQuest_CraftedItem::BoneTip;
+        BoneSpear.RecipeName = TEXT("Bone-Tipped Spear");
+        BoneSpear.Description = TEXT("A long spear with a sharpened bone tip. More effective against large dinosaurs than a stone axe. Keep distance.");
+        BoneSpear.CraftingTimeSec = 6.0f;
+
+        FQuest_CraftingIngredient Stick3;
+        Stick3.ResourceType = EQuest_ResourceType::Stick;
+        Stick3.RequiredCount = 2;
+        BoneSpear.Ingredients.Add(Stick3);
+
+        FQuest_CraftingIngredient Bone1;
+        Bone1.ResourceType = EQuest_ResourceType::Bone;
+        Bone1.RequiredCount = 1;
+        BoneSpear.Ingredients.Add(Bone1);
+
+        FQuest_CraftingIngredient Vine1;
+        Vine1.ResourceType = EQuest_ResourceType::Vine;
+        Vine1.RequiredCount = 1;
+        BoneSpear.Ingredients.Add(Vine1);
+
+        Recipes.Add(BoneSpear);
+    }
+
+    // ---- Recipe 5: Torch (1 Stick + 1 Tinder + 1 Vine) ----
+    {
+        FQuest_CraftingRecipe Torch;
+        Torch.OutputItem = EQuest_CraftedItem::Torch;
+        Torch.RecipeName = TEXT("Torch");
+        Torch.Description = TEXT("A burning torch that scares off predators and lights dark caves. Burns for 5 minutes before going out.");
+        Torch.CraftingTimeSec = 2.5f;
+
+        FQuest_CraftingIngredient Stick4;
+        Stick4.ResourceType = EQuest_ResourceType::Stick;
+        Stick4.RequiredCount = 1;
+        Torch.Ingredients.Add(Stick4);
+
+        FQuest_CraftingIngredient Tinder2;
+        Tinder2.ResourceType = EQuest_ResourceType::Tinder;
+        Tinder2.RequiredCount = 1;
+        Torch.Ingredients.Add(Tinder2);
+
+        FQuest_CraftingIngredient Vine2;
+        Vine2.ResourceType = EQuest_ResourceType::Vine;
+        Vine2.RequiredCount = 1;
+        Torch.Ingredients.Add(Vine2);
+
+        Recipes.Add(Torch);
+    }
+}
+
+bool AQuest_CraftingSystemManager::CanCraft(int32 RecipeIndex) const
+{
+    if (!Recipes.IsValidIndex(RecipeIndex))
+    {
+        return false;
+    }
+
+    const FQuest_CraftingRecipe& Recipe = Recipes[RecipeIndex];
+
+    for (const FQuest_CraftingIngredient& Ingredient : Recipe.Ingredients)
+    {
+        if (GetResourceCount(Ingredient.ResourceType) < Ingredient.RequiredCount)
+        {
+            return false;
         }
     }
 
-    // Find in database
-    for (const FQuest_CraftingMission& DBMission : MissionDatabase)
+    return true;
+}
+
+bool AQuest_CraftingSystemManager::TryCraft(int32 RecipeIndex)
+{
+    if (!CanCraft(RecipeIndex))
     {
-        if (DBMission.MissionID == MissionID)
+        CraftingState = EQuest_CraftingState::Failed;
+        return false;
+    }
+
+    SelectedRecipeIndex = RecipeIndex;
+    CraftingState = EQuest_CraftingState::Crafting;
+    CraftingProgress = 0.0f;
+
+    return true;
+}
+
+void AQuest_CraftingSystemManager::OnCraftingComplete()
+{
+    if (!Recipes.IsValidIndex(SelectedRecipeIndex))
+    {
+        return;
+    }
+
+    ConsumeMaterials(SelectedRecipeIndex);
+    PlayerInventory.CraftedItems.AddUnique(Recipes[SelectedRecipeIndex].OutputItem);
+
+    CraftingState = EQuest_CraftingState::Success;
+    CraftingProgress = 0.0f;
+    SelectedRecipeIndex = -1;
+}
+
+void AQuest_CraftingSystemManager::ConsumeMaterials(int32 RecipeIndex)
+{
+    if (!Recipes.IsValidIndex(RecipeIndex))
+    {
+        return;
+    }
+
+    for (const FQuest_CraftingIngredient& Ingredient : Recipes[RecipeIndex].Ingredients)
+    {
+        switch (Ingredient.ResourceType)
         {
-            FQuest_CraftingMission NewMission = DBMission;
-            NewMission.bActive = true;
-            NewMission.bCompleted = false;
-            ActiveMissions.Add(NewMission);
-            UE_LOG(LogTemp, Log, TEXT("[QuestCraftingSystem] Started mission: %s"), *MissionID.ToString());
-            return;
+            case EQuest_ResourceType::Flint:
+                PlayerInventory.FlintCount = FMath::Max(0, PlayerInventory.FlintCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Stick:
+                PlayerInventory.StickCount = FMath::Max(0, PlayerInventory.StickCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Leaf:
+                PlayerInventory.LeafCount = FMath::Max(0, PlayerInventory.LeafCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Bone:
+                PlayerInventory.BoneCount = FMath::Max(0, PlayerInventory.BoneCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Vine:
+                PlayerInventory.VineCount = FMath::Max(0, PlayerInventory.VineCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Clay:
+                PlayerInventory.ClayCount = FMath::Max(0, PlayerInventory.ClayCount - Ingredient.RequiredCount);
+                break;
+            case EQuest_ResourceType::Tinder:
+                PlayerInventory.TinderCount = FMath::Max(0, PlayerInventory.TinderCount - Ingredient.RequiredCount);
+                break;
+            default:
+                break;
         }
     }
-
-    UE_LOG(LogTemp, Error, TEXT("[QuestCraftingSystem] Mission %s not found in database."), *MissionID.ToString());
 }
 
-void UQuestCraftingSystem::ReportResourceGathered(EQuest_ResourceType ResourceType, int32 Count)
+void AQuest_CraftingSystemManager::OpenCraftingMenu()
 {
-    for (FQuest_CraftingMission& Mission : ActiveMissions)
-    {
-        if (!Mission.bActive || Mission.bCompleted) continue;
-        UpdateObjectiveProgress(Mission,
-            EQuest_CraftingObjectiveType::GatherResource,
-            ResourceType,
-            EQuest_CraftedItemType::StoneAxe, // unused for resource gather
-            Count);
-    }
+    CraftingState = EQuest_CraftingState::MenuOpen;
 }
 
-void UQuestCraftingSystem::ReportItemCrafted(EQuest_CraftedItemType ItemType)
+void AQuest_CraftingSystemManager::CloseCraftingMenu()
 {
-    for (FQuest_CraftingMission& Mission : ActiveMissions)
-    {
-        if (!Mission.bActive || Mission.bCompleted) continue;
-        UpdateObjectiveProgress(Mission,
-            EQuest_CraftingObjectiveType::CraftItem,
-            EQuest_ResourceType::FlintStone, // unused for craft
-            ItemType,
-            1);
-    }
+    CraftingState = EQuest_CraftingState::Idle;
+    CraftingProgress = 0.0f;
+    SelectedRecipeIndex = -1;
 }
 
-void UQuestCraftingSystem::ReportItemUsed(EQuest_CraftedItemType ItemType)
+TArray<FQuest_CraftingRecipe> AQuest_CraftingSystemManager::GetAvailableRecipes() const
 {
-    for (FQuest_CraftingMission& Mission : ActiveMissions)
+    return Recipes;
+}
+
+int32 AQuest_CraftingSystemManager::GetResourceCount(EQuest_ResourceType ResourceType) const
+{
+    switch (ResourceType)
     {
-        if (!Mission.bActive || Mission.bCompleted) continue;
-        UpdateObjectiveProgress(Mission,
-            EQuest_CraftingObjectiveType::UseItem,
-            EQuest_ResourceType::FlintStone, // unused for use
-            ItemType,
-            1);
+        case EQuest_ResourceType::Flint:    return PlayerInventory.FlintCount;
+        case EQuest_ResourceType::Stick:    return PlayerInventory.StickCount;
+        case EQuest_ResourceType::Leaf:     return PlayerInventory.LeafCount;
+        case EQuest_ResourceType::Bone:     return PlayerInventory.BoneCount;
+        case EQuest_ResourceType::Vine:     return PlayerInventory.VineCount;
+        case EQuest_ResourceType::Clay:     return PlayerInventory.ClayCount;
+        case EQuest_ResourceType::Tinder:   return PlayerInventory.TinderCount;
+        default:                            return 0;
     }
 }
 
-bool UQuestCraftingSystem::IsMissionActive(FName MissionID) const
+void AQuest_CraftingSystemManager::AddResource(EQuest_ResourceType ResourceType, int32 Count)
 {
-    for (const FQuest_CraftingMission& M : ActiveMissions)
+    switch (ResourceType)
     {
-        if (M.MissionID == MissionID) return M.bActive && !M.bCompleted;
+        case EQuest_ResourceType::Flint:    PlayerInventory.FlintCount  += Count; break;
+        case EQuest_ResourceType::Stick:    PlayerInventory.StickCount  += Count; break;
+        case EQuest_ResourceType::Leaf:     PlayerInventory.LeafCount   += Count; break;
+        case EQuest_ResourceType::Bone:     PlayerInventory.BoneCount   += Count; break;
+        case EQuest_ResourceType::Vine:     PlayerInventory.VineCount   += Count; break;
+        case EQuest_ResourceType::Clay:     PlayerInventory.ClayCount   += Count; break;
+        case EQuest_ResourceType::Tinder:   PlayerInventory.TinderCount += Count; break;
+        default: break;
     }
-    return false;
 }
 
-bool UQuestCraftingSystem::IsMissionCompleted(FName MissionID) const
+bool AQuest_CraftingSystemManager::HasCraftedItem(EQuest_CraftedItem Item) const
 {
-    for (const FQuest_CraftingMission& M : ActiveMissions)
-    {
-        if (M.MissionID == MissionID) return M.bCompleted;
-    }
-    return false;
+    return PlayerInventory.CraftedItems.Contains(Item);
 }
 
-float UQuestCraftingSystem::GetMissionProgress(FName MissionID) const
+bool AQuest_CraftingSystemManager::HasCraftedStoneAxe() const
 {
-    for (const FQuest_CraftingMission& M : ActiveMissions)
-    {
-        if (M.MissionID != MissionID) continue;
-        if (M.Objectives.Num() == 0) return 0.0f;
-
-        int32 CompletedCount = 0;
-        for (const FQuest_CraftingObjective& Obj : M.Objectives)
-        {
-            if (Obj.bCompleted) CompletedCount++;
-        }
-        return static_cast<float>(CompletedCount) / static_cast<float>(M.Objectives.Num());
-    }
-    return 0.0f;
+    return HasCraftedItem(EQuest_CraftedItem::StoneAxe);
 }
 
-FQuest_CraftingMission UQuestCraftingSystem::GetMissionData(FName MissionID) const
+bool AQuest_CraftingSystemManager::HasCraftedCampfire() const
 {
-    for (const FQuest_CraftingMission& M : ActiveMissions)
-    {
-        if (M.MissionID == MissionID) return M;
-    }
-    return FQuest_CraftingMission();
+    return HasCraftedItem(EQuest_CraftedItem::Campfire);
 }
 
-// ============================================================
-// PRIVATE HELPERS
-// ============================================================
-
-void UQuestCraftingSystem::UpdateObjectiveProgress(
-    FQuest_CraftingMission& Mission,
-    EQuest_CraftingObjectiveType ObjType,
-    EQuest_ResourceType Resource,
-    EQuest_CraftedItemType Item,
-    int32 Count)
+bool AQuest_CraftingSystemManager::HasCraftedTorch() const
 {
-    for (FQuest_CraftingObjective& Obj : Mission.Objectives)
-    {
-        if (Obj.bCompleted) continue;
-        if (Obj.ObjectiveType != ObjType) continue;
-
-        bool bMatches = false;
-        if (ObjType == EQuest_CraftingObjectiveType::GatherResource && Obj.TargetResource == Resource)
-            bMatches = true;
-        if ((ObjType == EQuest_CraftingObjectiveType::CraftItem ||
-             ObjType == EQuest_CraftingObjectiveType::UseItem) && Obj.TargetItem == Item)
-            bMatches = true;
-
-        if (!bMatches) continue;
-
-        Obj.CurrentCount = FMath::Min(Obj.CurrentCount + Count, Obj.RequiredCount);
-        if (Obj.CurrentCount >= Obj.RequiredCount)
-        {
-            Obj.bCompleted = true;
-            UE_LOG(LogTemp, Log, TEXT("[QuestCraftingSystem] Objective %s COMPLETED in mission %s"),
-                *Obj.ObjectiveID.ToString(), *Mission.MissionID.ToString());
-            OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj.ObjectiveID);
-        }
-    }
-
-    CheckMissionCompletion(Mission);
-}
-
-void UQuestCraftingSystem::CheckMissionCompletion(FQuest_CraftingMission& Mission)
-{
-    if (Mission.bCompleted) return;
-
-    bool bAllDone = true;
-    for (const FQuest_CraftingObjective& Obj : Mission.Objectives)
-    {
-        if (!Obj.bCompleted) { bAllDone = false; break; }
-    }
-
-    if (bAllDone)
-    {
-        Mission.bCompleted = true;
-        Mission.bActive = false;
-        UE_LOG(LogTemp, Log, TEXT("[QuestCraftingSystem] MISSION COMPLETED: %s"), *Mission.MissionID.ToString());
-        OnMissionCompleted.Broadcast(Mission.MissionID);
-    }
+    return HasCraftedItem(EQuest_CraftedItem::Torch);
 }
