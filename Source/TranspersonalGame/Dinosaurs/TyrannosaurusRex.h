@@ -1,7 +1,3 @@
-// TyrannosaurusRex.h — Tyrannosaurus Rex dinosaur class
-// Agent #3 — Core Systems Programmer
-// Inherits from ADinosaurBase. Apex predator: high health, high damage, aggressive.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,13 +7,19 @@
 /**
  * ATyrannosaurusRex
  *
- * Apex predator of the prehistoric world. Extremely high health and damage output.
- * Aggressive by default — will attack the player on sight within detection range.
- * Large capsule (120 radius, 220 half-height). Slow but devastating.
+ * Apex predator dinosaur — the most dangerous creature in the prehistoric world.
+ * Inherits from ADinosaurBase and overrides stats with T-Rex specific values:
+ * - Health: 2000 HP (tank)
+ * - Speed: 600 cm/s (fast for its size)
+ * - Damage: 150 per bite
+ * - Detection radius: 5000 cm (excellent vision)
+ * - Territory radius: 8000 cm
+ * - Diet: Carnivore (always hunts players on detection)
  *
- * Gameplay role: Boss-tier encounter. Player must avoid or use terrain to escape.
+ * Behavior: Solitary apex predator. Patrols territory, attacks anything that moves.
+ * Roars when entering aggressive state. Charges at detected prey.
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Tyrannosaurus Rex"))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATyrannosaurusRex : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -25,50 +27,51 @@ class TRANSPERSONALGAME_API ATyrannosaurusRex : public ADinosaurBase
 public:
     ATyrannosaurusRex();
 
-    // Override BeginPlay to set TRex-specific AI patrol radius
-    virtual void BeginPlay() override;
+    /** T-Rex roar sound — played when entering aggressive state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Audio")
+    USoundBase* RoarSound;
 
-    // Override Tick for roar cooldown logic
-    virtual void Tick(float DeltaTime) override;
-
-    // Roar ability — intimidates nearby creatures, triggers fear in player
-    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-    void PerformRoar();
-
-    // Stomp attack — area damage in front of TRex
-    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-    void PerformStompAttack();
-
-    // Called when TRex detects player — triggers roar if cooldown expired
-    virtual void OnTargetDetected_Implementation(AActor* Target) override;
-
-    // Called when TRex kills a target — brief feeding behavior
-    virtual void OnDeath_Implementation() override;
-
-    // Time since last roar (seconds)
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
-    float TimeSinceLastRoar;
-
-    // Roar cooldown in seconds (default 45s)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float RoarCooldown;
-
-    // Stomp damage radius (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
+    /** Stomp radius — ground shake effect when T-Rex walks nearby */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
     float StompRadius;
 
-    // Stomp damage amount
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
+    /** Stomp damage — applied to players within stomp radius on heavy footfall */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
     float StompDamage;
 
-    // Whether TRex is currently in feeding state after kill
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    bool bIsFeeding;
+    /** Charge speed multiplier — how much faster T-Rex moves when charging */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float ChargeSpeedMultiplier;
 
-    // Feeding duration (seconds) before resuming patrol
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
-    float FeedingDuration;
+    /** Whether T-Rex is currently in a charge attack */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State",
+        meta = (AllowPrivateAccess = "true"))
+    bool bIsCharging;
+
+    /** Charge cooldown in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float ChargeCooldown;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    /** Override: T-Rex roars when it detects a player */
+    virtual void OnPlayerDetected(APawn* DetectedPlayer) override;
+
+    /** Override: T-Rex death — collapses with heavy impact */
+    virtual void Die() override;
+
+    /** Initiate a charge attack toward target */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void StartCharge(AActor* Target);
+
+    /** Apply stomp damage to nearby players */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void ApplyStompDamage();
 
 private:
-    float FeedingTimer;
+    float LastChargeTime;
+    float LastStompTime;
+    float StompInterval;
 };
