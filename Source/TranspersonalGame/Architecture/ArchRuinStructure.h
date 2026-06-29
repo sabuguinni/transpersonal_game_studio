@@ -2,26 +2,33 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "ArchRuinStructure.generated.h"
+
+/**
+ * Cretaceous-era stone ruin structure for the prehistoric survival world.
+ * Represents ancient limestone ruins with moss, ferns, and weathered blocks.
+ * Agent #7 — Architecture & Interior Agent
+ */
 
 UENUM(BlueprintType)
 enum class EArch_RuinType : uint8
 {
     WallSegment     UMETA(DisplayName = "Wall Segment"),
-    Pillar          UMETA(DisplayName = "Pillar"),
     Archway         UMETA(DisplayName = "Archway"),
-    Foundation      UMETA(DisplayName = "Foundation"),
-    RubblePile      UMETA(DisplayName = "Rubble Pile"),
-    Doorframe       UMETA(DisplayName = "Doorframe")
+    Column          UMETA(DisplayName = "Column"),
+    Platform        UMETA(DisplayName = "Platform"),
+    Rubble          UMETA(DisplayName = "Rubble Pile"),
+    Altar           UMETA(DisplayName = "Stone Altar")
 };
 
 UENUM(BlueprintType)
-enum class EArch_RuinMaterial : uint8
+enum class EArch_WeatherState : uint8
 {
-    Limestone       UMETA(DisplayName = "Limestone"),
-    Sandstone       UMETA(DisplayName = "Sandstone"),
-    VolcanicRock    UMETA(DisplayName = "Volcanic Rock"),
-    MudBrick        UMETA(DisplayName = "Mud Brick")
+    Fresh           UMETA(DisplayName = "Fresh Stone"),
+    Mossy           UMETA(DisplayName = "Moss Covered"),
+    Overgrown       UMETA(DisplayName = "Heavily Overgrown"),
+    Collapsed       UMETA(DisplayName = "Partially Collapsed")
 };
 
 USTRUCT(BlueprintType)
@@ -29,32 +36,23 @@ struct FArch_RuinConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ruin")
     EArch_RuinType RuinType = EArch_RuinType::WallSegment;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
-    EArch_RuinMaterial MaterialType = EArch_RuinMaterial::Limestone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ruin")
+    EArch_WeatherState WeatherState = EArch_WeatherState::Mossy;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
-    float DegradationLevel = 0.5f;  // 0=pristine, 1=rubble
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ruin")
+    float StructuralIntegrity = 0.75f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
-    float MossCoverage = 0.7f;      // 0=bare, 1=fully covered
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ruin")
+    bool bCanCollapse = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
-    bool bHasVegetationGrowth = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Ruin")
-    FVector StructureScale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ruin")
+    float CollapseThreshold = 0.2f;
 };
 
-/**
- * AArchRuinStructure
- * Cretaceous-era architectural ruin structure for the prehistoric survival game.
- * Represents ancient stone constructions overgrown and degraded over millennia.
- * Agent #7 — Architecture & Interior Agent
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|Architecture")
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AArchRuinStructure : public AActor
 {
     GENERATED_BODY()
@@ -62,49 +60,48 @@ class TRANSPERSONALGAME_API AArchRuinStructure : public AActor
 public:
     AArchRuinStructure();
 
+protected:
     virtual void BeginPlay() override;
-    virtual void OnConstruction(const FTransform& Transform) override;
 
-    /** Primary structural mesh */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arch|Components",
-        meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UStaticMeshComponent> StructureMesh;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    /** Vegetation overlay mesh (moss, ferns) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arch|Components",
-        meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UStaticMeshComponent> VegetationMesh;
+    // === COMPONENTS ===
 
-    /** Ruin configuration */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Config")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* PrimaryMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* RubbleMesh;
+
+    // === CONFIGURATION ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
     FArch_RuinConfig RuinConfig;
 
-    /** World biome location tag */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Placement")
-    FName BiomeTag = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
+    float CurrentIntegrity;
 
-    /** Whether this ruin can be used as player shelter */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Gameplay")
-    bool bProvidesShelter = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Ruin")
+    bool bIsCollapsed;
 
-    /** Shelter quality rating 0-1 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arch|Gameplay",
-        meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ShelterQuality = 0.3f;
+    // === FUNCTIONS ===
 
-    /** Apply ruin configuration to mesh */
-    UFUNCTION(BlueprintCallable, Category = "Arch|Ruin")
-    void ApplyRuinConfig();
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
+    void ApplyDamage(float DamageAmount);
 
-    /** Get degradation description for UI */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Arch|Ruin")
-    FString GetDegradationDescription() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
+    void CollapseStructure();
 
-    /** Check if player is inside shelter bounds */
-    UFUNCTION(BlueprintCallable, Category = "Arch|Gameplay")
-    bool IsPlayerInShelter(const FVector& PlayerLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
+    float GetStructuralIntegrity() const;
 
-    /** Get shelter radius based on ruin type */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Arch|Gameplay")
-    float GetShelterRadius() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
+    EArch_RuinType GetRuinType() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Ruin")
+    void SetWeatherState(EArch_WeatherState NewState);
+
+    UFUNCTION(CallInEditor, Category = "Architecture|Debug")
+    void DebugPrintRuinInfo();
 };
