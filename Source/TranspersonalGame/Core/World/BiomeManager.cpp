@@ -1,205 +1,242 @@
-// BiomeManager.cpp
-// Procedural World Generator — Agent #5
-// Manages biome zones, climate properties, and location-based queries.
-
-#include "BiomeManager.h"
-#include "DrawDebugHelpers.h"
+#include "Core/World/BiomeManager.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
-ABiomeManager::ABiomeManager()
+// ============================================================
+// UWorld_BiomeComponent
+// ============================================================
+
+UWorld_BiomeComponent::UWorld_BiomeComponent()
 {
-    PrimaryActorTick.bCanEverTick = false;
-    InitDefaultBiomes();
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Update once per second
+    CurrentBiome = EWorld_BiomeType::None;
+    TransitionBlend = 0.0f;
 }
 
-void ABiomeManager::BeginPlay()
+void UWorld_BiomeComponent::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: %d biomes registered"), BiomeConfigs.Num());
+    InitializeDefaultBiomes();
 }
 
-void ABiomeManager::Tick(float DeltaTime)
+void UWorld_BiomeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        UpdateBiomeForActor(Owner);
+    }
 }
 
-void ABiomeManager::InitDefaultBiomes()
+void UWorld_BiomeComponent::InitializeDefaultBiomes()
 {
-    BiomeConfigs.Empty();
+    RegisteredBiomes.Empty();
 
-    // Forest biome — dense, humid, high foliage
-    FWorld_BiomeConfig Forest;
-    Forest.BiomeType            = EWorld_BiomeType::Forest;
-    Forest.DisplayName          = TEXT("Dense Cretaceous Forest");
-    Forest.AmbientTemperature   = 28.0f;
-    Forest.Humidity             = 0.85f;
-    Forest.FogDensityMultiplier = 1.8f;
-    Forest.FoliageDensity       = 0.95f;
-    Forest.DinosaurSpawnWeight  = 0.6f;
-    Forest.bHasWater            = false;
-    Forest.AmbientSoundTag      = FName("Biome_Forest");
-    BiomeConfigs.Add(Forest);
+    // Forest biome — dense jungle, high humidity
+    FWorld_BiomeData Forest;
+    Forest.BiomeType = EWorld_BiomeType::Forest;
+    Forest.WorldCenter = FVector(-1500.f, 0.f, 0.f);
+    Forest.Radius = 1800.f;
+    Forest.VegetationDensity = 2.5f;
+    Forest.AmbientTemperature = 26.f;
+    Forest.Humidity = 0.85f;
+    Forest.FogColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
+    RegisteredBiomes.Add(Forest);
 
-    // Rocky Plains biome — dry, sparse
-    FWorld_BiomeConfig Rocky;
-    Rocky.BiomeType            = EWorld_BiomeType::RockyPlains;
-    Rocky.DisplayName          = TEXT("Rocky Badlands");
-    Rocky.AmbientTemperature   = 35.0f;
-    Rocky.Humidity             = 0.2f;
-    Rocky.FogDensityMultiplier = 0.4f;
-    Rocky.FoliageDensity       = 0.15f;
-    Rocky.DinosaurSpawnWeight  = 0.8f;
-    Rocky.bHasWater            = false;
-    Rocky.AmbientSoundTag      = FName("Biome_Rocky");
-    BiomeConfigs.Add(Rocky);
+    // Plains biome — open grassland, moderate conditions
+    FWorld_BiomeData Plains;
+    Plains.BiomeType = EWorld_BiomeType::Plains;
+    Plains.WorldCenter = FVector(1500.f, 0.f, 0.f);
+    Plains.Radius = 1800.f;
+    Plains.VegetationDensity = 0.8f;
+    Plains.AmbientTemperature = 28.f;
+    Plains.Humidity = 0.4f;
+    Plains.FogColor = FLinearColor(0.7f, 0.75f, 0.6f, 1.0f);
+    RegisteredBiomes.Add(Plains);
 
-    // Savanna biome — open, warm, moderate fauna
-    FWorld_BiomeConfig Savanna;
-    Savanna.BiomeType            = EWorld_BiomeType::Savanna;
-    Savanna.DisplayName          = TEXT("Open Savanna");
-    Savanna.AmbientTemperature   = 32.0f;
-    Savanna.Humidity             = 0.35f;
-    Savanna.FogDensityMultiplier = 0.6f;
-    Savanna.FoliageDensity       = 0.3f;
-    Savanna.DinosaurSpawnWeight  = 0.9f;
-    Savanna.bHasWater            = false;
-    Savanna.AmbientSoundTag      = FName("Biome_Savanna");
-    BiomeConfigs.Add(Savanna);
+    // Rocky badlands — sparse vegetation, hot and dry
+    FWorld_BiomeData Rocky;
+    Rocky.BiomeType = EWorld_BiomeType::Rocky;
+    Rocky.WorldCenter = FVector(0.f, -1500.f, 0.f);
+    Rocky.Radius = 1600.f;
+    Rocky.VegetationDensity = 0.2f;
+    Rocky.AmbientTemperature = 38.f;
+    Rocky.Humidity = 0.15f;
+    Rocky.FogColor = FLinearColor(0.8f, 0.65f, 0.4f, 1.0f);
+    RegisteredBiomes.Add(Rocky);
 
-    // River Valley biome — water, high humidity
-    FWorld_BiomeConfig River;
-    River.BiomeType            = EWorld_BiomeType::RiverValley;
-    River.DisplayName          = TEXT("River Valley");
-    River.AmbientTemperature   = 24.0f;
-    River.Humidity             = 0.95f;
-    River.FogDensityMultiplier = 2.5f;
-    River.FoliageDensity       = 0.8f;
-    River.DinosaurSpawnWeight  = 0.7f;
-    River.bHasWater            = true;
-    River.AmbientSoundTag      = FName("Biome_River");
-    BiomeConfigs.Add(River);
+    // Swamp biome — waterlogged, high humidity, dense low vegetation
+    FWorld_BiomeData Swamp;
+    Swamp.BiomeType = EWorld_BiomeType::Swamp;
+    Swamp.WorldCenter = FVector(0.f, 1500.f, 0.f);
+    Swamp.Radius = 1600.f;
+    Swamp.VegetationDensity = 1.8f;
+    Swamp.AmbientTemperature = 30.f;
+    Swamp.Humidity = 0.95f;
+    Swamp.FogColor = FLinearColor(0.3f, 0.5f, 0.35f, 1.0f);
+    RegisteredBiomes.Add(Swamp);
 
-    // Swamp biome — very humid, low visibility
-    FWorld_BiomeConfig Swamp;
-    Swamp.BiomeType            = EWorld_BiomeType::Swamp;
-    Swamp.DisplayName          = TEXT("Prehistoric Swamp");
-    Swamp.AmbientTemperature   = 22.0f;
-    Swamp.Humidity             = 1.0f;
-    Swamp.FogDensityMultiplier = 4.0f;
-    Swamp.FoliageDensity       = 0.7f;
-    Swamp.DinosaurSpawnWeight  = 0.5f;
-    Swamp.bHasWater            = true;
-    Swamp.AmbientSoundTag      = FName("Biome_Swamp");
-    BiomeConfigs.Add(Swamp);
-
-    // Volcanic biome — extreme heat, low fauna
-    FWorld_BiomeConfig Volcano;
-    Volcano.BiomeType            = EWorld_BiomeType::Volcano;
-    Volcano.DisplayName          = TEXT("Volcanic Region");
-    Volcano.AmbientTemperature   = 55.0f;
-    Volcano.Humidity             = 0.1f;
-    Volcano.FogDensityMultiplier = 3.0f;
-    Volcano.FoliageDensity       = 0.05f;
-    Volcano.DinosaurSpawnWeight  = 0.2f;
-    Volcano.bHasWater            = false;
-    Volcano.AmbientSoundTag      = FName("Biome_Volcano");
-    BiomeConfigs.Add(Volcano);
+    // River valley — central corridor
+    FWorld_BiomeData River;
+    River.BiomeType = EWorld_BiomeType::River;
+    River.WorldCenter = FVector(0.f, 800.f, -80.f);
+    River.Radius = 600.f;
+    River.VegetationDensity = 1.5f;
+    River.AmbientTemperature = 24.f;
+    River.Humidity = 0.9f;
+    River.FogColor = FLinearColor(0.5f, 0.65f, 0.8f, 1.0f);
+    RegisteredBiomes.Add(River);
 }
 
-EWorld_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+EWorld_BiomeType UWorld_BiomeComponent::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Simple sector-based biome detection using actor-relative position
-    const FVector LocalPos = WorldLocation - GetActorLocation();
-    const float Dist = LocalPos.Size2D();
+    float ClosestDist = TNumericLimits<float>::Max();
+    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::None;
 
-    // Beyond detection radius → default Forest
-    if (Dist > BiomeDetectionRadius)
+    for (const FWorld_BiomeData& Biome : RegisteredBiomes)
     {
-        return EWorld_BiomeType::Forest;
-    }
-
-    // Sector logic: divide world into angular sectors
-    const float AngleDeg = FMath::RadiansToDegrees(FMath::Atan2(LocalPos.Y, LocalPos.X));
-
-    if (LocalPos.Y > 2000.0f)
-    {
-        // North: Forest + River Valley
-        if (FMath::Abs(LocalPos.X) < 1500.0f)
-            return EWorld_BiomeType::RiverValley;
-        return EWorld_BiomeType::Forest;
-    }
-    else if (LocalPos.X > 1500.0f)
-    {
-        // East: Rocky Plains
-        return EWorld_BiomeType::RockyPlains;
-    }
-    else if (LocalPos.Y < -1500.0f)
-    {
-        // South: Savanna
-        return EWorld_BiomeType::Savanna;
-    }
-    else if (LocalPos.X < -1500.0f)
-    {
-        // West: Swamp
-        return EWorld_BiomeType::Swamp;
-    }
-
-    // Centre: Forest
-    return EWorld_BiomeType::Forest;
-}
-
-FWorld_BiomeConfig ABiomeManager::GetBiomeConfig(EWorld_BiomeType BiomeType) const
-{
-    for (const FWorld_BiomeConfig& Config : BiomeConfigs)
-    {
-        if (Config.BiomeType == BiomeType)
+        float Dist = FVector::Dist2D(WorldLocation, Biome.WorldCenter);
+        if (Dist < Biome.Radius && Dist < ClosestDist)
         {
-            return Config;
+            ClosestDist = Dist;
+            ClosestBiome = Biome.BiomeType;
         }
     }
 
-    // Return default Forest config if not found
-    FWorld_BiomeConfig Default;
-    Default.BiomeType   = EWorld_BiomeType::Forest;
-    Default.DisplayName = TEXT("Default");
-    return Default;
+    return ClosestBiome;
 }
 
-float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+FWorld_BiomeData UWorld_BiomeComponent::GetBiomeData(EWorld_BiomeType BiomeType) const
 {
-    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FWorld_BiomeConfig Config = GetBiomeConfig(Biome);
-    return Config.AmbientTemperature;
+    for (const FWorld_BiomeData& Biome : RegisteredBiomes)
+    {
+        if (Biome.BiomeType == BiomeType)
+        {
+            return Biome;
+        }
+    }
+    return FWorld_BiomeData(); // Return default if not found
 }
 
-float ABiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+void UWorld_BiomeComponent::UpdateBiomeForActor(AActor* TargetActor)
 {
-    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FWorld_BiomeConfig Config = GetBiomeConfig(Biome);
-    return Config.Humidity;
+    if (!TargetActor)
+    {
+        return;
+    }
+
+    FVector ActorLocation = TargetActor->GetActorLocation();
+    EWorld_BiomeType NewBiome = GetBiomeAtLocation(ActorLocation);
+
+    if (NewBiome != CurrentBiome)
+    {
+        CurrentBiome = NewBiome;
+        TransitionBlend = 0.0f;
+    }
+    else
+    {
+        TransitionBlend = FMath::Clamp(TransitionBlend + 0.1f, 0.0f, 1.0f);
+    }
 }
 
-bool ABiomeManager::IsWaterBiome(const FVector& WorldLocation) const
+// ============================================================
+// AWorld_BiomeManager
+// ============================================================
+
+AWorld_BiomeManager::AWorld_BiomeManager()
 {
-    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FWorld_BiomeConfig Config = GetBiomeConfig(Biome);
-    return Config.bHasWater;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 2.0f;
+
+    BiomeComponent = CreateDefaultSubobject<UWorld_BiomeComponent>(TEXT("BiomeComponent"));
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 }
 
-void ABiomeManager::DrawBiomeDebugZones()
+void AWorld_BiomeManager::BeginPlay()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    Super::BeginPlay();
 
-    const FVector Origin = GetActorLocation();
-    const float R = BiomeDetectionRadius;
+    // Initialize biome definitions from component defaults
+    if (BiomeComponent)
+    {
+        for (EWorld_BiomeType BiomeType : {
+            EWorld_BiomeType::Forest,
+            EWorld_BiomeType::Plains,
+            EWorld_BiomeType::Rocky,
+            EWorld_BiomeType::Swamp,
+            EWorld_BiomeType::River
+        })
+        {
+            FWorld_BiomeData Data = BiomeComponent->GetBiomeData(BiomeType);
+            if (Data.BiomeType != EWorld_BiomeType::None)
+            {
+                BiomeDefinitions.Add(Data);
+            }
+        }
+    }
+}
 
-    // Draw each biome zone as a coloured arc
-    DrawDebugCircle(World, Origin + FVector(0, 2500, 100), 1500.0f, 32, FColor::Green,  true, 30.0f, 0, 8.0f, FVector(1,0,0), FVector(0,1,0));
-    DrawDebugCircle(World, Origin + FVector(2200, 0, 100),  1500.0f, 32, FColor::Orange, true, 30.0f, 0, 8.0f, FVector(1,0,0), FVector(0,1,0));
-    DrawDebugCircle(World, Origin + FVector(0,-2200, 100),  1500.0f, 32, FColor::Yellow, true, 30.0f, 0, 8.0f, FVector(1,0,0), FVector(0,1,0));
-    DrawDebugCircle(World, Origin + FVector(-2200,0, 100),  1500.0f, 32, FColor::Blue,   true, 30.0f, 0, 8.0f, FVector(1,0,0), FVector(0,1,0));
-    DrawDebugCircle(World, Origin + FVector(0, 2000, 100),  800.0f,  32, FColor::Cyan,   true, 30.0f, 0, 8.0f, FVector(1,0,0), FVector(0,1,0));
+void AWorld_BiomeManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    // Periodic biome state update — lightweight, 2s interval
+}
 
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Debug zones drawn (Forest=Green, Rocky=Orange, Savanna=Yellow, Swamp=Blue, River=Cyan)"));
+void AWorld_BiomeManager::RegenerateBiomes()
+{
+    BiomeDefinitions.Empty();
+    if (BiomeComponent)
+    {
+        for (EWorld_BiomeType BiomeType : {
+            EWorld_BiomeType::Forest,
+            EWorld_BiomeType::Plains,
+            EWorld_BiomeType::Rocky,
+            EWorld_BiomeType::Swamp,
+            EWorld_BiomeType::River
+        })
+        {
+            FWorld_BiomeData Data = BiomeComponent->GetBiomeData(BiomeType);
+            if (Data.BiomeType != EWorld_BiomeType::None)
+            {
+                BiomeDefinitions.Add(Data);
+            }
+        }
+    }
+    UE_LOG(LogTemp, Log, TEXT("AWorld_BiomeManager: Biomes regenerated — %d biomes active"), BiomeDefinitions.Num());
+}
+
+EWorld_BiomeType AWorld_BiomeManager::QueryBiomeAtLocation(const FVector& WorldLocation) const
+{
+    if (!BiomeComponent)
+    {
+        return EWorld_BiomeType::None;
+    }
+    return BiomeComponent->GetBiomeAtLocation(WorldLocation);
+}
+
+float AWorld_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    if (!BiomeComponent)
+    {
+        return 25.f; // Default temperature
+    }
+
+    EWorld_BiomeType Biome = BiomeComponent->GetBiomeAtLocation(WorldLocation);
+    FWorld_BiomeData Data = BiomeComponent->GetBiomeData(Biome);
+    return Data.AmbientTemperature;
+}
+
+float AWorld_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+{
+    if (!BiomeComponent)
+    {
+        return 0.5f; // Default humidity
+    }
+
+    EWorld_BiomeType Biome = BiomeComponent->GetBiomeAtLocation(WorldLocation);
+    FWorld_BiomeData Data = BiomeComponent->GetBiomeData(Biome);
+    return Data.Humidity;
 }
