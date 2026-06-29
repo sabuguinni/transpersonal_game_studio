@@ -1,3 +1,7 @@
+// TRexCharacter.h
+// Core Systems Programmer #03 — Cycle AUTO_20260629_004
+// Tyrannosaurus Rex — apex predator species implementation
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,14 +9,16 @@
 #include "TRexCharacter.generated.h"
 
 /**
- * ATRexCharacter — Tyrannosaurus Rex species implementation.
+ * ATRexCharacter
+ * Tyrannosaurus Rex — the apex predator of the prehistoric world.
+ * Inherits all base dinosaur behavior from ADinosaurBase.
+ * Species-specific: massive size, high damage, large territory, slow but devastating.
  *
- * Inherits from ADinosaurBase. Overrides stats with T-Rex specific values:
- * - Apex predator: high health, high damage, slow speed
- * - Aggressive carnivore: attacks on sight within 2500 units
- * - Territorial: does not flee unless health < 20%
- *
- * @author Core Systems Programmer — Agent #3
+ * Stats (realistic approximation):
+ *   Mass: ~8000 kg | Length: ~12m | Speed: ~20 km/h (550 UU/s)
+ *   Bite force: ~57,000 N (highest of any land predator)
+ *   Vision: binocular forward-facing, motion-sensitive
+ *   Hearing: excellent low-frequency detection
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
 class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
@@ -22,41 +28,72 @@ class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 public:
     ATRexCharacter();
 
-    /** Override: T-Rex specific BeginPlay setup */
-    virtual void BeginPlay() override;
+    // --- Species-specific overrides ---
 
-    /** Roar ability — stuns nearby prey for RoarStunDuration seconds */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    /** Called when TRex detects prey — triggers charge sequence */
+    UFUNCTION(BlueprintNativeEvent, Category = "TRex|Combat")
+    void OnPreyDetected(AActor* PreyActor);
+    virtual void OnPreyDetected_Implementation(AActor* PreyActor);
+
+    /** Roar ability — stuns nearby prey, triggers fear response in other dinosaurs */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
     void PerformRoar();
 
-    /** Stomp attack — AoE damage in StompRadius around feet */
+    /** Charge attack — brief speed boost toward target */
     UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void PerformStomp();
+    void InitiateCharge(AActor* Target);
 
-    /** Duration (seconds) prey is stunned after a roar */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarStunDuration = 3.0f;
+    /** Returns true if TRex is currently in charge state */
+    UFUNCTION(BlueprintPure, Category = "TRex|State")
+    bool IsCharging() const { return bIsCharging; }
 
-    /** Radius (cm) of the stomp AoE damage */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadius = 400.0f;
-
-    /** Stomp damage amount */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompDamage = 60.0f;
-
-    /** Cooldown (seconds) between roars */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float RoarCooldown = 15.0f;
-
-    /** Whether the T-Rex is currently in a roar animation */
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    bool bIsRoaring = false;
+    // --- Overridden base behavior ---
+    virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+        AController* EventInstigator, AActor* DamageCauser) override;
 
 protected:
-    /** Internal timer tracking last roar time */
-    float LastRoarTime = 0.0f;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    /** Apply T-Rex default stats in constructor */
-    void InitTRexStats();
+    /** Roar radius — all prey within this range receive fear debuff */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
+        meta = (ClampMin = "100.0", ClampMax = "5000.0"))
+    float RoarRadius;
+
+    /** Roar fear duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
+        meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float RoarFearDuration;
+
+    /** Charge speed multiplier (applied to base MaxWalkSpeed) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
+        meta = (ClampMin = "1.0", ClampMax = "3.0"))
+    float ChargeSpeedMultiplier;
+
+    /** Charge duration in seconds before returning to normal speed */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
+        meta = (ClampMin = "0.5", ClampMax = "5.0"))
+    float ChargeDuration;
+
+    /** Cooldown between roars in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
+        meta = (ClampMin = "5.0", ClampMax = "120.0"))
+    float RoarCooldown;
+
+    /** Current charge target */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
+        meta = (AllowPrivateAccess = "true"))
+    TWeakObjectPtr<AActor> ChargeTarget;
+
+private:
+    bool bIsCharging;
+    bool bRoarOnCooldown;
+    float ChargeElapsed;
+    float BaseWalkSpeed;
+
+    FTimerHandle ChargeTimerHandle;
+    FTimerHandle RoarCooldownHandle;
+
+    void EndCharge();
+    void ResetRoarCooldown();
 };
