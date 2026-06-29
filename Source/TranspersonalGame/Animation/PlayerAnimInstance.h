@@ -4,34 +4,11 @@
 #include "Animation/AnimInstance.h"
 #include "PlayerAnimInstance.generated.h"
 
-// Movement state enum for the prehistoric human player
-UENUM(BlueprintType)
-enum class EAnim_PlayerMovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Climbing    UMETA(DisplayName = "Climbing"),
-    Dead        UMETA(DisplayName = "Dead")
-};
-
-// Combat state enum for weapon/tool context
-UENUM(BlueprintType)
-enum class EAnim_PlayerCombatState : uint8
-{
-    Unarmed     UMETA(DisplayName = "Unarmed"),
-    SpearReady  UMETA(DisplayName = "Spear Ready"),
-    BowReady    UMETA(DisplayName = "Bow Ready"),
-    ClubReady   UMETA(DisplayName = "Club Ready"),
-    Torch       UMETA(DisplayName = "Torch")
-};
-
 /**
  * UPlayerAnimInstance
- * Animation Blueprint logic for the prehistoric human player character.
- * Drives locomotion blend spaces, foot IK, aim offsets, and survival state reactions.
+ * Animation instance for the prehistoric human player character.
+ * Drives locomotion blend spaces, survival state transitions,
+ * combat poses, and foot IK for terrain adaptation.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPlayerAnimInstance : public UAnimInstance
@@ -41,172 +18,206 @@ class TRANSPERSONALGAME_API UPlayerAnimInstance : public UAnimInstance
 public:
     UPlayerAnimInstance();
 
-    // --- UAnimInstance interface ---
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+    virtual void NativePostEvaluateAnimation() override;
 
-    // =========================================================
-    // LOCOMOTION PROPERTIES
-    // =========================================================
+    // ─── Locomotion ───────────────────────────────────────────────────────────
 
-    /** Raw movement speed (cm/s) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** Current ground speed (cm/s) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     float Speed;
 
-    /** Smoothed speed for blend space — avoids snapping */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** Exponentially smoothed speed for blend space input */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     float SmoothedSpeed;
 
-    /** Strafe direction in degrees (-180 to 180) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** Strafe direction angle (-180 to 180) relative to movement direction */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     float Direction;
 
-    /** True when character velocity > 3 cm/s */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** True when character velocity magnitude > 10 cm/s */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsMoving;
 
-    /** True when player holds sprint input and stamina > 0 */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** True when sprinting (shift held, stamina > 0) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsSprinting;
 
-    /** True when crouched */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** True when crouching */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsCrouching;
 
-    /** True when airborne (falling or jumping) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** True when character is airborne */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     bool bIsInAir;
 
-    /** Lateral lean amount for turn animations (-1 to 1) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    /** Lateral lean amount for banking turns (-1 left, +1 right) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
     float LeanAmount;
 
-    // =========================================================
-    // SURVIVAL STATE PROPERTIES
-    // =========================================================
+    /** Vertical velocity for jump/fall blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion", meta = (AllowPrivateAccess = "true"))
+    float VerticalVelocity;
 
-    /** True when player is in stealth/sneak mode */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    // ─── Survival States ──────────────────────────────────────────────────────
+
+    /** True when sneaking (low stance, slow movement) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
     bool bIsSneaking;
 
-    /** True when player is climbing a surface */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    /** True when climbing a surface */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
     bool bIsClimbing;
 
-    /** Fear level 0-1: affects idle fidgets, breathing, posture */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    /** Fear level 0-1 — affects breathing, head movement, posture */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
     float FearLevel;
 
-    /** Stamina level 0-1: affects run speed blend and recovery pose */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    /** Stamina 0-1 — affects run posture, breathing intensity */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
     float StaminaLevel;
 
-    // =========================================================
-    // COMBAT PROPERTIES
-    // =========================================================
+    /** Hunger 0-1 — affects idle posture (hunched when starving) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
+    float HungerLevel;
 
-    /** True during attack montage window */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    /** True when character is exhausted (stamina < 0.1) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival", meta = (AllowPrivateAccess = "true"))
+    bool bIsExhausted;
+
+    // ─── Combat ───────────────────────────────────────────────────────────────
+
+    /** True when in combat stance */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsInCombat;
+
+    /** True when attacking (melee swing active) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
     bool bIsAttacking;
 
-    /** True during block/parry window */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    /** True when blocking/guarding */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
     bool bIsBlocking;
 
-    /** True when hit reaction is playing */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    bool bIsHurt;
+    /** True when throwing a projectile */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsThrowing;
 
-    /** True when death animation is active */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    /** True when character is hit (triggers hit reaction montage) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
+    bool bIsHit;
+
+    /** True when character is dead */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
     bool bIsDead;
 
-    /** Aim pitch offset for upper body aim (-90 to 90) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    float AimPitch;
+    /** Equipped weapon type index (0=none, 1=spear, 2=club, 3=bow) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat", meta = (AllowPrivateAccess = "true"))
+    int32 WeaponTypeIndex;
 
-    /** Aim yaw offset for upper body aim (-180 to 180) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    float AimYaw;
+    // ─── Interaction ──────────────────────────────────────────────────────────
 
-    // =========================================================
-    // FOOT IK PROPERTIES
-    // =========================================================
+    /** True when gathering resources (picking up, harvesting) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Interaction", meta = (AllowPrivateAccess = "true"))
+    bool bIsGathering;
 
-    /** IK blend alpha for left foot (0 = disabled, 1 = full IK) */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+    /** True when crafting at a workstation */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Interaction", meta = (AllowPrivateAccess = "true"))
+    bool bIsCrafting;
+
+    /** True when swimming */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Interaction", meta = (AllowPrivateAccess = "true"))
+    bool bIsSwimming;
+
+    // ─── Foot IK ──────────────────────────────────────────────────────────────
+
+    /** Left foot IK target offset from default bone position */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK", meta = (AllowPrivateAccess = "true"))
+    FVector LeftFootIKOffset;
+
+    /** Right foot IK target offset from default bone position */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK", meta = (AllowPrivateAccess = "true"))
+    FVector RightFootIKOffset;
+
+    /** Pelvis vertical offset to keep feet planted on uneven terrain */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK", meta = (AllowPrivateAccess = "true"))
+    float PelvisOffset;
+
+    /** Left foot IK alpha (0=off, 1=full IK) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK", meta = (AllowPrivateAccess = "true"))
     float LeftFootIKAlpha;
 
-    /** IK blend alpha for right foot */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
+    /** Right foot IK alpha (0=off, 1=full IK) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK", meta = (AllowPrivateAccess = "true"))
     float RightFootIKAlpha;
 
-    /** Left foot world-space IK effector offset */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    FVector LeftFootEffectorLocation;
+    // ─── AimOffset ────────────────────────────────────────────────────────────
 
-    /** Right foot world-space IK effector offset */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|FootIK")
-    FVector RightFootEffectorLocation;
+    /** Aim pitch for upper body aim offset (-90 to 90) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|AimOffset", meta = (AllowPrivateAccess = "true"))
+    float AimPitch;
 
-    // =========================================================
-    // STATE MACHINE ENUMS
-    // =========================================================
+    /** Aim yaw for upper body aim offset (-90 to 90) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|AimOffset", meta = (AllowPrivateAccess = "true"))
+    float AimYaw;
 
-    /** Current movement state — drives state machine transitions */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|States")
-    EAnim_PlayerMovementState MovementState;
+    // ─── Blueprint callable utilities ─────────────────────────────────────────
 
-    /** Current combat/weapon state — drives upper body layer */
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|States")
-    EAnim_PlayerCombatState CombatState;
+    /** Play a one-shot montage by name (e.g., "Attack_Spear", "HitReact_Front") */
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayMontageByName(const FName& MontageName, float PlayRate = 1.0f);
 
-    // =========================================================
-    // CALLABLE FUNCTIONS (from Character or Ability System)
-    // =========================================================
+    /** Stop the currently active montage */
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void StopActiveMontage(float BlendOutTime = 0.25f);
 
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetSprinting(bool bSprinting);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetSneaking(bool bSneaking);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetClimbing(bool bClimbing);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetFearLevel(float Fear);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetStaminaLevel(float Stamina);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void SetCombatState(EAnim_PlayerCombatState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void TriggerAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void TriggerHurt();
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Control")
-    void TriggerDeath();
+    /** Returns true if any montage is currently playing */
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool IsAnyMontageActive() const;
 
 private:
-    // Cached references
+    /** Cached reference to the owning character */
     UPROPERTY()
-    ACharacter* OwnerCharacter;
+    class ATranspersonalCharacter* OwnerCharacter;
 
+    /** Cached movement component */
     UPROPERTY()
     class UCharacterMovementComponent* MovementComponent;
 
-    // Internal update methods
-    void UpdateLocomotionData(float DeltaSeconds);
-    void UpdateAimData();
-    void UpdateFootIK();
-    void UpdateMovementState();
-    void UpdateCombatState();
+    /** Speed smoothing factor (higher = snappier) */
+    float SpeedSmoothingAlpha;
 
-    /** Line-trace foot IK offset calculation */
-    FVector CalculateFootIKOffset(const FName& FootSocketName);
+    /** Lean smoothing factor */
+    float LeanSmoothingAlpha;
+
+    /** Previous frame velocity for lean calculation */
+    FVector PreviousVelocity;
+
+    /** Foot IK trace channel */
+    TEnumAsByte<ECollisionChannel> FootIKTraceChannel;
+
+    /** Foot IK trace half-height (cm) */
+    float FootIKTraceHalfHeight;
+
+    /** Maximum pelvis correction distance (cm) */
+    float MaxPelvisCorrection;
+
+    /** Internal: update locomotion variables from movement component */
+    void UpdateLocomotion(float DeltaSeconds);
+
+    /** Internal: update survival state variables from character */
+    void UpdateSurvivalStates(float DeltaSeconds);
+
+    /** Internal: update combat variables from character */
+    void UpdateCombatStates(float DeltaSeconds);
+
+    /** Internal: perform foot IK raycasts and update offsets */
+    void UpdateFootIK(float DeltaSeconds);
+
+    /** Internal: update aim offset from control rotation */
+    void UpdateAimOffset(float DeltaSeconds);
+
+    /** Internal: smooth a float value toward target */
+    float SmoothFloat(float Current, float Target, float Alpha, float DeltaSeconds) const;
 };
