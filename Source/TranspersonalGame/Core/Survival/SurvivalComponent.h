@@ -4,62 +4,57 @@
 #include "Components/ActorComponent.h"
 #include "SurvivalComponent.generated.h"
 
-/**
- * ESurvivalStatType — identifies each tracked survival stat.
- * Prefixed Core_ to avoid ODR collision across the 19-agent codebase.
- */
+/** Tick interval categories for survival drain rates */
 UENUM(BlueprintType)
-enum class ECore_SurvivalStat : uint8
+enum class ECore_SurvivalState : uint8
 {
-    Health      UMETA(DisplayName = "Health"),
-    Hunger      UMETA(DisplayName = "Hunger"),
-    Thirst      UMETA(DisplayName = "Thirst"),
-    Stamina     UMETA(DisplayName = "Stamina"),
-    Temperature UMETA(DisplayName = "Temperature"),
-    Fear        UMETA(DisplayName = "Fear")
+    Healthy     UMETA(DisplayName = "Healthy"),
+    Hungry      UMETA(DisplayName = "Hungry"),
+    Thirsty     UMETA(DisplayName = "Thirsty"),
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Critical    UMETA(DisplayName = "Critical"),
+    Dead        UMETA(DisplayName = "Dead")
 };
 
-/**
- * FCore_SurvivalStatData — runtime data for a single survival stat.
- * Current, min, max, drain rate per second, critical threshold.
- */
+/** Snapshot of all survival stats — used for UI and save/load */
 USTRUCT(BlueprintType)
-struct FCore_SurvivalStatData
+struct FCore_SurvivalStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Current = 100.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float Health = 100.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Min = 0.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float Hunger = 100.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float Max = 100.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float Thirst = 100.f;
 
-    /** Units drained per second during normal activity. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float DrainRatePerSecond = 0.5f;
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float Stamina = 100.f;
 
-    /** Below this value the stat is considered critical (triggers UI warning). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float CriticalThreshold = 20.0f;
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float Fear = 0.f;
 
-    bool IsCritical() const { return Current <= CriticalThreshold; }
-    bool IsEmpty()    const { return Current <= Min; }
-    float NormalizedValue() const { return (Max > Min) ? (Current - Min) / (Max - Min) : 0.0f; }
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    float BodyTemperature = 37.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Survival")
+    ECore_SurvivalState State = ECore_SurvivalState::Healthy;
 };
 
 /**
- * USurvivalComponent — manages all survival stats for a prehistoric human character.
+ * USurvivalComponent
  *
- * Attach to ATranspersonalCharacter (or any APawn) to enable hunger, thirst,
- * stamina, temperature, and fear mechanics. Stats drain passively each tick;
- * external systems (crafting, combat, biome) call Modify* methods to adjust them.
+ * Manages all survival statistics for a prehistoric human character:
+ * health, hunger, thirst, stamina, fear, and body temperature.
+ * Drains occur on a configurable tick interval. Critical thresholds
+ * trigger health damage. Death is broadcast via OnDeath delegate.
  *
- * Design: Casey Muratori-style — testable in isolation, no hidden global state.
+ * Attach to ATranspersonalCharacter in its constructor.
  */
-UCLASS(ClassGroup = "TranspersonalGame", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "Survival Component")
 class TRANSPERSONALGAME_API USurvivalComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -67,109 +62,117 @@ class TRANSPERSONALGAME_API USurvivalComponent : public UActorComponent
 public:
     USurvivalComponent();
 
-    // ── Lifecycle ────────────────────────────────────────────────────────────
+    // ── UActorComponent overrides ──────────────────────────────────────────
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType,
                                FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ── Stat Access ──────────────────────────────────────────────────────────
-
-    /** Returns normalised value [0,1] for the given stat. */
+    // ── Stat accessors ─────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetStatNormalized(ECore_SurvivalStat Stat) const;
+    FCore_SurvivalStats GetStats() const { return Stats; }
 
-    /** Returns raw current value for the given stat. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    float GetStatCurrent(ECore_SurvivalStat Stat) const;
+    ECore_SurvivalState GetSurvivalState() const { return Stats.State; }
 
-    /** Returns true if the stat is below its critical threshold. */
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsStatCritical(ECore_SurvivalStat Stat) const;
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetHealth() const { return Stats.Health; }
 
-    // ── Stat Modification ────────────────────────────────────────────────────
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetHunger() const { return Stats.Hunger; }
 
-    /**
-     * Add (positive) or remove (negative) from a stat.
-     * @param Delta  Amount to add; clamped to [Min, Max].
-     */
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ModifyStat(ECore_SurvivalStat Stat, float Delta);
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetThirst() const { return Stats.Thirst; }
 
-    /** Convenience: apply damage directly to Health. */
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetStamina() const { return Stats.Stamina; }
+
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetFear() const { return Stats.Fear; }
+
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetBodyTemperature() const { return Stats.BodyTemperature; }
+
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    bool IsAlive() const { return Stats.State != ECore_SurvivalState::Dead; }
+
+    // ── Stat modifiers ─────────────────────────────────────────────────────
+    /** Apply direct damage (positive = damage, negative = heal) */
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void ApplyDamage(float Amount);
 
-    /** Convenience: eat food — restores Hunger, slight Thirst drain. */
+    /** Consume food — restores hunger. Amount 0-100. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ConsumeFood(float NutritionValue);
+    void ConsumeFood(float Amount);
 
-    /** Convenience: drink water — restores Thirst. */
+    /** Drink water — restores thirst. Amount 0-100. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    void DrinkWater(float HydrationValue);
+    void DrinkWater(float Amount);
 
-    /** Set ambient temperature modifier (from biome system). Range -1..+1. */
+    /** Add or remove stamina. Negative = spend, positive = recover. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    void SetAmbientTemperatureModifier(float Modifier);
+    void ModifyStamina(float Delta);
 
-    /** Increase fear (predator nearby, loud noise, etc.). */
+    /** Increase fear (e.g. dinosaur nearby). Clamped 0-100. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void AddFear(float Amount);
 
-    /** Reduce fear (safe area, fire nearby, etc.). */
+    /** Reduce fear (e.g. safe shelter). Clamped 0-100. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void ReduceFear(float Amount);
 
-    // ── State Queries ────────────────────────────────────────────────────────
-
-    /** True when Health <= 0. */
+    /** Set ambient temperature — affects body temperature drift. */
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsDead() const;
+    void SetAmbientTemperature(float Celsius);
 
-    /** True when Stamina is critically low (can't sprint). */
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsExhausted() const;
+    // ── Delegates ──────────────────────────────────────────────────────────
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeath);
+    UPROPERTY(BlueprintAssignable, Category = "Survival|Events")
+    FOnDeath OnDeath;
 
-    // ── Configurable Drain Rates (editable per-character) ────────────────────
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStateChanged, ECore_SurvivalState, NewState);
+    UPROPERTY(BlueprintAssignable, Category = "Survival|Events")
+    FOnStateChanged OnStateChanged;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float HungerDrainRate = 0.3f;
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChanged, float, NewHealth);
+    UPROPERTY(BlueprintAssignable, Category = "Survival|Events")
+    FOnHealthChanged OnHealthChanged;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float ThirstDrainRate = 0.5f;
+    // ── Configurable drain rates (per second) ──────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
+    float HungerDrainRate = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
+    float ThirstDrainRate = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
     float StaminaRecoveryRate = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float FearDecayRate = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
+    float FearDecayRate = 1.0f;
 
-    /** Health drain per second when Hunger is empty. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float StarvationDamageRate = 1.0f;
+    /** Health damage per second when hunger or thirst reaches 0 */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
+    float StarvationDamageRate = 2.0f;
 
-    /** Health drain per second when Thirst is empty. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float DehydrationDamageRate = 2.0f;
+    /** Critical threshold — below this triggers Critical state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Config")
+    float CriticalHealthThreshold = 20.0f;
+
+    /** Ambient temperature in Celsius (set by world/biome systems) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival|Environment")
+    float AmbientTemperature = 28.0f;
 
 private:
-    // ── Internal stat storage ─────────────────────────────────────────────────
-    FCore_SurvivalStatData HealthStat;
-    FCore_SurvivalStatData HungerStat;
-    FCore_SurvivalStatData ThirstStat;
-    FCore_SurvivalStatData StaminaStat;
-    FCore_SurvivalStatData TemperatureStat;
-    FCore_SurvivalStatData FearStat;
+    UPROPERTY(VisibleAnywhere, Category = "Survival|State",
+              meta = (AllowPrivateAccess = "true"))
+    FCore_SurvivalStats Stats;
 
-    float AmbientTemperatureModifier = 0.0f;
-    bool bIsSprinting = false;
+    float AccumulatedTime = 0.f;
+    static constexpr float TickInterval = 1.0f; // drain tick every 1 second
 
-    /** Returns a mutable reference to the stat data for the given enum. */
-    FCore_SurvivalStatData& GetStatData(ECore_SurvivalStat Stat);
-    const FCore_SurvivalStatData& GetStatDataConst(ECore_SurvivalStat Stat) const;
-
-    void TickPassiveDrain(float DeltaTime);
-    void TickStaminaRecovery(float DeltaTime);
-    void TickFearDecay(float DeltaTime);
-    void TickStarvationAndDehydration(float DeltaTime);
-    void TickTemperatureEffect(float DeltaTime);
+    void DrainStats(float DeltaSeconds);
+    void UpdateBodyTemperature(float DeltaSeconds);
+    void ApplyStarvationDamage(float DeltaSeconds);
+    void RecalculateState();
+    void SetStat(float& Stat, float NewValue);
 };
