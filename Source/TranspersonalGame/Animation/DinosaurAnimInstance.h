@@ -1,68 +1,15 @@
 #pragma once
-// DinosaurAnimInstance.h
-// Agent #10 — Animation Agent | PROD_CYCLE_AUTO_20260629_004
-// UAnimInstance subclass driving all dinosaur species locomotion and combat.
-// Provides blend space inputs, attack montage triggers, and procedural IK.
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "DinosaurAnimInstance.generated.h"
 
-// ============================================================
-// ENUMS — global scope (RULE 1)
-// ============================================================
-
-UENUM(BlueprintType)
-enum class EAnim_DinosaurSpecies : uint8
-{
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Stegosaurus     UMETA(DisplayName = "Stegosaurus"),
-    Pterodactyl     UMETA(DisplayName = "Pterodactyl"),
-    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
-    Spinosaurus     UMETA(DisplayName = "Spinosaurus")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinosaurLocomotionState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walk        UMETA(DisplayName = "Walk"),
-    Trot        UMETA(DisplayName = "Trot"),
-    Run         UMETA(DisplayName = "Run"),
-    Charge      UMETA(DisplayName = "Charge"),
-    Swim        UMETA(DisplayName = "Swim")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinosaurAttackType : uint8
-{
-    None        UMETA(DisplayName = "None"),
-    Bite        UMETA(DisplayName = "Bite"),
-    Claw        UMETA(DisplayName = "Claw"),
-    TailSwipe   UMETA(DisplayName = "Tail Swipe"),
-    Charge      UMETA(DisplayName = "Charge"),
-    Stomp       UMETA(DisplayName = "Stomp")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinosaurBehaviorState : uint8
-{
-    Passive     UMETA(DisplayName = "Passive"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Resting     UMETA(DisplayName = "Resting")
-};
-
-// ============================================================
-// MAIN CLASS
-// ============================================================
-
+/**
+ * UDinosaurAnimInstance
+ * Animation instance for all dinosaur species in the prehistoric survival game.
+ * Drives locomotion blending, attack montages, alert states, and death poses.
+ * Works with the Behavior Tree / NPC system to reflect AI state in animation.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
 {
@@ -74,96 +21,177 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ---- Species ----
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino|Identity")
-    EAnim_DinosaurSpecies Species;
+    // ─── Locomotion ───────────────────────────────────────────────────────────
 
-    // ---- Locomotion ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    /** Current ground speed (cm/s) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float Direction;
+    /** Smoothed speed for blend space — avoids jitter on direction changes */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float SmoothedSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    /** Forward/backward direction scalar (-1 to 1) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float ForwardSpeed;
+
+    /** Lateral direction scalar (-1 to 1) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float LateralSpeed;
+
+    /** True when the dinosaur is airborne (e.g. jumping raptors) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    /** True when the dinosaur is actively accelerating */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
     bool bIsAccelerating;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    EAnim_DinosaurLocomotionState LocomotionState;
+    /** True when moving at maximum sprint speed */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    bool bIsSprinting;
 
-    // ---- Combat ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
-    EAnim_DinosaurAttackType CurrentAttack;
+    /** Locomotion speed as 0-1 alpha for blend spaces (0=idle, 0.5=walk, 1=run) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    float LocomotionAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
+    // ─── Combat & Behaviour ───────────────────────────────────────────────────
+
+    /** True when the dinosaur is in an active attack state */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
     bool bIsAttacking;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
-    float AttackBlendWeight;
+    /** True when the dinosaur has detected a threat and is alert */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsAlert;
 
-    // ---- Behavior ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    EAnim_DinosaurBehaviorState BehaviorState;
+    /** True when the dinosaur is actively chasing a target */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsChasing;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    float AlertLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
+    /** True when the dinosaur is performing a roar/display behaviour */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
     bool bIsRoaring;
 
-    // ---- Procedural ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
-    float TailSwayAngle;
+    /** True when the dinosaur is feeding on a carcass */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsFeeding;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
-    float HeadBobAlpha;
+    /** True when the dinosaur is in a death state */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    bool bIsDead;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
-    float BreathingAlpha;
+    /** Normalised health (0-1) — drives injury limping blend */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    float HealthAlpha;
 
-    // ---- IK ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    FVector LeftFootOffset;
+    /** Injury severity (0=healthy, 1=critically injured) — drives limp pose */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    float InjuryAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    FVector RightFootOffset;
+    // ─── IK & Foot Placement ──────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
-    float FootIKAlpha;
+    /** Enable foot IK for terrain adaptation */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    bool bEnableFootIK;
 
-    // ---- Blend Weights ----
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Blend")
-    float SpeedNormalized;
+    /** Left front foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftFrontFootIKTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Blend")
-    float AggressionBlend;
+    /** Right front foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightFrontFootIKTarget;
 
-    // ---- Public API ----
-    UFUNCTION(BlueprintCallable, Category = "Dino|Combat")
-    void TriggerAttack(EAnim_DinosaurAttackType AttackType);
+    /** Left rear foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector LeftRearFootIKTarget;
 
-    UFUNCTION(BlueprintCallable, Category = "Dino|Combat")
-    void EndAttack();
+    /** Right rear foot IK target world location */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    FVector RightRearFootIKTarget;
 
-    UFUNCTION(BlueprintCallable, Category = "Dino|Behavior")
-    void TriggerRoar();
+    /** Body lean alpha for slope adaptation (0=flat, 1=steep) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
+    float BodyLeanAlpha;
 
-    UFUNCTION(BlueprintCallable, Category = "Dino|Behavior")
-    void SetBehaviorState(EAnim_DinosaurBehaviorState NewState);
+    // ─── Head Tracking ────────────────────────────────────────────────────────
 
-private:
+    /** True when the dinosaur is tracking a target with its head */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|HeadTracking")
+    bool bIsHeadTracking;
+
+    /** World-space look-at target for head IK */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|HeadTracking")
+    FVector HeadLookAtTarget;
+
+    /** Head tracking weight (0=no tracking, 1=full tracking) */
+    UPROPERTY(BlueprintReadOnly, Category = "Anim|HeadTracking")
+    float HeadTrackingWeight;
+
+    // ─── Species Configuration ────────────────────────────────────────────────
+
+    /** Sprint speed threshold (cm/s) — above this = sprinting */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    float SprintSpeedThreshold;
+
+    /** Walk speed threshold (cm/s) — above this = walking */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    float WalkSpeedThreshold;
+
+    /** Speed smoothing rate (higher = faster response) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    float SpeedSmoothingRate;
+
+    /** Number of feet for this species (2=biped, 4=quadruped) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Anim|Config")
+    int32 FootCount;
+
+    // ─── Blueprint Events ─────────────────────────────────────────────────────
+
+    /** Called when the dinosaur transitions from idle to alert */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Anim|Events")
+    void OnAlertStateEntered();
+
+    /** Called when the dinosaur begins an attack */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Anim|Events")
+    void OnAttackStarted();
+
+    /** Called when the dinosaur dies */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Anim|Events")
+    void OnDeathStarted();
+
+    /** Called when the dinosaur begins roaring */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Anim|Events")
+    void OnRoarStarted();
+
+protected:
+    /** Cached owning pawn */
     UPROPERTY()
-    APawn* CachedPawn;
+    APawn* OwnerPawn;
 
+    /** Cached movement component */
     UPROPERTY()
-    UCharacterMovementComponent* CachedMovement;
+    UCharacterMovementComponent* MovementComponent;
 
-    float ProceduralTime;
+    /** Previous bIsAlert state for transition detection */
+    bool bWasAlert;
 
-    void UpdateLocomotionState();
-    void UpdateProceduralAnimation(float DeltaSeconds);
-    void UpdateFootIK(float DeltaSeconds);
+    /** Previous bIsAttacking state for transition detection */
+    bool bWasAttacking;
+
+    /** Previous bIsDead state for transition detection */
+    bool bWasDead;
+
+    /** Previous bIsRoaring state for transition detection */
+    bool bWasRoaring;
+
+    /** Update foot IK targets via line traces */
+    void UpdateFootIK();
+
+    /** Update head tracking towards the AI's current focus target */
+    void UpdateHeadTracking();
+
+    /** Compute locomotion alpha from speed */
+    float ComputeLocomotionAlpha(float CurrentSpeed) const;
 };
