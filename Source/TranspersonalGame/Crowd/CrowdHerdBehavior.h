@@ -8,88 +8,102 @@ UENUM(BlueprintType)
 enum class ECrowd_HerdState : uint8
 {
     Grazing     UMETA(DisplayName = "Grazing"),
-    Migrating   UMETA(DisplayName = "Migrating"),
+    Wandering   UMETA(DisplayName = "Wandering"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
+    Stampeding  UMETA(DisplayName = "Stampeding"),
     Resting     UMETA(DisplayName = "Resting")
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_HerdAgent
+struct FCrowd_HerdMember
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    AActor* MemberActor = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowd_HerdState State;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float FearLevel;
-
-    FCrowd_HerdAgent()
-        : Location(FVector::ZeroVector)
-        , Velocity(FVector::ZeroVector)
-        , State(ECrowd_HerdState::Grazing)
-        , FearLevel(0.0f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    bool bIsLeader = false;
 };
 
 UCLASS(ClassGroup = (Crowd), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API ACrowd_HerdBehaviorActor : public AActor
+class TRANSPERSONALGAME_API UCrowdHerdBehavior : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACrowd_HerdBehaviorActor();
+    UCrowdHerdBehavior();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    int32 HerdSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float CohesionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float SeparationRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float AlignmentRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float MaxSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    ECrowd_HerdState CurrentHerdState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Herd")
-    TArray<FCrowd_HerdAgent> Agents;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    void InitializeHerd(int32 Count, FVector Origin, float SpreadRadius);
+    void AddHerdMember(AActor* Member);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    void TriggerFlee(FVector ThreatLocation, float ThreatRadius);
+    void RemoveHerdMember(AActor* Member);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
+    void TriggerStampede(FVector ThreatLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
     void SetHerdState(ECrowd_HerdState NewState);
 
+    UFUNCTION(BlueprintPure, Category = "Crowd|Herd")
+    ECrowd_HerdState GetHerdState() const { return CurrentHerdState; }
+
+    UFUNCTION(BlueprintPure, Category = "Crowd|Herd")
+    int32 GetHerdSize() const { return HerdMembers.Num(); }
+
     UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    int32 GetAgentCount() const;
+    FVector ComputeFlockingVelocity(const FCrowd_HerdMember& Member);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float SeparationRadius = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float CohesionRadius = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float AlignmentRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float StampedeSpeed = 1200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float GrazeSpeed = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float WanderSpeed = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    float FearDecayRate = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
+    int32 MaxHerdSize = 50;
 
 private:
-    void UpdateBoids(float DeltaTime);
-    FVector ComputeCohesion(int32 AgentIndex);
-    FVector ComputeSeparation(int32 AgentIndex);
-    FVector ComputeAlignment(int32 AgentIndex);
-    FVector ComputeFlee(int32 AgentIndex, FVector ThreatPos);
+    UPROPERTY()
+    TArray<FCrowd_HerdMember> HerdMembers;
 
-    FVector ActiveThreatLocation;
-    bool bHasThreat;
-    float ThreatDecayTimer;
+    ECrowd_HerdState CurrentHerdState = ECrowd_HerdState::Grazing;
+
+    FVector StampedeThreatLocation = FVector::ZeroVector;
+    float StateTimer = 0.0f;
+
+    void UpdateGrazing(float DeltaTime);
+    void UpdateWandering(float DeltaTime);
+    void UpdateFleeing(float DeltaTime);
+    void UpdateStampeding(float DeltaTime);
+    void UpdateResting(float DeltaTime);
+
+    FVector ComputeSeparation(const FCrowd_HerdMember& Member);
+    FVector ComputeCohesion(const FCrowd_HerdMember& Member);
+    FVector ComputeAlignment(const FCrowd_HerdMember& Member);
 };
