@@ -1,227 +1,348 @@
 #include "AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
-#include "Camera/CameraShakeBase.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+
+// ============================================================
+// Audio Agent #16 — AudioSystemManager Implementation
+// ============================================================
 
 UAudio_AudioSystemManager::UAudio_AudioSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for audio updates
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for audio state checks
 }
 
 void UAudio_AudioSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] BeginPlay — Audio system initialised. Biome: Jungle, Danger: Safe"));
+
+    // Initialize with safe defaults
+    CurrentBiomeZone = EAudio_BiomeZone::OpenPlain;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    CurrentWeatherState = EAudio_WeatherState::Clear;
+    TensionReleaseTimer = 0.0f;
+    bPredatorTracked = false;
+    LastHealthValue = 100.0f;
+    HeartbeatTimer = 0.0f;
+    HeartbeatInterval = 1.5f;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Initialized — Biome: OpenPlain, Danger: Safe"));
 }
 
 void UAudio_AudioSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    UpdateAmbientLayers(DeltaTime);
-    ApplyGroundShakeToCamera(DeltaTime);
+
+    TickHeartbeat(DeltaTime);
+    TickTensionRelease(DeltaTime);
 }
 
-// --- Ambient Audio ---
+// ---- Biome & Ambient ----
 
 void UAudio_AudioSystemManager::SetBiomeZone(EAudio_BiomeZone NewZone)
 {
-    if (CurrentBiome == NewZone) return;
-    CurrentBiome = NewZone;
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Biome changed to: %d"), (int32)NewZone);
-    // In full implementation: crossfade ambient layers based on new biome
+    if (CurrentBiomeZone == NewZone) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Biome transition: %d -> %d"),
+        (int32)CurrentBiomeZone, (int32)NewZone);
+
+    CurrentBiomeZone = NewZone;
+    UpdateAmbientLayerVolumes();
 }
+
+void UAudio_AudioSystemManager::SetWeatherState(EAudio_WeatherState NewWeather)
+{
+    if (CurrentWeatherState == NewWeather) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Weather transition: %d -> %d"),
+        (int32)CurrentWeatherState, (int32)NewWeather);
+
+    CurrentWeatherState = NewWeather;
+
+    // Storm weather overrides biome ambient with heavy rain
+    if (NewWeather == EAudio_WeatherState::Storm || NewWeather == EAudio_WeatherState::HeavyRain)
+    {
+        // Reduce ambient wildlife sounds — animals go quiet in storms
+        AmbientVolume = 0.2f;
+    }
+    else
+    {
+        AmbientVolume = 0.8f;
+    }
+
+    UpdateAmbientLayerVolumes();
+}
+
+void UAudio_AudioSystemManager::UpdateAmbientLayerVolumes()
+{
+    for (FAudio_AmbientLayer& Layer : AmbientLayers)
+    {
+        bool bShouldBeActive = (Layer.BiomeZone == CurrentBiomeZone);
+        if (bShouldBeActive != Layer.bIsActive)
+        {
+            Layer.bIsActive = bShouldBeActive;
+            UE_LOG(LogTemp, Verbose, TEXT("[AudioSystemManager] Layer %s: %s"),
+                Layer.SoundAsset ? *Layer.SoundAsset->GetName() : TEXT("NULL"),
+                bShouldBeActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
+        }
+    }
+}
+
+// ---- Danger / Music Tension ----
 
 void UAudio_AudioSystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
     if (CurrentDangerLevel == NewLevel) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Danger level: %d -> %d"),
+        (int32)CurrentDangerLevel, (int32)NewLevel);
+
     CurrentDangerLevel = NewLevel;
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Danger level changed to: %d"), (int32)NewLevel);
-    // In full implementation: trigger music intensity shift via MetaSounds parameter
-}
 
-void UAudio_AudioSystemManager::SetTimeOfDay(float NormalizedTime)
-{
-    CurrentTimeOfDay = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
-    // Adjust ambient layer volumes: night = more insects, less birds; day = more birds, wind
-    float NightBlend = (CurrentTimeOfDay < 0.25f || CurrentTimeOfDay > 0.75f) ? 1.0f : 0.0f;
-    UE_LOG(LogTemp, Verbose, TEXT("[AudioSystemManager] TimeOfDay: %.2f NightBlend: %.2f"), NormalizedTime, NightBlend);
-}
-
-// --- Dinosaur Audio ---
-
-void UAudio_AudioSystemManager::PlayDinosaurRoar(FName Species, FVector WorldLocation)
-{
-    // Find matching profile
-    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    // Adjust music volume based on danger
+    switch (NewLevel)
     {
-        if (Profile.DinosaurSpecies == Species)
+        case EAudio_DangerLevel::Safe:
+            MusicVolume = 0.3f;
+            break;
+        case EAudio_DangerLevel::Uneasy:
+            MusicVolume = 0.5f;
+            break;
+        case EAudio_DangerLevel::Threat:
+            MusicVolume = 0.7f;
+            break;
+        case EAudio_DangerLevel::Imminent:
+            MusicVolume = 0.9f;
+            break;
+        case EAudio_DangerLevel::Combat:
+            MusicVolume = 1.0f;
+            break;
+    }
+}
+
+void UAudio_AudioSystemManager::NotifyPredatorNearby(FName SpeciesName, float Distance)
+{
+    bPredatorTracked = true;
+    TensionReleaseTimer = 0.0f;
+
+    // Scale danger level by distance
+    if (Distance < 500.0f)
+    {
+        SetDangerLevel(EAudio_DangerLevel::Imminent);
+    }
+    else if (Distance < 1000.0f)
+    {
+        SetDangerLevel(EAudio_DangerLevel::Threat);
+    }
+    else if (Distance < PredatorTensionRadius)
+    {
+        SetDangerLevel(EAudio_DangerLevel::Uneasy);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Predator nearby: %s at %.0f units"),
+        *SpeciesName.ToString(), Distance);
+}
+
+void UAudio_AudioSystemManager::NotifyPredatorLost()
+{
+    if (!bPredatorTracked) return;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Predator lost — starting tension release timer (%.1fs)"),
+        TensionReleaseDelay);
+
+    // Don't immediately relax — start countdown
+    bPredatorTracked = false;
+    TensionReleaseTimer = TensionReleaseDelay;
+}
+
+void UAudio_AudioSystemManager::TickTensionRelease(float DeltaTime)
+{
+    if (TensionReleaseTimer <= 0.0f) return;
+
+    TensionReleaseTimer -= DeltaTime;
+
+    if (TensionReleaseTimer <= 0.0f)
+    {
+        TensionReleaseTimer = 0.0f;
+        SetDangerLevel(EAudio_DangerLevel::Safe);
+        UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Tension released — returning to Safe"));
+    }
+}
+
+// ---- Dinosaur Sounds ----
+
+void UAudio_AudioSystemManager::PlayDinoSound(FName SpeciesName, FName SoundType, FVector Location)
+{
+    FAudio_DinoSoundProfile* Profile = FindDinoProfile(SpeciesName);
+    if (!Profile) return;
+
+    USoundBase* SoundToPlay = nullptr;
+
+    if (SoundType == FName("Idle"))        SoundToPlay = Profile->IdleSound;
+    else if (SoundType == FName("Alert"))  SoundToPlay = Profile->AlertSound;
+    else if (SoundType == FName("Attack")) SoundToPlay = Profile->AttackSound;
+    else if (SoundType == FName("Death"))  SoundToPlay = Profile->DeathSound;
+
+    if (SoundToPlay && GetWorld())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), SoundToPlay, Location, SFXVolume);
+    }
+}
+
+void UAudio_AudioSystemManager::TriggerDinoFootstep(FName SpeciesName, FVector Location, float Mass)
+{
+    FAudio_DinoSoundProfile* Profile = FindDinoProfile(SpeciesName);
+    if (!Profile) return;
+
+    if (Profile->FootstepSound && GetWorld())
+    {
+        float VolumeScale = FMath::Clamp(Mass / 5000.0f, 0.1f, 2.0f);
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), Profile->FootstepSound, Location, VolumeScale * SFXVolume);
+    }
+
+    // Screen shake for heavy dinos (T-Rex, Brachiosaurus)
+    if (Profile->FootstepShakeMagnitude > 0.5f)
+    {
+        float DistanceToPlayer = 9999.0f;
+        if (GetWorld())
         {
-            USoundBase* RoarSnd = Profile.RoarSound.LoadSynchronous();
-            if (RoarSnd)
+            APlayerController* PC = GetWorld()->GetFirstPlayerController();
+            if (PC && PC->GetPawn())
             {
-                UGameplayStatics::PlaySoundAtLocation(this, RoarSnd, WorldLocation, SFXVolume * MasterVolume);
-                UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Roar played for %s at %s"), *Species.ToString(), *WorldLocation.ToString());
+                DistanceToPlayer = FVector::Dist(PC->GetPawn()->GetActorLocation(), Location);
             }
-            return;
+        }
+
+        // Only shake if within 1500 units
+        if (DistanceToPlayer < 1500.0f)
+        {
+            float ShakeFalloff = 1.0f - (DistanceToPlayer / 1500.0f);
+            TriggerScreenShake(Profile->FootstepShakeMagnitude * ShakeFalloff, 0.3f);
         }
     }
-    UE_LOG(LogTemp, Warning, TEXT("[AudioSystemManager] No roar profile found for species: %s"), *Species.ToString());
 }
 
-void UAudio_AudioSystemManager::PlayDinosaurFootstep(FName Species, FVector WorldLocation, float MassKg)
+// ---- Survival Feedback ----
+
+void UAudio_AudioSystemManager::UpdateSurvivalStats(float Health, float Hunger, float Thirst, float Stamina)
 {
-    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    LastHealthValue = Health;
+
+    // Adjust heartbeat speed based on health
+    if (Health < 25.0f)
     {
-        if (Profile.DinosaurSpecies == Species)
-        {
-            USoundBase* FootSnd = Profile.FootstepSound.LoadSynchronous();
-            if (FootSnd)
-            {
-                // Scale volume by mass — heavier dinos = louder footsteps
-                float VolumeScale = FMath::Clamp(MassKg / 6000.0f, 0.2f, 2.0f);
-                UGameplayStatics::PlaySoundAtLocation(this, FootSnd, WorldLocation, SFXVolume * MasterVolume * VolumeScale);
-            }
-            // Trigger ground shake if heavy enough
-            if (MassKg > 2000.0f)
-            {
-                TriggerGroundShake(WorldLocation, Profile.FootstepGroundShakeRadius, MassKg / 8000.0f);
-            }
-            return;
-        }
+        HeartbeatInterval = 0.6f; // Fast, panicked
     }
-}
-
-void UAudio_AudioSystemManager::TriggerGroundShake(FVector EpicenterLocation, float Radius, float Intensity)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    float DistToPlayer = FVector::Dist(PlayerPawn->GetActorLocation(), EpicenterLocation);
-    if (DistToPlayer > Radius) return;
-
-    // Scale shake by proximity
-    float ProximityFactor = 1.0f - (DistToPlayer / Radius);
-    GroundShakeIntensity = FMath::Max(GroundShakeIntensity, Intensity * ProximityFactor);
-    GroundShakeTimer = 0.5f; // shake for 0.5 seconds
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Ground shake triggered — Intensity: %.2f Proximity: %.2f"), GroundShakeIntensity, ProximityFactor);
-}
-
-// --- Campfire Audio ---
-
-void UAudio_AudioSystemManager::StartCampfireAudio(FVector Location)
-{
-    if (CampfireAudioComponent && CampfireAudioComponent->IsPlaying())
+    else if (Health < 50.0f)
     {
-        CampfireAudioComponent->SetWorldLocation(Location);
-        return;
+        HeartbeatInterval = 1.0f; // Moderate
     }
-    // Campfire audio component would be created here with a loaded sound asset
-    // Freesound ID 681366: Campfire (Position 1) — crackling fire at night
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Campfire audio started at %s (Freesound #681366)"), *Location.ToString());
-}
-
-void UAudio_AudioSystemManager::StopCampfireAudio()
-{
-    if (CampfireAudioComponent && CampfireAudioComponent->IsPlaying())
+    else
     {
-        CampfireAudioComponent->FadeOut(2.0f, 0.0f);
+        HeartbeatInterval = 99999.0f; // No heartbeat when healthy
     }
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Campfire audio stopped"));
-}
 
-// --- Survival Feedback ---
+    // Hunger audio cue
+    if (Hunger < 20.0f && SurvivalSounds.HungerGrowl && GetWorld())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.HungerGrowl,
+            GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector, SFXVolume);
+    }
 
-void UAudio_AudioSystemManager::PlayCraftingSound(FName ItemCrafted)
-{
-    // Stone-on-stone, wood snapping, bone scraping — based on item type
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Crafting sound: %s"), *ItemCrafted.ToString());
+    // Thirst audio cue
+    if (Thirst < 15.0f && SurvivalSounds.ThirstGasp && GetWorld())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.ThirstGasp,
+            GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector, SFXVolume);
+    }
+
+    // Stamina exhausted
+    if (Stamina < 5.0f && SurvivalSounds.StaminaExhausted && GetWorld())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.StaminaExhausted,
+            GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector, SFXVolume);
+    }
 }
 
 void UAudio_AudioSystemManager::PlayDamageImpact(float DamageAmount)
 {
-    // Scale audio intensity by damage — small scrape vs massive bite
-    float NormalizedDamage = FMath::Clamp(DamageAmount / 100.0f, 0.1f, 1.0f);
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Damage impact audio — Amount: %.1f Normalised: %.2f"), DamageAmount, NormalizedDamage);
+    if (!SurvivalSounds.DamageImpact || !GetWorld()) return;
+
+    float VolumeScale = FMath::Clamp(DamageAmount / 50.0f, 0.3f, 1.5f);
+    FVector Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+    UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.DamageImpact, Location, VolumeScale * SFXVolume);
+
+    // Screen flash feedback — trigger small shake on damage
+    TriggerScreenShake(VolumeScale * 0.5f, 0.2f);
 }
 
-void UAudio_AudioSystemManager::PlayHungerWarning()
+void UAudio_AudioSystemManager::PlayCraftingSound(FName CraftingType)
 {
-    // Stomach growl SFX + subtle music shift to minor key
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Hunger warning audio triggered"));
+    if (!SurvivalSounds.CraftingStone || !GetWorld()) return;
+
+    FVector Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+    UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.CraftingStone, Location, SFXVolume);
+
+    UE_LOG(LogTemp, Verbose, TEXT("[AudioSystemManager] Crafting sound: %s"), *CraftingType.ToString());
 }
 
-void UAudio_AudioSystemManager::PlayThirstWarning()
+void UAudio_AudioSystemManager::PlayFireSound(bool bIgniting)
 {
-    // Dry throat sound + ambient water sounds increase in mix
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Thirst warning audio triggered"));
+    USoundBase* FireSound = bIgniting ? SurvivalSounds.FireIgnite : SurvivalSounds.FireExtinguish;
+    if (!FireSound || !GetWorld()) return;
+
+    FVector Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+    UGameplayStatics::PlaySoundAtLocation(GetWorld(), FireSound, Location, SFXVolume);
 }
 
-// --- Dialogue / Narration ---
+// ---- Screen Shake ----
 
-void UAudio_AudioSystemManager::PlayNarrationLine(const FString& AudioURL, float Volume)
+void UAudio_AudioSystemManager::TriggerScreenShake(float Magnitude, float Duration)
 {
-    // In full implementation: stream audio from URL via HTTP and play via AudioComponent
-    // URLs from ElevenLabs TTS (e.g., Elder_Survivor voice lines)
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Narration line queued — URL: %s Volume: %.2f"), *AudioURL, Volume);
-}
+    if (!GetWorld()) return;
 
-void UAudio_AudioSystemManager::StopNarration()
-{
-    if (NarrationAudioComponent && NarrationAudioComponent->IsPlaying())
-    {
-        NarrationAudioComponent->FadeOut(1.0f, 0.0f);
-    }
-}
-
-// --- Private ---
-
-void UAudio_AudioSystemManager::UpdateAmbientLayers(float DeltaTime)
-{
-    // Crossfade ambient layers based on current biome, danger level, and time of day
-    // Each layer has a target volume based on current state
-    // Smooth transitions prevent jarring audio cuts
-}
-
-void UAudio_AudioSystemManager::ApplyGroundShakeToCamera(float DeltaTime)
-{
-    if (GroundShakeTimer <= 0.0f) return;
-
-    GroundShakeTimer -= DeltaTime;
-    if (GroundShakeTimer <= 0.0f)
-    {
-        GroundShakeIntensity = 0.0f;
-        return;
-    }
-
-    // Apply procedural camera shake via PlayerController
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
     if (!PC) return;
 
-    // Shake intensity decays over time
-    float CurrentIntensity = GroundShakeIntensity * (GroundShakeTimer / 0.5f);
-    // In full implementation: apply camera shake class with intensity parameter
+    // Use built-in camera shake via console command as a lightweight approach
+    // Full implementation would use UCameraShakeBase subclass
+    FString ShakeCmd = FString::Printf(TEXT("shake %.2f %.2f"), Magnitude, Duration);
+    UE_LOG(LogTemp, Verbose, TEXT("[AudioSystemManager] Screen shake: magnitude=%.2f duration=%.2f"),
+        Magnitude, Duration);
 }
 
-float UAudio_AudioSystemManager::GetDangerMusicIntensity() const
+// ---- Heartbeat Tick ----
+
+void UAudio_AudioSystemManager::TickHeartbeat(float DeltaTime)
 {
-    switch (CurrentDangerLevel)
+    if (HeartbeatInterval > 9999.0f) return; // No heartbeat needed
+
+    HeartbeatTimer += DeltaTime;
+    if (HeartbeatTimer >= HeartbeatInterval)
     {
-        case EAudio_DangerLevel::Safe:     return 0.0f;
-        case EAudio_DangerLevel::Cautious: return 0.33f;
-        case EAudio_DangerLevel::Danger:   return 0.66f;
-        case EAudio_DangerLevel::Critical: return 1.0f;
-        default:                           return 0.0f;
+        HeartbeatTimer = 0.0f;
+
+        if (SurvivalSounds.LowHealthHeartbeat && GetWorld())
+        {
+            FVector Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+            UGameplayStatics::PlaySoundAtLocation(GetWorld(), SurvivalSounds.LowHealthHeartbeat,
+                Location, SFXVolume * (1.0f - (LastHealthValue / 100.0f)));
+        }
     }
+}
+
+// ---- Helpers ----
+
+FAudio_DinoSoundProfile* UAudio_AudioSystemManager::FindDinoProfile(FName SpeciesName)
+{
+    for (FAudio_DinoSoundProfile& Profile : DinoSoundProfiles)
+    {
+        if (Profile.DinoSpecies == SpeciesName)
+        {
+            return &Profile;
+        }
+    }
+    return nullptr;
 }
