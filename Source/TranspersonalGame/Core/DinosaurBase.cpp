@@ -1,116 +1,354 @@
-// DinosaurBase.cpp
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260625_004
-// Base class for all dinosaur pawns in the prehistoric survival game.
-
 #include "DinosaurBase.h"
-#include "Components/CapsuleComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/World.h"
+#include "Components/CapsuleComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
 
 ADinosaurBase::ADinosaurBase()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Default survival stats
-    MaxHealth = 500.0f;
-    CurrentHealth = MaxHealth;
-    MaxStamina = 200.0f;
-    CurrentStamina = MaxStamina;
-    WalkSpeed = 300.0f;
-    RunSpeed = 700.0f;
-    AttackDamage = 50.0f;
-    DetectionRadius = 1500.0f;
-    bIsAggressive = false;
-    bIsAlive = true;
-    DinosaurSpecies = EEng_DinosaurSpecies::TRex;
+    // Configure capsule for a large dinosaur by default (TRex scale)
+    GetCapsuleComponent()->SetCapsuleHalfHeight(96.0f);
+    GetCapsuleComponent()->SetCapsuleRadius(55.0f);
 
-    // Movement component defaults
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-    GetCharacterMovement()->JumpZVelocity = 0.0f; // Dinosaurs don't jump by default
-    GetCharacterMovement()->GravityScale = 1.0f;
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
+    // Configure movement
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed;
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate = FRotator(0.0f, 180.0f, 0.0f);
+        MoveComp->GravityScale = 1.0f;
+        MoveComp->MaxStepHeight = 45.0f;
+        MoveComp->SetWalkableFloorAngle(45.0f);
+    }
 
-    // Capsule defaults
-    GetCapsuleComponent()->SetCapsuleHalfHeight(88.0f);
-    GetCapsuleComponent()->SetCapsuleRadius(34.0f);
+    // Don't use controller rotation for movement — let movement component handle it
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationRoll = false;
 
-    // Mesh defaults
-    GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
-    GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+    // Set default territory center to spawn location (updated in BeginPlay)
+    TerritoryCenter = FVector::ZeroVector;
 }
 
 void ADinosaurBase::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentHealth = MaxHealth;
-    CurrentStamina = MaxStamina;
+
+    // Set territory center to spawn location
+    TerritoryCenter = GetActorLocation();
+
+    // Apply movement speed from stats
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed;
+    }
+
+    // Start in idle state
+    SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
+
+    // Initialize roam target
+    RoamTarget = GetRandomRoamTarget();
+    bHasRoamTarget = true;
 }
 
 void ADinosaurBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Stamina regeneration when not running
-    if (CurrentStamina < MaxStamina)
+    if (!IsAlive())
     {
-        CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + DeltaTime * 20.0f);
+        return;
+    }
+
+    // Throttled state update
+    StateUpdateTimer += DeltaTime;
+    if (StateUpdateTimer >= StateUpdateInterval)
+    {
+        StateUpdateTimer = 0.0f;
+        ScanForPlayer();
+        UpdateBehavior(DeltaTime);
     }
 }
 
-float ADinosaurBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-    AController* EventInstigator, AActor* DamageCauser)
+float ADinosaurBase::TakeDamageFromPlayer(float DamageAmount, AActor* DamageInstigator)
 {
-    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    if (!IsAlive())
+    {
+        return 0.0f;
+    }
 
-    if (!bIsAlive) return 0.0f;
+    DinoStats.CurrentHealth = FMath::Max(0.0f, DinoStats.CurrentHealth - DamageAmount);
 
-    CurrentHealth = FMath::Max(0.0f, CurrentHealth - ActualDamage);
+    // React to damage — become aggressive
+    if (DinoStats.bIsCarnivore && DamageInstigator)
+    {
+        DetectedPlayer = DamageInstigator;
+        SetBehaviorState(EEng_DinosaurBehaviorState::Attacking);
+    }
 
-    if (CurrentHealth <= 0.0f)
+    if (!IsAlive())
     {
         Die();
     }
 
-    return ActualDamage;
+    return DamageAmount;
 }
 
-void ADinosaurBase::Die()
+void ADinosaurBase::AttackTarget(AActor* Target)
 {
-    if (!bIsAlive) return;
-    bIsAlive = false;
-
-    // Disable movement
-    GetCharacterMovement()->DisableMovement();
-    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Enable ragdoll on death
-    GetMesh()->SetSimulatePhysics(true);
-    GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
-    // Destroy after 10 seconds
-    SetLifeSpan(10.0f);
-}
-
-void ADinosaurBase::SetRunning(bool bRun)
-{
-    if (bRun && CurrentStamina > 10.0f)
+    if (!Target || !IsAlive())
     {
-        GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
+        return;
     }
-    else
+
+    // Apply damage to target
+    UGameplayStatics::ApplyDamage(
+        Target,
+        DinoStats.AttackDamage,
+        GetController(),
+        this,
+        nullptr
+    );
+}
+
+void ADinosaurBase::SetBehaviorState(EEng_DinosaurBehaviorState NewState)
+{
+    if (BehaviorState == NewState)
     {
-        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+        return;
+    }
+
+    BehaviorState = NewState;
+
+    // Adjust movement speed based on state
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        switch (NewState)
+        {
+            case EEng_DinosaurBehaviorState::Idle:
+            case EEng_DinosaurBehaviorState::Resting:
+                MoveComp->MaxWalkSpeed = 0.0f;
+                break;
+            case EEng_DinosaurBehaviorState::Roaming:
+                MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed * 0.4f;
+                break;
+            case EEng_DinosaurBehaviorState::Hunting:
+                MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed * 0.7f;
+                break;
+            case EEng_DinosaurBehaviorState::Attacking:
+                MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed;
+                break;
+            case EEng_DinosaurBehaviorState::Fleeing:
+                MoveComp->MaxWalkSpeed = DinoStats.MoveSpeed * 1.2f;
+                break;
+        }
     }
 }
 
 float ADinosaurBase::GetHealthPercent() const
 {
-    return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f;
+    if (DinoStats.MaxHealth <= 0.0f)
+    {
+        return 0.0f;
+    }
+    return DinoStats.CurrentHealth / DinoStats.MaxHealth;
 }
 
-float ADinosaurBase::GetStaminaPercent() const
+void ADinosaurBase::OnDetectPlayer_Implementation(AActor* Player)
 {
-    return (MaxStamina > 0.0f) ? (CurrentStamina / MaxStamina) : 0.0f;
+    DetectedPlayer = Player;
+    if (DinoStats.bIsCarnivore)
+    {
+        SetBehaviorState(EEng_DinosaurBehaviorState::Hunting);
+    }
+}
+
+void ADinosaurBase::OnLosePlayer_Implementation()
+{
+    DetectedPlayer = nullptr;
+    SetBehaviorState(EEng_DinosaurBehaviorState::Roaming);
+}
+
+void ADinosaurBase::OnDeath_Implementation()
+{
+    // Base death behavior — subclasses can override
+    SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
+
+    // Disable collision
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Disable movement
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->DisableMovement();
+    }
+}
+
+void ADinosaurBase::UpdateBehavior(float DeltaTime)
+{
+    switch (BehaviorState)
+    {
+        case EEng_DinosaurBehaviorState::Idle:
+            // Occasionally start roaming
+            if (FMath::RandRange(0.0f, 1.0f) < 0.1f)
+            {
+                SetBehaviorState(EEng_DinosaurBehaviorState::Roaming);
+                RoamTarget = GetRandomRoamTarget();
+                bHasRoamTarget = true;
+            }
+            break;
+
+        case EEng_DinosaurBehaviorState::Roaming:
+            UpdateRoaming(DeltaTime);
+            break;
+
+        case EEng_DinosaurBehaviorState::Hunting:
+        case EEng_DinosaurBehaviorState::Attacking:
+            UpdateHunting(DeltaTime);
+            break;
+
+        case EEng_DinosaurBehaviorState::Fleeing:
+            // Move away from detected player
+            if (DetectedPlayer)
+            {
+                FVector AwayDir = (GetActorLocation() - DetectedPlayer->GetActorLocation()).GetSafeNormal();
+                AddMovementInput(AwayDir, 1.0f);
+            }
+            break;
+
+        case EEng_DinosaurBehaviorState::Resting:
+            // Rest for a while then go back to idle
+            if (FMath::RandRange(0.0f, 1.0f) < 0.05f)
+            {
+                SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
+            }
+            break;
+    }
+}
+
+void ADinosaurBase::UpdateRoaming(float DeltaTime)
+{
+    if (!bHasRoamTarget)
+    {
+        RoamTarget = GetRandomRoamTarget();
+        bHasRoamTarget = true;
+        return;
+    }
+
+    FVector CurrentLoc = GetActorLocation();
+    float DistToTarget = FVector::Dist2D(CurrentLoc, RoamTarget);
+
+    if (DistToTarget < 200.0f)
+    {
+        // Reached roam target — idle briefly then get new target
+        bHasRoamTarget = false;
+        SetBehaviorState(EEng_DinosaurBehaviorState::Idle);
+        return;
+    }
+
+    // Move toward roam target
+    FVector Dir = (RoamTarget - CurrentLoc).GetSafeNormal2D();
+    AddMovementInput(Dir, 1.0f);
+}
+
+void ADinosaurBase::UpdateHunting(float DeltaTime)
+{
+    if (!DetectedPlayer)
+    {
+        SetBehaviorState(EEng_DinosaurBehaviorState::Roaming);
+        return;
+    }
+
+    FVector CurrentLoc = GetActorLocation();
+    float DistToPlayer = FVector::Dist(CurrentLoc, DetectedPlayer->GetActorLocation());
+
+    if (DistToPlayer <= DinoStats.AttackRadius)
+    {
+        // In attack range — attack
+        SetBehaviorState(EEng_DinosaurBehaviorState::Attacking);
+        AttackTarget(DetectedPlayer);
+    }
+    else if (DistToPlayer > DinoStats.DetectionRadius * 1.5f)
+    {
+        // Lost the player
+        OnLosePlayer();
+    }
+    else
+    {
+        // Chase the player
+        FVector Dir = (DetectedPlayer->GetActorLocation() - CurrentLoc).GetSafeNormal2D();
+        AddMovementInput(Dir, 1.0f);
+    }
+}
+
+void ADinosaurBase::ScanForPlayer()
+{
+    // Only carnivores actively hunt players
+    if (!DinoStats.bIsCarnivore)
+    {
+        return;
+    }
+
+    // If already tracking, check if still in range
+    if (DetectedPlayer)
+    {
+        float Dist = FVector::Dist(GetActorLocation(), DetectedPlayer->GetActorLocation());
+        if (Dist > DinoStats.DetectionRadius * 1.5f)
+        {
+            OnLosePlayer();
+        }
+        return;
+    }
+
+    // Scan for player pawn
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC)
+    {
+        return;
+    }
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn)
+    {
+        return;
+    }
+
+    float Dist = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    if (Dist <= DinoStats.DetectionRadius)
+    {
+        OnDetectPlayer(PlayerPawn);
+    }
+}
+
+FVector ADinosaurBase::GetRandomRoamTarget() const
+{
+    // Pick a random point within roam radius of territory center
+    float Angle = FMath::RandRange(0.0f, 360.0f);
+    float Radius = FMath::RandRange(500.0f, DinoStats.RoamRadius);
+
+    FVector Offset(
+        FMath::Cos(FMath::DegreesToRadians(Angle)) * Radius,
+        FMath::Sin(FMath::DegreesToRadians(Angle)) * Radius,
+        0.0f
+    );
+
+    return TerritoryCenter + Offset;
+}
+
+void ADinosaurBase::Die()
+{
+    OnDeath();
 }
