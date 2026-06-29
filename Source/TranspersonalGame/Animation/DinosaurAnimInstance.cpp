@@ -1,68 +1,69 @@
 // DinosaurAnimInstance.cpp
-// Animation Agent #10 — Transpersonal Game Studio
-// Dinosaur AnimInstance — drives locomotion, attack, and death states for all dinosaur species
+// Animation Agent #10 — PROD_CYCLE_AUTO_20260629_002
+// Runtime animation brain for all dinosaur species in the prehistoric survival game.
+// Drives locomotion, combat, behavior blend weights via NativeUpdateAnimation.
 
 #include "DinosaurAnimInstance.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Character.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 
 UDinosaurAnimInstance::UDinosaurAnimInstance()
 {
     // Locomotion defaults
     GroundSpeed = 0.0f;
-    MovementDirection = 0.0f;
+    VerticalSpeed = 0.0f;
     bIsMoving = false;
-    bIsRunning = false;
-    bIsInAir = false;
-    VerticalVelocity = 0.0f;
+    bIsFalling = false;
+    bIsSprinting = false;
+    MovementDirection = 0.0f;
+    TurnRate = 0.0f;
+    LocomotionState = EAnim_DinosaurLocomotionState::Idle;
 
     // Combat defaults
+    AttackType = EAnim_DinosaurAttackType::None;
     bIsAttacking = false;
-    bIsRoaring = false;
-    bIsEating = false;
+    bIsInCombat = false;
     bIsDead = false;
-    bIsStunned = false;
-
-    // Behavioral defaults
-    bIsAlerted = false;
-    bIsSearching = false;
-    bIsSleeping = false;
-    bIsIdle = true;
-
-    // Blend weights
-    AttackBlendWeight = 0.0f;
-    RoarBlendWeight = 0.0f;
-    InjuryBlendWeight = 0.0f;
-    AlertBlendWeight = 0.0f;
-
-    // Species defaults
-    DinosaurSpecies = EAnim_DinosaurSpecies::Raptor;
+    bIsWounded = false;
     HealthPercent = 1.0f;
     StaminaPercent = 1.0f;
+    AttackBlendWeight = 0.0f;
+    WoundedBlendWeight = 0.0f;
 
-    // IK defaults
+    // Behavior defaults
+    bIsEating = false;
+    bIsDrinking = false;
+    bIsResting = false;
+    bIsAlerted = false;
+    bIsRoaring = false;
+    bIsSniffing = false;
+    AlertBlendWeight = 0.0f;
+    BehaviorBlendWeight = 0.0f;
+
+    // Species / IK defaults
+    Species = EAnim_DinosaurSpecies::Velociraptor;
     bEnableFootIK = true;
-    LeftFootIKAlpha = 1.0f;
-    RightFootIKAlpha = 1.0f;
     LeftFootIKOffset = FVector::ZeroVector;
     RightFootIKOffset = FVector::ZeroVector;
+    LeftFootIKAlpha = 0.0f;
+    RightFootIKAlpha = 0.0f;
+    SpineIKBend = 0.0f;
+    NeckIKTarget = FVector::ZeroVector;
+    TailSwayAmount = 0.0f;
+    TailSwaySpeed = 1.0f;
 
-    // Tail/head procedural
-    TailSwayAngle = 0.0f;
-    HeadLookAtAlpha = 0.0f;
-    HeadLookAtTarget = FVector::ZeroVector;
+    // Blend space defaults
+    LocomotionBlendSpaceX = 0.0f;
+    LocomotionBlendSpaceY = 0.0f;
+    TurnBlendAlpha = 0.0f;
+    LandingImpactAlpha = 0.0f;
 
     // Cached refs
     OwnerPawn = nullptr;
     OwnerMovement = nullptr;
-
-    // Internal
-    TimeSinceLastAttack = 0.0f;
-    TimeSinceLastRoar = 0.0f;
-    IdleVariantIndex = 0;
-    IdleVariantTimer = 0.0f;
 }
 
 void UDinosaurAnimInstance::NativeInitializeAnimation()
@@ -72,10 +73,10 @@ void UDinosaurAnimInstance::NativeInitializeAnimation()
     OwnerPawn = TryGetPawnOwner();
     if (OwnerPawn)
     {
-        ACharacter* OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-        if (OwnerCharacter)
+        ACharacter* OwnerChar = Cast<ACharacter>(OwnerPawn);
+        if (OwnerChar)
         {
-            OwnerMovement = OwnerCharacter->GetCharacterMovement();
+            OwnerMovement = OwnerChar->GetCharacterMovement();
         }
     }
 }
@@ -89,18 +90,17 @@ void UDinosaurAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         OwnerPawn = TryGetPawnOwner();
         if (!OwnerPawn) return;
 
-        ACharacter* OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-        if (OwnerCharacter)
+        ACharacter* OwnerChar = Cast<ACharacter>(OwnerPawn);
+        if (OwnerChar)
         {
-            OwnerMovement = OwnerCharacter->GetCharacterMovement();
+            OwnerMovement = OwnerChar->GetCharacterMovement();
         }
     }
 
     UpdateLocomotion(DeltaSeconds);
-    UpdateCombatState(DeltaSeconds);
-    UpdateBehaviorState(DeltaSeconds);
-    UpdateProceduralElements(DeltaSeconds);
-    UpdateFootIK(DeltaSeconds);
+    UpdateCombat(DeltaSeconds);
+    UpdateBehavior(DeltaSeconds);
+    UpdateIK(DeltaSeconds);
 }
 
 void UDinosaurAnimInstance::UpdateLocomotion(float DeltaSeconds)
@@ -108,258 +108,191 @@ void UDinosaurAnimInstance::UpdateLocomotion(float DeltaSeconds)
     if (!OwnerPawn) return;
 
     FVector Velocity = OwnerPawn->GetVelocity();
-    FVector HorizontalVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-    GroundSpeed = HorizontalVelocity.Size();
-    VerticalVelocity = Velocity.Z;
+    GroundSpeed = FVector(Velocity.X, Velocity.Y, 0.0f).Size();
+    VerticalSpeed = Velocity.Z;
 
     bIsMoving = GroundSpeed > 10.0f;
-    bIsInAir = (OwnerMovement && OwnerMovement->IsFalling());
+    bIsFalling = OwnerMovement ? OwnerMovement->IsFalling() : false;
 
-    // Determine run threshold by species
-    float RunThreshold = GetRunThresholdForSpecies();
-    bIsRunning = GroundSpeed > RunThreshold;
-
-    // Movement direction relative to actor forward
-    if (bIsMoving)
+    // Determine locomotion state
+    if (bIsDead)
     {
-        FRotator ActorRotation = OwnerPawn->GetActorRotation();
-        FVector ForwardVector = ActorRotation.Vector();
-        FVector NormalizedVelocity = HorizontalVelocity.GetSafeNormal();
-
-        float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
-        FVector CrossProduct = FVector::CrossProduct(ForwardVector, NormalizedVelocity);
-        float AngleRad = FMath::Acos(FMath::Clamp(DotProduct, -1.0f, 1.0f));
-        float AngleDeg = FMath::RadiansToDegrees(AngleRad);
-
-        MovementDirection = (CrossProduct.Z < 0.0f) ? -AngleDeg : AngleDeg;
+        LocomotionState = EAnim_DinosaurLocomotionState::Dead;
+    }
+    else if (bIsFalling)
+    {
+        LocomotionState = EAnim_DinosaurLocomotionState::Falling;
+    }
+    else if (bIsSprinting && GroundSpeed > 400.0f)
+    {
+        LocomotionState = EAnim_DinosaurLocomotionState::Sprint;
+    }
+    else if (bIsMoving && GroundSpeed > 150.0f)
+    {
+        LocomotionState = EAnim_DinosaurLocomotionState::Run;
+    }
+    else if (bIsMoving)
+    {
+        LocomotionState = EAnim_DinosaurLocomotionState::Walk;
     }
     else
     {
-        MovementDirection = FMath::FInterpTo(MovementDirection, 0.0f, DeltaSeconds, 5.0f);
+        LocomotionState = EAnim_DinosaurLocomotionState::Idle;
     }
+
+    // Blend space inputs: X = direction (-180 to 180), Y = speed (0 to 1)
+    if (bIsMoving && OwnerPawn)
+    {
+        FVector ForwardVec = OwnerPawn->GetActorForwardVector();
+        FVector VelocityNorm = Velocity.GetSafeNormal();
+        MovementDirection = UKismetMathLibrary::DegAcos(
+            FVector::DotProduct(ForwardVec, VelocityNorm)
+        );
+        // Determine sign (left/right)
+        FVector CrossProduct = FVector::CrossProduct(ForwardVec, VelocityNorm);
+        if (CrossProduct.Z < 0.0f) MovementDirection = -MovementDirection;
+    }
+    else
+    {
+        MovementDirection = 0.0f;
+    }
+
+    // Normalize speed for blend space Y axis (0=idle, 1=sprint)
+    float MaxSpeed = bIsSprinting ? 800.0f : 500.0f;
+    LocomotionBlendSpaceX = MovementDirection;
+    LocomotionBlendSpaceY = FMath::Clamp(GroundSpeed / MaxSpeed, 0.0f, 1.0f);
+
+    // Tail sway: faster when running
+    TailSwaySpeed = FMath::Lerp(0.5f, 3.0f, LocomotionBlendSpaceY);
+    TailSwayAmount = FMath::Lerp(0.2f, 1.0f, LocomotionBlendSpaceY);
 }
 
-void UDinosaurAnimInstance::UpdateCombatState(float DeltaSeconds)
+void UDinosaurAnimInstance::UpdateCombat(float DeltaSeconds)
 {
-    // Decay timers
-    TimeSinceLastAttack += DeltaSeconds;
-    TimeSinceLastRoar += DeltaSeconds;
+    // Blend attack weight in/out smoothly
+    float TargetAttackWeight = bIsAttacking ? 1.0f : 0.0f;
+    AttackBlendWeight = FMath::FInterpTo(AttackBlendWeight, TargetAttackWeight, DeltaSeconds, 8.0f);
 
-    // Blend weight decay
-    if (!bIsAttacking)
-    {
-        AttackBlendWeight = FMath::FInterpTo(AttackBlendWeight, 0.0f, DeltaSeconds, 4.0f);
-    }
-    if (!bIsRoaring)
-    {
-        RoarBlendWeight = FMath::FInterpTo(RoarBlendWeight, 0.0f, DeltaSeconds, 3.0f);
-    }
+    // Wounded blend based on health
+    float TargetWoundedWeight = (HealthPercent < 0.35f) ? 1.0f : 0.0f;
+    WoundedBlendWeight = FMath::FInterpTo(WoundedBlendWeight, TargetWoundedWeight, DeltaSeconds, 3.0f);
 
-    // Injury blend based on health
-    float TargetInjuryBlend = 0.0f;
-    if (HealthPercent < 0.3f)
-    {
-        TargetInjuryBlend = 1.0f - (HealthPercent / 0.3f);
-    }
-    InjuryBlendWeight = FMath::FInterpTo(InjuryBlendWeight, TargetInjuryBlend, DeltaSeconds, 2.0f);
+    // Spine IK bend during attack (lean forward)
+    float TargetSpineBend = bIsAttacking ? 15.0f : 0.0f;
+    SpineIKBend = FMath::FInterpTo(SpineIKBend, TargetSpineBend, DeltaSeconds, 6.0f);
+}
 
+void UDinosaurAnimInstance::UpdateBehavior(float DeltaSeconds)
+{
     // Alert blend
-    float TargetAlertBlend = bIsAlerted ? 1.0f : 0.0f;
-    AlertBlendWeight = FMath::FInterpTo(AlertBlendWeight, TargetAlertBlend, DeltaSeconds, 3.0f);
-}
+    float TargetAlertWeight = bIsAlerted ? 1.0f : 0.0f;
+    AlertBlendWeight = FMath::FInterpTo(AlertBlendWeight, TargetAlertWeight, DeltaSeconds, 4.0f);
 
-void UDinosaurAnimInstance::UpdateBehaviorState(float DeltaSeconds)
-{
-    // Idle variant cycling — prevents static idle loop
-    if (bIsIdle && !bIsMoving && !bIsAttacking && !bIsDead)
+    // Behavior blend (eating/drinking/resting)
+    float TargetBehaviorWeight = (bIsEating || bIsDrinking || bIsResting) ? 1.0f : 0.0f;
+    BehaviorBlendWeight = FMath::FInterpTo(BehaviorBlendWeight, TargetBehaviorWeight, DeltaSeconds, 2.0f);
+
+    // Neck IK: point toward food/water source when eating/drinking
+    if (bIsEating || bIsDrinking)
     {
-        IdleVariantTimer += DeltaSeconds;
-        float VariantDuration = GetIdleVariantDuration();
-        if (IdleVariantTimer >= VariantDuration)
+        // Neck lowers toward ground
+        if (OwnerPawn)
         {
-            IdleVariantTimer = 0.0f;
-            IdleVariantIndex = (IdleVariantIndex + 1) % 3; // 3 idle variants
+            FVector ActorLoc = OwnerPawn->GetActorLocation();
+            NeckIKTarget = ActorLoc + FVector(100.0f, 0.0f, -80.0f);
         }
     }
-    else
+    else if (bIsAlerted && OwnerPawn)
     {
-        IdleVariantTimer = 0.0f;
-    }
-
-    // Auto-set idle when not doing anything
-    bIsIdle = !bIsMoving && !bIsAttacking && !bIsRoaring && !bIsEating && !bIsDead && !bIsStunned && !bIsSleeping;
-}
-
-void UDinosaurAnimInstance::UpdateProceduralElements(float DeltaSeconds)
-{
-    if (!OwnerPawn) return;
-
-    // Tail sway — oscillates based on movement speed
-    float SwayFrequency = bIsMoving ? (GroundSpeed / 100.0f) * 2.0f : 0.5f;
-    float SwayAmplitude = bIsMoving ? 15.0f : 5.0f;
-    float GameTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    TailSwayAngle = FMath::Sin(GameTime * SwayFrequency) * SwayAmplitude;
-
-    // Head look-at — smooth interpolation toward target
-    if (HeadLookAtAlpha > 0.01f && !HeadLookAtTarget.IsZero())
-    {
-        // Alpha is set externally by AI/behavior system
-        // Here we just ensure smooth transitions
+        // Neck raises and points forward when alerted
+        FVector ActorLoc = OwnerPawn->GetActorLocation();
+        NeckIKTarget = ActorLoc + OwnerPawn->GetActorForwardVector() * 300.0f + FVector(0.0f, 0.0f, 50.0f);
     }
 }
 
-void UDinosaurAnimInstance::UpdateFootIK(float DeltaSeconds)
+void UDinosaurAnimInstance::UpdateIK(float DeltaSeconds)
 {
     if (!bEnableFootIK || !OwnerPawn) return;
 
-    // Foot IK trace — cast rays downward from foot bone positions
-    // This adapts foot placement to uneven terrain
-    UWorld* World = GetWorld();
+    UWorld* World = OwnerPawn->GetWorld();
     if (!World) return;
 
-    FVector ActorLocation = OwnerPawn->GetActorLocation();
-    FVector ActorForward = OwnerPawn->GetActorForwardVector();
-    FVector ActorRight = OwnerPawn->GetActorRightVector();
+    // Foot IK: trace downward from each foot socket to find ground
+    FVector ActorLoc = OwnerPawn->GetActorLocation();
+    FCollisionQueryParams TraceParams;
+    TraceParams.AddIgnoredActor(OwnerPawn);
 
-    // Approximate foot positions based on species scale
-    float FootSpread = GetFootSpreadForSpecies();
-    float FootForwardOffset = GetFootForwardOffsetForSpecies();
+    // Left foot trace
+    FVector LeftFootStart = ActorLoc + FVector(-30.0f, 30.0f, 50.0f);
+    FVector LeftFootEnd = LeftFootStart + FVector(0.0f, 0.0f, -150.0f);
+    FHitResult LeftHit;
+    bool bLeftHit = World->LineTraceSingleByChannel(LeftHit, LeftFootStart, LeftFootEnd, ECC_WorldStatic, TraceParams);
 
-    FVector LeftFootWorld = ActorLocation + ActorRight * (-FootSpread) + ActorForward * FootForwardOffset;
-    FVector RightFootWorld = ActorLocation + ActorRight * FootSpread + ActorForward * FootForwardOffset;
-
-    // Trace downward
-    FHitResult LeftHit, RightHit;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerPawn);
-
-    float TraceDistance = 100.0f;
-    bool bLeftHit = World->LineTraceSingleByChannel(
-        LeftHit,
-        LeftFootWorld + FVector(0, 0, 50),
-        LeftFootWorld - FVector(0, 0, TraceDistance),
-        ECC_WorldStatic,
-        QueryParams
-    );
-
-    bool bRightHit = World->LineTraceSingleByChannel(
-        RightHit,
-        RightFootWorld + FVector(0, 0, 50),
-        RightFootWorld - FVector(0, 0, TraceDistance),
-        ECC_WorldStatic,
-        QueryParams
-    );
-
-    // Smooth IK offsets
-    FVector TargetLeftOffset = bLeftHit ? FVector(0, 0, LeftHit.ImpactPoint.Z - ActorLocation.Z) : FVector::ZeroVector;
-    FVector TargetRightOffset = bRightHit ? FVector(0, 0, RightHit.ImpactPoint.Z - ActorLocation.Z) : FVector::ZeroVector;
-
-    LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, TargetLeftOffset, DeltaSeconds, 10.0f);
-    RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, TargetRightOffset, DeltaSeconds, 10.0f);
-
-    // Alpha — reduce IK when in air
-    float TargetAlpha = bIsInAir ? 0.0f : 1.0f;
-    LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, TargetAlpha, DeltaSeconds, 5.0f);
-    RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, TargetAlpha, DeltaSeconds, 5.0f);
-}
-
-void UDinosaurAnimInstance::TriggerAttack(EAnim_DinosaurAttackType AttackType)
-{
-    if (bIsDead || bIsStunned) return;
-
-    bIsAttacking = true;
-    AttackBlendWeight = 1.0f;
-    TimeSinceLastAttack = 0.0f;
-    CurrentAttackType = AttackType;
-}
-
-void UDinosaurAnimInstance::TriggerRoar()
-{
-    if (bIsDead || bIsStunned) return;
-
-    bIsRoaring = true;
-    RoarBlendWeight = 1.0f;
-    TimeSinceLastRoar = 0.0f;
-}
-
-void UDinosaurAnimInstance::SetAlertState(bool bAlerted, FVector ThreatLocation)
-{
-    bIsAlerted = bAlerted;
-    if (bAlerted)
+    if (bLeftHit)
     {
-        HeadLookAtTarget = ThreatLocation;
-        HeadLookAtAlpha = 1.0f;
+        FVector TargetOffset = FVector(0.0f, 0.0f, LeftHit.ImpactPoint.Z - ActorLoc.Z + 90.0f);
+        LeftFootIKOffset = FMath::VInterpTo(LeftFootIKOffset, TargetOffset, DeltaSeconds, 12.0f);
+        LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, 1.0f, DeltaSeconds, 8.0f);
     }
     else
     {
-        HeadLookAtAlpha = FMath::FInterpTo(HeadLookAtAlpha, 0.0f, 0.016f, 2.0f);
+        LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, 0.0f, DeltaSeconds, 8.0f);
+    }
+
+    // Right foot trace
+    FVector RightFootStart = ActorLoc + FVector(-30.0f, -30.0f, 50.0f);
+    FVector RightFootEnd = RightFootStart + FVector(0.0f, 0.0f, -150.0f);
+    FHitResult RightHit;
+    bool bRightHit = World->LineTraceSingleByChannel(RightHit, RightFootStart, RightFootEnd, ECC_WorldStatic, TraceParams);
+
+    if (bRightHit)
+    {
+        FVector TargetOffset = FVector(0.0f, 0.0f, RightHit.ImpactPoint.Z - ActorLoc.Z + 90.0f);
+        RightFootIKOffset = FMath::VInterpTo(RightFootIKOffset, TargetOffset, DeltaSeconds, 12.0f);
+        RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, 1.0f, DeltaSeconds, 8.0f);
+    }
+    else
+    {
+        RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, 0.0f, DeltaSeconds, 8.0f);
     }
 }
 
-void UDinosaurAnimInstance::SetHealthPercent(float NewHealthPercent)
+void UDinosaurAnimInstance::SetLocomotionState(EAnim_DinosaurLocomotionState NewState)
 {
-    HealthPercent = FMath::Clamp(NewHealthPercent, 0.0f, 1.0f);
+    LocomotionState = NewState;
+}
+
+void UDinosaurAnimInstance::TriggerAttack(EAnim_DinosaurAttackType InAttackType)
+{
+    AttackType = InAttackType;
+    bIsAttacking = true;
+    bIsInCombat = true;
+}
+
+void UDinosaurAnimInstance::OnAttackEnd()
+{
+    bIsAttacking = false;
+    AttackType = EAnim_DinosaurAttackType::None;
+}
+
+void UDinosaurAnimInstance::SetHealthPercent(float NewHealth)
+{
+    HealthPercent = FMath::Clamp(NewHealth, 0.0f, 1.0f);
     if (HealthPercent <= 0.0f)
     {
         bIsDead = true;
         bIsAttacking = false;
-        bIsRoaring = false;
+        bIsInCombat = false;
     }
+    bIsWounded = HealthPercent < 0.35f;
 }
 
-void UDinosaurAnimInstance::SetStaminaPercent(float NewStaminaPercent)
+void UDinosaurAnimInstance::SetBehaviorState(bool bEating, bool bDrinking, bool bResting, bool bAlerted, bool bRoaring, bool bSniffing)
 {
-    StaminaPercent = FMath::Clamp(NewStaminaPercent, 0.0f, 1.0f);
-}
-
-float UDinosaurAnimInstance::GetRunThresholdForSpecies() const
-{
-    switch (DinosaurSpecies)
-    {
-        case EAnim_DinosaurSpecies::TRex:           return 300.0f;
-        case EAnim_DinosaurSpecies::Raptor:         return 200.0f;
-        case EAnim_DinosaurSpecies::Triceratops:    return 250.0f;
-        case EAnim_DinosaurSpecies::Brachiosaurus:  return 150.0f;
-        case EAnim_DinosaurSpecies::Pterodactyl:    return 400.0f;
-        case EAnim_DinosaurSpecies::Stegosaurus:    return 180.0f;
-        case EAnim_DinosaurSpecies::Ankylosaurus:   return 160.0f;
-        default:                                    return 200.0f;
-    }
-}
-
-float UDinosaurAnimInstance::GetFootSpreadForSpecies() const
-{
-    switch (DinosaurSpecies)
-    {
-        case EAnim_DinosaurSpecies::TRex:           return 60.0f;
-        case EAnim_DinosaurSpecies::Raptor:         return 25.0f;
-        case EAnim_DinosaurSpecies::Triceratops:    return 70.0f;
-        case EAnim_DinosaurSpecies::Brachiosaurus:  return 100.0f;
-        case EAnim_DinosaurSpecies::Stegosaurus:    return 65.0f;
-        case EAnim_DinosaurSpecies::Ankylosaurus:   return 75.0f;
-        default:                                    return 40.0f;
-    }
-}
-
-float UDinosaurAnimInstance::GetFootForwardOffsetForSpecies() const
-{
-    switch (DinosaurSpecies)
-    {
-        case EAnim_DinosaurSpecies::TRex:           return 80.0f;
-        case EAnim_DinosaurSpecies::Raptor:         return 30.0f;
-        case EAnim_DinosaurSpecies::Triceratops:    return 90.0f;
-        case EAnim_DinosaurSpecies::Brachiosaurus:  return 120.0f;
-        default:                                    return 50.0f;
-    }
-}
-
-float UDinosaurAnimInstance::GetIdleVariantDuration() const
-{
-    switch (DinosaurSpecies)
-    {
-        case EAnim_DinosaurSpecies::TRex:           return 8.0f;
-        case EAnim_DinosaurSpecies::Raptor:         return 4.0f;
-        case EAnim_DinosaurSpecies::Brachiosaurus:  return 12.0f;
-        default:                                    return 6.0f;
-    }
+    bIsEating = bEating;
+    bIsDrinking = bDrinking;
+    bIsResting = bResting;
+    bIsAlerted = bAlerted;
+    bIsRoaring = bRoaring;
+    bIsSniffing = bSniffing;
 }
