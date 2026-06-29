@@ -2,22 +2,24 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Quest/QuestTypes.h"
+#include "Quest/QuestSystemTypes.h"
 #include "QuestManagerComponent.generated.h"
 
 // ============================================================
-// Quest Manager Component
-// Attach to GameState or PlayerController to manage all quests
-// Agent #14 — Quest & Mission Designer
-// Cycle: PROD_CYCLE_AUTO_20260628_005
+// QuestManagerComponent — Agent #14 Quest & Mission Designer
+// Cycle: PROD_CYCLE_AUTO_20260629_011
+//
+// Attached to the PlayerController or GameMode.
+// Manages the full lifecycle of quests: available → active →
+// completed/failed. Tracks objectives, rewards, and state.
 // ============================================================
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestActivated, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestCompleted, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestFailed, const FString&, QuestID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveUpdated, const FString&, QuestID, const FString&, ObjectiveID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuest_OnQuestActivated, const FString&, QuestID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuest_OnObjectiveUpdated, const FString&, QuestID, const FString&, ObjectiveID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuest_OnQuestCompleted, const FString&, QuestID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuest_OnQuestFailed, const FString&, QuestID);
 
-UCLASS(ClassGroup = (Quest), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UQuestManagerComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -25,50 +27,38 @@ class TRANSPERSONALGAME_API UQuestManagerComponent : public UActorComponent
 public:
     UQuestManagerComponent();
 
-    // ---- Delegates ----
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestActivated OnQuestActivated;
+    // ── Lifecycle ──────────────────────────────────────────
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestCompleted OnQuestCompleted;
+    // ── Quest Registration ─────────────────────────────────
+    /** Register a quest definition into the available pool */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void RegisterQuest(const FQuest_Definition& QuestDef);
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnQuestFailed OnQuestFailed;
+    /** Load all built-in quests (called on BeginPlay) */
+    UFUNCTION(BlueprintCallable, Category = "Quest")
+    void LoadBuiltInQuests();
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
-    FOnObjectiveUpdated OnObjectiveUpdated;
-
-    // ---- Active Quest Registry ----
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
-    TArray<FQuest_Data> ActiveQuests;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
-    TArray<FQuest_Data> CompletedQuests;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest")
-    TArray<FQuest_Data> FailedQuests;
-
-    // ---- Quest Library (all available quests) ----
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Library")
-    TArray<FQuest_Data> QuestLibrary;
-
-    // ---- Core Functions ----
+    // ── Quest Activation ───────────────────────────────────
+    /** Attempt to activate a quest by ID. Returns true if successful. */
     UFUNCTION(BlueprintCallable, Category = "Quest")
     bool ActivateQuest(const FString& QuestID);
 
+    /** Abandon an active quest */
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool AbandonQuest(const FString& QuestID);
+    void AbandonQuest(const FString& QuestID);
 
+    // ── Objective Progress ─────────────────────────────────
+    /** Report progress on an objective (e.g., killed a raptor, gathered stone) */
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 ProgressDelta);
+    void ReportObjectiveProgress(const FString& TargetTag, int32 Count = 1);
 
+    /** Directly complete an objective by ID */
     UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
+    void CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void FailQuest(const FString& QuestID);
-
-    // ---- Query Functions ----
+    // ── Query ──────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
     bool IsQuestActive(const FString& QuestID) const;
 
@@ -76,47 +66,47 @@ public:
     bool IsQuestCompleted(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    bool GetQuestData(const FString& QuestID, FQuest_Data& OutQuestData) const;
+    EQuest_Status GetQuestStatus(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    TArray<FQuest_Data> GetActiveQuestsByCategory(EQuest_Category Category) const;
+    TArray<FQuest_RuntimeState> GetActiveQuests() const;
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest")
-    int32 GetActiveQuestCount() const;
+    int32 GetObjectiveProgress(const FString& QuestID, const FString& ObjectiveID) const;
 
-    // ---- Predefined Quest Builders ----
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    void RegisterDefaultQuests();
+    // ── Delegates ─────────────────────────────────────────
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
+    FQuest_OnQuestActivated OnQuestActivated;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    FQuest_Data BuildQuest_HunterRescue();
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
+    FQuest_OnObjectiveUpdated OnObjectiveUpdated;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    FQuest_Data BuildQuest_RiverCrossing();
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
+    FQuest_OnQuestCompleted OnQuestCompleted;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    FQuest_Data BuildQuest_StampedeWarning();
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Events")
+    FQuest_OnQuestFailed OnQuestFailed;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    FQuest_Data BuildQuest_FirstHunt();
+    // ── Data ───────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest", meta = (AllowPrivateAccess = "true"))
+    TArray<FQuest_Definition> QuestLibrary;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Builder")
-    FQuest_Data BuildQuest_CampDefense();
+    UPROPERTY(BlueprintReadOnly, Category = "Quest", meta = (AllowPrivateAccess = "true"))
+    TArray<FQuest_RuntimeState> ActiveQuestStates;
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> CompletedQuestIDs;
 
 private:
-    // Check if all mandatory objectives are met and auto-complete quest
+    /** Check if all objectives in a quest are done and trigger completion */
     void CheckQuestCompletion(const FString& QuestID);
 
-    // Apply rewards when quest completes
-    void ApplyQuestReward(const FQuest_Data& Quest);
+    /** Grant rewards for a completed quest */
+    void GrantRewards(const FQuest_Definition& QuestDef);
 
-    // Time tracking for timed quests
-    TMap<FString, float> QuestTimers;
+    /** Find quest definition by ID */
+    const FQuest_Definition* FindQuestDefinition(const FString& QuestID) const;
 
-    // Find quest index in ActiveQuests array
-    int32 FindActiveQuestIndex(const FString& QuestID) const;
+    /** Find runtime state by ID */
+    FQuest_RuntimeState* FindRuntimeState(const FString& QuestID);
 };
