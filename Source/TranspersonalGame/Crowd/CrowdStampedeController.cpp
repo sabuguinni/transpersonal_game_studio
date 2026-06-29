@@ -1,218 +1,44 @@
-// CrowdStampedeController.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Stampede trigger, panic propagation, and escape logic
-
 #include "CrowdStampedeController.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
-UCrowdStampedeController::UCrowdStampedeController()
+ACrowd_StampedeController::ACrowd_StampedeController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = true;
 
-    PanicPropagationSpeed   = 800.f;
-    PanicDecayRate          = 0.15f;
-    StampedeSpeedMultiplier = 2.8f;
-    MinPanicThreshold       = 0.6f;
-    PlayerDangerRadius      = 250.f;
-
-    CurrentPhase        = ECrowd_StampedePhase::Idle;
-    PanickingAgentCount = 0;
+    CurrentState = ECrowd_StampedeState::Idle;
+    MaxStampedeSpeed = 1200.0f;
+    FearDecayRate = 0.05f;
+    DangerZoneRadius = 600.0f;
+    SeparationForce = 1.5f;
+    CohesionForce = 0.8f;
+    AlignmentForce = 1.0f;
 }
 
-void UCrowdStampedeController::BeginPlay()
+void ACrowd_StampedeController::BeginPlay()
 {
     Super::BeginPlay();
 }
 
-void UCrowdStampedeController::TickComponent(float DeltaTime, ELevelTick TickType,
-                                              FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_StampedeController::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    if (CurrentPhase == ECrowd_StampedePhase::Idle || Agents.Num() == 0)
+    switch (CurrentState)
     {
-        return;
-    }
-
-    ActiveEvent.TimeElapsed += DeltaTime;
-
-    TickPanicPropagation(DeltaTime);
-    TickPhaseTransitions();
-    TickAgentMovement(DeltaTime);
-}
-
-// ─── Public API ──────────────────────────────────────────────────────────────
-
-void UCrowdStampedeController::TriggerStampede(ECrowd_StampedeTrigger Trigger,
-                                                FVector Epicentre, float Intensity)
-{
-    ActiveEvent.Trigger           = Trigger;
-    ActiveEvent.EpicentreLocation = Epicentre;
-    ActiveEvent.Intensity         = FMath::Clamp(Intensity, 0.f, 1.f);
-    ActiveEvent.PropagationRadius = 2000.f * Intensity;
-    ActiveEvent.TimeElapsed       = 0.f;
-
-    CurrentPhase = ECrowd_StampedePhase::Panic;
-
-    // Immediately panic agents near epicentre
-    for (FCrowd_StampedeAgent& Agent : Agents)
-    {
-        float Dist = FVector::Dist(Agent.Location, Epicentre);
-        if (Dist < 600.f)
-        {
-            Agent.PanicLevel   = Intensity;
-            Agent.bIsPanicking = true;
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[CrowdStampede] Triggered: %d agents, Intensity=%.2f, Epicentre=%s"),
-           Agents.Num(), Intensity, *Epicentre.ToString());
-}
-
-void UCrowdStampedeController::RegisterAgent(FVector Location, int32 Index)
-{
-    FCrowd_StampedeAgent NewAgent;
-    NewAgent.Location   = Location;
-    NewAgent.AgentIndex = Index;
-    NewAgent.PanicLevel = 0.f;
-    NewAgent.bIsPanicking = false;
-    Agents.Add(NewAgent);
-}
-
-void UCrowdStampedeController::ClearAllAgents()
-{
-    Agents.Empty();
-    PanickingAgentCount = 0;
-    CurrentPhase        = ECrowd_StampedePhase::Idle;
-}
-
-bool UCrowdStampedeController::IsPlayerInDanger(FVector PlayerLocation) const
-{
-    if (CurrentPhase != ECrowd_StampedePhase::Running)
-    {
-        return false;
-    }
-
-    for (const FCrowd_StampedeAgent& Agent : Agents)
-    {
-        if (Agent.bIsPanicking)
-        {
-            float Dist = FVector::Dist(Agent.Location, PlayerLocation);
-            if (Dist < PlayerDangerRadius)
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-float UCrowdStampedeController::GetHerdPanicLevel() const
-{
-    if (Agents.Num() == 0) return 0.f;
-
-    float Total = 0.f;
-    for (const FCrowd_StampedeAgent& Agent : Agents)
-    {
-        Total += Agent.PanicLevel;
-    }
-    return Total / static_cast<float>(Agents.Num());
-}
-
-void UCrowdStampedeController::ForceSettle()
-{
-    for (FCrowd_StampedeAgent& Agent : Agents)
-    {
-        Agent.PanicLevel   = 0.f;
-        Agent.bIsPanicking = false;
-        Agent.Velocity     = FVector::ZeroVector;
-    }
-    CurrentPhase        = ECrowd_StampedePhase::Settled;
-    PanickingAgentCount = 0;
-}
-
-// ─── Private Tick Helpers ────────────────────────────────────────────────────
-
-void UCrowdStampedeController::TickPanicPropagation(float DeltaTime)
-{
-    int32 NewPanicking = 0;
-
-    for (int32 i = 0; i < Agents.Num(); ++i)
-    {
-        FCrowd_StampedeAgent& AgentA = Agents[i];
-
-        if (!AgentA.bIsPanicking)
-        {
-            // Check if a nearby panicking agent infects this one
-            for (int32 j = 0; j < Agents.Num(); ++j)
-            {
-                if (i == j) continue;
-                const FCrowd_StampedeAgent& AgentB = Agents[j];
-                if (!AgentB.bIsPanicking) continue;
-
-                float Dist = FVector::Dist(AgentA.Location, AgentB.Location);
-                float InfectionRange = PanicPropagationSpeed * DeltaTime * 0.5f + 300.f;
-
-                if (Dist < InfectionRange)
-                {
-                    float InfectionStrength = FMath::Clamp(1.f - (Dist / InfectionRange), 0.f, 1.f);
-                    AgentA.PanicLevel += InfectionStrength * AgentB.PanicLevel * DeltaTime * 2.f;
-                    AgentA.PanicLevel  = FMath::Clamp(AgentA.PanicLevel, 0.f, 1.f);
-
-                    if (AgentA.PanicLevel >= MinPanicThreshold)
-                    {
-                        AgentA.bIsPanicking = true;
-                    }
-                }
-            }
-        }
-        else
-        {
-            // Decay panic if trigger is old
-            if (ActiveEvent.TimeElapsed > 5.f)
-            {
-                AgentA.PanicLevel -= PanicDecayRate * DeltaTime;
-                AgentA.PanicLevel  = FMath::Max(AgentA.PanicLevel, 0.f);
-                if (AgentA.PanicLevel < 0.1f)
-                {
-                    AgentA.bIsPanicking = false;
-                }
-            }
-            ++NewPanicking;
-        }
-    }
-
-    PanickingAgentCount = NewPanicking;
-}
-
-void UCrowdStampedeController::TickPhaseTransitions()
-{
-    float HerdPanic = GetHerdPanicLevel();
-
-    switch (CurrentPhase)
-    {
-    case ECrowd_StampedePhase::Panic:
-        if (HerdPanic > 0.75f)
-        {
-            CurrentPhase = ECrowd_StampedePhase::Running;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdStampede] Phase -> Running (panic=%.2f)"), HerdPanic);
-        }
+    case ECrowd_StampedeState::Alarmed:
+    case ECrowd_StampedeState::Fleeing:
+    case ECrowd_StampedeState::Stampeding:
+        UpdateStampedeMovement(DeltaTime);
+        UpdateFlockingBehavior(DeltaTime);
         break;
 
-    case ECrowd_StampedePhase::Running:
-        if (HerdPanic < 0.3f)
+    case ECrowd_StampedeState::Dispersed:
+        CalmHerd(FearDecayRate * DeltaTime);
+        if (AverageFearLevel() < 0.05f)
         {
-            CurrentPhase = ECrowd_StampedePhase::Dispersing;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdStampede] Phase -> Dispersing"));
-        }
-        break;
-
-    case ECrowd_StampedePhase::Dispersing:
-        if (HerdPanic < 0.05f)
-        {
-            CurrentPhase = ECrowd_StampedePhase::Settled;
-            UE_LOG(LogTemp, Log, TEXT("[CrowdStampede] Phase -> Settled"));
+            CurrentState = ECrowd_StampedeState::Idle;
         }
         break;
 
@@ -221,33 +47,189 @@ void UCrowdStampedeController::TickPhaseTransitions()
     }
 }
 
-void UCrowdStampedeController::TickAgentMovement(float DeltaTime)
+void ACrowd_StampedeController::TriggerStampede(FVector TriggerLocation, FVector FleeDirection, float PanicRadius)
 {
-    if (CurrentPhase != ECrowd_StampedePhase::Running &&
-        CurrentPhase != ECrowd_StampedePhase::Dispersing)
+    StampedeData.TriggerLocation = TriggerLocation;
+    StampedeData.FleeDirection = FleeDirection.GetSafeNormal();
+    StampedeData.PanicRadius = PanicRadius;
+
+    // Set fear on all members within panic radius
+    for (FCrowd_HerdMember& Member : HerdMembers)
     {
-        return;
+        float Dist = FVector::Dist(Member.Location, TriggerLocation);
+        if (Dist <= PanicRadius)
+        {
+            float FearIntensity = 1.0f - (Dist / PanicRadius);
+            Member.FearLevel = FMath::Max(Member.FearLevel, FearIntensity);
+        }
     }
 
-    for (FCrowd_StampedeAgent& Agent : Agents)
+    float AvgFear = AverageFearLevel();
+    if (AvgFear > 0.7f)
     {
-        if (!Agent.bIsPanicking) continue;
-
-        FVector FleeDir = ComputeFleeDirection(Agent);
-        float   Speed   = 600.f * StampedeSpeedMultiplier * Agent.PanicLevel;
-
-        Agent.Velocity  = FMath::VInterpTo(Agent.Velocity, FleeDir * Speed, DeltaTime, 3.f);
-        Agent.Location += Agent.Velocity * DeltaTime;
+        CurrentState = ECrowd_StampedeState::Stampeding;
+    }
+    else if (AvgFear > 0.3f)
+    {
+        CurrentState = ECrowd_StampedeState::Fleeing;
+    }
+    else if (AvgFear > 0.1f)
+    {
+        CurrentState = ECrowd_StampedeState::Alarmed;
     }
 }
 
-FVector UCrowdStampedeController::ComputeFleeDirection(const FCrowd_StampedeAgent& Agent) const
+void ACrowd_StampedeController::AddHerdMember(FVector Location, bool bIsLeader)
 {
-    FVector AwayFromEpicentre = (Agent.Location - ActiveEvent.EpicentreLocation).GetSafeNormal();
+    FCrowd_HerdMember NewMember;
+    NewMember.Location = Location;
+    NewMember.Velocity = FVector::ZeroVector;
+    NewMember.FearLevel = 0.0f;
+    NewMember.bIsLeader = bIsLeader;
+    HerdMembers.Add(NewMember);
+}
 
-    // Add slight lateral spread so herd fans out rather than piling up
-    FVector Lateral = FVector::CrossProduct(AwayFromEpicentre, FVector::UpVector);
-    float   Spread  = FMath::Sin(static_cast<float>(Agent.AgentIndex) * 0.7f) * 0.4f;
+void ACrowd_StampedeController::CalmHerd(float CalmRate)
+{
+    for (FCrowd_HerdMember& Member : HerdMembers)
+    {
+        Member.FearLevel = FMath::Max(0.0f, Member.FearLevel - CalmRate);
+    }
+}
 
-    return (AwayFromEpicentre + Lateral * Spread).GetSafeNormal();
+bool ACrowd_StampedeController::IsPlayerInDangerZone(FVector PlayerLocation) const
+{
+    if (CurrentState != ECrowd_StampedeState::Stampeding)
+    {
+        return false;
+    }
+
+    for (const FCrowd_HerdMember& Member : HerdMembers)
+    {
+        float Dist = FVector::Dist(Member.Location, PlayerLocation);
+        if (Dist <= DangerZoneRadius)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ACrowd_StampedeController::UpdateFlockingBehavior(float DeltaTime)
+{
+    for (int32 i = 0; i < HerdMembers.Num(); ++i)
+    {
+        FCrowd_HerdMember& Member = HerdMembers[i];
+
+        FVector Separation = CalculateSeparation(i) * SeparationForce;
+        FVector Cohesion = CalculateCohesion(i) * CohesionForce;
+        FVector Alignment = CalculateAlignment(i) * AlignmentForce;
+
+        // Fear-weighted flee direction
+        FVector FleeForce = StampedeData.FleeDirection * (Member.FearLevel * MaxStampedeSpeed);
+
+        FVector TotalForce = Separation + Cohesion + Alignment + FleeForce;
+        Member.Velocity = FMath::VInterpTo(Member.Velocity, TotalForce, DeltaTime, 3.0f);
+
+        float Speed = FMath::Lerp(200.0f, MaxStampedeSpeed, Member.FearLevel);
+        Member.Velocity = Member.Velocity.GetClampedToMaxSize(Speed);
+    }
+}
+
+void ACrowd_StampedeController::UpdateStampedeMovement(float DeltaTime)
+{
+    for (FCrowd_HerdMember& Member : HerdMembers)
+    {
+        Member.Location += Member.Velocity * DeltaTime;
+        // Decay fear gradually during movement
+        Member.FearLevel = FMath::Max(0.0f, Member.FearLevel - (FearDecayRate * DeltaTime * 0.1f));
+    }
+
+    // Check if herd has dispersed
+    if (AverageFearLevel() < 0.2f && CurrentState == ECrowd_StampedeState::Stampeding)
+    {
+        CurrentState = ECrowd_StampedeState::Dispersed;
+    }
+}
+
+FVector ACrowd_StampedeController::CalculateSeparation(int32 MemberIndex) const
+{
+    const FCrowd_HerdMember& Self = HerdMembers[MemberIndex];
+    FVector SeparationVec = FVector::ZeroVector;
+    const float MinDist = 200.0f;
+
+    for (int32 i = 0; i < HerdMembers.Num(); ++i)
+    {
+        if (i == MemberIndex) continue;
+        FVector Diff = Self.Location - HerdMembers[i].Location;
+        float Dist = Diff.Size();
+        if (Dist < MinDist && Dist > 0.0f)
+        {
+            SeparationVec += Diff.GetSafeNormal() * (MinDist - Dist);
+        }
+    }
+    return SeparationVec;
+}
+
+FVector ACrowd_StampedeController::CalculateCohesion(int32 MemberIndex) const
+{
+    const FCrowd_HerdMember& Self = HerdMembers[MemberIndex];
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 Count = 0;
+    const float NeighborRadius = 800.0f;
+
+    for (int32 i = 0; i < HerdMembers.Num(); ++i)
+    {
+        if (i == MemberIndex) continue;
+        float Dist = FVector::Dist(Self.Location, HerdMembers[i].Location);
+        if (Dist < NeighborRadius)
+        {
+            CenterOfMass += HerdMembers[i].Location;
+            ++Count;
+        }
+    }
+
+    if (Count > 0)
+    {
+        CenterOfMass /= static_cast<float>(Count);
+        return (CenterOfMass - Self.Location).GetSafeNormal();
+    }
+    return FVector::ZeroVector;
+}
+
+FVector ACrowd_StampedeController::CalculateAlignment(int32 MemberIndex) const
+{
+    const FCrowd_HerdMember& Self = HerdMembers[MemberIndex];
+    FVector AvgVelocity = FVector::ZeroVector;
+    int32 Count = 0;
+    const float NeighborRadius = 600.0f;
+
+    for (int32 i = 0; i < HerdMembers.Num(); ++i)
+    {
+        if (i == MemberIndex) continue;
+        float Dist = FVector::Dist(Self.Location, HerdMembers[i].Location);
+        if (Dist < NeighborRadius)
+        {
+            AvgVelocity += HerdMembers[i].Velocity;
+            ++Count;
+        }
+    }
+
+    if (Count > 0)
+    {
+        AvgVelocity /= static_cast<float>(Count);
+        return AvgVelocity.GetSafeNormal();
+    }
+    return FVector::ZeroVector;
+}
+
+float ACrowd_StampedeController::AverageFearLevel() const
+{
+    if (HerdMembers.Num() == 0) return 0.0f;
+    float Total = 0.0f;
+    for (const FCrowd_HerdMember& Member : HerdMembers)
+    {
+        Total += Member.FearLevel;
+    }
+    return Total / static_cast<float>(HerdMembers.Num());
 }
