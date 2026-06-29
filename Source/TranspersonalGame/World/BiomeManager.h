@@ -2,78 +2,63 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/DataTable.h"
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-/**
- * EEng_BiomeType — Prehistoric biome classifications
- * Prefixed with Eng_ to avoid collision with other agents' types.
- */
+// ============================================================
+// Biome type enum — P1 World Generation
+// ============================================================
 UENUM(BlueprintType)
 enum class EEng_BiomeType : uint8
 {
-    Jungle         UMETA(DisplayName = "Jungle"),
-    Savanna        UMETA(DisplayName = "Savanna"),
-    Swamp          UMETA(DisplayName = "Swamp"),
-    Volcanic       UMETA(DisplayName = "Volcanic"),
-    Coastal        UMETA(DisplayName = "Coastal"),
-    Forest         UMETA(DisplayName = "Forest"),
-    Plains         UMETA(DisplayName = "Plains"),
-    Desert         UMETA(DisplayName = "Desert"),
-    Unknown        UMETA(DisplayName = "Unknown")
+    Jungle        UMETA(DisplayName = "Jungle"),
+    Savanna       UMETA(DisplayName = "Savanna"),
+    Swamp         UMETA(DisplayName = "Swamp"),
+    Volcanic      UMETA(DisplayName = "Volcanic"),
+    Coastal       UMETA(DisplayName = "Coastal"),
+    Forest        UMETA(DisplayName = "Forest"),
+    Plains        UMETA(DisplayName = "Plains"),
+    Unknown       UMETA(DisplayName = "Unknown")
 };
 
-/**
- * FEng_BiomeData — Runtime data for a single biome region.
- * Stored per-cell in the biome grid.
- */
+// ============================================================
+// Per-biome data row for DataTable
+// ============================================================
 USTRUCT(BlueprintType)
-struct FEng_BiomeData
+struct TRANSPERSONALGAME_API FEng_BiomeData : public FTableRowBase
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     EEng_BiomeType BiomeType = EEng_BiomeType::Unknown;
 
-    /** Average temperature in Celsius */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
+    FLinearColor FogColor = FLinearColor(0.6f, 0.8f, 1.0f, 1.0f);
 
-    /** Rainfall in mm/year (affects vegetation density) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Rainfall = 1200.0f;
+    float FogDensity = 0.02f;
 
-    /** Elevation in metres above sea level */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 0.0f;
+    float AmbientTemperature = 28.0f;
 
-    /** Danger level 0-1 (affects dinosaur spawn density) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DangerLevel = 0.5f;
-
-    /** World-space origin of this biome cell */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector WorldOrigin = FVector::ZeroVector;
+    float Humidity = 0.7f;
 
-    /** Radius of this biome cell in cm */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 50000.0f;
+    float VegetationDensity = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float DinosaurSpawnWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName = TEXT("Unknown");
 };
 
-/**
- * ABiomeManager — World actor that owns and queries the biome grid.
- *
- * Responsibilities:
- *   - Maintains a flat array of FEng_BiomeData cells covering the playable world
- *   - Provides GetBiomeAtLocation() for any world-space query
- *   - Exposes biome data to Blueprint for environment/AI systems
- *   - Integrates with PCGWorldGenerator (forward-declared; no hard dependency)
- *
- * Architecture rules:
- *   - Single instance per world (enforced via BeginPlay check)
- *   - All cross-system queries go through this actor, never direct array access
- *   - DinosaurBase, FoliageManager, and WeatherSystem query this actor for biome context
- */
+// ============================================================
+// BiomeManager — world actor that classifies terrain into biomes
+// and drives environment parameters (fog, temperature, vegetation)
+// ============================================================
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|World")
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
@@ -82,79 +67,67 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
+    // ---- Blueprint-callable API ----
+
+    /** Returns the biome type at a given world location using height + noise sampling */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    /** Returns full biome data struct for the given biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeData GetBiomeData(EEng_BiomeType BiomeType) const;
+
+    /** Forces a biome refresh across the entire world (call after terrain changes) */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
+    void RefreshBiomeMap();
+
+    /** Returns the dominant biome within a radius around a point */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetDominantBiomeInRadius(const FVector& Center, float Radius) const;
+
+    // ---- Properties ----
+
+    /** World size in cm — used for biome sampling grid */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float WorldSizeCm = 400000.0f;
+
+    /** Grid resolution for biome sampling (cells per axis) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    int32 BiomeGridResolution = 64;
+
+    /** Noise scale for biome boundary variation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float BiomeNoiseScale = 0.0001f;
+
+    /** Optional DataTable override for biome parameters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    UDataTable* BiomeDataTable = nullptr;
+
+    /** Height threshold below which terrain is classified as Coastal/Swamp */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Thresholds")
+    float CoastalHeightThreshold = 500.0f;
+
+    /** Height threshold above which terrain is classified as Volcanic */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Thresholds")
+    float VolcanicHeightThreshold = 8000.0f;
+
 protected:
     virtual void BeginPlay() override;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // ─── Biome Query API ─────────────────────────────────────────────────────
-
-    /**
-     * Returns the biome data for the cell closest to WorldLocation.
-     * Returns a default Unknown biome if no cells are registered.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    FEng_BiomeData GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    /**
-     * Returns the biome type enum for a world location (convenience wrapper).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    EEng_BiomeType GetBiomeTypeAtLocation(const FVector& WorldLocation) const;
-
-    /**
-     * Returns the danger level (0-1) at a world location.
-     * Used by DinosaurBase to scale spawn frequency.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
-
-    // ─── Biome Registration ───────────────────────────────────────────────────
-
-    /**
-     * Registers a biome cell. Called by PCGWorldGenerator during world init.
-     * Safe to call at runtime — adds to the BiomeCells array.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Setup")
-    void RegisterBiomeCell(const FEng_BiomeData& BiomeData);
-
-    /**
-     * Clears all registered biome cells. Use when regenerating the world.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Setup")
-    void ClearAllBiomeCells();
-
-    /**
-     * Returns the total number of registered biome cells.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
-    int32 GetBiomeCellCount() const;
-
-    // ─── Default Biome Setup (Editor / Prototype) ─────────────────────────────
-
-    /**
-     * Populates a default set of biome cells for the MinPlayableMap.
-     * Called in BeginPlay if BiomeCells is empty (prototype fallback).
-     */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Setup")
-    void InitialiseDefaultBiomes();
-
-    // ─── Properties ──────────────────────────────────────────────────────────
-
-    /** All registered biome cells. Populated by PCGWorldGenerator or InitialiseDefaultBiomes. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|Data")
-    TArray<FEng_BiomeData> BiomeCells;
-
-    /** World extents in cm used for biome grid queries (default: 200km × 200km). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float WorldExtentCm = 200000.0f;
-
-    /** If true, draws debug spheres for each biome cell origin in-editor. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
-    bool bDrawDebugBiomes = false;
+    virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-    /** Finds the index of the nearest biome cell to WorldLocation. Returns -1 if empty. */
-    int32 FindNearestBiomeCellIndex(const FVector& WorldLocation) const;
+    /** Internal biome grid — flattened 2D array of biome types */
+    TArray<EEng_BiomeType> BiomeGrid;
+
+    /** Populate default biome data for all biome types */
+    void InitDefaultBiomeData();
+
+    /** Sample biome at normalised UV coordinates [0,1] */
+    EEng_BiomeType SampleBiomeAtUV(float U, float V) const;
+
+    /** Simple deterministic noise for biome boundary variation */
+    float SimpleNoise(float X, float Y) const;
+
+    /** Default biome data map (used when no DataTable is set) */
+    TMap<EEng_BiomeType, FEng_BiomeData> DefaultBiomeData;
 };
