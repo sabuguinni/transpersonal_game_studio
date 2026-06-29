@@ -1,214 +1,146 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Components/ActorComponent.h"
 #include "NarrativeDialogueSystem.generated.h"
 
-// Narr_ prefix for all types per UE5 compilation rules
-
+// ============================================================
+// ENarr_SpeakerRole — Who is speaking
+// ============================================================
 UENUM(BlueprintType)
-enum class ENarr_DialogueTone : uint8
+enum class ENarr_SpeakerRole : uint8
 {
-    Urgent      UMETA(DisplayName = "Urgent"),
-    Cautious    UMETA(DisplayName = "Cautious"),
-    Informative UMETA(DisplayName = "Informative"),
-    Commanding  UMETA(DisplayName = "Commanding"),
-    Fearful     UMETA(DisplayName = "Fearful")
+    None        UMETA(DisplayName = "None"),
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Survivor    UMETA(DisplayName = "Survivor"),
+    TribalLeader UMETA(DisplayName = "Tribal Leader"),
+    Narrator    UMETA(DisplayName = "Narrator")
 };
 
+// ============================================================
+// ENarr_DialogueCondition — When does this line trigger?
+// ============================================================
 UENUM(BlueprintType)
-enum class ENarr_QuestStage : uint8
+enum class ENarr_DialogueCondition : uint8
 {
-    NotStarted  UMETA(DisplayName = "Not Started"),
-    Active      UMETA(DisplayName = "Active"),
-    Completed   UMETA(DisplayName = "Completed"),
-    Failed      UMETA(DisplayName = "Failed")
+    Always          UMETA(DisplayName = "Always"),
+    OnFirstVisit    UMETA(DisplayName = "On First Visit"),
+    OnDangerNear    UMETA(DisplayName = "On Danger Nearby"),
+    OnLowHealth     UMETA(DisplayName = "On Low Health"),
+    OnQuestActive   UMETA(DisplayName = "On Quest Active"),
+    OnNightfall     UMETA(DisplayName = "On Nightfall"),
+    OnRainStart     UMETA(DisplayName = "On Rain Start"),
+    OnDinoSpotted   UMETA(DisplayName = "On Dinosaur Spotted")
 };
 
+// ============================================================
+// FNarr_DialogueLine — A single spoken line
+// ============================================================
 USTRUCT(BlueprintType)
-struct FNarr_DialogueLine : public FTableRowBase
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SpeakerID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
     FText LineText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTone Tone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_SpeakerRole Speaker = ENarr_SpeakerRole::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_DialogueCondition Condition = ENarr_DialogueCondition::Always;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString AudioAssetPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    USoundBase* VoiceAudio = nullptr;
 
-    FNarr_DialogueLine()
-        : SpeakerID(TEXT("Unknown"))
-        , Tone(ENarr_DialogueTone::Informative)
-        , DisplayDuration(4.0f)
-        , AudioAssetPath(TEXT(""))
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    float DisplayDuration = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    bool bPlayOnce = true;
+
+    UPROPERTY(Transient)
+    bool bHasPlayed = false;
 };
 
+// ============================================================
+// FNarr_DialogueSequence — An ordered set of lines
+// ============================================================
 USTRUCT(BlueprintType)
-struct FNarr_QuestData : public FTableRowBase
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Sequence")
+    FName SequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FText QuestTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Sequence")
+    TArray<FNarr_DialogueLine> Lines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FText QuestDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Sequence")
+    bool bLoopSequence = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    ENarr_QuestStage Stage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FString> ObjectiveIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString RewardDescription;
-
-    FNarr_QuestData()
-        : QuestID(TEXT(""))
-        , Stage(ENarr_QuestStage::NotStarted)
-        , RewardDescription(TEXT(""))
-    {}
+    UPROPERTY(Transient)
+    int32 CurrentLineIndex = 0;
 };
 
-USTRUCT(BlueprintType)
-struct FNarr_NPCProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString NPCID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FText NPCName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FString Role; // Hunter, Elder, Scout, Crafter
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    TArray<FString> DialogueLineIDs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    float TrustLevel; // 0.0 - 1.0
-
-    FNarr_NPCProfile()
-        : NPCID(TEXT(""))
-        , Role(TEXT("Hunter"))
-        , TrustLevel(0.5f)
-    {}
-};
-
-UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarrativeDialogueSystem : public UActorComponent
+// ============================================================
+// UNarr_DialogueComponent — Attaches to any NPC/trigger actor
+// ============================================================
+UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent), DisplayName = "Narr Dialogue Component")
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarrativeDialogueSystem();
+    UNarr_DialogueComponent();
 
-    // Active dialogue lines loaded for current scene
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueLine> ActiveDialogueLines;
+    // All dialogue sequences available on this actor
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    // NPC profiles registered in this scene
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|NPCs")
-    TArray<FNarr_NPCProfile> RegisteredNPCs;
+    // Radius within which the player triggers dialogue
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float ProximityRadius = 400.0f;
 
-    // Current active quest
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative|Quest")
-    FNarr_QuestData ActiveQuest;
+    // Currently active sequence ID
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    FName ActiveSequenceID;
 
-    // All quests in the game
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Quest")
-    TArray<FNarr_QuestData> AllQuests;
+    // Play a specific sequence by ID
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlaySequence(FName SequenceID);
 
-    // Current dialogue line index
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative|Dialogue")
-    int32 CurrentLineIndex;
+    // Advance to next line in active sequence
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceLine();
 
-    // Is dialogue currently playing
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative|Dialogue")
-    bool bDialogueActive;
+    // Stop current sequence
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void StopSequence();
 
-    // Start a dialogue sequence by NPC ID
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void StartDialogue(const FString& NPCID);
-
-    // Advance to next dialogue line
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void AdvanceDialogue();
-
-    // End current dialogue
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void EndDialogue();
-
-    // Get current dialogue line text
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative|Dialogue")
+    // Get current line text for HUD display
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
     FText GetCurrentLineText() const;
 
-    // Get current speaker name
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative|Dialogue")
-    FString GetCurrentSpeaker() const;
+    // Check if a sequence has been completed
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative")
+    bool IsSequenceComplete(FName SequenceID) const;
 
-    // Start a quest by ID
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Quest")
-    bool StartQuest(const FString& QuestID);
-
-    // Complete a quest objective
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Quest")
-    void CompleteObjective(const FString& ObjectiveID);
-
-    // Mark active quest as complete
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Quest")
-    void CompleteActiveQuest();
-
-    // Fail the active quest
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Quest")
-    void FailActiveQuest();
-
-    // Register an NPC profile
-    UFUNCTION(BlueprintCallable, Category = "Narrative|NPCs")
-    void RegisterNPC(const FNarr_NPCProfile& NPCProfile);
-
-    // Get NPC trust level
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Narrative|NPCs")
-    float GetNPCTrust(const FString& NPCID) const;
-
-    // Increase NPC trust (player helped them)
-    UFUNCTION(BlueprintCallable, Category = "Narrative|NPCs")
-    void IncreaseTrust(const FString& NPCID, float Amount);
-
-    // Load default prehistoric survival quests
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative|Setup")
-    void LoadDefaultQuests();
-
-    // Load default NPC profiles
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative|Setup")
-    void LoadDefaultNPCs();
+    // Trigger dialogue based on game condition
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerByCondition(ENarr_DialogueCondition Condition);
 
 protected:
     virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Internal: find NPC by ID
-    FNarr_NPCProfile* FindNPC(const FString& NPCID);
+    // Timer for auto-advancing lines
+    float LineTimer = 0.0f;
+    bool bSequencePlaying = false;
 
-    // Internal: find quest by ID
-    FNarr_QuestData* FindQuest(const FString& QuestID);
-
-    // Completed objective IDs for active quest
-    TArray<FString> CompletedObjectives;
+    FNarr_DialogueSequence* FindSequence(FName SequenceID);
 };
