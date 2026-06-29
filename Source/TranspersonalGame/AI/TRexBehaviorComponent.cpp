@@ -1,334 +1,312 @@
-// TRexBehaviorComponent.cpp
-// Agent #11 — NPC Behavior Agent | PROD_CYCLE_AUTO_20260629_007
-// T-Rex patrol, chase, and attack behavior implementation
-
 #include "TRexBehaviorComponent.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
+// ── Constructor ──────────────────────────────────────────────────────────────
 UNPC_TRexBehaviorComponent::UNPC_TRexBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-
-    // Default behavioral parameters
-    PatrolRadius = 5000.0f;
-    ChaseDetectionRange = 3000.0f;
-    AttackRange = 300.0f;
-    PatrolSpeed = 300.0f;
-    ChaseSpeed = 700.0f;
-    AttackCooldown = 2.5f;
-    RoarRadius = 4000.0f;
-
-    CurrentState = ENPC_TRexState::Idle;
-    bCanAttack = true;
-    PatrolOrigin = FVector::ZeroVector;
-    CurrentPatrolTarget = FVector::ZeroVector;
-    TargetPawn = nullptr;
+    PrimaryComponentTick.TickInterval = 0.05f; // 20 Hz — sufficient for AI
 }
 
+// ── BeginPlay ────────────────────────────────────────────────────────────────
 void UNPC_TRexBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Record patrol origin at spawn location
     if (AActor* Owner = GetOwner())
     {
-        PatrolOrigin = Owner->GetActorLocation();
-        CurrentPatrolTarget = PatrolOrigin;
+        HomeLocation = Owner->GetActorLocation();
     }
 
-    // Start idle → patrol transition after short delay
-    GetWorld()->GetTimerManager().SetTimer(
-        PatrolTimerHandle,
-        this,
-        &UNPC_TRexBehaviorComponent::PickNewPatrolTarget,
-        3.0f,
-        false
-    );
+    // Start in patrol state
+    SetState(ENPC_TRexState::Patrol);
+    PickNewPatrolTarget();
 }
 
-void UNPC_TRexBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+// ── TickComponent ─────────────────────────────────────────────────────────────
+void UNPC_TRexBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                                FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (CurrentState == ENPC_TRexState::Dead)
-    {
-        return;
-    }
-
-    ScanForPlayer();
-    UpdateBehaviorState(DeltaTime);
-}
-
-void UNPC_TRexBehaviorComponent::ScanForPlayer()
-{
-    if (CurrentState == ENPC_TRexState::Dead)
-    {
-        return;
-    }
-
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    // Get player pawn
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-
-    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-
-    // Chase trigger
-    if (DistToPlayer <= ChaseDetectionRange)
-    {
-        if (CurrentState != ENPC_TRexState::Chase && CurrentState != ENPC_TRexState::Attack)
-        {
-            TargetPawn = PlayerPawn;
-            TransitionToState(ENPC_TRexState::Alert);
-
-            // Roar on first detection
-            OnTRexRoar.Broadcast(Owner->GetActorLocation(), RoarRadius);
-
-            // Short alert pause before chase
-            GetWorld()->GetTimerManager().SetTimer(
-                AlertTimerHandle,
-                this,
-                &UNPC_TRexBehaviorComponent::BeginChase,
-                1.2f,
-                false
-            );
-        }
-    }
-    else if (DistToPlayer > ChaseDetectionRange * 1.5f)
-    {
-        // Lost player — return to patrol
-        if (CurrentState == ENPC_TRexState::Chase || CurrentState == ENPC_TRexState::Alert)
-        {
-            TargetPawn = nullptr;
-            TransitionToState(ENPC_TRexState::Return);
-        }
-    }
-}
-
-void UNPC_TRexBehaviorComponent::UpdateBehaviorState(float DeltaTime)
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
+    TimeSinceLastAttack += DeltaTime;
 
     switch (CurrentState)
     {
-        case ENPC_TRexState::Patrol:
-            ExecutePatrol(DeltaTime);
-            break;
-
-        case ENPC_TRexState::Chase:
-            ExecuteChase(DeltaTime);
-            break;
-
-        case ENPC_TRexState::Attack:
-            ExecuteAttack();
-            break;
-
-        case ENPC_TRexState::Return:
-            ExecuteReturn(DeltaTime);
-            break;
-
-        default:
-            break;
+        case ENPC_TRexState::Idle:   TickIdle(DeltaTime);   break;
+        case ENPC_TRexState::Patrol: TickPatrol(DeltaTime); break;
+        case ENPC_TRexState::Alert:  TickAlert(DeltaTime);  break;
+        case ENPC_TRexState::Chase:  TickChase(DeltaTime);  break;
+        case ENPC_TRexState::Attack: TickAttack(DeltaTime); break;
+        case ENPC_TRexState::Return: TickReturn(DeltaTime); break;
+        case ENPC_TRexState::Dead:   /* no tick */           break;
+        default: break;
     }
 }
 
-void UNPC_TRexBehaviorComponent::ExecutePatrol(float DeltaTime)
+// ── State Machine ─────────────────────────────────────────────────────────────
+void UNPC_TRexBehaviorComponent::TickIdle(float DeltaTime)
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    // After 3 seconds idle, resume patrol
+    static float IdleTimer = 0.f;
+    IdleTimer += DeltaTime;
+    if (IdleTimer >= 3.f)
     {
-        return;
-    }
-
-    FVector OwnerLoc = Owner->GetActorLocation();
-    float DistToTarget = FVector::Dist2D(OwnerLoc, CurrentPatrolTarget);
-
-    if (DistToTarget < 200.0f)
-    {
-        // Reached patrol point — pick a new one after a pause
-        TransitionToState(ENPC_TRexState::Idle);
-        GetWorld()->GetTimerManager().SetTimer(
-            PatrolTimerHandle,
-            this,
-            &UNPC_TRexBehaviorComponent::PickNewPatrolTarget,
-            FMath::RandRange(4.0f, 8.0f),
-            false
-        );
-    }
-    else
-    {
-        // Move toward patrol target
-        FVector Direction = (CurrentPatrolTarget - OwnerLoc).GetSafeNormal2D();
-        Owner->AddActorWorldOffset(Direction * PatrolSpeed * DeltaTime, true);
-
-        // Face movement direction
-        FRotator TargetRot = Direction.Rotation();
-        Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), TargetRot, DeltaTime, 2.0f));
-    }
-}
-
-void UNPC_TRexBehaviorComponent::ExecuteChase(float DeltaTime)
-{
-    if (!TargetPawn)
-    {
-        TransitionToState(ENPC_TRexState::Return);
-        return;
-    }
-
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    FVector OwnerLoc = Owner->GetActorLocation();
-    FVector PlayerLoc = TargetPawn->GetActorLocation();
-    float DistToPlayer = FVector::Dist(OwnerLoc, PlayerLoc);
-
-    if (DistToPlayer <= AttackRange)
-    {
-        TransitionToState(ENPC_TRexState::Attack);
-        return;
-    }
-
-    // Move toward player
-    FVector Direction = (PlayerLoc - OwnerLoc).GetSafeNormal2D();
-    Owner->AddActorWorldOffset(Direction * ChaseSpeed * DeltaTime, true);
-
-    // Face player
-    FRotator TargetRot = Direction.Rotation();
-    Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), TargetRot, DeltaTime, 5.0f));
-
-    OnTRexAnimStateChanged.Broadcast(ENPC_TRexState::Chase, ChaseSpeed, 0.0f, 0.0f, false);
-}
-
-void UNPC_TRexBehaviorComponent::ExecuteAttack()
-{
-    if (!bCanAttack || !TargetPawn)
-    {
-        return;
-    }
-
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    float DistToPlayer = FVector::Dist(Owner->GetActorLocation(), TargetPawn->GetActorLocation());
-    if (DistToPlayer > AttackRange * 1.5f)
-    {
-        TransitionToState(ENPC_TRexState::Chase);
-        return;
-    }
-
-    // Trigger attack
-    bCanAttack = false;
-    int32 AttackIndex = FMath::RandRange(0, 2); // 3 attack animations
-    OnTRexAttackMontage.Broadcast(AttackIndex);
-
-    // Apply damage to player
-    if (AActor* PlayerActor = Cast<AActor>(TargetPawn))
-    {
-        UGameplayStatics::ApplyDamage(PlayerActor, 35.0f, nullptr, Owner, nullptr);
-    }
-
-    // Reset attack cooldown
-    GetWorld()->GetTimerManager().SetTimer(
-        AttackCooldownHandle,
-        this,
-        &UNPC_TRexBehaviorComponent::ResetAttackCooldown,
-        AttackCooldown,
-        false
-    );
-}
-
-void UNPC_TRexBehaviorComponent::ExecuteReturn(float DeltaTime)
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    FVector OwnerLoc = Owner->GetActorLocation();
-    float DistToOrigin = FVector::Dist2D(OwnerLoc, PatrolOrigin);
-
-    if (DistToOrigin < 300.0f)
-    {
-        // Back at origin — resume patrol
+        IdleTimer = 0.f;
+        SetState(ENPC_TRexState::Patrol);
         PickNewPatrolTarget();
-        return;
     }
 
-    // Move back to patrol origin
-    FVector Direction = (PatrolOrigin - OwnerLoc).GetSafeNormal2D();
-    Owner->AddActorWorldOffset(Direction * PatrolSpeed * DeltaTime, true);
-
-    FRotator TargetRot = Direction.Rotation();
-    Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), TargetRot, DeltaTime, 3.0f));
-}
-
-void UNPC_TRexBehaviorComponent::TransitionToState(ENPC_TRexState NewState)
-{
-    if (CurrentState == NewState)
+    // Scan for player
+    if (IsPlayerInDetectionRange())
     {
+        IdleTimer = 0.f;
+        SetState(ENPC_TRexState::Alert);
+    }
+}
+
+void UNPC_TRexBehaviorComponent::TickPatrol(float DeltaTime)
+{
+    // Check for player first
+    if (IsPlayerInDetectionRange())
+    {
+        SetState(ENPC_TRexState::Alert);
         return;
     }
 
-    CurrentState = NewState;
-    OnTRexAnimStateChanged.Broadcast(NewState, 0.0f, 0.0f, 0.0f, false);
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector OwnerLoc = Owner->GetActorLocation();
+    float DistToTarget = FVector::Dist(OwnerLoc, CurrentPatrolTarget);
+
+    if (DistToTarget < 200.f)
+    {
+        // Reached patrol point — idle briefly
+        SetState(ENPC_TRexState::Idle);
+        return;
+    }
+
+    // Move toward patrol target
+    FVector Direction = (CurrentPatrolTarget - OwnerLoc).GetSafeNormal();
+    Owner->SetActorLocation(OwnerLoc + Direction * PatrolSpeed * DeltaTime, true);
+
+    // Face movement direction
+    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(OwnerLoc, CurrentPatrolTarget);
+    Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), LookAt, DeltaTime, 3.f));
 }
 
+void UNPC_TRexBehaviorComponent::TickAlert(float DeltaTime)
+{
+    // Alert: T-Rex has spotted player — roar and transition to chase
+    TriggerRoar();
+    SetState(ENPC_TRexState::Chase);
+}
+
+void UNPC_TRexBehaviorComponent::TickChase(float DeltaTime)
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    // Re-acquire target if lost
+    if (!TargetActor)
+    {
+        TargetActor = FindNearestPlayer();
+    }
+
+    if (!TargetActor)
+    {
+        SetState(ENPC_TRexState::Return);
+        return;
+    }
+
+    float Dist = GetDistanceToTarget();
+
+    // Lost player — return home
+    if (Dist > DetectionRange * 1.5f)
+    {
+        TargetActor = nullptr;
+        SetState(ENPC_TRexState::Return);
+        return;
+    }
+
+    // Close enough to attack
+    if (Dist <= AttackRange)
+    {
+        SetState(ENPC_TRexState::Attack);
+        return;
+    }
+
+    // Chase movement
+    FVector OwnerLoc = Owner->GetActorLocation();
+    FVector TargetLoc = TargetActor->GetActorLocation();
+    FVector Direction = (TargetLoc - OwnerLoc).GetSafeNormal();
+
+    Owner->SetActorLocation(OwnerLoc + Direction * ChaseSpeed * DeltaTime, true);
+
+    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(OwnerLoc, TargetLoc);
+    Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), LookAt, DeltaTime, 5.f));
+}
+
+void UNPC_TRexBehaviorComponent::TickAttack(float DeltaTime)
+{
+    if (!TargetActor)
+    {
+        SetState(ENPC_TRexState::Chase);
+        return;
+    }
+
+    float Dist = GetDistanceToTarget();
+
+    // Target escaped attack range — chase again
+    if (Dist > AttackRange * 1.5f)
+    {
+        SetState(ENPC_TRexState::Chase);
+        return;
+    }
+
+    // Cooldown-gated attack
+    if (TimeSinceLastAttack >= AttackCooldown)
+    {
+        TimeSinceLastAttack = 0.f;
+        int32 AttackIdx = FMath::RandRange(0, 2); // 3 attack animations
+        TriggerAttack(AttackIdx);
+
+        // Apply damage to target
+        if (ACharacter* TargetChar = Cast<ACharacter>(TargetActor))
+        {
+            UGameplayStatics::ApplyDamage(TargetActor, AttackDamage,
+                                          nullptr, GetOwner(), nullptr);
+        }
+    }
+}
+
+void UNPC_TRexBehaviorComponent::TickReturn(float DeltaTime)
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector OwnerLoc = Owner->GetActorLocation();
+    float DistHome = FVector::Dist(OwnerLoc, HomeLocation);
+
+    if (DistHome < 200.f)
+    {
+        SetState(ENPC_TRexState::Idle);
+        return;
+    }
+
+    FVector Direction = (HomeLocation - OwnerLoc).GetSafeNormal();
+    Owner->SetActorLocation(OwnerLoc + Direction * PatrolSpeed * DeltaTime, true);
+
+    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(OwnerLoc, HomeLocation);
+    Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), LookAt, DeltaTime, 3.f));
+
+    // If player re-enters range during return, re-engage
+    if (IsPlayerInDetectionRange())
+    {
+        SetState(ENPC_TRexState::Alert);
+    }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+void UNPC_TRexBehaviorComponent::SetState(ENPC_TRexState NewState)
+{
+    if (NewState == CurrentState) return;
+
+    ENPC_TRexState OldState = CurrentState;
+    CurrentState = NewState;
+
+    float Speed = (NewState == ENPC_TRexState::Chase) ? ChaseSpeed : PatrolSpeed;
+    bool bAttacking = (NewState == ENPC_TRexState::Attack);
+    bool bRoaring   = (NewState == ENPC_TRexState::Alert);
+
+    OnStateChanged.Broadcast(NewState, OldState, Speed, bAttacking, bRoaring);
+}
+
+void UNPC_TRexBehaviorComponent::SetTarget(AActor* NewTarget)
+{
+    TargetActor = NewTarget;
+    if (NewTarget && CurrentState == ENPC_TRexState::Patrol)
+    {
+        SetState(ENPC_TRexState::Alert);
+    }
+}
+
+void UNPC_TRexBehaviorComponent::TriggerRoar()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector Origin = Owner->GetActorLocation();
+    OnRoar.Broadcast(Origin, RoarRadius);
+}
+
+void UNPC_TRexBehaviorComponent::TriggerAttack(int32 AttackIndex)
+{
+    OnAttackMontage.Broadcast(AttackIndex);
+}
+
+bool UNPC_TRexBehaviorComponent::IsPlayerInDetectionRange() const
+{
+    AActor* Player = FindNearestPlayer();
+    if (!Player) return false;
+    return GetDistanceToTarget() <= DetectionRange;
+}
+
+bool UNPC_TRexBehaviorComponent::IsPlayerInAttackRange() const
+{
+    if (!TargetActor) return false;
+    return GetDistanceToTarget() <= AttackRange;
+}
+
+float UNPC_TRexBehaviorComponent::GetDistanceToTarget() const
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return TNumericLimits<float>::Max();
+
+    AActor* Target = TargetActor ? TargetActor : FindNearestPlayer();
+    if (!Target) return TNumericLimits<float>::Max();
+
+    return FVector::Dist(Owner->GetActorLocation(), Target->GetActorLocation());
+}
+
+// ── Private Helpers ───────────────────────────────────────────────────────────
 void UNPC_TRexBehaviorComponent::PickNewPatrolTarget()
 {
-    // Pick random point within patrol radius
-    float Angle = FMath::RandRange(0.0f, 360.0f);
-    float Distance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
-    float RadAngle = FMath::DegreesToRadians(Angle);
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
 
-    CurrentPatrolTarget = PatrolOrigin + FVector(
-        FMath::Cos(RadAngle) * Distance,
-        FMath::Sin(RadAngle) * Distance,
-        0.0f
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-PatrolRadius, PatrolRadius),
+        FMath::RandRange(-PatrolRadius, PatrolRadius),
+        0.f
     );
 
-    TransitionToState(ENPC_TRexState::Patrol);
+    CurrentPatrolTarget = HomeLocation + RandomOffset;
+    bPatrolTargetReached = false;
 }
 
-void UNPC_TRexBehaviorComponent::BeginChase()
+AActor* UNPC_TRexBehaviorComponent::FindNearestPlayer() const
 {
-    if (TargetPawn)
-    {
-        TransitionToState(ENPC_TRexState::Chase);
-    }
-}
+    AActor* Owner = GetOwner();
+    if (!Owner) return nullptr;
 
-void UNPC_TRexBehaviorComponent::ResetAttackCooldown()
-{
-    bCanAttack = true;
-}
+    UWorld* World = Owner->GetWorld();
+    if (!World) return nullptr;
 
-void UNPC_TRexBehaviorComponent::OnTRexDeath()
-{
-    TransitionToState(ENPC_TRexState::Dead);
-    GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
-    SetComponentTickEnabled(false);
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return nullptr;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return nullptr;
+
+    // Cache target for next detection check
+    const_cast<UNPC_TRexBehaviorComponent*>(this)->TargetActor = PlayerPawn;
+    return PlayerPawn;
 }
