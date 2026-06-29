@@ -5,52 +5,57 @@
 
 // ============================================================
 // Quest System Types — Agent #14 Quest & Mission Designer
-// Cycle: PROD_CYCLE_AUTO_20260629_011
-// All types prefixed with Quest_ to avoid collision
+// Cycle: PROD_CYCLE_AUTO_20260629_013
+// All types prefixed with Quest_ to avoid collisions
 // ============================================================
 
 UENUM(BlueprintType)
 enum class EQuest_Status : uint8
 {
-    Locked       UMETA(DisplayName = "Locked"),
-    Available    UMETA(DisplayName = "Available"),
-    Active       UMETA(DisplayName = "Active"),
-    Completed    UMETA(DisplayName = "Completed"),
-    Failed       UMETA(DisplayName = "Failed")
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Active          UMETA(DisplayName = "Active"),
+    ObjectivesMet   UMETA(DisplayName = "Objectives Met"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Failed          UMETA(DisplayName = "Failed"),
+    Abandoned       UMETA(DisplayName = "Abandoned")
 };
 
 UENUM(BlueprintType)
 enum class EQuest_ObjectiveType : uint8
 {
-    Hunt         UMETA(DisplayName = "Hunt Target"),
-    Gather       UMETA(DisplayName = "Gather Resources"),
-    Explore      UMETA(DisplayName = "Explore Location"),
-    Defend       UMETA(DisplayName = "Defend Camp"),
-    Escort       UMETA(DisplayName = "Escort NPC"),
-    Craft        UMETA(DisplayName = "Craft Item"),
-    Track        UMETA(DisplayName = "Track Animal"),
-    Survive      UMETA(DisplayName = "Survive Duration")
+    Hunt            UMETA(DisplayName = "Hunt Target"),
+    Gather          UMETA(DisplayName = "Gather Resources"),
+    Explore         UMETA(DisplayName = "Explore Location"),
+    Defend          UMETA(DisplayName = "Defend Camp"),
+    Rescue          UMETA(DisplayName = "Rescue NPC"),
+    Craft           UMETA(DisplayName = "Craft Item"),
+    Track           UMETA(DisplayName = "Track Animal"),
+    Survive         UMETA(DisplayName = "Survive Duration"),
+    Escort          UMETA(DisplayName = "Escort NPC"),
+    Investigate     UMETA(DisplayName = "Investigate Site")
 };
 
 UENUM(BlueprintType)
-enum class EQuest_Difficulty : uint8
+enum class EQuest_Priority : uint8
 {
-    Scavenger    UMETA(DisplayName = "Scavenger"),
-    Hunter       UMETA(DisplayName = "Hunter"),
-    Apex         UMETA(DisplayName = "Apex Predator")
+    Critical        UMETA(DisplayName = "Critical"),
+    High            UMETA(DisplayName = "High"),
+    Normal          UMETA(DisplayName = "Normal"),
+    Low             UMETA(DisplayName = "Low"),
+    Optional        UMETA(DisplayName = "Optional")
 };
 
 UENUM(BlueprintType)
 enum class EQuest_RewardType : uint8
 {
-    Resources    UMETA(DisplayName = "Resources"),
-    Tools        UMETA(DisplayName = "Tools"),
-    Knowledge    UMETA(DisplayName = "Knowledge"),
-    Shelter      UMETA(DisplayName = "Shelter Access"),
-    Alliance     UMETA(DisplayName = "Tribe Alliance")
+    Resources       UMETA(DisplayName = "Resources"),
+    Tools           UMETA(DisplayName = "Tools"),
+    Knowledge       UMETA(DisplayName = "Knowledge"),
+    Shelter         UMETA(DisplayName = "Shelter Access"),
+    Allies          UMETA(DisplayName = "Tribal Allies"),
+    Territory       UMETA(DisplayName = "Territory Access")
 };
 
-// Single objective within a quest
 USTRUCT(BlueprintType)
 struct FQuest_Objective
 {
@@ -77,6 +82,15 @@ struct FQuest_Objective
     UPROPERTY(BlueprintReadOnly, Category = "Quest")
     bool bCompleted;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bOptional;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float TargetRadius;
+
     FQuest_Objective()
         : ObjectiveID(TEXT(""))
         , ObjectiveType(EQuest_ObjectiveType::Hunt)
@@ -84,10 +98,12 @@ struct FQuest_Objective
         , RequiredCount(1)
         , CurrentCount(0)
         , bCompleted(false)
+        , bOptional(false)
+        , TargetLocation(FVector::ZeroVector)
+        , TargetRadius(500.0f)
     {}
 };
 
-// Reward granted on quest completion
 USTRUCT(BlueprintType)
 struct FQuest_Reward
 {
@@ -97,7 +113,7 @@ struct FQuest_Reward
     EQuest_RewardType RewardType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString ItemID;
+    FString ResourceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     int32 Quantity;
@@ -107,14 +123,13 @@ struct FQuest_Reward
 
     FQuest_Reward()
         : RewardType(EQuest_RewardType::Resources)
-        , ItemID(TEXT(""))
+        , ResourceID(TEXT(""))
         , Quantity(1)
     {}
 };
 
-// Full quest definition
 USTRUCT(BlueprintType)
-struct FQuest_Definition
+struct FQuest_Data
 {
     GENERATED_BODY()
 
@@ -128,10 +143,10 @@ struct FQuest_Definition
     FText QuestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FText QuestNarrative;
+    EQuest_Priority Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Difficulty Difficulty;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest")
+    EQuest_Status Status;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FQuest_Objective> Objectives;
@@ -140,53 +155,27 @@ struct FQuest_Definition
     TArray<FQuest_Reward> Rewards;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestGiverNPCID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
     TArray<FString> PrerequisiteQuestIDs;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    EQuest_Status Status;
-
-    // Optional time limit in seconds (0 = no limit)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimitSeconds;
+    bool bRepeatable;
 
-    // NPC giver tag
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString GiverNPCTag;
-
-    FQuest_Definition()
-        : QuestID(TEXT(""))
-        , Difficulty(EQuest_Difficulty::Hunter)
-        , Status(EQuest_Status::Locked)
-        , TimeLimitSeconds(0.0f)
-        , GiverNPCTag(TEXT(""))
-    {}
-};
-
-// Runtime quest state tracked per player
-USTRUCT(BlueprintType)
-struct FQuest_RuntimeState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    FString QuestID;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    EQuest_Status Status;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TArray<FQuest_Objective> ActiveObjectives;
+    float TimeLimit;
 
     UPROPERTY(BlueprintReadOnly, Category = "Quest")
     float ElapsedTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    float StartTime;
-
-    FQuest_RuntimeState()
+    FQuest_Data()
         : QuestID(TEXT(""))
-        , Status(EQuest_Status::Locked)
+        , Priority(EQuest_Priority::Normal)
+        , Status(EQuest_Status::Inactive)
+        , QuestGiverNPCID(TEXT(""))
+        , bRepeatable(false)
+        , TimeLimit(0.0f)
         , ElapsedTime(0.0f)
-        , StartTime(0.0f)
     {}
 };
