@@ -5,82 +5,45 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ============================================================
-// Biome zone data — defines a rectangular biome region
-// ============================================================
+UENUM(BlueprintType)
+enum class EWorld_BiomeType : uint8
+{
+    RiverDelta      UMETA(DisplayName = "River Delta"),
+    JungleLowland   UMETA(DisplayName = "Jungle Lowland"),
+    RockyHighland   UMETA(DisplayName = "Rocky Highland"),
+    VolcanicBadland UMETA(DisplayName = "Volcanic Badland"),
+    OpenPlains      UMETA(DisplayName = "Open Plains"),
+    Unknown         UMETA(DisplayName = "Unknown")
+};
+
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
+struct TRANSPERSONALGAME_API FWorld_BiomeZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector2D CenterXY;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    FVector Center = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector2D ExtentXY;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float Radius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BaseElevation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float AmbientTemperature = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity;   // 0.0 - 1.0
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float Humidity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float WaterPresence;       // 0.0 - 1.0
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float DangerLevel = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DinosaurDensity;     // 0.0 - 1.0
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeColor;   // Debug visualization color
-
-    FWorld_BiomeZone()
-        : BiomeName(TEXT("Unknown"))
-        , CenterXY(FVector2D::ZeroVector)
-        , ExtentXY(FVector2D(1000.f, 1000.f))
-        , BaseElevation(0.f)
-        , VegetationDensity(0.5f)
-        , WaterPresence(0.f)
-        , DinosaurDensity(0.3f)
-        , BiomeColor(FLinearColor::White)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    FString BiomeName = TEXT("Unknown Biome");
 };
 
-// ============================================================
-// Dinosaur spawn entry for a biome
-// ============================================================
-USTRUCT(BlueprintType)
-struct FWorld_DinoSpawnEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    FString SpeciesName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 MinCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    int32 MaxCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
-    float SpawnWeight;  // Relative probability
-
-    FWorld_DinoSpawnEntry()
-        : SpeciesName(TEXT("Raptor"))
-        , MinCount(1)
-        , MaxCount(3)
-        , SpawnWeight(1.0f)
-    {}
-};
-
-// ============================================================
-// ABiomeManager — manages biome zones, PCG scatter, dino spawn
-// ============================================================
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
+UCLASS(ClassGroup = (World), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -88,77 +51,48 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // ---- Biome Registry ----
+    // Query which biome a world location falls in
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    // Get the full biome zone data for a location
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    bool GetBiomeZoneAtLocation(const FVector& WorldLocation, FWorld_BiomeZone& OutZone) const;
+
+    // Get ambient temperature at location (affects player survival stats)
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+
+    // Get danger level at location (affects dinosaur aggression radius)
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+
+    // Register a new biome zone at runtime (called by PCG)
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    void RegisterBiomeZone(const FWorld_BiomeZone& Zone);
+
+    // Get all registered biome zones
+    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    TArray<FWorld_BiomeZone> GetAllBiomeZones() const;
+
+    // Called by PCGWorldGenerator to initialize default biomes
+    UFUNCTION(CallInEditor, Category = "World|Biome")
+    void InitializeDefaultBiomes();
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
     TArray<FWorld_BiomeZone> BiomeZones;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    bool bAutoRegisterDefaultBiomes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    bool bAutoInitializeOnBeginPlay = true;
 
-    // ---- Vegetation PCG ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    int32 VegetationSeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    float GlobalVegetationScale;
-
-    // ---- Dinosaur Spawning ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
-    TArray<FWorld_DinoSpawnEntry> GlobalSpawnTable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
-    int32 DinosaurSpawnSeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
-    bool bSpawnDinosaursOnBeginPlay;
-
-    // ---- Runtime State ----
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    int32 TotalActorsSpawned;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    int32 ActiveBiomeCount;
-
-    // ---- API ----
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterDefaultBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FString GetBiomeAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetVegetationDensityAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetWaterPresenceAtLocation(FVector WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void ScatterVegetationInBiome(int32 BiomeIndex, int32 Count);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void SpawnDinosaursInBiome(int32 BiomeIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome", CallInEditor)
-    void RegenerateAllBiomes();
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FVector> GeneratePoissonDiskPoints(FVector2D Center, FVector2D Extent, float MinDistance, int32 MaxPoints, int32 Seed) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DrawBiomeDebugBounds(float Duration = 5.0f) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
+    float BiomeTransitionBlendRadius = 500.0f;
 
 private:
-    const FWorld_BiomeZone* FindBiomeAtLocation(FVector WorldLocation) const;
-    FVector GetRandomPointInBiome(const FWorld_BiomeZone& Zone, int32& InOutSeed) const;
+    // Find nearest biome zone to a location
+    int32 FindNearestBiomeIndex(const FVector& WorldLocation) const;
 };
