@@ -1,0 +1,23 @@
+{
+  "asset_name": "cretaceous_fallen_ancient_tree_log",
+  "meshy_task_id": "019f142b-90b1-7839-80dc-ec2c3b2457c6",
+  "glb_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1782749864967_Cretaceous_era_large_fallen_ancient_tree.glb",
+  "thumbnail_url": "https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019f142b-90b1-7839-80dc-ec2c3b2457c6/output/preview.png",
+  "category": "Props",
+  "description": "Cretaceous era large fallen ancient tree log, moss-covered, partially decomposed. 4 meters long with weathered bark and ferns growing on it.",
+  "polycount_target": 8000,
+  "art_style": "realistic",
+  "ue5_import_path": "/Game/Environment/Props/FallenLog",
+  "biome_placement": {
+    "primary_biome": "Jungle",
+    "secondary_biome": "River",
+    "spawn_coords": {"x": 50000, "y": 50000, "z": 100},
+    "placement_notes": "Place near river banks and in dense forest areas. Rotate randomly for natural look. Scale 0.8-1.2 for variety."
+  },
+  "narrative_purpose": "Environmental storytelling — suggests ancient forest age and decay cycle. Can be used as cover for player hiding from predators.",
+  "lod_chain": ["LOD0_8000", "LOD1_3000", "LOD2_800"],
+  "collision": "complex_as_simple",
+  "status": "generated",
+  "cycle": "PROD_CYCLE_AUTO_20260629_011",
+  "agent": "Environment_Artist_06"
+}
