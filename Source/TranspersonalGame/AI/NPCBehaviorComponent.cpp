@@ -1,305 +1,476 @@
-#include "AI/NPCBehaviorComponent.h"
+// NPCBehaviorComponent.cpp
+// NPC Behavior Agent #11 — Transpersonal Game Studio
+// Implements full NPC behavioral AI: patrol, memory, threat response, daily routines
+
+#include "NPCBehaviorComponent.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 // ============================================================
-// Constructor
+//  Constructor
 // ============================================================
+
 UNPCBehaviorComponent::UNPCBehaviorComponent()
 {
-	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.TickInterval = 0.1f; // 10Hz — sufficient for NPC logic
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 Hz — sufficient for NPC AI
+
+    CurrentBehaviorState = ENPC_BehaviorState::Idle;
+    CurrentThreatLevel   = ENPC_ThreatLevel::None;
+
+    PatrolRadius         = 2000.0f;
+    DetectionRadius      = 1500.0f;
+    FleeRadius           = 800.0f;
+    AttackRadius         = 250.0f;
+    MemoryDuration       = 30.0f;
+    MaxMemoryEntries     = 16;
+
+    bCanFlee             = true;
+    bCanAttack           = false; // Most NPCs are non-combatants
+    bHasDailyRoutine     = true;
+    bIsAlive             = true;
+
+    CurrentHunger        = 50.0f;
+    CurrentFear          = 0.0f;
+    CurrentFatigue       = 0.0f;
+    HomeLocation         = FVector::ZeroVector;
+    bHomeLocationSet     = false;
+
+    // Daily routine defaults (hours in 0-24 range)
+    WakeHour             = 6.0f;
+    SleepHour            = 20.0f;
+    GatherHour           = 8.0f;
+    RestHour             = 13.0f;
 }
 
 // ============================================================
-// BeginPlay
+//  BeginPlay
 // ============================================================
+
 void UNPCBehaviorComponent::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	// Build a default daily routine if none was assigned
-	if (DailyRoutine.Num() == 0)
-	{
-		AActor* Owner = GetOwner();
-		FVector HomeLocation = Owner ? Owner->GetActorLocation() : FVector::ZeroVector;
+    AActor* Owner = GetOwner();
+    if (Owner && !bHomeLocationSet)
+    {
+        HomeLocation     = Owner->GetActorLocation();
+        bHomeLocationSet = true;
+    }
 
-		// Dawn: gather near spawn (06:00 - 10:00)
-		FNPC_DailyRoutineSlot GatherSlot;
-		GatherSlot.StartHour = 6.f;
-		GatherSlot.DurationHours = 4.f;
-		GatherSlot.ActivityLocation = HomeLocation + FVector(300.f, 0.f, 0.f);
-		GatherSlot.Activity = ENPC_BehaviorState::Gather;
+    // Stagger memory cleanup timer to avoid all NPCs ticking simultaneously
+    float CleanupDelay = FMath::FRandRange(5.0f, 15.0f);
+    GetWorld()->GetTimerManager().SetTimer(
+        MemoryCleanupTimer,
+        this,
+        &UNPCBehaviorComponent::CleanupExpiredMemories,
+        10.0f,
+        true,
+        CleanupDelay
+    );
 
-		// Midday: patrol perimeter (10:00 - 14:00)
-		FNPC_DailyRoutineSlot PatrolSlot;
-		PatrolSlot.StartHour = 10.f;
-		PatrolSlot.DurationHours = 4.f;
-		PatrolSlot.ActivityLocation = HomeLocation + FVector(0.f, 400.f, 0.f);
-		PatrolSlot.Activity = ENPC_BehaviorState::Patrol;
-
-		// Afternoon: idle/rest (14:00 - 18:00)
-		FNPC_DailyRoutineSlot RestSlot;
-		RestSlot.StartHour = 14.f;
-		RestSlot.DurationHours = 4.f;
-		RestSlot.ActivityLocation = HomeLocation;
-		RestSlot.Activity = ENPC_BehaviorState::Idle;
-
-		// Dusk: seek shelter (18:00 - 22:00)
-		FNPC_DailyRoutineSlot SeekSlot;
-		SeekSlot.StartHour = 18.f;
-		SeekSlot.DurationHours = 4.f;
-		SeekSlot.ActivityLocation = HomeLocation;
-		SeekSlot.Activity = ENPC_BehaviorState::Seek;
-
-		// Night: idle/sleep (22:00 - 06:00)
-		FNPC_DailyRoutineSlot SleepSlot;
-		SleepSlot.StartHour = 22.f;
-		SleepSlot.DurationHours = 8.f;
-		SleepSlot.ActivityLocation = HomeLocation;
-		SleepSlot.Activity = ENPC_BehaviorState::Idle;
-
-		DailyRoutine.Add(GatherSlot);
-		DailyRoutine.Add(PatrolSlot);
-		DailyRoutine.Add(RestSlot);
-		DailyRoutine.Add(SeekSlot);
-		DailyRoutine.Add(SleepSlot);
-	}
+    // Stagger daily routine evaluation
+    float RoutineDelay = FMath::FRandRange(0.5f, 3.0f);
+    GetWorld()->GetTimerManager().SetTimer(
+        DailyRoutineTimer,
+        this,
+        &UNPCBehaviorComponent::EvaluateDailyRoutine,
+        5.0f,
+        true,
+        RoutineDelay
+    );
 }
 
 // ============================================================
-// TickComponent
+//  TickComponent
 // ============================================================
+
 void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-	FActorComponentTickFunction* ThisTickFunction)
+    FActorComponentTickFunction* ThisTickFunction)
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	TickMemoryDecay(DeltaTime);
-	TickFearDecay(DeltaTime);
+    if (!bIsAlive) return;
+
+    // Decay fear over time (fear reduces 5 units/sec when no threat present)
+    if (CurrentThreatLevel == ENPC_ThreatLevel::None && CurrentFear > 0.0f)
+    {
+        CurrentFear = FMath::Max(0.0f, CurrentFear - (5.0f * DeltaTime));
+    }
+
+    // Accumulate fatigue over time
+    CurrentFatigue = FMath::Clamp(CurrentFatigue + (0.5f * DeltaTime), 0.0f, 100.0f);
+
+    // Increase hunger over time
+    CurrentHunger = FMath::Clamp(CurrentHunger + (0.2f * DeltaTime), 0.0f, 100.0f);
+
+    // Evaluate threat from nearby predators
+    EvaluateThreat();
+
+    // Update behavior state machine
+    UpdateBehaviorState();
 }
 
 // ============================================================
-// State Machine
+//  Threat Evaluation
 // ============================================================
+
+void UNPCBehaviorComponent::EvaluateThreat()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    FVector OwnerLocation = Owner->GetActorLocation();
+
+    // Scan for pawns within detection radius
+    TArray<FOverlapResult> Overlaps;
+    FCollisionShape Sphere = FCollisionShape::MakeSphere(DetectionRadius);
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(Owner);
+
+    World->OverlapMultiByChannel(Overlaps, OwnerLocation, FQuat::Identity,
+        ECC_Pawn, Sphere, Params);
+
+    float HighestThreat = 0.0f;
+    AActor* ClosestThreat = nullptr;
+    float ClosestDist = FLT_MAX;
+
+    for (const FOverlapResult& Overlap : Overlaps)
+    {
+        AActor* OtherActor = Overlap.GetActor();
+        if (!OtherActor) continue;
+
+        // Check if this actor is tagged as a predator
+        if (!OtherActor->ActorHasTag(FName("Predator")) &&
+            !OtherActor->ActorHasTag(FName("Dinosaur"))) continue;
+
+        float Dist = FVector::Dist(OwnerLocation, OtherActor->GetActorLocation());
+        float ThreatScore = 1.0f - FMath::Clamp(Dist / DetectionRadius, 0.0f, 1.0f);
+
+        // Large predators (TRex tag) amplify threat
+        if (OtherActor->ActorHasTag(FName("TRex")))
+        {
+            ThreatScore *= 2.5f;
+        }
+        else if (OtherActor->ActorHasTag(FName("Raptor")))
+        {
+            ThreatScore *= 1.5f;
+        }
+
+        if (ThreatScore > HighestThreat)
+        {
+            HighestThreat = ThreatScore;
+        }
+
+        if (Dist < ClosestDist)
+        {
+            ClosestDist  = Dist;
+            ClosestThreat = OtherActor;
+        }
+    }
+
+    // Map threat score to enum
+    ENPC_ThreatLevel NewThreat = ENPC_ThreatLevel::None;
+    if      (HighestThreat >= 1.8f) NewThreat = ENPC_ThreatLevel::Critical;
+    else if (HighestThreat >= 1.0f) NewThreat = ENPC_ThreatLevel::High;
+    else if (HighestThreat >= 0.5f) NewThreat = ENPC_ThreatLevel::Medium;
+    else if (HighestThreat >  0.0f) NewThreat = ENPC_ThreatLevel::Low;
+
+    // Raise fear when threat detected
+    if (NewThreat != ENPC_ThreatLevel::None)
+    {
+        float FearIncrease = static_cast<float>(NewThreat) * 15.0f;
+        CurrentFear = FMath::Min(100.0f, CurrentFear + FearIncrease);
+
+        // Add memory entry for this threat
+        if (ClosestThreat)
+        {
+            AddMemoryEntry(ClosestThreat, ClosestThreat->GetActorLocation(),
+                ENPC_ThreatLevel::High, TEXT("Predator detected"));
+        }
+    }
+
+    // Broadcast if threat level changed
+    if (NewThreat != CurrentThreatLevel)
+    {
+        CurrentThreatLevel = NewThreat;
+        OnThreatLevelChanged.Broadcast(CurrentThreatLevel);
+    }
+}
+
+// ============================================================
+//  Behavior State Machine
+// ============================================================
+
+void UNPCBehaviorComponent::UpdateBehaviorState()
+{
+    if (!bIsAlive) return;
+
+    ENPC_BehaviorState NewState = CurrentBehaviorState;
+
+    // Priority order: Critical threat > High threat > Hunger > Fatigue > Daily routine
+    switch (CurrentThreatLevel)
+    {
+        case ENPC_ThreatLevel::Critical:
+        case ENPC_ThreatLevel::High:
+            NewState = bCanFlee ? ENPC_BehaviorState::Flee : ENPC_BehaviorState::Idle;
+            break;
+
+        case ENPC_ThreatLevel::Medium:
+            NewState = ENPC_BehaviorState::Flee;
+            break;
+
+        case ENPC_ThreatLevel::Low:
+            NewState = ENPC_BehaviorState::Investigate;
+            break;
+
+        case ENPC_ThreatLevel::None:
+        default:
+            // No threat — evaluate survival needs and routine
+            if (CurrentHunger >= 80.0f)
+            {
+                NewState = ENPC_BehaviorState::Gather;
+            }
+            else if (CurrentFatigue >= 80.0f)
+            {
+                NewState = ENPC_BehaviorState::Idle; // Rest
+            }
+            else
+            {
+                NewState = ENPC_BehaviorState::Patrol;
+            }
+            break;
+    }
+
+    if (NewState != CurrentBehaviorState)
+    {
+        SetBehaviorState(NewState);
+    }
+}
+
 void UNPCBehaviorComponent::SetBehaviorState(ENPC_BehaviorState NewState)
 {
-	if (NewState == CurrentState)
-	{
-		return;
-	}
-
-	ENPC_BehaviorState OldState = CurrentState;
-	CurrentState = NewState;
-	OnStateChanged.Broadcast(OldState, NewState);
+    ENPC_BehaviorState OldState = CurrentBehaviorState;
+    CurrentBehaviorState = NewState;
+    OnBehaviorStateChanged.Broadcast(OldState, NewState);
 }
 
 // ============================================================
-// Threat & Perception
+//  Memory System
 // ============================================================
-void UNPCBehaviorComponent::ReportThreat(FVector ThreatLocation, float ThreatScore,
-	bool bIsDino, bool bIsPlayerThreat)
+
+void UNPCBehaviorComponent::AddMemoryEntry(AActor* SourceActor, FVector Location,
+    ENPC_ThreatLevel Threat, const FString& Context)
 {
-	// Apply dinosaur fear multiplier
-	float AdjustedScore = ThreatScore;
-	if (bIsDino)
-	{
-		AdjustedScore *= DinoFearMultiplier;
-	}
+    if (!SourceActor) return;
 
-	// Add or update memory entry
-	FNPC_MemoryEntry NewEntry;
-	NewEntry.Location = ThreatLocation;
-	NewEntry.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-	NewEntry.ThreatScore = AdjustedScore;
-	NewEntry.bIsDinosaur = bIsDino;
-	NewEntry.bIsPlayer = bIsPlayerThreat;
+    // Check if we already have a memory for this actor — update it
+    for (FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.SourceActor == SourceActor)
+        {
+            Entry.LastKnownLocation = Location;
+            Entry.ThreatLevel       = Threat;
+            Entry.ContextNote       = Context;
+            Entry.Timestamp         = GetWorld()->GetTimeSeconds();
+            Entry.bIsActive         = true;
+            return;
+        }
+    }
 
-	// Check if we already have a nearby entry (within 500 units) — update it
-	bool bUpdated = false;
-	for (FNPC_MemoryEntry& Entry : MemoryEntries)
-	{
-		if (FVector::Dist(Entry.Location, ThreatLocation) < 500.f && Entry.bIsDinosaur == bIsDino)
-		{
-			Entry = NewEntry;
-			bUpdated = true;
-			break;
-		}
-	}
+    // New memory entry
+    if (MemoryEntries.Num() >= MaxMemoryEntries)
+    {
+        // Remove oldest entry
+        float OldestTime = FLT_MAX;
+        int32 OldestIdx  = 0;
+        for (int32 i = 0; i < MemoryEntries.Num(); ++i)
+        {
+            if (MemoryEntries[i].Timestamp < OldestTime)
+            {
+                OldestTime = MemoryEntries[i].Timestamp;
+                OldestIdx  = i;
+            }
+        }
+        MemoryEntries.RemoveAt(OldestIdx);
+    }
 
-	if (!bUpdated)
-	{
-		MemoryEntries.Add(NewEntry);
+    FNPC_MemoryEntry NewEntry;
+    NewEntry.SourceActor       = SourceActor;
+    NewEntry.LastKnownLocation = Location;
+    NewEntry.ThreatLevel       = Threat;
+    NewEntry.ContextNote       = Context;
+    NewEntry.Timestamp         = GetWorld()->GetTimeSeconds();
+    NewEntry.bIsActive         = true;
 
-		// Trim oldest entries if over capacity
-		while (MemoryEntries.Num() > MaxMemoryEntries)
-		{
-			MemoryEntries.RemoveAt(0);
-		}
-	}
-
-	// Update fear level
-	FearLevel = FMath::Clamp(FearLevel + AdjustedScore * 0.1f, 0.f, 1.f);
-
-	// Recalculate threat level and broadcast
-	ENPC_ThreatLevel OldThreat = CurrentThreatLevel;
-	RecalculateThreatLevel();
-
-	if (CurrentThreatLevel != OldThreat)
-	{
-		OnThreatDetected.Broadcast(CurrentThreatLevel);
-	}
-
-	// Auto-flee on High/Critical threat
-	if (CurrentThreatLevel >= ENPC_ThreatLevel::High && CurrentState != ENPC_BehaviorState::Flee)
-	{
-		TriggerFlee(ThreatLocation);
-	}
+    MemoryEntries.Add(NewEntry);
 }
 
-void UNPCBehaviorComponent::ClearMemory()
+void UNPCBehaviorComponent::CleanupExpiredMemories()
 {
-	MemoryEntries.Empty();
-	FearLevel = 0.f;
-	CurrentThreatLevel = ENPC_ThreatLevel::None;
+    if (!GetWorld()) return;
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    MemoryEntries.RemoveAll([&](const FNPC_MemoryEntry& Entry)
+    {
+        return (CurrentTime - Entry.Timestamp) > MemoryDuration;
+    });
 }
 
-// ============================================================
-// Daily Routine
-// ============================================================
-void UNPCBehaviorComponent::SetDailyRoutine(const TArray<FNPC_DailyRoutineSlot>& NewRoutine)
+bool UNPCBehaviorComponent::HasMemoryOf(AActor* Actor) const
 {
-	DailyRoutine = NewRoutine;
-	ActiveRoutineIndex = 0;
+    if (!Actor) return false;
+
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.SourceActor == Actor && Entry.bIsActive)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-void UNPCBehaviorComponent::UpdateRoutineForHour(float CurrentHour)
+FVector UNPCBehaviorComponent::GetLastKnownLocationOf(AActor* Actor) const
 {
-	// Only update routine if not fleeing or in danger
-	if (CurrentState == ENPC_BehaviorState::Flee ||
-		CurrentState == ENPC_BehaviorState::Dead ||
-		CurrentThreatLevel >= ENPC_ThreatLevel::Medium)
-	{
-		return;
-	}
+    if (!Actor) return FVector::ZeroVector;
 
-	for (int32 i = 0; i < DailyRoutine.Num(); ++i)
-	{
-		const FNPC_DailyRoutineSlot& Slot = DailyRoutine[i];
-		float EndHour = Slot.StartHour + Slot.DurationHours;
-
-		// Handle midnight wrap-around
-		bool bInSlot = false;
-		if (EndHour > 24.f)
-		{
-			bInSlot = (CurrentHour >= Slot.StartHour) || (CurrentHour < (EndHour - 24.f));
-		}
-		else
-		{
-			bInSlot = (CurrentHour >= Slot.StartHour) && (CurrentHour < EndHour);
-		}
-
-		if (bInSlot && i != ActiveRoutineIndex)
-		{
-			ActiveRoutineIndex = i;
-			SetBehaviorState(Slot.Activity);
-			break;
-		}
-	}
-}
-
-FNPC_DailyRoutineSlot UNPCBehaviorComponent::GetCurrentRoutineSlot() const
-{
-	if (DailyRoutine.IsValidIndex(ActiveRoutineIndex))
-	{
-		return DailyRoutine[ActiveRoutineIndex];
-	}
-	return FNPC_DailyRoutineSlot();
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.SourceActor == Actor)
+        {
+            return Entry.LastKnownLocation;
+        }
+    }
+    return FVector::ZeroVector;
 }
 
 // ============================================================
-// Flee Logic
+//  Daily Routine
 // ============================================================
-FVector UNPCBehaviorComponent::ComputeFleeDirection(FVector ThreatLocation) const
+
+void UNPCBehaviorComponent::EvaluateDailyRoutine()
 {
-	AActor* Owner = GetOwner();
-	if (!Owner)
-	{
-		return FVector::ForwardVector;
-	}
+    if (!bHasDailyRoutine || !bIsAlive) return;
+    if (CurrentThreatLevel != ENPC_ThreatLevel::None) return; // Don't override threat response
 
-	FVector OwnerLoc = Owner->GetActorLocation();
-	FVector AwayDir = (OwnerLoc - ThreatLocation).GetSafeNormal();
+    // Get game time of day (0-24 hours)
+    // In absence of a game time system, use real elapsed time modulo 24
+    float GameHour = FMath::Fmod(GetWorld()->GetTimeSeconds() / 60.0f, 24.0f);
 
-	// Add slight lateral offset to avoid running directly away (more realistic)
-	FVector LateralOffset = FVector::CrossProduct(AwayDir, FVector::UpVector) * 0.3f;
-	return (AwayDir + LateralOffset).GetSafeNormal();
-}
-
-void UNPCBehaviorComponent::TriggerFlee(FVector ThreatLocation)
-{
-	FVector FleeDir = ComputeFleeDirection(ThreatLocation);
-	SetBehaviorState(ENPC_BehaviorState::Flee);
-	OnFleeStarted.Broadcast(FleeDir);
-}
-
-// ============================================================
-// Private: Memory Decay
-// ============================================================
-void UNPCBehaviorComponent::TickMemoryDecay(float DeltaTime)
-{
-	if (!GetWorld())
-	{
-		return;
-	}
-
-	float Now = GetWorld()->GetTimeSeconds();
-
-	// Remove expired entries
-	MemoryEntries.RemoveAll([this, Now](const FNPC_MemoryEntry& Entry)
-	{
-		return (Now - Entry.Timestamp) > MemoryDecayTime;
-	});
-
-	RecalculateThreatLevel();
+    if (GameHour >= SleepHour || GameHour < WakeHour)
+    {
+        // Sleeping — stay idle at home
+        if (CurrentBehaviorState != ENPC_BehaviorState::Idle)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Idle);
+        }
+    }
+    else if (GameHour >= GatherHour && GameHour < RestHour)
+    {
+        // Gathering food
+        if (CurrentHunger > 30.0f && CurrentBehaviorState != ENPC_BehaviorState::Gather)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Gather);
+        }
+    }
+    else if (GameHour >= RestHour && GameHour < SleepHour)
+    {
+        // Afternoon patrol / social time
+        if (CurrentBehaviorState != ENPC_BehaviorState::Patrol)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Patrol);
+        }
+    }
 }
 
 // ============================================================
-// Private: Fear Decay
+//  Public API
 // ============================================================
-void UNPCBehaviorComponent::TickFearDecay(float DeltaTime)
+
+void UNPCBehaviorComponent::SetFearLevel(float NewFear)
 {
-	if (CurrentThreatLevel == ENPC_ThreatLevel::None)
-	{
-		FearLevel = FMath::Max(0.f, FearLevel - FearDecayRate * DeltaTime);
-	}
+    CurrentFear = FMath::Clamp(NewFear, 0.0f, 100.0f);
 }
 
-// ============================================================
-// Private: Recalculate Threat Level from memory
-// ============================================================
-void UNPCBehaviorComponent::RecalculateThreatLevel()
+void UNPCBehaviorComponent::SetHunger(float NewHunger)
 {
-	if (MemoryEntries.Num() == 0)
-	{
-		CurrentThreatLevel = ENPC_ThreatLevel::None;
-		return;
-	}
-
-	float MaxScore = 0.f;
-	for (const FNPC_MemoryEntry& Entry : MemoryEntries)
-	{
-		MaxScore = FMath::Max(MaxScore, Entry.ThreatScore);
-	}
-
-	CurrentThreatLevel = ScoreToThreatLevel(MaxScore);
+    CurrentHunger = FMath::Clamp(NewHunger, 0.0f, 100.0f);
 }
 
-ENPC_ThreatLevel UNPCBehaviorComponent::ScoreToThreatLevel(float Score) const
+void UNPCBehaviorComponent::SetFatigue(float NewFatigue)
 {
-	if (Score <= 0.f)   return ENPC_ThreatLevel::None;
-	if (Score < 2.f)    return ENPC_ThreatLevel::Low;
-	if (Score < 5.f)    return ENPC_ThreatLevel::Medium;
-	if (Score < 10.f)   return ENPC_ThreatLevel::High;
-	return ENPC_ThreatLevel::Critical;
+    CurrentFatigue = FMath::Clamp(NewFatigue, 0.0f, 100.0f);
+}
+
+void UNPCBehaviorComponent::NotifyDeath()
+{
+    bIsAlive = false;
+    CurrentBehaviorState = ENPC_BehaviorState::Dead;
+    CurrentThreatLevel   = ENPC_ThreatLevel::None;
+
+    // Clear timers
+    GetWorld()->GetTimerManager().ClearTimer(MemoryCleanupTimer);
+    GetWorld()->GetTimerManager().ClearTimer(DailyRoutineTimer);
+
+    OnBehaviorStateChanged.Broadcast(ENPC_BehaviorState::Patrol, ENPC_BehaviorState::Dead);
+}
+
+void UNPCBehaviorComponent::ForceState(ENPC_BehaviorState ForcedState)
+{
+    SetBehaviorState(ForcedState);
+}
+
+FVector UNPCBehaviorComponent::GetNextPatrolPoint() const
+{
+    // Random point within patrol radius around home location
+    float Angle  = FMath::FRandRange(0.0f, 360.0f);
+    float Radius = FMath::FRandRange(PatrolRadius * 0.3f, PatrolRadius);
+    float X = HomeLocation.X + Radius * FMath::Cos(FMath::DegreesToRadians(Angle));
+    float Y = HomeLocation.Y + Radius * FMath::Sin(FMath::DegreesToRadians(Angle));
+    return FVector(X, Y, HomeLocation.Z);
+}
+
+FVector UNPCBehaviorComponent::GetFleeDirection() const
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return FVector::ForwardVector;
+
+    FVector OwnerLoc = Owner->GetActorLocation();
+
+    // Flee away from the most recent high-threat memory
+    FVector ThreatLocation = FVector::ZeroVector;
+    float   HighestThreat  = 0.0f;
+
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        float ThreatScore = static_cast<float>(Entry.ThreatLevel);
+        if (ThreatScore > HighestThreat)
+        {
+            HighestThreat  = ThreatScore;
+            ThreatLocation = Entry.LastKnownLocation;
+        }
+    }
+
+    if (HighestThreat > 0.0f)
+    {
+        FVector AwayDir = (OwnerLoc - ThreatLocation).GetSafeNormal();
+        return AwayDir;
+    }
+
+    // No memory — flee in a random direction
+    return FVector(FMath::FRandRange(-1.0f, 1.0f),
+                   FMath::FRandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
 }
