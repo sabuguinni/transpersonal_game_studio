@@ -1,7 +1,4 @@
-// TyrannosaurusRex.cpp — Implementation of ATyrannosaurusRex
-// Agent #3 — Core Systems Programmer
-
-#include "Dinosaurs/TyrannosaurusRex.h"
+#include "TyrannosaurusRex.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -12,201 +9,185 @@ ATyrannosaurusRex::ATyrannosaurusRex()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // --- Species identity ---
-    Species = EEng_DinosaurSpecies::TRex;
-    Diet = EEng_DinosaurDiet::Carnivore;
-    bIsAggressive = true;
-    bIsPackAnimal = false;
+    // T-Rex capsule — large predator
+    GetCapsuleComponent()->SetCapsuleHalfHeight(200.0f);
+    GetCapsuleComponent()->SetCapsuleRadius(80.0f);
 
-    // --- Stats: apex predator tier ---
-    DinoStats.MaxHealth = 2500.0f;
-    DinoStats.CurrentHealth = 2500.0f;
-    DinoStats.AttackDamage = 180.0f;
-    DinoStats.AttackRange = 250.0f;
-    DinoStats.MovementSpeed = 550.0f;
-    DinoStats.SprintSpeed = 900.0f;
-    DinoStats.BodyMass = 8000.0f;
-    DinoStats.MaxHunger = 200.0f;
-    DinoStats.CurrentHunger = 100.0f;
+    // Override base stats with T-Rex specific values
+    MaxHealth = 2000.0f;
+    CurrentHealth = 2000.0f;
+    AttackDamage = 150.0f;
+    AttackRange = 250.0f;
+    DetectionRadius = 5000.0f;
+    TerritoryRadius = 8000.0f;
+    WalkSpeed = 300.0f;
+    RunSpeed = 600.0f;
+    SprintSpeed = 800.0f;
+    Diet = EEng_DinoDiet::Carnivore;
+    Species = EEng_DinoSpecies::TyrannosaurusRex;
 
-    // --- Sensory: excellent sight, decent hearing, poor smell ---
-    SensoryData.SightRange = 4000.0f;
-    SensoryData.SightAngle = 120.0f;
-    SensoryData.HearingRange = 2500.0f;
-    SensoryData.SmellRange = 800.0f;
-    SensoryData.bIsNocturnal = false;
+    // T-Rex movement — heavy, powerful
+    GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
+    GetCharacterMovement()->Mass = 8000.0f;
+    GetCharacterMovement()->GroundFriction = 4.0f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 800.0f;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 90.0f, 0.0f);
+    GetCharacterMovement()->bOrientRotationToMovement = true;
 
-    // --- Capsule: large body ---
-    GetCapsuleComponent()->SetCapsuleRadius(120.0f);
-    GetCapsuleComponent()->SetCapsuleHalfHeight(220.0f);
+    // Scale — T-Rex is massive
+    SetActorScale3D(FVector(3.0f, 3.0f, 3.0f));
 
-    // --- Movement ---
-    GetCharacterMovement()->MaxWalkSpeed = DinoStats.MovementSpeed;
-    GetCharacterMovement()->JumpZVelocity = 0.0f;    // TRex cannot jump
-    GetCharacterMovement()->bCanWalkOffLedges = true;
-    GetCharacterMovement()->GravityScale = 1.2f;     // Heavy — falls faster
-
-    // --- Mesh offset for large body ---
-    if (GetMesh())
-    {
-        GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -220.0f));
-        GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-    }
-
-    // --- Roar / Stomp config ---
-    RoarCooldown = 45.0f;
-    TimeSinceLastRoar = RoarCooldown; // Ready to roar immediately
+    // Combat properties
     StompRadius = 400.0f;
-    StompDamage = 80.0f;
-    bIsFeeding = false;
-    FeedingDuration = 12.0f;
-    FeedingTimer = 0.0f;
+    StompDamage = 25.0f;
+    ChargeSpeedMultiplier = 1.5f;
+    ChargeCooldown = 8.0f;
+    bIsCharging = false;
+
+    // Audio
+    RoarSound = nullptr;
+
+    // Internal timers
+    LastChargeTime = -999.0f;
+    LastStompTime = 0.0f;
+    StompInterval = 2.0f; // stomp every 2 seconds while walking
 }
 
 void ATyrannosaurusRex::BeginPlay()
 {
+    // Call parent BeginPlay — initialises health, hunger, movement speed
     Super::BeginPlay();
 
-    // TRex starts in patrolling state
-    SetBehaviorState(EEng_DinosaurBehaviorState::Patrolling);
+    UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex spawned: Health=%.0f, Speed=%.0f, DetectionRadius=%.0f"),
+        CurrentHealth, RunSpeed, DetectionRadius);
 }
 
 void ATyrannosaurusRex::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Roar cooldown tracking
-    TimeSinceLastRoar += DeltaTime;
-
-    // Feeding timer
-    if (bIsFeeding)
+    // Apply stomp damage periodically while moving
+    if (BehaviorState == EEng_DinoBehaviorState::Hunt || BehaviorState == EEng_DinoBehaviorState::Aggressive)
     {
-        FeedingTimer += DeltaTime;
-        if (FeedingTimer >= FeedingDuration)
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastStompTime >= StompInterval)
         {
-            bIsFeeding = false;
-            FeedingTimer = 0.0f;
-            SetBehaviorState(EEng_DinosaurBehaviorState::Patrolling);
+            ApplyStompDamage();
+            LastStompTime = CurrentTime;
+        }
+    }
+
+    // Reset charge flag if not moving fast enough
+    if (bIsCharging)
+    {
+        float CurrentSpeed = GetVelocity().Size();
+        if (CurrentSpeed < RunSpeed * 0.5f)
+        {
+            bIsCharging = false;
+            GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
         }
     }
 }
 
-void ATyrannosaurusRex::PerformRoar()
+void ATyrannosaurusRex::OnPlayerDetected(APawn* DetectedPlayer)
 {
-    if (TimeSinceLastRoar < RoarCooldown)
+    // T-Rex always hunts — it's an apex carnivore
+    SetBehaviorState(EEng_DinoBehaviorState::Aggressive);
+
+    // Play roar sound at detection
+    if (RoarSound && GetWorld())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), RoarSound, GetActorLocation(), 1.5f);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("TyrannosaurusRex detected player %s — HUNTING!"),
+        *DetectedPlayer->GetName());
+
+    // Attempt charge if cooldown has elapsed
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastChargeTime >= ChargeCooldown)
+    {
+        StartCharge(DetectedPlayer);
+    }
+}
+
+void ATyrannosaurusRex::StartCharge(AActor* Target)
+{
+    if (!Target || !GetWorld())
+    {
+        return;
+    }
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastChargeTime < ChargeCooldown)
     {
         return; // Still on cooldown
     }
 
-    TimeSinceLastRoar = 0.0f;
+    bIsCharging = true;
+    LastChargeTime = CurrentTime;
 
-    // Apply fear to all nearby actors (player-facing: reduce stamina, increase fear stat)
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
+    // Boost speed during charge
+    float ChargeSpeed = RunSpeed * ChargeSpeedMultiplier;
+    GetCharacterMovement()->MaxWalkSpeed = ChargeSpeed;
 
-    const float RoarFearRadius = 2000.0f;
-    const FVector MyLocation = GetActorLocation();
+    UE_LOG(LogTemp, Warning, TEXT("TyrannosaurusRex CHARGING at %s! Speed=%.0f"),
+        *Target->GetName(), ChargeSpeed);
 
-    for (AActor* Actor : NearbyActors)
+    // Reset charge after 3 seconds
+    FTimerHandle ChargeTimer;
+    GetWorld()->GetTimerManager().SetTimer(ChargeTimer, [this]()
     {
-        if (Actor == this) continue;
+        bIsCharging = false;
+        GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
+        UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex charge ended"));
+    }, 3.0f, false);
+}
+
+void ATyrannosaurusRex::ApplyStompDamage()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    // Find all pawns within stomp radius
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), OverlappingActors);
+
+    FVector MyLocation = GetActorLocation();
+
+    for (AActor* Actor : OverlappingActors)
+    {
+        if (Actor == this)
+        {
+            continue;
+        }
 
         float Distance = FVector::Dist(MyLocation, Actor->GetActorLocation());
-        if (Distance <= RoarFearRadius)
+        if (Distance <= StompRadius)
         {
-            // Broadcast roar event — Blueprint/BehaviorTree can respond
-            // Player character will receive fear debuff via their SurvivalComponent
-            Actor->Tags.AddUnique(FName("TRexRoarAffected"));
+            // Apply stomp damage — falls off with distance
+            float DamageFalloff = 1.0f - (Distance / StompRadius);
+            float ActualDamage = StompDamage * DamageFalloff;
+
+            UGameplayStatics::ApplyDamage(Actor, ActualDamage, GetController(),
+                this, UDamageType::StaticClass());
+
+            UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex stomp hit %s for %.1f damage (dist=%.0f)"),
+                *Actor->GetName(), ActualDamage, Distance);
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex [%s] ROAR — affecting radius %.0f cm"), *GetName(), RoarFearRadius);
 }
 
-void ATyrannosaurusRex::PerformStompAttack()
+void ATyrannosaurusRex::Die()
 {
-    const FVector StompOrigin = GetActorLocation();
+    UE_LOG(LogTemp, Warning, TEXT("TyrannosaurusRex DIED — the apex predator has fallen!"));
 
-    // Sphere overlap for stomp damage
-    TArray<FOverlapResult> Overlaps;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
+    // Call parent die — enables ragdoll, disables movement
+    Super::Die();
 
-    bool bHit = GetWorld()->OverlapMultiByChannel(
-        Overlaps,
-        StompOrigin,
-        FQuat::Identity,
-        ECollisionChannel::ECC_Pawn,
-        FCollisionShape::MakeSphere(StompRadius),
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        for (const FOverlapResult& Overlap : Overlaps)
-        {
-            AActor* HitActor = Overlap.GetActor();
-            if (HitActor && HitActor != this)
-            {
-                UGameplayStatics::ApplyDamage(
-                    HitActor,
-                    StompDamage,
-                    GetController(),
-                    this,
-                    UDamageType::StaticClass()
-                );
-            }
-        }
-    }
-
-    // Debug visualization in editor
-#if WITH_EDITOR
-    DrawDebugSphere(GetWorld(), StompOrigin, StompRadius, 16, FColor::Orange, false, 2.0f);
-#endif
-
-    UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex [%s] STOMP — radius %.0f, damage %.0f"), *GetName(), StompRadius, StompDamage);
-}
-
-void ATyrannosaurusRex::OnTargetDetected_Implementation(AActor* Target)
-{
-    // Call parent implementation
-    Super::OnTargetDetected_Implementation(Target);
-
-    // Roar on detection if cooldown expired
-    if (TimeSinceLastRoar >= RoarCooldown)
-    {
-        PerformRoar();
-    }
-
-    // Immediately switch to hunting
-    SetBehaviorState(EEng_DinosaurBehaviorState::Hunting);
-
-    UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex [%s] detected target [%s] — HUNTING"), *GetName(), *Target->GetName());
-}
-
-void ATyrannosaurusRex::OnDeath_Implementation()
-{
-    // TRex death — enter feeding state briefly before ragdoll
-    bIsFeeding = false; // Already dead, no feeding
-
-    // Broadcast death to nearby creatures (they may flee)
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADinosaurBase::StaticClass(), NearbyActors);
-
-    const FVector MyLocation = GetActorLocation();
-    for (AActor* Actor : NearbyActors)
-    {
-        if (Actor == this) continue;
-        float Distance = FVector::Dist(MyLocation, Actor->GetActorLocation());
-        if (Distance <= 3000.0f)
-        {
-            // Tag nearby dinos — BehaviorTree can pick this up and trigger flee
-            Actor->Tags.AddUnique(FName("TRexDeathNearby"));
-        }
-    }
-
-    // Call parent (handles ragdoll, mesh collision, etc.)
-    Super::OnDeath_Implementation();
-
-    UE_LOG(LogTemp, Log, TEXT("TyrannosaurusRex [%s] DIED — nearby creatures alerted"), *GetName());
+    // T-Rex death causes a ground shake (screen shake would be added via camera manager)
+    // Apply final stomp damage as death throes
+    ApplyStompDamage();
 }
