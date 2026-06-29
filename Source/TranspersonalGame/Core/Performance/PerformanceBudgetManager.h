@@ -1,158 +1,155 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "PerformanceBudgetManager.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums & Structs — must be at global scope (UHT rule)
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * FPerf_BudgetSnapshot — per-frame performance snapshot
+ * Prefix: Perf_ (Agent #04 namespace — prevents ODR collision)
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_BudgetSnapshot
+{
+    GENERATED_BODY()
 
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTimeMs = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GameThreadMs = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float RenderThreadMs = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUTimeMs = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCallCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 TriangleCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TextureMemoryMB = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bIsOverBudget = false;
+};
+
+/**
+ * EPerf_QualityTier — scalability quality tiers
+ * Prefix: Perf_ (Agent #04 namespace)
+ */
 UENUM(BlueprintType)
 enum class EPerf_QualityTier : uint8
 {
-    Low      UMETA(DisplayName = "Low (30fps Console)"),
-    Medium   UMETA(DisplayName = "Medium (45fps)"),
-    High     UMETA(DisplayName = "High (60fps PC)"),
-    Ultra    UMETA(DisplayName = "Ultra (120fps)"),
+    Low        UMETA(DisplayName = "Low (Console 30fps)"),
+    Medium     UMETA(DisplayName = "Medium (Console 60fps)"),
+    High       UMETA(DisplayName = "High (PC 60fps)"),
+    Ultra      UMETA(DisplayName = "Ultra (PC 60fps+ High-End)"),
+    Cinematic  UMETA(DisplayName = "Cinematic (Offline/Screenshot)")
 };
 
-UENUM(BlueprintType)
-enum class EPerf_BudgetStatus : uint8
-{
-    OK          UMETA(DisplayName = "Within Budget"),
-    Warning     UMETA(DisplayName = "Near Limit"),
-    OverBudget  UMETA(DisplayName = "Over Budget"),
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_FrameBudget
-{
-    GENERATED_BODY()
-
-    /** Target frame time in milliseconds (16.67ms = 60fps, 33.33ms = 30fps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameTimeMs = 16.67f;
-
-    /** Maximum dynamic lights allowed in scene */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDynamicLights = 4;
-
-    /** Maximum draw calls per frame */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDrawCalls = 2000;
-
-    /** Maximum triangles per frame (millions) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxTrianglesMillion = 3.0f;
-
-    /** Maximum shadow-casting lights */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxShadowCasters = 2;
-
-    /** Minimum LOD screen size threshold */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinLODScreenSize = 0.0002f;
-};
-
-USTRUCT(BlueprintType)
-struct FPerf_RuntimeStats
-{
-    GENERATED_BODY()
-
-    /** Current frame time in ms (smoothed over 30 frames) */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float SmoothedFrameTimeMs = 0.0f;
-
-    /** Current dynamic light count in scene */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DynamicLightCount = 0;
-
-    /** Current visible actor count */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VisibleActorCount = 0;
-
-    /** Overall budget status */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EPerf_BudgetStatus BudgetStatus = EPerf_BudgetStatus::OK;
-
-    /** Frames since last budget violation */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 FramesSinceViolation = 0;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// APerf_BudgetManager — world actor that enforces frame budgets at runtime
-// ─────────────────────────────────────────────────────────────────────────────
-
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Budget Manager"))
-class TRANSPERSONALGAME_API APerf_BudgetManager : public AActor
+/**
+ * UPerformanceBudgetManager — World Subsystem
+ * 
+ * Monitors frame budget and dynamically adjusts quality settings
+ * to maintain target FPS (60 PC / 30 console).
+ * 
+ * Frame budgets:
+ *   60fps target = 16.67ms total
+ *   30fps target = 33.33ms total
+ *   Game thread budget: 8ms (60fps) / 16ms (30fps)
+ *   Render thread budget: 8ms (60fps) / 16ms (30fps)
+ *   GPU budget: 14ms (60fps) / 28ms (30fps)
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UPerformanceBudgetManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    APerf_BudgetManager();
+    // UWorldSubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // --- Frame Budget Queries ---
 
-    // ── Budget Configuration ──
+    /** Returns the most recent performance snapshot */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_BudgetSnapshot GetCurrentSnapshot() const;
 
-    /** Frame budget for current quality tier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget FrameBudget;
+    /** Returns true if the last frame exceeded the target frame time */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsOverBudget() const;
 
-    /** Active quality tier — drives budget thresholds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    EPerf_QualityTier QualityTier = EPerf_QualityTier::High;
+    /** Returns current FPS (smoothed over 30 frames) */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetSmoothedFPS() const;
 
-    /** How often (seconds) to run the full budget audit */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget", meta = (ClampMin = "0.1", ClampMax = "5.0"))
-    float AuditIntervalSeconds = 1.0f;
+    /** Returns target frame time in ms (16.67 for 60fps, 33.33 for 30fps) */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetTargetFrameTimeMs() const;
 
-    // ── Runtime Stats (read-only) ──
+    // --- Quality Tier Management ---
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats")
-    FPerf_RuntimeStats RuntimeStats;
-
-    // ── Public API ──
-
-    /** Set quality tier and update budget thresholds accordingly */
+    /** Set the active quality tier — applies console commands immediately */
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void SetQualityTier(EPerf_QualityTier NewTier);
 
-    /** Force an immediate budget audit — returns current status */
+    /** Returns the currently active quality tier */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_BudgetStatus RunBudgetAudit();
+    EPerf_QualityTier GetCurrentQualityTier() const { return CurrentQualityTier; }
 
-    /** Returns true if scene is within all budget limits */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    bool IsWithinBudget() const;
+    /** Enable/disable dynamic quality scaling (auto-adjusts tier based on FPS) */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetDynamicQualityEnabled(bool bEnabled);
 
-    /** Get recommended LOD bias for current performance state */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    float GetRecommendedLODBias() const;
+    // --- Budget Configuration ---
 
-    /** Apply console variable overrides for current quality tier */
+    /** Set target FPS (default: 60 on PC, 30 on console) */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetTargetFPS(int32 InTargetFPS);
+
+    /** Returns target FPS */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetTargetFPS() const { return TargetFPS; }
+
+    // --- Diagnostics ---
+
+    /** Log full performance report to output log */
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void ApplyQualityConsoleVars();
+    void LogPerformanceReport() const;
 
-    /** Log current performance stats to output log */
+    /** Apply all performance console commands for current tier */
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void LogPerformanceStats() const;
+    void ApplyQualityTierCommands();
 
 private:
-    // ── Internal ──
+    // Current state
+    FPerf_BudgetSnapshot CurrentSnapshot;
+    EPerf_QualityTier CurrentQualityTier = EPerf_QualityTier::High;
+    int32 TargetFPS = 60;
+    bool bDynamicQualityEnabled = true;
 
-    float TimeSinceLastAudit = 0.0f;
+    // FPS smoothing ring buffer
+    static constexpr int32 FPS_SAMPLE_COUNT = 30;
+    TArray<float> FPSSamples;
+    int32 FPSSampleIndex = 0;
 
-    /** Smoothed frame time accumulator (ring buffer of 30 samples) */
-    TArray<float> FrameTimeSamples;
-    int32 FrameSampleIndex = 0;
-    static constexpr int32 FrameSampleCount = 30;
+    // Timer handle for periodic budget checks
+    FTimerHandle BudgetCheckTimer;
 
-    void UpdateFrameTimeSamples(float DeltaTime);
-    void UpdateDynamicLightCount();
-    void ApplyBudgetThresholdsForTier(EPerf_QualityTier Tier, FPerf_FrameBudget& OutBudget) const;
+    // Internal methods
+    void TickBudgetCheck();
+    void UpdateFPSSamples(float DeltaTime);
+    void AutoAdjustQuality();
+    void ApplyLowQualitySettings();
+    void ApplyMediumQualitySettings();
+    void ApplyHighQualitySettings();
+    void ApplyUltraQualitySettings();
     void ExecuteConsoleCommand(const FString& Command) const;
 };
