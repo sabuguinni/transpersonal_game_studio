@@ -1,6 +1,7 @@
 // TRexCharacter.h
-// Core Systems Programmer #03 — Cycle AUTO_20260629_004
-// Tyrannosaurus Rex — apex predator species implementation
+// Transpersonal Game Studio — Core Systems Programmer (Agent #3)
+// Cycle: PROD_CYCLE_AUTO_20260629_009
+// Tyrannosaurus Rex — apex predator concrete subclass of DinosaurBase
 
 #pragma once
 
@@ -10,15 +11,9 @@
 
 /**
  * ATRexCharacter
- * Tyrannosaurus Rex — the apex predator of the prehistoric world.
- * Inherits all base dinosaur behavior from ADinosaurBase.
- * Species-specific: massive size, high damage, large territory, slow but devastating.
- *
- * Stats (realistic approximation):
- *   Mass: ~8000 kg | Length: ~12m | Speed: ~20 km/h (550 UU/s)
- *   Bite force: ~57,000 N (highest of any land predator)
- *   Vision: binocular forward-facing, motion-sensitive
- *   Hearing: excellent low-frequency detection
+ * Concrete implementation of the Tyrannosaurus Rex.
+ * Apex predator with high health, devastating attack damage, and territorial aggression.
+ * Inherits all survival loops (hunger drain, stamina regen) from ADinosaurBase.
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
 class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
@@ -28,72 +23,74 @@ class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 public:
     ATRexCharacter();
 
-    // --- Species-specific overrides ---
-
-    /** Called when TRex detects prey — triggers charge sequence */
-    UFUNCTION(BlueprintNativeEvent, Category = "TRex|Combat")
-    void OnPreyDetected(AActor* PreyActor);
-    virtual void OnPreyDetected_Implementation(AActor* PreyActor);
-
-    /** Roar ability — stuns nearby prey, triggers fear response in other dinosaurs */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
-    void PerformRoar();
-
-    /** Charge attack — brief speed boost toward target */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void InitiateCharge(AActor* Target);
-
-    /** Returns true if TRex is currently in charge state */
-    UFUNCTION(BlueprintPure, Category = "TRex|State")
-    bool IsCharging() const { return bIsCharging; }
-
-    // --- Overridden base behavior ---
-    virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
-        AController* EventInstigator, AActor* DamageCauser) override;
-
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    /** Roar radius — all prey within this range receive fear debuff */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
-        meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float RoarRadius;
+    // --- Species-Specific Overrides ---
 
-    /** Roar fear duration in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
-        meta = (ClampMin = "1.0", ClampMax = "30.0"))
-    float RoarFearDuration;
+    /** TRex roar — alerts nearby prey, triggers fear response on player */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void PerformRoar();
 
-    /** Charge speed multiplier (applied to base MaxWalkSpeed) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-        meta = (ClampMin = "1.0", ClampMax = "3.0"))
-    float ChargeSpeedMultiplier;
+    /** Stomp attack — area-of-effect ground slam dealing 80% of AttackDamage in radius */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void PerformStompAttack();
 
-    /** Charge duration in seconds before returning to normal speed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat",
-        meta = (ClampMin = "0.5", ClampMax = "5.0"))
-    float ChargeDuration;
+    /** Called when TRex detects prey — initiates charge sequence */
+    virtual void OnAlerted() override;
 
-    /** Cooldown between roars in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities",
-        meta = (ClampMin = "5.0", ClampMax = "120.0"))
-    float RoarCooldown;
+    /** Called when TRex health drops below 30% — enters enraged state */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void EnterEnragedState();
 
-    /** Current charge target */
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
-        meta = (AllowPrivateAccess = "true"))
-    TWeakObjectPtr<AActor> ChargeTarget;
+    // --- TRex-Specific Properties ---
 
-private:
-    bool bIsCharging;
-    bool bRoarOnCooldown;
-    float ChargeElapsed;
-    float BaseWalkSpeed;
+    /** Radius of stomp AoE attack in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompRadius = 350.0f;
 
-    FTimerHandle ChargeTimerHandle;
-    FTimerHandle RoarCooldownHandle;
+    /** Stomp damage multiplier relative to base AttackDamage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompDamageMultiplier = 0.8f;
 
-    void EndCharge();
+    /** Roar radius — prey within this range receive fear debuff */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
+    float RoarRadius = 1500.0f;
+
+    /** Fear intensity applied to player on roar (0-1 scale) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
+    float RoarFearIntensity = 0.75f;
+
+    /** Speed multiplier when enraged (health < 30%) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
+    float EnragedSpeedMultiplier = 1.4f;
+
+    /** Is TRex currently in enraged state? */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    bool bIsEnraged = false;
+
+    /** Cooldown between roar events in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
+    float RoarCooldown = 12.0f;
+
+    /** Time since last roar */
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
+    float TimeSinceLastRoar = 0.0f;
+
+    /** Charge speed when sprinting toward prey */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
+    float ChargeSpeed = 1100.0f;
+
+protected:
+    /** Timer handle for roar cooldown tracking */
+    FTimerHandle RoarCooldownTimer;
+
+    /** Whether roar is currently on cooldown */
+    bool bRoarOnCooldown = false;
+
+    /** Reset roar cooldown */
     void ResetRoarCooldown();
+
+    /** Check enrage threshold each tick */
+    void CheckEnrageThreshold();
 };
