@@ -1,198 +1,179 @@
 #include "BiomeManager.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 #include "Math/UnrealMathUtility.h"
 
 ABiomeManager::ABiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 1.0f; // Check biomes once per second max
+    PrimaryActorTick.bCanEverTick = false;
+    bAutoInitializeOnBeginPlay = true;
+    BiomeTransitionBlendRadius = 500.0f;
 }
 
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeBiomeData();
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome zones, %d biome types"),
-        BiomeZones.Num(), BiomeDataMap.Num());
+
+    if (bAutoInitializeOnBeginPlay && BiomeZones.Num() == 0)
+    {
+        InitializeDefaultBiomes();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biome zones"), BiomeZones.Num());
 }
 
 void ABiomeManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (bShowDebugBiomes)
-    {
-        DrawBiomeBoundaries();
-    }
 }
 
-void ABiomeManager::InitializeBiomeData()
+void ABiomeManager::InitializeDefaultBiomes()
 {
-    // Forest biome — dense Cretaceous jungle
-    FEng_BiomeData ForestData;
-    ForestData.BiomeType = EEng_BiomeType::Forest;
-    ForestData.BiomeName = TEXT("Cretaceous Forest");
-    ForestData.Temperature = 28.0f;
-    ForestData.Humidity = 0.85f;
-    ForestData.FoliageDensity = 0.9f;
-    ForestData.DinosaurSpawnWeight = 1.2f;
-    ForestData.BiomeDebugColor = FLinearColor(0.0f, 0.8f, 0.2f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Forest, ForestData);
+    BiomeZones.Empty();
 
-    // Savanna biome — open grassland with scattered trees
-    FEng_BiomeData SavannaData;
-    SavannaData.BiomeType = EEng_BiomeType::Savanna;
-    SavannaData.BiomeName = TEXT("Open Savanna");
-    SavannaData.Temperature = 35.0f;
-    SavannaData.Humidity = 0.3f;
-    SavannaData.FoliageDensity = 0.3f;
-    SavannaData.DinosaurSpawnWeight = 1.5f;
-    SavannaData.BiomeDebugColor = FLinearColor(0.8f, 0.6f, 0.1f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Savanna, SavannaData);
+    // River Delta — center of map
+    {
+        FWorld_BiomeZone Zone;
+        Zone.BiomeType = EWorld_BiomeType::RiverDelta;
+        Zone.BiomeName = TEXT("River Delta");
+        Zone.Center = FVector(0.0f, 0.0f, -180.0f);
+        Zone.Radius = 1500.0f;
+        Zone.AmbientTemperature = 28.0f;
+        Zone.Humidity = 0.85f;
+        Zone.DangerLevel = 0.4f;
+        BiomeZones.Add(Zone);
+    }
 
-    // Wetland biome — river delta, marshes
-    FEng_BiomeData WetlandData;
-    WetlandData.BiomeType = EEng_BiomeType::Wetland;
-    WetlandData.BiomeName = TEXT("River Wetland");
-    WetlandData.Temperature = 26.0f;
-    WetlandData.Humidity = 0.95f;
-    WetlandData.FoliageDensity = 0.7f;
-    WetlandData.DinosaurSpawnWeight = 0.8f;
-    WetlandData.BiomeDebugColor = FLinearColor(0.2f, 0.5f, 0.9f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Wetland, WetlandData);
+    // Jungle Lowland — northwest quadrant
+    {
+        FWorld_BiomeZone Zone;
+        Zone.BiomeType = EWorld_BiomeType::JungleLowland;
+        Zone.BiomeName = TEXT("Jungle Lowland");
+        Zone.Center = FVector(-3000.0f, 2000.0f, 0.0f);
+        Zone.Radius = 2500.0f;
+        Zone.AmbientTemperature = 32.0f;
+        Zone.Humidity = 0.95f;
+        Zone.DangerLevel = 0.7f;
+        BiomeZones.Add(Zone);
+    }
 
-    // Volcanic biome — ash plains, lava fields
-    FEng_BiomeData VolcanicData;
-    VolcanicData.BiomeType = EEng_BiomeType::Volcanic;
-    VolcanicData.BiomeName = TEXT("Volcanic Badlands");
-    VolcanicData.Temperature = 55.0f;
-    VolcanicData.Humidity = 0.05f;
-    VolcanicData.FoliageDensity = 0.05f;
-    VolcanicData.DinosaurSpawnWeight = 0.4f;
-    VolcanicData.BiomeDebugColor = FLinearColor(0.6f, 0.3f, 0.1f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Volcanic, VolcanicData);
+    // Rocky Highland — east quadrant
+    {
+        FWorld_BiomeZone Zone;
+        Zone.BiomeType = EWorld_BiomeType::RockyHighland;
+        Zone.BiomeName = TEXT("Rocky Highland");
+        Zone.Center = FVector(3600.0f, -2000.0f, 200.0f);
+        Zone.Radius = 2000.0f;
+        Zone.AmbientTemperature = 18.0f;
+        Zone.Humidity = 0.25f;
+        Zone.DangerLevel = 0.5f;
+        BiomeZones.Add(Zone);
+    }
 
-    // Plains biome — open flat terrain, high visibility
-    FEng_BiomeData PlainsData;
-    PlainsData.BiomeType = EEng_BiomeType::Plains;
-    PlainsData.BiomeName = TEXT("Open Plains");
-    PlainsData.Temperature = 30.0f;
-    PlainsData.Humidity = 0.4f;
-    PlainsData.FoliageDensity = 0.2f;
-    PlainsData.DinosaurSpawnWeight = 2.0f; // High dinosaur density on plains
-    PlainsData.BiomeDebugColor = FLinearColor(0.9f, 0.9f, 0.8f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Plains, PlainsData);
+    // Volcanic Badland — far east
+    {
+        FWorld_BiomeZone Zone;
+        Zone.BiomeType = EWorld_BiomeType::VolcanicBadland;
+        Zone.BiomeName = TEXT("Volcanic Badland");
+        Zone.Center = FVector(5200.0f, -3200.0f, 0.0f);
+        Zone.Radius = 1800.0f;
+        Zone.AmbientTemperature = 55.0f;
+        Zone.Humidity = 0.05f;
+        Zone.DangerLevel = 0.9f;
+        BiomeZones.Add(Zone);
+    }
 
-    // Coastal biome — shoreline, tidal flats
-    FEng_BiomeData CoastalData;
-    CoastalData.BiomeType = EEng_BiomeType::Coastal;
-    CoastalData.BiomeName = TEXT("Coastal Shore");
-    CoastalData.Temperature = 24.0f;
-    CoastalData.Humidity = 0.7f;
-    CoastalData.FoliageDensity = 0.4f;
-    CoastalData.DinosaurSpawnWeight = 0.6f;
-    CoastalData.BiomeDebugColor = FLinearColor(0.3f, 0.7f, 1.0f, 1.0f);
-    BiomeDataMap.Add(EEng_BiomeType::Coastal, CoastalData);
+    // Open Plains — south quadrant
+    {
+        FWorld_BiomeZone Zone;
+        Zone.BiomeType = EWorld_BiomeType::OpenPlains;
+        Zone.BiomeName = TEXT("Open Plains");
+        Zone.Center = FVector(0.0f, -4000.0f, 0.0f);
+        Zone.Radius = 3000.0f;
+        Zone.AmbientTemperature = 24.0f;
+        Zone.Humidity = 0.35f;
+        Zone.DangerLevel = 0.3f;
+        BiomeZones.Add(Zone);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Default biomes initialized — %d zones"), BiomeZones.Num());
 }
 
-EEng_BiomeType ABiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+EWorld_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    int32 Idx = FindNearestBiomeIndex(WorldLocation);
+    if (Idx >= 0 && Idx < BiomeZones.Num())
+    {
+        return BiomeZones[Idx].BiomeType;
+    }
+    return EWorld_BiomeType::Unknown;
+}
+
+bool ABiomeManager::GetBiomeZoneAtLocation(const FVector& WorldLocation, FWorld_BiomeZone& OutZone) const
+{
+    int32 Idx = FindNearestBiomeIndex(WorldLocation);
+    if (Idx >= 0 && Idx < BiomeZones.Num())
+    {
+        const FWorld_BiomeZone& Zone = BiomeZones[Idx];
+        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
+        if (Dist <= Zone.Radius + BiomeTransitionBlendRadius)
+        {
+            OutZone = Zone;
+            return true;
+        }
+    }
+    return false;
+}
+
+float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    FWorld_BiomeZone Zone;
+    if (GetBiomeZoneAtLocation(WorldLocation, Zone))
+    {
+        return Zone.AmbientTemperature;
+    }
+    return 22.0f; // Default ambient temperature
+}
+
+float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
+{
+    FWorld_BiomeZone Zone;
+    if (GetBiomeZoneAtLocation(WorldLocation, Zone))
+    {
+        return Zone.DangerLevel;
+    }
+    return 0.2f; // Default low danger
+}
+
+void ABiomeManager::RegisterBiomeZone(const FWorld_BiomeZone& Zone)
+{
+    BiomeZones.Add(Zone);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered new biome zone '%s'"), *Zone.BiomeName);
+}
+
+TArray<FWorld_BiomeZone> ABiomeManager::GetAllBiomeZones() const
+{
+    return BiomeZones;
+}
+
+int32 ABiomeManager::FindNearestBiomeIndex(const FVector& WorldLocation) const
 {
     if (BiomeZones.Num() == 0)
     {
-        // Fallback: classify by noise/position when no zones registered
-        return ClassifyLocationByNoise(WorldLocation);
+        return -1;
     }
 
-    float ClosestDist = FLT_MAX;
-    EEng_BiomeType ClosestBiome = EEng_BiomeType::Plains;
+    int32 NearestIdx = 0;
+    float NearestDist = FVector::Dist2D(WorldLocation, BiomeZones[0].Center);
 
-    for (const FEng_BiomeZone& Zone : BiomeZones)
+    for (int32 i = 1; i < BiomeZones.Num(); i++)
     {
-        float Dist = FVector::Dist2D(WorldLocation, Zone.Center);
-        if (Dist <= Zone.Radius && Dist < ClosestDist)
+        float Dist = FVector::Dist2D(WorldLocation, BiomeZones[i].Center);
+        if (Dist < NearestDist)
         {
-            ClosestDist = Dist;
-            ClosestBiome = Zone.BiomeType;
+            NearestDist = Dist;
+            NearestIdx = i;
         }
     }
 
-    return ClosestBiome;
-}
-
-FEng_BiomeData ABiomeManager::GetBiomeDataAtLocation(FVector WorldLocation) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    return GetBiomeDataByType(BiomeType);
-}
-
-FEng_BiomeData ABiomeManager::GetBiomeDataByType(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeData* Data = BiomeDataMap.Find(BiomeType);
-    if (Data)
-    {
-        return *Data;
-    }
-
-    // Return default Plains data if type not found
-    FEng_BiomeData DefaultData;
-    DefaultData.BiomeType = EEng_BiomeType::Plains;
-    DefaultData.BiomeName = TEXT("Default Plains");
-    return DefaultData;
-}
-
-void ABiomeManager::RegisterBiomeZone(FVector Center, float Radius, EEng_BiomeType BiomeType)
-{
-    FEng_BiomeZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    NewZone.BiomeType = BiomeType;
-    BiomeZones.Add(NewZone);
-
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered zone '%s' at (%.0f, %.0f) radius=%.0f"),
-        *UEnum::GetValueAsString(BiomeType), Center.X, Center.Y, Radius);
-}
-
-int32 ABiomeManager::GetBiomeZoneCount() const
-{
-    return BiomeZones.Num();
-}
-
-void ABiomeManager::DrawBiomeBoundaries()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    for (const FEng_BiomeZone& Zone : BiomeZones)
-    {
-        const FEng_BiomeData* Data = BiomeDataMap.Find(Zone.BiomeType);
-        FColor DebugColor = FColor::White;
-        if (Data)
-        {
-            DebugColor = FColor(
-                (uint8)(Data->BiomeDebugColor.R * 255),
-                (uint8)(Data->BiomeDebugColor.G * 255),
-                (uint8)(Data->BiomeDebugColor.B * 255),
-                255
-            );
-        }
-
-        DrawDebugCircle(World, Zone.Center, Zone.Radius, 32, DebugColor,
-            false, 2.0f, 0, 5.0f, FVector(0,0,1), FVector(1,0,0));
-    }
-}
-
-EEng_BiomeType ABiomeManager::ClassifyLocationByNoise(FVector WorldLocation) const
-{
-    // Simple deterministic classification based on world position
-    // Used when no zones are registered (fallback for early development)
-    float X = WorldLocation.X;
-    float Y = WorldLocation.Y;
-
-    // Quadrant-based classification for MinPlayableMap
-    if (X > 300.0f && Y > -200.0f)  return EEng_BiomeType::Forest;
-    if (X < -300.0f && Y > 200.0f)  return EEng_BiomeType::Savanna;
-    if (FMath::Abs(Y) > 600.0f)     return EEng_BiomeType::Wetland;
-    if (X > 600.0f && Y < -200.0f)  return EEng_BiomeType::Volcanic;
-    if (X < -200.0f && Y < -400.0f) return EEng_BiomeType::Coastal;
-    return EEng_BiomeType::Plains;
+    return NearestIdx;
 }
