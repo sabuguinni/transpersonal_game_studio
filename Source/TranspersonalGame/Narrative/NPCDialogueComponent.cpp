@@ -1,254 +1,314 @@
 // NPCDialogueComponent.cpp
 // Agent #15 — Narrative & Dialogue Agent
-// Full implementation of NPC social dynamics and dialogue system
+// Implements contextual NPC dialogue system for prehistoric survival game
 
 #include "NPCDialogueComponent.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-
-// ─── Constructor ──────────────────────────────────────────────────────────────
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 UNPCDialogueComponent::UNPCDialogueComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check every second, not every frame
+    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5s for performance
 
-    NPCName = TEXT("Unknown");
+    NPCName = FText::FromString(TEXT("Unknown"));
     NPCRole = ENarr_NPCRole::Hunter;
-    TribeName = TEXT("Valley Tribe");
-
     CurrentRelationship = ENarr_NPCRelationship::Neutral;
-    RelationshipScore = 50.0f;
-    RelationshipScoreMax = 100.0f;
-
     DialogueTriggerRadius = 400.0f;
-    bCanSpeak = true;
-    bHasMetPlayer = false;
-    LastDialogueTime = -999.0f;
-    LastSpokenLine = TEXT("");
+    bIsInDialogue = false;
+    bHasGreeted = false;
+    LastTrigger = ENarr_DialogueTrigger::PlayerApproach;
+    DialogueCooldownSeconds = 30.0f;
+    bCooldownActive = false;
+    TrustPoints = 0;
+    InteractionCount = 0;
 }
-
-// ─── BeginPlay ────────────────────────────────────────────────────────────────
 
 void UNPCDialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Seed default knowledge based on role
-    switch (NPCRole)
-    {
-        case ENarr_NPCRole::Scout:
-            AddKnowledge(TEXT("territory_safe"), TEXT("Eastern ridge — safe for 2 days"));
-            AddKnowledge(TEXT("water_source"), TEXT("River bend 300 paces north"));
-            break;
-        case ENarr_NPCRole::Tracker:
-            AddKnowledge(TEXT("predator_tracks"), TEXT("TRex tracks near salt flats — 1 day old"));
-            AddKnowledge(TEXT("herd_direction"), TEXT("Brachiosaurus herd moving north-east"));
-            break;
-        case ENarr_NPCRole::Elder:
-            AddKnowledge(TEXT("migration_pattern"), TEXT("Great herds come every dry season"));
-            AddKnowledge(TEXT("danger_season"), TEXT("Raptors nest in valley during wet season"));
-            break;
-        case ENarr_NPCRole::Hunter:
-            AddKnowledge(TEXT("hunting_ground"), TEXT("Salt flats — good ambush terrain"));
-            AddKnowledge(TEXT("prey_weakness"), TEXT("Herbivores slow at river crossings"));
-            break;
-        default:
-            break;
-    }
-
-    UpdateRelationshipTier();
+    
+    // Populate dialogue lines based on role
+    InitialiseDialogueLines();
 }
-
-// ─── TickComponent ────────────────────────────────────────────────────────────
 
 void UNPCDialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    // Tick is intentionally lightweight — dialogue triggers are event-driven
-    // Future: proximity check to player for auto-trigger
-}
 
-// ─── TryTriggerDialogue ───────────────────────────────────────────────────────
-
-bool UNPCDialogueComponent::TryTriggerDialogue(ENarr_DialogueTrigger Trigger)
-{
-    if (!bCanSpeak)
+    if (bCooldownActive || bIsInDialogue)
     {
-        return false;
+        return;
     }
 
-    TArray<FNarr_DialogueLine> Available = GetAvailableLines(Trigger);
-    if (Available.Num() == 0)
+    // Check for player proximity
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
-        return false;
+        return;
     }
 
-    // Pick a random available line
-    int32 Index = FMath::RandRange(0, Available.Num() - 1);
-    const FNarr_DialogueLine& ChosenLine = Available[Index];
-
-    LastSpokenLine = ChosenLine.LineText.ToString();
-
-    UWorld* World = GetWorld();
-    if (World)
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        LastDialogueTime = World->GetTimeSeconds();
-        LastTriggerTimes.Add(Trigger, LastDialogueTime);
+        return;
     }
 
-    // Mark one-time lines as spoken
-    for (int32 i = 0; i < DialogueLines.Num(); i++)
+    float DistanceToPlayer = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
+
+    if (DistanceToPlayer <= DialogueTriggerRadius)
     {
-        if (DialogueLines[i].LineText.EqualTo(ChosenLine.LineText) && DialogueLines[i].bOneTimeOnly)
+        if (!bHasGreeted)
         {
-            SpokenOneTimeLines.Add(i);
-            break;
+            TriggerDialogue(ENarr_DialogueTrigger::PlayerApproach);
+            bHasGreeted = true;
         }
     }
-
-    // First meeting bonus
-    if (Trigger == ENarr_DialogueTrigger::PlayerFirstMeet && !bHasMetPlayer)
-    {
-        MarkPlayerMet();
-    }
-
-    return true;
-}
-
-// ─── ModifyRelationship ───────────────────────────────────────────────────────
-
-void UNPCDialogueComponent::ModifyRelationship(float Delta)
-{
-    RelationshipScore = FMath::Clamp(RelationshipScore + Delta, 0.0f, RelationshipScoreMax);
-    UpdateRelationshipTier();
-}
-
-// ─── GetRelationshipTier ──────────────────────────────────────────────────────
-
-ENarr_NPCRelationship UNPCDialogueComponent::GetRelationshipTier() const
-{
-    return CurrentRelationship;
-}
-
-// ─── AddKnowledge ─────────────────────────────────────────────────────────────
-
-void UNPCDialogueComponent::AddKnowledge(const FString& Key, const FString& Value)
-{
-    // Update if key exists
-    for (FNarr_NPCKnowledge& K : KnowledgeBase)
-    {
-        if (K.KnowledgeKey == Key)
-        {
-            K.KnowledgeValue = Value;
-            UWorld* World = GetWorld();
-            K.AcquiredAtTime = World ? World->GetTimeSeconds() : 0.0f;
-            return;
-        }
-    }
-
-    // Add new entry
-    FNarr_NPCKnowledge NewKnowledge;
-    NewKnowledge.KnowledgeKey = Key;
-    NewKnowledge.KnowledgeValue = Value;
-    UWorld* World = GetWorld();
-    NewKnowledge.AcquiredAtTime = World ? World->GetTimeSeconds() : 0.0f;
-    NewKnowledge.bSharedWithPlayer = false;
-    KnowledgeBase.Add(NewKnowledge);
-}
-
-// ─── GetKnowledge ─────────────────────────────────────────────────────────────
-
-FString UNPCDialogueComponent::GetKnowledge(const FString& Key) const
-{
-    for (const FNarr_NPCKnowledge& K : KnowledgeBase)
-    {
-        if (K.KnowledgeKey == Key)
-        {
-            return K.KnowledgeValue;
-        }
-    }
-    return TEXT("");
-}
-
-// ─── GetAvailableLines ────────────────────────────────────────────────────────
-
-TArray<FNarr_DialogueLine> UNPCDialogueComponent::GetAvailableLines(ENarr_DialogueTrigger Trigger) const
-{
-    TArray<FNarr_DialogueLine> Result;
-
-    for (int32 i = 0; i < DialogueLines.Num(); i++)
-    {
-        const FNarr_DialogueLine& Line = DialogueLines[i];
-
-        // Wrong trigger
-        if (Line.Trigger != Trigger) continue;
-
-        // Relationship too low
-        if (static_cast<uint8>(CurrentRelationship) < static_cast<uint8>(Line.MinRelationship)) continue;
-
-        // Already spoken (one-time)
-        if (Line.bOneTimeOnly && SpokenOneTimeLines.Contains(i)) continue;
-
-        // On cooldown
-        if (!IsLineCooledDown(Line, Trigger)) continue;
-
-        Result.Add(Line);
-    }
-
-    return Result;
-}
-
-// ─── MarkPlayerMet ────────────────────────────────────────────────────────────
-
-void UNPCDialogueComponent::MarkPlayerMet()
-{
-    if (!bHasMetPlayer)
-    {
-        bHasMetPlayer = true;
-        // Small relationship boost on first meeting
-        ModifyRelationship(5.0f);
-    }
-}
-
-// ─── CanTriggerDialogue ───────────────────────────────────────────────────────
-
-bool UNPCDialogueComponent::CanTriggerDialogue(ENarr_DialogueTrigger Trigger) const
-{
-    if (!bCanSpeak) return false;
-    return GetAvailableLines(Trigger).Num() > 0;
-}
-
-// ─── UpdateRelationshipTier ───────────────────────────────────────────────────
-
-void UNPCDialogueComponent::UpdateRelationshipTier()
-{
-    const float Score = RelationshipScore;
-
-    if (Score < 10.0f)
-        CurrentRelationship = ENarr_NPCRelationship::Hostile;
-    else if (Score < 25.0f)
-        CurrentRelationship = ENarr_NPCRelationship::Wary;
-    else if (Score < 50.0f)
-        CurrentRelationship = ENarr_NPCRelationship::Neutral;
-    else if (Score < 70.0f)
-        CurrentRelationship = ENarr_NPCRelationship::Friendly;
-    else if (Score < 90.0f)
-        CurrentRelationship = ENarr_NPCRelationship::Trusted;
     else
-        CurrentRelationship = ENarr_NPCRelationship::Allied;
+    {
+        // Reset greeting when player leaves
+        if (bHasGreeted && DistanceToPlayer > DialogueTriggerRadius * 1.5f)
+        {
+            bHasGreeted = false;
+        }
+    }
 }
 
-// ─── IsLineCooledDown ─────────────────────────────────────────────────────────
-
-bool UNPCDialogueComponent::IsLineCooledDown(const FNarr_DialogueLine& Line, ENarr_DialogueTrigger Trigger) const
+void UNPCDialogueComponent::TriggerDialogue(ENarr_DialogueTrigger Trigger)
 {
-    const float* LastTime = LastTriggerTimes.Find(Trigger);
-    if (!LastTime) return true;
+    if (bCooldownActive || bIsInDialogue)
+    {
+        return;
+    }
 
-    UWorld* World = GetWorld();
-    if (!World) return true;
+    LastTrigger = Trigger;
+    bIsInDialogue = true;
 
-    const float Elapsed = World->GetTimeSeconds() - *LastTime;
-    return Elapsed >= Line.CooldownSeconds;
+    // Get appropriate line for trigger
+    FNarr_DialogueLine Line = GetDialogueLineForTrigger(Trigger);
+
+    if (!Line.DialogueText.IsEmpty())
+    {
+        // Broadcast to Blueprint/UI
+        OnDialogueTriggered.Broadcast(Line, CurrentRelationship);
+
+        // Log for debugging
+        UE_LOG(LogTemp, Log, TEXT("[NPC Dialogue] %s (%s): %s"),
+            *NPCName.ToString(),
+            *UEnum::GetValueAsString(NPCRole),
+            *Line.DialogueText.ToString());
+    }
+
+    // Start cooldown
+    StartDialogueCooldown();
+}
+
+FNarr_DialogueLine UNPCDialogueComponent::GetDialogueLineForTrigger(ENarr_DialogueTrigger Trigger)
+{
+    // Filter lines by trigger type
+    TArray<FNarr_DialogueLine> MatchingLines;
+    for (const FNarr_DialogueLine& Line : DialogueLines)
+    {
+        if (Line.Trigger == Trigger)
+        {
+            // Check relationship requirement
+            if (static_cast<int32>(CurrentRelationship) >= static_cast<int32>(Line.MinRelationshipRequired))
+            {
+                MatchingLines.Add(Line);
+            }
+        }
+    }
+
+    if (MatchingLines.Num() == 0)
+    {
+        // Return default fallback line
+        FNarr_DialogueLine Fallback;
+        Fallback.DialogueText = FText::FromString(TEXT("..."));
+        Fallback.Trigger = Trigger;
+        Fallback.MinRelationshipRequired = ENarr_NPCRelationship::Neutral;
+        Fallback.bIsContextual = false;
+        return Fallback;
+    }
+
+    // Return random matching line
+    int32 RandomIndex = FMath::RandRange(0, MatchingLines.Num() - 1);
+    return MatchingLines[RandomIndex];
+}
+
+void UNPCDialogueComponent::StartDialogueCooldown()
+{
+    bIsInDialogue = false;
+    bCooldownActive = true;
+
+    GetWorld()->GetTimerManager().SetTimer(
+        CooldownTimerHandle,
+        this,
+        &UNPCDialogueComponent::OnCooldownExpired,
+        DialogueCooldownSeconds,
+        false
+    );
+}
+
+void UNPCDialogueComponent::OnCooldownExpired()
+{
+    bCooldownActive = false;
+}
+
+void UNPCDialogueComponent::ModifyRelationship(int32 TrustDelta)
+{
+    TrustPoints = FMath::Clamp(TrustPoints + TrustDelta, -100, 100);
+
+    // Update relationship tier based on trust points
+    ENarr_NPCRelationship NewRelationship;
+
+    if (TrustPoints <= -60)
+    {
+        NewRelationship = ENarr_NPCRelationship::Hostile;
+    }
+    else if (TrustPoints <= -20)
+    {
+        NewRelationship = ENarr_NPCRelationship::Wary;
+    }
+    else if (TrustPoints <= 20)
+    {
+        NewRelationship = ENarr_NPCRelationship::Neutral;
+    }
+    else if (TrustPoints <= 50)
+    {
+        NewRelationship = ENarr_NPCRelationship::Friendly;
+    }
+    else if (TrustPoints <= 80)
+    {
+        NewRelationship = ENarr_NPCRelationship::Trusted;
+    }
+    else
+    {
+        NewRelationship = ENarr_NPCRelationship::Allied;
+    }
+
+    if (NewRelationship != CurrentRelationship)
+    {
+        ENarr_NPCRelationship OldRelationship = CurrentRelationship;
+        CurrentRelationship = NewRelationship;
+        OnRelationshipChanged.Broadcast(OldRelationship, NewRelationship);
+
+        UE_LOG(LogTemp, Log, TEXT("[NPC Dialogue] %s relationship changed: %s -> %s"),
+            *NPCName.ToString(),
+            *UEnum::GetValueAsString(OldRelationship),
+            *UEnum::GetValueAsString(NewRelationship));
+    }
+}
+
+void UNPCDialogueComponent::NotifyDinosaurNearby(FName DinosaurSpecies, float Distance)
+{
+    if (bCooldownActive || bIsInDialogue)
+    {
+        return;
+    }
+
+    // Only trigger warning if dinosaur is close enough to be threatening
+    if (Distance < 1500.0f)
+    {
+        TriggerDialogue(ENarr_DialogueTrigger::DinosaurNearby);
+    }
+}
+
+void UNPCDialogueComponent::NotifyPlayerCombatVictory()
+{
+    ModifyRelationship(10);
+    TriggerDialogue(ENarr_DialogueTrigger::PlayerCombatVictory);
+    InteractionCount++;
+}
+
+void UNPCDialogueComponent::NotifyPlayerNearDeath()
+{
+    TriggerDialogue(ENarr_DialogueTrigger::PlayerNearDeath);
+}
+
+void UNPCDialogueComponent::NotifyMigrationEvent()
+{
+    TriggerDialogue(ENarr_DialogueTrigger::MigrationSeen);
+}
+
+void UNPCDialogueComponent::NotifyNightfall()
+{
+    TriggerDialogue(ENarr_DialogueTrigger::Nightfall);
+}
+
+void UNPCDialogueComponent::InitialiseDialogueLines()
+{
+    DialogueLines.Empty();
+
+    // Lines are populated based on NPC role
+    // In production, these would be loaded from a DataTable
+    // Here we seed with role-appropriate defaults
+
+    switch (NPCRole)
+    {
+        case ENarr_NPCRole::Hunter:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("You look like you can handle yourself. Good. This valley needs people who can fight."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::DinosaurNearby, ENarr_NPCRelationship::Neutral,
+                TEXT("Quiet. Do not move. Wait for it to pass."), true);
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerCombatVictory, ENarr_NPCRelationship::Neutral,
+                TEXT("Not bad. Most people freeze their first time. You did not."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerNearDeath, ENarr_NPCRelationship::Friendly,
+                TEXT("Stay with me! You are not dying today — I will not allow it."), true);
+            break;
+
+        case ENarr_NPCRole::Scout:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("I have mapped three valleys to the east. None of them are safe. But the northern ridge — that has possibilities."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::MigrationSeen, ENarr_NPCRelationship::Neutral,
+                TEXT("The herd is moving again. When they move, the predators follow. We need to move first."), true);
+            AddDialogueLine(ENarr_DialogueTrigger::Nightfall, ENarr_NPCRelationship::Neutral,
+                TEXT("Find shelter before full dark. The raptors hunt by sound at night — and they are very good at it."), true);
+            break;
+
+        case ENarr_NPCRole::Elder:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("Sit. You have the look of someone who has survived things they should not have. That is useful."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Friendly,
+                TEXT("I have been watching you. You learn fast. That is the only thing that matters out here."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::DinosaurNearby, ENarr_NPCRelationship::Neutral,
+                TEXT("I have seen that beast before. It has a territory. Stay out of it and it will not bother you."), true);
+            AddDialogueLine(ENarr_DialogueTrigger::Nightfall, ENarr_NPCRelationship::Trusted,
+                TEXT("Tonight we tell the old stories. About the time before the great beasts ruled. About what we lost — and what we must rebuild."), false);
+            break;
+
+        case ENarr_NPCRole::Crafter:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("You need tools? I can make them. But I need materials. Flint from the river, sinew from a kill — bring me those and we talk."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerCombatVictory, ENarr_NPCRelationship::Neutral,
+                TEXT("Good kill. Bring me the bones — I can make something useful from them."), true);
+            break;
+
+        case ENarr_NPCRole::Tracker:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("I can read the ground like you read the sky. These tracks — three raptors, moving fast, heading west. They found something."), false);
+            AddDialogueLine(ENarr_DialogueTrigger::DinosaurNearby, ENarr_NPCRelationship::Neutral,
+                TEXT("TRex. Half a kilometre. Downwind of us for now — but the wind is shifting."), true);
+            AddDialogueLine(ENarr_DialogueTrigger::MigrationSeen, ENarr_NPCRelationship::Neutral,
+                TEXT("The migration is three days early. Something spooked them. Something big."), true);
+            break;
+
+        default:
+            AddDialogueLine(ENarr_DialogueTrigger::PlayerApproach, ENarr_NPCRelationship::Neutral,
+                TEXT("..."), false);
+            break;
+    }
+}
+
+void UNPCDialogueComponent::AddDialogueLine(ENarr_DialogueTrigger Trigger, ENarr_NPCRelationship MinRelationship, const FString& Text, bool bContextual)
+{
+    FNarr_DialogueLine NewLine;
+    NewLine.Trigger = Trigger;
+    NewLine.MinRelationshipRequired = MinRelationship;
+    NewLine.DialogueText = FText::FromString(Text);
+    NewLine.bIsContextual = bContextual;
+    DialogueLines.Add(NewLine);
 }
