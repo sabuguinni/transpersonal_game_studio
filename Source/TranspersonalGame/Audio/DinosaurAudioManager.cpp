@@ -1,212 +1,288 @@
-#include "DinosaurAudioManager.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+// DinosaurAudioManager.cpp
+// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260629_004
+// Adaptive audio system for prehistoric survival game.
+// Walter Murch principle: the silence before the roar is more powerful than the roar itself.
 
-AAudio_DinosaurAudioManager::AAudio_DinosaurAudioManager()
+#include "DinosaurAudioManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraShakeBase.h"
+#include "Components/AudioComponent.h"
+
+ADinosaurAudioManager::ADinosaurAudioManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-    
-    // Initialize default settings
-    DinosaurVolumeMultiplier = 1.0f;
-    FootstepVolumeBySize = 1.0f;
-    RoarEchoDelay = 0.5f;
+    PrimaryActorTick.bCanEverTick = true;
+
+    PrimaryAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PrimaryAmbientComponent"));
+    PrimaryAmbientComponent->SetupAttachment(RootComponent);
+    PrimaryAmbientComponent->bAutoActivate = false;
+
+    DangerStingerComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DangerStingerComponent"));
+    DangerStingerComponent->SetupAttachment(RootComponent);
+    DangerStingerComponent->bAutoActivate = false;
+
+    // Default dinosaur profiles
+    FAudio_DinosaurSoundProfile TRexProfile;
+    TRexProfile.SpeciesName = FName("TRex");
+    TRexProfile.IdleVocalFrequency = 20.0f;
+    TRexProfile.AlertVocalFrequency = 8.0f;
+    TRexProfile.FootstepWeight = 3.0f;
+    TRexProfile.RoarRadius = 5000.0f;
+    TRexProfile.bCausesScreenShake = true;
+    DinosaurProfiles.Add(TRexProfile);
+
+    FAudio_DinosaurSoundProfile RaptorProfile;
+    RaptorProfile.SpeciesName = FName("Raptor");
+    RaptorProfile.IdleVocalFrequency = 10.0f;
+    RaptorProfile.AlertVocalFrequency = 3.0f;
+    RaptorProfile.FootstepWeight = 0.5f;
+    RaptorProfile.RoarRadius = 1500.0f;
+    RaptorProfile.bCausesScreenShake = false;
+    DinosaurProfiles.Add(RaptorProfile);
+
+    FAudio_DinosaurSoundProfile BrachioProfile;
+    BrachioProfile.SpeciesName = FName("Brachiosaurus");
+    BrachioProfile.IdleVocalFrequency = 30.0f;
+    BrachioProfile.AlertVocalFrequency = 15.0f;
+    BrachioProfile.FootstepWeight = 2.5f;
+    BrachioProfile.RoarRadius = 4000.0f;
+    BrachioProfile.bCausesScreenShake = true;
+    DinosaurProfiles.Add(BrachioProfile);
+
+    // Default ambient zone configs
+    FAudio_AmbientZoneConfig PlainsConfig;
+    PlainsConfig.BiomeZone = EAudio_BiomeZone::OpenPlains;
+    PlainsConfig.DayVolume = 0.6f;
+    PlainsConfig.NightVolume = 0.5f;
+    PlainsConfig.DangerMultiplier = 0.2f;
+    AmbientZoneConfigs.Add(PlainsConfig);
+
+    FAudio_AmbientZoneConfig ForestConfig;
+    ForestConfig.BiomeZone = EAudio_BiomeZone::DenseForest;
+    ForestConfig.DayVolume = 0.9f;
+    ForestConfig.NightVolume = 1.0f;
+    ForestConfig.DangerMultiplier = 0.4f;
+    AmbientZoneConfigs.Add(ForestConfig);
+
+    FAudio_AmbientZoneConfig RiverConfig;
+    RiverConfig.BiomeZone = EAudio_BiomeZone::Riverbank;
+    RiverConfig.DayVolume = 0.8f;
+    RiverConfig.NightVolume = 0.7f;
+    RiverConfig.DangerMultiplier = 0.3f;
+    AmbientZoneConfigs.Add(RiverConfig);
 }
 
-void AAudio_DinosaurAudioManager::BeginPlay()
+void ADinosaurAudioManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializeDinosaurSounds();
-}
 
-void AAudio_DinosaurAudioManager::InitializeDinosaurSounds()
-{
-    // Initialize T-Rex sounds
-    FAudio_DinosaurSoundData TRexRoar;
-    TRexRoar.Species = EAudio_DinosaurSpecies::TRex;
-    TRexRoar.SoundType = EAudio_DinosaurSoundType::Roar;
-    TRexRoar.BaseVolume = 1.5f;
-    TRexRoar.BasePitch = 0.8f;
-    TRexRoar.MaxDistance = 10000.0f;
-    DinosaurSounds.Add(TRexRoar);
-    
-    FAudio_DinosaurSoundData TRexFootstep;
-    TRexFootstep.Species = EAudio_DinosaurSpecies::TRex;
-    TRexFootstep.SoundType = EAudio_DinosaurSoundType::Footstep;
-    TRexFootstep.BaseVolume = 1.2f;
-    TRexFootstep.BasePitch = 0.7f;
-    TRexFootstep.MaxDistance = 8000.0f;
-    DinosaurSounds.Add(TRexFootstep);
-    
-    // Initialize Velociraptor sounds
-    FAudio_DinosaurSoundData RaptorGrowl;
-    RaptorGrowl.Species = EAudio_DinosaurSpecies::Velociraptor;
-    RaptorGrowl.SoundType = EAudio_DinosaurSoundType::Growl;
-    RaptorGrowl.BaseVolume = 0.8f;
-    RaptorGrowl.BasePitch = 1.2f;
-    RaptorGrowl.MaxDistance = 3000.0f;
-    DinosaurSounds.Add(RaptorGrowl);
-    
-    FAudio_DinosaurSoundData RaptorFootstep;
-    RaptorFootstep.Species = EAudio_DinosaurSpecies::Velociraptor;
-    RaptorFootstep.SoundType = EAudio_DinosaurSoundType::Footstep;
-    RaptorFootstep.BaseVolume = 0.4f;
-    RaptorFootstep.BasePitch = 1.1f;
-    RaptorFootstep.MaxDistance = 1500.0f;
-    DinosaurSounds.Add(RaptorFootstep);
-    
-    // Initialize Brachiosaurus sounds
-    FAudio_DinosaurSoundData BrachioRoar;
-    BrachioRoar.Species = EAudio_DinosaurSpecies::Brachiosaurus;
-    BrachioRoar.SoundType = EAudio_DinosaurSoundType::Roar;
-    BrachioRoar.BaseVolume = 1.3f;
-    BrachioRoar.BasePitch = 0.6f;
-    BrachioRoar.MaxDistance = 12000.0f;
-    DinosaurSounds.Add(BrachioRoar);
-    
-    FAudio_DinosaurSoundData BrachioFootstep;
-    BrachioFootstep.Species = EAudio_DinosaurSpecies::Brachiosaurus;
-    BrachioFootstep.SoundType = EAudio_DinosaurSoundType::Footstep;
-    BrachioFootstep.BaseVolume = 1.4f;
-    BrachioFootstep.BasePitch = 0.5f;
-    BrachioFootstep.MaxDistance = 9000.0f;
-    DinosaurSounds.Add(BrachioFootstep);
-}
-
-void AAudio_DinosaurAudioManager::PlayDinosaurSound(EAudio_DinosaurSpecies Species, EAudio_DinosaurSoundType SoundType, FVector Location, float VolumeMultiplier)
-{
-    FAudio_DinosaurSoundData* SoundData = FindSoundData(Species, SoundType);
-    if (!SoundData)
+    if (PrimaryAmbientComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Sound data not found for species %d, sound type %d"), (int32)Species, (int32)SoundType);
-        return;
-    }
-    
-    UAudioComponent* AudioComp = CreateDinosaurAudioComponent(*SoundData, Location);
-    if (AudioComp)
-    {
-        float FinalVolume = SoundData->BaseVolume * DinosaurVolumeMultiplier * VolumeMultiplier;
-        AudioComp->SetVolumeMultiplier(FinalVolume);
-        AudioComp->Play();
-        
-        ActiveDinosaurAudioComponents.Add(AudioComp);
+        PrimaryAmbientComponent->SetVolumeMultiplier(0.7f);
+        PrimaryAmbientComponent->Play();
     }
 }
 
-void AAudio_DinosaurAudioManager::PlayFootstepBySpecies(EAudio_DinosaurSpecies Species, FVector FootstepLocation, float Intensity)
+void ADinosaurAudioManager::Tick(float DeltaTime)
 {
-    float SizeMultiplier = GetSpeciesSizeMultiplier(Species);
-    float FinalIntensity = Intensity * SizeMultiplier * FootstepVolumeBySize;
-    
-    PlayDinosaurSound(Species, EAudio_DinosaurSoundType::Footstep, FootstepLocation, FinalIntensity);
-    
-    // Add ground shake effect for large dinosaurs
-    if (SizeMultiplier > 1.0f && GetWorld())
+    Super::Tick(DeltaTime);
+
+    UpdateAmbientVolumes(DeltaTime);
+    TickSilenceEvent(DeltaTime);
+}
+
+void ADinosaurAudioManager::TriggerDinosaurRoar(AActor* DinosaurActor, FName SpeciesName, float Intensity)
+{
+    if (!DinosaurActor) return;
+
+    FAudio_DinosaurSoundProfile* Profile = FindProfileForSpecies(SpeciesName);
+    if (!Profile) return;
+
+    // Trigger silence event before the roar — Walter Murch principle
+    // The silence makes the roar hit harder
+    TriggerSilenceEvent(0.8f, Profile->RoarRadius * 0.5f);
+
+    // Screen shake for heavy dinosaurs
+    if (Profile->bCausesScreenShake)
     {
-        APlayerController* PC = GetWorld()->GetFirstPlayerController();
-        if (PC)
-        {
-            float ShakeIntensity = FMath::Clamp(SizeMultiplier * 0.5f, 0.1f, 2.0f);
-            PC->ClientStartCameraShake(nullptr, ShakeIntensity);
-        }
+        TriggerFootstepScreenShake(Intensity * Profile->FootstepWeight, DinosaurActor->GetActorLocation());
     }
+
+    // Increase danger level on roar
+    CurrentDangerLevel = FMath::Clamp(CurrentDangerLevel + (Intensity * 0.4f), 0.0f, 1.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: %s roar triggered at intensity %.2f, danger now %.2f"),
+        *SpeciesName.ToString(), Intensity, CurrentDangerLevel);
 }
 
-void AAudio_DinosaurAudioManager::PlayRoarWithEcho(EAudio_DinosaurSpecies Species, FVector RoarLocation)
+void ADinosaurAudioManager::UpdateDinosaurState(AActor* DinosaurActor, EAudio_DinosaurState NewState)
 {
-    // Play main roar
-    PlayDinosaurSound(Species, EAudio_DinosaurSoundType::Roar, RoarLocation, 1.0f);
-    
-    // Schedule echo roar
-    FTimerHandle EchoTimer;
-    GetWorld()->GetTimerManager().SetTimer(EchoTimer, [this, Species, RoarLocation]()
+    if (!DinosaurActor) return;
+
+    switch (NewState)
     {
-        PlayDinosaurSound(Species, EAudio_DinosaurSoundType::Roar, RoarLocation, 0.3f);
-    }, RoarEchoDelay, false);
-}
+        case EAudio_DinosaurState::Hunting:
+            // Danger level spikes when a dinosaur starts hunting
+            CurrentDangerLevel = FMath::Clamp(CurrentDangerLevel + 0.3f, 0.0f, 1.0f);
+            break;
 
-void AAudio_DinosaurAudioManager::StopAllDinosaurSounds()
-{
-    for (UAudioComponent* AudioComp : ActiveDinosaurAudioComponents)
-    {
-        if (AudioComp && IsValid(AudioComp))
-        {
-            AudioComp->Stop();
-            AudioComp->DestroyComponent();
-        }
-    }
-    ActiveDinosaurAudioComponents.Empty();
-}
+        case EAudio_DinosaurState::Idle:
+            // Danger slowly decreases when dinosaur is idle
+            CurrentDangerLevel = FMath::Clamp(CurrentDangerLevel - 0.1f, 0.0f, 1.0f);
+            break;
 
-void AAudio_DinosaurAudioManager::SetDinosaurVolumeMultiplier(float NewMultiplier)
-{
-    DinosaurVolumeMultiplier = FMath::Clamp(NewMultiplier, 0.0f, 2.0f);
-}
+        case EAudio_DinosaurState::Fleeing:
+            // Fleeing dinosaur = something bigger nearby — danger spikes
+            CurrentDangerLevel = FMath::Clamp(CurrentDangerLevel + 0.5f, 0.0f, 1.0f);
+            break;
 
-float AAudio_DinosaurAudioManager::GetSpeciesSizeMultiplier(EAudio_DinosaurSpecies Species)
-{
-    switch (Species)
-    {
-        case EAudio_DinosaurSpecies::TRex:
-            return 1.5f;
-        case EAudio_DinosaurSpecies::Brachiosaurus:
-            return 2.0f;
-        case EAudio_DinosaurSpecies::Triceratops:
-            return 1.3f;
-        case EAudio_DinosaurSpecies::Ankylosaurus:
-            return 1.2f;
-        case EAudio_DinosaurSpecies::Parasaurolophus:
-            return 1.1f;
-        case EAudio_DinosaurSpecies::Pachycephalosaurus:
-            return 0.9f;
-        case EAudio_DinosaurSpecies::Protoceratops:
-            return 0.7f;
-        case EAudio_DinosaurSpecies::Tsintaosaurus:
-            return 1.0f;
-        case EAudio_DinosaurSpecies::Velociraptor:
-            return 0.6f;
+        case EAudio_DinosaurState::Feeding:
+            // Feeding = distracted, danger drops slightly
+            CurrentDangerLevel = FMath::Clamp(CurrentDangerLevel - 0.05f, 0.0f, 1.0f);
+            break;
+
         default:
-            return 1.0f;
+            break;
     }
 }
 
-FAudio_DinosaurSoundData* AAudio_DinosaurAudioManager::FindSoundData(EAudio_DinosaurSpecies Species, EAudio_DinosaurSoundType SoundType)
+void ADinosaurAudioManager::PlayFootstepImpact(AActor* DinosaurActor, float FootWeight, FVector ImpactLocation)
 {
-    return DinosaurSounds.FindByPredicate([Species, SoundType](const FAudio_DinosaurSoundData& Data)
+    if (!DinosaurActor) return;
+
+    // Heavy footsteps trigger screen shake proportional to weight and distance to player
+    if (FootWeight > 1.5f)
     {
-        return Data.Species == Species && Data.SoundType == SoundType;
-    });
+        TriggerFootstepScreenShake(FootWeight, ImpactLocation);
+    }
 }
 
-UAudioComponent* AAudio_DinosaurAudioManager::CreateDinosaurAudioComponent(const FAudio_DinosaurSoundData& SoundData, FVector Location)
+void ADinosaurAudioManager::TriggerSilenceEvent(float SilenceDuration, float RadiusMeters)
 {
-    UAudioComponent* NewComponent = NewObject<UAudioComponent>(this);
-    if (NewComponent)
+    // Silence event: mute ambient sounds to create tension before a major audio event
+    bInSilenceEvent = true;
+    SilenceTimer = SilenceDuration;
+
+    if (PrimaryAmbientComponent && PrimaryAmbientComponent->IsPlaying())
     {
-        NewComponent->SetWorldLocation(Location);
-        
-        if (SoundData.SoundCue.IsValid())
-        {
-            NewComponent->SetSound(SoundData.SoundCue.Get());
-        }
-        
-        NewComponent->SetVolumeMultiplier(SoundData.BaseVolume);
-        NewComponent->SetPitchMultiplier(SoundData.BasePitch);
-        NewComponent->bAutoActivate = false;
-        
-        if (SoundData.bIs3D)
-        {
-            NewComponent->AttenuationSettings = NewObject<USoundAttenuation>();
-            if (NewComponent->AttenuationSettings)
-            {
-                NewComponent->AttenuationSettings->Attenuation.FalloffDistance = SoundData.MaxDistance;
-            }
-        }
-        
-        NewComponent->RegisterComponent();
+        PrimaryAmbientComponent->SetVolumeMultiplier(0.0f);
     }
-    
-    return NewComponent;
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: Silence event triggered for %.1fs radius %.0fm"),
+        SilenceDuration, RadiusMeters);
+}
+
+void ADinosaurAudioManager::SetPlayerBiomeZone(EAudio_BiomeZone NewZone)
+{
+    if (CurrentBiomeZone == NewZone) return;
+
+    CurrentBiomeZone = NewZone;
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: Player entered biome zone %d"),
+        static_cast<int32>(NewZone));
+}
+
+void ADinosaurAudioManager::SetDangerLevel(float DangerLevel01)
+{
+    CurrentDangerLevel = FMath::Clamp(DangerLevel01, 0.0f, 1.0f);
+}
+
+void ADinosaurAudioManager::SetTimeOfDay(float TimeNormalized01)
+{
+    CurrentTimeOfDay = FMath::Clamp(TimeNormalized01, 0.0f, 1.0f);
+}
+
+void ADinosaurAudioManager::TriggerFootstepScreenShake(float Intensity, FVector SourceLocation)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    // Scale shake by distance from player to source
+    APawn* PlayerPawn = PC->GetPawn();
+    if (PlayerPawn)
+    {
+        float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), SourceLocation);
+        float DistanceFactor = FMath::Clamp(1.0f - (Distance / MaxRoarScreenShakeRadius), 0.0f, 1.0f);
+        float FinalIntensity = Intensity * DistanceFactor * GlobalAudioScale;
+
+        if (FinalIntensity > 0.1f)
+        {
+            PC->ClientStartCameraShake(UCameraShakeBase::StaticClass(), FinalIntensity);
+            UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: Screen shake intensity %.2f at distance %.0fm"),
+                FinalIntensity, Distance);
+        }
+    }
+}
+
+void ADinosaurAudioManager::TriggerDamageAudioFeedback(float DamageAmount)
+{
+    // Damage audio feedback: brief silence then pain sound
+    // The silence is the moment of shock before the pain registers
+    float SilenceDuration = FMath::Clamp(DamageAmount / 100.0f * 0.3f, 0.05f, 0.3f);
+    TriggerSilenceEvent(SilenceDuration, 500.0f);
+
+    UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: Damage audio feedback for %.1f damage"),
+        DamageAmount);
+}
+
+void ADinosaurAudioManager::UpdateAmbientVolumes(float DeltaTime)
+{
+    if (bInSilenceEvent) return;
+
+    // Find config for current biome
+    FAudio_AmbientZoneConfig* ZoneConfig = nullptr;
+    for (FAudio_AmbientZoneConfig& Config : AmbientZoneConfigs)
+    {
+        if (Config.BiomeZone == CurrentBiomeZone)
+        {
+            ZoneConfig = &Config;
+            break;
+        }
+    }
+
+    if (!ZoneConfig) return;
+
+    // Blend between day and night volume based on time of day
+    // CurrentTimeOfDay: 0=midnight, 0.5=noon, 1=midnight
+    float DayFactor = FMath::Sin(CurrentTimeOfDay * PI);
+    float BaseVolume = FMath::Lerp(ZoneConfig->NightVolume, ZoneConfig->DayVolume, DayFactor);
+
+    // Danger reduces ambient volume (world goes quiet when predators are near)
+    float DangerReduction = CurrentDangerLevel * ZoneConfig->DangerMultiplier;
+    float FinalVolume = FMath::Clamp((BaseVolume - DangerReduction) * GlobalAudioScale, 0.0f, 1.0f);
+
+    if (PrimaryAmbientComponent)
+    {
+        float CurrentVol = PrimaryAmbientComponent->VolumeMultiplier;
+        float NewVol = FMath::FInterpTo(CurrentVol, FinalVolume, DeltaTime, ZoneConfig->TensionFadeSpeed);
+        PrimaryAmbientComponent->SetVolumeMultiplier(NewVol);
+    }
+}
+
+void ADinosaurAudioManager::TickSilenceEvent(float DeltaTime)
+{
+    if (!bInSilenceEvent) return;
+
+    SilenceTimer -= DeltaTime;
+    if (SilenceTimer <= 0.0f)
+    {
+        bInSilenceEvent = false;
+        SilenceTimer = 0.0f;
+        UE_LOG(LogTemp, Log, TEXT("DinosaurAudioManager: Silence event ended — ambient audio restoring"));
+    }
+}
+
+FAudio_DinosaurSoundProfile* ADinosaurAudioManager::FindProfileForSpecies(FName SpeciesName)
+{
+    for (FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    {
+        if (Profile.SpeciesName == SpeciesName)
+        {
+            return &Profile;
+        }
+    }
+    return nullptr;
 }
