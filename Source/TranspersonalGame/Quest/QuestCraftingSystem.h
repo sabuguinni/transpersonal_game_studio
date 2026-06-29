@@ -1,175 +1,228 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "QuestCraftingSystem.generated.h"
 
 // ============================================================
-// Quest_CraftingSystem — Agent #14 Quest & Mission Designer
-// Cycle: PROD_CYCLE_AUTO_20260628_010
-// Converts crafting milestones into quest objective completions.
+// ENUMS — must be at global scope (UE5 compilation rule)
 // ============================================================
-
-UENUM(BlueprintType)
-enum class EQuest_CraftingObjectiveType : uint8
-{
-    GatherResource      UMETA(DisplayName = "Gather Resource"),
-    CraftItem           UMETA(DisplayName = "Craft Item"),
-    UseItem             UMETA(DisplayName = "Use Item"),
-    DeliverItem         UMETA(DisplayName = "Deliver Item"),
-    BuildStructure      UMETA(DisplayName = "Build Structure")
-};
 
 UENUM(BlueprintType)
 enum class EQuest_ResourceType : uint8
 {
-    FlintStone          UMETA(DisplayName = "Flint Stone"),
-    DryWood             UMETA(DisplayName = "Dry Wood"),
-    Leaf                UMETA(DisplayName = "Leaf"),
-    Bone                UMETA(DisplayName = "Bone"),
-    Hide                UMETA(DisplayName = "Hide"),
-    Meat                UMETA(DisplayName = "Meat"),
-    Vine                UMETA(DisplayName = "Vine"),
-    Clay                UMETA(DisplayName = "Clay")
+    None        UMETA(DisplayName = "None"),
+    Flint       UMETA(DisplayName = "Flint Rock"),
+    Stick       UMETA(DisplayName = "Wooden Stick"),
+    Leaf        UMETA(DisplayName = "Large Leaf"),
+    Bone        UMETA(DisplayName = "Animal Bone"),
+    Vine        UMETA(DisplayName = "Vine"),
+    Clay        UMETA(DisplayName = "Clay"),
+    Tinder      UMETA(DisplayName = "Dry Tinder")
 };
 
 UENUM(BlueprintType)
-enum class EQuest_CraftedItemType : uint8
+enum class EQuest_CraftedItem : uint8
 {
-    StoneAxe            UMETA(DisplayName = "Stone Axe"),
-    Campfire            UMETA(DisplayName = "Campfire"),
-    WaterContainer      UMETA(DisplayName = "Water Container"),
-    SpearHead           UMETA(DisplayName = "Spear Head"),
-    LeatherWrap         UMETA(DisplayName = "Leather Wrap"),
-    BoneTrap            UMETA(DisplayName = "Bone Trap")
+    None            UMETA(DisplayName = "None"),
+    StoneAxe        UMETA(DisplayName = "Stone Axe"),
+    Campfire        UMETA(DisplayName = "Campfire"),
+    WaterContainer  UMETA(DisplayName = "Water Container"),
+    BoneTip         UMETA(DisplayName = "Bone-Tipped Spear"),
+    Torch           UMETA(DisplayName = "Torch")
 };
 
+UENUM(BlueprintType)
+enum class EQuest_CraftingState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    MenuOpen        UMETA(DisplayName = "Menu Open"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Success         UMETA(DisplayName = "Success"),
+    Failed          UMETA(DisplayName = "Failed — Missing Materials")
+};
+
+// ============================================================
+// STRUCTS
+// ============================================================
+
 USTRUCT(BlueprintType)
-struct FQuest_CraftingObjective
+struct FQuest_CraftingIngredient
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FName ObjectiveID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    EQuest_ResourceType ResourceType = EQuest_ResourceType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    EQuest_CraftingObjectiveType ObjectiveType = EQuest_CraftingObjectiveType::GatherResource;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    EQuest_ResourceType TargetResource = EQuest_ResourceType::FlintStone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    EQuest_CraftedItemType TargetItem = EQuest_CraftedItemType::StoneAxe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     int32 RequiredCount = 1;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Crafting")
-    int32 CurrentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Crafting")
-    bool bCompleted = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FText ObjectiveDescription;
 };
 
 USTRUCT(BlueprintType)
-struct FQuest_CraftingMission
+struct FQuest_CraftingRecipe
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FName MissionID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    EQuest_CraftedItem OutputItem = EQuest_CraftedItem::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FText MissionTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    FString RecipeName = TEXT("Unknown Recipe");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FText MissionDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    FString Description = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    TArray<FQuest_CraftingObjective> Objectives;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    TArray<FQuest_CraftingIngredient> Ingredients;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Crafting")
-    bool bActive = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    float CraftingTimeSec = 2.0f;
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Crafting")
-    bool bCompleted = false;
+USTRUCT(BlueprintType)
+struct FQuest_PlayerInventory
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    EQuest_CraftedItemType RewardItem = EQuest_CraftedItemType::StoneAxe;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 FlintCount = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Crafting")
-    FText CompletionNarrativeLine;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 StickCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 LeafCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 BoneCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 VineCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 ClayCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    int32 TinderCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    TArray<EQuest_CraftedItem> CraftedItems;
 };
 
 // ============================================================
-// UQuestCraftingSystem — ActorComponent
-// Attach to PlayerCharacter. Tracks crafting quest progress.
+// RESOURCE PICKUP ACTOR — spawned in world for player to collect
 // ============================================================
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuest_CraftingObjectiveUpdated,
-    FName, MissionID, FName, ObjectiveID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuest_CraftingMissionCompleted,
-    FName, MissionID);
-
-UCLASS(ClassGroup = (Quest), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQuestCraftingSystem : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_ResourcePickup : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuestCraftingSystem();
+    AQuest_ResourcePickup();
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
+    EQuest_ResourceType ResourceType = EQuest_ResourceType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
+    int32 PickupCount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource")
+    bool bHasBeenPickedUp = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource")
+    class UStaticMeshComponent* MeshComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource")
+    class USphereComponent* PickupRadius;
+
+    UFUNCTION(BlueprintCallable, Category = "Resource")
+    bool TryPickup(FQuest_PlayerInventory& OutInventory);
+
+    UFUNCTION(BlueprintCallable, Category = "Resource")
+    FString GetResourceDisplayName() const;
+
+protected:
     virtual void BeginPlay() override;
+};
 
-    // --- Active Missions ---
-    UPROPERTY(BlueprintReadOnly, Category = "Quest|Crafting")
-    TArray<FQuest_CraftingMission> ActiveMissions;
+// ============================================================
+// CRAFTING SYSTEM MANAGER
+// ============================================================
 
-    // --- Delegates ---
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Crafting")
-    FOnQuest_CraftingObjectiveUpdated OnObjectiveUpdated;
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_CraftingSystemManager : public AActor
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest|Crafting")
-    FOnQuest_CraftingMissionCompleted OnMissionCompleted;
+public:
+    AQuest_CraftingSystemManager();
 
-    // --- Public API ---
+    // Current crafting state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
+    EQuest_CraftingState CraftingState = EQuest_CraftingState::Idle;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    void StartMission(FName MissionID);
+    // Player's current inventory
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    FQuest_PlayerInventory PlayerInventory;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    void ReportResourceGathered(EQuest_ResourceType ResourceType, int32 Count = 1);
+    // All available recipes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    TArray<FQuest_CraftingRecipe> Recipes;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    void ReportItemCrafted(EQuest_CraftedItemType ItemType);
+    // Currently selected recipe index
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
+    int32 SelectedRecipeIndex = -1;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    void ReportItemUsed(EQuest_CraftedItemType ItemType);
+    // Crafting progress timer
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
+    float CraftingProgress = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    bool IsMissionActive(FName MissionID) const;
+    // ---- Core Functions ----
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    bool IsMissionCompleted(FName MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    void InitializeRecipes();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    float GetMissionProgress(FName MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    bool CanCraft(int32 RecipeIndex) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest|Crafting")
-    FQuest_CraftingMission GetMissionData(FName MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    bool TryCraft(int32 RecipeIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    void OpenCraftingMenu();
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    void CloseCraftingMenu();
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    TArray<FQuest_CraftingRecipe> GetAvailableRecipes() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    int32 GetResourceCount(EQuest_ResourceType ResourceType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    void AddResource(EQuest_ResourceType ResourceType, int32 Count);
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    bool HasCraftedItem(EQuest_CraftedItem Item) const;
+
+    // Quest integration — called by quest system to check progress
+    UFUNCTION(BlueprintCallable, Category = "Quest Integration")
+    bool HasCraftedStoneAxe() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Integration")
+    bool HasCraftedCampfire() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Integration")
+    bool HasCraftedTorch() const;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    void InitializeDefaultMissions();
-    void CheckMissionCompletion(FQuest_CraftingMission& Mission);
-    void UpdateObjectiveProgress(FQuest_CraftingMission& Mission,
-        EQuest_CraftingObjectiveType ObjType,
-        EQuest_ResourceType Resource,
-        EQuest_CraftedItemType Item,
-        int32 Count);
-
-    // Pre-defined missions loaded at BeginPlay
-    TArray<FQuest_CraftingMission> MissionDatabase;
+    void ConsumeMaterials(int32 RecipeIndex);
+    FTimerHandle CraftingTimerHandle;
+    void OnCraftingComplete();
 };
