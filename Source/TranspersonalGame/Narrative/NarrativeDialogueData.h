@@ -1,96 +1,176 @@
+// NarrativeDialogueData.h
+// Agent #15 — Narrative & Dialogue Agent
+// Dialogue data structures for NPC_HerdTracker_QuestGiver and waypoint flavour lines
+// Cycle: PROD_CYCLE_AUTO_20260629_006
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "UObject/NoExportTypes.h"
 #include "NarrativeDialogueData.generated.h"
 
-// ============================================================
-// Narrative & Dialogue Agent #15 — PROD_CYCLE_AUTO_20260620_007
-// All 8 quest zone voice briefs defined and linked to TTS URLs.
-// ============================================================
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
-enum class ENarr_QuestZoneID : uint8
+enum class ENarr_DialogueNodeType : uint8
 {
-    WaterHole       UMETA(DisplayName = "Hunt: Water Hole"),
-    ForestEdge      UMETA(DisplayName = "Gather: Forest Edge"),
-    RockShelter     UMETA(DisplayName = "Defend: Rock Shelter"),
-    Clearing        UMETA(DisplayName = "Explore: Clearing"),
-    Hilltop         UMETA(DisplayName = "Survive: Hilltop"),
-    RiverBank       UMETA(DisplayName = "Gather: River Bank"),
-    Cave            UMETA(DisplayName = "Explore: Cave"),
-    HuntingGround   UMETA(DisplayName = "Hunt: Hunting Ground")
+    NPC_Line        UMETA(DisplayName = "NPC Line"),
+    Player_Choice   UMETA(DisplayName = "Player Choice"),
+    Condition_Check UMETA(DisplayName = "Condition Check"),
+    End_Conversation UMETA(DisplayName = "End Conversation")
 };
 
+UENUM(BlueprintType)
+enum class ENarr_HerdTrackerState : uint8
+{
+    Greeting        UMETA(DisplayName = "Greeting"),
+    QuestOffer      UMETA(DisplayName = "Quest Offer"),
+    QuestAccepted   UMETA(DisplayName = "Quest Accepted"),
+    QuestDeclined   UMETA(DisplayName = "Quest Declined"),
+    InProgress      UMETA(DisplayName = "In Progress"),
+    QuestComplete   UMETA(DisplayName = "Quest Complete"),
+    QuestFailed     UMETA(DisplayName = "Quest Failed")
+};
+
+UENUM(BlueprintType)
+enum class ENarr_WaypointID : uint8
+{
+    ValleyEntrance      UMETA(DisplayName = "Valley Entrance"),
+    RiverCrossing       UMETA(DisplayName = "River Crossing"),
+    HerdRestingGround   UMETA(DisplayName = "Herd Resting Ground"),
+    PredatorTerritory   UMETA(DisplayName = "Predator Territory"),
+    SouthernPass        UMETA(DisplayName = "Southern Pass")
+};
+
+// ─── Structs ──────────────────────────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
-struct FNarr_DialogueLine
+struct FNarr_DialogueNode
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SpeakerID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FName NodeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_DialogueNodeType NodeType = ENarr_DialogueNodeType::NPC_Line;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString VoiceAudioURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FText SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_QuestZoneID LinkedQuestZone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float EstimatedDurationSeconds;
+    // Audio URL from ElevenLabs/Supabase
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FString AudioURL;
 
-    FNarr_DialogueLine()
-        : SpeakerID(TEXT("ElderNPC"))
-        , DialogueText(TEXT(""))
-        , VoiceAudioURL(TEXT(""))
-        , LinkedQuestZone(ENarr_QuestZoneID::WaterHole)
-        , EstimatedDurationSeconds(10.0f)
+    // IDs of nodes that follow this one (for branching)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    TArray<FName> NextNodeIDs;
+
+    // Optional: condition tag that must be true to reach this node
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FName ConditionTag;
+
+    FNarr_DialogueNode()
+        : NodeID(NAME_None)
+        , NodeType(ENarr_DialogueNodeType::NPC_Line)
+        , ConditionTag(NAME_None)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_QuestVoiceBriefTable
+struct FNarr_WaypointFlavourLine
 {
     GENERATED_BODY()
 
-    // All 8 quest zone voice briefs — populated from ElevenLabs TTS
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|VoiceBriefs")
-    TArray<FNarr_DialogueLine> AllBriefs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Waypoint")
+    ENarr_WaypointID WaypointID = ENarr_WaypointID::ValleyEntrance;
 
-    FNarr_QuestVoiceBriefTable() {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Waypoint")
+    FText FlavourText;
+
+    // Supabase audio URL
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Waypoint")
+    FString AudioURL;
+
+    // Speaker — usually the quest giver narrating remotely or an ambient voice
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Waypoint")
+    FText SpeakerName;
+
+    FNarr_WaypointFlavourLine()
+        : WaypointID(ENarr_WaypointID::ValleyEntrance)
+    {}
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueManager : public AActor
+USTRUCT(BlueprintType)
+struct FNarr_DeathNarrativeBeat
+{
+    GENERATED_BODY()
+
+    // Cause tag: "Stampede", "Raptor", "TRex", "Starvation", "Drowning"
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Death")
+    FName CauseTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Death")
+    FText NarrativeText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Death")
+    FString AudioURL;
+
+    // How long to display before respawn prompt (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Death")
+    float DisplayDuration = 5.0f;
+
+    FNarr_DeathNarrativeBeat()
+        : CauseTag(NAME_None)
+        , DisplayDuration(5.0f)
+    {}
+};
+
+// ─── Main Data Asset ──────────────────────────────────────────────────────────
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UNarr_HerdTrackerDialogueAsset : public UObject
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueManager();
+    UNarr_HerdTrackerDialogueAsset();
 
-    // All 8 quest zone voice briefs — keyed by ENarr_QuestZoneID
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<uint8, FNarr_DialogueLine> QuestZoneDialogueMap;
+    // Full dialogue tree for NPC_HerdTracker_QuestGiver
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|HerdTracker")
+    TArray<FNarr_DialogueNode> DialogueNodes;
 
-    // Retrieve dialogue line for a given quest zone
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetDialogueForZone(ENarr_QuestZoneID ZoneID) const;
+    // Waypoint flavour lines (5 waypoints)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Waypoint")
+    TArray<FNarr_WaypointFlavourLine> WaypointLines;
 
-    // Play dialogue line (logs URL for audio system to pick up)
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayDialogueForZone(ENarr_QuestZoneID ZoneID);
+    // Death narrative beats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Death")
+    TArray<FNarr_DeathNarrativeBeat> DeathBeats;
 
-    // Populate all 8 quest zone briefs from TTS asset URLs
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void InitialiseAllQuestBriefs();
+    // Lore: the Shadow Bull
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
+    FText ShadowBullLoreEntry;
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
+    FText ShadowBullSpeciesNote;
 
-private:
-    void RegisterBrief(ENarr_QuestZoneID Zone, const FString& Speaker,
-                       const FString& Text, const FString& AudioURL, float Duration);
+    // Helper: find node by ID
+    UFUNCTION(BlueprintCallable, Category = "Narrative|HerdTracker")
+    FNarr_DialogueNode GetNodeByID(FName NodeID) const;
+
+    // Helper: get waypoint flavour line
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Waypoint")
+    FNarr_WaypointFlavourLine GetWaypointLine(ENarr_WaypointID WaypointID) const;
+
+    // Helper: get death beat by cause
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Death")
+    FNarr_DeathNarrativeBeat GetDeathBeat(FName CauseTag) const;
+
+    // Populate all data with authored content
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative|HerdTracker")
+    void PopulateDefaultContent();
 };
