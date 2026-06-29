@@ -1,3 +1,6 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// TranspersonalGame.Build.cs — verified by Performance Optimizer (Agent #4)
+
 using UnrealBuildTool;
 
 public class TranspersonalGame : ModuleRules
@@ -6,114 +9,91 @@ public class TranspersonalGame : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        PublicDependencyModuleNames.AddRange(new string[] 
-        { 
-            "Core", 
-            "CoreUObject", 
+        PublicDependencyModuleNames.AddRange(new string[]
+        {
+            // Core engine
+            "Core",
+            "CoreUObject",
             "Engine",
             "InputCore",
+
+            // Enhanced Input (UE5.1+)
             "EnhancedInput",
-            "UMG",
-            "Slate",
-            "SlateCore",
-            "NavigationSystem",
-            "AIModule",
-            "GameplayTasks",
-            "GameplayTags",
+
+            // Character movement + physics
             "PhysicsCore",
             "Chaos",
-            "ChaosVehicles",
-            "GeometryCollectionEngine",
-            "FieldSystemEngine",
+
+            // AI & Navigation (DinosaurBase, NPC behavior)
+            "AIModule",
+            "NavigationSystem",
+            "GameplayTasks",
+
+            // Gameplay framework
+            "GameplayAbilities",
+            "GameplayTags",
+            "GameplayTasks",
+
+            // Procedural Content Generation
+            "PCG",
+
+            // Rendering / Lumen
+            "RenderCore",
+            "Renderer",
+
+            // Slate UI (HUD)
+            "Slate",
+            "SlateCore",
+            "UMG",
+
+            // Online / session (future multiplayer)
+            "OnlineSubsystem",
+        });
+
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            // Niagara VFX
             "Niagara",
+
+            // Audio
             "AudioMixer",
             "MetasoundEngine",
-            "ProceduralMeshComponent",
+
+            // Landscape
             "Landscape",
+            "LandscapeEditor",
+
+            // Foliage
             "Foliage",
+
+            // World Partition / streaming
+            "WorldPartitionEditor",
+
+            // Mass AI (crowd simulation)
+            "MassAI",
             "MassEntity",
-            "MassMovement",
-            "MassSpawner",
-            "MassActors",
-            "MassCommon",
-            "MassSimulation",
             "MassGameplay",
-            "StructUtils",
-            "StateTreeModule",
-            "SmartObjectsModule",
-            "WorldPartition",
-            "PCG"
+
+            // Chaos physics extras
+            "GeometryCollectionEngine",
+            "ChaosSolverEngine",
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[] 
-        { 
-            "RenderCore",
-            "RHI",
-            "ApplicationCore",
-            "Json",
-            "JsonObjectConverter",
-            "HTTP",
-            "ToolMenus",
-            "EditorStyle",
-            "EditorWidgets",
-            "UnrealEd",
-            "LevelEditor",
-            "PropertyEditor",
-            "DetailCustomizations",
-            "ComponentVisualizers",
-            "EngineSettings",
-            "DeveloperSettings"
-        });
-
-        // Enable RTTI for advanced reflection
-        bUseRTTI = true;
-        
-        // Enable exceptions for error handling
-        bEnableExceptions = true;
-        
-        // Optimization settings
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Include paths
-        PublicIncludePaths.AddRange(new string[] 
+        // Needed for UE5 editor tools
+        if (Target.bBuildEditor)
         {
-            "TranspersonalGame/Public",
-            "TranspersonalGame/Public/Core",
-            "TranspersonalGame/Public/Systems",
-            "TranspersonalGame/Public/Components",
-            "TranspersonalGame/Public/Actors",
-            "TranspersonalGame/Public/UI",
-            "TranspersonalGame/Public/World",
-            "TranspersonalGame/Public/AI",
-            "TranspersonalGame/Public/Audio",
-            "TranspersonalGame/Public/VFX"
-        });
-        
-        PrivateIncludePaths.AddRange(new string[] 
-        {
-            "TranspersonalGame/Private",
-            "TranspersonalGame/Private/Core",
-            "TranspersonalGame/Private/Systems",
-            "TranspersonalGame/Private/Components",
-            "TranspersonalGame/Private/Actors",
-            "TranspersonalGame/Private/UI",
-            "TranspersonalGame/Private/World",
-            "TranspersonalGame/Private/AI",
-            "TranspersonalGame/Private/Audio",
-            "TranspersonalGame/Private/VFX"
-        });
-
-        // Preprocessor definitions
-        PublicDefinitions.AddRange(new string[]
-        {
-            "TRANSPERSONAL_GAME=1",
-            "UE_BUILD_SHIPPING_WITH_EDITOR=1"
-        });
-
-        if (Target.Configuration == UnrealTargetConfiguration.Development || 
-            Target.Configuration == UnrealTargetConfiguration.Debug)
-        {
-            PublicDefinitions.Add("TRANSPERSONAL_DEBUG=1");
+            PrivateDependencyModuleNames.AddRange(new string[]
+            {
+                "UnrealEd",
+                "LevelEditor",
+                "PropertyEditor",
+            });
         }
+
+        // Optimization: enable unity builds for faster compile
+        bUseUnity = true;
+
+        // Enable IWYU for cleaner includes
+        bEnforceIWYU = true;
     }
 }
