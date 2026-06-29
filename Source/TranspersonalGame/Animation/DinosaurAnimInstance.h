@@ -1,56 +1,67 @@
 #pragma once
-
 // DinosaurAnimInstance.h
-// Animation Agent #10 — Transpersonal Game Studio
-// UAnimInstance subclass for all dinosaur species
-// Drives locomotion blendspace, combat montages, foot IK, procedural tail/head
+// Agent #10 — Animation Agent | PROD_CYCLE_AUTO_20260629_004
+// UAnimInstance subclass driving all dinosaur species locomotion and combat.
+// Provides blend space inputs, attack montage triggers, and procedural IK.
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "DinosaurAnimInstance.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENUMS — must be at global scope (UHT rule)
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// ENUMS — global scope (RULE 1)
+// ============================================================
 
 UENUM(BlueprintType)
 enum class EAnim_DinosaurSpecies : uint8
 {
     TRex            UMETA(DisplayName = "T-Rex"),
-    Raptor          UMETA(DisplayName = "Raptor"),
     Triceratops     UMETA(DisplayName = "Triceratops"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
     Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Pterodactyl     UMETA(DisplayName = "Pterodactyl"),
     Stegosaurus     UMETA(DisplayName = "Stegosaurus"),
+    Pterodactyl     UMETA(DisplayName = "Pterodactyl"),
     Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
-    Generic         UMETA(DisplayName = "Generic")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_DinosaurAttackType : uint8
-{
-    Bite            UMETA(DisplayName = "Bite"),
-    Claw            UMETA(DisplayName = "Claw"),
-    TailSwipe       UMETA(DisplayName = "Tail Swipe"),
-    Charge          UMETA(DisplayName = "Charge"),
-    Stomp           UMETA(DisplayName = "Stomp"),
-    HornThrust      UMETA(DisplayName = "Horn Thrust")
+    Spinosaurus     UMETA(DisplayName = "Spinosaurus")
 };
 
 UENUM(BlueprintType)
 enum class EAnim_DinosaurLocomotionState : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Walk            UMETA(DisplayName = "Walk"),
-    Run             UMETA(DisplayName = "Run"),
-    Sprint          UMETA(DisplayName = "Sprint"),
-    Swim            UMETA(DisplayName = "Swim"),
-    Fly             UMETA(DisplayName = "Fly")
+    Idle        UMETA(DisplayName = "Idle"),
+    Walk        UMETA(DisplayName = "Walk"),
+    Trot        UMETA(DisplayName = "Trot"),
+    Run         UMETA(DisplayName = "Run"),
+    Charge      UMETA(DisplayName = "Charge"),
+    Swim        UMETA(DisplayName = "Swim")
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+UENUM(BlueprintType)
+enum class EAnim_DinosaurAttackType : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Bite        UMETA(DisplayName = "Bite"),
+    Claw        UMETA(DisplayName = "Claw"),
+    TailSwipe   UMETA(DisplayName = "Tail Swipe"),
+    Charge      UMETA(DisplayName = "Charge"),
+    Stomp       UMETA(DisplayName = "Stomp")
+};
+
+UENUM(BlueprintType)
+enum class EAnim_DinosaurBehaviorState : uint8
+{
+    Passive     UMETA(DisplayName = "Passive"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Aggressive  UMETA(DisplayName = "Aggressive"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+    Resting     UMETA(DisplayName = "Resting")
+};
+
+// ============================================================
 // MAIN CLASS
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
@@ -60,163 +71,99 @@ class TRANSPERSONALGAME_API UDinosaurAnimInstance : public UAnimInstance
 public:
     UDinosaurAnimInstance();
 
-    // ── UAnimInstance overrides ──────────────────────────────────────────────
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion ───────────────────────────────────────────────────────────
+    // ---- Species ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dino|Identity")
+    EAnim_DinosaurSpecies Species;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float GroundSpeed;
+    // ---- Locomotion ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    float Speed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float MovementDirection;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    float Direction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsRunning;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
     bool bIsInAir;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float VerticalVelocity;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    bool bIsAccelerating;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
     EAnim_DinosaurLocomotionState LocomotionState;
 
-    // ── Combat ───────────────────────────────────────────────────────────────
+    // ---- Combat ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
+    EAnim_DinosaurAttackType CurrentAttack;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
     bool bIsAttacking;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    bool bIsRoaring;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    bool bIsEating;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    bool bIsDead;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    bool bIsStunned;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Combat")
-    EAnim_DinosaurAttackType CurrentAttackType;
-
-    // ── Behavior ─────────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behavior")
-    bool bIsAlerted;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behavior")
-    bool bIsSearching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behavior")
-    bool bIsSleeping;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behavior")
-    bool bIsIdle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Behavior")
-    int32 IdleVariantIndex;
-
-    // ── Blend Weights ────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Combat")
     float AttackBlendWeight;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
-    float RoarBlendWeight;
+    // ---- Behavior ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
+    EAnim_DinosaurBehaviorState BehaviorState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
-    float InjuryBlendWeight;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
+    float AlertLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Blend")
-    float AlertBlendWeight;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
+    bool bIsRoaring;
 
-    // ── Species & Stats ──────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadWrite, Category = "Anim|Species")
-    EAnim_DinosaurSpecies DinosaurSpecies;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Stats")
-    float HealthPercent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Stats")
-    float StaminaPercent;
-
-    // ── Foot IK ──────────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    bool bEnableFootIK;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    float LeftFootIKAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    float RightFootIKAlpha;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    FVector LeftFootIKOffset;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    FVector RightFootIKOffset;
-
-    // ── Procedural ───────────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Procedural")
+    // ---- Procedural ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
     float TailSwayAngle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Procedural")
-    float HeadLookAtAlpha;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
+    float HeadBobAlpha;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Procedural")
-    FVector HeadLookAtTarget;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Procedural")
+    float BreathingAlpha;
 
-    // ── Public API (callable from AI/Behavior Trees) ─────────────────────────
+    // ---- IK ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FVector LeftFootOffset;
 
-    UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FVector RightFootOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    float FootIKAlpha;
+
+    // ---- Blend Weights ----
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Blend")
+    float SpeedNormalized;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Blend")
+    float AggressionBlend;
+
+    // ---- Public API ----
+    UFUNCTION(BlueprintCallable, Category = "Dino|Combat")
     void TriggerAttack(EAnim_DinosaurAttackType AttackType);
 
-    UFUNCTION(BlueprintCallable, Category = "Anim|Combat")
+    UFUNCTION(BlueprintCallable, Category = "Dino|Combat")
+    void EndAttack();
+
+    UFUNCTION(BlueprintCallable, Category = "Dino|Behavior")
     void TriggerRoar();
 
-    UFUNCTION(BlueprintCallable, Category = "Anim|Behavior")
-    void SetAlertState(bool bAlerted, FVector ThreatLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Stats")
-    void SetHealthPercent(float NewHealthPercent);
-
-    UFUNCTION(BlueprintCallable, Category = "Anim|Stats")
-    void SetStaminaPercent(float NewStaminaPercent);
+    UFUNCTION(BlueprintCallable, Category = "Dino|Behavior")
+    void SetBehaviorState(EAnim_DinosaurBehaviorState NewState);
 
 private:
-    // ── Cached references ────────────────────────────────────────────────────
     UPROPERTY()
-    APawn* OwnerPawn;
+    APawn* CachedPawn;
 
     UPROPERTY()
-    class UCharacterMovementComponent* OwnerMovement;
+    UCharacterMovementComponent* CachedMovement;
 
-    // ── Internal state ───────────────────────────────────────────────────────
-    float TimeSinceLastAttack;
-    float TimeSinceLastRoar;
-    float IdleVariantTimer;
+    float ProceduralTime;
 
-    // ── Update subsystems ────────────────────────────────────────────────────
-    void UpdateLocomotion(float DeltaSeconds);
-    void UpdateCombatState(float DeltaSeconds);
-    void UpdateBehaviorState(float DeltaSeconds);
-    void UpdateProceduralElements(float DeltaSeconds);
+    void UpdateLocomotionState();
+    void UpdateProceduralAnimation(float DeltaSeconds);
     void UpdateFootIK(float DeltaSeconds);
-
-    // ── Species helpers ──────────────────────────────────────────────────────
-    float GetRunThresholdForSpecies() const;
-    float GetFootSpreadForSpecies() const;
-    float GetFootForwardOffsetForSpecies() const;
-    float GetIdleVariantDuration() const;
 };
