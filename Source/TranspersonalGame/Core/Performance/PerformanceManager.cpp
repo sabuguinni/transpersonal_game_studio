@@ -1,273 +1,251 @@
-// PerformanceManager.cpp
-// Agent #04 — Performance Optimizer
-// Enforces 60fps PC / 30fps console frame budget.
-// Controls LOD distances, tick intervals, shadow quality, texture streaming.
-
-#include "PerformanceManager.h"
+#include "Core/Performance/PerformanceManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "AIController.h"
+#include "BrainComponent.h"
 
-APerformanceManager::APerformanceManager()
+APerf_PerformanceManager* APerf_PerformanceManager::Instance = nullptr;
+
+APerf_PerformanceManager::APerf_PerformanceManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Self-ticks at 2Hz — low overhead
+    PrimaryActorTick.TickInterval = 0.0f; // Tick every frame for FPS measurement
 }
 
-void APerformanceManager::BeginPlay()
+void APerf_PerformanceManager::BeginPlay()
 {
     Super::BeginPlay();
-    ApplyQualityTier(QualityTier);
-    ApplyConsoleCommands();
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Initialized. Target: %.0f FPS. Tier: %d"),
-           TargetFPS_PC, (int32)QualityTier);
+    Instance = this;
+    ApplyPerformancePreset();
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Initialized. Target FPS: %.0f | AI LOD Full: %.0fm | Dormant: %.0fm"),
+        TargetFPS, AILODFullDistance / 100.f, AILODDormantDistance / 100.f);
 }
 
-void APerformanceManager::Tick(float DeltaTime)
+void APerf_PerformanceManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateFrameStats(DeltaTime);
+    UpdateFrameBudget(DeltaTime);
 
-    TimeSinceLastTickUpdate += DeltaTime;
-    if (TimeSinceLastTickUpdate >= TickUpdateInterval)
+    LODUpdateAccumulator += DeltaTime;
+    if (LODUpdateAccumulator >= LODUpdateInterval)
     {
-        TimeSinceLastTickUpdate = 0.0f;
-        UpdateTickIntervalsForAllActors();
+        LODUpdateAccumulator = 0.f;
+        UpdateAILODTiers();
     }
 }
 
-// ============================================================
-// UpdateFrameStats — rolling average FPS
-// ============================================================
-void APerformanceManager::UpdateFrameStats(float DeltaTime)
+// ── Public API ─────────────────────────────────────────────────────────────
+
+APerf_PerformanceManager* APerf_PerformanceManager::GetInstance()
 {
-    FrameTimeAccumulator += DeltaTime * 1000.0f; // ms
-    FrameCount++;
-
-    if (FrameCount >= 60)
-    {
-        FrameStats.LastFrameTimeMs = FrameTimeAccumulator / FrameCount;
-        FrameStats.AverageFPS = (FrameStats.LastFrameTimeMs > 0.0f)
-            ? (1000.0f / FrameStats.LastFrameTimeMs)
-            : 0.0f;
-        FrameTimeAccumulator = 0.0f;
-        FrameCount = 0;
-
-        if (!IsFrameBudgetHealthy())
-        {
-            UE_LOG(LogTemp, Warning,
-                TEXT("[PerformanceManager] Frame budget exceeded! FPS=%.1f (target=%.1f). "
-                     "Active dinos=%d, crowd=%d"),
-                FrameStats.AverageFPS, TargetFPS_PC,
-                FrameStats.ActiveDinoCount, FrameStats.ActiveCrowdCount);
-        }
-    }
+    return Instance;
 }
 
-// ============================================================
-// UpdateTickIntervalsForAllActors — LOD-based tick throttling
-// ============================================================
-void APerformanceManager::UpdateTickIntervalsForAllActors()
+void APerf_PerformanceManager::RegisterAIActor(AActor* Actor)
+{
+    if (!Actor) return;
+    if (RegisteredActors.Contains(Actor)) return;
+
+    RegisteredActors.Add(Actor);
+    FPerf_ActorBudget Budget;
+    Budget.TickInterval = 0.1f;
+    Budget.bTickEnabled = true;
+    ActorBudgets.Add(Actor, Budget);
+
+    UE_LOG(LogTemp, Verbose, TEXT("[PerformanceManager] Registered AI actor: %s"), *Actor->GetName());
+}
+
+void APerf_PerformanceManager::UnregisterAIActor(AActor* Actor)
+{
+    if (!Actor) return;
+    RegisteredActors.Remove(Actor);
+    ActorBudgets.Remove(Actor);
+}
+
+EPerf_AILODTier APerf_PerformanceManager::GetActorLODTier(AActor* Actor) const
+{
+    if (const FPerf_ActorBudget* Budget = ActorBudgets.Find(Actor))
+    {
+        return Budget->AILODTier;
+    }
+    return EPerf_AILODTier::Full;
+}
+
+void APerf_PerformanceManager::ForceUpdateAllLOD()
+{
+    LODUpdateAccumulator = LODUpdateInterval;
+    UpdateAILODTiers();
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Forced LOD update on %d actors"), RegisteredActors.Num());
+}
+
+void APerf_PerformanceManager::ApplyPerformancePreset()
 {
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // Get player location for distance checks
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+    // Shadow quality — balanced for 60fps
+    GEngine->Exec(World, TEXT("r.Shadow.MaxCSMResolution 1024"));
+    GEngine->Exec(World, TEXT("r.Shadow.RadiusThreshold 0.05"));
+    GEngine->Exec(World, TEXT("r.Shadow.DistanceScale 1.0"));
 
-    int32 DinoCount = 0;
-    int32 NearCrowd = 0;
-    int32 MidCrowd = 0;
-    int32 DormantCrowd = 0;
+    // Lumen — enabled but conservative
+    GEngine->Exec(World, TEXT("r.Lumen.DiffuseIndirect.Allow 1"));
+    GEngine->Exec(World, TEXT("r.Lumen.Reflections.Allow 1"));
+    GEngine->Exec(World, TEXT("r.Lumen.DiffuseIndirect.MaxTraceDistance 10000"));
 
-    for (TActorIterator<AActor> It(World); It; ++It)
+    // Occlusion culling
+    GEngine->Exec(World, TEXT("r.HZBOcclusion 1"));
+    GEngine->Exec(World, TEXT("r.OcclusionCullParallelRecursive 1"));
+
+    // LOD distances — slightly aggressive for performance
+    GEngine->Exec(World, TEXT("foliage.LODDistanceScale 1.5"));
+    GEngine->Exec(World, TEXT("r.StaticMeshLODDistanceScale 1.5"));
+    GEngine->Exec(World, TEXT("r.SkeletalMeshLODBias 0"));
+
+    // Sky atmosphere — fast LUT for performance
+    GEngine->Exec(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
+
+    // GC tuning — less frequent purges
+    GEngine->Exec(World, TEXT("gc.TimeBetweenPurgingPendingKillObjects 60"));
+
+    // Async loading
+    GEngine->Exec(World, TEXT("s.AsyncLoadingTimeLimit 5"));
+    GEngine->Exec(World, TEXT("s.PriorityAsyncLoadingExtraTime 2"));
+
+    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Performance preset applied (60fps PC target)"));
+}
+
+// ── Private Helpers ────────────────────────────────────────────────────────
+
+void APerf_PerformanceManager::UpdateFrameBudget(float DeltaTime)
+{
+    FPSAccumulator += DeltaTime;
+    FPSFrameCount++;
+
+    if (FPSAccumulator >= 1.0f)
     {
-        AActor* Actor = *It;
-        if (!Actor || Actor == this) continue;
+        FrameBudget.CurrentFPS = static_cast<float>(FPSFrameCount) / FPSAccumulator;
+        FrameBudget.FrameTimeMs = (FPSAccumulator / static_cast<float>(FPSFrameCount)) * 1000.f;
+        FrameBudget.bBelowTargetFPS = (FrameBudget.CurrentFPS < TargetFPS * 0.9f); // 10% tolerance
+        FrameBudget.ActiveAICount = 0;
+        FrameBudget.DormantAICount = 0;
 
-        FString ClassName = Actor->GetClass()->GetName();
-        bool bIsDino = ClassName.Contains(TEXT("Dino")) || ClassName.Contains(TEXT("TRex"))
-                    || ClassName.Contains(TEXT("Raptor")) || ClassName.Contains(TEXT("Brach"))
-                    || ClassName.Contains(TEXT("Tyrann")) || ClassName.Contains(TEXT("Veloci"));
-        bool bIsCrowd = ClassName.Contains(TEXT("Crowd")) || ClassName.Contains(TEXT("NPC"))
-                     || ClassName.Contains(TEXT("Primitive"));
-
-        if (bIsDino)
+        for (const AActor* Actor : RegisteredActors)
         {
-            Actor->SetActorTickInterval(TickBudget.DinosaurTickInterval);
-            DinoCount++;
+            if (const FPerf_ActorBudget* Budget = ActorBudgets.Find(Actor))
+            {
+                if (Budget->AILODTier == EPerf_AILODTier::Dormant)
+                    FrameBudget.DormantAICount++;
+                else
+                    FrameBudget.ActiveAICount++;
+            }
         }
-        else if (bIsCrowd && PlayerPawn)
+
+        FPSAccumulator = 0.f;
+        FPSFrameCount = 0;
+
+        if (FrameBudget.bBelowTargetFPS)
         {
-            float Dist = GetDistanceToPlayer(Actor);
-            if (Dist < TickBudget.NearDistanceThreshold)
-            {
-                Actor->SetActorTickEnabled(true);
-                Actor->SetActorTickInterval(TickBudget.CrowdNearTickInterval);
-                NearCrowd++;
-            }
-            else if (Dist < TickBudget.FarDistanceThreshold)
-            {
-                Actor->SetActorTickEnabled(true);
-                Actor->SetActorTickInterval(TickBudget.CrowdMidTickInterval);
-                MidCrowd++;
-            }
-            else
-            {
-                Actor->SetActorTickEnabled(false); // Dormant
-                DormantCrowd++;
-            }
+            UE_LOG(LogTemp, Warning, TEXT("[PerformanceManager] Below target FPS! Current: %.1f | Active AI: %d | Dormant AI: %d"),
+                FrameBudget.CurrentFPS, FrameBudget.ActiveAICount, FrameBudget.DormantAICount);
+        }
+    }
+}
+
+void APerf_PerformanceManager::UpdateAILODTiers()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Get player location
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+
+    // Update each registered actor
+    for (AActor* Actor : RegisteredActors)
+    {
+        if (!IsValid(Actor)) continue;
+
+        FPerf_ActorBudget* Budget = ActorBudgets.Find(Actor);
+        if (!Budget) continue;
+
+        float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
+        Budget->DistanceToPlayer = Distance;
+
+        EPerf_AILODTier NewTier = CalculateLODTier(Distance);
+        if (NewTier != Budget->AILODTier)
+        {
+            ApplyLODTierToActor(Actor, NewTier, *Budget);
         }
     }
 
-    FrameStats.ActiveDinoCount = DinoCount;
-    FrameStats.ActiveCrowdCount = NearCrowd + MidCrowd;
-    FrameStats.DormantCrowdCount = DormantCrowd;
+    // Clean up invalid actors
+    RegisteredActors.RemoveAll([](const AActor* A) { return !IsValid(A); });
 }
 
-// ============================================================
-// ApplyQualityTier
-// ============================================================
-void APerformanceManager::ApplyQualityTier(EPerf_QualityTier NewTier)
+EPerf_AILODTier APerf_PerformanceManager::CalculateLODTier(float Distance) const
 {
-    QualityTier = NewTier;
+    if (Distance <= AILODFullDistance)
+        return EPerf_AILODTier::Full;
+    if (Distance <= AILODDormantDistance)
+        return EPerf_AILODTier::Reduced;
+    return EPerf_AILODTier::Dormant;
+}
+
+void APerf_PerformanceManager::ApplyLODTierToActor(AActor* Actor, EPerf_AILODTier NewTier, FPerf_ActorBudget& Budget)
+{
+    Budget.AILODTier = NewTier;
+
     switch (NewTier)
     {
-        case EPerf_QualityTier::Low:    ApplyQualityPreset_Low();    break;
-        case EPerf_QualityTier::Medium: ApplyQualityPreset_Medium(); break;
-        case EPerf_QualityTier::High:   ApplyQualityPreset_High();   break;
-        case EPerf_QualityTier::Ultra:  ApplyQualityPreset_Ultra();  break;
+    case EPerf_AILODTier::Full:
+        Budget.TickInterval = 0.1f;
+        Budget.bTickEnabled = true;
+        Actor->SetActorTickEnabled(true);
+        Actor->SetActorTickInterval(0.1f);
+        // Re-enable AI brain if it was paused
+        if (APawn* Pawn = Cast<APawn>(Actor))
+        {
+            if (AAIController* AIC = Cast<AAIController>(Pawn->GetController()))
+            {
+                if (AIC->GetBrainComponent())
+                    AIC->GetBrainComponent()->RestartLogic();
+            }
+        }
+        break;
+
+    case EPerf_AILODTier::Reduced:
+        Budget.TickInterval = ReducedTickInterval;
+        Budget.bTickEnabled = true;
+        Actor->SetActorTickEnabled(true);
+        Actor->SetActorTickInterval(ReducedTickInterval);
+        break;
+
+    case EPerf_AILODTier::Dormant:
+        Budget.TickInterval = DormantTickInterval;
+        Budget.bTickEnabled = true; // Still tick, just very slowly
+        Actor->SetActorTickEnabled(true);
+        Actor->SetActorTickInterval(DormantTickInterval);
+        // Pause AI brain to save CPU
+        if (APawn* Pawn = Cast<APawn>(Actor))
+        {
+            if (AAIController* AIC = Cast<AAIController>(Pawn->GetController()))
+            {
+                if (AIC->GetBrainComponent())
+                    AIC->GetBrainComponent()->PauseLogic(TEXT("Dormant LOD"));
+            }
+        }
+        break;
     }
-    ApplyConsoleCommands();
-}
 
-void APerformanceManager::ApplyQualityPreset_Low()
-{
-    StaticMeshLODScale    = 0.7f;
-    SkeletalMeshLODScale  = 0.7f;
-    MaxShadowResolution   = 512;
-    TextureStreamingPoolMB = 512;
-    TickBudget.DinosaurTickInterval  = 0.1f;  // 10Hz
-    TickBudget.CrowdNearTickInterval = 0.2f;  // 5Hz
-    TickBudget.CrowdMidTickInterval  = 1.0f;  // 1Hz
-    TickBudget.NearDistanceThreshold = 300.0f;
-    TickBudget.FarDistanceThreshold  = 1000.0f;
-}
-
-void APerformanceManager::ApplyQualityPreset_Medium()
-{
-    StaticMeshLODScale    = 1.0f;
-    SkeletalMeshLODScale  = 1.0f;
-    MaxShadowResolution   = 1024;
-    TextureStreamingPoolMB = 768;
-    TickBudget.DinosaurTickInterval  = 0.05f; // 20Hz
-    TickBudget.CrowdNearTickInterval = 0.1f;  // 10Hz
-    TickBudget.CrowdMidTickInterval  = 0.5f;  // 2Hz
-    TickBudget.NearDistanceThreshold = 500.0f;
-    TickBudget.FarDistanceThreshold  = 1500.0f;
-}
-
-void APerformanceManager::ApplyQualityPreset_High()
-{
-    StaticMeshLODScale    = 1.0f;
-    SkeletalMeshLODScale  = 1.0f;
-    MaxShadowResolution   = 2048;
-    TextureStreamingPoolMB = 1024;
-    TickBudget.DinosaurTickInterval  = 0.05f; // 20Hz
-    TickBudget.CrowdNearTickInterval = 0.1f;  // 10Hz
-    TickBudget.CrowdMidTickInterval  = 0.5f;  // 2Hz
-    TickBudget.NearDistanceThreshold = 500.0f;
-    TickBudget.FarDistanceThreshold  = 2000.0f;
-}
-
-void APerformanceManager::ApplyQualityPreset_Ultra()
-{
-    StaticMeshLODScale    = 1.5f;
-    SkeletalMeshLODScale  = 1.5f;
-    MaxShadowResolution   = 4096;
-    TextureStreamingPoolMB = 2048;
-    TickBudget.DinosaurTickInterval  = 0.033f; // 30Hz
-    TickBudget.CrowdNearTickInterval = 0.05f;  // 20Hz
-    TickBudget.CrowdMidTickInterval  = 0.2f;   // 5Hz
-    TickBudget.NearDistanceThreshold = 800.0f;
-    TickBudget.FarDistanceThreshold  = 3000.0f;
-}
-
-// ============================================================
-// ApplyConsoleCommands — push all settings to UE5 renderer
-// ============================================================
-void APerformanceManager::ApplyConsoleCommands()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // LOD
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        FString::Printf(TEXT("r.StaticMeshLODDistanceScale %.2f"), StaticMeshLODScale));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        FString::Printf(TEXT("r.SkeletalMeshLODDistanceScale %.2f"), SkeletalMeshLODScale));
-
-    // Shadows
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        FString::Printf(TEXT("r.Shadow.MaxResolution %d"), MaxShadowResolution));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        TEXT("r.Shadow.RadiusThreshold 0.03"));
-
-    // Texture streaming
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        FString::Printf(TEXT("r.Streaming.PoolSize %d"), TextureStreamingPoolMB));
-
-    // Occlusion
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.HZBOcclusion 1"));
-
-    // Sky performance
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-
-    // Lumen
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.Reflections.Allow 1"));
-    UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.DynamicGlobalIlluminationMethod 1"));
-
-    // Niagara GPU particle budget
-    UKismetSystemLibrary::ExecuteConsoleCommand(World,
-        TEXT("fx.Niagara.MaxGPUParticlesSpawnPerFrame 2000"));
-
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Console commands applied. "
-        "LOD=%.1f Shadow=%d Streaming=%dMB"),
-        StaticMeshLODScale, MaxShadowResolution, TextureStreamingPoolMB);
-}
-
-// ============================================================
-// Public API
-// ============================================================
-void APerformanceManager::SetTargetFPS(float NewTargetFPS)
-{
-    TargetFPS_PC = FMath::Clamp(NewTargetFPS, 20.0f, 144.0f);
-    UE_LOG(LogTemp, Log, TEXT("[PerformanceManager] Target FPS set to %.0f"), TargetFPS_PC);
-}
-
-FPerf_FrameStats APerformanceManager::GetFrameStats() const
-{
-    return FrameStats;
-}
-
-bool APerformanceManager::IsFrameBudgetHealthy() const
-{
-    if (FrameStats.AverageFPS <= 0.0f) return true; // Not enough data yet
-    return FrameStats.AverageFPS >= (TargetFPS_PC * 0.9f); // 10% tolerance
-}
-
-float APerformanceManager::GetDistanceToPlayer(AActor* Actor) const
-{
-    if (!Actor) return 0.0f;
-    UWorld* World = GetWorld();
-    if (!World) return 0.0f;
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
-    if (!PlayerPawn) return 0.0f;
-    return FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
+    UE_LOG(LogTemp, Verbose, TEXT("[PerformanceManager] %s -> LOD tier: %d (dist: %.0fm)"),
+        *Actor->GetName(), static_cast<int32>(NewTier), Budget.DistanceToPlayer / 100.f);
 }
