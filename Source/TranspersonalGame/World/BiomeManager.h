@@ -2,50 +2,85 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Forest      UMETA(DisplayName = "Cretaceous Forest"),
-    Savanna     UMETA(DisplayName = "Open Savanna"),
-    Wetland     UMETA(DisplayName = "River Wetland"),
-    Volcanic    UMETA(DisplayName = "Volcanic Badlands"),
-    Plains      UMETA(DisplayName = "Open Plains"),
-    Coastal     UMETA(DisplayName = "Coastal Shore"),
-    None        UMETA(DisplayName = "Undefined")
-};
-
+// ============================================================
+// Biome zone data — defines a rectangular biome region
+// ============================================================
 USTRUCT(BlueprintType)
-struct FEng_BiomeData
+struct FWorld_BiomeZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EEng_BiomeType BiomeType = EEng_BiomeType::None;
+    FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown");
+    FVector2D CenterXY;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 25.0f;
+    FVector2D ExtentXY;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    float BaseElevation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FoliageDensity = 0.5f;
+    float VegetationDensity;   // 0.0 - 1.0
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DinosaurSpawnWeight = 1.0f;
+    float WaterPresence;       // 0.0 - 1.0
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeDebugColor = FLinearColor::White;
+    float DinosaurDensity;     // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor BiomeColor;   // Debug visualization color
+
+    FWorld_BiomeZone()
+        : BiomeName(TEXT("Unknown"))
+        , CenterXY(FVector2D::ZeroVector)
+        , ExtentXY(FVector2D(1000.f, 1000.f))
+        , BaseElevation(0.f)
+        , VegetationDensity(0.5f)
+        , WaterPresence(0.f)
+        , DinosaurDensity(0.3f)
+        , BiomeColor(FLinearColor::White)
+    {}
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+// ============================================================
+// Dinosaur spawn entry for a biome
+// ============================================================
+USTRUCT(BlueprintType)
+struct FWorld_DinoSpawnEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FString SpeciesName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    int32 MinCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    int32 MaxCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float SpawnWeight;  // Relative probability
+
+    FWorld_DinoSpawnEntry()
+        : SpeciesName(TEXT("Raptor"))
+        , MinCount(1)
+        , MaxCount(3)
+        , SpawnWeight(1.0f)
+    {}
+};
+
+// ============================================================
+// ABiomeManager — manages biome zones, PCG scatter, dino spawn
+// ============================================================
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -53,51 +88,77 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
+protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void Tick(float DeltaTime) override;
 
-    // Query which biome a world position belongs to
+    // ---- Biome Registry ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeZone> BiomeZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    bool bAutoRegisterDefaultBiomes;
+
+    // ---- Vegetation PCG ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    int32 VegetationSeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    float GlobalVegetationScale;
+
+    // ---- Dinosaur Spawning ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
+    TArray<FWorld_DinoSpawnEntry> GlobalSpawnTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
+    int32 DinosaurSpawnSeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaurs")
+    bool bSpawnDinosaursOnBeginPlay;
+
+    // ---- Runtime State ----
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    int32 TotalActorsSpawned;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    int32 ActiveBiomeCount;
+
+    // ---- API ----
+
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    EEng_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+    void RegisterDefaultBiomes();
 
-    // Get full biome data for a world position
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeData GetBiomeDataAtLocation(FVector WorldLocation) const;
+    FString GetBiomeAtLocation(FVector WorldLocation) const;
 
-    // Get biome data by type
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeData GetBiomeDataByType(EEng_BiomeType BiomeType) const;
+    float GetVegetationDensityAtLocation(FVector WorldLocation) const;
 
-    // Register a biome zone (called by world generator)
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterBiomeZone(FVector Center, float Radius, EEng_BiomeType BiomeType);
+    float GetWaterPresenceAtLocation(FVector WorldLocation) const;
 
-    // Get all registered biome zones count
     UFUNCTION(BlueprintCallable, Category = "Biome")
-    int32 GetBiomeZoneCount() const;
+    void ScatterVegetationInBiome(int32 BiomeIndex, int32 Count);
 
-    // Debug: draw biome boundaries in viewport
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
-    void DrawBiomeBoundaries();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void SpawnDinosaursInBiome(int32 BiomeIndex);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome|Config")
-    float BiomeBlendRadius = 200.0f;
+    UFUNCTION(BlueprintCallable, Category = "Biome", CallInEditor)
+    void RegenerateAllBiomes();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome|Config")
-    bool bShowDebugBiomes = false;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<FVector> GeneratePoissonDiskPoints(FVector2D Center, FVector2D Extent, float MinDistance, int32 MaxPoints, int32 Seed) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DrawBiomeDebugBounds(float Duration = 5.0f) const;
 
 private:
-    struct FEng_BiomeZone
-    {
-        FVector Center;
-        float Radius;
-        EEng_BiomeType BiomeType;
-    };
-
-    TArray<FEng_BiomeZone> BiomeZones;
-    TMap<EEng_BiomeType, FEng_BiomeData> BiomeDataMap;
-
-    void InitializeBiomeData();
-    EEng_BiomeType ClassifyLocationByNoise(FVector WorldLocation) const;
+    const FWorld_BiomeZone* FindBiomeAtLocation(FVector WorldLocation) const;
+    FVector GetRandomPointInBiome(const FWorld_BiomeZone& Zone, int32& InOutSeed) const;
 };
