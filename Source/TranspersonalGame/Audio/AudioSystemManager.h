@@ -3,67 +3,18 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundCue.h"
 #include "AudioSystemManager.generated.h"
 
-// ============================================================
-// Audio Agent #16 — AudioSystemManager
-// Adaptive audio system: ambient layers, proximity triggers,
-// dinosaur state-driven music, campfire/night ambience
-// ============================================================
-
 UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
+enum class EAudio_EnvironmentState : uint8
 {
     Calm        UMETA(DisplayName = "Calm"),
-    Aware       UMETA(DisplayName = "Aware"),
-    Tense       UMETA(DisplayName = "Tense"),
-    Chase       UMETA(DisplayName = "Chase"),
+    Alert       UMETA(DisplayName = "Alert — Predator Nearby"),
     Combat      UMETA(DisplayName = "Combat"),
-    Safe        UMETA(DisplayName = "Safe")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_TimeOfDay : uint8
-{
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Day         UMETA(DisplayName = "Day"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
-{
-    OpenPlains  UMETA(DisplayName = "Open Plains"),
-    DenseForest UMETA(DisplayName = "Dense Forest"),
-    RiverBank   UMETA(DisplayName = "River Bank"),
-    RockyRidge  UMETA(DisplayName = "Rocky Ridge"),
-    Swamp       UMETA(DisplayName = "Swamp")
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_ProximityTrigger
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    float TriggerRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    float FadeInTime = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    float FadeOutTime = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    float MaxVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    bool bLooping = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    bool bIs3D = true;
+    Night       UMETA(DisplayName = "Night"),
+    Rain        UMETA(DisplayName = "Rain"),
+    Fire        UMETA(DisplayName = "Fire — Camp Active")
 };
 
 USTRUCT(BlueprintType)
@@ -72,22 +23,16 @@ struct FAudio_AmbientLayer
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    EAudio_BiomeType Biome = EAudio_BiomeType::OpenPlains;
+    USoundCue* SoundCue = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    EAudio_TimeOfDay TimeOfDay = EAudio_TimeOfDay::Day;
+    float Volume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float BaseVolume = 0.6f;
+    float FadeInTime = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float CrossfadeDuration = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    FString FreesoundPreviewURL;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    FString SoundAssetPath;
+    EAudio_EnvironmentState ActiveInState = EAudio_EnvironmentState::Calm;
 };
 
 USTRUCT(BlueprintType)
@@ -99,58 +44,21 @@ struct FAudio_VoiceLine
     FString CharacterName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    FString DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
     FString AudioURL;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
     FString TriggerCondition;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    float PlaybackVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    bool bSubtitlesEnabled = true;
+    float CooldownSeconds = 120.0f;
 };
 
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_ProximityComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UAudio_ProximityComponent();
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    FAudio_ProximityTrigger ProximitySettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
-    USoundBase* ProximitySound = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Proximity", meta = (AllowPrivateAccess = "true"))
-    bool bPlayerInRange = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Proximity", meta = (AllowPrivateAccess = "true"))
-    float CurrentVolume = 0.0f;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Proximity")
-    void UpdateProximityVolume(float DistanceToPlayer);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Proximity")
-    void SetProximitySound(USoundBase* NewSound);
-
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-protected:
-    virtual void BeginPlay() override;
-
-private:
-    UPROPERTY()
-    UAudioComponent* AudioComp = nullptr;
-};
-
-UCLASS()
+/**
+ * AAudio_SystemManager
+ * Manages adaptive ambient audio, voice lines, and environmental sound states
+ * for the prehistoric survival game. Integrates with MetaSounds via UE5.
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
 {
     GENERATED_BODY()
@@ -158,79 +66,105 @@ class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
 public:
     AAudio_SystemManager();
 
-    // Current audio state
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|State")
-    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Calm;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|State")
-    EAudio_TimeOfDay CurrentTimeOfDay = EAudio_TimeOfDay::Day;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|State")
-    EAudio_BiomeType CurrentBiome = EAudio_BiomeType::OpenPlains;
-
-    // Registered voice lines (TTS-generated)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    TArray<FAudio_VoiceLine> RegisteredVoiceLines;
-
-    // Ambient layers
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    TArray<FAudio_AmbientLayer> AmbientLayers;
-
-    // Campfire sound (Freesound ID 681366)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Campfire")
-    FString CampfireFreesoundURL = TEXT("https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3");
-
-    // Threat level transition times (seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    float MusicTransitionTime = 4.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    float ThreatEscalationDelay = 1.5f;
-
-    // State change functions
-    UFUNCTION(BlueprintCallable, Category = "Audio|State")
-    void SetThreatLevel(EAudio_ThreatLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|State")
-    void SetTimeOfDay(EAudio_TimeOfDay NewTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|State")
-    void SetBiome(EAudio_BiomeType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
-    void PlayVoiceLine(const FString& CharacterName, const FString& TriggerCondition);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
-    void RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine);
-
-    UFUNCTION(BlueprintPure, Category = "Audio|State")
-    EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
-
-    UFUNCTION(BlueprintPure, Category = "Audio|State")
-    EAudio_TimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
-    void CrossfadeToAmbientLayer(EAudio_BiomeType Biome, EAudio_TimeOfDay Time);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Debug")
-    void LogAudioState() const;
-
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
+    // === ENVIRONMENT STATE ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void SetEnvironmentState(EAudio_EnvironmentState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    EAudio_EnvironmentState GetCurrentEnvironmentState() const { return CurrentEnvironmentState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void TransitionToState(EAudio_EnvironmentState NewState, float TransitionTime = 2.0f);
+
+    // === AMBIENT LAYERS ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void RegisterAmbientLayer(FAudio_AmbientLayer Layer);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void UpdateAmbientMix();
+
+    // === VOICE LINES ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
+    void RegisterVoiceLine(FAudio_VoiceLine VoiceLine);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
+    void TriggerVoiceLine(const FString& CharacterName, const FString& Condition);
+
+    // === DINOSAUR PROXIMITY ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void NotifyDinosaurProximity(float DistanceMeters, FName DinosaurSpecies);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void NotifyDinosaurLost();
+
+    // === SURVIVAL FEEDBACK ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Survival")
+    void PlayHeartbeatTension(float IntensityNormalized);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Survival")
+    void PlayDamageImpact(float DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Survival")
+    void PlayCraftingSound(FName ToolType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Survival")
+    void PlayFootstep(FName SurfaceType);
+
+    // === DAY/NIGHT AUDIO ===
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    void SetTimeOfDay(float NormalizedTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
 protected:
-    void InitializeDefaultVoiceLines();
-    void InitializeDefaultAmbientLayers();
-    void UpdateMusicState(float DeltaTime);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State",
+        meta = (AllowPrivateAccess = "true"))
+    EAudio_EnvironmentState CurrentEnvironmentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    TArray<FAudio_AmbientLayer> RegisteredAmbientLayers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    TArray<FAudio_VoiceLine> RegisteredVoiceLines;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|DayNight",
+        meta = (AllowPrivateAccess = "true"))
+    float CurrentTimeOfDay = 0.5f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Dinosaur",
+        meta = (AllowPrivateAccess = "true"))
+    float NearestDinosaurDistance = 9999.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Dinosaur",
+        meta = (AllowPrivateAccess = "true"))
+    FName NearestDinosaurSpecies = NAME_None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|Survival",
+        meta = (AllowPrivateAccess = "true"))
+    float HeartbeatIntensity = 0.0f;
+
+    // === VOICE LINE CATALOG (URLs from ElevenLabs TTS) ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|VoiceCatalog")
+    TMap<FString, FString> VoiceLineURLCatalog;
 
 private:
-    UPROPERTY()
-    UAudioComponent* MusicComponent = nullptr;
+    void UpdateDinosaurAudioState(float DeltaTime);
+    void UpdateDayNightAudio();
+    void UpdateHeartbeat(float DeltaTime);
 
-    UPROPERTY()
-    UAudioComponent* AmbientComponent = nullptr;
-
-    float ThreatTransitionTimer = 0.0f;
-    EAudio_ThreatLevel PendingThreatLevel = EAudio_ThreatLevel::Calm;
-    bool bTransitioningThreat = false;
+    float StateTransitionTimer = 0.0f;
+    float StateTransitionDuration = 2.0f;
+    EAudio_EnvironmentState TargetEnvironmentState;
+    bool bIsTransitioning = false;
 };
