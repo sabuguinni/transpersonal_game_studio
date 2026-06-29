@@ -1,218 +1,179 @@
-// DinosaurAudioComponent.h
-// Agent #16 — Audio Agent | PROD_CYCLE_AUTO_20260629_002
-// Adaptive audio component for dinosaur entities — roars, footsteps, breathing, alerts
-// Attaches to dinosaur pawns and drives MetaSound parameters based on AI state
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
 #include "DinosaurAudioComponent.generated.h"
 
-// ─── Enums (global scope, Audio_ prefix) ───────────────────────────────────
-
-UENUM(BlueprintType)
-enum class EAudio_DinoSpecies : uint8
-{
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Raptor          UMETA(DisplayName = "Raptor"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Pterodactyl     UMETA(DisplayName = "Pterodactyl"),
-    Unknown         UMETA(DisplayName = "Unknown")
-};
-
+/**
+ * Enum for dinosaur audio state — drives MetaSound parameter selection.
+ * Prefix: EAudio_ to avoid collision with other agents.
+ */
 UENUM(BlueprintType)
 enum class EAudio_DinoState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Alerted     UMETA(DisplayName = "Alerted"),
+    Alert       UMETA(DisplayName = "Alert"),
     Hunting     UMETA(DisplayName = "Hunting"),
     Attacking   UMETA(DisplayName = "Attacking"),
     Fleeing     UMETA(DisplayName = "Fleeing"),
     Feeding     UMETA(DisplayName = "Feeding"),
-    Sleeping    UMETA(DisplayName = "Sleeping")
+    Dead        UMETA(DisplayName = "Dead")
 };
 
+/**
+ * Enum for dinosaur species — each species has a distinct audio profile.
+ */
 UENUM(BlueprintType)
-enum class EAudio_FootstepWeight : uint8
+enum class EAudio_DinoSpecies : uint8
 {
-    Light   UMETA(DisplayName = "Light"),   // Raptor, Pterodactyl
-    Medium  UMETA(DisplayName = "Medium"),  // Triceratops
-    Heavy   UMETA(DisplayName = "Heavy"),   // T-Rex, Brachiosaurus
-    Massive UMETA(DisplayName = "Massive")  // Brachiosaurus full weight
+    TyrannosaurusRex    UMETA(DisplayName = "T-Rex"),
+    Velociraptor        UMETA(DisplayName = "Velociraptor"),
+    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
+    Spinosaurus         UMETA(DisplayName = "Spinosaurus"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
+    Pterodactyl         UMETA(DisplayName = "Pterodactyl"),
+    Generic             UMETA(DisplayName = "Generic")
 };
 
-// ─── Structs (global scope) ────────────────────────────────────────────────
-
+/**
+ * Struct holding the full audio profile for a dinosaur species.
+ * Assigned per-species in Blueprint or DataAsset.
+ */
 USTRUCT(BlueprintType)
-struct FAudio_DinoSoundProfile
+struct FAudio_DinoAudioProfile
 {
     GENERATED_BODY()
 
+    /** Ambient idle vocalisation — looping, low volume */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    EAudio_DinoSpecies Species = EAudio_DinoSpecies::Unknown;
+    USoundCue* IdleVocalisation = nullptr;
 
+    /** Alert call — played once when dinosaur detects a threat */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    EAudio_FootstepWeight FootstepWeight = EAudio_FootstepWeight::Medium;
+    USoundCue* AlertCall = nullptr;
 
-    // Roar range — how far the roar carries (cm)
+    /** Attack roar — played at the moment of charge/strike */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    float RoarRadius = 5000.0f;
+    USoundCue* AttackRoar = nullptr;
 
-    // Footstep interval in seconds (faster = more frequent)
+    /** Death sound — played once on death */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    float FootstepInterval = 0.8f;
+    USoundCue* DeathSound = nullptr;
 
-    // Ground shake radius when footstep lands (cm)
+    /** Footstep — played per-step via animation notify */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    float GroundShakeRadius = 2000.0f;
+    USoundCue* Footstep = nullptr;
 
-    // Breathing rate — breaths per minute
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
-    float BreathingRate = 12.0f;
+    /** Ground shake radius for heavy species (T-Rex, Brachio) in cm */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
+    float GroundShakeRadius = 1500.0f;
 
-    // Volume multiplier for this species
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino")
+    /** Volume multiplier for this species */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino", meta = (ClampMin = "0.1", ClampMax = "3.0"))
     float VolumeMultiplier = 1.0f;
+
+    /** Attenuation distance — how far the player can hear this dino */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino", meta = (ClampMin = "500.0", ClampMax = "20000.0"))
+    float AttenuationMaxDistance = 8000.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FAudio_ProximityThreat
-{
-    GENERATED_BODY()
-
-    // Distance to nearest predator (cm)
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Threat")
-    float NearestPredatorDistance = 99999.0f;
-
-    // Is the predator actively hunting the player?
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Threat")
-    bool bIsBeingHunted = false;
-
-    // Threat level 0.0–1.0 (drives music intensity)
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Threat")
-    float ThreatLevel = 0.0f;
-
-    // Species of nearest threat
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Threat")
-    EAudio_DinoSpecies NearestThreatSpecies = EAudio_DinoSpecies::Unknown;
-};
-
-// ─── Component ─────────────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent), DisplayName = "Dinosaur Audio Component")
-class TRANSPERSONALGAME_API UDinosaurAudioComponent : public UActorComponent
+/**
+ * UAudio_DinosaurAudioComponent
+ *
+ * Attached to every dinosaur pawn. Manages:
+ * - State-driven vocalisation (idle/alert/attack/death)
+ * - Footstep audio via animation notify
+ * - Ground shake propagation to nearby players
+ * - Proximity-based audio intensity (fear factor)
+ *
+ * Designed to work with MetaSounds in UE5.3+.
+ * Falls back to SoundCue if MetaSound asset not assigned.
+ */
+UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Dinosaur Audio Component")
+class TRANSPERSONALGAME_API UAudio_DinosaurAudioComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UDinosaurAudioComponent();
+    UAudio_DinosaurAudioComponent();
 
-    // ── Configuration ──────────────────────────────────────────────────────
+    // ─── Species & Profile ────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    FAudio_DinoSoundProfile SoundProfile;
+    /** Species determines which audio profile is active */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino|Config")
+    EAudio_DinoSpecies Species = EAudio_DinoSpecies::Generic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    /** Full audio profile for this dinosaur — assign in Blueprint or DataAsset */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dino|Config")
+    FAudio_DinoAudioProfile AudioProfile;
+
+    // ─── Runtime State ────────────────────────────────────────────────────────
+
+    /** Current behavioural state — drives which audio plays */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dino|State")
     EAudio_DinoState CurrentState = EAudio_DinoState::Idle;
 
-    // Distance at which player starts hearing ambient breathing (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float BreathingAudibleRadius = 800.0f;
-
-    // Distance at which footsteps cause camera shake for player (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float FootstepShakeRadius = 1500.0f;
-
-    // Enable low-frequency rumble effect for heavy dinosaurs
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    bool bEnableLFRumble = true;
-
-    // ── Runtime State ──────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    float TimeSinceLastRoar = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    float TimeSinceLastFootstep = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    bool bPlayerInBreathingRange = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
+    /** Distance to nearest player — updated every tick (throttled) */
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Dino|State")
     float DistanceToPlayer = 99999.0f;
 
-    // ── Audio Assets (assigned in Blueprint) ──────────────────────────────
+    // ─── Public Interface ─────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
-    USoundBase* RoarSound = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
-    USoundBase* FootstepSound = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
-    USoundBase* BreathingSound = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
-    USoundBase* AlertSound = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
-    USoundBase* FeedingSound = nullptr;
-
-    // ── Public API ─────────────────────────────────────────────────────────
-
+    /**
+     * Called by AI Behavior Tree when dino state changes.
+     * Transitions audio from current state to new state.
+     */
     UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
     void SetDinoState(EAudio_DinoState NewState);
 
+    /**
+     * Called by Animation Notify on each footstep.
+     * Plays footstep sound and triggers ground shake if applicable.
+     */
     UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void TriggerRoar();
+    void PlayFootstep();
 
+    /**
+     * Called by Combat system on death.
+     * Stops all looping audio, plays death sound once.
+     */
     UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void TriggerFootstep();
+    void PlayDeathAudio();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void TriggerAlert();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dino")
-    void SetSpecies(EAudio_DinoSpecies Species);
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Dino")
-    float GetThreatLevelForPlayer() const;
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Dino")
-    bool IsPlayerInDanger() const;
-
-    // Returns the sound profile defaults for a given species
-    UFUNCTION(BlueprintPure, Category = "Audio|Dino")
-    static FAudio_DinoSoundProfile GetDefaultProfileForSpecies(EAudio_DinoSpecies Species);
+    /**
+     * Returns a 0-1 fear intensity value based on species, state, and distance.
+     * Used by the HUD and player character to modulate heartbeat/breathing audio.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Audio|Dino")
+    float GetFearIntensity() const;
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Internal audio component for continuous sounds (breathing, ambient)
+    /** Active audio component for looping vocalisations */
     UPROPERTY()
-    UAudioComponent* BreathingAudioComp = nullptr;
+    UAudioComponent* LoopingAudioComp = nullptr;
 
-    // Cooldown tracking
-    float RoarCooldown = 8.0f;
-    float FootstepCooldown = 0.0f;
+    /** Accumulated time since last player distance update */
+    float DistanceUpdateAccumulator = 0.0f;
 
-    // Update distance to player each tick
-    void UpdatePlayerDistance();
+    /** How often to update player distance (seconds) */
+    static constexpr float DistanceUpdateInterval = 0.25f;
 
-    // Apply state-specific audio behaviour
-    void ApplyStateAudio(EAudio_DinoState OldState, EAudio_DinoState NewState);
+    /** Stops any currently playing looping vocalisation */
+    void StopLoopingAudio();
 
-    // Trigger ground shake via camera shake at player location
-    void TriggerGroundShake(float Intensity);
+    /** Starts a new looping vocalisation for the given state */
+    void StartLoopingAudio(USoundCue* SoundCue);
 
-    // Cached player pawn reference
-    UPROPERTY()
-    APawn* CachedPlayerPawn = nullptr;
+    /** Finds the nearest player pawn in the world */
+    APawn* FindNearestPlayer() const;
+
+    /** Propagates ground shake to all players within GroundShakeRadius */
+    void PropagateGroundShake();
 };
