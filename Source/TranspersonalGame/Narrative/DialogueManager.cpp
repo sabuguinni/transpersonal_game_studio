@@ -1,176 +1,262 @@
 // DialogueManager.cpp
 // Agent #15 — Narrative & Dialogue Agent
-// Full implementation of UNarr_DialogueManagerComponent
+// Full implementation of the dialogue manager system.
 
 #include "DialogueManager.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
-UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
+ADialogueManager::ADialogueManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5s — not every frame
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f;
+
+    ProximityTriggerRadius = 800.0f;
+    DangerCheckInterval = 3.0f;
+    DangerCheckTimer = 0.0f;
+    bDialogueActive = false;
+
+    // Populate hardcoded survival dialogue lines
+    PopulateDefaultLines();
 }
 
-void UNarr_DialogueManagerComponent::BeginPlay()
+void ADialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Seed the dialogue library with default lines (text only — audio assigned via Blueprint)
-    FNarr_DialogueLine DangerLine;
-    DangerLine.Trigger = ENarr_DialogueTrigger::DangerNear;
-    DangerLine.Speaker = ENarr_CharacterRole::HunterElder;
-    DangerLine.LineText = TEXT("Something is wrong. The birds stopped singing. Move to high ground — now.");
-    DangerLine.CooldownSeconds = 90.0f;
-    DangerLine.Priority = 2.0f;
-    DialogueLibrary.Add(DangerLine);
-
-    FNarr_DialogueLine HungerLine;
-    HungerLine.Trigger = ENarr_DialogueTrigger::PlayerLowHunger;
-    HungerLine.Speaker = ENarr_CharacterRole::HuntCaller;
-    HungerLine.LineText = TEXT("The river bends east past the dead tree — that is where the herd crosses at dawn.");
-    HungerLine.CooldownSeconds = 120.0f;
-    HungerLine.Priority = 1.0f;
-    DialogueLibrary.Add(HungerLine);
-
-    FNarr_DialogueLine StampedeWarning;
-    StampedeWarning.Trigger = ENarr_DialogueTrigger::StampedeWarning;
-    StampedeWarning.Speaker = ENarr_CharacterRole::TrailReader;
-    StampedeWarning.LineText = TEXT("The stampede is coming. I felt it in the ground — thousands of them. Run for the rocks!");
-    StampedeWarning.CooldownSeconds = 180.0f;
-    StampedeWarning.Priority = 3.0f;
-    DialogueLibrary.Add(StampedeWarning);
-
-    FNarr_DialogueLine NestLine;
-    NestLine.Trigger = ENarr_DialogueTrigger::NestDiscovered;
-    NestLine.Speaker = ENarr_CharacterRole::HunterElder;
-    NestLine.LineText = TEXT("Do not touch the eggs. The mother is never far. She watches from the tree line.");
-    NestLine.CooldownSeconds = 300.0f;
-    NestLine.Priority = 1.5f;
-    DialogueLibrary.Add(NestLine);
-
-    FNarr_DialogueLine CampLine;
-    CampLine.Trigger = ENarr_DialogueTrigger::CampFound;
-    CampLine.Speaker = ENarr_CharacterRole::ScoutLeader;
-    CampLine.LineText = TEXT("We found the old camp — bones of those who came before us. This place will be our home now.");
-    CampLine.CooldownSeconds = 600.0f;
-    CampLine.Priority = 1.0f;
-    DialogueLibrary.Add(CampLine);
-
-    FNarr_DialogueLine SurvivalLine;
-    SurvivalLine.Trigger = ENarr_DialogueTrigger::DangerNear;
-    SurvivalLine.Speaker = ENarr_CharacterRole::SurvivalElder;
-    SurvivalLine.LineText = TEXT("The beast that hunts at night remembers faces. Make yourself dangerous. Make yourself loud.");
-    SurvivalLine.CooldownSeconds = 90.0f;
-    SurvivalLine.Priority = 1.8f;
-    DialogueLibrary.Add(SurvivalLine);
+    RegisterHardcodedLines();
 }
 
-void UNarr_DialogueManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ADialogueManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    ElapsedTime += DeltaTime;
+    Super::Tick(DeltaTime);
 
-    // Auto-clear playing state after estimated duration
-    if (CurrentState.bIsPlaying && ElapsedTime - CurrentState.LastPlayedTime > 20.0f)
+    if (bDialogueActive)
     {
-        CurrentState.bIsPlaying = false;
+        AdvanceDialogueTimer(DeltaTime);
+    }
+
+    DangerCheckTimer += DeltaTime;
+    if (DangerCheckTimer >= DangerCheckInterval)
+    {
+        DangerCheckTimer = 0.0f;
+        CheckProximityTriggers();
     }
 }
 
-void UNarr_DialogueManagerComponent::TriggerDialogue(ENarr_DialogueTrigger Trigger)
+void ADialogueManager::TriggerDialogueLine(FName LineID)
 {
-    if (Trigger == ENarr_DialogueTrigger::None) return;
-
-    // Global cooldown check
-    if (CurrentState.bIsPlaying) return;
-    if (ElapsedTime - CurrentState.LastPlayedTime < GlobalCooldownSeconds) return;
-
-    // Trigger-specific cooldown check
-    if (IsTriggerOnCooldown(Trigger)) return;
-
-    FNarr_DialogueLine* BestLine = FindBestLine(Trigger);
-    if (BestLine)
+    if (bDialogueActive)
     {
-        PlayLine(*BestLine);
+        return; // Don't interrupt active dialogue
     }
-}
 
-void UNarr_DialogueManagerComponent::RegisterDialogueLine(FNarr_DialogueLine Line)
-{
-    DialogueLibrary.Add(Line);
-}
-
-FNarr_DialogueState UNarr_DialogueManagerComponent::GetDialogueState() const
-{
-    return CurrentState;
-}
-
-bool UNarr_DialogueManagerComponent::IsTriggerOnCooldown(ENarr_DialogueTrigger Trigger) const
-{
-    const float* LastTime = TriggerCooldownMap.Find(Trigger);
-    if (!LastTime) return false;
-
-    // Find cooldown for this trigger
-    float CooldownDuration = 120.0f;
-    for (const FNarr_DialogueLine& Line : DialogueLibrary)
+    FNarr_DialogueLine Line = GetLineByID(LineID);
+    if (Line.LineID == NAME_None)
     {
-        if (Line.Trigger == Trigger)
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Line ID '%s' not found"), *LineID.ToString());
+        return;
+    }
+
+    if (Line.bPlayOnce && HasLineBeenPlayed(LineID))
+    {
+        return;
+    }
+
+    // Activate dialogue
+    CurrentDialogue.LineID = Line.LineID;
+    CurrentDialogue.SpeakerName = Line.SpeakerName;
+    CurrentDialogue.LineText = Line.LineText;
+    CurrentDialogue.RemainingTime = Line.DisplayDuration;
+    CurrentDialogue.bIsActive = true;
+    bDialogueActive = true;
+
+    // Mark as played
+    if (Line.bPlayOnce)
+    {
+        PlayedLineIDs.AddUnique(LineID);
+    }
+
+    // Play voice audio if available
+    if (Line.VoiceAudio.IsValid())
+    {
+        USoundBase* Sound = Line.VoiceAudio.Get();
+        if (Sound)
         {
-            CooldownDuration = Line.CooldownSeconds;
-            break;
+            UGameplayStatics::PlaySound2D(GetWorld(), Sound);
         }
     }
 
-    return (ElapsedTime - *LastTime) < CooldownDuration;
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Playing line '%s' — %s: %s"),
+        *LineID.ToString(), *Line.SpeakerName, *Line.LineText);
 }
 
-void UNarr_DialogueManagerComponent::StopDialogue()
+void ADialogueManager::TriggerDialogueByRole(ENarr_SpeakerRole Role, ENarr_DialogueTrigger Trigger)
 {
-    CurrentState.bIsPlaying = false;
-}
-
-FNarr_DialogueLine* UNarr_DialogueManagerComponent::FindBestLine(ENarr_DialogueTrigger Trigger)
-{
-    FNarr_DialogueLine* BestLine = nullptr;
-    float BestPriority = -1.0f;
-
-    for (FNarr_DialogueLine& Line : DialogueLibrary)
+    for (const FNarr_DialogueLine& Line : HardcodedLines)
     {
-        if (Line.Trigger != Trigger) continue;
-        if (Line.Priority > BestPriority)
+        if (Line.SpeakerRole == Role && Line.TriggerType == Trigger)
         {
-            BestPriority = Line.Priority;
-            BestLine = &Line;
+            if (!HasLineBeenPlayed(Line.LineID))
+            {
+                TriggerDialogueLine(Line.LineID);
+                return;
+            }
+        }
+    }
+}
+
+void ADialogueManager::StopCurrentDialogue()
+{
+    CurrentDialogue.bIsActive = false;
+    CurrentDialogue.RemainingTime = 0.0f;
+    bDialogueActive = false;
+}
+
+bool ADialogueManager::HasLineBeenPlayed(FName LineID) const
+{
+    return PlayedLineIDs.Contains(LineID);
+}
+
+FNarr_DialogueLine ADialogueManager::GetLineByID(FName LineID) const
+{
+    for (const FNarr_DialogueLine& Line : HardcodedLines)
+    {
+        if (Line.LineID == LineID)
+        {
+            return Line;
         }
     }
 
-    return BestLine;
-}
-
-void UNarr_DialogueManagerComponent::PlayLine(FNarr_DialogueLine& Line)
-{
-    CurrentState.LastTrigger = Line.Trigger;
-    CurrentState.LastPlayedTime = ElapsedTime;
-    CurrentState.bIsPlaying = true;
-    CurrentState.CurrentLineText = Line.LineText;
-
-    TriggerCooldownMap.Add(Line.Trigger, ElapsedTime);
-
-    // Play audio if asset is assigned
-    if (Line.VoiceAsset && GetOwner())
+    // Check DataTable if assigned
+    if (DialogueDataTable)
     {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            Line.VoiceAsset,
-            GetOwner()->GetActorLocation(),
-            1.0f,  // Volume
-            1.0f,  // Pitch
-            0.0f   // StartTime
-        );
+        FNarr_DialogueLine* Row = DialogueDataTable->FindRow<FNarr_DialogueLine>(LineID, TEXT("DialogueManager"));
+        if (Row)
+        {
+            return *Row;
+        }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Playing line: [%s] '%s'"),
-        *UEnum::GetValueAsString(Line.Speaker),
-        *Line.LineText);
+    return FNarr_DialogueLine(); // Empty line with NAME_None
+}
+
+TArray<FNarr_DialogueLine> ADialogueManager::GetLinesByTrigger(ENarr_DialogueTrigger Trigger) const
+{
+    TArray<FNarr_DialogueLine> Result;
+    for (const FNarr_DialogueLine& Line : HardcodedLines)
+    {
+        if (Line.TriggerType == Trigger)
+        {
+            Result.Add(Line);
+        }
+    }
+    return Result;
+}
+
+void ADialogueManager::RegisterHardcodedLines()
+{
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered %d hardcoded dialogue lines"), HardcodedLines.Num());
+}
+
+void ADialogueManager::DebugPlayRandomLine()
+{
+    if (HardcodedLines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: No lines to play"));
+        return;
+    }
+
+    int32 RandomIndex = FMath::RandRange(0, HardcodedLines.Num() - 1);
+    TriggerDialogueLine(HardcodedLines[RandomIndex].LineID);
+}
+
+void ADialogueManager::AdvanceDialogueTimer(float DeltaTime)
+{
+    CurrentDialogue.RemainingTime -= DeltaTime;
+    if (CurrentDialogue.RemainingTime <= 0.0f)
+    {
+        StopCurrentDialogue();
+    }
+}
+
+void ADialogueManager::CheckProximityTriggers()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float RadiusSq = ProximityTriggerRadius * ProximityTriggerRadius;
+
+    for (const FNarr_DialogueLine& Line : HardcodedLines)
+    {
+        if (Line.TriggerType == ENarr_DialogueTrigger::OnProximity)
+        {
+            float DistSq = FVector::DistSquared(PlayerLocation, GetActorLocation());
+            if (DistSq <= RadiusSq && !HasLineBeenPlayed(Line.LineID))
+            {
+                TriggerDialogueLine(Line.LineID);
+                break;
+            }
+        }
+    }
+}
+
+void ADialogueManager::PopulateDefaultLines()
+{
+    // Tribal Leader — danger warning
+    {
+        FNarr_DialogueLine Line;
+        Line.LineID = FName("KARA_TREX_WARNING");
+        Line.SpeakerName = TEXT("Kara");
+        Line.SpeakerRole = ENarr_SpeakerRole::TribalLeader;
+        Line.LineText = TEXT("Listen carefully. The T-Rex hunts by sound and smell — not sight. Stay downwind and move slowly.");
+        Line.DisplayDuration = 6.0f;
+        Line.TriggerType = ENarr_DialogueTrigger::OnDangerNear;
+        Line.bPlayOnce = true;
+        HardcodedLines.Add(Line);
+    }
+
+    // Scout — raptor nest intel
+    {
+        FNarr_DialogueLine Line;
+        Line.LineID = FName("DREN_RAPTOR_NEST");
+        Line.SpeakerName = TEXT("Dren");
+        Line.SpeakerRole = ENarr_SpeakerRole::Scout;
+        Line.LineText = TEXT("We found the raptor nest at dawn. Four eggs, still warm. The pack returns before nightfall.");
+        Line.DisplayDuration = 5.0f;
+        Line.TriggerType = ENarr_DialogueTrigger::OnQuestStart;
+        Line.bPlayOnce = true;
+        HardcodedLines.Add(Line);
+    }
+
+    // Elder — herd wisdom
+    {
+        FNarr_DialogueLine Line;
+        Line.LineID = FName("MOSA_HERD_WISDOM");
+        Line.SpeakerName = TEXT("Mosa");
+        Line.SpeakerRole = ENarr_SpeakerRole::Elder;
+        Line.LineText = TEXT("Follow the Brachiosaurus herd — not too close. They remember safe paths and water sources.");
+        Line.DisplayDuration = 7.0f;
+        Line.TriggerType = ENarr_DialogueTrigger::OnFirstVisit;
+        Line.bPlayOnce = true;
+        HardcodedLines.Add(Line);
+    }
+
+    // Player narration — intro
+    {
+        FNarr_DialogueLine Line;
+        Line.LineID = FName("PLAYER_INTRO_NARRATION");
+        Line.SpeakerName = TEXT("Survivor");
+        Line.SpeakerRole = ENarr_SpeakerRole::PlayerVoice;
+        Line.LineText = TEXT("First winter alone. No tribe. No fire. I survived by remembering what my mother taught me — read the ground, read the wind, read the silence.");
+        Line.DisplayDuration = 8.0f;
+        Line.TriggerType = ENarr_DialogueTrigger::OnFirstVisit;
+        Line.bPlayOnce = true;
+        HardcodedLines.Add(Line);
+    }
 }
