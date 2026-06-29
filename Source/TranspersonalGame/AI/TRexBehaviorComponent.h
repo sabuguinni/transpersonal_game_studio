@@ -1,37 +1,30 @@
-// TRexBehaviorComponent.h
-// Agent #11 — NPC Behavior Agent | PROD_CYCLE_AUTO_20260629_007
-// T-Rex behavioral state machine — patrol, alert, chase, attack, return, dead
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "TimerManager.h"
 #include "TRexBehaviorComponent.generated.h"
 
-// === GLOBAL SCOPE ENUMS (RULE 1 — must be outside UCLASS) ===
-
+// ── Global-scope enum (RULE 1: USTRUCT/UENUM at global scope only) ──────────
 UENUM(BlueprintType)
 enum class ENPC_TRexState : uint8
 {
-    Idle     UMETA(DisplayName = "Idle"),
-    Patrol   UMETA(DisplayName = "Patrol"),
-    Alert    UMETA(DisplayName = "Alert"),
-    Chase    UMETA(DisplayName = "Chase"),
-    Attack   UMETA(DisplayName = "Attack"),
-    Return   UMETA(DisplayName = "Return"),
-    Dead     UMETA(DisplayName = "Dead")
+    Idle      UMETA(DisplayName = "Idle"),
+    Patrol    UMETA(DisplayName = "Patrol"),
+    Alert     UMETA(DisplayName = "Alert"),
+    Chase     UMETA(DisplayName = "Chase"),
+    Attack    UMETA(DisplayName = "Attack"),
+    Return    UMETA(DisplayName = "Return"),
+    Dead      UMETA(DisplayName = "Dead")
 };
 
-// === DELEGATES ===
-
+// ── Delegate declarations ────────────────────────────────────────────────────
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(
     FNPC_TRexAnimStateDelegate,
     ENPC_TRexState, NewState,
+    ENPC_TRexState, OldState,
     float, Speed,
-    float, TurnRate,
-    float, BlendWeight,
-    bool, bIsAttacking
+    bool, bIsAttacking,
+    bool, bIsRoaring
 );
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -41,13 +34,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
     FNPC_TRexRoarDelegate,
-    FVector, RoarOrigin,
-    float, RoarRadius
+    FVector, Origin,
+    float,   Radius
 );
 
-// === COMPONENT CLASS ===
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "T-Rex Behavior Component")
+// ── Component ────────────────────────────────────────────────────────────────
+UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UNPC_TRexBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -55,81 +47,96 @@ class TRANSPERSONALGAME_API UNPC_TRexBehaviorComponent : public UActorComponent
 public:
     UNPC_TRexBehaviorComponent();
 
-    // === BEHAVIORAL PARAMETERS ===
-
+    // ── Tuning ──────────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float PatrolRadius;
+    float PatrolRadius = 5000.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
-    float ChaseDetectionRange;
+    float DetectionRange = 3000.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Attack")
+    float AttackRange = 300.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Attack")
+    float AttackDamage = 80.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Attack")
+    float AttackCooldown = 2.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Roar")
+    float RoarRadius = 6000.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
-    float PatrolSpeed;
+    float PatrolSpeed = 300.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
-    float ChaseSpeed;
+    float ChaseSpeed = 700.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackCooldown;
+    // ── State ────────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
+              meta = (AllowPrivateAccess = "true"))
+    ENPC_TRexState CurrentState = ENPC_TRexState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Audio")
-    float RoarRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
+              meta = (AllowPrivateAccess = "true"))
+    AActor* TargetActor = nullptr;
 
-    // === STATE ===
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State",
+              meta = (AllowPrivateAccess = "true"))
+    FVector HomeLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    ENPC_TRexState CurrentState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    FVector PatrolOrigin;
-
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    FVector CurrentPatrolTarget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    APawn* TargetPawn;
-
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State")
-    bool bCanAttack;
-
-    // === DELEGATES ===
+    // ── Delegates ────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintAssignable, Category = "TRex|Events")
+    FNPC_TRexAnimStateDelegate OnStateChanged;
 
     UPROPERTY(BlueprintAssignable, Category = "TRex|Events")
-    FNPC_TRexAnimStateDelegate OnTRexAnimStateChanged;
+    FNPC_TRexAttackMontageDelegate OnAttackMontage;
 
     UPROPERTY(BlueprintAssignable, Category = "TRex|Events")
-    FNPC_TRexAttackMontageDelegate OnTRexAttackMontage;
+    FNPC_TRexRoarDelegate OnRoar;
 
-    UPROPERTY(BlueprintAssignable, Category = "TRex|Events")
-    FNPC_TRexRoarDelegate OnTRexRoar;
+    // ── Public API ───────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void SetState(ENPC_TRexState NewState);
 
-    // === PUBLIC API ===
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void SetTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|State")
-    void TransitionToState(ENPC_TRexState NewState);
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void TriggerRoar();
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Events")
-    void OnTRexDeath();
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void TriggerAttack(int32 AttackIndex = 0);
+
+    UFUNCTION(BlueprintPure, Category = "TRex|Behavior")
+    bool IsPlayerInDetectionRange() const;
+
+    UFUNCTION(BlueprintPure, Category = "TRex|Behavior")
+    bool IsPlayerInAttackRange() const;
+
+    UFUNCTION(BlueprintPure, Category = "TRex|Behavior")
+    float GetDistanceToTarget() const;
+
+    UFUNCTION(BlueprintPure, Category = "TRex|Behavior")
+    ENPC_TRexState GetCurrentState() const { return CurrentState; }
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType,
+                               FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    FTimerHandle PatrolTimerHandle;
-    FTimerHandle AlertTimerHandle;
-    FTimerHandle AttackCooldownHandle;
+    float TimeSinceLastAttack = 0.f;
+    FVector CurrentPatrolTarget = FVector::ZeroVector;
+    bool   bPatrolTargetReached = true;
 
-    void ScanForPlayer();
-    void UpdateBehaviorState(float DeltaTime);
-    void ExecutePatrol(float DeltaTime);
-    void ExecuteChase(float DeltaTime);
-    void ExecuteAttack();
-    void ExecuteReturn(float DeltaTime);
+    void TickIdle(float DeltaTime);
+    void TickPatrol(float DeltaTime);
+    void TickAlert(float DeltaTime);
+    void TickChase(float DeltaTime);
+    void TickAttack(float DeltaTime);
+    void TickReturn(float DeltaTime);
+
     void PickNewPatrolTarget();
-    void BeginChase();
-    void ResetAttackCooldown();
+    AActor* FindNearestPlayer() const;
 };
