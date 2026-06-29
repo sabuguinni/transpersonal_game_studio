@@ -1,21 +1,116 @@
+// DialogueManager.h
+// Agent #15 — Narrative & Dialogue Agent
+// Manages NPC dialogue lines, voice audio cues, and narrative triggers in the world.
+// All dialogue is survival-focused: danger warnings, resource tips, tribal lore.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "DialogueSystemTypes.h"
+#include "Engine/DataTable.h"
+#include "Sound/SoundBase.h"
 #include "DialogueManager.generated.h"
 
-// ============================================================
-// DIALOGUE MANAGER — Agent #15 Narrative & Dialogue
-// Manages all NPC dialogue trees, proximity detection,
-// and quest integration for MinPlayableMap NPCs
-// ============================================================
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNarr_DialogueLineSpoken, const FNarr_DialogueEvent&, DialogueEvent);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNarr_DialogueStateChanged, FName, NPCID, ENarr_DialogueState, NewState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNarr_QuestOfferTriggered, FName, NPCID, FName, QuestID);
+UENUM(BlueprintType)
+enum class ENarr_DialogueTrigger : uint8
+{
+    OnProximity         UMETA(DisplayName = "On Proximity"),
+    OnQuestStart        UMETA(DisplayName = "On Quest Start"),
+    OnQuestComplete     UMETA(DisplayName = "On Quest Complete"),
+    OnDangerNear        UMETA(DisplayName = "On Danger Near"),
+    OnPlayerLowHealth   UMETA(DisplayName = "On Player Low Health"),
+    OnFirstVisit        UMETA(DisplayName = "On First Visit"),
+    OnItemPickup        UMETA(DisplayName = "On Item Pickup"),
+    Manual              UMETA(DisplayName = "Manual")
+};
 
-UCLASS(BlueprintType, Blueprintable)
+UENUM(BlueprintType)
+enum class ENarr_SpeakerRole : uint8
+{
+    TribalLeader    UMETA(DisplayName = "Tribal Leader"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Elder           UMETA(DisplayName = "Elder"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Survivor        UMETA(DisplayName = "Survivor"),
+    PlayerVoice     UMETA(DisplayName = "Player Voice")
+};
+
+// ─── Structs ──────────────────────────────────────────────────────────────────
+
+USTRUCT(BlueprintType)
+struct FNarr_DialogueLine : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FName LineID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_SpeakerRole SpeakerRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString LineText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TSoftObjectPtr<USoundBase> VoiceAudio;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float DisplayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_DialogueTrigger TriggerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bPlayOnce;
+
+    FNarr_DialogueLine()
+        : LineID(NAME_None)
+        , SpeakerName(TEXT("Unknown"))
+        , SpeakerRole(ENarr_SpeakerRole::Hunter)
+        , LineText(TEXT(""))
+        , DisplayDuration(5.0f)
+        , TriggerType(ENarr_DialogueTrigger::OnProximity)
+        , bPlayOnce(true)
+    {}
+};
+
+USTRUCT(BlueprintType)
+struct FNarr_ActiveDialogue
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FName LineID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FString SpeakerName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FString LineText;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    float RemainingTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    bool bIsActive;
+
+    FNarr_ActiveDialogue()
+        : LineID(NAME_None)
+        , SpeakerName(TEXT(""))
+        , LineText(TEXT(""))
+        , RemainingTime(0.0f)
+        , bIsActive(false)
+    {}
+};
+
+// ─── DialogueManager Actor ────────────────────────────────────────────────────
+
+UCLASS(ClassGroup = "Narrative", meta = (DisplayName = "Dialogue Manager"))
 class TRANSPERSONALGAME_API ADialogueManager : public AActor
 {
     GENERATED_BODY()
@@ -29,122 +124,63 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // -------------------------------------------------------
-    // DIALOGUE REGISTRY
-    // -------------------------------------------------------
+    // ── Data ──────────────────────────────────────────────────────────────────
 
-    // All registered NPC dialogue trees
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Registry")
-    TArray<FNarr_DialogueTree> RegisteredDialogueTrees;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Data")
+    UDataTable* DialogueDataTable;
 
-    // Currently active dialogue (one at a time)
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FName ActiveNPCID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Data")
+    TArray<FNarr_DialogueLine> HardcodedLines;
+
+    // ── State ─────────────────────────────────────────────────────────────────
 
     UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FName ActiveNodeID;
+    FNarr_ActiveDialogue CurrentDialogue;
 
     UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    ENarr_DialogueState ActiveDialogueState = ENarr_DialogueState::Idle;
+    TArray<FName> PlayedLineIDs;
 
-    // Is a dialogue currently in progress?
     UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    bool bDialogueActive = false;
+    bool bDialogueActive;
 
-    // -------------------------------------------------------
-    // PROXIMITY DETECTION
-    // -------------------------------------------------------
+    // ── Settings ──────────────────────────────────────────────────────────────
 
-    // How often to check player proximity to NPCs (seconds)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Settings")
-    float ProximityCheckInterval = 0.3f;
+    float ProximityTriggerRadius;
 
-    // -------------------------------------------------------
-    // DELEGATES
-    // -------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Settings")
+    float DangerCheckInterval;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FOnNarr_DialogueLineSpoken OnDialogueLineSpoken;
+    // ── Functions ─────────────────────────────────────────────────────────────
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FOnNarr_DialogueStateChanged OnDialogueStateChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FOnNarr_QuestOfferTriggered OnQuestOfferTriggered;
-
-    // -------------------------------------------------------
-    // PUBLIC API
-    // -------------------------------------------------------
-
-    // Register a dialogue tree for an NPC
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueTree(const FNarr_DialogueTree& DialogueTree);
+    void TriggerDialogueLine(FName LineID);
 
-    // Start dialogue with a specific NPC
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool StartDialogue(FName NPCID);
+    void TriggerDialogueByRole(ENarr_SpeakerRole Role, ENarr_DialogueTrigger Trigger);
 
-    // Advance dialogue with a player response choice (0-based index)
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool AdvanceDialogue(int32 ResponseIndex);
+    void StopCurrentDialogue();
 
-    // End the current dialogue
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
+    bool HasLineBeenPlayed(FName LineID) const;
 
-    // Get the current active node for UI display
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool GetActiveNode(FNarr_DialogueNode& OutNode) const;
+    FNarr_DialogueLine GetLineByID(FName LineID) const;
 
-    // Get the NPC name for the active dialogue
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FString GetActiveNPCName() const;
+    TArray<FNarr_DialogueLine> GetLinesByTrigger(ENarr_DialogueTrigger Trigger) const;
 
-    // Notify that a quest state changed (updates NPC dialogue state)
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void NotifyQuestStateChanged(FName QuestID, FName NewStateName);
+    void RegisterHardcodedLines();
 
-    // Initialize built-in dialogue trees for MinPlayableMap NPCs
-    UFUNCTION(CallInEditor, Category = "Narrative")
-    void InitializeBuiltInDialogueTrees();
-
-    // Validate all registered dialogue trees (checks node references)
-    UFUNCTION(CallInEditor, Category = "Narrative")
-    void ValidateDialogueTrees();
+    UFUNCTION(CallInEditor, Category = "Narrative|Debug")
+    void DebugPlayRandomLine();
 
 private:
-    // Internal: find a dialogue tree by NPC ID
-    FNarr_DialogueTree* FindDialogueTree(FName NPCID);
-    const FNarr_DialogueTree* FindDialogueTreeConst(FName NPCID) const;
+    float DangerCheckTimer;
 
-    // Internal: find a node within a tree by node ID
-    const FNarr_DialogueNode* FindNode(const FNarr_DialogueTree& Tree, FName NodeID) const;
-
-    // Internal: evaluate whether a dialogue condition is met
-    bool EvaluateCondition(ENarr_DialogueCondition Condition, FName QuestID) const;
-
-    // Internal: broadcast a dialogue event
-    void BroadcastDialogueEvent(const FNarr_DialogueNode& Node, ENarr_DialogueState NewState);
-
-    // Proximity check timer
-    float ProximityCheckTimer = 0.0f;
-
-    // Quest state cache: QuestID -> state name
-    TMap<FName, FName> QuestStateCache;
-
-    // -------------------------------------------------------
-    // BUILT-IN DIALOGUE DATA
-    // -------------------------------------------------------
-
-    // TribalElder — "Survive the Stampede" quest giver
-    FNarr_DialogueTree BuildTribalElderDialogue() const;
-
-    // Scout — "Ghost of the Ridge" stealth quest giver
-    FNarr_DialogueTree BuildScoutDialogue() const;
-
-    // Watcher — "The Watcher" observation quest giver
-    FNarr_DialogueTree BuildWatcherDialogue() const;
-
-    // Villager — "Missing Brother" side quest
-    FNarr_DialogueTree BuildVillagerDialogue() const;
+    void AdvanceDialogueTimer(float DeltaTime);
+    void CheckProximityTriggers();
+    void PopulateDefaultLines();
 };
