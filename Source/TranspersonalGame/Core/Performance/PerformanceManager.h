@@ -1,96 +1,84 @@
-// PerformanceManager.h
-// Transpersonal Game Studio — Performance Optimizer Agent #4
-// PROD_CYCLE_AUTO_20260628_009
-// Manages runtime performance: LOD culling, tick throttling, scalability
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
 #include "PerformanceManager.generated.h"
 
-// ─── Enums (global scope — UHT requirement) ───────────────────────────────
-
+// AI LOD tier — controls how much CPU an AI agent consumes based on distance
 UENUM(BlueprintType)
-enum class EPerf_QualityPreset : uint8
+enum class EPerf_AILODTier : uint8
 {
-    Low     UMETA(DisplayName = "Low (Console Min)"),
-    Medium  UMETA(DisplayName = "Medium (Console Target)"),
-    High    UMETA(DisplayName = "High (PC Target)"),
-    Ultra   UMETA(DisplayName = "Ultra (PC High-end)")
+    Full        UMETA(DisplayName = "Full (0-50m)"),
+    Reduced     UMETA(DisplayName = "Reduced (50-150m)"),
+    Dormant     UMETA(DisplayName = "Dormant (150m+)")
 };
 
-UENUM(BlueprintType)
-enum class EPerf_TickLODLevel : uint8
+// Per-actor performance snapshot
+USTRUCT(BlueprintType)
+struct FPerf_ActorBudget
 {
-    Full        UMETA(DisplayName = "Full Tick (< 200m)"),
-    Reduced     UMETA(DisplayName = "Reduced Tick (200-500m)"),
-    Minimal     UMETA(DisplayName = "Minimal Tick (500-1000m)"),
-    Disabled    UMETA(DisplayName = "Disabled (> 1000m)")
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float DistanceToPlayer = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_AILODTier AILODTier = EPerf_AILODTier::Full;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bTickEnabled = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TickInterval = 0.1f;
 };
 
-// ─── Structs (global scope — UHT requirement) ─────────────────────────────
-
+// Frame budget tracking
 USTRUCT(BlueprintType)
 struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFPS = 60.0f;
+    // Target FPS (60 PC, 30 console)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS = 60.f;
 
+    // Current measured FPS (updated each second)
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameBudget_ms = 16.67f;
+    float CurrentFPS = 0.f;
 
+    // Frame time in ms
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float SurvivalSystem_ms = 2.5f;
+    float FrameTimeMs = 0.f;
 
+    // Number of active AI agents this frame
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AISystem_ms = 2.5f;
+    int32 ActiveAICount = 0;
 
+    // Number of dormant AI agents
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PhysicsSystem_ms = 1.67f;
+    int32 DormantAICount = 0;
 
+    // Whether we are below target FPS
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float RenderingBudget_ms = 10.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFrameTime_ms = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    bool bOverBudget = false;
+    bool bBelowTargetFPS = false;
 };
 
-USTRUCT(BlueprintType)
-struct FPerf_LODSettings
-{
-    GENERATED_BODY()
-
-    // Distance at which survival drain is disabled for non-player characters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Survival")
-    float SurvivalDrain_DisableDistance = 500.0f;
-
-    // Distance at which ALL survival ticks are disabled
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Survival")
-    float SurvivalAll_DisableDistance = 1000.0f;
-
-    // Distance at which AI behavior trees are simplified
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|AI")
-    float AISimplify_Distance = 300.0f;
-
-    // Distance at which AI is fully disabled (only position updated)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|AI")
-    float AIDisable_Distance = 800.0f;
-
-    // Distance at which physics simulation is disabled
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Physics")
-    float PhysicsDisable_Distance = 400.0f;
-};
-
-// ─── Main Class ───────────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+/**
+ * APerf_PerformanceManager
+ *
+ * Manages AI LOD tiers, tick intervals, and frame budget for the prehistoric survival game.
+ * Placed once in the level — automatically adjusts all registered AI actors.
+ *
+ * Budget targets:
+ *   PC high-end:  60fps (16.67ms frame budget)
+ *   Console:      30fps (33.33ms frame budget)
+ *
+ * AI LOD distances:
+ *   0-50m:    Full BT + perception (full tick cost)
+ *   50-150m:  Reduced BT (tick interval x5)
+ *   150m+:    Dormant (tick interval x20, no perception)
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Performance Manager"))
 class TRANSPERSONALGAME_API APerf_PerformanceManager : public AActor
 {
     GENERATED_BODY()
@@ -98,79 +86,90 @@ class TRANSPERSONALGAME_API APerf_PerformanceManager : public AActor
 public:
     APerf_PerformanceManager();
 
+protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── Frame Budget ─────────────────────────────────────────────────────
+public:
+    // ── Configuration ──────────────────────────────────────────────────────
 
+    // Distance at which AI switches from Full to Reduced tier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI LOD")
+    float AILODFullDistance = 5000.f;  // 50m in UE units (1 unit = 1cm)
+
+    // Distance at which AI switches from Reduced to Dormant tier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI LOD")
+    float AILODDormantDistance = 15000.f;  // 150m
+
+    // Tick interval for Reduced tier (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI LOD")
+    float ReducedTickInterval = 0.5f;
+
+    // Tick interval for Dormant tier (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI LOD")
+    float DormantTickInterval = 2.0f;
+
+    // How often (seconds) to re-evaluate AI LOD tiers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|AI LOD")
+    float LODUpdateInterval = 1.0f;
+
+    // Target FPS for budget enforcement
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget PCBudget;
+    float TargetFPS = 60.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget ConsoleBudget;
+    // ── Runtime State ──────────────────────────────────────────────────────
 
-    // ─── LOD Settings ─────────────────────────────────────────────────────
+    // Current frame budget snapshot
+    UPROPERTY(BlueprintReadOnly, Category = "Performance|Budget")
+    FPerf_FrameBudget FrameBudget;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    FPerf_LODSettings LODSettings;
+    // ── Public API ─────────────────────────────────────────────────────────
 
-    // ─── Quality Preset ───────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Quality")
-    EPerf_QualityPreset ActivePreset = EPerf_QualityPreset::High;
-
-    // ─── Runtime Stats ────────────────────────────────────────────────────
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats",
-              meta = (AllowPrivateAccess = "true"))
-    float CurrentFPS = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats",
-              meta = (AllowPrivateAccess = "true"))
-    float AverageFrameTime_ms = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats",
-              meta = (AllowPrivateAccess = "true"))
-    int32 ActiveTickingActors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance|Stats",
-              meta = (AllowPrivateAccess = "true"))
-    bool bIsOverBudget = false;
-
-    // ─── Public API ───────────────────────────────────────────────────────
-
+    // Register an actor for LOD management (call from BeginPlay of AI actors)
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyQualityPreset(EPerf_QualityPreset Preset);
+    void RegisterAIActor(AActor* Actor);
 
+    // Unregister an actor (call from EndPlay)
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_TickLODLevel GetTickLODForDistance(float DistanceFromPlayer) const;
+    void UnregisterAIActor(AActor* Actor);
 
+    // Get the current LOD tier for a registered actor
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_FrameBudget GetActiveBudget() const;
+    EPerf_AILODTier GetActorLODTier(AActor* Actor) const;
 
+    // Force immediate LOD update for all registered actors
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
+    void ForceUpdateAllLOD();
+
+    // Get singleton instance (set in BeginPlay)
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS() const { return CurrentFPS; }
+    static APerf_PerformanceManager* GetInstance();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsOverBudget() const { return bIsOverBudget; }
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance|Debug")
-    void PrintPerformanceReport() const;
-
-    // ─── Singleton Access ─────────────────────────────────────────────────
-
-    UFUNCTION(BlueprintCallable, Category = "Performance", meta = (WorldContext = "WorldContextObject"))
-    static APerf_PerformanceManager* GetInstance(UObject* WorldContextObject);
+    // Apply recommended console vars for 60fps target
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
+    void ApplyPerformancePreset();
 
 private:
-    // Frame time accumulator for rolling average
-    TArray<float> FrameTimeHistory;
-    static const int32 FrameHistorySize = 60;
+    // Registered AI actors
+    UPROPERTY()
+    TArray<AActor*> RegisteredActors;
 
-    // Singleton instance
-    static TWeakObjectPtr<APerf_PerformanceManager> Instance;
+    // Per-actor budget data
+    TMap<AActor*, FPerf_ActorBudget> ActorBudgets;
 
-    void UpdateFrameStats(float DeltaTime);
-    void CheckBudgetOverrun();
-    void ApplyConsoleCommands(const TArray<FString>& Commands);
+    // Timer accumulator for LOD updates
+    float LODUpdateAccumulator = 0.f;
+
+    // FPS measurement accumulator
+    float FPSAccumulator = 0.f;
+    int32 FPSFrameCount = 0;
+
+    // Singleton
+    static APerf_PerformanceManager* Instance;
+
+    // Internal helpers
+    void UpdateAILODTiers();
+    void UpdateFrameBudget(float DeltaTime);
+    EPerf_AILODTier CalculateLODTier(float Distance) const;
+    void ApplyLODTierToActor(AActor* Actor, EPerf_AILODTier NewTier, FPerf_ActorBudget& Budget);
 };
