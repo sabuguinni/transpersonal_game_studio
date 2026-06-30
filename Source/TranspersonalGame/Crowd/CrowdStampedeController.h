@@ -2,193 +2,137 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "CrowdSimulationTypes.h"
 #include "CrowdStampedeController.generated.h"
 
+// ── Stampede trigger source ──────────────────────────────────────────────────
 UENUM(BlueprintType)
-enum class ECrowd_HerdState : uint8
+enum class ECrowd_StampedeTrigger : uint8
 {
-    Grazing       UMETA(DisplayName = "Grazing"),
-    Wandering     UMETA(DisplayName = "Wandering"),
-    Alerted       UMETA(DisplayName = "Alerted"),
-    Stampeding    UMETA(DisplayName = "Stampeding"),
-    Fleeing       UMETA(DisplayName = "Fleeing"),
-    Resting       UMETA(DisplayName = "Resting")
+    PlayerProximity     UMETA(DisplayName = "Player Proximity"),
+    PredatorDetected    UMETA(DisplayName = "Predator Detected"),
+    LoudNoise           UMETA(DisplayName = "Loud Noise"),
+    Explosion           UMETA(DisplayName = "Explosion"),
+    LightningStrike     UMETA(DisplayName = "Lightning Strike"),
+    AlphaFlee           UMETA(DisplayName = "Alpha Flee Signal")
 };
 
-UENUM(BlueprintType)
-enum class ECrowd_HerbivoreSpecies : uint8
-{
-    Triceratops   UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Stegosaurus   UMETA(DisplayName = "Stegosaurus"),
-    Ankylosaurus  UMETA(DisplayName = "Ankylosaurus")
-};
-
+// ── Per-wave propagation data ────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FCrowd_HerdMember
+struct FCrowd_StampedeWave
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    FVector Origin = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
-    FVector Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float PropagationRadius = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
-    float Health;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float PropagationSpeed = 1200.0f;   // cm/s
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
-    bool bIsAlpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float PanicIntensity = 1.0f;        // 0..1 — decays with distance
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Herd")
-    ECrowd_HerbivoreSpecies Species;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float ElapsedTime = 0.0f;
 
-    FCrowd_HerdMember()
-        : Location(FVector::ZeroVector)
-        , Velocity(FVector::ZeroVector)
-        , Health(100.f)
-        , bIsAlpha(false)
-        , Species(ECrowd_HerbivoreSpecies::Triceratops)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    bool bActive = false;
 };
 
+// ── Danger zone for player avoidance ────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct FCrowd_StampedeData
+struct FCrowd_DangerZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
-    FVector ThreatLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    FVector Center = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
-    FVector FleeDirection;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float Radius = 500.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
-    float StampedeSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float DamagePerSecond = 25.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
-    float PanicRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float Duration = 8.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Crowd|Stampede")
-    float Duration;
-
-    FCrowd_StampedeData()
-        : ThreatLocation(FVector::ZeroVector)
-        , FleeDirection(FVector::ZeroVector)
-        , StampedeSpeed(800.f)
-        , PanicRadius(2000.f)
-        , Duration(15.f)
-    {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede")
+    float ElapsedTime = 0.0f;
 };
 
-UCLASS(ClassGroup = (Crowd), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCrowdHerdComponent : public UActorComponent
+// ── Stampede Controller Actor ────────────────────────────────────────────────
+UCLASS(ClassGroup = "Crowd", meta = (DisplayName = "Crowd Stampede Controller"))
+class TRANSPERSONALGAME_API ACrowd_StampedeController : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCrowdHerdComponent();
+    ACrowd_StampedeController();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    ECrowd_HerdState HerdState;
+    // ── Configuration ────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede|Config")
+    float TriggerRadius = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    ECrowd_HerbivoreSpecies Species;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede|Config")
+    float MaxWaveRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    TArray<FCrowd_HerdMember> HerdMembers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede|Config")
+    float PanicDecayRate = 0.15f;       // per second
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    int32 HerdSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede|Config")
+    float CalmDownTime = 12.0f;         // seconds before herd re-settles
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float DetectionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stampede|Config")
+    bool bAutoTriggerOnPlayerProximity = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float CohesionRadius;
+    // ── Runtime state ────────────────────────────────────────────────────────
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stampede|State")
+    bool bStampedeActive = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Herd")
-    float SeparationRadius;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stampede|State")
+    float StampedeElapsedTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    FCrowd_StampedeData ActiveStampede;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stampede|State")
+    FVector StampedeDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Stampede")
-    bool bIsStampeding;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stampede|State")
+    TArray<FCrowd_StampedeWave> ActiveWaves;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    void InitializeHerd(ECrowd_HerbivoreSpecies InSpecies, int32 InSize, FVector CenterLocation);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stampede|State")
+    TArray<FCrowd_DangerZone> ActiveDangerZones;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void TriggerStampede(FVector ThreatLocation);
+    // ── Blueprint API ────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Stampede")
+    void TriggerStampede(ECrowd_StampedeTrigger Trigger, FVector TriggerLocation, FVector FleeDirection);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void CalmHerd();
+    UFUNCTION(BlueprintCallable, Category = "Stampede")
+    void StopStampede();
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    void UpdateFlockingBehavior(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Stampede")
+    bool IsLocationInDangerZone(FVector Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    FVector CalculateCohesionForce(int32 MemberIndex) const;
+    UFUNCTION(BlueprintCallable, Category = "Stampede")
+    float GetPanicIntensityAtLocation(FVector Location) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    FVector CalculateSeparationForce(int32 MemberIndex) const;
+    UFUNCTION(BlueprintPure, Category = "Stampede")
+    bool IsStampedeActive() const { return bStampedeActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    FVector CalculateAlignmentForce(int32 MemberIndex) const;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-private:
-    float StampedeTimer;
-    float GrazingTimer;
-};
-
-UCLASS(ClassGroup = (Crowd), BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdStampedeController : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    ACrowdStampedeController();
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Components",
-        meta = (AllowPrivateAccess = "true"))
-    USphereComponent* ThreatDetectionSphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UCrowdHerdComponent* HerdComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    float GlobalThreatRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    int32 MaxSimultaneousHerds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
-    TArray<ACrowdStampedeController*> NearbyHerds;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void BroadcastThreatToNearbyHerds(FVector ThreatLocation, float ThreatRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Stampede")
-    void OnPredatorEnterRange(AActor* PredatorActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd|Herd")
-    void SpawnHerdAtLocation(FVector Location, ECrowd_HerbivoreSpecies Species, int32 Count);
+    UFUNCTION(CallInEditor, Category = "Stampede|Debug")
+    void DEBUG_TriggerTestStampede();
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION()
-    void OnThreatSphereOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+private:
+    void UpdateWaves(float DeltaTime);
+    void UpdateDangerZones(float DeltaTime);
+    void SpawnDangerZoneAtLocation(FVector Location, float Radius, float DPS, float Duration);
+    void NotifyNearbyHerds(FVector Origin, float PanicIntensity);
+
+    float CalmDownTimer = 0.0f;
 };
