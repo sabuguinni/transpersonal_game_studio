@@ -1,14 +1,12 @@
 #pragma once
 
+// NPCBehaviorComponent.h
+// NPC Behavior Agent #11 — Transpersonal Game Studio
+// Behavior state machine for prehistoric survival NPCs
+
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "NPCBehaviorComponent.generated.h"
-
-// ============================================================
-// NPC Behavior Component — Agent #11
-// Drives daily routines, threat response, memory, and social
-// relations for all non-player characters in the world.
-// ============================================================
 
 UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
@@ -43,61 +41,25 @@ enum class ENPC_TimeOfDay : uint8
     Night   UMETA(DisplayName = "Night")
 };
 
-UENUM(BlueprintType)
-enum class ENPC_SocialRelation : uint8
-{
-    Stranger  UMETA(DisplayName = "Stranger"),
-    Neutral   UMETA(DisplayName = "Neutral"),
-    Friendly  UMETA(DisplayName = "Friendly"),
-    Hostile   UMETA(DisplayName = "Hostile"),
-    Ally      UMETA(DisplayName = "Ally")
-};
-
-// A single memory entry — what this NPC remembers about an event
 USTRUCT(BlueprintType)
-struct FNPC_MemoryEntry
+struct FNPC_BehaviorMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    AActor* SourceActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    FVector LastKnownThreatLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    FVector LastKnownLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float TimeSinceLastThreat = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float ThreatScore = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    bool bHasSeenPlayer = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float TimeStamp = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    bool bIsDangerous = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    ENPC_ThreatLevel ThreatLevel = ENPC_ThreatLevel::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Memory")
+    float FearLevel = 0.0f;
 };
 
-// Daily schedule slot — what this NPC does at a given time of day
-USTRUCT(BlueprintType)
-struct FNPC_ScheduleSlot
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    ENPC_TimeOfDay TimeOfDay = ENPC_TimeOfDay::Morning;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    ENPC_BehaviorState DesiredState = ENPC_BehaviorState::Idle;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    FVector TargetLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Schedule")
-    float Duration = 60.0f;
-};
-
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -105,113 +67,51 @@ class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
 public:
     UNPCBehaviorComponent();
 
-    // ---- Lifecycle ----
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ---- State ----
-    UFUNCTION(BlueprintCallable, Category = "NPC|State")
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
     void SetBehaviorState(ENPC_BehaviorState NewState);
 
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
     ENPC_BehaviorState GetBehaviorState() const { return CurrentState; }
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|State")
-    void EvaluateThreat(AActor* ThreatSource, float ThreatScore);
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void UpdateThreatLevel(ENPC_ThreatLevel NewThreat, FVector ThreatLocation);
 
-    UFUNCTION(BlueprintPure, Category = "NPC|State")
-    ENPC_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void OnTimeOfDayChanged(ENPC_TimeOfDay NewTimeOfDay);
 
-    // ---- Memory ----
-    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
-    void AddMemory(AActor* Source, FVector Location, float Threat, bool bDangerous);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Memory")
-    void ForgetOldMemories(float MaxAge);
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Memory")
-    bool HasMemoryOf(AActor* Source) const;
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Memory")
-    FNPC_MemoryEntry GetMostDangerousMemory() const;
-
-    // ---- Schedule ----
-    UFUNCTION(BlueprintCallable, Category = "NPC|Schedule")
-    void AddScheduleSlot(FNPC_ScheduleSlot Slot);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Schedule")
-    void EvaluateSchedule(ENPC_TimeOfDay CurrentTimeOfDay);
-
-    // ---- Social ----
-    UFUNCTION(BlueprintCallable, Category = "NPC|Social")
-    void SetRelationToPlayer(ENPC_SocialRelation Relation);
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Social")
-    ENPC_SocialRelation GetRelationToPlayer() const { return RelationToPlayer; }
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Social")
-    void ModifyFear(float Delta);
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Social")
-    float GetFearLevel() const { return FearLevel; }
-
-    // ---- Patrol ----
-    UFUNCTION(BlueprintCallable, Category = "NPC|Patrol")
-    void SetPatrolPoints(const TArray<FVector>& Points);
-
-    UFUNCTION(BlueprintPure, Category = "NPC|Patrol")
-    FVector GetNextPatrolPoint();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Patrol")
-    void AdvancePatrolIndex();
-
-protected:
-    // ---- Internal helpers ----
-    void UpdateThreatDecay(float DeltaTime);
-    void UpdateFearDecay(float DeltaTime);
-    ENPC_ThreatLevel ScoreToThreatLevel(float Score) const;
-
-public:
-    // ---- Exposed properties ----
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
-    float ThreatDecayRate = 5.0f;
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    float GetFearLevel() const { return Memory.FearLevel; }
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
-    float FearDecayRate = 2.0f;
+    float PatrolRadius = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
-    float MemoryMaxAge = 300.0f;
+    float FleeDistance = 3000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
-    float PatrolAcceptRadius = 150.0f;
+    float ThreatDetectionRange = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
-    float FleeSpeedMultiplier = 1.5f;
+    float MemoryDecayRate = 0.1f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|State")
     ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Idle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|State")
     ENPC_ThreatLevel CurrentThreatLevel = ENPC_ThreatLevel::None;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Social", meta = (AllowPrivateAccess = "true"))
-    ENPC_SocialRelation RelationToPlayer = ENPC_SocialRelation::Neutral;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC|State")
+    FNPC_BehaviorMemory Memory;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Social", meta = (AllowPrivateAccess = "true"))
-    float FearLevel = 0.0f;
+private:
+    void UpdateIdleBehavior(float DeltaTime);
+    void UpdatePatrolBehavior(float DeltaTime);
+    void UpdateFleeBehavior(float DeltaTime);
+    void DecayMemory(float DeltaTime);
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State", meta = (AllowPrivateAccess = "true"))
-    float CurrentThreatScore = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
-    TArray<FNPC_MemoryEntry> MemoryEntries;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Schedule")
-    TArray<FNPC_ScheduleSlot> DailySchedule;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    TArray<FVector> PatrolPoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    int32 CurrentPatrolIndex = 0;
+    float StateTimer = 0.0f;
+    FVector PatrolOrigin = FVector::ZeroVector;
 };
