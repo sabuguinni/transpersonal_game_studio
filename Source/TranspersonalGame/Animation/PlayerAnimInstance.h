@@ -39,76 +39,87 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // --- Locomotion ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float SmoothedSpeed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float LeanAmount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    float VerticalVelocity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsFalling;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
-    bool bIsSprinting;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+    // ── Locomotion ──────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
     EAnim_LocomotionState LocomotionState;
 
-    // --- Weapon ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Weapon")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float LeanAngle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsCrouching;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    bool bIsSprinting;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+    float VerticalVelocity;
+
+    // ── Weapon / Combat ─────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
     EAnim_WeaponState WeaponState;
 
-    // --- IK ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    FVector LeftFootIKLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    bool bIsAiming;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    FVector RightFootIKLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    float AimPitch;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    float LeftFootAlpha;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Combat")
+    float AimYaw;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|IK")
-    float RightFootAlpha;
+    // ── Survival Stats ──────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float StaminaNormalized;   // 0.0 – 1.0
 
-    // --- Survival State ---
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-    float StaminaRatio;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
+    float HealthNormalized;    // 0.0 – 1.0
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
-    float FearLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
     bool bIsExhausted;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Anim|Survival")
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
     bool bIsInjured;
+
+    // ── IK ──────────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector LeftFootIKLocation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    FVector RightFootIKLocation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
+    float FootIKAlpha;
+
+    // ── Thresholds ──────────────────────────────────────────────────────────
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float WalkSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float RunSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float SprintSpeedThreshold;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation|Config")
+    float IKTraceDistance;
 
 private:
     UPROPERTY()
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY()
-    class UCharacterMovementComponent* MovementComponent;
+    TObjectPtr<class ACharacter> OwnerCharacter;
 
     void UpdateLocomotionState();
-    void UpdateFootIK(float DeltaSeconds);
-    void UpdateSurvivalState();
-    float SmoothFloat(float Current, float Target, float Speed, float DeltaSeconds) const;
+    void UpdateWeaponState();
+    void UpdateSurvivalStats();
+    void UpdateFootIK();
+    FVector TraceFootIK(const FName& FootSocketName) const;
 };
