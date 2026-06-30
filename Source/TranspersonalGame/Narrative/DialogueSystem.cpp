@@ -1,168 +1,294 @@
 #include "DialogueSystem.h"
-#include "GameFramework/Character.h"
-#include "Components/SphereComponent.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ANarr_DialogueTrigger
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Constructor ──────────────────────────────────────────────────────────────
 
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(TriggerRadius);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-    RootComponent = TriggerSphere;
-
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(
-        this, &ANarr_DialogueTrigger::OnPlayerEnterRange);
+    PrimaryActorTick.bCanEverTick = true;
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    bAutoAdvance = true;
 }
 
-void ANarr_DialogueTrigger::BeginPlay()
+// ─── BeginPlay ────────────────────────────────────────────────────────────────
+
+void ANarr_DialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Update sphere radius from property
-    if (TriggerSphere)
-    {
-        TriggerSphere->SetSphereRadius(TriggerRadius);
-    }
-
-    // Register with world dialogue manager
-    if (UWorld* World = GetWorld())
-    {
-        if (UNarr_DialogueManager* Manager = World->GetSubsystem<UNarr_DialogueManager>())
-        {
-            Manager->RegisterTrigger(this);
-        }
-    }
+    InitializeVoiceLineRegistry();
 }
 
-void ANarr_DialogueTrigger::Tick(float DeltaTime)
+// ─── Tick ─────────────────────────────────────────────────────────────────────
+
+void ANarr_DialogueManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-}
 
-void ANarr_DialogueTrigger::OnPlayerEnterRange(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
-{
-    if (!OtherActor) return;
-
-    // Only trigger for player character
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    if (bOneShot && bHasTriggered) return;
-
-    TriggerDialogue(OtherActor);
-}
-
-void ANarr_DialogueTrigger::TriggerDialogue(AActor* PlayerActor)
-{
-    if (!PlayerActor) return;
-    if (NPCProfile.DialogueLines.Num() == 0) return;
-
-    bHasTriggered = true;
-
-    FNarr_DialogueLine& Line = NPCProfile.DialogueLines[CurrentLineIndex];
-    UE_LOG(LogTemp, Log, TEXT("[Dialogue] %s: \"%s\""),
-        *NPCProfile.Name, *Line.LineText);
-    UE_LOG(LogTemp, Log, TEXT("[Dialogue] Audio: %s"), *Line.AudioURL);
-
-    if (!bOneShot)
+    if (!bDialogueActive || !bAutoAdvance)
     {
-        CurrentLineIndex = (CurrentLineIndex + 1) % NPCProfile.DialogueLines.Num();
+        return;
+    }
+
+    DialogueTimer -= DeltaTime;
+    if (DialogueTimer <= 0.0f)
+    {
+        AdvanceDialogue();
     }
 }
 
-void ANarr_DialogueTrigger::RegisterDialogueLine(const FNarr_DialogueLine& Line)
-{
-    NPCProfile.DialogueLines.Add(Line);
-}
+// ─── StartDialogueSequence ────────────────────────────────────────────────────
 
-bool ANarr_DialogueTrigger::HasUnplayedLines() const
+bool ANarr_DialogueManager::StartDialogueSequence(FName SequenceID)
 {
-    if (bOneShot) return !bHasTriggered;
-    return NPCProfile.DialogueLines.Num() > 0;
-}
-
-FNarr_DialogueLine ANarr_DialogueTrigger::GetNextLine()
-{
-    if (NPCProfile.DialogueLines.Num() == 0)
+    int32 Idx = FindSequenceIndex(SequenceID);
+    if (Idx == INDEX_NONE)
     {
-        return FNarr_DialogueLine();
+        UE_LOG(LogTemp, Warning, TEXT("ANarr_DialogueManager: Sequence '%s' not found."), *SequenceID.ToString());
+        return false;
     }
-    int32 Idx = FMath::Clamp(CurrentLineIndex, 0, NPCProfile.DialogueLines.Num() - 1);
-    return NPCProfile.DialogueLines[Idx];
+
+    FNarr_DialogueSequence& Seq = RegisteredSequences[Idx];
+
+    // Don't replay non-repeatable sequences
+    if (Seq.bHasBeenPlayed && !Seq.bIsRepeatable)
+    {
+        return false;
+    }
+
+    if (Seq.Lines.Num() == 0)
+    {
+        return false;
+    }
+
+    ActiveSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    bDialogueActive = true;
+
+    // Set timer for first line
+    DialogueTimer = Seq.Lines[0].DisplayDuration;
+
+    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Starting sequence '%s' (%d lines)"),
+        *SequenceID.ToString(), Seq.Lines.Num());
+
+    return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UNarr_DialogueManager
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── AdvanceDialogue ──────────────────────────────────────────────────────────
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+bool ANarr_DialogueManager::AdvanceDialogue()
 {
-    Super::Initialize(Collection);
-    PopulateDefaultRegistry();
-    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Initialized — %d voice lines registered"),
-        VoiceLineRegistry.Num());
+    if (!bDialogueActive)
+    {
+        return false;
+    }
+
+    int32 SeqIdx = FindSequenceIndex(ActiveSequenceID);
+    if (SeqIdx == INDEX_NONE)
+    {
+        EndDialogue();
+        return false;
+    }
+
+    FNarr_DialogueSequence& Seq = RegisteredSequences[SeqIdx];
+    CurrentLineIndex++;
+
+    if (CurrentLineIndex >= Seq.Lines.Num())
+    {
+        // Sequence complete
+        Seq.bHasBeenPlayed = true;
+        EndDialogue();
+        return false;
+    }
+
+    // Check result of previous line
+    const FNarr_DialogueLine& PrevLine = Seq.Lines[CurrentLineIndex - 1];
+    if (PrevLine.Result == ENarr_DialogueResult::End)
+    {
+        Seq.bHasBeenPlayed = true;
+        EndDialogue();
+        return false;
+    }
+
+    // Set timer for next line
+    DialogueTimer = Seq.Lines[CurrentLineIndex].DisplayDuration;
+    return true;
 }
 
-void UNarr_DialogueManager::Deinitialize()
+// ─── EndDialogue ──────────────────────────────────────────────────────────────
+
+void ANarr_DialogueManager::EndDialogue()
 {
-    RegisteredTriggers.Empty();
-    VoiceLineRegistry.Empty();
-    Super::Deinitialize();
+    bDialogueActive = false;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    ActiveSequenceID = NAME_None;
+
+    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Dialogue ended."));
 }
 
-void UNarr_DialogueManager::RegisterTrigger(ANarr_DialogueTrigger* Trigger)
+// ─── GetCurrentLine ───────────────────────────────────────────────────────────
+
+bool ANarr_DialogueManager::GetCurrentLine(FNarr_DialogueLine& OutLine) const
 {
-    if (!Trigger) return;
-    RegisteredTriggers.AddUnique(Trigger);
-    UE_LOG(LogTemp, Log, TEXT("[DialogueManager] Registered trigger: %s"),
-        *Trigger->GetActorLabel());
+    if (!bDialogueActive)
+    {
+        return false;
+    }
+
+    int32 SeqIdx = FindSequenceIndex(ActiveSequenceID);
+    if (SeqIdx == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const FNarr_DialogueSequence& Seq = RegisteredSequences[SeqIdx];
+    if (!Seq.Lines.IsValidIndex(CurrentLineIndex))
+    {
+        return false;
+    }
+
+    OutLine = Seq.Lines[CurrentLineIndex];
+    return true;
 }
 
-void UNarr_DialogueManager::UnregisterTrigger(ANarr_DialogueTrigger* Trigger)
+// ─── RegisterVoiceLine ────────────────────────────────────────────────────────
+
+void ANarr_DialogueManager::RegisterVoiceLine(FName LineID,
+    ENarr_DialogueSpeaker Speaker,
+    const FString& AudioURL,
+    float Duration,
+    ENarr_DialogueContext Context)
 {
-    if (!Trigger) return;
-    RegisteredTriggers.Remove(Trigger);
+    // Check for duplicate
+    for (FNarr_VoiceLineRegistry& Entry : VoiceLineRegistry)
+    {
+        if (Entry.LineID == LineID)
+        {
+            Entry.AudioURL = AudioURL;
+            Entry.DurationSeconds = Duration;
+            UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Updated voice line '%s'"), *LineID.ToString());
+            return;
+        }
+    }
+
+    FNarr_VoiceLineRegistry NewEntry;
+    NewEntry.LineID = LineID;
+    NewEntry.Speaker = Speaker;
+    NewEntry.AudioURL = AudioURL;
+    NewEntry.DurationSeconds = Duration;
+    NewEntry.Context = Context;
+    VoiceLineRegistry.Add(NewEntry);
+
+    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Registered voice line '%s' (%.1fs)"),
+        *LineID.ToString(), Duration);
 }
 
-int32 UNarr_DialogueManager::GetActiveTriggerCount() const
+// ─── GetVoiceLineURL ──────────────────────────────────────────────────────────
+
+FString ANarr_DialogueManager::GetVoiceLineURL(FName LineID) const
 {
-    return RegisteredTriggers.Num();
+    for (const FNarr_VoiceLineRegistry& Entry : VoiceLineRegistry)
+    {
+        if (Entry.LineID == LineID)
+        {
+            return Entry.AudioURL;
+        }
+    }
+    return FString();
 }
 
-void UNarr_DialogueManager::LoadVoiceLineRegistry()
+// ─── TriggerContextDialogue ───────────────────────────────────────────────────
+
+bool ANarr_DialogueManager::TriggerContextDialogue(ENarr_DialogueContext Context)
 {
-    PopulateDefaultRegistry();
+    if (bDialogueActive)
+    {
+        // Don't interrupt active dialogue
+        return false;
+    }
+
+    // Find first matching non-played sequence for this context
+    for (const FNarr_DialogueSequence& Seq : RegisteredSequences)
+    {
+        if (Seq.RequiredContext == Context)
+        {
+            if (!Seq.bHasBeenPlayed || Seq.bIsRepeatable)
+            {
+                return StartDialogueSequence(Seq.SequenceID);
+            }
+        }
+    }
+
+    return false;
 }
 
-void UNarr_DialogueManager::PopulateDefaultRegistry()
+// ─── HasSequenceBeenPlayed ────────────────────────────────────────────────────
+
+bool ANarr_DialogueManager::HasSequenceBeenPlayed(FName SequenceID) const
 {
-    // Cycle PROD_CYCLE_AUTO_20260630_001 — 4 voice lines generated via ElevenLabs TTS
-    VoiceLineRegistry.Add(
-        TEXT("Kael_Hunter"),
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782781107555_Kael_Hunter.mp3")
+    int32 Idx = FindSequenceIndex(SequenceID);
+    if (Idx == INDEX_NONE)
+    {
+        return false;
+    }
+    return RegisteredSequences[Idx].bHasBeenPlayed;
+}
+
+// ─── FindSequenceIndex ────────────────────────────────────────────────────────
+
+int32 ANarr_DialogueManager::FindSequenceIndex(FName SequenceID) const
+{
+    for (int32 i = 0; i < RegisteredSequences.Num(); i++)
+    {
+        if (RegisteredSequences[i].SequenceID == SequenceID)
+        {
+            return i;
+        }
+    }
+    return INDEX_NONE;
+}
+
+// ─── InitializeVoiceLineRegistry ─────────────────────────────────────────────
+
+void ANarr_DialogueManager::InitializeVoiceLineRegistry()
+{
+    // Cycle AUTO_20260630_002 — ElevenLabs TTS voice lines
+    // These URLs are live audio from the production pipeline
+
+    RegisterVoiceLine(
+        FName("TL_MigrationOrder"),
+        ENarr_DialogueSpeaker::TribalLeader,
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785903459_TribalLeader.mp3"),
+        9.0f,
+        ENarr_DialogueContext::Migration
     );
-    VoiceLineRegistry.Add(
-        TEXT("Mara_Scout"),
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782781123869_Mara_Scout.mp3")
+
+    RegisterVoiceLine(
+        FName("SS_RexWarning"),
+        ENarr_DialogueSpeaker::SurvivorScout,
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785921355_SurvivorScout.mp3"),
+        8.0f,
+        ENarr_DialogueContext::Danger
     );
-    VoiceLineRegistry.Add(
-        TEXT("Dara_Elder"),
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782781130765_Dara_Elder.mp3")
+
+    RegisterVoiceLine(
+        FName("EH_RiverWarning"),
+        ENarr_DialogueSpeaker::ElderHunter,
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785927646_ElderHunter.mp3"),
+        11.0f,
+        ENarr_DialogueContext::Discovery
     );
-    VoiceLineRegistry.Add(
-        TEXT("Bron_Tracker"),
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782781132919_Bron_Tracker.mp3")
+
+    RegisterVoiceLine(
+        FName("YT_BigTracks"),
+        ENarr_DialogueSpeaker::YoungTracker,
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785929604_YoungTracker.mp3"),
+        12.0f,
+        ENarr_DialogueContext::Discovery
     );
+
+    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Initialized %d voice lines"), VoiceLineRegistry.Num());
 }
