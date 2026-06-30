@@ -1,365 +1,396 @@
 #include "PrehistoricAudioManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
-UPrehistoricAudioManager::UPrehistoricAudioManager()
+APrehistoricAudioManager::APrehistoricAudioManager()
 {
-    CurrentBiome = EAudio_BiomeType::Forest;
-    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-    CurrentTimeOfDay = 0.5f; // Noon
-    AmbienceAudioComponent = nullptr;
-    MusicAudioComponent = nullptr;
-    HeartbeatAudioComponent = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s — audio doesn't need per-frame ticks
+
+    // Populate known Freesound campfire asset IDs (discovered via search_sounds)
+    FreesoundCampfireIDs.Add(681367); // Campfire Position 2 — 22s, quiet night
+    FreesoundCampfireIDs.Add(681366); // Campfire Position 1 — 83s, quiet night
+    FreesoundCampfireIDs.Add(688992); // Campfire St. Marys River — 9 min, birds+fire
+    FreesoundCampfireIDs.Add(802195); // Fire-Nature Sounds — 4 min, campfire at night
+
+    FreesoundCampfireURLs.Add(TEXT("https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3"));
+    FreesoundCampfireURLs.Add(TEXT("https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3"));
+    FreesoundCampfireURLs.Add(TEXT("https://cdn.freesound.org/previews/688/688992_13721094-hq.mp3"));
+    FreesoundCampfireURLs.Add(TEXT("https://cdn.freesound.org/previews/802/802195_17223245-hq.mp3"));
 }
 
-void UPrehistoricAudioManager::Initialize(FSubsystemCollectionBase& Collection)
+void APrehistoricAudioManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("PrehistoricAudioManager: Initializing audio subsystem"));
-    
-    // Create persistent audio components
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        // Create ambience audio component
-        AmbienceAudioComponent = NewObject<UAudioComponent>(this);
-        if (AmbienceAudioComponent)
-        {
-            AmbienceAudioComponent->bAutoActivate = false;
-            AmbienceAudioComponent->SetVolumeMultiplier(AmbienceSettings.BaseVolume);
-            AmbienceAudioComponent->RegisterComponent();
-        }
+    Super::BeginPlay();
 
-        // Create music audio component
-        MusicAudioComponent = NewObject<UAudioComponent>(this);
-        if (MusicAudioComponent)
-        {
-            MusicAudioComponent->bAutoActivate = false;
-            MusicAudioComponent->SetVolumeMultiplier(0.5f);
-            MusicAudioComponent->RegisterComponent();
-        }
+    InitializeDefaultProfiles();
 
-        // Create heartbeat audio component
-        HeartbeatAudioComponent = NewObject<UAudioComponent>(this);
-        if (HeartbeatAudioComponent)
-        {
-            HeartbeatAudioComponent->bAutoActivate = false;
-            HeartbeatAudioComponent->SetVolumeMultiplier(0.3f);
-            HeartbeatAudioComponent->RegisterComponent();
-        }
-    }
+    // Start ambient update loop every 10 seconds
+    GetWorldTimerManager().SetTimer(
+        AmbientUpdateTimer,
+        this,
+        &APrehistoricAudioManager::UpdateAmbientLayers,
+        10.0f,
+        true
+    );
 
-    InitializeDefaultSoundProfiles();
+    // Threat decay — reduce threat level over time if no new threats
+    GetWorldTimerManager().SetTimer(
+        ThreatDecayTimer,
+        this,
+        &APrehistoricAudioManager::DecayThreatLevel,
+        30.0f,
+        true
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] PrehistoricAudioManager initialized. Biome: %d, Time: %d"),
+        (int32)CurrentBiome, (int32)CurrentTimeOfDay);
 }
 
-void UPrehistoricAudioManager::Deinitialize()
+void APrehistoricAudioManager::Tick(float DeltaTime)
 {
-    // Stop all active sounds
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->Stop();
-    }
-    
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->Stop();
-    }
-    
-    if (HeartbeatAudioComponent)
-    {
-        HeartbeatAudioComponent->Stop();
-    }
-
-    // Clean up active sound components
-    for (UAudioComponent* AudioComp : ActiveSoundComponents)
-    {
-        if (AudioComp && IsValid(AudioComp))
-        {
-            AudioComp->Stop();
-            AudioComp->DestroyComponent();
-        }
-    }
-    ActiveSoundComponents.Empty();
-
-    Super::Deinitialize();
+    Super::Tick(DeltaTime);
+    // Lightweight tick — heavy work done via timers
 }
 
-void UPrehistoricAudioManager::SetBiomeAmbience(EAudio_BiomeType BiomeType, float FadeTime)
+void APrehistoricAudioManager::InitializeDefaultProfiles()
 {
-    if (CurrentBiome == BiomeType)
-    {
-        return; // Already in this biome
-    }
+    // T-Rex profile
+    FAudio_DinosaurSoundProfile TRex;
+    TRex.SpeciesName = TEXT("TyrannosaurusRex");
+    TRex.FootstepRadius = 3000.0f;
+    TRex.RoarRadius = 10000.0f;
+    DinosaurProfiles.Add(TRex);
 
-    CurrentBiome = BiomeType;
-    
-    if (!AmbienceAudioComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAudioManager: AmbienceAudioComponent is null"));
-        return;
-    }
+    // Raptor profile
+    FAudio_DinosaurSoundProfile Raptor;
+    Raptor.SpeciesName = TEXT("Velociraptor");
+    Raptor.FootstepRadius = 800.0f;
+    Raptor.RoarRadius = 3000.0f;
+    DinosaurProfiles.Add(Raptor);
 
-    USoundCue* NewAmbience = nullptr;
-    
-    switch (BiomeType)
-    {
-        case EAudio_BiomeType::Forest:
-            NewAmbience = AmbienceSettings.ForestAmbience;
-            break;
-        case EAudio_BiomeType::Plains:
-            NewAmbience = AmbienceSettings.PlainsAmbience;
-            break;
-        case EAudio_BiomeType::Swamp:
-            NewAmbience = AmbienceSettings.SwampAmbience;
-            break;
-        default:
-            NewAmbience = AmbienceSettings.ForestAmbience; // Default fallback
-            break;
-    }
+    // Triceratops profile
+    FAudio_DinosaurSoundProfile Trike;
+    Trike.SpeciesName = TEXT("Triceratops");
+    Trike.FootstepRadius = 2000.0f;
+    Trike.RoarRadius = 5000.0f;
+    DinosaurProfiles.Add(Trike);
 
-    if (NewAmbience)
+    // Brachiosaurus profile
+    FAudio_DinosaurSoundProfile Brachio;
+    Brachio.SpeciesName = TEXT("Brachiosaurus");
+    Brachio.FootstepRadius = 4000.0f;
+    Brachio.RoarRadius = 8000.0f;
+    DinosaurProfiles.Add(Brachio);
+
+    // Register voice lines from Agent #15 Narrative output
+    FAudio_VoiceLine LineKora;
+    LineKora.CharacterName = TEXT("Kora");
+    LineKora.LineText = TEXT("The eastern ridge is raptor territory now. We lost two scouts last moon cycle.");
+    LineKora.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790823084_TribalLeader_Kora.mp3");
+    LineKora.Duration = 8.0f;
+    RegisteredVoiceLines.Add(LineKora);
+
+    FAudio_VoiceLine LineDavan;
+    LineDavan.CharacterName = TEXT("Davan");
+    LineDavan.LineText = TEXT("We have tracked the Triceratops herd for three days. They know where the water is.");
+    LineDavan.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790841088_Scout_Davan.mp3");
+    LineDavan.Duration = 9.0f;
+    RegisteredVoiceLines.Add(LineDavan);
+
+    FAudio_VoiceLine LineMaren;
+    LineMaren.CharacterName = TEXT("Maren");
+    LineMaren.LineText = TEXT("The T-Rex does not hunt by sight alone. It reads the ground — your footprints, your warmth.");
+    LineMaren.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790848707_Elder_Maren.mp3");
+    LineMaren.Duration = 10.0f;
+    RegisteredVoiceLines.Add(LineMaren);
+
+    FAudio_VoiceLine LineBrek;
+    LineBrek.CharacterName = TEXT("Brek");
+    LineBrek.LineText = TEXT("Fire. That is the only thing they fear. Keep it burning through the night.");
+    LineBrek.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790850746_Hunter_Brek.mp3");
+    LineBrek.Duration = 7.0f;
+    RegisteredVoiceLines.Add(LineBrek);
+
+    FAudio_VoiceLine LineBrekDanger;
+    LineBrekDanger.CharacterName = TEXT("Brek");
+    LineBrekDanger.LineText = TEXT("Something massive just moved through the tree line. Stay low. Do not run.");
+    LineBrekDanger.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790967276_Hunter_Brek_Danger.mp3");
+    LineBrekDanger.Duration = 11.0f;
+    RegisteredVoiceLines.Add(LineBrekDanger);
+
+    FAudio_VoiceLine LineMarenSeasons;
+    LineMarenSeasons.CharacterName = TEXT("Maren");
+    LineMarenSeasons.LineText = TEXT("The dry season is ending. When the rains come, the herds move north through the valley pass.");
+    LineMarenSeasons.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782790990071_Elder_Maren_Seasons.mp3");
+    LineMarenSeasons.Duration = 13.0f;
+    RegisteredVoiceLines.Add(LineMarenSeasons);
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Initialized %d dinosaur profiles, %d voice lines"),
+        DinosaurProfiles.Num(), RegisteredVoiceLines.Num());
+}
+
+void APrehistoricAudioManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+{
+    if (CurrentTimeOfDay == NewTime) return;
+
+    EAudio_TimeOfDay OldTime = CurrentTimeOfDay;
+    CurrentTimeOfDay = NewTime;
+
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Time of day changed: %d -> %d"), (int32)OldTime, (int32)NewTime);
+
+    // Trigger ambient layer update on time change
+    UpdateAmbientLayers();
+
+    // Night transition — increase threat awareness
+    if (NewTime == EAudio_TimeOfDay::Night && CurrentThreatLevel == EAudio_ThreatLevel::Safe)
     {
-        AmbienceAudioComponent->SetSound(NewAmbience);
-        AmbienceAudioComponent->FadeIn(FadeTime, AmbienceSettings.BaseVolume);
-        
-        UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Switched to %s biome ambience"), 
-               *UEnum::GetValueAsString(BiomeType));
+        SetThreatLevel(EAudio_ThreatLevel::Aware);
+        UE_LOG(LogTemp, Log, TEXT("[AudioManager] Nightfall — threat level raised to Aware"));
+    }
+}
+
+void APrehistoricAudioManager::SetThreatLevel(EAudio_ThreatLevel NewThreat)
+{
+    if (CurrentThreatLevel == NewThreat) return;
+
+    CurrentThreatLevel = NewThreat;
+
+    float MusicIntensity = GetThreatMusicIntensity();
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Threat level: %d | Music intensity: %.2f"), (int32)NewThreat, MusicIntensity);
+}
+
+void APrehistoricAudioManager::SetActiveBiome(EAudio_BiomeType NewBiome)
+{
+    if (CurrentBiome == NewBiome) return;
+    CurrentBiome = NewBiome;
+    UpdateAmbientLayers();
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Biome changed to: %d"), (int32)NewBiome);
+}
+
+void APrehistoricAudioManager::SetWeatherState(EAudio_WeatherState NewWeather)
+{
+    if (CurrentWeather == NewWeather) return;
+    CurrentWeather = NewWeather;
+    UpdateAmbientLayers();
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Weather changed to: %d"), (int32)NewWeather);
+}
+
+void APrehistoricAudioManager::PlayVoiceLine(const FAudio_VoiceLine& Line)
+{
+    if (Line.AudioAsset && GetWorld())
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), Line.AudioAsset, 1.0f, 1.0f, 0.0f);
+        UE_LOG(LogTemp, Log, TEXT("[AudioManager] Playing voice line: %s — '%s'"), *Line.CharacterName, *Line.LineText);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAudioManager: No ambience sound for biome type"));
+        // Asset not yet imported — log URL for Blueprint wiring
+        UE_LOG(LogTemp, Warning, TEXT("[AudioManager] Voice line asset not set for %s. URL: %s"), *Line.CharacterName, *Line.AudioURL);
     }
 }
 
-void UPrehistoricAudioManager::SetThreatLevel(EAudio_ThreatLevel ThreatLevel)
+void APrehistoricAudioManager::RegisterVoiceLine(const FAudio_VoiceLine& Line)
 {
-    if (CurrentThreatLevel == ThreatLevel)
+    RegisteredVoiceLines.Add(Line);
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Registered voice line for %s"), *Line.CharacterName);
+}
+
+void APrehistoricAudioManager::TriggerDinosaurRoar(const FString& SpeciesName, FVector Location)
+{
+    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
     {
-        return;
+        if (Profile.SpeciesName == SpeciesName)
+        {
+            if (Profile.AlertSound && GetWorld())
+            {
+                UGameplayStatics::PlaySoundAtLocation(GetWorld(), Profile.AlertSound, Location, 1.0f, 1.0f, 0.0f);
+            }
+
+            // Escalate threat level based on proximity to player
+            APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+            if (PC && PC->GetPawn())
+            {
+                float Distance = FVector::Dist(Location, PC->GetPawn()->GetActorLocation());
+                if (Distance < 2000.0f)
+                {
+                    SetThreatLevel(EAudio_ThreatLevel::Critical);
+                }
+                else if (Distance < 5000.0f)
+                {
+                    SetThreatLevel(EAudio_ThreatLevel::Danger);
+                }
+                else if (Distance < Profile.RoarRadius)
+                {
+                    SetThreatLevel(EAudio_ThreatLevel::Aware);
+                }
+            }
+
+            UE_LOG(LogTemp, Log, TEXT("[AudioManager] Dinosaur roar: %s at (%.0f, %.0f, %.0f)"),
+                *SpeciesName, Location.X, Location.Y, Location.Z);
+            return;
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[AudioManager] No profile found for species: %s"), *SpeciesName);
+}
+
+void APrehistoricAudioManager::TriggerDinosaurFootstep(const FString& SpeciesName, FVector Location, float Mass)
+{
+    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    {
+        if (Profile.SpeciesName == SpeciesName)
+        {
+            if (Profile.FootstepSound && GetWorld())
+            {
+                float VolumeScale = FMath::Clamp(Mass / 5000.0f, 0.1f, 2.0f);
+                UGameplayStatics::PlaySoundAtLocation(GetWorld(), Profile.FootstepSound, Location, VolumeScale);
+            }
+
+            // Screen shake for heavy footsteps
+            float ShakeIntensity = FMath::Clamp(Mass / 8000.0f, 0.0f, 1.0f);
+            TriggerFootstepShake(ShakeIntensity, Location);
+            return;
+        }
+    }
+}
+
+void APrehistoricAudioManager::RegisterDinosaurProfile(const FAudio_DinosaurSoundProfile& Profile)
+{
+    // Remove existing profile for this species if present
+    DinosaurProfiles.RemoveAll([&Profile](const FAudio_DinosaurSoundProfile& Existing)
+    {
+        return Existing.SpeciesName == Profile.SpeciesName;
+    });
+    DinosaurProfiles.Add(Profile);
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Registered dinosaur profile: %s"), *Profile.SpeciesName);
+}
+
+void APrehistoricAudioManager::TriggerFootstepShake(float Intensity, FVector SourceLocation)
+{
+    if (!GetWorld() || Intensity <= 0.01f) return;
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    float Distance = FVector::Dist(SourceLocation, PlayerPawn->GetActorLocation());
+    float FalloffIntensity = Intensity * FMath::Clamp(1.0f - (Distance / 5000.0f), 0.0f, 1.0f);
+
+    if (FalloffIntensity > 0.05f)
+    {
+        PC->ClientStartCameraShake(nullptr, FalloffIntensity);
+        UE_LOG(LogTemp, Verbose, TEXT("[AudioManager] Screen shake: intensity=%.2f dist=%.0f"), FalloffIntensity, Distance);
+    }
+}
+
+void APrehistoricAudioManager::SpawnCampfireAudio(FVector Location)
+{
+    if (!GetWorld()) return;
+
+    if (CampfireLoopSound)
+    {
+        UAudioComponent* CampfireComp = UGameplayStatics::SpawnSoundAtLocation(
+            GetWorld(),
+            CampfireLoopSound,
+            Location,
+            FRotator::ZeroRotator,
+            1.0f,
+            1.0f,
+            0.0f,
+            nullptr,
+            nullptr,
+            true
+        );
+
+        if (CampfireComp)
+        {
+            CampfireComp->bAutoDestroy = false;
+            ActiveAmbientComponents.Add(CampfireComp);
+            UE_LOG(LogTemp, Log, TEXT("[AudioManager] Campfire audio spawned at (%.0f, %.0f, %.0f)"),
+                Location.X, Location.Y, Location.Z);
+        }
+    }
+    else
+    {
+        // Log Freesound reference for Blueprint wiring
+        UE_LOG(LogTemp, Warning, TEXT("[AudioManager] Campfire sound not set. Use Freesound ID 681366 (83s campfire loop). URL: %s"),
+            FreesoundCampfireURLs.Num() > 1 ? *FreesoundCampfireURLs[1] : TEXT("N/A"));
+    }
+}
+
+void APrehistoricAudioManager::UpdateAmbientLayers()
+{
+    // Filter active layers by current biome and time of day
+    int32 ActiveCount = 0;
+    for (int32 i = 0; i < AmbientLayers.Num(); i++)
+    {
+        const FAudio_AmbientLayer& Layer = AmbientLayers[i];
+        bool bShouldBeActive = (Layer.ActiveBiome == CurrentBiome && Layer.ActiveTimeOfDay == CurrentTimeOfDay);
+
+        if (i < ActiveAmbientComponents.Num() && ActiveAmbientComponents[i])
+        {
+            float TargetVolume = bShouldBeActive ? Layer.BaseVolume : 0.0f;
+            FadeAmbientLayer(i, TargetVolume, 3.0f);
+            if (bShouldBeActive) ActiveCount++;
+        }
     }
 
-    EAudio_ThreatLevel PreviousThreatLevel = CurrentThreatLevel;
-    CurrentThreatLevel = ThreatLevel;
+    UE_LOG(LogTemp, Log, TEXT("[AudioManager] Ambient update: %d active layers (Biome=%d, Time=%d, Threat=%d, Weather=%d)"),
+        ActiveCount, (int32)CurrentBiome, (int32)CurrentTimeOfDay, (int32)CurrentThreatLevel, (int32)CurrentWeather);
+}
 
-    // Adjust ambience volume based on threat level
-    float VolumeMultiplier = 1.0f;
-    switch (ThreatLevel)
+void APrehistoricAudioManager::FadeAmbientLayer(int32 LayerIndex, float TargetVolume, float FadeTime)
+{
+    if (LayerIndex < 0 || LayerIndex >= ActiveAmbientComponents.Num()) return;
+    UAudioComponent* Comp = ActiveAmbientComponents[LayerIndex];
+    if (!Comp) return;
+
+    if (TargetVolume <= 0.0f)
     {
-        case EAudio_ThreatLevel::Safe:
-            VolumeMultiplier = 1.0f;
-            break;
-        case EAudio_ThreatLevel::Cautious:
-            VolumeMultiplier = 0.7f;
+        Comp->FadeOut(FadeTime, 0.0f);
+    }
+    else
+    {
+        Comp->FadeIn(FadeTime, TargetVolume);
+    }
+}
+
+void APrehistoricAudioManager::DecayThreatLevel()
+{
+    // Gradually reduce threat over time if no new threats
+    switch (CurrentThreatLevel)
+    {
+        case EAudio_ThreatLevel::Critical:
+            SetThreatLevel(EAudio_ThreatLevel::Danger);
             break;
         case EAudio_ThreatLevel::Danger:
-            VolumeMultiplier = 0.4f;
+            SetThreatLevel(EAudio_ThreatLevel::Aware);
             break;
-        case EAudio_ThreatLevel::Panic:
-            VolumeMultiplier = 0.1f;
-            break;
-    }
-
-    if (AmbienceAudioComponent)
-    {
-        float TargetVolume = AmbienceSettings.BaseVolume * VolumeMultiplier;
-        AmbienceAudioComponent->SetVolumeMultiplier(TargetVolume);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Threat level changed to %s"), 
-           *UEnum::GetValueAsString(ThreatLevel));
-}
-
-void UPrehistoricAudioManager::UpdateTimeOfDay(float TimeOfDay)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 1.0f);
-    
-    // Adjust audio based on time of day
-    // Night time (0.0-0.2 and 0.8-1.0) should be quieter and more ominous
-    bool bIsNight = (TimeOfDay < 0.2f || TimeOfDay > 0.8f);
-    
-    if (AmbienceAudioComponent)
-    {
-        float TimeVolumeMultiplier = bIsNight ? 0.6f : 1.0f;
-        float CurrentVolume = AmbienceAudioComponent->VolumeMultiplier;
-        float TargetVolume = AmbienceSettings.BaseVolume * TimeVolumeMultiplier;
-        
-        // Smooth transition
-        AmbienceAudioComponent->SetVolumeMultiplier(FMath::Lerp(CurrentVolume, TargetVolume, 0.1f));
-    }
-}
-
-void UPrehistoricAudioManager::PlayDinosaurSound(const FString& DinosaurType, const FString& SoundType, FVector Location)
-{
-    FAudio_DinosaurSoundProfile* SoundProfile = DinosaurSoundProfiles.Find(DinosaurType);
-    if (!SoundProfile)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAudioManager: No sound profile found for dinosaur type: %s"), *DinosaurType);
-        return;
-    }
-
-    USoundCue* SoundToPlay = nullptr;
-    
-    if (SoundType == "Idle")
-    {
-        SoundToPlay = SoundProfile->IdleSound;
-    }
-    else if (SoundType == "Alert")
-    {
-        SoundToPlay = SoundProfile->AlertSound;
-    }
-    else if (SoundType == "Attack")
-    {
-        SoundToPlay = SoundProfile->AttackSound;
-    }
-    else if (SoundType == "Footstep")
-    {
-        SoundToPlay = SoundProfile->FootstepSound;
-    }
-
-    if (SoundToPlay)
-    {
-        UAudioComponent* AudioComp = CreateSpatialAudioComponent(Location);
-        if (AudioComp)
-        {
-            AudioComp->SetSound(SoundToPlay);
-            
-            // Randomize pitch for variation
-            float RandomPitch = FMath::RandRange(SoundProfile->MinPitch, SoundProfile->MaxPitch);
-            AudioComp->SetPitchMultiplier(RandomPitch);
-            
-            // Set attenuation distance
-            AudioComp->AttenuationSettings.FalloffDistance = SoundProfile->MaxAudibleDistance;
-            
-            AudioComp->Play();
-            ActiveSoundComponents.Add(AudioComp);
-            
-            UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Playing %s sound for %s at location %s"), 
-                   *SoundType, *DinosaurType, *Location.ToString());
-        }
-    }
-}
-
-void UPrehistoricAudioManager::RegisterDinosaurSoundProfile(const FString& DinosaurType, const FAudio_DinosaurSoundProfile& SoundProfile)
-{
-    DinosaurSoundProfiles.Add(DinosaurType, SoundProfile);
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Registered sound profile for %s"), *DinosaurType);
-}
-
-void UPrehistoricAudioManager::PlaySurvivalSound(const FString& SoundName, FVector Location, float Volume)
-{
-    // This would play survival-related sounds like crafting, fire, etc.
-    // For now, we'll log the request
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Playing survival sound %s at %s with volume %f"), 
-           *SoundName, *Location.ToString(), Volume);
-}
-
-void UPrehistoricAudioManager::PlayPlayerHeartbeat(float Intensity)
-{
-    if (!HeartbeatAudioComponent)
-    {
-        return;
-    }
-
-    // Intensity affects both volume and pitch
-    float HeartbeatVolume = FMath::Clamp(Intensity * 0.5f, 0.1f, 0.8f);
-    float HeartbeatPitch = FMath::Clamp(1.0f + (Intensity * 0.3f), 0.8f, 1.5f);
-    
-    HeartbeatAudioComponent->SetVolumeMultiplier(HeartbeatVolume);
-    HeartbeatAudioComponent->SetPitchMultiplier(HeartbeatPitch);
-    
-    if (!HeartbeatAudioComponent->IsPlaying())
-    {
-        HeartbeatAudioComponent->Play();
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Playing heartbeat with intensity %f"), Intensity);
-}
-
-void UPrehistoricAudioManager::StopPlayerHeartbeat()
-{
-    if (HeartbeatAudioComponent && HeartbeatAudioComponent->IsPlaying())
-    {
-        HeartbeatAudioComponent->FadeOut(1.0f, 0.0f);
-    }
-}
-
-void UPrehistoricAudioManager::PlayWeatherSound(const FString& WeatherType, float Intensity)
-{
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Playing weather sound %s with intensity %f"), 
-           *WeatherType, Intensity);
-}
-
-void UPrehistoricAudioManager::UpdateWindIntensity(float WindSpeed)
-{
-    // Adjust ambient wind sounds based on wind speed
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Updating wind intensity to %f"), WindSpeed);
-}
-
-void UPrehistoricAudioManager::InitializeDefaultSoundProfiles()
-{
-    // Initialize default dinosaur sound profiles
-    // These would normally load actual sound assets
-    
-    FAudio_DinosaurSoundProfile TRexProfile;
-    TRexProfile.MinPitch = 0.7f;
-    TRexProfile.MaxPitch = 1.0f;
-    TRexProfile.MaxAudibleDistance = 5000.0f;
-    RegisterDinosaurSoundProfile("TRex", TRexProfile);
-    
-    FAudio_DinosaurSoundProfile RaptorProfile;
-    RaptorProfile.MinPitch = 1.0f;
-    RaptorProfile.MaxPitch = 1.4f;
-    RaptorProfile.MaxAudibleDistance = 2000.0f;
-    RegisterDinosaurSoundProfile("Raptor", RaptorProfile);
-    
-    FAudio_DinosaurSoundProfile BrachiosaurusProfile;
-    BrachiosaurusProfile.MinPitch = 0.5f;
-    BrachiosaurusProfile.MaxPitch = 0.8f;
-    BrachiosaurusProfile.MaxAudibleDistance = 8000.0f;
-    RegisterDinosaurSoundProfile("Brachiosaurus", BrachiosaurusProfile);
-    
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAudioManager: Initialized default dinosaur sound profiles"));
-}
-
-void UPrehistoricAudioManager::CleanupInactiveSounds()
-{
-    // Remove finished audio components
-    for (int32 i = ActiveSoundComponents.Num() - 1; i >= 0; i--)
-    {
-        UAudioComponent* AudioComp = ActiveSoundComponents[i];
-        if (!AudioComp || !IsValid(AudioComp) || !AudioComp->IsPlaying())
-        {
-            if (AudioComp && IsValid(AudioComp))
+        case EAudio_ThreatLevel::Aware:
+            // Only decay to Safe during daytime
+            if (CurrentTimeOfDay == EAudio_TimeOfDay::Day)
             {
-                AudioComp->DestroyComponent();
+                SetThreatLevel(EAudio_ThreatLevel::Safe);
             }
-            ActiveSoundComponents.RemoveAt(i);
-        }
+            break;
+        case EAudio_ThreatLevel::Safe:
+        default:
+            break;
     }
 }
 
-UAudioComponent* UPrehistoricAudioManager::CreateSpatialAudioComponent(FVector Location)
+float APrehistoricAudioManager::GetThreatMusicIntensity() const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    switch (CurrentThreatLevel)
     {
-        return nullptr;
+        case EAudio_ThreatLevel::Safe:     return 0.0f;
+        case EAudio_ThreatLevel::Aware:    return 0.3f;
+        case EAudio_ThreatLevel::Danger:   return 0.7f;
+        case EAudio_ThreatLevel::Critical: return 1.0f;
+        default:                           return 0.0f;
     }
-
-    UAudioComponent* AudioComp = NewObject<UAudioComponent>(this);
-    if (AudioComp)
-    {
-        AudioComp->bAutoActivate = false;
-        AudioComp->SetWorldLocation(Location);
-        AudioComp->RegisterComponent();
-        
-        // Clean up old components periodically
-        CleanupInactiveSounds();
-    }
-    
-    return AudioComp;
 }
