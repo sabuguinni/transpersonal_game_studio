@@ -1,241 +1,280 @@
-// BiomeManager.cpp
-// Engine Architect #02 — Cycle 013
-// Prehistoric survival game: Biome query system for world generation
+// BiomeManager.cpp — Engine Architect #02 — PROD_CYCLE_AUTO_20260630_001
+// Manages biome detection, transitions, and environmental parameters for the prehistoric world.
 
 #include "BiomeManager.h"
-#include "Math/UnrealMathUtility.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
 
-// ============================================================
-// Constructor
-// ============================================================
-
-ABiomeManager::ABiomeManager()
+UBiomeManager::UBiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s — not every frame
+    // Default biome parameters
+    CurrentBiome = EBiomeType::Forest;
+    PreviousBiome = EBiomeType::Forest;
+    BiomeTransitionAlpha = 1.0f;
+    TransitionDuration = 5.0f;
+    bIsTransitioning = false;
 
-    WorldSizeKm = 4.0f;
-    BiomeSeed = 42;
-    BiomeNoiseScale = 0.0005f;
-    BiomeGridResolution = 64;
-    bDebugDrawBiomeBoundaries = false;
+    // Temperature ranges per biome (Celsius)
+    BiomeTemperatures.Add(EBiomeType::Forest,     FVector2D(18.0f, 28.0f));
+    BiomeTemperatures.Add(EBiomeType::Jungle,     FVector2D(25.0f, 38.0f));
+    BiomeTemperatures.Add(EBiomeType::Swamp,      FVector2D(20.0f, 32.0f));
+    BiomeTemperatures.Add(EBiomeType::Desert,     FVector2D(35.0f, 55.0f));
+    BiomeTemperatures.Add(EBiomeType::Volcanic,   FVector2D(45.0f, 80.0f));
+    BiomeTemperatures.Add(EBiomeType::Coastal,    FVector2D(22.0f, 30.0f));
+    BiomeTemperatures.Add(EBiomeType::Grassland,  FVector2D(15.0f, 30.0f));
+    BiomeTemperatures.Add(EBiomeType::Mountain,   FVector2D(0.0f,  15.0f));
+    BiomeTemperatures.Add(EBiomeType::River,      FVector2D(16.0f, 26.0f));
+    BiomeTemperatures.Add(EBiomeType::Cave,       FVector2D(10.0f, 16.0f));
 
-    InitializeDefaultBiomes();
+    // Humidity ranges (0-1)
+    BiomeHumidity.Add(EBiomeType::Forest,    FVector2D(0.5f, 0.75f));
+    BiomeHumidity.Add(EBiomeType::Jungle,    FVector2D(0.8f, 1.0f));
+    BiomeHumidity.Add(EBiomeType::Swamp,     FVector2D(0.85f, 1.0f));
+    BiomeHumidity.Add(EBiomeType::Desert,    FVector2D(0.05f, 0.2f));
+    BiomeHumidity.Add(EBiomeType::Volcanic,  FVector2D(0.1f, 0.3f));
+    BiomeHumidity.Add(EBiomeType::Coastal,   FVector2D(0.6f, 0.8f));
+    BiomeHumidity.Add(EBiomeType::Grassland, FVector2D(0.3f, 0.55f));
+    BiomeHumidity.Add(EBiomeType::Mountain,  FVector2D(0.4f, 0.65f));
+    BiomeHumidity.Add(EBiomeType::River,     FVector2D(0.7f, 0.9f));
+    BiomeHumidity.Add(EBiomeType::Cave,      FVector2D(0.6f, 0.85f));
+
+    // Danger levels (0-10)
+    BiomeDangerLevel.Add(EBiomeType::Forest,    4);
+    BiomeDangerLevel.Add(EBiomeType::Jungle,    7);
+    BiomeDangerLevel.Add(EBiomeType::Swamp,     6);
+    BiomeDangerLevel.Add(EBiomeType::Desert,    5);
+    BiomeDangerLevel.Add(EBiomeType::Volcanic,  9);
+    BiomeDangerLevel.Add(EBiomeType::Coastal,   3);
+    BiomeDangerLevel.Add(EBiomeType::Grassland, 3);
+    BiomeDangerLevel.Add(EBiomeType::Mountain,  6);
+    BiomeDangerLevel.Add(EBiomeType::River,     4);
+    BiomeDangerLevel.Add(EBiomeType::Cave,      7);
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-
-void ABiomeManager::BeginPlay()
+void UBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager initialized"));
+}
 
-    // Pre-compute biome grid for fast spatial lookup
-    BiomeGrid.SetNum(BiomeGridResolution * BiomeGridResolution);
-    const float WorldSizeCm = WorldSizeKm * 100000.0f;
-    const float CellSize = WorldSizeCm / BiomeGridResolution;
+void UBiomeManager::Deinitialize()
+{
+    Super::Deinitialize();
+}
 
-    for (int32 Y = 0; Y < BiomeGridResolution; ++Y)
+EBiomeType UBiomeManager::GetBiomeAtLocation(FVector WorldLocation) const
+{
+    // Biome detection based on world coordinates using noise-like heuristics.
+    // In production this will sample the PCG biome map texture.
+    // For now: use coordinate-based zone assignment.
+
+    float X = WorldLocation.X;
+    float Y = WorldLocation.Y;
+    float Z = WorldLocation.Z;
+
+    // Elevation-based biomes
+    if (Z > 8000.0f) return EBiomeType::Mountain;
+    if (Z < -200.0f) return EBiomeType::Cave;
+
+    // Distance from origin determines biome zones
+    float DistFromOrigin = FMath::Sqrt(X * X + Y * Y);
+
+    // Quadrant-based biome assignment (will be replaced by PCG texture sampling)
+    if (X > 5000.0f && Y > 5000.0f)   return EBiomeType::Jungle;
+    if (X > 5000.0f && Y < -5000.0f)  return EBiomeType::Desert;
+    if (X < -5000.0f && Y > 5000.0f)  return EBiomeType::Swamp;
+    if (X < -5000.0f && Y < -5000.0f) return EBiomeType::Volcanic;
+    if (FMath::Abs(X) < 2000.0f && FMath::Abs(Y) < 500.0f) return EBiomeType::River;
+    if (DistFromOrigin > 12000.0f)     return EBiomeType::Coastal;
+    if (Z > 3000.0f)                   return EBiomeType::Mountain;
+    if (DistFromOrigin < 3000.0f)      return EBiomeType::Grassland;
+
+    return EBiomeType::Forest;
+}
+
+FBiomeEnvironmentData UBiomeManager::GetEnvironmentData(EBiomeType Biome) const
+{
+    FBiomeEnvironmentData Data;
+    Data.BiomeType = Biome;
+
+    // Temperature
+    if (BiomeTemperatures.Contains(Biome))
     {
-        for (int32 X = 0; X < BiomeGridResolution; ++X)
-        {
-            const float WorldX = (X * CellSize) - (WorldSizeCm * 0.5f);
-            const float WorldY = (Y * CellSize) - (WorldSizeCm * 0.5f);
-            BiomeGrid[Y * BiomeGridResolution + X] = GetBiomeAtLocation(FVector(WorldX, WorldY, 0.0f));
-        }
+        FVector2D TempRange = BiomeTemperatures[Biome];
+        Data.Temperature = (TempRange.X + TempRange.Y) * 0.5f;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Grid computed (%dx%d), %d biome definitions active"),
-        BiomeGridResolution, BiomeGridResolution, BiomeDefinitions.Num());
-}
-
-// ============================================================
-// Tick
-// ============================================================
-
-void ABiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-#if WITH_EDITOR
-    if (bDebugDrawBiomeBoundaries)
+    // Humidity
+    if (BiomeHumidity.Contains(Biome))
     {
-        // Draw debug grid in editor — only in editor builds
-        const UWorld* World = GetWorld();
-        if (!World) return;
-
-        const float WorldSizeCm = WorldSizeKm * 100000.0f;
-        const float CellSize = WorldSizeCm / 8.0f; // Coarse debug grid
-
-        for (int32 Y = 0; Y < 8; ++Y)
-        {
-            for (int32 X = 0; X < 8; ++X)
-            {
-                const float WX = (X * CellSize) - (WorldSizeCm * 0.5f);
-                const float WY = (Y * CellSize) - (WorldSizeCm * 0.5f);
-                const FVector Center(WX + CellSize * 0.5f, WY + CellSize * 0.5f, 100.0f);
-                DrawDebugBox(World, Center, FVector(CellSize * 0.45f, CellSize * 0.45f, 50.0f),
-                    FColor::Green, false, DeltaTime * 1.1f, 0, 10.0f);
-            }
-        }
-    }
-#endif
-}
-
-// ============================================================
-// Query API
-// ============================================================
-
-EBiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    const float WorldSizeCm = WorldSizeKm * 100000.0f;
-    const float HalfWorld = WorldSizeCm * 0.5f;
-
-    // Normalize to [0, 1]
-    const float NX = (WorldLocation.X + HalfWorld) / WorldSizeCm;
-    const float NY = (WorldLocation.Y + HalfWorld) / WorldSizeCm;
-
-    // Sample two noise octaves for biome determination
-    const float NoiseVal1 = SampleBiomeNoise(WorldLocation.X * BiomeNoiseScale, WorldLocation.Y * BiomeNoiseScale);
-    const float NoiseVal2 = SampleBiomeNoise(WorldLocation.X * BiomeNoiseScale * 2.3f + 100.0f,
-                                              WorldLocation.Y * BiomeNoiseScale * 2.3f + 100.0f);
-
-    // Altitude factor from Z
-    const float AltitudeFactor = FMath::Clamp(WorldLocation.Z / 5000.0f, 0.0f, 1.0f);
-
-    // Combine noise for biome selection
-    const float Combined = (NoiseVal1 * 0.6f) + (NoiseVal2 * 0.3f) + (AltitudeFactor * 0.1f);
-
-    // Map combined value to biome — 10 biomes across [0, 1]
-    if (Combined < 0.08f)  return EBiomeType::River;
-    if (Combined < 0.18f)  return EBiomeType::Coastal;
-    if (Combined < 0.30f)  return EBiomeType::Swamp;
-    if (Combined < 0.42f)  return EBiomeType::Jungle;
-    if (Combined < 0.54f)  return EBiomeType::Forest;
-    if (Combined < 0.64f)  return EBiomeType::Savanna;
-    if (Combined < 0.73f)  return EBiomeType::Desert;
-    if (Combined < 0.82f)  return EBiomeType::Mountain;
-    if (Combined < 0.92f)  return EBiomeType::Volcanic;
-    return EBiomeType::Mountain;
-}
-
-FBiomeData ABiomeManager::GetBiomeData(EBiomeType BiomeType) const
-{
-    for (const FBiomeData& Data : BiomeDefinitions)
-    {
-        if (Data.BiomeType == BiomeType)
-        {
-            return Data;
-        }
+        FVector2D HumRange = BiomeHumidity[Biome];
+        Data.Humidity = (HumRange.X + HumRange.Y) * 0.5f;
     }
 
-    // Return default if not found
-    FBiomeData Default;
-    Default.BiomeType = BiomeType;
-    Default.DisplayName = TEXT("Unknown");
-    return Default;
-}
-
-float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
-{
-    const FBiomeData Data = GetBiomeData(GetBiomeAtLocation(WorldLocation));
-
-    // Add local noise variation ±3°C
-    const float Noise = SampleBiomeNoise(WorldLocation.X * 0.0001f, WorldLocation.Y * 0.0001f);
-    const float BaseTemp = FMath::Lerp(Data.MinTemperatureCelsius, Data.MaxTemperatureCelsius, Noise);
-
-    // Altitude cooling: -0.65°C per 100m
-    const float AltitudeCooling = (WorldLocation.Z / 100.0f) * 0.65f;
-
-    return FMath::Clamp(BaseTemp - AltitudeCooling, -20.0f, 60.0f);
-}
-
-float ABiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    const FBiomeData Data = GetBiomeData(GetBiomeAtLocation(WorldLocation));
-    const float Noise = SampleBiomeNoise(WorldLocation.X * 0.00015f + 50.0f, WorldLocation.Y * 0.00015f + 50.0f);
-    return FMath::Clamp(Data.HumidityPercent + (Noise - 0.5f) * 20.0f, 0.0f, 100.0f);
-}
-
-float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
-{
-    const FBiomeData Data = GetBiomeData(GetBiomeAtLocation(WorldLocation));
-    return Data.DangerLevel;
-}
-
-bool ABiomeManager::IsInTransitionZone(const FVector& WorldLocation) const
-{
-    // Sample biome at location and at small offsets — if they differ, we're in a transition
-    const EBiomeType Center = GetBiomeAtLocation(WorldLocation);
-    const float CheckRadius = 500.0f; // 5 meters
-
-    const EBiomeType North = GetBiomeAtLocation(WorldLocation + FVector(CheckRadius, 0, 0));
-    const EBiomeType East  = GetBiomeAtLocation(WorldLocation + FVector(0, CheckRadius, 0));
-
-    return (North != Center) || (East != Center);
-}
-
-TArray<EBiomeType> ABiomeManager::GetAllActiveBiomes() const
-{
-    TArray<EBiomeType> ActiveBiomes;
-    for (const FBiomeData& Data : BiomeDefinitions)
+    // Danger
+    if (BiomeDangerLevel.Contains(Biome))
     {
-        ActiveBiomes.AddUnique(Data.BiomeType);
+        Data.DangerLevel = BiomeDangerLevel[Biome];
     }
-    return ActiveBiomes;
-}
 
-// ============================================================
-// Private helpers
-// ============================================================
-
-void ABiomeManager::InitializeDefaultBiomes()
-{
-    BiomeDefinitions.Empty();
-
-    auto AddBiome = [&](EBiomeType Type, const FString& Name, EBiomeClimate Climate,
-                        float TMin, float TMax, float Humidity, float VegDensity,
-                        float DinoSpawn, float Danger, float Water, float Food)
+    // Biome-specific environment settings
+    switch (Biome)
     {
-        FBiomeData B;
-        B.BiomeType = Type;
-        B.DisplayName = Name;
-        B.Climate = Climate;
-        B.MinTemperatureCelsius = TMin;
-        B.MaxTemperatureCelsius = TMax;
-        B.HumidityPercent = Humidity;
-        B.VegetationDensity = VegDensity;
-        B.DinosaurSpawnDensity = DinoSpawn;
-        B.DangerLevel = Danger;
-        B.WaterAvailability = Water;
-        B.FoodAvailability = Food;
-        BiomeDefinitions.Add(B);
-    };
+    case EBiomeType::Forest:
+        Data.FogDensity = 0.02f;
+        Data.WindStrength = 0.4f;
+        Data.AmbientSoundTag = FName("Forest_Ambient");
+        Data.SkyColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
+        break;
+    case EBiomeType::Jungle:
+        Data.FogDensity = 0.04f;
+        Data.WindStrength = 0.2f;
+        Data.AmbientSoundTag = FName("Jungle_Ambient");
+        Data.SkyColor = FLinearColor(0.3f, 0.5f, 0.2f, 1.0f);
+        break;
+    case EBiomeType::Desert:
+        Data.FogDensity = 0.005f;
+        Data.WindStrength = 0.8f;
+        Data.AmbientSoundTag = FName("Desert_Ambient");
+        Data.SkyColor = FLinearColor(0.9f, 0.7f, 0.3f, 1.0f);
+        break;
+    case EBiomeType::Volcanic:
+        Data.FogDensity = 0.08f;
+        Data.WindStrength = 0.6f;
+        Data.AmbientSoundTag = FName("Volcanic_Ambient");
+        Data.SkyColor = FLinearColor(0.8f, 0.3f, 0.1f, 1.0f);
+        break;
+    case EBiomeType::Swamp:
+        Data.FogDensity = 0.06f;
+        Data.WindStrength = 0.1f;
+        Data.AmbientSoundTag = FName("Swamp_Ambient");
+        Data.SkyColor = FLinearColor(0.3f, 0.4f, 0.2f, 1.0f);
+        break;
+    case EBiomeType::Coastal:
+        Data.FogDensity = 0.015f;
+        Data.WindStrength = 1.0f;
+        Data.AmbientSoundTag = FName("Coastal_Ambient");
+        Data.SkyColor = FLinearColor(0.5f, 0.7f, 0.9f, 1.0f);
+        break;
+    case EBiomeType::Mountain:
+        Data.FogDensity = 0.025f;
+        Data.WindStrength = 1.2f;
+        Data.AmbientSoundTag = FName("Mountain_Ambient");
+        Data.SkyColor = FLinearColor(0.6f, 0.7f, 0.9f, 1.0f);
+        break;
+    case EBiomeType::Grassland:
+        Data.FogDensity = 0.01f;
+        Data.WindStrength = 0.6f;
+        Data.AmbientSoundTag = FName("Grassland_Ambient");
+        Data.SkyColor = FLinearColor(0.6f, 0.8f, 0.4f, 1.0f);
+        break;
+    case EBiomeType::River:
+        Data.FogDensity = 0.03f;
+        Data.WindStrength = 0.3f;
+        Data.AmbientSoundTag = FName("River_Ambient");
+        Data.SkyColor = FLinearColor(0.4f, 0.6f, 0.7f, 1.0f);
+        break;
+    case EBiomeType::Cave:
+        Data.FogDensity = 0.0f;
+        Data.WindStrength = 0.0f;
+        Data.AmbientSoundTag = FName("Cave_Ambient");
+        Data.SkyColor = FLinearColor(0.05f, 0.05f, 0.1f, 1.0f);
+        break;
+    default:
+        Data.FogDensity = 0.02f;
+        Data.WindStrength = 0.4f;
+        Data.AmbientSoundTag = FName("Default_Ambient");
+        Data.SkyColor = FLinearColor(0.5f, 0.6f, 0.8f, 1.0f);
+        break;
+    }
 
-    //                  Type                  Name           Climate                  TMin  TMax  Hum  Veg  Dino  Danger Water Food
-    AddBiome(EBiomeType::Jungle,   TEXT("Jungle"),   EBiomeClimate::Tropical,   25.0f, 38.0f, 90.0f, 0.95f, 0.80f, 0.85f, 0.90f, 0.85f);
-    AddBiome(EBiomeType::Savanna,  TEXT("Savanna"),  EBiomeClimate::Tropical,   20.0f, 42.0f, 35.0f, 0.40f, 0.90f, 0.75f, 0.35f, 0.60f);
-    AddBiome(EBiomeType::Swamp,    TEXT("Swamp"),    EBiomeClimate::Tropical,   18.0f, 32.0f, 95.0f, 0.80f, 0.70f, 0.70f, 0.95f, 0.70f);
-    AddBiome(EBiomeType::Volcanic, TEXT("Volcanic"), EBiomeClimate::Volcanic,   30.0f, 65.0f, 20.0f, 0.10f, 0.30f, 0.95f, 0.15f, 0.10f);
-    AddBiome(EBiomeType::Coastal,  TEXT("Coastal"),  EBiomeClimate::Coastal,    15.0f, 28.0f, 75.0f, 0.50f, 0.60f, 0.55f, 0.85f, 0.75f);
-    AddBiome(EBiomeType::Forest,   TEXT("Forest"),   EBiomeClimate::Temperate,  10.0f, 25.0f, 70.0f, 0.85f, 0.65f, 0.60f, 0.70f, 0.80f);
-    AddBiome(EBiomeType::Desert,   TEXT("Desert"),   EBiomeClimate::Arid,       28.0f, 55.0f, 10.0f, 0.05f, 0.20f, 0.40f, 0.05f, 0.15f);
-    AddBiome(EBiomeType::Mountain, TEXT("Mountain"), EBiomeClimate::Temperate,  -5.0f, 15.0f, 50.0f, 0.30f, 0.40f, 0.50f, 0.60f, 0.40f);
-    AddBiome(EBiomeType::River,    TEXT("River"),    EBiomeClimate::Tropical,   18.0f, 30.0f, 85.0f, 0.70f, 0.55f, 0.45f, 1.00f, 0.90f);
-    AddBiome(EBiomeType::None,     TEXT("None"),     EBiomeClimate::Temperate,  10.0f, 20.0f, 50.0f, 0.30f, 0.30f, 0.30f, 0.50f, 0.50f);
+    return Data;
 }
 
-float ABiomeManager::SampleBiomeNoise(float X, float Y) const
+void UBiomeManager::TransitionToBiome(EBiomeType NewBiome, float Duration)
 {
-    // Deterministic pseudo-noise using sine combination (no external dependency)
-    // Seeded by BiomeSeed for reproducible worlds
-    const float SeedOffset = static_cast<float>(BiomeSeed) * 0.01f;
-    const float N1 = FMath::Sin(X * 127.1f + SeedOffset) * 43758.5453f;
-    const float N2 = FMath::Sin(Y * 311.7f + SeedOffset) * 43758.5453f;
-    const float N3 = FMath::Sin((X + Y) * 74.3f + SeedOffset) * 43758.5453f;
+    if (NewBiome == CurrentBiome) return;
 
-    const float Raw = FMath::Frac(N1) * 0.4f + FMath::Frac(N2) * 0.4f + FMath::Frac(N3) * 0.2f;
-    return FMath::Clamp(Raw, 0.0f, 1.0f);
+    PreviousBiome = CurrentBiome;
+    CurrentBiome = NewBiome;
+    TransitionDuration = FMath::Max(0.1f, Duration);
+    BiomeTransitionAlpha = 0.0f;
+    bIsTransitioning = true;
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transitioning from %d to %d over %.1f seconds"),
+        (int32)PreviousBiome, (int32)NewBiome, TransitionDuration);
+}
+
+void UBiomeManager::UpdateTransition(float DeltaTime)
+{
+    if (!bIsTransitioning) return;
+
+    BiomeTransitionAlpha += DeltaTime / TransitionDuration;
+
+    if (BiomeTransitionAlpha >= 1.0f)
+    {
+        BiomeTransitionAlpha = 1.0f;
+        bIsTransitioning = false;
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Transition to biome %d complete"), (int32)CurrentBiome);
+    }
+}
+
+float UBiomeManager::GetCurrentTemperature() const
+{
+    if (!BiomeTemperatures.Contains(CurrentBiome)) return 25.0f;
+
+    FVector2D TempRange = BiomeTemperatures[CurrentBiome];
+    float BaseTemp = (TempRange.X + TempRange.Y) * 0.5f;
+
+    // Blend with previous biome during transition
+    if (bIsTransitioning && BiomeTemperatures.Contains(PreviousBiome))
+    {
+        FVector2D PrevRange = BiomeTemperatures[PreviousBiome];
+        float PrevTemp = (PrevRange.X + PrevRange.Y) * 0.5f;
+        return FMath::Lerp(PrevTemp, BaseTemp, BiomeTransitionAlpha);
+    }
+
+    return BaseTemp;
+}
+
+float UBiomeManager::GetCurrentHumidity() const
+{
+    if (!BiomeHumidity.Contains(CurrentBiome)) return 0.5f;
+
+    FVector2D HumRange = BiomeHumidity[CurrentBiome];
+    float BaseHum = (HumRange.X + HumRange.Y) * 0.5f;
+
+    if (bIsTransitioning && BiomeHumidity.Contains(PreviousBiome))
+    {
+        FVector2D PrevRange = BiomeHumidity[PreviousBiome];
+        float PrevHum = (PrevRange.X + PrevRange.Y) * 0.5f;
+        return FMath::Lerp(PrevHum, BaseHum, BiomeTransitionAlpha);
+    }
+
+    return BaseHum;
+}
+
+int32 UBiomeManager::GetCurrentDangerLevel() const
+{
+    if (!BiomeDangerLevel.Contains(CurrentBiome)) return 3;
+    return BiomeDangerLevel[CurrentBiome];
+}
+
+FString UBiomeManager::GetBiomeName(EBiomeType Biome) const
+{
+    switch (Biome)
+    {
+    case EBiomeType::Forest:    return TEXT("Forest");
+    case EBiomeType::Jungle:    return TEXT("Jungle");
+    case EBiomeType::Swamp:     return TEXT("Swamp");
+    case EBiomeType::Desert:    return TEXT("Desert");
+    case EBiomeType::Volcanic:  return TEXT("Volcanic");
+    case EBiomeType::Coastal:   return TEXT("Coastal");
+    case EBiomeType::Grassland: return TEXT("Grassland");
+    case EBiomeType::Mountain:  return TEXT("Mountain");
+    case EBiomeType::River:     return TEXT("River");
+    case EBiomeType::Cave:      return TEXT("Cave");
+    default:                    return TEXT("Unknown");
+    }
 }
