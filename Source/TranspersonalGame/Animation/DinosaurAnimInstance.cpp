@@ -1,64 +1,60 @@
 // DinosaurAnimInstance.cpp
 // Animation Agent #10 — Transpersonal Game Studio
-// Full implementation of dinosaur animation instance
-// Handles locomotion, attack states, pack behavior signals, and procedural head tracking
+// Dinosaur animation: bipedal/quadruped locomotion, attack montages, procedural tail
 
 #include "DinosaurAnimInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UDinosaurAnimInstance::UDinosaurAnimInstance()
 {
-    // Locomotion defaults
-    DinoSpeed = 0.0f;
-    DinoSmoothedSpeed = 0.0f;
-    DinoDirection = 0.0f;
-    bDinoIsMoving = false;
-    bDinoIsRunning = false;
-    bDinoIsInAir = false;
-    DinoGaitCycle = 0.0f;
+    // Locomotion
+    Speed = 0.0f;
+    Direction = 0.0f;
+    bIsInAir = false;
+    bIsBipedal = true;
 
-    // Behavior state defaults
-    DinoAIState = EAnim_DinoAIState::Idle;
-    bDinoIsAttacking = false;
-    bDinoIsEating = false;
-    bDinoIsResting = false;
-    bDinoIsAlerted = false;
-    bDinoIsDead = false;
-    AlertLevel = 0.0f;
+    // Behavior state
+    BehaviorState = EAnim_DinoState::Idle;
+    bIsAggressive = false;
+    bIsAlert = false;
+    bIsFleeing = false;
+    bIsEating = false;
+    bIsSleeping = false;
 
-    // Head tracking defaults
+    // Attack
+    bIsAttacking = false;
+    AttackType = EAnim_DinoAttack::None;
+    AttackBlendWeight = 0.0f;
+
+    // Procedural tail
+    TailSwaySpeed = 1.5f;
+    TailSwayAmount = 8.0f;
+    TailSwayTime = 0.0f;
+
+    // Head tracking
     bEnableHeadTracking = true;
-    HeadTargetLocation = FVector::ZeroVector;
-    HeadAimRotation = FRotator::ZeroRotator;
     HeadTrackingWeight = 0.0f;
-    HeadTrackingInterpSpeed = 4.0f;
+    HeadTargetLocation = FVector::ZeroVector;
 
-    // Tail physics defaults
-    TailSwayAmount = 0.0f;
-    TailSwayFrequency = 1.2f;
-    TailSwayPhase = 0.0f;
-
-    // Internal
-    OwnerDinosaur = nullptr;
-    OwnerMovement = nullptr;
-    SpeedSmoothingRate = 6.0f;
-    AccumulatedTime = 0.0f;
+    // Breath
+    BreathCycleSpeed = 0.8f;
+    BreathAlpha = 0.0f;
+    BreathTime = 0.0f;
 }
 
 void UDinosaurAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-    APawn* OwnerPawn = TryGetPawnOwner();
+    OwnerPawn = TryGetPawnOwner();
     if (OwnerPawn)
     {
-        OwnerDinosaur = Cast<ACharacter>(OwnerPawn);
-        if (OwnerDinosaur)
-        {
-            OwnerMovement = OwnerDinosaur->GetCharacterMovement();
-        }
+        // Try to get movement component
+        MovementComponent = Cast<UCharacterMovementComponent>(
+            OwnerPawn->GetMovementComponent()
+        );
     }
 }
 
@@ -66,217 +62,207 @@ void UDinosaurAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    AccumulatedTime += DeltaSeconds;
-
-    if (!OwnerDinosaur || !OwnerMovement)
+    if (!OwnerPawn)
     {
-        APawn* OwnerPawn = TryGetPawnOwner();
-        if (OwnerPawn)
-        {
-            OwnerDinosaur = Cast<ACharacter>(OwnerPawn);
-            if (OwnerDinosaur)
-            {
-                OwnerMovement = OwnerDinosaur->GetCharacterMovement();
-            }
-        }
+        OwnerPawn = TryGetPawnOwner();
         return;
     }
 
-    UpdateDinoLocomotion(DeltaSeconds);
-    UpdateDinoBehaviorState(DeltaSeconds);
+    UpdateLocomotion(DeltaSeconds);
+    UpdateBehaviorState();
+    UpdateProceduralTail(DeltaSeconds);
     UpdateHeadTracking(DeltaSeconds);
-    UpdateTailPhysics(DeltaSeconds);
+    UpdateBreathing(DeltaSeconds);
+    UpdateAttackBlend(DeltaSeconds);
 }
 
-void UDinosaurAnimInstance::UpdateDinoLocomotion(float DeltaSeconds)
+// ─── LOCOMOTION ───────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateLocomotion(float DeltaSeconds)
 {
-    if (!OwnerMovement)
-        return;
+    FVector Velocity = OwnerPawn->GetVelocity();
+    Speed = Velocity.Size2D();
 
-    FVector Velocity = OwnerMovement->Velocity;
-    float RawSpeed = Velocity.Size2D();
-
-    DinoSmoothedSpeed = FMath::FInterpTo(DinoSmoothedSpeed, RawSpeed, DeltaSeconds, SpeedSmoothingRate);
-    DinoSpeed = DinoSmoothedSpeed;
-
-    bDinoIsMoving = RawSpeed > 15.0f;
-    bDinoIsInAir = OwnerMovement->IsFalling();
-
-    // Running threshold: 300 cm/s (walk ~150, trot ~300, run ~600+)
-    bDinoIsRunning = RawSpeed > 300.0f;
-
-    // Direction for strafing (most dinos don't strafe but useful for pack animals)
-    if (bDinoIsMoving)
+    if (Speed > 1.0f)
     {
-        FRotator ActorRotation = OwnerDinosaur->GetActorRotation();
-        FVector VelocityNorm = Velocity.GetSafeNormal2D();
-        FVector ForwardVector = ActorRotation.Vector();
+        FRotator ActorRot = OwnerPawn->GetActorRotation();
+        FVector Forward = ActorRot.Vector();
+        FVector VelNorm = Velocity.GetSafeNormal2D();
+        float Dot = FVector::DotProduct(Forward, VelNorm);
+        Direction = UKismetMathLibrary::DegAcos(Dot);
 
-        DinoDirection = UKismetMathLibrary::DegAtan2(
-            FVector::DotProduct(VelocityNorm, FVector::CrossProduct(FVector::UpVector, ForwardVector)),
-            FVector::DotProduct(VelocityNorm, ForwardVector)
-        );
+        FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
+        if (FVector::DotProduct(Right, VelNorm) < 0.0f)
+            Direction = -Direction;
     }
     else
     {
-        DinoDirection = FMath::FInterpTo(DinoDirection, 0.0f, DeltaSeconds, 4.0f);
+        Direction = FMath::FInterpTo(Direction, 0.0f, DeltaSeconds, 3.0f);
     }
 
-    // Gait cycle: accumulates with speed for procedural animation timing
-    if (bDinoIsMoving)
+    if (MovementComponent)
     {
-        float GaitRate = DinoSpeed / 400.0f; // normalized gait rate
-        DinoGaitCycle = FMath::Fmod(DinoGaitCycle + DeltaSeconds * GaitRate * 2.0f, 1.0f);
+        bIsInAir = MovementComponent->IsFalling();
     }
 }
 
-void UDinosaurAnimInstance::UpdateDinoBehaviorState(float DeltaSeconds)
+// ─── BEHAVIOR STATE ───────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateBehaviorState()
 {
-    // Alert level smoothing
-    AlertLevel = FMath::Clamp(AlertLevel, 0.0f, 1.0f);
+    EAnim_DinoState NewState = EAnim_DinoState::Idle;
 
-    // Auto-transition to alert if moving fast
-    if (DinoSpeed > 350.0f && DinoAIState == EAnim_DinoAIState::Idle)
+    if (bIsSleeping)
     {
-        DinoAIState = EAnim_DinoAIState::Alert;
+        NewState = EAnim_DinoState::Sleep;
+    }
+    else if (bIsEating)
+    {
+        NewState = EAnim_DinoState::Eat;
+    }
+    else if (bIsAttacking)
+    {
+        NewState = EAnim_DinoState::Attack;
+    }
+    else if (bIsFleeing)
+    {
+        NewState = EAnim_DinoState::Flee;
+    }
+    else if (bIsAggressive)
+    {
+        NewState = EAnim_DinoState::Aggressive;
+    }
+    else if (bIsAlert)
+    {
+        NewState = EAnim_DinoState::Alert;
+    }
+    else if (Speed > 300.0f)
+    {
+        NewState = EAnim_DinoState::Run;
+    }
+    else if (Speed > 50.0f)
+    {
+        NewState = EAnim_DinoState::Walk;
+    }
+    else
+    {
+        NewState = EAnim_DinoState::Idle;
     }
 
-    // Head tracking weight: higher when alerted or hunting
-    float TargetHeadWeight = 0.0f;
-    switch (DinoAIState)
-    {
-        case EAnim_DinoAIState::Idle:
-            TargetHeadWeight = 0.3f;
-            break;
-        case EAnim_DinoAIState::Alert:
-            TargetHeadWeight = 0.7f;
-            break;
-        case EAnim_DinoAIState::Hunting:
-            TargetHeadWeight = 1.0f;
-            break;
-        case EAnim_DinoAIState::Attacking:
-            TargetHeadWeight = 0.5f; // attacking uses montage, reduce IK
-            break;
-        case EAnim_DinoAIState::Fleeing:
-            TargetHeadWeight = 0.2f;
-            break;
-        case EAnim_DinoAIState::Eating:
-            TargetHeadWeight = 0.0f; // eating animation handles head
-            break;
-        case EAnim_DinoAIState::Resting:
-            TargetHeadWeight = 0.1f;
-            break;
-        case EAnim_DinoAIState::Dead:
-            TargetHeadWeight = 0.0f;
-            break;
-        default:
-            TargetHeadWeight = 0.0f;
-            break;
-    }
-
-    HeadTrackingWeight = FMath::FInterpTo(HeadTrackingWeight, TargetHeadWeight, DeltaSeconds, 3.0f);
+    BehaviorState = NewState;
 }
+
+// ─── PROCEDURAL TAIL ──────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateProceduralTail(float DeltaSeconds)
+{
+    // Tail sway increases with speed and aggression
+    float SpeedFactor = FMath::Clamp(Speed / 600.0f, 0.3f, 1.5f);
+    float AggressionFactor = bIsAggressive ? 2.0f : 1.0f;
+
+    float CurrentSwaySpeed = TailSwaySpeed * SpeedFactor * AggressionFactor;
+    TailSwayTime += DeltaSeconds * CurrentSwaySpeed;
+
+    // Sinusoidal sway
+    float SwayAmount = TailSwayAmount * SpeedFactor;
+    TailSwayAngle = FMath::Sin(TailSwayTime) * SwayAmount;
+
+    // Secondary frequency for natural feel
+    TailSwayAngle += FMath::Sin(TailSwayTime * 2.3f) * SwayAmount * 0.3f;
+}
+
+// ─── HEAD TRACKING ────────────────────────────────────────────────────────────
 
 void UDinosaurAnimInstance::UpdateHeadTracking(float DeltaSeconds)
 {
-    if (!bEnableHeadTracking || !OwnerDinosaur)
-        return;
+    if (!bEnableHeadTracking || !OwnerPawn) return;
 
-    // Calculate desired head rotation to look at target
-    if (!HeadTargetLocation.IsNearlyZero())
-    {
-        USkeletalMeshComponent* MeshComp = OwnerDinosaur->GetMesh();
-        if (MeshComp)
-        {
-            FVector HeadBoneLocation = MeshComp->GetSocketLocation(TEXT("head"));
-            FVector ToTarget = (HeadTargetLocation - HeadBoneLocation).GetSafeNormal();
+    // Head tracking weight — higher when alert or aggressive
+    float TargetWeight = 0.0f;
+    if (bIsAlert || bIsAggressive)
+        TargetWeight = 1.0f;
+    else if (BehaviorState == EAnim_DinoState::Idle)
+        TargetWeight = 0.4f;
 
-            FRotator DesiredRotation = ToTarget.Rotation();
-            FRotator ActorRotation = OwnerDinosaur->GetActorRotation();
-
-            // Clamp head rotation to realistic limits
-            FRotator RelativeDesired = DesiredRotation - ActorRotation;
-            RelativeDesired.Yaw = FMath::Clamp(RelativeDesired.Yaw, -80.0f, 80.0f);
-            RelativeDesired.Pitch = FMath::Clamp(RelativeDesired.Pitch, -40.0f, 40.0f);
-            RelativeDesired.Roll = 0.0f;
-
-            HeadAimRotation = FMath::RInterpTo(HeadAimRotation, RelativeDesired, DeltaSeconds, HeadTrackingInterpSpeed);
-        }
-    }
-    else
-    {
-        // No target: return to neutral
-        HeadAimRotation = FMath::RInterpTo(HeadAimRotation, FRotator::ZeroRotator, DeltaSeconds, HeadTrackingInterpSpeed);
-    }
+    HeadTrackingWeight = FMath::FInterpTo(HeadTrackingWeight, TargetWeight, DeltaSeconds, 3.0f);
 }
 
-void UDinosaurAnimInstance::UpdateTailPhysics(float DeltaSeconds)
+void UDinosaurAnimInstance::SetHeadTarget(FVector TargetWorldLocation)
 {
-    // Procedural tail sway based on movement speed
-    float SpeedFactor = FMath::Clamp(DinoSpeed / 600.0f, 0.0f, 1.0f);
-    float TargetSwayAmount = bDinoIsMoving ? FMath::Lerp(0.3f, 1.0f, SpeedFactor) : 0.15f;
-
-    TailSwayAmount = FMath::FInterpTo(TailSwayAmount, TargetSwayAmount, DeltaSeconds, 3.0f);
-
-    // Phase accumulates over time for sinusoidal sway
-    TailSwayPhase = FMath::Fmod(TailSwayPhase + DeltaSeconds * TailSwayFrequency, 2.0f * PI);
+    HeadTargetLocation = TargetWorldLocation;
+    bIsAlert = true;
 }
 
-void UDinosaurAnimInstance::SetAIState(EAnim_DinoAIState NewState)
+// ─── BREATHING ────────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateBreathing(float DeltaSeconds)
 {
-    if (DinoAIState == EAnim_DinoAIState::Dead)
-        return; // Can't leave dead state
+    // Breathing rate increases when running or aggressive
+    float BreathRate = BreathCycleSpeed;
+    if (Speed > 300.0f)
+        BreathRate *= 2.5f;
+    else if (bIsAggressive)
+        BreathRate *= 1.8f;
+    else if (bIsSleeping)
+        BreathRate *= 0.4f;
 
-    DinoAIState = NewState;
-
-    // Update convenience booleans
-    bDinoIsAttacking = (NewState == EAnim_DinoAIState::Attacking);
-    bDinoIsEating = (NewState == EAnim_DinoAIState::Eating);
-    bDinoIsResting = (NewState == EAnim_DinoAIState::Resting);
-    bDinoIsAlerted = (NewState == EAnim_DinoAIState::Alert || NewState == EAnim_DinoAIState::Hunting);
+    BreathTime += DeltaSeconds * BreathRate;
+    BreathAlpha = (FMath::Sin(BreathTime * TWO_PI) + 1.0f) * 0.5f;
 }
 
-void UDinosaurAnimInstance::SetHeadTrackingTarget(FVector WorldLocation)
+// ─── ATTACK BLEND ─────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::UpdateAttackBlend(float DeltaSeconds)
 {
-    HeadTargetLocation = WorldLocation;
+    float TargetBlend = bIsAttacking ? 1.0f : 0.0f;
+    AttackBlendWeight = FMath::FInterpTo(AttackBlendWeight, TargetBlend, DeltaSeconds, 12.0f);
 }
 
-void UDinosaurAnimInstance::ClearHeadTrackingTarget()
+// ─── STATE SETTERS ────────────────────────────────────────────────────────────
+
+void UDinosaurAnimInstance::SetAggressive(bool bAggressive)
 {
-    HeadTargetLocation = FVector::ZeroVector;
+    bIsAggressive = bAggressive;
+    if (bAggressive) bIsAlert = true;
 }
 
-void UDinosaurAnimInstance::TriggerDinoAttack()
+void UDinosaurAnimInstance::SetAlert(bool bAlert)
 {
-    if (bDinoIsDead)
-        return;
-
-    SetAIState(EAnim_DinoAIState::Attacking);
-
-    // Reset to hunting after attack window (montage notify should handle this,
-    // but we set a timer as fallback)
-    GetWorld()->GetTimerManager().SetTimer(
-        AttackResetTimer,
-        [this]()
-        {
-            if (DinoAIState == EAnim_DinoAIState::Attacking)
-            {
-                SetAIState(EAnim_DinoAIState::Hunting);
-            }
-        },
-        1.2f,
-        false
-    );
+    bIsAlert = bAlert;
 }
 
-void UDinosaurAnimInstance::TriggerDinoDeath()
+void UDinosaurAnimInstance::SetFleeing(bool bFlee)
 {
-    bDinoIsDead = true;
-    bDinoIsAttacking = false;
-    bDinoIsEating = false;
-    bDinoIsResting = false;
-    bDinoIsAlerted = false;
-    DinoAIState = EAnim_DinoAIState::Dead;
-    HeadTrackingWeight = 0.0f;
-    TailSwayAmount = 0.0f;
+    bIsFleeing = bFlee;
+    bIsAggressive = false;
+}
+
+void UDinosaurAnimInstance::SetEating(bool bEat)
+{
+    bIsEating = bEat;
+}
+
+void UDinosaurAnimInstance::SetSleeping(bool bSleep)
+{
+    bIsSleeping = bSleep;
+    bIsAggressive = false;
+    bIsAlert = false;
+}
+
+void UDinosaurAnimInstance::TriggerAttack(EAnim_DinoAttack Type)
+{
+    bIsAttacking = true;
+    AttackType = Type;
+    AttackBlendWeight = 0.0f;
+}
+
+void UDinosaurAnimInstance::EndAttack()
+{
+    bIsAttacking = false;
+    AttackType = EAnim_DinoAttack::None;
+}
+
+void UDinosaurAnimInstance::SetBipedal(bool bBipedal)
+{
+    bIsBipedal = bBipedal;
 }
