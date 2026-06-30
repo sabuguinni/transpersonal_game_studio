@@ -1,42 +1,63 @@
-#include "DinoAnimInstance.h"
+// DinoAnimInstance.cpp
+// Animation Agent #10 — Transpersonal Game Studio
+// Cycle: PROD_CYCLE_AUTO_20260630_003
+// Dinosaur animation instance — quadruped/biped locomotion, attack montages,
+// procedural spine/head tracking, tail physics simulation.
 
-#include "GameFramework/Character.h"
+#include "DinoAnimInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
 UDinoAnimInstance::UDinoAnimInstance()
-    : Speed(0.f)
-    , Direction(0.f)
-    , bIsInAir(false)
-    , bIsAttacking(false)
-    , bIsEating(false)
-    , bIsAlert(false)
-    , LeftFootIKLocation(FVector::ZeroVector)
-    , RightFootIKLocation(FVector::ZeroVector)
-    , PelvisOffset(0.f)
-    , TailSwayAlpha(0.f)
-    , OwnerPawn(nullptr)
-    , MovementComp(nullptr)
-    , PelvisOffsetTarget(0.f)
 {
+    // Locomotion
+    DinoSpeed = 0.0f;
+    SmoothedDinoSpeed = 0.0f;
+    DinoDirection = 0.0f;
+    DinoVerticalVelocity = 0.0f;
+
+    bDinoIsMoving = false;
+    bDinoIsCharging = false;
+    bDinoIsInAir = false;
+    bDinoIsAttacking = false;
+    bDinoIsEating = false;
+    bDinoIsSleeping = false;
+    bDinoIsAlerted = false;
+    bDinoIsWounded = false;
+
+    DinoLocomotionState = EAnim_DinoLocomotionState::DinoIdle;
+    DinoBehaviorState = EAnim_DinoBehaviorState::DinoBehavior_Idle;
+    DinoSpeciesType = EAnim_DinoSpecies::Raptor;
+
+    // Procedural tracking
+    HeadYaw = 0.0f;
+    HeadPitch = 0.0f;
+    SpineForwardLean = 0.0f;
+    TailSwayAmount = 0.0f;
+    TailSwayFrequency = 1.0f;
+    TailSwayTime = 0.0f;
+
+    // IK
+    FrontLeftFootOffset = FVector::ZeroVector;
+    FrontRightFootOffset = FVector::ZeroVector;
+    BackLeftFootOffset = FVector::ZeroVector;
+    BackRightFootOffset = FVector::ZeroVector;
+    DinoIKAlpha = 0.0f;
+
+    // Health
+    DinoHealthNormalized = 1.0f;
+
+    // Smoothing
+    DinoSpeedSmoothingRate = 8.0f;
+    HeadTrackSmoothingRate = 5.0f;
+    TailSwaySmoothingRate = 3.0f;
 }
 
 void UDinoAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-
     OwnerPawn = TryGetPawnOwner();
-    if (OwnerPawn)
-    {
-        ACharacter* Char = Cast<ACharacter>(OwnerPawn);
-        if (Char)
-        {
-            MovementComp = Char->GetCharacterMovement();
-        }
-    }
 }
 
 void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
@@ -49,98 +70,200 @@ void UDinoAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         return;
     }
 
-    // ── Locomotion ──────────────────────────────────────────────────────────
-    const FVector Velocity = OwnerPawn->GetVelocity();
-    Speed = Velocity.Size2D();
-
-    // Direction: signed angle between actor forward and velocity
-    if (Speed > 1.f)
-    {
-        const FVector Forward = OwnerPawn->GetActorForwardVector();
-        const FVector VelNorm = Velocity.GetSafeNormal2D();
-        const float Dot   = FVector::DotProduct(Forward, VelNorm);
-        const FVector Cross = FVector::CrossProduct(Forward, VelNorm);
-        Direction = FMath::RadiansToDegrees(FMath::Atan2(Cross.Z, Dot));
-    }
-    else
-    {
-        Direction = 0.f;
-    }
-
-    // ── Air state ───────────────────────────────────────────────────────────
-    if (MovementComp)
-    {
-        bIsInAir = MovementComp->IsFalling();
-    }
-
-    // ── Tail sway — driven by normalised speed ───────────────────────────────
-    // Assume max dino speed ~1200 cm/s (raptor sprint)
-    TailSwayAlpha = FMath::Clamp(Speed / 1200.f, 0.f, 1.f);
-
-    // ── IK Foot Placement ───────────────────────────────────────────────────
-    if (!bIsInAir)
-    {
-        LeftFootIKLocation  = TraceFootIK(TEXT("foot_l"));
-        RightFootIKLocation = TraceFootIK(TEXT("foot_r"));
-
-        // Pelvis offset: average of foot deltas from capsule base
-        const float OwnerZ = OwnerPawn->GetActorLocation().Z;
-        const float LeftDelta  = LeftFootIKLocation.Z  - OwnerZ;
-        const float RightDelta = RightFootIKLocation.Z - OwnerZ;
-        PelvisOffsetTarget = FMath::Min(LeftDelta, RightDelta);
-    }
-    else
-    {
-        PelvisOffsetTarget = 0.f;
-    }
-
-    // Smooth pelvis offset interpolation
-    PelvisOffset = FMath::FInterpTo(PelvisOffset, PelvisOffsetTarget, DeltaSeconds, 10.f);
+    UpdateDinoLocomotion(DeltaSeconds);
+    UpdateDinoLocomotionState();
+    UpdateProceduralSpine(DeltaSeconds);
+    UpdateTailSway(DeltaSeconds);
+    UpdateDinoFootIK(DeltaSeconds);
 }
 
-FVector UDinoAnimInstance::TraceFootIK(FName SocketName) const
+void UDinoAnimInstance::UpdateDinoLocomotion(float DeltaSeconds)
 {
-    if (!OwnerPawn)
+    FVector Velocity = OwnerPawn->GetVelocity();
+    float RawSpeed = Velocity.Size2D();
+
+    SmoothedDinoSpeed = FMath::FInterpTo(SmoothedDinoSpeed, RawSpeed, DeltaSeconds, DinoSpeedSmoothingRate);
+    DinoSpeed = SmoothedDinoSpeed;
+    DinoVerticalVelocity = Velocity.Z;
+
+    FRotator PawnRot = OwnerPawn->GetActorRotation();
+    FVector LocalVel = PawnRot.UnrotateVector(Velocity);
+    DinoDirection = FMath::RadiansToDegrees(FMath::Atan2(LocalVel.Y, LocalVel.X));
+
+    bDinoIsMoving = RawSpeed > 20.0f;
+    bDinoIsInAir = DinoVerticalVelocity < -50.0f;
+
+    // Charging = very high speed
+    bDinoIsCharging = RawSpeed > 700.0f;
+
+    // Spine forward lean based on speed
+    float TargetLean = FMath::Clamp(RawSpeed * 0.015f, 0.0f, 25.0f);
+    SpineForwardLean = FMath::FInterpTo(SpineForwardLean, TargetLean, DeltaSeconds, 4.0f);
+}
+
+void UDinoAnimInstance::UpdateDinoLocomotionState()
+{
+    EAnim_DinoLocomotionState NewState = DinoLocomotionState;
+
+    if (bDinoIsSleeping)
     {
-        return FVector::ZeroVector;
+        NewState = EAnim_DinoLocomotionState::DinoSleep;
     }
+    else if (bDinoIsAttacking)
+    {
+        NewState = EAnim_DinoLocomotionState::DinoAttack;
+    }
+    else if (bDinoIsEating)
+    {
+        NewState = EAnim_DinoLocomotionState::DinoEat;
+    }
+    else if (bDinoIsInAir)
+    {
+        NewState = EAnim_DinoLocomotionState::DinoFall;
+    }
+    else if (bDinoIsCharging)
+    {
+        NewState = EAnim_DinoLocomotionState::DinoCharge;
+    }
+    else if (bDinoIsMoving)
+    {
+        // Speed thresholds vary by species
+        float WalkThreshold = 150.0f;
+        float RunThreshold = 400.0f;
+
+        if (DinoSpeciesType == EAnim_DinoSpecies::TRex || DinoSpeciesType == EAnim_DinoSpecies::Brachiosaurus)
+        {
+            WalkThreshold = 200.0f;
+            RunThreshold = 500.0f;
+        }
+
+        if (DinoSpeed > RunThreshold)
+            NewState = EAnim_DinoLocomotionState::DinoRun;
+        else if (DinoSpeed > WalkThreshold)
+            NewState = EAnim_DinoLocomotionState::DinoTrot;
+        else
+            NewState = EAnim_DinoLocomotionState::DinoWalk;
+    }
+    else
+    {
+        NewState = bDinoIsAlerted
+            ? EAnim_DinoLocomotionState::DinoAlert
+            : EAnim_DinoLocomotionState::DinoIdle;
+    }
+
+    DinoLocomotionState = NewState;
+}
+
+void UDinoAnimInstance::UpdateProceduralSpine(float DeltaSeconds)
+{
+    // Head tracking toward a target (set externally by AI)
+    // Smooth head rotation toward TargetLookAtLocation
+    if (!OwnerPawn) return;
+
+    FVector PawnLoc = OwnerPawn->GetActorLocation();
+    FVector ToTarget = (TargetLookAtLocation - PawnLoc).GetSafeNormal();
+    FRotator LookRot = ToTarget.Rotation();
+    FRotator PawnRot = OwnerPawn->GetActorRotation();
+    FRotator Delta = UKismetMathLibrary::NormalizedDeltaRotator(LookRot, PawnRot);
+
+    float TargetHeadYaw = FMath::Clamp(Delta.Yaw, -60.0f, 60.0f);
+    float TargetHeadPitch = FMath::Clamp(Delta.Pitch, -30.0f, 30.0f);
+
+    HeadYaw = FMath::FInterpTo(HeadYaw, TargetHeadYaw, DeltaSeconds, HeadTrackSmoothingRate);
+    HeadPitch = FMath::FInterpTo(HeadPitch, TargetHeadPitch, DeltaSeconds, HeadTrackSmoothingRate);
+}
+
+void UDinoAnimInstance::UpdateTailSway(float DeltaSeconds)
+{
+    // Procedural tail sway — sinusoidal, speed-modulated
+    float SpeedFactor = FMath::Clamp(DinoSpeed / 600.0f, 0.2f, 1.0f);
+    TailSwayFrequency = FMath::Lerp(0.8f, 2.5f, SpeedFactor);
+
+    TailSwayTime += DeltaSeconds * TailSwayFrequency;
+    float TargetSway = FMath::Sin(TailSwayTime) * SpeedFactor * 15.0f;
+    TailSwayAmount = FMath::FInterpTo(TailSwayAmount, TargetSway, DeltaSeconds, TailSwaySmoothingRate);
+}
+
+void UDinoAnimInstance::UpdateDinoFootIK(float DeltaSeconds)
+{
+    if (!OwnerPawn) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
 
     USkeletalMeshComponent* Mesh = OwnerPawn->FindComponentByClass<USkeletalMeshComponent>();
-    if (!Mesh)
-    {
-        return OwnerPawn->GetActorLocation();
-    }
+    if (!Mesh) return;
 
-    const FVector SocketLoc = Mesh->GetSocketLocation(SocketName);
-    const FVector TraceStart = SocketLoc + FVector(0.f, 0.f, 50.f);
-    const FVector TraceEnd   = SocketLoc - FVector(0.f, 0.f, 75.f);
+    // Quadruped foot socket names (biped dinosaurs like T-Rex use only back feet)
+    static const FName SocketNames[4] = {
+        FName("foot_fl"), FName("foot_fr"),
+        FName("foot_bl"), FName("foot_br")
+    };
 
-    FHitResult HitResult;
+    FVector* Offsets[4] = {
+        &FrontLeftFootOffset, &FrontRightFootOffset,
+        &BackLeftFootOffset, &BackRightFootOffset
+    };
+
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(OwnerPawn);
 
-    UWorld* World = OwnerPawn->GetWorld();
-    if (World && World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, Params))
+    float TraceHalfHeight = 60.0f;
+
+    for (int32 i = 0; i < 4; ++i)
     {
-        return HitResult.ImpactPoint;
+        if (!Mesh->DoesSocketExist(SocketNames[i]))
+        {
+            *Offsets[i] = FVector::ZeroVector;
+            continue;
+        }
+
+        FVector FootLoc = Mesh->GetSocketLocation(SocketNames[i]);
+        FVector TraceStart = FootLoc + FVector(0, 0, TraceHalfHeight);
+        FVector TraceEnd = FootLoc - FVector(0, 0, TraceHalfHeight);
+
+        FHitResult Hit;
+        bool bHit = World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params);
+
+        FVector TargetOffset = FVector::ZeroVector;
+        if (bHit)
+        {
+            float Delta = Hit.ImpactPoint.Z - FootLoc.Z;
+            TargetOffset = FVector(0, 0, FMath::Clamp(Delta, -30.0f, 30.0f));
+        }
+
+        *Offsets[i] = FMath::VInterpTo(*Offsets[i], TargetOffset, DeltaSeconds, 12.0f);
     }
 
-    return SocketLoc;
+    // IK alpha — grounded, not charging
+    float TargetAlpha = (!bDinoIsInAir && !bDinoIsCharging) ? 1.0f : 0.0f;
+    DinoIKAlpha = FMath::FInterpTo(DinoIKAlpha, TargetAlpha, DeltaSeconds, 10.0f);
 }
 
-void UDinoAnimInstance::TriggerAttack()
+void UDinoAnimInstance::SetDinoHealthNormalized(float Value)
 {
-    bIsAttacking = true;
-    // Montage playback is handled in the Animation Blueprint graph.
-    // This flag drives the state machine transition to the Attack state.
+    DinoHealthNormalized = FMath::Clamp(Value, 0.0f, 1.0f);
+    bDinoIsWounded = DinoHealthNormalized < 0.35f;
 }
 
-void UDinoAnimInstance::StartEating()
+void UDinoAnimInstance::SetDinoBehaviorState(EAnim_DinoBehaviorState NewState)
 {
-    bIsEating = true;
+    DinoBehaviorState = NewState;
+
+    // Map behavior to animation flags
+    bDinoIsAttacking = (NewState == EAnim_DinoBehaviorState::DinoBehavior_Attack);
+    bDinoIsEating = (NewState == EAnim_DinoBehaviorState::DinoBehavior_Eat);
+    bDinoIsSleeping = (NewState == EAnim_DinoBehaviorState::DinoBehavior_Sleep);
+    bDinoIsAlerted = (NewState == EAnim_DinoBehaviorState::DinoBehavior_Alert ||
+                      NewState == EAnim_DinoBehaviorState::DinoBehavior_Stalk);
 }
 
-void UDinoAnimInstance::StopEating()
+void UDinoAnimInstance::SetTargetLookAt(FVector TargetLocation)
 {
-    bIsEating = false;
+    TargetLookAtLocation = TargetLocation;
+}
+
+EAnim_DinoLocomotionState UDinoAnimInstance::GetDinoLocomotionState() const
+{
+    return DinoLocomotionState;
 }
