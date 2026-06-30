@@ -1,330 +1,367 @@
-#include "SurvivalComponent.h"
+// SurvivalComponent.cpp
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// Full implementation of survival stat ticking, drain logic, biome integration.
+
+#include "Core/Survival/SurvivalComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "World/BiomeManager.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
 USurvivalComponent::USurvivalComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // We manage our own interval
+    PrimaryComponentTick.TickInterval = 0.0f; // We manage our own interval via accumulator
 
-    // Default stat configurations
-    Health.Current            = 100.f;
-    Health.Max                = 100.f;
-    Health.DecayRatePerSecond = 0.0f;   // Health doesn't decay passively
-    Health.CriticalThreshold  = 20.f;
-
-    Hunger.Current            = 100.f;
-    Hunger.Max                = 100.f;
-    Hunger.DecayRatePerSecond = 0.8f;   // ~2 min to deplete at rest
-    Hunger.CriticalThreshold  = 15.f;
-
-    Thirst.Current            = 100.f;
-    Thirst.Max                = 100.f;
-    Thirst.DecayRatePerSecond = 1.2f;   // Thirst depletes faster than hunger
-    Thirst.CriticalThreshold  = 15.f;
-
-    Stamina.Current            = 100.f;
-    Stamina.Max                = 100.f;
-    Stamina.DecayRatePerSecond = 0.0f;  // Managed separately via sprint logic
-    Stamina.CriticalThreshold  = 10.f;
-
-    Temperature.Current            = 37.0f; // Normal body temp in Celsius
-    Temperature.Max                = 42.0f; // Lethal upper bound
-    Temperature.DecayRatePerSecond = 0.0f;  // Biome-driven
-    Temperature.CriticalThreshold  = 34.0f; // Hypothermia threshold
-
-    Fear.Current            = 0.f;
-    Fear.Max                = 100.f;
-    Fear.DecayRatePerSecond = -2.0f;    // Fear naturally decreases (negative = regen)
-    Fear.CriticalThreshold  = 80.f;
+    // Default stats — full bars at start
+    Stats.Health  = 100.0f; Stats.MaxHealth  = 100.0f;
+    Stats.Hunger  = 100.0f; Stats.MaxHunger  = 100.0f;
+    Stats.Thirst  = 100.0f; Stats.MaxThirst  = 100.0f;
+    Stats.Stamina = 100.0f; Stats.MaxStamina = 100.0f;
+    Stats.Fear    = 0.0f;   Stats.MaxFear    = 100.0f;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void USurvivalComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Try to find BiomeManager in the world and register for biome change events
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        TArray<AActor*> FoundManagers;
-        UGameplayStatics::GetAllActorsOfClass(World, ABiomeManager::StaticClass(), FoundManagers);
-        if (FoundManagers.Num() > 0)
-        {
-            ABiomeManager* BiomeMgr = Cast<ABiomeManager>(FoundManagers[0]);
-            if (BiomeMgr)
-            {
-                // Bind to biome transition event
-                BiomeMgr->OnPlayerEnteredBiome.AddDynamic(this, &USurvivalComponent::SetCurrentBiome);
-                UE_LOG(LogTemp, Log, TEXT("SurvivalComponent: Bound to BiomeManager OnPlayerEnteredBiome"));
-            }
-        }
-    }
+    CurrentState = ECore_SurvivalState::Healthy;
+    bIsAlive = true;
+    bIsSprinting = false;
+    SurvivalTickAccumulator = 0.0f;
+    BiomeThirstMultiplier = 1.0f;
+    BiomeHumidityHealBonus = 0.0f;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void USurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-                                       FActorComponentTickFunction* ThisTickFunction)
+                                        FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (bIsDead) return;
+    if (!bIsAlive) return;
 
-    AccumulatedTime += DeltaTime;
+    SurvivalTickAccumulator += DeltaTime;
+    if (SurvivalTickAccumulator >= SurvivalTickInterval)
+    {
+        TickSurvival(SurvivalTickAccumulator);
+        SurvivalTickAccumulator = 0.0f;
+    }
+}
 
-    // ── Stamina: always ticked (sprint drain / regen) ─────────────────────
+// ─── Core Survival Tick ───────────────────────────────────────────────────────
+
+void USurvivalComponent::TickSurvival(float DeltaTime)
+{
+    if (!bIsAlive) return;
+
+    const float SprintMultiplier = bIsSprinting ? 3.0f : 1.0f;
+
+    // ── Hunger drain ──────────────────────────────────────────────────────
+    const float HungerDrain = bIsSprinting
+        ? DrainRates.HungerDrainSprint * DeltaTime
+        : DrainRates.HungerDrainRest * DeltaTime;
+
+    Stats.Hunger -= HungerDrain;
+    ClampStat(Stats.Hunger, 0.0f, Stats.MaxHunger);
+    BroadcastStatChange(ECore_SurvivalStat::Hunger, Stats.Hunger);
+
+    // ── Thirst drain (biome temperature modulated) ────────────────────────
+    const float ThirstDrain = bIsSprinting
+        ? DrainRates.ThirstDrainSprint * DeltaTime * BiomeThirstMultiplier
+        : DrainRates.ThirstDrainRest * DeltaTime * BiomeThirstMultiplier;
+
+    Stats.Thirst -= ThirstDrain;
+    ClampStat(Stats.Thirst, 0.0f, Stats.MaxThirst);
+    BroadcastStatChange(ECore_SurvivalStat::Thirst, Stats.Thirst);
+
+    // ── Stamina ───────────────────────────────────────────────────────────
     if (bIsSprinting)
     {
-        float Drain = SprintStaminaDrain * DeltaTime;
-        Stamina.Current = FMath::Max(0.f, Stamina.Current - Drain);
-        if (Stamina.IsDepleted())
+        Stats.Stamina -= DrainRates.StaminaDrainSprint * DeltaTime;
+        if (Stats.Stamina <= ExhaustionThreshold)
         {
-            SetSprinting(false);
+            SetSprinting(false); // Force stop sprinting when exhausted
         }
     }
     else
     {
-        // Regen stamina when not sprinting
-        float Regen = StaminaRegenRate * DeltaTime;
-        Stamina.Current = FMath::Min(Stamina.Max, Stamina.Current + Regen);
+        // Recover stamina at rest (slower when hungry/thirsty)
+        const float RecoveryMult = (Stats.Hunger < StarvationThreshold || Stats.Thirst < DehydrationThreshold)
+            ? 0.3f : 1.0f;
+        Stats.Stamina += DrainRates.StaminaRecoveryRest * DeltaTime * RecoveryMult;
     }
+    ClampStat(Stats.Stamina, 0.0f, Stats.MaxStamina);
+    BroadcastStatChange(ECore_SurvivalStat::Stamina, Stats.Stamina);
 
-    // ── Survival tick at configured interval ─────────────────────────────
-    if (AccumulatedTime < TickInterval) return;
-    float TickDelta = AccumulatedTime;
-    AccumulatedTime = 0.f;
+    // ── Health drain from starvation / dehydration ────────────────────────
+    float HealthDelta = 0.0f;
 
-    // Apply biome modifiers to decay rates
-    float TempMod     = BiomeTempModifier;
-    float HumidityMod = BiomeHumidityModifier;
-
-    // Tick hunger and thirst with biome multipliers
-    TickStat(Hunger,  ECore_SurvivalStat::Hunger,  TickDelta, TempMod);
-    TickStat(Thirst,  ECore_SurvivalStat::Thirst,  TickDelta, TempMod * HumidityMod);
-    TickStat(Fear,    ECore_SurvivalStat::Fear,     TickDelta, 1.0f);
-
-    // Starvation: deal health damage when hunger is depleted
-    if (Hunger.IsDepleted())
+    if (Stats.Hunger <= StarvationThreshold)
     {
-        float StarveDmg = StarvationDamageRate * TickDelta;
-        Health.Current = FMath::Max(0.f, Health.Current - StarveDmg);
-        OnStatChanged.Broadcast(ECore_SurvivalStat::Health, Health.Current);
+        HealthDelta -= DrainRates.HealthDrainStarving * DeltaTime;
     }
-
-    // Dehydration: deal health damage when thirst is depleted
-    if (Thirst.IsDepleted())
+    if (Stats.Thirst <= DehydrationThreshold)
     {
-        float DehydDmg = DehydrationDamageRate * TickDelta;
-        Health.Current = FMath::Max(0.f, Health.Current - DehydDmg);
-        OnStatChanged.Broadcast(ECore_SurvivalStat::Health, Health.Current);
+        HealthDelta -= DrainRates.HealthDrainDehydrated * DeltaTime;
     }
 
-    // Check critical thresholds
-    if (Health.IsCritical())  HandleStatCritical(ECore_SurvivalStat::Health);
-    if (Hunger.IsCritical())  HandleStatCritical(ECore_SurvivalStat::Hunger);
-    if (Thirst.IsCritical())  HandleStatCritical(ECore_SurvivalStat::Thirst);
-    if (Fear.IsCritical())    HandleStatCritical(ECore_SurvivalStat::Fear);
-
-    // Death check
-    if (Health.IsDepleted())
+    // Biome humidity bonus: humid biomes provide slight health regen
+    if (BiomeHumidityHealBonus > 0.0f && Stats.Hunger > StarvationThreshold && Stats.Thirst > DehydrationThreshold)
     {
-        HandleDeath();
+        HealthDelta += BiomeHumidityHealBonus * DeltaTime;
+    }
+
+    if (!FMath::IsNearlyZero(HealthDelta))
+    {
+        Stats.Health += HealthDelta;
+        ClampStat(Stats.Health, 0.0f, Stats.MaxHealth);
+        BroadcastStatChange(ECore_SurvivalStat::Health, Stats.Health);
+    }
+
+    // ── Fear decay (passive calm when no threats) ─────────────────────────
+    if (Stats.Fear > 0.0f)
+    {
+        Stats.Fear -= DrainRates.FearDecayRate * DeltaTime;
+        ClampStat(Stats.Fear, 0.0f, Stats.MaxFear);
+        BroadcastStatChange(ECore_SurvivalStat::Fear, Stats.Fear);
+    }
+
+    // ── Death check ───────────────────────────────────────────────────────
+    if (Stats.Health <= 0.0f)
+    {
+        bIsAlive = false;
+        CurrentState = ECore_SurvivalState::Dead;
+        OnSurvivalStateChanged.Broadcast(ECore_SurvivalState::Dead);
+        OnPlayerDied.Broadcast();
+        return;
+    }
+
+    // ── Update composite state ────────────────────────────────────────────
+    UpdateSurvivalState();
+}
+
+// ─── State Machine ────────────────────────────────────────────────────────────
+
+void USurvivalComponent::UpdateSurvivalState()
+{
+    ECore_SurvivalState NewState = ECore_SurvivalState::Healthy;
+
+    if (Stats.Fear >= PanicThreshold)
+    {
+        NewState = ECore_SurvivalState::Panicking;
+    }
+    else if (Stats.Stamina <= ExhaustionThreshold)
+    {
+        NewState = ECore_SurvivalState::Exhausted;
+    }
+    else if (Stats.Thirst <= DehydrationThreshold)
+    {
+        NewState = ECore_SurvivalState::Dehydrated;
+    }
+    else if (Stats.Thirst <= 30.0f)
+    {
+        NewState = ECore_SurvivalState::Thirsty;
+    }
+    else if (Stats.Hunger <= StarvationThreshold)
+    {
+        NewState = ECore_SurvivalState::Starving;
+    }
+    else if (Stats.Hunger <= 30.0f)
+    {
+        NewState = ECore_SurvivalState::Hungry;
+    }
+
+    if (NewState != CurrentState)
+    {
+        CurrentState = NewState;
+        OnSurvivalStateChanged.Broadcast(CurrentState);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Stat accessors
-// ─────────────────────────────────────────────────────────────────────────────
-float USurvivalComponent::GetStat(ECore_SurvivalStat Stat) const
+// ─── Stat Modifiers ───────────────────────────────────────────────────────────
+
+void USurvivalComponent::ApplyDamage(float Amount, AActor* DamageCauser)
 {
-    return GetStatConstRef(Stat).Current;
+    if (!bIsAlive || Amount <= 0.0f) return;
+
+    Stats.Health -= Amount;
+    ClampStat(Stats.Health, 0.0f, Stats.MaxHealth);
+    BroadcastStatChange(ECore_SurvivalStat::Health, Stats.Health);
+
+    // Taking damage causes fear spike
+    const float FearSpike = FMath::Clamp(Amount * 0.5f, 5.0f, 30.0f);
+    AddFear(FearSpike);
+
+    if (Stats.Health <= 0.0f)
+    {
+        bIsAlive = false;
+        CurrentState = ECore_SurvivalState::Dead;
+        OnSurvivalStateChanged.Broadcast(ECore_SurvivalState::Dead);
+        OnPlayerDied.Broadcast();
+    }
+    else
+    {
+        UpdateSurvivalState();
+    }
 }
 
-float USurvivalComponent::GetStatNormalized(ECore_SurvivalStat Stat) const
+void USurvivalComponent::HealHealth(float Amount)
 {
-    return GetStatConstRef(Stat).GetNormalized();
-}
-
-bool USurvivalComponent::IsStatCritical(ECore_SurvivalStat Stat) const
-{
-    return GetStatConstRef(Stat).IsCritical();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stat modifiers
-// ─────────────────────────────────────────────────────────────────────────────
-void USurvivalComponent::ApplyDamage(float Amount)
-{
-    if (bIsDead || Amount <= 0.f) return;
-    Health.Current = FMath::Max(0.f, Health.Current - Amount);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Health, Health.Current);
-    if (Health.IsDepleted()) HandleDeath();
-    else if (Health.IsCritical()) HandleStatCritical(ECore_SurvivalStat::Health);
-}
-
-void USurvivalComponent::Heal(float Amount)
-{
-    if (bIsDead || Amount <= 0.f) return;
-    Health.Current = FMath::Min(Health.Max, Health.Current + Amount);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Health, Health.Current);
+    if (!bIsAlive || Amount <= 0.0f) return;
+    Stats.Health += Amount;
+    ClampStat(Stats.Health, 0.0f, Stats.MaxHealth);
+    BroadcastStatChange(ECore_SurvivalStat::Health, Stats.Health);
+    UpdateSurvivalState();
 }
 
 void USurvivalComponent::ConsumeFood(float NutritionValue)
 {
-    if (NutritionValue <= 0.f) return;
-    Hunger.Current = FMath::Min(Hunger.Max, Hunger.Current + NutritionValue);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Hunger, Hunger.Current);
+    if (!bIsAlive || NutritionValue <= 0.0f) return;
+    Stats.Hunger += NutritionValue;
+    ClampStat(Stats.Hunger, 0.0f, Stats.MaxHunger);
+    BroadcastStatChange(ECore_SurvivalStat::Hunger, Stats.Hunger);
+    UpdateSurvivalState();
 }
 
 void USurvivalComponent::DrinkWater(float HydrationValue)
 {
-    if (HydrationValue <= 0.f) return;
-    Thirst.Current = FMath::Min(Thirst.Max, Thirst.Current + HydrationValue);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Thirst, Thirst.Current);
-}
-
-void USurvivalComponent::RestoreStamina(float Amount)
-{
-    if (Amount <= 0.f) return;
-    Stamina.Current = FMath::Min(Stamina.Max, Stamina.Current + Amount);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Stamina, Stamina.Current);
+    if (!bIsAlive || HydrationValue <= 0.0f) return;
+    Stats.Thirst += HydrationValue;
+    ClampStat(Stats.Thirst, 0.0f, Stats.MaxThirst);
+    BroadcastStatChange(ECore_SurvivalStat::Thirst, Stats.Thirst);
+    UpdateSurvivalState();
 }
 
 void USurvivalComponent::AddFear(float Amount)
 {
-    if (Amount <= 0.f) return;
-    Fear.Current = FMath::Min(Fear.Max, Fear.Current + Amount);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Fear, Fear.Current);
-    if (Fear.IsCritical()) HandleStatCritical(ECore_SurvivalStat::Fear);
+    if (!bIsAlive || Amount <= 0.0f) return;
+    Stats.Fear += Amount;
+    ClampStat(Stats.Fear, 0.0f, Stats.MaxFear);
+    BroadcastStatChange(ECore_SurvivalStat::Fear, Stats.Fear);
+    UpdateSurvivalState();
 }
 
 void USurvivalComponent::ReduceFear(float Amount)
 {
-    if (Amount <= 0.f) return;
-    Fear.Current = FMath::Max(0.f, Fear.Current - Amount);
-    OnStatChanged.Broadcast(ECore_SurvivalStat::Fear, Fear.Current);
+    if (Amount <= 0.0f) return;
+    Stats.Fear -= Amount;
+    ClampStat(Stats.Fear, 0.0f, Stats.MaxFear);
+    BroadcastStatChange(ECore_SurvivalStat::Fear, Stats.Fear);
+    UpdateSurvivalState();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Biome integration
-// ─────────────────────────────────────────────────────────────────────────────
-void USurvivalComponent::ApplyBiomeModifiers(const FEng_BiomeConfig& BiomeConfig)
+void USurvivalComponent::RestoreStamina(float Amount)
 {
-    // Temperature modifier: hot biomes increase hunger/thirst decay
-    // Normalized: 0.5 (cold) to 2.0 (volcanic)
-    float NormalizedTemp = FMath::GetMappedRangeValueClamped(
-        FVector2D(-20.f, 50.f),
-        FVector2D(0.5f, 2.0f),
-        BiomeConfig.AmbientTemperatureCelsius
-    );
-    BiomeTempModifier = NormalizedTemp;
-
-    // Humidity modifier: low humidity increases thirst decay
-    // Normalized: 2.0 (desert/volcanic) to 0.7 (swamp/coastal)
-    float NormalizedHumidity = FMath::GetMappedRangeValueClamped(
-        FVector2D(0.f, 1.f),
-        FVector2D(2.0f, 0.7f),
-        BiomeConfig.HumidityFactor
-    );
-    BiomeHumidityModifier = NormalizedHumidity;
-
-    UE_LOG(LogTemp, Log, TEXT("SurvivalComponent: Biome modifiers updated — TempMod=%.2f, HumidityMod=%.2f"),
-           BiomeTempModifier, BiomeHumidityModifier);
+    if (!bIsAlive || Amount <= 0.0f) return;
+    Stats.Stamina += Amount;
+    ClampStat(Stats.Stamina, 0.0f, Stats.MaxStamina);
+    BroadcastStatChange(ECore_SurvivalStat::Stamina, Stats.Stamina);
+    UpdateSurvivalState();
 }
 
-void USurvivalComponent::SetCurrentBiome(EEng_BiomeType NewBiome)
-{
-    CurrentBiome = NewBiome;
-    UE_LOG(LogTemp, Log, TEXT("SurvivalComponent: Entered biome %d"), (int32)NewBiome);
-}
+// ─── Sprint Control ───────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sprint / stamina
-// ─────────────────────────────────────────────────────────────────────────────
 void USurvivalComponent::SetSprinting(bool bSprinting)
 {
-    if (bSprinting && !CanSprint()) return;
+    if (!bIsAlive) return;
+
+    if (bSprinting && !CanSprint())
+    {
+        bIsSprinting = false;
+        return;
+    }
 
     bIsSprinting = bSprinting;
 
-    // Adjust character movement speed
-    AActor* Owner = GetOwner();
-    if (Owner)
+    // Propagate sprint speed to CharacterMovementComponent
+    ACharacter* OwnerChar = Cast<ACharacter>(GetOwner());
+    if (OwnerChar)
     {
-        ACharacter* Char = Cast<ACharacter>(Owner);
-        if (Char && Char->GetCharacterMovement())
+        UCharacterMovementComponent* MoveComp = OwnerChar->GetCharacterMovement();
+        if (MoveComp)
         {
-            Char->GetCharacterMovement()->MaxWalkSpeed = bIsSprinting ? 700.f : 400.f;
+            MoveComp->MaxWalkSpeed = bIsSprinting ? 600.0f : 300.0f;
         }
     }
 }
 
 bool USurvivalComponent::CanSprint() const
 {
-    return !bIsDead && Stamina.Current >= SprintMinStamina;
+    return bIsAlive
+        && Stats.Stamina > ExhaustionThreshold
+        && CurrentState != ECore_SurvivalState::Dead
+        && CurrentState != ECore_SurvivalState::Exhausted;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
-void USurvivalComponent::TickStat(FCore_StatValue& Stat, ECore_SurvivalStat StatType,
-                                   float DeltaTime, float DecayMultiplier)
+// ─── Biome Integration ────────────────────────────────────────────────────────
+
+void USurvivalComponent::OnBiomeChanged(float NewTemperature, float NewHumidity)
 {
-    if (Stat.DecayRatePerSecond == 0.f) return;
+    // Temperature range: 0 (arctic) to 1 (volcanic). Hot = faster thirst.
+    // At temperature 0.5 (temperate) multiplier = 1.0
+    // At temperature 1.0 (volcanic) multiplier = 2.5
+    // At temperature 0.0 (arctic) multiplier = 0.5
+    BiomeThirstMultiplier = FMath::Lerp(0.5f, 2.5f, NewTemperature);
 
-    float Delta = Stat.DecayRatePerSecond * DeltaTime * DecayMultiplier;
-    float OldValue = Stat.Current;
-    Stat.Current = FMath::Clamp(Stat.Current - Delta, 0.f, Stat.Max);
+    // Humidity range: 0 (desert) to 1 (swamp). Humid = slight health regen.
+    // At humidity > 0.6, small passive heal (0.05/s max)
+    BiomeHumidityHealBonus = FMath::Max(0.0f, (NewHumidity - 0.6f) * 0.125f);
 
-    if (!FMath::IsNearlyEqual(OldValue, Stat.Current, 0.01f))
-    {
-        OnStatChanged.Broadcast(StatType, Stat.Current);
-    }
+    UE_LOG(LogTemp, Log, TEXT("SurvivalComponent: Biome changed — Temp=%.2f ThirstMult=%.2f | Humidity=%.2f HealBonus=%.4f"),
+           NewTemperature, BiomeThirstMultiplier, NewHumidity, BiomeHumidityHealBonus);
 }
 
-void USurvivalComponent::HandleStatCritical(ECore_SurvivalStat Stat)
+// ─── Stat Accessors ───────────────────────────────────────────────────────────
+
+float USurvivalComponent::GetHealthPercent() const
 {
-    OnStatCritical.Broadcast(Stat);
+    return Stats.MaxHealth > 0.0f ? Stats.Health / Stats.MaxHealth : 0.0f;
 }
 
-void USurvivalComponent::HandleDeath()
+float USurvivalComponent::GetHungerPercent() const
 {
-    if (bIsDead) return;
-    bIsDead = true;
-    bIsSprinting = false;
-    UE_LOG(LogTemp, Warning, TEXT("SurvivalComponent: Character has died!"));
-    OnCharacterDied.Broadcast();
+    return Stats.MaxHunger > 0.0f ? Stats.Hunger / Stats.MaxHunger : 0.0f;
 }
 
-FCore_StatValue& USurvivalComponent::GetStatRef(ECore_SurvivalStat Stat)
+float USurvivalComponent::GetThirstPercent() const
 {
-    switch (Stat)
-    {
-        case ECore_SurvivalStat::Health:      return Health;
-        case ECore_SurvivalStat::Hunger:      return Hunger;
-        case ECore_SurvivalStat::Thirst:      return Thirst;
-        case ECore_SurvivalStat::Stamina:     return Stamina;
-        case ECore_SurvivalStat::Temperature: return Temperature;
-        case ECore_SurvivalStat::Fear:        return Fear;
-        default:                              return Health;
-    }
+    return Stats.MaxThirst > 0.0f ? Stats.Thirst / Stats.MaxThirst : 0.0f;
 }
 
-const FCore_StatValue& USurvivalComponent::GetStatConstRef(ECore_SurvivalStat Stat) const
+float USurvivalComponent::GetStaminaPercent() const
 {
-    switch (Stat)
-    {
-        case ECore_SurvivalStat::Health:      return Health;
-        case ECore_SurvivalStat::Hunger:      return Hunger;
-        case ECore_SurvivalStat::Thirst:      return Thirst;
-        case ECore_SurvivalStat::Stamina:     return Stamina;
-        case ECore_SurvivalStat::Temperature: return Temperature;
-        case ECore_SurvivalStat::Fear:        return Fear;
-        default:                              return Health;
-    }
+    return Stats.MaxStamina > 0.0f ? Stats.Stamina / Stats.MaxStamina : 0.0f;
+}
+
+float USurvivalComponent::GetFearPercent() const
+{
+    return Stats.MaxFear > 0.0f ? Stats.Fear / Stats.MaxFear : 0.0f;
+}
+
+// ─── Debug ────────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::PrintSurvivalStats() const
+{
+    UE_LOG(LogTemp, Log, TEXT("=== SurvivalComponent Stats ==="));
+    UE_LOG(LogTemp, Log, TEXT("  Health:  %.1f / %.1f  (%.0f%%)"), Stats.Health,  Stats.MaxHealth,  GetHealthPercent()  * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("  Hunger:  %.1f / %.1f  (%.0f%%)"), Stats.Hunger,  Stats.MaxHunger,  GetHungerPercent()  * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("  Thirst:  %.1f / %.1f  (%.0f%%)"), Stats.Thirst,  Stats.MaxThirst,  GetThirstPercent()  * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("  Stamina: %.1f / %.1f  (%.0f%%)"), Stats.Stamina, Stats.MaxStamina, GetStaminaPercent() * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("  Fear:    %.1f / %.1f  (%.0f%%)"), Stats.Fear,    Stats.MaxFear,    GetFearPercent()    * 100.0f);
+    UE_LOG(LogTemp, Log, TEXT("  State:   %d | Alive: %s | Sprinting: %s"),
+           (int32)CurrentState,
+           bIsAlive ? TEXT("YES") : TEXT("NO"),
+           bIsSprinting ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Log, TEXT("  BiomeThirstMult: %.2f | BiomeHealBonus: %.4f"),
+           BiomeThirstMultiplier, BiomeHumidityHealBonus);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::BroadcastStatChange(ECore_SurvivalStat Stat, float NewValue)
+{
+    OnStatChanged.Broadcast(Stat, NewValue);
+}
+
+void USurvivalComponent::ClampStat(float& Stat, float Min, float Max)
+{
+    Stat = FMath::Clamp(Stat, Min, Max);
 }
