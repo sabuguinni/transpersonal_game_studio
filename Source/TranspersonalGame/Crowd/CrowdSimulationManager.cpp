@@ -1,403 +1,332 @@
-// ============================================================
-// Agent #13 — Crowd & Traffic Simulation
-// CrowdSimulationManager.cpp — Full implementation
-// Prehistoric survival game — Mass AI crowd system
-// Up to 50,000 simultaneous agents with LOD chain
-// ============================================================
-
 #include "CrowdSimulationManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "DrawDebugHelpers.h"
-#include "NavigationSystem.h"
-#include "NavMesh/NavMeshBoundsVolume.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Math/UnrealMathUtility.h"
 
-UCrowdSimulationManager::UCrowdSimulationManager()
+// ============================================================
+// ACrowdSimulationManager — Implementation
+// Agent #13 Crowd & Traffic Simulation
+// Boids-based flocking for prehistoric herds, packs, tribes
+// ============================================================
+
+ACrowdSimulationManager::ACrowdSimulationManager()
 {
-    MaxAgents = 50000;
-    ActiveAgentCount = 0;
-    NextHerdID = 0;
-    bSimulationActive = false;
-    SimulationTickRate = 0.1f; // 10Hz update for performance
-    LODFullRadius = 5000.0f;
-    LODReducedRadius = 20000.0f;
-    LODMinimalRadius = 50000.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.05f; // 20Hz simulation
+
+    MaxAgents = 200;
+    SimulationTickRate = 0.05f;
+    bEnableFlocking = true;
+    bEnableStampede = true;
+    LODDistanceFar = 5000.0f;
+    LODDistanceMid = 2500.0f;
+    NextAgentID = 0;
+    CurrentLODLevel = 0;
+    SimAccumulator = 0.0f;
 }
 
-void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACrowdSimulationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Initializing Crowd Simulation Manager — max agents: %d"), MaxAgents);
-    
-    // Reserve memory for agent pools
-    AgentPool.Reserve(FMath::Min(MaxAgents, 10000));
-    HerdRegistry.Reserve(500);
-    ActiveStampedeEvents.Reserve(32);
-    
-    bSimulationActive = true;
-    
-    // Start simulation tick timer
-    GetWorld()->GetTimerManager().SetTimer(
-        SimulationTickHandle,
-        this,
-        &UCrowdSimulationManager::SimulationTick,
-        SimulationTickRate,
-        true
-    );
-    
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Simulation started at %.1fHz"), 1.0f / SimulationTickRate);
+    Super::BeginPlay();
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: BeginPlay — %d agents ready"), Agents.Num());
 }
 
-void UCrowdSimulationManager::Deinitialize()
+void ACrowdSimulationManager::Tick(float DeltaTime)
 {
-    bSimulationActive = false;
-    
-    if (GetWorld())
+    Super::Tick(DeltaTime);
+
+    SimAccumulator += DeltaTime;
+    if (SimAccumulator >= SimulationTickRate)
     {
-        GetWorld()->GetTimerManager().ClearTimer(SimulationTickHandle);
+        SimAccumulator = 0.0f;
+        UpdateAgentStates(SimulationTickRate);
     }
-    
-    AgentPool.Empty();
-    HerdRegistry.Empty();
-    ActiveStampedeEvents.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Simulation stopped — %d agents cleaned up"), ActiveAgentCount);
-    
-    Super::Deinitialize();
 }
 
-void UCrowdSimulationManager::SimulationTick()
+// ---- Spawn Herd ----
+
+void ACrowdSimulationManager::SpawnHerd(ECrowd_AgentType AgentType, FVector CenterLocation, int32 Count)
 {
-    if (!bSimulationActive) return;
-    
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Get player location for LOD calculations
-    APlayerController* PC = World->GetFirstPlayerController();
-    FVector PlayerLocation = FVector::ZeroVector;
-    if (PC && PC->GetPawn())
+    if (!GetWorld()) return;
+
+    int32 ToSpawn = FMath::Min(Count, MaxAgents - Agents.Num());
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawning herd of %d agents (type %d)"), ToSpawn, (int32)AgentType);
+
+    for (int32 i = 0; i < ToSpawn; i++)
     {
-        PlayerLocation = PC->GetPawn()->GetActorLocation();
-    }
-    
-    float CurrentTime = World->GetTimeSeconds();
-    
-    // Update stampede events — decay over time
-    for (int32 i = ActiveStampedeEvents.Num() - 1; i >= 0; --i)
-    {
-        FCrowd_StampedeEvent& Event = ActiveStampedeEvents[i];
-        float Age = CurrentTime - Event.Timestamp;
-        if (Age > 30.0f) // Stampede lasts 30 seconds max
+        FCrowd_AgentData NewAgent;
+        NewAgent.AgentID = NextAgentID++;
+        NewAgent.AgentType = AgentType;
+
+        // Scatter agents in a circle around center
+        float Angle = (float)i / (float)ToSpawn * 2.0f * PI;
+        float Radius = FMath::RandRange(100.0f, HerdConfig.CohesionRadius * 0.5f);
+        NewAgent.Location = CenterLocation + FVector(
+            FMath::Cos(Angle) * Radius,
+            FMath::Sin(Angle) * Radius,
+            0.0f
+        );
+
+        // Initial state by type
+        switch (AgentType)
         {
-            ActiveStampedeEvents.RemoveAt(i);
-        }
-        else
-        {
-            // Decay intensity over time
-            Event.Intensity = FMath::Max(0.0f, 1.0f - (Age / 30.0f));
-        }
-    }
-    
-    // Update herd centers
-    UpdateHerdCenters();
-    
-    // Update LOD for all agents based on player distance
-    UpdateAgentLOD(PlayerLocation);
-    
-    // Process agent state machines
-    ProcessAgentStates(CurrentTime, PlayerLocation);
-}
-
-void UCrowdSimulationManager::UpdateHerdCenters()
-{
-    // Reset herd centers
-    TMap<int32, FVector> HerdPositionSums;
-    TMap<int32, int32> HerdMemberCounts;
-    
-    for (auto& Pair : HerdRegistry)
-    {
-        HerdPositionSums.Add(Pair.Key, FVector::ZeroVector);
-        HerdMemberCounts.Add(Pair.Key, 0);
-        Pair.Value.MemberCount = 0;
-    }
-    
-    // Sum agent positions per herd
-    for (const FCrowd_AgentRuntimeData& Agent : AgentPool)
-    {
-        if (Agent.HerdID >= 0 && HerdRegistry.Contains(Agent.HerdID))
-        {
-            HerdPositionSums[Agent.HerdID] += Agent.CurrentTarget;
-            HerdMemberCounts[Agent.HerdID]++;
-        }
-    }
-    
-    // Compute averages
-    for (auto& Pair : HerdRegistry)
-    {
-        int32 Count = HerdMemberCounts[Pair.Key];
-        if (Count > 0)
-        {
-            Pair.Value.HerdCenter = HerdPositionSums[Pair.Key] / (float)Count;
-            Pair.Value.MemberCount = Count;
-        }
-    }
-}
-
-void UCrowdSimulationManager::UpdateAgentLOD(const FVector& PlayerLocation)
-{
-    for (FCrowd_AgentRuntimeData& Agent : AgentPool)
-    {
-        float DistSq = FVector::DistSquared(Agent.CurrentTarget, PlayerLocation);
-        
-        if (DistSq < LODFullRadius * LODFullRadius)
-        {
-            Agent.LODLevel = ECrowd_LODLevel::Full;
-        }
-        else if (DistSq < LODReducedRadius * LODReducedRadius)
-        {
-            Agent.LODLevel = ECrowd_LODLevel::Reduced;
-        }
-        else if (DistSq < LODMinimalRadius * LODMinimalRadius)
-        {
-            Agent.LODLevel = ECrowd_LODLevel::Minimal;
-        }
-        else
-        {
-            Agent.LODLevel = ECrowd_LODLevel::Ghost;
-        }
-    }
-}
-
-void UCrowdSimulationManager::ProcessAgentStates(float CurrentTime, const FVector& PlayerLocation)
-{
-    for (FCrowd_AgentRuntimeData& Agent : AgentPool)
-    {
-        // Skip ghost-LOD agents (too far — no simulation)
-        if (Agent.LODLevel == ECrowd_LODLevel::Ghost) continue;
-        
-        // Skip dead agents
-        if (Agent.CurrentState == ECrowd_AgentState::Dead) continue;
-        
-        Agent.StateTimer += SimulationTickRate;
-        
-        switch (Agent.CurrentState)
-        {
-            case ECrowd_AgentState::Idle:
-                ProcessIdleState(Agent, CurrentTime);
-                break;
-                
-            case ECrowd_AgentState::Wandering:
-                ProcessWanderingState(Agent, CurrentTime);
-                break;
-                
-            case ECrowd_AgentState::Grazing:
-                ProcessGrazingState(Agent, CurrentTime);
-                break;
-                
-            case ECrowd_AgentState::Fleeing:
-                ProcessFleeingState(Agent, CurrentTime, PlayerLocation);
-                break;
-                
-            case ECrowd_AgentState::Stampeding:
-                ProcessStampedeState(Agent, CurrentTime);
-                break;
-                
-            case ECrowd_AgentState::Migrating:
-                ProcessMigratingState(Agent, CurrentTime);
-                break;
-                
-            default:
-                break;
-        }
-        
-        // Check for stampede contagion from nearby events
-        CheckStampedeContagion(Agent, CurrentTime);
-    }
-}
-
-void UCrowdSimulationManager::ProcessIdleState(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    // After 3-8 seconds of idle, transition to wandering or grazing
-    float IdleDuration = FMath::RandRange(3.0f, 8.0f);
-    if (Agent.StateTimer > IdleDuration)
-    {
-        Agent.StateTimer = 0.0f;
-        float Roll = FMath::FRand();
-        if (Roll < 0.4f)
-        {
-            Agent.CurrentState = ECrowd_AgentState::Grazing;
-        }
-        else
-        {
-            Agent.CurrentState = ECrowd_AgentState::Wandering;
-            // Pick a random wander target
-            FVector RandomOffset = FVector(
-                FMath::RandRange(-500.0f, 500.0f),
-                FMath::RandRange(-500.0f, 500.0f),
-                0.0f
-            );
-            Agent.CurrentTarget = Agent.CurrentTarget + RandomOffset;
-        }
-    }
-}
-
-void UCrowdSimulationManager::ProcessWanderingState(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    // After reaching target or 10 seconds, go idle
-    if (Agent.StateTimer > 10.0f)
-    {
-        Agent.CurrentState = ECrowd_AgentState::Idle;
-        Agent.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::ProcessGrazingState(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    // Graze for 5-15 seconds then idle
-    float GrazeDuration = FMath::RandRange(5.0f, 15.0f);
-    if (Agent.StateTimer > GrazeDuration)
-    {
-        Agent.CurrentState = ECrowd_AgentState::Idle;
-        Agent.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::ProcessFleeingState(FCrowd_AgentRuntimeData& Agent, float CurrentTime, const FVector& PlayerLocation)
-{
-    // Flee for 8-15 seconds then slow down
-    float FleeDuration = FMath::RandRange(8.0f, 15.0f);
-    if (Agent.StateTimer > FleeDuration)
-    {
-        Agent.CurrentState = ECrowd_AgentState::Wandering;
-        Agent.FleeReason = ECrowd_FleeReason::None;
-        Agent.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::ProcessStampedeState(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    // Stampede runs for 20-40 seconds
-    float StampedeDuration = FMath::RandRange(20.0f, 40.0f);
-    if (Agent.StateTimer > StampedeDuration)
-    {
-        Agent.CurrentState = ECrowd_AgentState::Fleeing;
-        Agent.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::ProcessMigratingState(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    // Migration continues until reaching target (handled by movement component)
-    // After 120 seconds, reset to idle (arrived or gave up)
-    if (Agent.StateTimer > 120.0f)
-    {
-        Agent.CurrentState = ECrowd_AgentState::Idle;
-        Agent.StateTimer = 0.0f;
-    }
-}
-
-void UCrowdSimulationManager::CheckStampedeContagion(FCrowd_AgentRuntimeData& Agent, float CurrentTime)
-{
-    if (Agent.CurrentState == ECrowd_AgentState::Stampeding) return;
-    if (Agent.CurrentState == ECrowd_AgentState::Dead) return;
-    
-    // Check if any stampede event is close enough to trigger contagion
-    for (const FCrowd_StampedeEvent& Event : ActiveStampedeEvents)
-    {
-        float DistSq = FVector::DistSquared(Agent.CurrentTarget, Event.Origin);
-        float ContagionRadiusSq = 600.0f * 600.0f; // Default contagion radius
-        
-        if (DistSq < ContagionRadiusSq && Event.Intensity > 0.3f)
-        {
-            // Trigger stampede on this agent
-            Agent.CurrentState = ECrowd_AgentState::Stampeding;
-            Agent.FleeDirection = Event.Direction;
-            Agent.StateTimer = 0.0f;
-            Agent.LastStampedeSignalTime = CurrentTime;
+        case ECrowd_AgentType::DinosaurHerbivore:
+            NewAgent.State = ECrowd_AgentState::Grazing;
+            NewAgent.Speed = FMath::RandRange(150.0f, 300.0f);
+            break;
+        case ECrowd_AgentType::DinosaurCarnivore:
+        case ECrowd_AgentType::DinosaurPack:
+            NewAgent.State = ECrowd_AgentState::Wandering;
+            NewAgent.Speed = FMath::RandRange(400.0f, 700.0f);
+            break;
+        case ECrowd_AgentType::HumanPrimitive:
+            NewAgent.State = ECrowd_AgentState::Idle;
+            NewAgent.Speed = FMath::RandRange(100.0f, 200.0f);
+            break;
+        case ECrowd_AgentType::MigrationHerd:
+            NewAgent.State = ECrowd_AgentState::Wandering;
+            NewAgent.Speed = FMath::RandRange(200.0f, 350.0f);
+            break;
+        default:
+            NewAgent.Speed = 200.0f;
             break;
         }
+
+        NewAgent.Velocity = FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal() * NewAgent.Speed;
+        NewAgent.FearLevel = 0.0f;
+
+        Agents.Add(NewAgent);
     }
 }
 
-// ============================================================
-// Public API — Blueprint callable
-// ============================================================
+// ---- Stampede Trigger ----
 
-void UCrowdSimulationManager::TriggerStampedeEvent(FVector Origin, FVector Direction, float Radius, ECrowd_FleeReason Cause)
+void ACrowdSimulationManager::TriggerStampede(FVector ThreatLocation, float ThreatRadius)
 {
-    FCrowd_StampedeEvent NewEvent;
-    NewEvent.Origin = Origin;
-    NewEvent.Direction = Direction.GetSafeNormal();
-    NewEvent.Radius = Radius;
-    NewEvent.Intensity = 1.0f;
-    NewEvent.Cause = Cause;
-    NewEvent.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    ActiveStampedeEvents.Add(NewEvent);
-    
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Stampede triggered at (%.0f, %.0f, %.0f) radius=%.0f cause=%d"),
-        Origin.X, Origin.Y, Origin.Z, Radius, (int32)Cause);
-}
+    if (!bEnableStampede) return;
 
-int32 UCrowdSimulationManager::RegisterHerd(ECrowd_AgentSpecies Species, FVector Center, int32 InitialSize)
-{
-    FCrowd_HerdData NewHerd;
-    NewHerd.HerdID = NextHerdID++;
-    NewHerd.Species = Species;
-    NewHerd.HerdCenter = Center;
-    NewHerd.MemberCount = InitialSize;
-    NewHerd.bIsStampeding = false;
-    NewHerd.StampedeIntensity = 0.0f;
-    
-    HerdRegistry.Add(NewHerd.HerdID, NewHerd);
-    
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd registered: ID=%d Species=%d Size=%d"),
-        NewHerd.HerdID, (int32)Species, InitialSize);
-    
-    return NewHerd.HerdID;
-}
-
-void UCrowdSimulationManager::SetHerdMigrationTarget(int32 HerdID, FVector Target)
-{
-    if (FCrowd_HerdData* Herd = HerdRegistry.Find(HerdID))
+    int32 AffectedCount = 0;
+    for (FCrowd_AgentData& Agent : Agents)
     {
-        Herd->MigrationTarget = Target;
-        UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Herd %d migration target set to (%.0f, %.0f, %.0f)"),
-            HerdID, Target.X, Target.Y, Target.Z);
+        float Dist = FVector::Dist(Agent.Location, ThreatLocation);
+        if (Dist <= ThreatRadius)
+        {
+            float FearBoost = FMath::Clamp(1.0f - (Dist / ThreatRadius), 0.0f, 1.0f);
+            Agent.FearLevel = FMath::Clamp(Agent.FearLevel + FearBoost, 0.0f, 1.0f);
+
+            if (Agent.FearLevel >= HerdConfig.StampedeThreshold)
+            {
+                Agent.State = ECrowd_AgentState::Stampeding;
+                // Flee direction = away from threat
+                FVector FleeDir = (Agent.Location - ThreatLocation).GetSafeNormal();
+                Agent.Velocity = FleeDir * Agent.Speed * 2.5f; // Stampede = 2.5x normal speed
+                AffectedCount++;
+            }
+            else if (Agent.FearLevel >= HerdConfig.FleeThreshold)
+            {
+                Agent.State = ECrowd_AgentState::Fleeing;
+                FVector FleeDir = (Agent.Location - ThreatLocation).GetSafeNormal();
+                Agent.Velocity = FleeDir * Agent.Speed * 1.5f;
+                AffectedCount++;
+            }
+        }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Stampede triggered — %d agents affected"), AffectedCount);
 }
 
-int32 UCrowdSimulationManager::GetActiveAgentCount() const
-{
-    return AgentPool.Num();
-}
+// ---- Flee Trigger ----
 
-int32 UCrowdSimulationManager::GetHerdCount() const
+void ACrowdSimulationManager::TriggerFlee(FVector ThreatLocation, float FearAmount)
 {
-    return HerdRegistry.Num();
-}
-
-FCrowd_HerdData UCrowdSimulationManager::GetHerdData(int32 HerdID) const
-{
-    if (const FCrowd_HerdData* Herd = HerdRegistry.Find(HerdID))
+    for (FCrowd_AgentData& Agent : Agents)
     {
-        return *Herd;
+        float Dist = FVector::Dist(Agent.Location, ThreatLocation);
+        float FalloffFear = FearAmount * FMath::Clamp(1.0f - (Dist / 3000.0f), 0.0f, 1.0f);
+        Agent.FearLevel = FMath::Clamp(Agent.FearLevel + FalloffFear, 0.0f, 1.0f);
+
+        if (Agent.FearLevel >= HerdConfig.FleeThreshold && Agent.State != ECrowd_AgentState::Stampeding)
+        {
+            Agent.State = ECrowd_AgentState::Fleeing;
+            FVector FleeDir = (Agent.Location - ThreatLocation).GetSafeNormal();
+            Agent.Velocity = FleeDir * Agent.Speed * 1.5f;
+        }
     }
-    return FCrowd_HerdData();
 }
 
-bool UCrowdSimulationManager::IsSimulationActive() const
+// ---- Update Agent States ----
+
+void ACrowdSimulationManager::UpdateAgentStates(float DeltaTime)
 {
-    return bSimulationActive;
+    for (int32 i = 0; i < Agents.Num(); i++)
+    {
+        TickAgent(Agents[i], DeltaTime);
+    }
 }
 
-void UCrowdSimulationManager::SetSimulationActive(bool bActive)
+void ACrowdSimulationManager::TickAgent(FCrowd_AgentData& Agent, float DeltaTime)
 {
-    bSimulationActive = bActive;
-    UE_LOG(LogTemp, Log, TEXT("[CrowdSim] Simulation %s"), bActive ? TEXT("RESUMED") : TEXT("PAUSED"));
+    // Fear decay
+    Agent.FearLevel = FMath::Max(0.0f, Agent.FearLevel - DeltaTime * 0.1f);
+
+    // State transitions
+    if (Agent.State == ECrowd_AgentState::Stampeding || Agent.State == ECrowd_AgentState::Fleeing)
+    {
+        if (Agent.FearLevel < HerdConfig.FleeThreshold * 0.5f)
+        {
+            Agent.State = ECrowd_AgentState::Wandering;
+        }
+    }
+
+    // Apply flocking forces
+    if (bEnableFlocking && (Agent.State == ECrowd_AgentState::Grazing || Agent.State == ECrowd_AgentState::Wandering))
+    {
+        int32 Idx = Agents.IndexOfByKey(Agent);
+        if (Idx != INDEX_NONE)
+        {
+            FVector Cohesion = ComputeCohesion(Idx) * 0.3f;
+            FVector Separation = ComputeSeparation(Idx) * 1.5f;
+            FVector Alignment = ComputeAlignment(Idx) * 0.5f;
+
+            Agent.Velocity += (Cohesion + Separation + Alignment) * DeltaTime;
+            Agent.Velocity = ClampVelocity(Agent.Velocity, Agent.Speed);
+        }
+    }
+
+    // Move agent
+    Agent.Location += Agent.Velocity * DeltaTime;
+
+    // Keep on ground (Z = 100 placeholder)
+    Agent.Location.Z = 100.0f;
+}
+
+// ---- Boids: Cohesion ----
+
+FVector ACrowdSimulationManager::ComputeCohesion(int32 AgentIndex) const
+{
+    if (!Agents.IsValidIndex(AgentIndex)) return FVector::ZeroVector;
+
+    const FCrowd_AgentData& Self = Agents[AgentIndex];
+    FVector Center = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (int32 i = 0; i < Agents.Num(); i++)
+    {
+        if (i == AgentIndex) continue;
+        float Dist = FVector::Dist(Self.Location, Agents[i].Location);
+        if (Dist < HerdConfig.CohesionRadius)
+        {
+            Center += Agents[i].Location;
+            Count++;
+        }
+    }
+
+    if (Count == 0) return FVector::ZeroVector;
+    Center /= (float)Count;
+    return (Center - Self.Location).GetSafeNormal() * 100.0f;
+}
+
+// ---- Boids: Separation ----
+
+FVector ACrowdSimulationManager::ComputeSeparation(int32 AgentIndex) const
+{
+    if (!Agents.IsValidIndex(AgentIndex)) return FVector::ZeroVector;
+
+    const FCrowd_AgentData& Self = Agents[AgentIndex];
+    FVector Repulsion = FVector::ZeroVector;
+
+    for (int32 i = 0; i < Agents.Num(); i++)
+    {
+        if (i == AgentIndex) continue;
+        float Dist = FVector::Dist(Self.Location, Agents[i].Location);
+        if (Dist < HerdConfig.SeparationRadius && Dist > 0.0f)
+        {
+            FVector Away = (Self.Location - Agents[i].Location).GetSafeNormal();
+            Repulsion += Away * (HerdConfig.SeparationRadius - Dist);
+        }
+    }
+
+    return Repulsion;
+}
+
+// ---- Boids: Alignment ----
+
+FVector ACrowdSimulationManager::ComputeAlignment(int32 AgentIndex) const
+{
+    if (!Agents.IsValidIndex(AgentIndex)) return FVector::ZeroVector;
+
+    const FCrowd_AgentData& Self = Agents[AgentIndex];
+    FVector AvgVelocity = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (int32 i = 0; i < Agents.Num(); i++)
+    {
+        if (i == AgentIndex) continue;
+        float Dist = FVector::Dist(Self.Location, Agents[i].Location);
+        if (Dist < HerdConfig.AlignmentRadius)
+        {
+            AvgVelocity += Agents[i].Velocity;
+            Count++;
+        }
+    }
+
+    if (Count == 0) return FVector::ZeroVector;
+    AvgVelocity /= (float)Count;
+    return (AvgVelocity - Self.Velocity).GetSafeNormal() * 50.0f;
+}
+
+// ---- LOD ----
+
+void ACrowdSimulationManager::SetLODLevel(int32 Level)
+{
+    CurrentLODLevel = FMath::Clamp(Level, 0, 2);
+    switch (CurrentLODLevel)
+    {
+    case 0: // Full simulation
+        SimulationTickRate = 0.05f;
+        bEnableFlocking = true;
+        break;
+    case 1: // Mid LOD — reduce tick rate
+        SimulationTickRate = 0.1f;
+        bEnableFlocking = true;
+        break;
+    case 2: // Far LOD — minimal simulation
+        SimulationTickRate = 0.25f;
+        bEnableFlocking = false;
+        break;
+    }
+    PrimaryActorTick.TickInterval = SimulationTickRate;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: LOD level set to %d (tick %.2fs)"), CurrentLODLevel, SimulationTickRate);
+}
+
+// ---- Utility ----
+
+int32 ACrowdSimulationManager::GetActiveAgentCount() const
+{
+    return Agents.Num();
+}
+
+void ACrowdSimulationManager::ClearAllAgents()
+{
+    Agents.Empty();
+    NextAgentID = 0;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: All agents cleared"));
+}
+
+FVector ACrowdSimulationManager::ClampVelocity(const FVector& Vel, float MaxSpeed) const
+{
+    float Len = Vel.Size();
+    if (Len > MaxSpeed)
+    {
+        return Vel.GetSafeNormal() * MaxSpeed;
+    }
+    return Vel;
+}
+
+void ACrowdSimulationManager::SpawnAgentMesh(const FCrowd_AgentData& Agent)
+{
+    // Placeholder — in full implementation, spawn instanced static mesh
+    // or use Mass Entity for large-scale simulation
+    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulationManager: SpawnAgentMesh for ID %d at %s"),
+        Agent.AgentID, *Agent.Location.ToString());
 }
