@@ -1,136 +1,197 @@
-// DinosaurAIController.h — Core Systems Programmer #03 — Cycle 009
-// Prehistoric survival game: AI controller for all dinosaur pawns.
-// Drives navigation, perception, and biome-aware roaming via UE5 AIModule.
+// DinosaurAIController.h
+// Core Systems Programmer #03 — Transpersonal Game Studio
+// AI Controller for all dinosaur species. Drives the EDinosaurBehavior state machine
+// defined in DinosaurBase via Behavior Trees + EQS queries.
+// Depends on: DinosaurBase.h, AIController (Engine)
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AIController.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "DinosaurBase.h"
 #include "DinosaurAIController.generated.h"
 
-// Forward declarations
-class UNavigationSystemV1;
-class UAIPerceptionComponent;
-class UAISenseConfig_Sight;
-class UAISenseConfig_Hearing;
+// ─── Blackboard Key Names ────────────────────────────────────────────────────
+// These string literals must match the BB_DinosaurBase Blackboard asset keys.
+
+/** Blackboard key: target actor (player or prey) */
+#define BB_KEY_TARGET_ACTOR      TEXT("TargetActor")
+/** Blackboard key: patrol destination vector */
+#define BB_KEY_PATROL_DEST       TEXT("PatrolDestination")
+/** Blackboard key: home/territory center vector */
+#define BB_KEY_HOME_LOCATION     TEXT("HomeLocation")
+/** Blackboard key: current behavior state (int32 cast of EDinosaurBehavior) */
+#define BB_KEY_BEHAVIOR_STATE    TEXT("BehaviorState")
+/** Blackboard key: is target visible (bool) */
+#define BB_KEY_TARGET_VISIBLE    TEXT("bTargetVisible")
+/** Blackboard key: stamina value (float) */
+#define BB_KEY_STAMINA           TEXT("Stamina")
+
+// ─── Forward Declarations ────────────────────────────────────────────────────
+class ADinosaurBase;
+class UBehaviorTreeComponent;
 
 /**
- * ADinosaurAIController — AI Controller for all dinosaur pawns.
+ * ADinosaurAIController
  *
- * Responsibilities:
- * - Biome-aware roaming: picks patrol points within suitable biome zones
- * - Threat detection: uses UAIPerceptionComponent (sight + hearing)
- * - State-driven navigation: moves pawn based on ADinosaurBase::CurrentState
- * - Attack execution: moves into melee range and triggers ApplyMeleeDamage()
+ * Drives all dinosaur species via a shared Behavior Tree (BT_DinosaurBase).
+ * Perception events from UAIPerceptionComponent update the Blackboard, which
+ * in turn drives BT task selection (patrol, chase, attack, flee, return).
  *
- * Usage: Set as AIControllerClass on any ADinosaurBase Blueprint subclass.
+ * Species-specific overrides are handled by subclassing this controller
+ * (e.g., ATRexAIController, ARaptorAIController) and overriding
+ * SelectPatrolDestination() or AdjustCombatBehavior().
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(ClassGroup = "DinosaurAI", meta = (DisplayName = "Dinosaur AI Controller"))
 class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
 {
     GENERATED_BODY()
 
 public:
-    ADinosaurAIController();
+    ADinosaurAIController(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────────
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // ─── AAIController Overrides ─────────────────────────────────────────────
+
     virtual void OnPossess(APawn* InPawn) override;
     virtual void OnUnPossess() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // ── Navigation ─────────────────────────────────────────────────────────────
+    // ─── Behavior Tree ───────────────────────────────────────────────────────
 
-    /** Pick a random reachable point within RoamRadius and move toward it. */
-    UFUNCTION(BlueprintCallable, Category = "DinoAI|Navigation")
-    void StartRoaming();
+    /** The shared Behavior Tree asset for all dinosaurs. Set per-species in BP. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|BehaviorTree")
+    UBehaviorTree* DinosaurBehaviorTree;
 
-    /** Move directly toward the current threat target. */
-    UFUNCTION(BlueprintCallable, Category = "DinoAI|Navigation")
-    void MoveToTarget(AActor* Target);
+    /** Starts the Behavior Tree on the possessed pawn. */
+    UFUNCTION(BlueprintCallable, Category = "AI|BehaviorTree")
+    void StartBehaviorTree();
 
-    /** Move away from the threat (flee behavior). */
-    UFUNCTION(BlueprintCallable, Category = "DinoAI|Navigation")
-    void FleeFromTarget(AActor* Threat);
+    /** Stops the Behavior Tree and clears the Blackboard. */
+    UFUNCTION(BlueprintCallable, Category = "AI|BehaviorTree")
+    void StopBehaviorTree();
 
-    /** Stop all movement immediately. */
-    UFUNCTION(BlueprintCallable, Category = "DinoAI|Navigation")
-    void StopMovement();
+    // ─── Blackboard Interface ────────────────────────────────────────────────
 
-    // ── Perception ─────────────────────────────────────────────────────────────
+    /** Sets the current behavior state on the Blackboard. */
+    UFUNCTION(BlueprintCallable, Category = "AI|Blackboard")
+    void SetBehaviorState(EDinosaurBehavior NewState);
 
-    /** Called when AI perception detects/loses an actor. */
+    /** Gets the current behavior state from the Blackboard. */
+    UFUNCTION(BlueprintPure, Category = "AI|Blackboard")
+    EDinosaurBehavior GetBehaviorState() const;
+
+    /** Sets the target actor (player/prey) on the Blackboard. */
+    UFUNCTION(BlueprintCallable, Category = "AI|Blackboard")
+    void SetTargetActor(AActor* Target);
+
+    /** Gets the current target actor from the Blackboard. */
+    UFUNCTION(BlueprintPure, Category = "AI|Blackboard")
+    AActor* GetTargetActor() const;
+
+    /** Sets the patrol destination on the Blackboard. */
+    UFUNCTION(BlueprintCallable, Category = "AI|Blackboard")
+    void SetPatrolDestination(FVector Destination);
+
+    // ─── Perception ──────────────────────────────────────────────────────────
+
+    /** Called when the AI perceives actors (sight/hearing). */
     UFUNCTION()
-    void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
-    // ── State Queries ──────────────────────────────────────────────────────────
+    /** Returns true if the given actor is currently seen. */
+    UFUNCTION(BlueprintPure, Category = "AI|Perception")
+    bool CanSeeActor(AActor* Actor) const;
 
-    UFUNCTION(BlueprintPure, Category = "DinoAI|State")
-    bool HasReachedDestination() const;
+    // ─── Navigation ──────────────────────────────────────────────────────────
 
-    UFUNCTION(BlueprintPure, Category = "DinoAI|State")
-    AActor* GetCurrentTarget() const { return CurrentThreat; }
+    /**
+     * Selects a random patrol destination within PatrolRadius of the territory center.
+     * Subclasses can override to implement species-specific patrol patterns.
+     */
+    UFUNCTION(BlueprintNativeEvent, Category = "AI|Navigation")
+    FVector SelectPatrolDestination();
+    virtual FVector SelectPatrolDestination_Implementation();
 
-    UFUNCTION(BlueprintPure, Category = "DinoAI|State")
-    bool IsInAttackRange() const;
+    /** Moves the pawn toward a target location using the NavMesh. */
+    UFUNCTION(BlueprintCallable, Category = "AI|Navigation")
+    void MoveToLocation_Safe(FVector TargetLocation, float AcceptanceRadius = 100.0f);
 
-    // ── Config ─────────────────────────────────────────────────────────────────
+    /** Moves the pawn toward a target actor using the NavMesh. */
+    UFUNCTION(BlueprintCallable, Category = "AI|Navigation")
+    void MoveToActor_Safe(AActor* TargetActor, float AcceptanceRadius = 200.0f);
 
-    /** Radius within which the dino will pick roam destinations. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinoAI|Config")
-    float RoamRadius = 2000.f;
+    // ─── Combat ──────────────────────────────────────────────────────────────
 
-    /** How long (seconds) to wait at a roam destination before picking a new one. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinoAI|Config")
-    float RoamWaitTime = 3.0f;
+    /**
+     * Called when the pawn should engage in combat.
+     * Subclasses override to implement species-specific attack patterns.
+     */
+    UFUNCTION(BlueprintNativeEvent, Category = "AI|Combat")
+    void AdjustCombatBehavior();
+    virtual void AdjustCombatBehavior_Implementation();
 
-    /** Minimum distance to consider "arrived" at a roam point. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinoAI|Config")
-    float AcceptanceRadius = 150.f;
+    /** Returns true if the target is within melee attack range. */
+    UFUNCTION(BlueprintPure, Category = "AI|Combat")
+    bool IsTargetInAttackRange() const;
 
-    /** How often (seconds) the AI re-evaluates its state. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DinoAI|Config")
-    float AITickInterval = 0.5f;
+    // ─── State Machine ───────────────────────────────────────────────────────
+
+    /** Transitions the dinosaur to a new behavior state. Updates BB + DinosaurBase. */
+    UFUNCTION(BlueprintCallable, Category = "AI|StateMachine")
+    void TransitionToState(EDinosaurBehavior NewState);
+
+    /** Evaluates current conditions and selects the appropriate state. */
+    UFUNCTION(BlueprintCallable, Category = "AI|StateMachine")
+    void EvaluateState();
 
 protected:
-    // ── Components ─────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAIPerceptionComponent* PerceptionComp;
+    // ─── Internal References ─────────────────────────────────────────────────
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAISenseConfig_Sight* SightConfig;
+    /** Cached reference to the possessed DinosaurBase pawn. */
+    UPROPERTY(BlueprintReadOnly, Category = "AI|Internal",
+              meta = (AllowPrivateAccess = "true"))
+    ADinosaurBase* ControlledDinosaur;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|Components",
-        meta = (AllowPrivateAccess = "true"))
-    UAISenseConfig_Hearing* HearingConfig;
+    /** BehaviorTree runtime component. */
+    UPROPERTY(BlueprintReadOnly, Category = "AI|Internal",
+              meta = (AllowPrivateAccess = "true"))
+    UBehaviorTreeComponent* BehaviorTreeComp;
 
-    // ── Internal State ─────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|State",
-        meta = (AllowPrivateAccess = "true"))
-    AActor* CurrentThreat = nullptr;
+    // ─── Configuration ───────────────────────────────────────────────────────
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|State",
-        meta = (AllowPrivateAccess = "true"))
-    FVector CurrentRoamDestination = FVector::ZeroVector;
+    /** Radius around territory center for patrol waypoints. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Config")
+    float PatrolRadius;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|State",
-        meta = (AllowPrivateAccess = "true"))
-    float RoamWaitTimer = 0.f;
+    /** Distance from territory center that triggers a Return-to-Home state. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Config")
+    float MaxRoamDistance;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|State",
-        meta = (AllowPrivateAccess = "true"))
-    float AITickTimer = 0.f;
+    /** Minimum stamina (0-100) required to initiate a chase. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Config")
+    float MinStaminaToChase;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DinoAI|State",
-        meta = (AllowPrivateAccess = "true"))
-    bool bIsWaitingAtDestination = false;
+    /** Stamina threshold below which the dinosaur flees combat. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Config")
+    float FleeStaminaThreshold;
 
-    // ── Internal Helpers ───────────────────────────────────────────────────────
-    ADinosaurBase* GetDinoPawn() const;
-    void EvaluateAndExecuteState(float DeltaTime);
-    FVector PickRoamDestination() const;
-    void SetupPerceptionSystem();
+    /** How often (seconds) EvaluateState() is called from Tick. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Config")
+    float StateEvaluationInterval;
+
+private:
+    /** Accumulator for StateEvaluationInterval. */
+    float StateEvalTimer;
+
+    /** Last known location of the target (used when target is lost). */
+    FVector LastKnownTargetLocation;
+
+    /** Whether the controller has a valid BT running. */
+    bool bBehaviorTreeRunning;
 };
