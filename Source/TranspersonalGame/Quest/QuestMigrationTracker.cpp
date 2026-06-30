@@ -1,301 +1,248 @@
+// QuestMigrationTracker.cpp
+// Agent #14 — Quest & Mission Designer
+// Migration quest: follow the herd to the river crossing before dry season
+
 #include "QuestMigrationTracker.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 
-// ============================================================
-// Constructor
-// ============================================================
-AQuest_MigrationTracker::AQuest_MigrationTracker()
+UQuestMigrationTracker::UQuestMigrationTracker()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10Hz — sufficient for quest logic
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.5f; // 2Hz update
 
-    // Default waypoints matching the crowd markers placed in MinPlayableMap
-    // CrowdMigration_Path_01 → 02 → 03 → 04 → WaterSource
-    FQuest_MigrationWaypoint WP0;
-    WP0.WorldLocation = FVector(-5000.0f, -3000.0f, 100.0f);
-    WP0.WaypointLabel = TEXT("Herd Gathering Point");
-    WP0.AcceptanceRadius = 600.0f;
-    MigrationWaypoints.Add(WP0);
-
-    FQuest_MigrationWaypoint WP1;
-    WP1.WorldLocation = FVector(-2000.0f, -1000.0f, 100.0f);
-    WP1.WaypointLabel = TEXT("River Crossing");
-    WP1.AcceptanceRadius = 500.0f;
-    WP1.bTriggerStampedeOnArrive = true;
-    MigrationWaypoints.Add(WP1);
-
-    FQuest_MigrationWaypoint WP2;
-    WP2.WorldLocation = FVector(1000.0f, 2000.0f, 100.0f);
-    WP2.WaypointLabel = TEXT("Open Plains");
-    WP2.AcceptanceRadius = 500.0f;
-    MigrationWaypoints.Add(WP2);
-
-    FQuest_MigrationWaypoint WP3;
-    WP3.WorldLocation = FVector(4000.0f, 4000.0f, 100.0f);
-    WP3.WaypointLabel = TEXT("Water Source");
-    WP3.AcceptanceRadius = 700.0f;
-    WP3.bIsWaterSource = true;
-    MigrationWaypoints.Add(WP3);
+    CurrentPhase = EQuest_MigrationPhase::NotStarted;
+    FailReason = EQuest_MigrationFailReason::None;
+    bQuestActive = false;
+    bQuestCompleted = false;
+    GlobalPanicLevel = 0.0f;
+    TimeRemainingSeconds = 600.0f; // 10 minutes default
+    QuestTimeLimit = 600.0f;
+    HerdLeaderLocation = FVector::ZeroVector;
+    MaxDistanceFromHerd = 2500.0f;
+    WaterSourceLocation = FVector(8000.0f, 3000.0f, 50.0f);
+    StampedeZoneRadius = 1500.0f;
+    WaypointReachRadius = 400.0f;
+    CurrentWaypointIndex = 0;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-void AQuest_MigrationTracker::BeginPlay()
+void UQuestMigrationTracker::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Ready. %d waypoints defined."), MigrationWaypoints.Num());
+    SetupDefaultWaypoints();
 }
 
-// ============================================================
-// Tick
-// ============================================================
-void AQuest_MigrationTracker::Tick(float DeltaTime)
+void UQuestMigrationTracker::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!bQuestActive) return;
+    if (!bQuestActive || bQuestCompleted)
+        return;
 
-    UpdateWaypointProgress(DeltaTime);
-    UpdateStampedePhase(DeltaTime);
-    CheckTimeLimit(DeltaTime);
+    UpdateQuestTimer(DeltaTime);
+    UpdatePhaseLogic(DeltaTime);
 }
 
-// ============================================================
-// StartMigrationQuest
-// ============================================================
-void AQuest_MigrationTracker::StartMigrationQuest()
+void UQuestMigrationTracker::SetupDefaultWaypoints()
+{
+    Waypoints.Empty();
+
+    // Waypoint 0 — Herd gathering point
+    FQuest_MigrationWaypoint WP0;
+    WP0.WorldLocation = FVector(3000.0f, 1500.0f, 100.0f);
+    WP0.WaypointLabel = TEXT("Locate the Herd");
+    WP0.bIsStampedeZone = false;
+    WP0.bIsWaterSource = false;
+    WP0.RequiredPhase = EQuest_MigrationPhase::LocateHerd;
+    WP0.DangerRadius = 0.0f;
+    Waypoints.Add(WP0);
+
+    // Waypoint 1 — Migration column start
+    FQuest_MigrationWaypoint WP1;
+    WP1.WorldLocation = FVector(1000.0f, 800.0f, 100.0f);
+    WP1.WaypointLabel = TEXT("Join the Migration");
+    WP1.bIsStampedeZone = false;
+    WP1.bIsWaterSource = false;
+    WP1.RequiredPhase = EQuest_MigrationPhase::FollowHerd;
+    WP1.DangerRadius = 0.0f;
+    Waypoints.Add(WP1);
+
+    // Waypoint 2 — Narrow canyon (stampede risk)
+    FQuest_MigrationWaypoint WP2;
+    WP2.WorldLocation = FVector(4500.0f, 2200.0f, 100.0f);
+    WP2.WaypointLabel = TEXT("Cross the Canyon");
+    WP2.bIsStampedeZone = true;
+    WP2.bIsWaterSource = false;
+    WP2.RequiredPhase = EQuest_MigrationPhase::SurviveStampede;
+    WP2.DangerRadius = StampedeZoneRadius;
+    Waypoints.Add(WP2);
+
+    // Waypoint 3 — River crossing / water source
+    FQuest_MigrationWaypoint WP3;
+    WP3.WorldLocation = WaterSourceLocation;
+    WP3.WaypointLabel = TEXT("Reach the River");
+    WP3.bIsStampedeZone = false;
+    WP3.bIsWaterSource = true;
+    WP3.RequiredPhase = EQuest_MigrationPhase::ReachWaterSource;
+    WP3.DangerRadius = 0.0f;
+    Waypoints.Add(WP3);
+}
+
+void UQuestMigrationTracker::StartMigrationQuest()
 {
     if (bQuestActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestMigrationTracker: Quest already active."));
         return;
-    }
-
-    MigrationState = FQuest_MigrationState();
-    MigrationState.TimeLimit = 600.0f;
-    MigrationState.CurrentWaypointIndex = 0;
 
     bQuestActive = true;
-    SetPhase(EQuest_MigrationPhase::LocateHerd);
+    bQuestCompleted = false;
+    CurrentPhase = EQuest_MigrationPhase::LocateHerd;
+    FailReason = EQuest_MigrationFailReason::None;
+    TimeRemainingSeconds = QuestTimeLimit;
+    CurrentWaypointIndex = 0;
+    GlobalPanicLevel = 0.0f;
 
-    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Migration quest STARTED. Objective: %s"),
-        MigrationWaypoints.Num() > 0 ? *MigrationWaypoints[0].WaypointLabel : TEXT("Unknown"));
+    OnQuestPhaseChanged.Broadcast(CurrentPhase);
+    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Migration quest STARTED"));
 }
 
-// ============================================================
-// UpdateWaypointProgress
-// ============================================================
-void AQuest_MigrationTracker::UpdateWaypointProgress(float DeltaTime)
+void UQuestMigrationTracker::UpdateQuestTimer(float DeltaTime)
 {
-    if (MigrationState.CurrentPhase == EQuest_MigrationPhase::SurviveStampede) return;
-    if (MigrationState.CurrentPhase == EQuest_MigrationPhase::Completed) return;
-    if (MigrationState.CurrentPhase == EQuest_MigrationPhase::Failed) return;
-
-    if (MigrationState.CurrentWaypointIndex >= MigrationWaypoints.Num()) return;
-
-    // Get player location
-    APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    FVector PlayerLoc = PlayerPawn->GetActorLocation();
-    FQuest_MigrationWaypoint& CurrentWP = MigrationWaypoints[MigrationState.CurrentWaypointIndex];
-
-    float Dist = FVector::Dist(PlayerLoc, CurrentWP.WorldLocation);
-    MigrationState.DistanceToNextWaypoint = Dist;
-
-    // Phase: LocateHerd → FollowHerd when player is near first waypoint
-    if (MigrationState.CurrentPhase == EQuest_MigrationPhase::LocateHerd)
+    if (TimeRemainingSeconds <= 0.0f)
     {
-        if (Dist <= CurrentWP.AcceptanceRadius * 2.0f)
+        FailQuest(EQuest_MigrationFailReason::TimeExpired);
+        return;
+    }
+    TimeRemainingSeconds -= DeltaTime;
+}
+
+void UQuestMigrationTracker::UpdatePhaseLogic(float DeltaTime)
+{
+    if (Waypoints.Num() == 0 || CurrentWaypointIndex >= Waypoints.Num())
+        return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner)
+        return;
+
+    FVector PlayerLoc = Owner->GetActorLocation();
+    FQuest_MigrationWaypoint& CurrentWP = Waypoints[CurrentWaypointIndex];
+
+    float DistToWaypoint = FVector::Dist(PlayerLoc, CurrentWP.WorldLocation);
+
+    // Check stampede zone danger
+    if (CurrentWP.bIsStampedeZone && CurrentPhase == EQuest_MigrationPhase::SurviveStampede)
+    {
+        float PanicAtPlayer = GetPanicLevelAtLocation(PlayerLoc);
+        if (PanicAtPlayer > 0.85f)
         {
-            SetPhase(EQuest_MigrationPhase::FollowHerd);
+            // High panic = trample risk
+            OnStampedeWarning.Broadcast(PanicAtPlayer);
         }
     }
 
-    // Check if player reached current waypoint
-    if (Dist <= CurrentWP.AcceptanceRadius)
+    // Check herd distance (FollowHerd phase)
+    if (CurrentPhase == EQuest_MigrationPhase::FollowHerd)
     {
-        CurrentWP.bReached = true;
-        MigrationState.WaypointsReached++;
-
-        UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Waypoint reached — %s"), *CurrentWP.WaypointLabel);
-
-        // Trigger stampede if flagged
-        if (CurrentWP.bTriggerStampedeOnArrive && !MigrationState.bStampedeActive)
+        float DistToHerd = FVector::Dist(PlayerLoc, HerdLeaderLocation);
+        if (DistToHerd > MaxDistanceFromHerd && HerdLeaderLocation != FVector::ZeroVector)
         {
-            TriggerStampedeEvent();
-            return;
+            // Player fell too far behind — warn but don't fail immediately
+            OnHerdDistanceWarning.Broadcast(DistToHerd);
         }
+    }
 
-        // Water source = quest complete
-        if (CurrentWP.bIsWaterSource)
-        {
-            CompleteQuest();
-            return;
-        }
-
+    // Waypoint reached?
+    if (DistToWaypoint <= WaypointReachRadius)
+    {
         AdvanceToNextWaypoint();
     }
 }
 
-// ============================================================
-// AdvanceToNextWaypoint
-// ============================================================
-void AQuest_MigrationTracker::AdvanceToNextWaypoint()
+void UQuestMigrationTracker::AdvanceToNextWaypoint()
 {
-    MigrationState.CurrentWaypointIndex++;
+    CurrentWaypointIndex++;
 
-    if (MigrationState.CurrentWaypointIndex >= MigrationWaypoints.Num())
+    if (CurrentWaypointIndex >= Waypoints.Num())
     {
+        // All waypoints reached — complete quest
         CompleteQuest();
         return;
     }
 
-    FQuest_MigrationWaypoint& Next = MigrationWaypoints[MigrationState.CurrentWaypointIndex];
-    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Next objective — %s"), *Next.WaypointLabel);
-}
-
-// ============================================================
-// TriggerStampedeEvent
-// ============================================================
-void AQuest_MigrationTracker::TriggerStampedeEvent()
-{
-    MigrationState.bStampedeActive = true;
-    StampedeElapsed = 0.0f;
-    SetPhase(EQuest_MigrationPhase::SurviveStampede);
-
-    OnStampedeTriggered.Broadcast();
-    UE_LOG(LogTemp, Warning, TEXT("QuestMigrationTracker: STAMPEDE TRIGGERED! Player must survive for %.1fs"), StampedeWarningTime);
-}
-
-// ============================================================
-// UpdateStampedePhase
-// ============================================================
-void AQuest_MigrationTracker::UpdateStampedePhase(float DeltaTime)
-{
-    if (!MigrationState.bStampedeActive) return;
-
-    StampedeElapsed += DeltaTime;
-
-    // Check if player is in danger zone
-    APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-    if (PC && PC->GetPawn())
+    // Advance phase
+    EQuest_MigrationPhase NextPhase = Waypoints[CurrentWaypointIndex].RequiredPhase;
+    if (NextPhase != CurrentPhase)
     {
-        FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
-        FVector StampedeOrigin = MigrationWaypoints[MigrationState.CurrentWaypointIndex].WorldLocation;
-        float DistFromStampede = FVector::Dist(PlayerLoc, StampedeOrigin);
+        CurrentPhase = NextPhase;
+        OnQuestPhaseChanged.Broadcast(CurrentPhase);
+        UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Phase advanced to %d"), (int32)CurrentPhase);
+    }
+}
 
-        if (DistFromStampede < StampedeDangerRadius)
+void UQuestMigrationTracker::CompleteQuest()
+{
+    bQuestActive = false;
+    bQuestCompleted = true;
+    CurrentPhase = EQuest_MigrationPhase::Completed;
+    OnQuestPhaseChanged.Broadcast(CurrentPhase);
+    OnQuestCompleted.Broadcast(true, FailReason);
+    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Migration quest COMPLETED"));
+}
+
+void UQuestMigrationTracker::FailQuest(EQuest_MigrationFailReason Reason)
+{
+    bQuestActive = false;
+    FailReason = Reason;
+    CurrentPhase = EQuest_MigrationPhase::Failed;
+    OnQuestPhaseChanged.Broadcast(CurrentPhase);
+    OnQuestCompleted.Broadcast(false, Reason);
+    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Migration quest FAILED — reason %d"), (int32)Reason);
+}
+
+float UQuestMigrationTracker::GetPanicLevelAtLocation(FVector Location) const
+{
+    // Combine global panic with proximity to stampede waypoints
+    float LocalPanic = GlobalPanicLevel;
+
+    for (const FQuest_MigrationWaypoint& WP : Waypoints)
+    {
+        if (!WP.bIsStampedeZone || WP.DangerRadius <= 0.0f)
+            continue;
+
+        float Dist = FVector::Dist(Location, WP.WorldLocation);
+        if (Dist < WP.DangerRadius)
         {
-            // Player is in danger — damage is applied by gameplay systems
-            UE_LOG(LogTemp, Warning, TEXT("QuestMigrationTracker: Player in stampede danger zone! Dist=%.0f"), DistFromStampede);
+            float ZonePanic = 1.0f - (Dist / WP.DangerRadius);
+            LocalPanic = FMath::Max(LocalPanic, ZonePanic);
         }
     }
 
-    // Stampede ends after warning time — player survived
-    if (StampedeElapsed >= StampedeWarningTime)
-    {
-        MigrationState.bStampedeActive = false;
-        UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Stampede survived! Continuing migration."));
-        SetPhase(EQuest_MigrationPhase::FollowHerd);
-        AdvanceToNextWaypoint();
-    }
+    return FMath::Clamp(LocalPanic, 0.0f, 1.0f);
 }
 
-// ============================================================
-// CheckTimeLimit
-// ============================================================
-void AQuest_MigrationTracker::CheckTimeLimit(float DeltaTime)
+void UQuestMigrationTracker::UpdateHerdLeaderLocation(FVector NewLocation)
 {
-    MigrationState.ElapsedTime += DeltaTime;
-
-    if (MigrationState.ElapsedTime >= MigrationState.TimeLimit)
-    {
-        FailQuest(EQuest_MigrationFailReason::TimeExpired);
-    }
+    HerdLeaderLocation = NewLocation;
 }
 
-// ============================================================
-// CompleteQuest
-// ============================================================
-void AQuest_MigrationTracker::CompleteQuest()
+void UQuestMigrationTracker::SetGlobalPanicLevel(float PanicLevel)
 {
-    bQuestActive = false;
-    SetPhase(EQuest_MigrationPhase::Completed);
-    OnQuestCompleted.Broadcast(MigrationState.ElapsedTime);
-
-    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: QUEST COMPLETE! Time: %.1fs, Waypoints: %d/%d"),
-        MigrationState.ElapsedTime,
-        MigrationState.WaypointsReached,
-        MigrationWaypoints.Num());
+    GlobalPanicLevel = FMath::Clamp(PanicLevel, 0.0f, 1.0f);
 }
 
-// ============================================================
-// FailQuest
-// ============================================================
-void AQuest_MigrationTracker::FailQuest(EQuest_MigrationFailReason Reason)
+FQuest_MigrationWaypoint UQuestMigrationTracker::GetCurrentWaypoint() const
 {
-    bQuestActive = false;
-    MigrationState.FailReason = Reason;
-    SetPhase(EQuest_MigrationPhase::Failed);
+    if (CurrentWaypointIndex < Waypoints.Num())
+        return Waypoints[CurrentWaypointIndex];
 
-    UE_LOG(LogTemp, Warning, TEXT("QuestMigrationTracker: QUEST FAILED — Reason: %d"), (int32)Reason);
-}
-
-// ============================================================
-// GetCurrentWaypoint
-// ============================================================
-FQuest_MigrationWaypoint AQuest_MigrationTracker::GetCurrentWaypoint() const
-{
-    if (MigrationState.CurrentWaypointIndex < MigrationWaypoints.Num())
-    {
-        return MigrationWaypoints[MigrationState.CurrentWaypointIndex];
-    }
     return FQuest_MigrationWaypoint();
 }
 
-// ============================================================
-// GetProgressPercent
-// ============================================================
-float AQuest_MigrationTracker::GetProgressPercent() const
+float UQuestMigrationTracker::GetProgressPercent() const
 {
-    if (MigrationWaypoints.Num() == 0) return 0.0f;
-    return (float)MigrationState.WaypointsReached / (float)MigrationWaypoints.Num();
-}
+    if (Waypoints.Num() == 0)
+        return 0.0f;
 
-// ============================================================
-// IsPlayerNearHerd
-// ============================================================
-bool AQuest_MigrationTracker::IsPlayerNearHerd(const FVector& PlayerLocation) const
-{
-    if (MigrationState.CurrentWaypointIndex >= MigrationWaypoints.Num()) return false;
-
-    const FQuest_MigrationWaypoint& WP = MigrationWaypoints[MigrationState.CurrentWaypointIndex];
-    float Dist = FVector::Dist(PlayerLocation, WP.WorldLocation);
-    return Dist <= HerdProximityRadius;
-}
-
-// ============================================================
-// SetPhase
-// ============================================================
-void AQuest_MigrationTracker::SetPhase(EQuest_MigrationPhase NewPhase)
-{
-    MigrationState.CurrentPhase = NewPhase;
-    OnMigrationPhaseChanged.Broadcast(NewPhase);
-    UE_LOG(LogTemp, Log, TEXT("QuestMigrationTracker: Phase → %d"), (int32)NewPhase);
-}
-
-// ============================================================
-// DEBUG_StartQuestInEditor
-// ============================================================
-void AQuest_MigrationTracker::DEBUG_StartQuestInEditor()
-{
-    UE_LOG(LogTemp, Warning, TEXT("QuestMigrationTracker: DEBUG — Starting quest from editor."));
-    StartMigrationQuest();
+    return FMath::Clamp((float)CurrentWaypointIndex / (float)Waypoints.Num(), 0.0f, 1.0f);
 }
