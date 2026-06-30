@@ -1,37 +1,271 @@
 // AudioSystemManager.cpp
 // Audio Agent #16 — Transpersonal Game Studio
-// Adaptive audio: ambient layers, danger proximity, heartbeat, T-Rex screen shake
+// Adaptive audio system: danger-level music, ambient layers, NPC voice proximity triggers
 
 #include "AudioSystemManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
 #include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 // ============================================================
-// UAudio_ProximityComponent
+// UAudio_AmbientLayerComponent
 // ============================================================
 
-UAudio_ProximityComponent::UAudio_ProximityComponent()
+UAudio_AmbientLayerComponent::UAudio_AmbientLayerComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
+    DangerUpdateInterval = 1.0f;
+    bAudioInitialized  = false;
 }
 
-float UAudio_ProximityComponent::GetProximityVolume(float DistanceToPlayer) const
+void UAudio_AmbientLayerComponent::BeginPlay()
 {
-    if (DistanceToPlayer >= ProximityRadius)
+    Super::BeginPlay();
+
+    // Populate default ambient layers for each time-of-day
+    FAudio_AmbientLayer DawnLayer;
+    DawnLayer.LayerName      = FName("Dawn_Ambient");
+    DawnLayer.bActiveAtDawn  = true;
+    DawnLayer.bActiveAtDay   = false;
+    DawnLayer.bActiveAtDusk  = false;
+    DawnLayer.bActiveAtNight = false;
+    DawnLayer.BaseVolume     = 0.6f;
+    DawnLayer.FadeInTime     = 3.0f;
+    DawnLayer.FadeOutTime    = 2.0f;
+    AmbientLayers.Add(DawnLayer);
+
+    FAudio_AmbientLayer NightLayer;
+    NightLayer.LayerName      = FName("Night_Ambient");
+    NightLayer.bActiveAtDawn  = false;
+    NightLayer.bActiveAtDay   = false;
+    NightLayer.bActiveAtDusk  = false;
+    NightLayer.bActiveAtNight = true;
+    NightLayer.BaseVolume     = 0.8f;
+    NightLayer.FadeInTime     = 4.0f;
+    NightLayer.FadeOutTime    = 3.0f;
+    AmbientLayers.Add(NightLayer);
+
+    bAudioInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("AudioAmbientLayerComponent initialized with %d layers"), AmbientLayers.Num());
+}
+
+void UAudio_AmbientLayerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    // Tick-based danger update handled via timer in BeginPlay for performance
+}
+
+void UAudio_AmbientLayerComponent::SetDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    if (CurrentDangerLevel == NewLevel) return;
+    EAudio_DangerLevel OldLevel = CurrentDangerLevel;
+    CurrentDangerLevel = NewLevel;
+    OnDangerLevelChanged(OldLevel, NewLevel);
+    UE_LOG(LogTemp, Log, TEXT("Audio danger level: %d → %d"), (int32)OldLevel, (int32)NewLevel);
+}
+
+void UAudio_AmbientLayerComponent::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+{
+    if (CurrentTimeOfDay == NewTime) return;
+    CurrentTimeOfDay = NewTime;
+    UpdateAmbientLayers();
+    UE_LOG(LogTemp, Log, TEXT("Audio time of day changed to: %d"), (int32)NewTime);
+}
+
+void UAudio_AmbientLayerComponent::OnDangerLevelChanged(EAudio_DangerLevel OldLevel, EAudio_DangerLevel NewLevel)
+{
+    // Music intensity scales with danger level
+    // Safe=0.3, Aware=0.5, Threatened=0.75, Critical=1.0
+    const float VolumeMap[] = { 0.3f, 0.5f, 0.75f, 1.0f };
+    int32 Idx = FMath::Clamp((int32)NewLevel, 0, 3);
+    float TargetVolume = VolumeMap[Idx];
+
+    for (UAudioComponent* Comp : ActiveAudioComponents)
     {
-        return 0.0f;
+        if (IsValid(Comp))
+        {
+            Comp->SetVolumeMultiplier(TargetVolume);
+        }
     }
-    // Linear falloff from 1.0 at distance=0 to 0.0 at ProximityRadius
-    float Alpha = 1.0f - (DistanceToPlayer / ProximityRadius);
-    return FMath::Clamp(Alpha, 0.0f, 1.0f);
 }
 
-bool UAudio_ProximityComponent::IsPlayerInDangerZone(float DistanceToPlayer) const
+void UAudio_AmbientLayerComponent::UpdateAmbientLayers()
 {
-    return DistanceToPlayer <= HeartbeatThresholdDistance;
+    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
+    {
+        bool bShouldBeActive = false;
+        switch (CurrentTimeOfDay)
+        {
+            case EAudio_TimeOfDay::Dawn:  bShouldBeActive = Layer.bActiveAtDawn;  break;
+            case EAudio_TimeOfDay::Day:   bShouldBeActive = Layer.bActiveAtDay;   break;
+            case EAudio_TimeOfDay::Dusk:  bShouldBeActive = Layer.bActiveAtDusk;  break;
+            case EAudio_TimeOfDay::Night: bShouldBeActive = Layer.bActiveAtNight; break;
+        }
+        UE_LOG(LogTemp, Verbose, TEXT("Layer %s active=%d"), *Layer.LayerName.ToString(), bShouldBeActive);
+    }
+}
+
+// ============================================================
+// AAudio_ProximityVoiceTrigger
+// ============================================================
+
+AAudio_ProximityVoiceTrigger::AAudio_ProximityVoiceTrigger()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    ProximitySphere = CreateDefaultSubobject<USphereComponent>(TEXT("ProximitySphere"));
+    RootComponent   = ProximitySphere;
+    ProximitySphere->InitSphereRadius(400.0f);
+    ProximitySphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+
+    VoiceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VoiceAudioComponent"));
+    VoiceAudioComponent->SetupAttachment(RootComponent);
+    VoiceAudioComponent->bAutoActivate = false;
+
+    TriggerRadius       = 400.0f;
+    bHasTriggered       = false;
+    bRepeatTrigger      = false;
+    RepeatCooldown      = 30.0f;
+    LastTriggerTime     = -9999.0f;
+    SpeakerName         = FName("Unknown");
+}
+
+void AAudio_ProximityVoiceTrigger::BeginPlay()
+{
+    Super::BeginPlay();
+    ProximitySphere->SetSphereRadius(TriggerRadius);
+    ProximitySphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ProximityVoiceTrigger::OnPlayerEnterRadius);
+    UE_LOG(LogTemp, Log, TEXT("ProximityVoiceTrigger '%s' ready — radius=%.0f, line=%s"),
+        *SpeakerName.ToString(), TriggerRadius, *VoiceLineID.ToString());
+}
+
+void AAudio_ProximityVoiceTrigger::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+}
+
+void AAudio_ProximityVoiceTrigger::OnPlayerEnterRadius(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    if (!IsValid(OtherActor)) return;
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    float Now = GetWorld()->GetTimeSeconds();
+    bool bCooldownPassed = (Now - LastTriggerTime) > RepeatCooldown;
+
+    if (!bHasTriggered || (bRepeatTrigger && bCooldownPassed))
+    {
+        PlayVoiceLine();
+        bHasTriggered   = true;
+        LastTriggerTime = Now;
+        UE_LOG(LogTemp, Log, TEXT("ProximityVoiceTrigger fired: speaker=%s, line=%s"),
+            *SpeakerName.ToString(), *VoiceLineID.ToString());
+    }
+}
+
+void AAudio_ProximityVoiceTrigger::PlayVoiceLine()
+{
+    if (IsValid(VoiceAudioComponent) && VoiceAudioComponent->Sound)
+    {
+        VoiceAudioComponent->Play();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ProximityVoiceTrigger: no sound asset assigned for line %s — URL=%s"),
+            *VoiceLineID.ToString(), *VoiceLineURL);
+    }
+}
+
+// ============================================================
+// AAudio_DangerZoneActor
+// ============================================================
+
+AAudio_DangerZoneActor::AAudio_DangerZoneActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    DangerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DangerSphere"));
+    RootComponent = DangerSphere;
+    DangerSphere->InitSphereRadius(800.0f);
+    DangerSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+
+    DangerLevel       = EAudio_DangerLevel::Aware;
+    DangerRadius      = 800.0f;
+    bDynamicRadius    = false;
+    bPlayerInside     = false;
+}
+
+void AAudio_DangerZoneActor::BeginPlay()
+{
+    Super::BeginPlay();
+    DangerSphere->SetSphereRadius(DangerRadius);
+    DangerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_DangerZoneActor::OnPlayerEnter);
+    DangerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_DangerZoneActor::OnPlayerExit);
+    UE_LOG(LogTemp, Log, TEXT("DangerZoneActor '%s' ready — level=%d, radius=%.0f"),
+        *GetName(), (int32)DangerLevel, DangerRadius);
+}
+
+void AAudio_DangerZoneActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    if (bDynamicRadius)
+    {
+        // Dynamic radius can be driven externally (e.g., by DinosaurAI)
+        DangerSphere->SetSphereRadius(DangerRadius);
+    }
+}
+
+void AAudio_DangerZoneActor::OnPlayerEnter(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    if (!IsValid(OtherActor)) return;
+    if (!Cast<ACharacter>(OtherActor)) return;
+
+    bPlayerInside = true;
+    NotifyAudioSystem(DangerLevel);
+    UE_LOG(LogTemp, Log, TEXT("Player entered danger zone '%s' — level=%d"), *GetName(), (int32)DangerLevel);
+}
+
+void AAudio_DangerZoneActor::OnPlayerExit(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex)
+{
+    if (!IsValid(OtherActor)) return;
+    if (!Cast<ACharacter>(OtherActor)) return;
+
+    bPlayerInside = false;
+    NotifyAudioSystem(EAudio_DangerLevel::Safe);
+    UE_LOG(LogTemp, Log, TEXT("Player exited danger zone '%s' — reverting to Safe"), *GetName());
+}
+
+void AAudio_DangerZoneActor::NotifyAudioSystem(EAudio_DangerLevel NewLevel)
+{
+    // Find the ambient layer component on the player character and update it
+    ACharacter* Player = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    if (!IsValid(Player)) return;
+
+    UAudio_AmbientLayerComponent* AudioComp = Player->FindComponentByClass<UAudio_AmbientLayerComponent>();
+    if (IsValid(AudioComp))
+    {
+        AudioComp->SetDangerLevel(NewLevel);
+    }
 }
 
 // ============================================================
@@ -41,283 +275,79 @@ bool UAudio_ProximityComponent::IsPlayerInDangerZone(float DistanceToPlayer) con
 AAudio_SystemManager::AAudio_SystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.05f; // 20fps tick for audio — sufficient
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetupAttachment(GetRootComponent());
-
-    DangerAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DangerAudio"));
-    DangerAudioComponent->bAutoActivate = false;
-    DangerAudioComponent->SetupAttachment(GetRootComponent());
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
+    DayNightCycleDuration = 600.0f; // 10 minutes per full cycle
+    ElapsedDayTime     = 0.0f;
+    bDayNightCycleActive = true;
 }
 
 void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Cache player pawn reference
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PC)
-    {
-        CachedPlayerPawn = PC->GetPawn();
-    }
-
-    CurrentDangerLevel = EAudio_DangerLevel::Safe;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Day;
-    HeartbeatTimer = 0.0f;
-    CurrentHeartbeatInterval = HeartbeatMaxInterval;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Initialized — ambient layers: %d"), AmbientLayers.Num());
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager online — day cycle=%.0fs, danger=%d"),
+        DayNightCycleDuration, (int32)CurrentDangerLevel);
 }
 
 void AAudio_SystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    ScanForDanger(DeltaTime);
-    UpdateAmbientLayers(DeltaTime);
-    UpdateHeartbeat(DeltaTime);
-}
+    if (!bDayNightCycleActive) return;
 
-// ---- Danger Scanning ----
-
-void AAudio_SystemManager::ScanForDanger(float DeltaTime)
-{
-    DangerScanTimer += DeltaTime;
-    if (DangerScanTimer < DangerScanInterval)
+    ElapsedDayTime += DeltaTime;
+    if (ElapsedDayTime >= DayNightCycleDuration)
     {
-        return;
-    }
-    DangerScanTimer = 0.0f;
-
-    EAudio_DangerLevel EvaluatedLevel = EvaluateDangerFromZones();
-
-    if (EvaluatedLevel != CurrentDangerLevel)
-    {
-        SetDangerLevel(EvaluatedLevel);
+        ElapsedDayTime = 0.0f;
     }
 
-    // T-Rex screen shake check
-    float NearestDist = GetNearestDangerDistance();
-    if (NearestDist < TRexShakeRadius && CurrentDangerLevel >= EAudio_DangerLevel::Threatened)
+    // Map elapsed time to time-of-day enum
+    float Phase = ElapsedDayTime / DayNightCycleDuration;
+    EAudio_TimeOfDay NewTime;
+    if      (Phase < 0.1f)  NewTime = EAudio_TimeOfDay::Dawn;
+    else if (Phase < 0.5f)  NewTime = EAudio_TimeOfDay::Day;
+    else if (Phase < 0.6f)  NewTime = EAudio_TimeOfDay::Dusk;
+    else                    NewTime = EAudio_TimeOfDay::Night;
+
+    if (NewTime != CurrentTimeOfDay)
     {
-        ApplyTRexScreenShake();
+        CurrentTimeOfDay = NewTime;
+        BroadcastTimeOfDayChange(NewTime);
     }
 }
 
-EAudio_DangerLevel AAudio_SystemManager::EvaluateDangerFromZones() const
+void AAudio_SystemManager::SetGlobalDangerLevel(EAudio_DangerLevel NewLevel)
 {
-    if (!CachedPlayerPawn)
-    {
-        return EAudio_DangerLevel::Safe;
-    }
-
-    FVector PlayerLoc = CachedPlayerPawn->GetActorLocation();
-    EAudio_DangerLevel HighestLevel = EAudio_DangerLevel::Safe;
-
-    for (const FAudio_DangerZone& Zone : ActiveDangerZones)
-    {
-        float Dist = FVector::Dist(PlayerLoc, Zone.Location);
-        if (Dist <= Zone.Radius)
-        {
-            if (Zone.DangerLevel > HighestLevel)
-            {
-                HighestLevel = Zone.DangerLevel;
-            }
-        }
-    }
-
-    return HighestLevel;
-}
-
-float AAudio_SystemManager::GetNearestDangerDistance() const
-{
-    if (!CachedPlayerPawn || ActiveDangerZones.Num() == 0)
-    {
-        return TRexShakeRadius * 2.0f;
-    }
-
-    FVector PlayerLoc = CachedPlayerPawn->GetActorLocation();
-    float MinDist = TRexShakeRadius * 2.0f;
-
-    for (const FAudio_DangerZone& Zone : ActiveDangerZones)
-    {
-        float Dist = FVector::Dist(PlayerLoc, Zone.Location);
-        if (Dist < MinDist)
-        {
-            MinDist = Dist;
-        }
-    }
-
-    return MinDist;
-}
-
-// ---- Ambient Layers ----
-
-void AAudio_SystemManager::UpdateAmbientLayers(float DeltaTime)
-{
-    for (FAudio_AmbientLayer& Layer : AmbientLayers)
-    {
-        float TargetVolume = 0.0f;
-
-        // Active if time of day matches
-        if (Layer.ActiveTimeOfDay == CurrentTimeOfDay)
-        {
-            // Scale by danger: reduce ambient volume when danger is high
-            float DangerScale = 1.0f;
-            switch (CurrentDangerLevel)
-            {
-                case EAudio_DangerLevel::Aware:      DangerScale = 0.7f; break;
-                case EAudio_DangerLevel::Threatened: DangerScale = 0.4f; break;
-                case EAudio_DangerLevel::Critical:   DangerScale = 0.1f; break;
-                default:                             DangerScale = 1.0f; break;
-            }
-            TargetVolume = Layer.BaseVolume * DangerScale;
-        }
-
-        // Smooth crossfade
-        Layer.CurrentVolume = FMath::FInterpTo(Layer.CurrentVolume, TargetVolume, DeltaTime, AmbientCrossfadeSpeed);
-    }
-}
-
-// ---- Heartbeat ----
-
-void AAudio_SystemManager::UpdateHeartbeat(float DeltaTime)
-{
-    if (CurrentDangerLevel < EAudio_DangerLevel::Threatened)
-    {
-        return;
-    }
-
-    HeartbeatTimer += DeltaTime;
-
-    // Map danger level to heartbeat interval
-    float TargetInterval = HeartbeatMaxInterval;
-    switch (CurrentDangerLevel)
-    {
-        case EAudio_DangerLevel::Threatened:
-            TargetInterval = FMath::Lerp(HeartbeatMaxInterval, HeartbeatMinInterval, 0.5f);
-            break;
-        case EAudio_DangerLevel::Critical:
-            TargetInterval = HeartbeatMinInterval;
-            break;
-        default:
-            break;
-    }
-
-    CurrentHeartbeatInterval = FMath::FInterpTo(CurrentHeartbeatInterval, TargetInterval, DeltaTime, DangerTransitionSpeed);
-
-    if (HeartbeatTimer >= CurrentHeartbeatInterval)
-    {
-        HeartbeatTimer = 0.0f;
-        if (HeartbeatSound && CachedPlayerPawn)
-        {
-            UGameplayStatics::PlaySoundAtLocation(GetWorld(), HeartbeatSound, CachedPlayerPawn->GetActorLocation(), 1.0f);
-        }
-    }
-}
-
-// ---- Screen Shake ----
-
-void AAudio_SystemManager::ApplyTRexScreenShake()
-{
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC)
-    {
-        return;
-    }
-
-    float NearestDist = GetNearestDangerDistance();
-    float ShakeAlpha = 1.0f - FMath::Clamp(NearestDist / TRexShakeRadius, 0.0f, 1.0f);
-    float FinalIntensity = TRexShakeIntensity * ShakeAlpha;
-
-    if (FinalIntensity > 0.05f)
-    {
-        // Apply camera shake via console command (works without TSubclassOf reference)
-        FString Cmd = FString::Printf(TEXT("shake CameraShake_TRex %f"), FinalIntensity);
-        PC->ConsoleCommand(Cmd);
-    }
-}
-
-// ---- Public API ----
-
-void AAudio_SystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    if (NewLevel == CurrentDangerLevel)
-    {
-        return;
-    }
-
+    if (CurrentDangerLevel == NewLevel) return;
     CurrentDangerLevel = NewLevel;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Danger level changed to: %d"), (int32)NewLevel);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: global danger → %d"), (int32)NewLevel);
 }
 
-void AAudio_SystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
+void AAudio_SystemManager::RegisterVoiceLineURL(FName LineID, const FString& URL)
 {
-    if (NewTimeOfDay == CurrentTimeOfDay)
-    {
-        return;
-    }
-
-    CurrentTimeOfDay = NewTimeOfDay;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Time of day changed to: %d"), (int32)NewTimeOfDay);
+    VoiceLineURLRegistry.Add(LineID, URL);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: registered voice line '%s'"), *LineID.ToString());
 }
 
-void AAudio_SystemManager::RegisterDangerZone(FVector Location, float Radius, EAudio_DangerLevel Level, FString SourceName)
+FString AAudio_SystemManager::GetVoiceLineURL(FName LineID) const
 {
-    // Update existing zone if same source
-    for (FAudio_DangerZone& Zone : ActiveDangerZones)
+    const FString* Found = VoiceLineURLRegistry.Find(LineID);
+    return Found ? *Found : FString();
+}
+
+void AAudio_SystemManager::BroadcastTimeOfDayChange(EAudio_TimeOfDay NewTime)
+{
+    // Notify all ambient layer components in the world
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    for (AActor* Actor : AllActors)
     {
-        if (Zone.SourceActorName == SourceName)
+        if (!IsValid(Actor)) continue;
+        UAudio_AmbientLayerComponent* Comp = Actor->FindComponentByClass<UAudio_AmbientLayerComponent>();
+        if (IsValid(Comp))
         {
-            Zone.Location = Location;
-            Zone.Radius = Radius;
-            Zone.DangerLevel = Level;
-            return;
+            Comp->SetTimeOfDay(NewTime);
         }
     }
-
-    // Add new zone
-    FAudio_DangerZone NewZone;
-    NewZone.Location = Location;
-    NewZone.Radius = Radius;
-    NewZone.DangerLevel = Level;
-    NewZone.SourceActorName = SourceName;
-    ActiveDangerZones.Add(NewZone);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Danger zone registered: %s (radius=%.0f)"), *SourceName, Radius);
-}
-
-void AAudio_SystemManager::UnregisterDangerZone(FString SourceName)
-{
-    ActiveDangerZones.RemoveAll([&SourceName](const FAudio_DangerZone& Zone)
-    {
-        return Zone.SourceActorName == SourceName;
-    });
-}
-
-void AAudio_SystemManager::TriggerImpactSound(FVector ImpactLocation, float Magnitude)
-{
-    // Magnitude drives screen shake intensity for impacts (e.g., T-Rex footfall)
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC || !CachedPlayerPawn)
-    {
-        return;
-    }
-
-    float DistToPlayer = FVector::Dist(ImpactLocation, CachedPlayerPawn->GetActorLocation());
-    float ShakeAlpha = FMath::Clamp(1.0f - (DistToPlayer / TRexShakeRadius), 0.0f, 1.0f);
-    float FinalIntensity = Magnitude * ShakeAlpha;
-
-    if (FinalIntensity > 0.05f)
-    {
-        FString Cmd = FString::Printf(TEXT("shake CameraShake_Impact %f"), FinalIntensity);
-        PC->ConsoleCommand(Cmd);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Impact sound triggered at (%.0f,%.0f,%.0f) mag=%.2f shake=%.2f"),
-        ImpactLocation.X, ImpactLocation.Y, ImpactLocation.Z, Magnitude, FinalIntensity);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: time-of-day broadcast → %d"), (int32)NewTime);
 }
