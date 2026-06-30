@@ -1,181 +1,179 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "DialogueSystem.generated.h"
 
 // ============================================================
-// Enums — Narr_ prefix to avoid collision with other agents
+// Narrative & Dialogue Agent #15 — DialogueSystem.h
+// Cycle: PROD_CYCLE_AUTO_20260630_005
+// Elder Kael NPC dialogue tree — "First Craft" quest arc
 // ============================================================
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueTone : uint8
+enum class ENarr_DialogueState : uint8
 {
-    Neutral     UMETA(DisplayName = "Neutral"),
-    Urgent      UMETA(DisplayName = "Urgent"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Informative UMETA(DisplayName = "Informative"),
-    Hostile     UMETA(DisplayName = "Hostile")
+    Greeting        UMETA(DisplayName = "Greeting"),
+    QuestIntro      UMETA(DisplayName = "Quest Intro"),
+    CraftingGuide   UMETA(DisplayName = "Crafting Guide"),
+    DangerWarning   UMETA(DisplayName = "Danger Warning"),
+    QuestComplete   UMETA(DisplayName = "Quest Complete"),
+    Idle            UMETA(DisplayName = "Idle")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_NPCRole : uint8
+enum class ENarr_QuestStage : uint8
 {
-    TribeElder      UMETA(DisplayName = "Tribe Elder"),
-    Scout           UMETA(DisplayName = "Scout"),
-    Hunter          UMETA(DisplayName = "Hunter"),
-    Quartermaster   UMETA(DisplayName = "Quartermaster"),
-    TribeLeader     UMETA(DisplayName = "Tribe Leader"),
-    Survivor        UMETA(DisplayName = "Survivor")
+    NotStarted      UMETA(DisplayName = "Not Started"),
+    GatherResources UMETA(DisplayName = "Gather Resources"),
+    CraftAxe        UMETA(DisplayName = "Craft Axe"),
+    CraftFire       UMETA(DisplayName = "Craft Fire"),
+    ReturnToElder   UMETA(DisplayName = "Return To Elder"),
+    Completed       UMETA(DisplayName = "Completed")
 };
-
-// ============================================================
-// Structs
-// ============================================================
 
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString SpeakerID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FText LineText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LineText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_DialogueTone Tone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueState TriggerState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DisplayDuration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString AudioAssetPath;
-
     FNarr_DialogueLine()
-        : SpeakerID(TEXT("Unknown"))
-        , Tone(ENarr_DialogueTone::Neutral)
-        , DisplayDuration(4.0f)
-        , AudioAssetPath(TEXT(""))
+        : SpeakerName(TEXT("Elder Kael"))
+        , LineText(TEXT(""))
+        , TriggerState(ENarr_DialogueState::Idle)
+        , DisplayDuration(5.0f)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueNode
+struct FNarr_QuestObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString NodeID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString ObjectiveText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueLine> Lines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FString> PlayerResponseIDs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 RequiredCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString NextNodeID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 CurrentCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bEndsConversation;
-
-    FNarr_DialogueNode()
-        : NodeID(TEXT(""))
-        , bEndsConversation(false)
-    {}
-};
-
-USTRUCT(BlueprintType)
-struct FNarr_ConversationTree
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString ConversationID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_NPCRole NPCRole;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString RootNodeID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueNode> Nodes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bRequiresQuestActive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString RequiredQuestID;
-
-    FNarr_ConversationTree()
-        : ConversationID(TEXT(""))
-        , NPCRole(ENarr_NPCRole::Survivor)
-        , RootNodeID(TEXT("root"))
-        , bRequiresQuestActive(false)
-        , RequiredQuestID(TEXT(""))
+    FNarr_QuestObjective()
+        : ObjectiveText(TEXT(""))
+        , bCompleted(false)
+        , RequiredCount(1)
+        , CurrentCount(0)
     {}
 };
 
 // ============================================================
-// Component
+// ANarr_ElderKaelNPC — Quest-giving NPC with dialogue tree
 // ============================================================
-
-UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ANarr_ElderKaelNPC : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueComponent();
+    ANarr_ElderKaelNPC();
 
+protected:
     virtual void BeginPlay() override;
 
-    // The conversation tree assigned to this NPC
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FNarr_ConversationTree ConversationTree;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    // Role of this NPC
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_NPCRole NPCRole;
+    // Interaction trigger
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    USphereComponent* InteractionSphere;
 
-    // Whether this NPC is currently in dialogue with the player
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
-    bool bIsInDialogue;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* NPCMesh;
 
-    // Interaction radius — player must be within this range to trigger dialogue
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    // Current dialogue state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueState CurrentDialogueState;
+
+    // Current quest stage
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_QuestStage CurrentQuestStage;
+
+    // All dialogue lines for Elder Kael
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueLine> DialogueLines;
+
+    // Active quest objectives
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_QuestObjective> ActiveObjectives;
+
+    // Interaction radius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float InteractionRadius;
 
-    // Start dialogue from root node
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void StartDialogue();
+    // Is player currently in dialogue range
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bPlayerInRange;
 
-    // Advance to next node
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void AdvanceDialogue(const FString& ChosenResponseID);
+    // Dialogue display timer
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    float DialogueTimer;
 
-    // End dialogue
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void EndDialogue();
-
-    // Get current active node
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    FNarr_DialogueNode GetCurrentNode() const;
-
-    // Get current line index within active node
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    int32 GetCurrentLineIndex() const;
-
-    // Advance to next line within current node
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool AdvanceLine();
-
-private:
-    FString CurrentNodeID;
+    // Current line index
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
     int32 CurrentLineIndex;
 
-    FNarr_DialogueNode* FindNode(const FString& NodeID);
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void InitializeDialogueTree();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogue(ENarr_DialogueState State);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetCurrentLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void OnQuestStageAdvanced(ENarr_QuestStage NewStage);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateObjective(int32 ObjectiveIndex, int32 NewCount);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool AreAllObjectivesComplete() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FString GetObjectiveSummary() const;
+
+private:
+    UFUNCTION()
+    void OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnPlayerExitRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    void InitializeObjectives();
 };
