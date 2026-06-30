@@ -1,19 +1,19 @@
 // AudioSystemManager.h
-// Audio Agent #16 — Transpersonal Game Studio
-// Adaptive audio system: danger-level music, ambient layers, NPC voice proximity triggers
+// Audio Agent #16 — PROD_CYCLE_AUTO_20260630_007
+// Adaptive audio system: danger-driven music, ambient zones, NPC dialogue voice binding
+// Wires into QuestObjectiveSystem delegates from Agent #15
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "Components/ActorComponent.h"
+#include "Sound/SoundBase.h"
 #include "Components/AudioComponent.h"
-#include "Engine/EngineTypes.h"
 #include "AudioSystemManager.generated.h"
 
-// ============================================================
-// ENUMS — global scope (RULE 1)
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums — EAudio_ prefix (unique across project)
+// ─────────────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EAudio_DangerLevel : uint8
@@ -33,39 +33,18 @@ enum class EAudio_TimeOfDay : uint8
     Night   UMETA(DisplayName = "Night")
 };
 
-// ============================================================
-// STRUCTS — global scope (RULE 1)
-// ============================================================
-
-USTRUCT(BlueprintType)
-struct FAudio_AmbientLayer
+UENUM(BlueprintType)
+enum class EAudio_QuestStinger : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    FName LayerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtDawn  = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtDay   = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtDusk  = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    bool bActiveAtNight = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float BaseVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float FadeInTime  = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float FadeOutTime = 2.0f;
+    QuestStarted    UMETA(DisplayName = "Quest Started"),
+    QuestCompleted  UMETA(DisplayName = "Quest Completed"),
+    QuestFailed     UMETA(DisplayName = "Quest Failed"),
+    ObjectiveDone   UMETA(DisplayName = "Objective Done")
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Structs — FAudio_ prefix
+// ─────────────────────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FAudio_DangerZone
@@ -76,205 +55,285 @@ struct FAudio_DangerZone
     FName ZoneName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    FVector ZoneCenter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
+    float DangerRadius = 1200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
     EAudio_DangerLevel DangerLevel = EAudio_DangerLevel::Aware;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    float Radius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    FVector WorldLocation = FVector::ZeroVector;
+    bool bIsActive = true;
 };
 
-// ============================================================
-// UAudio_AmbientLayerComponent
-// ============================================================
+USTRUCT(BlueprintType)
+struct FAudio_AmbientLayer
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    FName LayerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* Sound = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float BaseVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    bool bActiveAtDawn  = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    bool bActiveAtDay   = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    bool bActiveAtDusk  = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    bool bActiveAtNight = false;
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_VoiceLineKey
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    FName SpeakerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    int32 LineIndex = 0;
+
+    bool operator==(const FAudio_VoiceLineKey& Other) const
+    {
+        return SpeakerName == Other.SpeakerName && LineIndex == Other.LineIndex;
+    }
+};
+
+FORCEINLINE uint32 GetTypeHash(const FAudio_VoiceLineKey& Key)
+{
+    return HashCombine(GetTypeHash(Key.SpeakerName), GetTypeHash(Key.LineIndex));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delegates
+// ─────────────────────────────────────────────────────────────────────────────
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAudio_OnDangerLevelChanged,
+    EAudio_DangerLevel, OldLevel, EAudio_DangerLevel, NewLevel);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FAudio_OnTimeOfDayChanged,
+    EAudio_TimeOfDay, NewTime);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAudio_OnDialogueLineStarted,
+    FName, SpeakerName, int32, LineIndex);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAudio_OnDialogueLineFinished,
+    FName, SpeakerName, int32, LineIndex);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FAudio_OnPlayerEnteredZone);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FAudio_OnPlayerExitedZone);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_AdaptiveMusicComponent
+// Manages danger-driven music blending and time-of-day ambient layers
+// ─────────────────────────────────────────────────────────────────────────────
 
 UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), BlueprintType)
-class TRANSPERSONALGAME_API UAudio_AmbientLayerComponent : public UActorComponent
+class TRANSPERSONALGAME_API UAudio_AdaptiveMusicComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UAudio_AmbientLayerComponent();
+    UAudio_AdaptiveMusicComponent();
 
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    // ── Danger system ──────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
     void SetDangerLevel(EAudio_DangerLevel NewLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void RegisterDangerZone(const FAudio_DangerZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void UnregisterDangerZone(FName ZoneName);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
+    void EvaluateDangerLevel();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void StartAdaptiveMusic();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void StopAdaptiveMusic();
+
+    // ── Time of day ────────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|TimeOfDay")
     void SetTimeOfDay(EAudio_TimeOfDay NewTime);
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Ambient")
+    // ── State accessors ────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintPure, Category = "Audio|State")
     EAudio_DangerLevel GetCurrentDangerLevel() const { return CurrentDangerLevel; }
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Ambient")
+    UFUNCTION(BlueprintPure, Category = "Audio|State")
     EAudio_TimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintPure, Category = "Audio|State")
+    float GetDangerBlendWeight() const { return CurrentDangerWeight; }
+
+    // ── Delegates ──────────────────────────────────────────────────────────
+
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnDangerLevelChanged OnDangerLevelChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnTimeOfDayChanged OnTimeOfDayChanged;
+
+    // ── Config ─────────────────────────────────────────────────────────────
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float DangerUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float MasterVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float MusicVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float SFXVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float AmbienceVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float DangerBlendSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
     TArray<FAudio_AmbientLayer> AmbientLayers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float DangerUpdateInterval;
-
 private:
     EAudio_DangerLevel CurrentDangerLevel;
     EAudio_TimeOfDay   CurrentTimeOfDay;
-    bool bAudioInitialized;
 
-    TArray<UAudioComponent*> ActiveAudioComponents;
+    bool  bMusicSystemActive;
+    float TargetDangerWeight;
+    float CurrentDangerWeight;
 
-    void OnDangerLevelChanged(EAudio_DangerLevel OldLevel, EAudio_DangerLevel NewLevel);
-    void UpdateAmbientLayers();
+    FTimerHandle DangerUpdateTimer;
+
+    UPROPERTY()
+    TArray<FAudio_DangerZone> RegisteredDangerZones;
 };
 
-// ============================================================
-// AAudio_ProximityVoiceTrigger
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_DialogueVoiceComponent
+// Manages NPC voice line playback — binds to ANarr_DialogueTriggerActor delegates
+// ─────────────────────────────────────────────────────────────────────────────
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_ProximityVoiceTrigger : public AActor
+UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), BlueprintType)
+class TRANSPERSONALGAME_API UAudio_DialogueVoiceComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_ProximityVoiceTrigger();
+    UAudio_DialogueVoiceComponent();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
-    void PlayVoiceLine();
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
+    void RegisterVoiceLine(FName SpeakerName, int32 LineIndex, USoundBase* AudioAsset);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    FName SpeakerName;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
+    void PlayDialogueLine(FName SpeakerName, int32 LineIndex);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    FName VoiceLineID;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dialogue")
+    void StopCurrentDialogue();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    FString VoiceLineURL;
+    UFUNCTION(BlueprintPure, Category = "Audio|Dialogue")
+    bool IsPlayingDialogue() const { return bIsPlayingDialogue; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    float TriggerRadius;
+    UFUNCTION(BlueprintPure, Category = "Audio|Dialogue")
+    FName GetActiveSpeaker() const { return ActiveSpeakerName; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    bool bRepeatTrigger;
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnDialogueLineStarted OnDialogueLineStarted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
-    float RepeatCooldown;
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnDialogueLineFinished OnDialogueLineFinished;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    float DialogueVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    float DialogueFadeInTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dialogue")
+    float DialogueFadeOutTime;
 
 private:
-    UPROPERTY(VisibleAnywhere, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    USphereComponent* ProximitySphere;
-
-    UPROPERTY(VisibleAnywhere, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    UAudioComponent* VoiceAudioComponent;
-
-    bool  bHasTriggered;
-    float LastTriggerTime;
-
     UFUNCTION()
-    void OnPlayerEnterRadius(
-        UPrimitiveComponent* OverlappedComp,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComp,
-        int32 OtherBodyIndex,
-        bool bFromSweep,
-        const FHitResult& SweepResult);
+    void OnDialogueFinished();
+
+    TMap<FAudio_VoiceLineKey, USoundBase*> VoiceLineRegistry;
+
+    bool bIsPlayingDialogue;
+    FName ActiveSpeakerName;
+    int32 ActiveLineIndex;
+
+    UPROPERTY()
+    UAudioComponent* ActiveAudioComponent;
 };
 
-// ============================================================
-// AAudio_DangerZoneActor
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_AmbientZoneComponent
+// Spatial ambient audio — fades in/out as player enters/exits radius
+// Used by NPC dialogue zones from Agent #15
+// ─────────────────────────────────────────────────────────────────────────────
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_DangerZoneActor : public AActor
+UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), BlueprintType)
+class TRANSPERSONALGAME_API UAudio_AmbientZoneComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_DangerZoneActor();
+    UAudio_AmbientZoneComponent();
 
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Danger")
-    void NotifyAudioSystem(EAudio_DangerLevel NewLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* AmbientSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    EAudio_DangerLevel DangerLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float ZoneRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    float DangerRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float FadeDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Danger")
-    bool bDynamicRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    float VolumeBlendSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Danger")
-    bool bPlayerInside;
+    UFUNCTION(BlueprintPure, Category = "Audio|Ambient")
+    bool IsPlayerInZone() const { return bPlayerInZone; }
 
-private:
-    UPROPERTY(VisibleAnywhere, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    USphereComponent* DangerSphere;
+    UFUNCTION(BlueprintPure, Category = "Audio|Ambient")
+    float GetCurrentVolume() const { return CurrentVolume; }
 
-    UFUNCTION()
-    void OnPlayerEnter(
-        UPrimitiveComponent* OverlappedComp,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComp,
-        int32 OtherBodyIndex,
-        bool bFromSweep,
-        const FHitResult& SweepResult);
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnPlayerEnteredZone OnPlayerEnteredZone;
 
-    UFUNCTION()
-    void OnPlayerExit(
-        UPrimitiveComponent* OverlappedComp,
-        AActor* OtherActor,
-        UPrimitiveComponent* OtherComp,
-        int32 OtherBodyIndex);
-};
-
-// ============================================================
-// AAudio_SystemManager — world singleton
-// ============================================================
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AAudio_SystemManager();
-
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    void SetGlobalDangerLevel(EAudio_DangerLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Manager")
-    void RegisterVoiceLineURL(FName LineID, const FString& URL);
-
-    UFUNCTION(BlueprintPure, Category = "Audio|Manager")
-    FString GetVoiceLineURL(FName LineID) const;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Manager")
-    float DayNightCycleDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Manager")
-    bool bDayNightCycleActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Manager")
-    EAudio_DangerLevel CurrentDangerLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|Manager")
-    EAudio_TimeOfDay CurrentTimeOfDay;
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
+    FAudio_OnPlayerExitedZone OnPlayerExitedZone;
 
 private:
-    TMap<FName, FString> VoiceLineURLRegistry;
-    float ElapsedDayTime;
+    bool  bPlayerInZone;
+    float CurrentVolume;
+    float TargetVolume;
 
-    void BroadcastTimeOfDayChange(EAudio_TimeOfDay NewTime);
+    UPROPERTY()
+    UAudioComponent* ActiveAmbientComponent;
 };
