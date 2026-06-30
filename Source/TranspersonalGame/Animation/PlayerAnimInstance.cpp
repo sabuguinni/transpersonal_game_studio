@@ -2,207 +2,207 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 UPlayerAnimInstance::UPlayerAnimInstance()
-	: LocomotionState(EAnim_LocomotionState::Idle)
-	, WeaponState(EAnim_WeaponState::Unarmed)
-	, Speed(0.f)
-	, SmoothedSpeed(0.f)
-	, Direction(0.f)
-	, LeanAmount(0.f)
-	, VerticalVelocity(0.f)
-	, bIsMoving(false)
-	, bIsInAir(false)
-	, bIsCrouching(false)
-	, bIsSprinting(false)
-	, bIsClimbing(false)
-	, LeftFootIKLocation(FVector::ZeroVector)
-	, RightFootIKLocation(FVector::ZeroVector)
-	, LeftFootIKAlpha(0.f)
-	, RightFootIKAlpha(0.f)
-	, LeftFootIKRotation(FRotator::ZeroRotator)
-	, RightFootIKRotation(FRotator::ZeroRotator)
-	, AimPitch(0.f)
-	, AimYaw(0.f)
-	, ExhaustionAlpha(0.f)
-	, InjuryAlpha(0.f)
-	, bIsExhausted(false)
-	, bIsInjured(false)
-	, WalkSpeedThreshold(50.f)
-	, RunSpeedThreshold(250.f)
-	, SprintSpeedThreshold(500.f)
-	, SpeedSmoothingRate(10.f)
-	, IKTraceDistance(55.f)
-	, LeanSmoothed(0.f)
-	, PreviousSpeed(0.f)
+    : Speed(0.f)
+    , SmoothedSpeed(0.f)
+    , Direction(0.f)
+    , LeanAmount(0.f)
+    , VerticalVelocity(0.f)
+    , bIsMoving(false)
+    , bIsFalling(false)
+    , bIsCrouching(false)
+    , bIsSprinting(false)
+    , LocomotionState(EAnim_LocomotionState::Idle)
+    , WeaponState(EAnim_WeaponState::Unarmed)
+    , LeftFootIKLocation(FVector::ZeroVector)
+    , RightFootIKLocation(FVector::ZeroVector)
+    , LeftFootAlpha(0.f)
+    , RightFootAlpha(0.f)
+    , StaminaRatio(1.f)
+    , FearLevel(0.f)
+    , bIsExhausted(false)
+    , bIsInjured(false)
+    , OwnerCharacter(nullptr)
+    , MovementComponent(nullptr)
 {
 }
 
 void UPlayerAnimInstance::NativeInitializeAnimation()
 {
-	Super::NativeInitializeAnimation();
-	OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+    Super::NativeInitializeAnimation();
+
+    APawn* Pawn = TryGetPawnOwner();
+    if (Pawn)
+    {
+        OwnerCharacter = Cast<ACharacter>(Pawn);
+        if (OwnerCharacter)
+        {
+            MovementComponent = OwnerCharacter->GetCharacterMovement();
+        }
+    }
 }
 
 void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-	Super::NativeUpdateAnimation(DeltaSeconds);
+    Super::NativeUpdateAnimation(DeltaSeconds);
 
-	if (!OwnerCharacter)
-	{
-		OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
-		if (!OwnerCharacter) return;
-	}
+    if (!OwnerCharacter || !MovementComponent)
+    {
+        return;
+    }
 
-	UpdateLocomotionState();
-	UpdateIK(DeltaSeconds);
-	UpdateAimOffset();
-	UpdateSurvivalStates();
+    // --- Raw velocity data ---
+    FVector Velocity = OwnerCharacter->GetVelocity();
+    Speed = Velocity.Size2D();
+    VerticalVelocity = Velocity.Z;
+
+    // --- Smoothed speed for blend space ---
+    SmoothedSpeed = SmoothFloat(SmoothedSpeed, Speed, 8.f, DeltaSeconds);
+
+    // --- Direction (relative to actor forward) ---
+    FRotator ActorRot = OwnerCharacter->GetActorRotation();
+    Direction = UKismetMathLibrary::NormalizedDeltaRotator(
+        UKismetMathLibrary::MakeRotFromX(Velocity),
+        ActorRot
+    ).Yaw;
+
+    // --- Lean (based on direction change rate) ---
+    float TargetLean = FMath::Clamp(Direction * 0.1f, -1.f, 1.f);
+    LeanAmount = SmoothFloat(LeanAmount, TargetLean, 5.f, DeltaSeconds);
+
+    // --- State flags ---
+    bIsMoving = Speed > 10.f;
+    bIsFalling = MovementComponent->IsFalling();
+    bIsCrouching = MovementComponent->IsCrouching();
+
+    // Sprint: speed > 400 cm/s (approx 4 m/s)
+    bIsSprinting = Speed > 400.f && bIsMoving && !bIsCrouching;
+
+    // --- Update subsystems ---
+    UpdateLocomotionState();
+    UpdateFootIK(DeltaSeconds);
+    UpdateSurvivalState();
 }
 
 void UPlayerAnimInstance::UpdateLocomotionState()
 {
-	if (!OwnerCharacter) return;
+    if (bIsFalling)
+    {
+        if (VerticalVelocity < -200.f)
+        {
+            LocomotionState = EAnim_LocomotionState::InAir;
+        }
+        else
+        {
+            LocomotionState = EAnim_LocomotionState::Land;
+        }
+        return;
+    }
 
-	UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
-	if (!MovComp) return;
+    if (bIsCrouching)
+    {
+        LocomotionState = Speed > 10.f
+            ? EAnim_LocomotionState::Sneak
+            : EAnim_LocomotionState::Crouch;
+        return;
+    }
 
-	FVector Velocity = OwnerCharacter->GetVelocity();
-	Speed = Velocity.Size2D();
-	VerticalVelocity = Velocity.Z;
+    if (!bIsMoving)
+    {
+        LocomotionState = EAnim_LocomotionState::Idle;
+        return;
+    }
 
-	// Smooth speed
-	SmoothedSpeed = FMath::FInterpTo(SmoothedSpeed, Speed, GetWorld()->GetDeltaSeconds(), SpeedSmoothingRate);
-
-	bIsMoving = Speed > WalkSpeedThreshold;
-	bIsInAir = MovComp->IsFalling();
-	bIsCrouching = MovComp->IsCrouching();
-
-	// Direction (strafe angle)
-	if (bIsMoving)
-	{
-		FRotator ActorRot = OwnerCharacter->GetActorRotation();
-		FRotator VelocityRot = Velocity.Rotation();
-		Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot).Yaw;
-	}
-	else
-	{
-		Direction = 0.f;
-	}
-
-	// Lean (rate of direction change)
-	float DeltaTime = GetWorld()->GetDeltaSeconds();
-	if (DeltaTime > 0.f)
-	{
-		float RawLean = (Speed - PreviousSpeed) / DeltaTime * 0.01f;
-		LeanSmoothed = FMath::FInterpTo(LeanSmoothed, RawLean, DeltaTime, 5.f);
-		LeanAmount = FMath::Clamp(LeanSmoothed, -1.f, 1.f);
-	}
-	PreviousSpeed = Speed;
-
-	// Locomotion state machine
-	if (bIsInAir)
-	{
-		LocomotionState = EAnim_LocomotionState::InAir;
-	}
-	else if (bIsClimbing)
-	{
-		LocomotionState = EAnim_LocomotionState::Climb;
-	}
-	else if (bIsCrouching)
-	{
-		LocomotionState = bIsMoving ? EAnim_LocomotionState::Sneak : EAnim_LocomotionState::Crouch;
-	}
-	else if (Speed >= SprintSpeedThreshold)
-	{
-		LocomotionState = EAnim_LocomotionState::Sprint;
-	}
-	else if (Speed >= RunSpeedThreshold)
-	{
-		LocomotionState = EAnim_LocomotionState::Run;
-	}
-	else if (Speed >= WalkSpeedThreshold)
-	{
-		LocomotionState = EAnim_LocomotionState::Walk;
-	}
-	else
-	{
-		LocomotionState = EAnim_LocomotionState::Idle;
-	}
+    if (bIsSprinting)
+    {
+        LocomotionState = EAnim_LocomotionState::Sprint;
+    }
+    else if (Speed > 200.f)
+    {
+        LocomotionState = EAnim_LocomotionState::Run;
+    }
+    else
+    {
+        LocomotionState = EAnim_LocomotionState::Walk;
+    }
 }
 
-void UPlayerAnimInstance::UpdateIK(float DeltaSeconds)
+void UPlayerAnimInstance::UpdateFootIK(float DeltaSeconds)
 {
-	if (!OwnerCharacter || bIsInAir) 
-	{
-		LeftFootIKAlpha = FMath::FInterpTo(LeftFootIKAlpha, 0.f, DeltaSeconds, 10.f);
-		RightFootIKAlpha = FMath::FInterpTo(RightFootIKAlpha, 0.f, DeltaSeconds, 10.f);
-		return;
-	}
+    if (!OwnerCharacter)
+    {
+        return;
+    }
 
-	PerformFootIKTrace(FName("foot_l"), LeftFootIKLocation, LeftFootIKRotation, LeftFootIKAlpha);
-	PerformFootIKTrace(FName("foot_r"), RightFootIKLocation, RightFootIKRotation, RightFootIKAlpha);
+    UWorld* World = OwnerCharacter->GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Only apply foot IK when grounded
+    if (bIsFalling)
+    {
+        LeftFootAlpha  = SmoothFloat(LeftFootAlpha,  0.f, 10.f, DeltaSeconds);
+        RightFootAlpha = SmoothFloat(RightFootAlpha, 0.f, 10.f, DeltaSeconds);
+        return;
+    }
+
+    const float TraceLength = 60.f;
+    const FName LeftFootBone  = TEXT("foot_l");
+    const FName RightFootBone = TEXT("foot_r");
+
+    auto TraceFootIK = [&](FName BoneName, FVector& OutLocation, float& OutAlpha)
+    {
+        USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+        if (!Mesh)
+        {
+            return;
+        }
+
+        FVector BoneLocation = Mesh->GetBoneLocation(BoneName);
+        FVector TraceStart   = BoneLocation + FVector(0.f, 0.f, TraceLength);
+        FVector TraceEnd     = BoneLocation - FVector(0.f, 0.f, TraceLength);
+
+        FHitResult HitResult;
+        FCollisionQueryParams Params;
+        Params.AddIgnoredActor(OwnerCharacter);
+
+        bool bHit = World->LineTraceSingleByChannel(
+            HitResult,
+            TraceStart,
+            TraceEnd,
+            ECC_Visibility,
+            Params
+        );
+
+        if (bHit)
+        {
+            OutLocation = HitResult.ImpactPoint;
+            OutAlpha    = SmoothFloat(OutAlpha, 1.f, 10.f, DeltaSeconds);
+        }
+        else
+        {
+            OutAlpha = SmoothFloat(OutAlpha, 0.f, 10.f, DeltaSeconds);
+        }
+    };
+
+    TraceFootIK(LeftFootBone,  LeftFootIKLocation,  LeftFootAlpha);
+    TraceFootIK(RightFootBone, RightFootIKLocation, RightFootAlpha);
 }
 
-void UPlayerAnimInstance::PerformFootIKTrace(FName SocketName, FVector& OutLocation, FRotator& OutRotation, float& OutAlpha)
+void UPlayerAnimInstance::UpdateSurvivalState()
 {
-	if (!OwnerCharacter) return;
-
-	USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-	if (!Mesh) return;
-
-	FVector SocketLocation = Mesh->GetSocketLocation(SocketName);
-	FVector TraceStart = SocketLocation + FVector(0.f, 0.f, IKTraceDistance);
-	FVector TraceEnd   = SocketLocation - FVector(0.f, 0.f, IKTraceDistance);
-
-	FHitResult HitResult;
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(OwnerCharacter);
-
-	bool bHit = GetWorld()->LineTraceSingleByChannel(
-		HitResult, TraceStart, TraceEnd,
-		ECollisionChannel::ECC_Visibility, Params
-	);
-
-	if (bHit)
-	{
-		OutLocation = HitResult.ImpactPoint;
-		FVector Normal = HitResult.ImpactNormal;
-		OutRotation = FRotator(
-			FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z)),
-			0.f,
-			-FMath::RadiansToDegrees(FMath::Atan2(Normal.Y, Normal.Z))
-		);
-		OutAlpha = FMath::FInterpTo(OutAlpha, 1.f, GetWorld()->GetDeltaSeconds(), 10.f);
-	}
-	else
-	{
-		OutAlpha = FMath::FInterpTo(OutAlpha, 0.f, GetWorld()->GetDeltaSeconds(), 10.f);
-	}
+    // Stub: in full implementation, query TranspersonalCharacter survival stats
+    // For now, derive exhaustion from speed and stamina ratio
+    bIsExhausted = StaminaRatio < 0.15f;
+    bIsInjured   = false; // Will be set by damage system integration
 }
 
-void UPlayerAnimInstance::UpdateAimOffset()
+float UPlayerAnimInstance::SmoothFloat(float Current, float Target, float Speed, float DeltaSeconds) const
 {
-	if (!OwnerCharacter) return;
-
-	AController* Controller = OwnerCharacter->GetController();
-	if (!Controller) return;
-
-	FRotator ControlRot = Controller->GetControlRotation();
-	FRotator ActorRot   = OwnerCharacter->GetActorRotation();
-	FRotator Delta = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, ActorRot);
-
-	AimPitch = FMath::Clamp(Delta.Pitch, -90.f, 90.f);
-	AimYaw   = FMath::Clamp(Delta.Yaw,   -90.f, 90.f);
-}
-
-void UPlayerAnimInstance::UpdateSurvivalStates()
-{
-	// Survival stats integration — reads from character if available
-	// Defaults to 0 until TranspersonalCharacter exposes stamina/health
-	// These alphas drive additive animation layers for exhaustion/injury posture
-	bIsExhausted = ExhaustionAlpha > 0.7f;
-	bIsInjured   = InjuryAlpha   > 0.5f;
+    return FMath::FInterpTo(Current, Target, DeltaSeconds, Speed);
 }
