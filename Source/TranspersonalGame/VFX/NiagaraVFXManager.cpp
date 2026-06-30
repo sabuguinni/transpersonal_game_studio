@@ -1,270 +1,281 @@
-#include "VFX/NiagaraVFXManager.h"
+// NiagaraVFXManager.cpp
+// VFX Agent #17 — Transpersonal Game Studio
+// Implements the Niagara VFX Manager: spawning, LOD, pooling, and lifecycle for all prehistoric VFX.
+
+#include "NiagaraVFXManager.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Camera/PlayerCameraManager.h"
-#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 // ============================================================
-// Constructor
+// UVFX_NiagaraVFXManager — Implementation
 // ============================================================
-UNiagaraVFXManager::UNiagaraVFXManager()
+
+UVFX_NiagaraVFXManager::UVFX_NiagaraVFXManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for LOD updates
-    ActiveEffectCount = 0;
+    // Default LOD distance thresholds
+    LODHighMaxDistance    = 1500.0f;
+    LODMediumMaxDistance  = 4000.0f;
+    LODLowMaxDistance     = 8000.0f;
+    MaxActiveEffects      = 64;
+    bVFXEnabled           = true;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-void UNiagaraVFXManager::BeginPlay()
+void UVFX_NiagaraVFXManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    ActiveLoopingEffects.Empty();
+    Super::Initialize(Collection);
+    ActiveEffects.Reserve(MaxActiveEffects);
+    UE_LOG(LogTemp, Log, TEXT("[VFX] NiagaraVFXManager initialized. MaxActiveEffects=%d"), MaxActiveEffects);
 }
 
-// ============================================================
-// TickComponent — prune destroyed looping effects, update count
-// ============================================================
-void UNiagaraVFXManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UVFX_NiagaraVFXManager::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Remove null or completed looping effects from tracking array
-    ActiveLoopingEffects.RemoveAll([](const TObjectPtr<UNiagaraComponent>& Comp)
+    // Clean up all active Niagara components
+    for (FVFX_ActiveEffect& Entry : ActiveEffects)
     {
-        return !IsValid(Comp) || !Comp->IsActive();
-    });
-
-    ActiveEffectCount = ActiveLoopingEffects.Num();
+        if (Entry.NiagaraComponent && Entry.NiagaraComponent->IsValidLowLevel())
+        {
+            Entry.NiagaraComponent->DeactivateImmediate();
+        }
+    }
+    ActiveEffects.Empty();
+    Super::Deinitialize();
 }
 
-// ============================================================
-// ComputeLODTier — distance from player camera to effect
-// ============================================================
-EVFX_LODTier UNiagaraVFXManager::ComputeLODTier(const FVector& EffectLocation) const
+UNiagaraComponent* UVFX_NiagaraVFXManager::SpawnEffect(
+    EVFX_EffectType EffectType,
+    const FVector& Location,
+    const FRotator& Rotation,
+    AActor* AttachTarget)
 {
+    if (!bVFXEnabled)
+    {
+        return nullptr;
+    }
+
+    UNiagaraSystem* System = GetSystemForEffect(EffectType);
+    if (!System)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[VFX] No Niagara system registered for effect type %d"), (int32)EffectType);
+        return nullptr;
+    }
+
+    // Enforce pool limit — cull oldest if at capacity
+    if (ActiveEffects.Num() >= MaxActiveEffects)
+    {
+        CullOldestEffect();
+    }
+
     UWorld* World = GetWorld();
-    if (!World) return EVFX_LODTier::High;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC || !PC->PlayerCameraManager) return EVFX_LODTier::High;
-
-    const FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
-    const float DistSq = FVector::DistSquared(CamLoc, EffectLocation);
-
-    const float D0 = LODDistances.HighToMedium;
-    const float D1 = LODDistances.MediumToLow;
-    const float D2 = LODDistances.LowToCull;
-
-    if (DistSq > D2 * D2) return EVFX_LODTier::Culled;
-    if (DistSq > D1 * D1) return EVFX_LODTier::Low;
-    if (DistSq > D0 * D0) return EVFX_LODTier::Medium;
-    return EVFX_LODTier::High;
-}
-
-// ============================================================
-// ResolveNiagaraSystem — pick correct NS asset for effect + LOD
-// (LOD Medium/Low fall back to same asset with reduced spawn rate
-//  via Niagara scalability — asset assignment is the same NS)
-// ============================================================
-UNiagaraSystem* UNiagaraVFXManager::ResolveNiagaraSystem(EVFX_EffectType EffectType, EVFX_LODTier LOD) const
-{
-    if (LOD == EVFX_LODTier::Culled) return nullptr;
-
-    switch (EffectType)
+    if (!World)
     {
-        case EVFX_EffectType::CampfireFlame:      return NS_CampfireFlame;
-        case EVFX_EffectType::CampfireSmoke:      return NS_CampfireSmoke;
-        case EVFX_EffectType::CampfireEmbers:     return NS_CampfireEmbers;
-        case EVFX_EffectType::PlayerFootstepDust: return NS_PlayerFootstepDust;
-        case EVFX_EffectType::DinoFootstepDust:   return NS_DinoFootstepDust;
-        case EVFX_EffectType::TRexFootstepDust:   return NS_TRexFootstepDust;
-        case EVFX_EffectType::BloodSplatter:      return NS_BloodSplatter;
-        case EVFX_EffectType::BloodDrip:          return NS_BloodSplatter; // reuse splatter at low scale
-        case EVFX_EffectType::RainSplash:         return NS_RainSplash;
-        case EVFX_EffectType::VolcanicAsh:        return NS_VolcanicAsh;
-        case EVFX_EffectType::BreathVapour:       return NS_BreathVapour;
-        case EVFX_EffectType::SparkCraft:         return NS_SparkCraft;
-        case EVFX_EffectType::SmokeCook:          return NS_CampfireSmoke; // reuse smoke
-        default:                                  return nullptr;
-    }
-}
-
-// ============================================================
-// EvictOldestEffect — remove oldest looping effect when pool full
-// ============================================================
-void UNiagaraVFXManager::EvictOldestEffect()
-{
-    if (ActiveLoopingEffects.Num() == 0) return;
-
-    UNiagaraComponent* Oldest = ActiveLoopingEffects[0];
-    if (IsValid(Oldest))
-    {
-        Oldest->DeactivateImmediate();
-        Oldest->DestroyComponent();
-    }
-    ActiveLoopingEffects.RemoveAt(0);
-}
-
-// ============================================================
-// SpawnEffect — core spawn function
-// ============================================================
-UNiagaraComponent* UNiagaraVFXManager::SpawnEffect(const FVFX_SpawnRequest& Request)
-{
-    UWorld* World = GetWorld();
-    if (!World) return nullptr;
-
-    // LOD check
-    EVFX_LODTier LOD = ComputeLODTier(Request.Location);
-    UNiagaraSystem* NS = ResolveNiagaraSystem(Request.EffectType, LOD);
-    if (!NS) return nullptr; // culled or no asset assigned
-
-    // Pool management for looping effects
-    if (Request.bLooping && ActiveLoopingEffects.Num() >= MaxActiveEffects)
-    {
-        EvictOldestEffect();
+        return nullptr;
     }
 
-    UNiagaraComponent* Comp = nullptr;
+    UNiagaraComponent* NiagaraComp = nullptr;
 
-    if (Request.AttachTarget && IsValid(Request.AttachTarget))
+    if (AttachTarget)
     {
-        // Attached spawn
-        Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
-            NS,
-            Request.AttachTarget,
+        NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+            System,
+            AttachTarget->GetRootComponent(),
             NAME_None,
-            Request.Location,
-            Request.Rotation,
+            Location,
+            Rotation,
             EAttachLocation::KeepWorldPosition,
-            !Request.bLooping // auto-destroy if one-shot
+            true
         );
     }
     else
     {
-        // World-space spawn
-        Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
             World,
-            NS,
-            Request.Location,
-            Request.Rotation,
-            Request.Scale,
-            true,               // auto-activate
-            !Request.bLooping   // auto-destroy if one-shot
+            System,
+            Location,
+            Rotation
         );
     }
 
-    if (Comp && Request.bLooping)
+    if (NiagaraComp)
     {
-        ActiveLoopingEffects.Add(Comp);
-        ActiveEffectCount = ActiveLoopingEffects.Num();
+        FVFX_ActiveEffect NewEntry;
+        NewEntry.NiagaraComponent = NiagaraComp;
+        NewEntry.EffectType        = EffectType;
+        NewEntry.SpawnLocation     = Location;
+        NewEntry.SpawnTime         = World->GetTimeSeconds();
+        NewEntry.CurrentLOD        = EVFX_LODTier::High;
+        ActiveEffects.Add(NewEntry);
+
+        UE_LOG(LogTemp, Verbose, TEXT("[VFX] Spawned effect type=%d at %s"), (int32)EffectType, *Location.ToString());
     }
 
-    return Comp;
+    return NiagaraComp;
 }
 
-// ============================================================
-// SpawnCampfire — flame + smoke + embers at location
-// ============================================================
-void UNiagaraVFXManager::SpawnCampfire(FVector Location)
+void UVFX_NiagaraVFXManager::StopEffect(UNiagaraComponent* NiagaraComponent, bool bImmediate)
 {
-    // Flame — looping, close to ground
-    FVFX_SpawnRequest FlameReq;
-    FlameReq.EffectType = EVFX_EffectType::CampfireFlame;
-    FlameReq.Location = Location;
-    FlameReq.Scale = FVector(1.0f);
-    FlameReq.bLooping = true;
-    SpawnEffect(FlameReq);
+    if (!NiagaraComponent || !NiagaraComponent->IsValidLowLevel())
+    {
+        return;
+    }
 
-    // Smoke — looping, offset upward
-    FVFX_SpawnRequest SmokeReq;
-    SmokeReq.EffectType = EVFX_EffectType::CampfireSmoke;
-    SmokeReq.Location = Location + FVector(0, 0, 30.0f);
-    SmokeReq.Scale = FVector(1.2f);
-    SmokeReq.bLooping = true;
-    SpawnEffect(SmokeReq);
+    if (bImmediate)
+    {
+        NiagaraComponent->DeactivateImmediate();
+    }
+    else
+    {
+        NiagaraComponent->Deactivate();
+    }
 
-    // Embers — looping, same base location
-    FVFX_SpawnRequest EmbersReq;
-    EmbersReq.EffectType = EVFX_EffectType::CampfireEmbers;
-    EmbersReq.Location = Location + FVector(0, 0, 10.0f);
-    EmbersReq.Scale = FVector(0.8f);
-    EmbersReq.bLooping = true;
-    SpawnEffect(EmbersReq);
+    // Remove from active list
+    ActiveEffects.RemoveAll([NiagaraComponent](const FVFX_ActiveEffect& Entry)
+    {
+        return Entry.NiagaraComponent == NiagaraComponent;
+    });
 }
 
-// ============================================================
-// SpawnPlayerFootstep — small dust puff, speed-scaled
-// ============================================================
-void UNiagaraVFXManager::SpawnPlayerFootstep(FVector Location, float SpeedScale)
+void UVFX_NiagaraVFXManager::RegisterEffectSystem(EVFX_EffectType EffectType, UNiagaraSystem* System)
 {
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::PlayerFootstepDust;
-    Req.Location = Location;
-    Req.Scale = FVector(FMath::Clamp(SpeedScale * 0.5f, 0.3f, 1.2f));
-    Req.bLooping = false;
-    SpawnEffect(Req);
+    if (!System)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[VFX] Attempted to register null NiagaraSystem for effect type %d"), (int32)EffectType);
+        return;
+    }
+    EffectSystemMap.Add(EffectType, System);
+    UE_LOG(LogTemp, Log, TEXT("[VFX] Registered Niagara system '%s' for effect type %d"), *System->GetName(), (int32)EffectType);
 }
 
-// ============================================================
-// SpawnTRexFootstep — large dust cloud, mass-scaled
-// ============================================================
-void UNiagaraVFXManager::SpawnTRexFootstep(FVector Location, float MassScale)
+void UVFX_NiagaraVFXManager::UpdateLOD(const FVector& CameraLocation)
 {
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::TRexFootstepDust;
-    Req.Location = Location;
-    Req.Scale = FVector(FMath::Clamp(MassScale * 2.0f, 1.5f, 4.0f));
-    Req.bLooping = false;
-    SpawnEffect(Req);
+    for (FVFX_ActiveEffect& Entry : ActiveEffects)
+    {
+        if (!Entry.NiagaraComponent || !Entry.NiagaraComponent->IsValidLowLevel())
+        {
+            continue;
+        }
+
+        float Distance = FVector::Dist(CameraLocation, Entry.SpawnLocation);
+        EVFX_LODTier NewLOD = ComputeLODTier(Distance);
+
+        if (NewLOD != Entry.CurrentLOD)
+        {
+            Entry.CurrentLOD = NewLOD;
+            ApplyLODToComponent(Entry.NiagaraComponent, NewLOD);
+        }
+    }
 }
 
-// ============================================================
-// SpawnBloodSplatter — damage-scaled blood at impact point
-// ============================================================
-void UNiagaraVFXManager::SpawnBloodSplatter(FVector Location, FVector ImpactNormal, float DamageAmount)
+EVFX_LODTier UVFX_NiagaraVFXManager::ComputeLODTier(float Distance) const
 {
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::BloodSplatter;
-    Req.Location = Location;
-    // Orient splatter along impact normal
-    Req.Rotation = ImpactNormal.Rotation();
-    // Scale by damage: 10 damage = scale 0.5, 100 damage = scale 2.0
-    const float ScaleVal = FMath::Clamp(DamageAmount / 50.0f, 0.3f, 3.0f);
-    Req.Scale = FVector(ScaleVal);
-    Req.bLooping = false;
-    SpawnEffect(Req);
+    if (Distance <= LODHighMaxDistance)
+    {
+        return EVFX_LODTier::High;
+    }
+    else if (Distance <= LODMediumMaxDistance)
+    {
+        return EVFX_LODTier::Medium;
+    }
+    else if (Distance <= LODLowMaxDistance)
+    {
+        return EVFX_LODTier::Low;
+    }
+    return EVFX_LODTier::Culled;
 }
 
-// ============================================================
-// SpawnBreathVapour — cold biome breath, attached to mouth socket
-// ============================================================
-void UNiagaraVFXManager::SpawnBreathVapour(USceneComponent* MouthSocket)
+void UVFX_NiagaraVFXManager::ApplyLODToComponent(UNiagaraComponent* Component, EVFX_LODTier LODTier)
 {
-    if (!MouthSocket) return;
+    if (!Component)
+    {
+        return;
+    }
 
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::BreathVapour;
-    Req.Location = MouthSocket->GetComponentLocation();
-    Req.Rotation = MouthSocket->GetComponentRotation();
-    Req.Scale = FVector(0.6f);
-    Req.bLooping = true;
-    Req.AttachTarget = MouthSocket;
-    SpawnEffect(Req);
+    switch (LODTier)
+    {
+        case EVFX_LODTier::High:
+            Component->SetVisibility(true);
+            Component->SetPaused(false);
+            break;
+
+        case EVFX_LODTier::Medium:
+            Component->SetVisibility(true);
+            Component->SetPaused(false);
+            // Medium LOD: reduce simulation quality via Niagara scalability
+            Component->SetVariableFloat(FName("SpawnRateScale"), 0.5f);
+            break;
+
+        case EVFX_LODTier::Low:
+            Component->SetVisibility(true);
+            Component->SetPaused(false);
+            Component->SetVariableFloat(FName("SpawnRateScale"), 0.2f);
+            break;
+
+        case EVFX_LODTier::Culled:
+            Component->SetVisibility(false);
+            Component->SetPaused(true);
+            break;
+    }
 }
 
-// ============================================================
-// StopEffect — deactivate and destroy a looping component
-// ============================================================
-void UNiagaraVFXManager::StopEffect(UNiagaraComponent* NiagaraComp)
+UNiagaraSystem* UVFX_NiagaraVFXManager::GetSystemForEffect(EVFX_EffectType EffectType) const
 {
-    if (!IsValid(NiagaraComp)) return;
+    const TObjectPtr<UNiagaraSystem>* Found = EffectSystemMap.Find(EffectType);
+    return Found ? Found->Get() : nullptr;
+}
 
-    NiagaraComp->DeactivateImmediate();
-    ActiveLoopingEffects.Remove(NiagaraComp);
-    NiagaraComp->DestroyComponent();
-    ActiveEffectCount = ActiveLoopingEffects.Num();
+void UVFX_NiagaraVFXManager::CullOldestEffect()
+{
+    if (ActiveEffects.Num() == 0)
+    {
+        return;
+    }
+
+    // Find oldest by spawn time
+    int32 OldestIndex = 0;
+    float OldestTime = ActiveEffects[0].SpawnTime;
+
+    for (int32 i = 1; i < ActiveEffects.Num(); ++i)
+    {
+        if (ActiveEffects[i].SpawnTime < OldestTime)
+        {
+            OldestTime = ActiveEffects[i].SpawnTime;
+            OldestIndex = i;
+        }
+    }
+
+    FVFX_ActiveEffect& Oldest = ActiveEffects[OldestIndex];
+    if (Oldest.NiagaraComponent && Oldest.NiagaraComponent->IsValidLowLevel())
+    {
+        Oldest.NiagaraComponent->DeactivateImmediate();
+    }
+    ActiveEffects.RemoveAt(OldestIndex);
+    UE_LOG(LogTemp, Verbose, TEXT("[VFX] Culled oldest effect to maintain pool limit"));
+}
+
+int32 UVFX_NiagaraVFXManager::GetActiveEffectCount() const
+{
+    return ActiveEffects.Num();
+}
+
+void UVFX_NiagaraVFXManager::StopAllEffects(bool bImmediate)
+{
+    for (FVFX_ActiveEffect& Entry : ActiveEffects)
+    {
+        if (Entry.NiagaraComponent && Entry.NiagaraComponent->IsValidLowLevel())
+        {
+            if (bImmediate)
+            {
+                Entry.NiagaraComponent->DeactivateImmediate();
+            }
+            else
+            {
+                Entry.NiagaraComponent->Deactivate();
+            }
+        }
+    }
+    ActiveEffects.Empty();
+    UE_LOG(LogTemp, Log, TEXT("[VFX] All effects stopped."));
 }
