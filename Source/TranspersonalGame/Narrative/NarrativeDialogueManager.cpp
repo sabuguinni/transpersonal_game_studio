@@ -1,315 +1,329 @@
-// NarrativeDialogueManager.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// Full implementation: dialogue trees, phase-gated triggers, quest integration
 #include "NarrativeDialogueManager.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
-UNarrativeDialogueManager::UNarrativeDialogueManager()
+ANarrativeDialogueManager::ANarrativeDialogueManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // 2Hz — proximity checks
+    PrimaryActorTick.bCanEverTick = true;
+
+    DialogueCooldownSeconds = 3.0f;
+    MaxQueueSize = 8;
+    bEnableSubtitles = true;
+    ProximityTriggerRadius = 800.0f;
+
+    TimeSinceLastDialogue = 0.0f;
+    CurrentLineTimer = 0.0f;
+    bDialoguePlaying = false;
 }
 
 // ─── BeginPlay ────────────────────────────────────────────────────────────────
 
-void UNarrativeDialogueManager::BeginPlay()
+void ANarrativeDialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-    LoadMigrationQuestDialogue();
-    LoadCampDefenseDialogue();
+    UE_LOG(LogTemp, Log, TEXT("[NarrativeDialogueManager] Initialized — subtitles=%s, cooldown=%.1fs"),
+        bEnableSubtitles ? TEXT("ON") : TEXT("OFF"), DialogueCooldownSeconds);
 }
 
-// ─── TickComponent ────────────────────────────────────────────────────────────
+// ─── Tick ─────────────────────────────────────────────────────────────────────
 
-void UNarrativeDialogueManager::TickComponent(float DeltaTime, ELevelTick TickType,
-    FActorComponentTickFunction* ThisTickFunction)
+void ANarrativeDialogueManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    AccumulatedTime += DeltaTime;
-}
+    Super::Tick(DeltaTime);
 
-// ─── RegisterDialogueTree ─────────────────────────────────────────────────────
+    TimeSinceLastDialogue += DeltaTime;
 
-void UNarrativeDialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& Tree)
-{
-    // Replace if exists
-    for (int32 i = 0; i < DialogueTrees.Num(); ++i)
+    if (bDialoguePlaying)
     {
-        if (DialogueTrees[i].TreeID == Tree.TreeID)
+        CurrentLineTimer -= DeltaTime;
+        CurrentDialogue.RemainingTime = FMath::Max(0.0f, CurrentLineTimer);
+
+        if (CurrentLineTimer <= 0.0f)
         {
-            DialogueTrees[i] = Tree;
-            return;
+            bDialoguePlaying = false;
+            CurrentDialogue = FNarr_ActiveDialogue();
+            AdvanceQueue();
         }
     }
-    DialogueTrees.Add(Tree);
 }
 
-// ─── TriggerDialogueLine ──────────────────────────────────────────────────────
+// ─── TriggerDialogue ──────────────────────────────────────────────────────────
 
-bool UNarrativeDialogueManager::TriggerDialogueLine(FName TreeID, int32 LineIndex)
+void ANarrativeDialogueManager::TriggerDialogue(ENarr_DialogueTrigger TriggerType,
+                                                  AActor* InstigatorActor)
 {
-    FNarr_DialogueTree* Tree = FindTree(TreeID);
-    if (!Tree) return false;
-    if (!Tree->Lines.IsValidIndex(LineIndex)) return false;
-
-    FNarr_DialogueLine& Line = Tree->Lines[LineIndex];
-
-    // Phase gate check
-    if (Line.RequiredPhase != ENarr_DialoguePhase::NotStarted &&
-        Line.RequiredPhase != CurrentPhase)
+    if (TimeSinceLastDialogue < DialogueCooldownSeconds && !bDialoguePlaying)
     {
-        return false;
+        return; // Still in cooldown
     }
 
-    // Cooldown check
-    float* LastTime = LastTriggerTimestamps.Find(TreeID);
-    if (LastTime && (AccumulatedTime - *LastTime) < Line.CooldownSeconds)
+    // Build a contextual line based on trigger type
+    FString ContextText;
+    ENarr_SpeakerRole Speaker = ENarr_SpeakerRole::Narrator;
+    bool bUrgent = false;
+
+    switch (TriggerType)
     {
-        return false;
+        case ENarr_DialogueTrigger::DinosaurNearby:
+            ContextText = TEXT("Something large is moving through the trees. Do not make a sound.");
+            Speaker = ENarr_SpeakerRole::Scout;
+            bUrgent = true;
+            break;
+
+        case ENarr_DialogueTrigger::PlayerInjured:
+            ContextText = TEXT("You are bleeding. Find shelter and treat the wound before infection sets in.");
+            Speaker = ENarr_SpeakerRole::Narrator;
+            bUrgent = true;
+            break;
+
+        case ENarr_DialogueTrigger::NightFall:
+            ContextText = TEXT("Night is coming. The predators grow bolder in the dark. Find high ground or a cave.");
+            Speaker = ENarr_SpeakerRole::TribalElder;
+            bUrgent = false;
+            break;
+
+        case ENarr_DialogueTrigger::ResourceFound:
+            ContextText = TEXT("Good find. These materials will serve us well.");
+            Speaker = ENarr_SpeakerRole::HunterLeader;
+            bUrgent = false;
+            break;
+
+        case ENarr_DialogueTrigger::QuestStart:
+            ContextText = TEXT("The task is clear. Move carefully and do not underestimate the terrain.");
+            Speaker = ENarr_SpeakerRole::TribalElder;
+            bUrgent = false;
+            break;
+
+        case ENarr_DialogueTrigger::QuestComplete:
+            ContextText = TEXT("Well done. The tribe will remember this.");
+            Speaker = ENarr_SpeakerRole::HunterLeader;
+            bUrgent = false;
+            break;
+
+        case ENarr_DialogueTrigger::TribeEvent:
+            ContextText = TEXT("The tribe has spoken. We move together.");
+            Speaker = ENarr_SpeakerRole::TribalElder;
+            bUrgent = false;
+            break;
+
+        default:
+            ContextText = TEXT("Stay alert.");
+            Speaker = ENarr_SpeakerRole::Narrator;
+            bUrgent = false;
+            break;
     }
 
-    // Already played this session (one-shot lines)
-    if (Line.bPlayedThisSession && Line.CooldownSeconds <= 0.0f)
-    {
-        return false;
-    }
-
-    Line.bPlayedThisSession = true;
-    LastTriggerTimestamps.Add(TreeID, AccumulatedTime);
-
-    OnDialogueLineTriggered.Broadcast(TreeID, LineIndex);
-    return true;
+    FNarr_DialogueLine Line = BuildSurvivalLine(TriggerType, ContextText, Speaker, bUrgent);
+    QueueDialogueLine(Line);
 }
 
-// ─── AdvanceDialogueTree ──────────────────────────────────────────────────────
+// ─── PlayDialogueLine ─────────────────────────────────────────────────────────
 
-void UNarrativeDialogueManager::AdvanceDialogueTree(FName TreeID)
+void ANarrativeDialogueManager::PlayDialogueLine(const FNarr_DialogueLine& Line)
 {
-    FNarr_DialogueTree* Tree = FindTree(TreeID);
-    if (!Tree) return;
+    bDialoguePlaying = true;
+    CurrentLineTimer = Line.DisplayDuration;
+    TimeSinceLastDialogue = 0.0f;
 
-    Tree->CurrentLineIndex++;
+    CurrentDialogue.LineID = Line.LineID;
+    CurrentDialogue.Text = Line.DialogueText;
+    CurrentDialogue.Speaker = Line.Speaker;
+    CurrentDialogue.RemainingTime = Line.DisplayDuration;
+    CurrentDialogue.bIsUrgent = Line.bIsUrgent;
 
-    if (Tree->CurrentLineIndex >= Tree->Lines.Num())
+    UE_LOG(LogTemp, Log, TEXT("[NarrativeDialogueManager] Playing: [%s] \"%s\" (%.1fs)"),
+        *Line.LineID, *Line.DialogueText, Line.DisplayDuration);
+}
+
+// ─── QueueDialogueLine ────────────────────────────────────────────────────────
+
+void ANarrativeDialogueManager::QueueDialogueLine(const FNarr_DialogueLine& Line)
+{
+    if (DialogueQueue.Num() >= MaxQueueSize)
     {
-        Tree->bIsActive = false;
-        OnDialogueTreeCompleted.Broadcast(TreeID);
+        UE_LOG(LogTemp, Warning, TEXT("[NarrativeDialogueManager] Queue full — dropping line: %s"), *Line.LineID);
+        return;
+    }
+
+    // Urgent lines jump to front of queue
+    if (Line.bIsUrgent)
+    {
+        DialogueQueue.Insert(Line, 0);
     }
     else
     {
-        TriggerDialogueLine(TreeID, Tree->CurrentLineIndex);
+        DialogueQueue.Add(Line);
+    }
+
+    if (!bDialoguePlaying)
+    {
+        AdvanceQueue();
     }
 }
 
-// ─── SetNarrativePhase ────────────────────────────────────────────────────────
+// ─── ClearDialogueQueue ───────────────────────────────────────────────────────
 
-void UNarrativeDialogueManager::SetNarrativePhase(ENarr_DialoguePhase NewPhase)
+void ANarrativeDialogueManager::ClearDialogueQueue()
 {
-    if (CurrentPhase == NewPhase) return;
-    CurrentPhase = NewPhase;
-    TriggerPhaseGatedLines(NewPhase);
+    DialogueQueue.Empty();
+    bDialoguePlaying = false;
+    CurrentDialogue = FNarr_ActiveDialogue();
+    CurrentLineTimer = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("[NarrativeDialogueManager] Queue cleared."));
 }
 
-// ─── TriggerPhaseGatedLines ───────────────────────────────────────────────────
+// ─── IsDialoguePlaying ────────────────────────────────────────────────────────
 
-void UNarrativeDialogueManager::TriggerPhaseGatedLines(ENarr_DialoguePhase Phase)
+bool ANarrativeDialogueManager::IsDialoguePlaying() const
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (!Tree.bIsActive) continue;
-        for (int32 i = 0; i < Tree.Lines.Num(); ++i)
-        {
-            if (Tree.Lines[i].RequiredPhase == Phase &&
-                !Tree.Lines[i].bPlayedThisSession)
-            {
-                TriggerDialogueLine(Tree.TreeID, i);
-                OnPhaseGateUnlocked.Broadcast(Phase, Tree.TreeID);
-                break; // one line per tree per phase unlock
-            }
-        }
-    }
+    return bDialoguePlaying;
 }
 
-// ─── GetCurrentLine ───────────────────────────────────────────────────────────
+// ─── GetCurrentDialogue ───────────────────────────────────────────────────────
 
-FNarr_DialogueLine UNarrativeDialogueManager::GetCurrentLine(FName TreeID) const
+FNarr_ActiveDialogue ANarrativeDialogueManager::GetCurrentDialogue() const
 {
-    const FNarr_DialogueTree* Tree = FindTreeConst(TreeID);
-    if (!Tree || !Tree->Lines.IsValidIndex(Tree->CurrentLineIndex))
-    {
-        return FNarr_DialogueLine();
-    }
-    return Tree->Lines[Tree->CurrentLineIndex];
+    return CurrentDialogue;
 }
 
-// ─── IsTreeComplete ───────────────────────────────────────────────────────────
+// ─── Survival Context Triggers ────────────────────────────────────────────────
 
-bool UNarrativeDialogueManager::IsTreeComplete(FName TreeID) const
+void ANarrativeDialogueManager::OnDinosaurDetected(FName DinosaurSpecies, float DistanceMeters)
 {
-    const FNarr_DialogueTree* Tree = FindTreeConst(TreeID);
-    if (!Tree) return false;
-    return !Tree->bIsActive && Tree->CurrentLineIndex >= Tree->Lines.Num();
+    bool bUrgent = (DistanceMeters < 300.0f);
+    FString Text;
+
+    if (DinosaurSpecies == FName("TRex"))
+    {
+        Text = bUrgent
+            ? TEXT("Tyrannosaurus — close range! Do NOT run. Back away slowly and find cover NOW.")
+            : TEXT("Tyrannosaurus tracks. It passed through here recently. Stay downwind.");
+    }
+    else if (DinosaurSpecies == FName("Raptor"))
+    {
+        Text = bUrgent
+            ? TEXT("Raptors nearby — they hunt in packs. Climb or find a narrow space they cannot follow.")
+            : TEXT("Raptor signs. They are scouting. Keep moving and do not linger.");
+    }
+    else if (DinosaurSpecies == FName("Brachiosaurus"))
+    {
+        Text = TEXT("A Brachiosaurus herd. They are peaceful unless startled. Move slowly around them.");
+        bUrgent = false;
+    }
+    else if (DinosaurSpecies == FName("Triceratops"))
+    {
+        Text = bUrgent
+            ? TEXT("Triceratops charging! Get behind a tree — it cannot turn fast.")
+            : TEXT("Triceratops grazing ahead. Give them space and they will ignore you.");
+    }
+    else
+    {
+        Text = FString::Printf(TEXT("Unknown creature detected at %.0f meters. Approach with caution."), DistanceMeters);
+    }
+
+    FNarr_DialogueLine Line = BuildSurvivalLine(
+        ENarr_DialogueTrigger::DinosaurNearby, Text,
+        ENarr_SpeakerRole::Scout, bUrgent);
+    QueueDialogueLine(Line);
 }
 
-// ─── ResetTree ────────────────────────────────────────────────────────────────
-
-void UNarrativeDialogueManager::ResetTree(FName TreeID)
+void ANarrativeDialogueManager::OnPlayerHealthCritical(float HealthPercent)
 {
-    FNarr_DialogueTree* Tree = FindTree(TreeID);
-    if (!Tree) return;
-    Tree->CurrentLineIndex = 0;
-    Tree->bIsActive = true;
-    for (FNarr_DialogueLine& Line : Tree->Lines)
+    FString Text;
+    if (HealthPercent < 0.15f)
     {
-        Line.bPlayedThisSession = false;
+        Text = TEXT("Critical injury. You will not survive another hit. Find shelter immediately.");
     }
+    else if (HealthPercent < 0.30f)
+    {
+        Text = TEXT("You are badly wounded. Use medicinal leaves or rest before continuing.");
+    }
+    else
+    {
+        Text = TEXT("You are hurt. Treat the wound when you have a safe moment.");
+    }
+
+    FNarr_DialogueLine Line = BuildSurvivalLine(
+        ENarr_DialogueTrigger::PlayerInjured, Text,
+        ENarr_SpeakerRole::Narrator, HealthPercent < 0.20f);
+    QueueDialogueLine(Line);
 }
 
-// ─── LoadMigrationQuestDialogue ───────────────────────────────────────────────
-// 4 narrative beats: Discovery → Journey → Danger → Arrival
-// Voice URLs from ElevenLabs TTS (Agent #15 production assets)
-
-void UNarrativeDialogueManager::LoadMigrationQuestDialogue()
+void ANarrativeDialogueManager::OnNightfallApproaching(float HoursUntilDark)
 {
-    FNarr_DialogueTree MigTree;
-    MigTree.TreeID = FName("Migration_Elder");
-    MigTree.OwnerRole = ENarr_NPCRole::Elder;
-    MigTree.bIsActive = true;
-
-    // Beat 1 — Discovery (Introduction phase)
+    FString Text;
+    if (HoursUntilDark < 1.0f)
     {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "The herd moves at dawn. Four days east, past the canyon where the river bends. "
-            "If we miss them, we face the dry season alone. I have seen what that does to a tribe.");
-        Line.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782820412984_QuestNPC_Elder_MigrationBriefi.mp3";
-        Line.SpeakerRole = ENarr_NPCRole::Elder;
-        Line.TriggerType = ENarr_DialogueTrigger::OnFirstMeeting;
-        Line.RequiredPhase = ENarr_DialoguePhase::Introduction;
-        Line.CooldownSeconds = 0.0f; // one-shot
-        MigTree.Lines.Add(Line);
+        Text = TEXT("Darkness is minutes away. You need shelter now — predators own the night.");
+    }
+    else if (HoursUntilDark < 2.0f)
+    {
+        Text = TEXT("The sun is low. Start looking for a cave or high ground to camp.");
+    }
+    else
+    {
+        Text = TEXT("Afternoon light. You have time, but do not waste it — nightfall comes fast.");
     }
 
-    // Beat 2 — Journey (QuestBriefing phase)
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "Keep the canyon wall on your left. The herd leaves tracks you cannot miss — "
-            "ground torn up, trees stripped bare. Follow the destruction.");
-        Line.AudioURL = "";
-        Line.SpeakerRole = ENarr_NPCRole::Elder;
-        Line.TriggerType = ENarr_DialogueTrigger::OnQuestPhase;
-        Line.RequiredPhase = ENarr_DialoguePhase::QuestBriefing;
-        Line.CooldownSeconds = 120.0f;
-        MigTree.Lines.Add(Line);
-    }
-
-    // Beat 3 — Danger (CrisisPoint phase)
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "The river is low. Lower than my father ever saw it. "
-            "Something upstream is wrong. We need to find out what before the herd arrives, "
-            "or the crossing will be a slaughter.");
-        Line.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782820437243_QuestNPC_Elder_RiverWarning.mp3";
-        Line.SpeakerRole = ENarr_NPCRole::Elder;
-        Line.TriggerType = ENarr_DialogueTrigger::OnQuestPhase;
-        Line.RequiredPhase = ENarr_DialoguePhase::CrisisPoint;
-        Line.CooldownSeconds = 0.0f;
-        MigTree.Lines.Add(Line);
-    }
-
-    // Beat 4 — Arrival (Resolution phase)
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "You crossed the canyon alone. No weapon, no fire, no tribe. "
-            "And you are still breathing. That means something. The elders will want to hear your story.");
-        Line.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782820435268_QuestNPC_Hunter_PlayerArrival.mp3";
-        Line.SpeakerRole = ENarr_NPCRole::Hunter;
-        Line.TriggerType = ENarr_DialogueTrigger::OnQuestPhase;
-        Line.RequiredPhase = ENarr_DialoguePhase::Resolution;
-        Line.CooldownSeconds = 0.0f;
-        MigTree.Lines.Add(Line);
-    }
-
-    RegisterDialogueTree(MigTree);
+    FNarr_DialogueLine Line = BuildSurvivalLine(
+        ENarr_DialogueTrigger::NightFall, Text,
+        ENarr_SpeakerRole::TribalElder, HoursUntilDark < 1.0f);
+    QueueDialogueLine(Line);
 }
 
-// ─── LoadCampDefenseDialogue ──────────────────────────────────────────────────
-// 3 dramatic beats: Warning → Waves → Final Stand
-// Escalating tension: calm briefing → urgent → desperate
-
-void UNarrativeDialogueManager::LoadCampDefenseDialogue()
+void ANarrativeDialogueManager::OnResourceDiscovered(FName ResourceType, int32 Quantity)
 {
-    FNarr_DialogueTree DefTree;
-    DefTree.TreeID = FName("Defense_Scout");
-    DefTree.OwnerRole = ENarr_NPCRole::Scout;
-    DefTree.bIsActive = true;
+    FString Text = FString::Printf(
+        TEXT("Found %d units of %s. Gather what you can carry."),
+        Quantity, *ResourceType.ToString());
 
-    // Beat 1 — Warning (Introduction phase)
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "They came from the north last season. Three of them. We lost two hunters before we drove them back. "
-            "This time we build the barrier higher. This time nobody dies.");
-        Line.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782820428506_QuestNPC_Scout_CampDefenseBrie.mp3";
-        Line.SpeakerRole = ENarr_NPCRole::Scout;
-        Line.TriggerType = ENarr_DialogueTrigger::OnFirstMeeting;
-        Line.RequiredPhase = ENarr_DialoguePhase::Introduction;
-        Line.CooldownSeconds = 0.0f;
-        DefTree.Lines.Add(Line);
-    }
+    FNarr_DialogueLine Line = BuildSurvivalLine(
+        ENarr_DialogueTrigger::ResourceFound, Text,
+        ENarr_SpeakerRole::HunterLeader, false);
+    QueueDialogueLine(Line);
+}
 
-    // Beat 2 — First Wave (MidJourney phase — reused as "wave active")
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "Danger! A predator stalks the camp. Gather your weapons and drive it away before it takes one of our own!");
-        Line.AudioURL = ""; // Previous cycle audio from Agent #14
-        Line.SpeakerRole = ENarr_NPCRole::Scout;
-        Line.TriggerType = ENarr_DialogueTrigger::OnDangerLevel;
-        Line.RequiredPhase = ENarr_DialoguePhase::MidJourney;
-        Line.CooldownSeconds = 30.0f;
-        DefTree.Lines.Add(Line);
-    }
+void ANarrativeDialogueManager::OnTribeEventOccurred(FName EventID)
+{
+    FString Text = FString::Printf(
+        TEXT("Tribe event: %s. The council has decided — we act together."),
+        *EventID.ToString());
 
-    // Beat 3 — Final Stand (CrisisPoint phase)
-    {
-        FNarr_DialogueLine Line;
-        Line.LineText = FText::FromString(
-            "The barrier is down! Fall back to the fire circle — they will not cross the flames. "
-            "Hold the line until dawn. We survive this together or not at all.");
-        Line.AudioURL = "";
-        Line.SpeakerRole = ENarr_NPCRole::TribalLeader;
-        Line.TriggerType = ENarr_DialogueTrigger::OnDangerLevel;
-        Line.RequiredPhase = ENarr_DialoguePhase::CrisisPoint;
-        Line.CooldownSeconds = 0.0f;
-        DefTree.Lines.Add(Line);
-    }
-
-    RegisterDialogueTree(DefTree);
+    FNarr_DialogueLine Line = BuildSurvivalLine(
+        ENarr_DialogueTrigger::TribeEvent, Text,
+        ENarr_SpeakerRole::TribalElder, false);
+    QueueDialogueLine(Line);
 }
 
 // ─── Private Helpers ──────────────────────────────────────────────────────────
 
-FNarr_DialogueTree* UNarrativeDialogueManager::FindTree(FName TreeID)
+void ANarrativeDialogueManager::AdvanceQueue()
 {
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
+    if (DialogueQueue.Num() == 0 || bDialoguePlaying)
     {
-        if (Tree.TreeID == TreeID) return &Tree;
+        return;
     }
-    return nullptr;
+
+    FNarr_DialogueLine Next = DialogueQueue[0];
+    DialogueQueue.RemoveAt(0);
+    PlayDialogueLine(Next);
 }
 
-const FNarr_DialogueTree* UNarrativeDialogueManager::FindTreeConst(FName TreeID) const
+FNarr_DialogueLine ANarrativeDialogueManager::BuildSurvivalLine(
+    ENarr_DialogueTrigger Trigger,
+    const FString& ContextText,
+    ENarr_SpeakerRole Speaker,
+    bool bUrgent)
 {
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == TreeID) return &Tree;
-    }
-    return nullptr;
+    FNarr_DialogueLine Line;
+    Line.LineID = FString::Printf(TEXT("LINE_%d"), FMath::Rand());
+    Line.DialogueText = ContextText;
+    Line.Speaker = Speaker;
+    Line.TriggerType = Trigger;
+    Line.DisplayDuration = bUrgent ? 3.5f : 5.0f;
+    Line.bIsUrgent = bUrgent;
+    Line.AudioAssetPath = TEXT("");
+    return Line;
 }
