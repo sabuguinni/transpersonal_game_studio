@@ -1,32 +1,30 @@
-// NarrativeDialogueManager.h
-// Agent #15 — Narrative & Dialogue Agent
-// CYCLE: PROD_CYCLE_AUTO_20260627_005
-// Manages NPC dialogue lines, voice audio references, and tribal lore delivery
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Sound/SoundBase.h"
 #include "NarrativeDialogueManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueSpeaker : uint8
 {
-    TribeElder      UMETA(DisplayName = "Tribe Elder"),
-    HuntLeader      UMETA(DisplayName = "Hunt Leader"),
+    TribalLeader    UMETA(DisplayName = "Tribal Leader"),
     Scout           UMETA(DisplayName = "Scout"),
-    TribalWarrior   UMETA(DisplayName = "Tribal Warrior"),
-    Unknown         UMETA(DisplayName = "Unknown")
+    Elder           UMETA(DisplayName = "Elder"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Narrator        UMETA(DisplayName = "Narrator")
 };
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueTrigger : uint8
 {
-    OnApproach      UMETA(DisplayName = "On Player Approach"),
+    OnProximity     UMETA(DisplayName = "On Proximity"),
     OnQuestStart    UMETA(DisplayName = "On Quest Start"),
     OnQuestComplete UMETA(DisplayName = "On Quest Complete"),
-    OnDanger        UMETA(DisplayName = "On Danger Detected"),
-    OnIdle          UMETA(DisplayName = "On Idle")
+    OnDinosaurSeen  UMETA(DisplayName = "On Dinosaur Seen"),
+    OnPlayerDamaged UMETA(DisplayName = "On Player Damaged"),
+    OnNightfall     UMETA(DisplayName = "On Nightfall"),
+    OnCampfire      UMETA(DisplayName = "On Campfire")
 };
 
 USTRUCT(BlueprintType)
@@ -35,46 +33,58 @@ struct FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString LineText;
+    FString LineID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueSpeaker Speaker;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTrigger Trigger;
+    ENarr_DialogueSpeaker SpeakerType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString AudioURL;
+    FString DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float Duration;
+    ENarr_DialogueTrigger TriggerCondition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    USoundBase* VoiceAudio;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DisplayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bHasBeenPlayed;
 
     FNarr_DialogueLine()
-        : LineText(TEXT(""))
-        , Speaker(ENarr_DialogueSpeaker::Unknown)
-        , Trigger(ENarr_DialogueTrigger::OnIdle)
-        , AudioURL(TEXT(""))
-        , Duration(0.0f)
+        : SpeakerType(ENarr_DialogueSpeaker::Hunter)
+        , TriggerCondition(ENarr_DialogueTrigger::OnProximity)
+        , VoiceAudio(nullptr)
+        , DisplayDuration(5.0f)
+        , bHasBeenPlayed(false)
     {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_NPCVoiceProfile
+struct FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueSpeaker Speaker;
+    FString SequenceID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString CharacterName;
+    TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    bool bIsActive;
 
-    FNarr_NPCVoiceProfile()
-        : Speaker(ENarr_DialogueSpeaker::Unknown)
-        , CharacterName(TEXT(""))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    int32 CurrentLineIndex;
+
+    FNarr_DialogueSequence()
+        : bIsActive(false)
+        , CurrentLineIndex(0)
     {}
 };
 
@@ -87,39 +97,57 @@ public:
     ANarrativeDialogueManager();
 
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // All registered NPC voice profiles
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Profiles")
-    TArray<FNarr_NPCVoiceProfile> NPCProfiles;
+    // Active dialogue sequences
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    // Currently active dialogue line
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FNarr_DialogueLine ActiveLine;
+    // Currently playing line
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    FNarr_DialogueLine ActiveDialogueLine;
 
-    // Whether a dialogue is currently playing
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    // Is dialogue currently playing
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
     bool bDialogueActive;
 
-    // Trigger a dialogue line by speaker and trigger type
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(ENarr_DialogueSpeaker Speaker, ENarr_DialogueTrigger Trigger);
+    // Time remaining on current line
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    float DialogueTimeRemaining;
 
-    // End current dialogue
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndDialogue();
+    // Trigger a dialogue sequence by ID
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void TriggerDialogueSequence(const FString& SequenceID);
 
-    // Get all lines for a specific speaker
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_DialogueLine> GetLinesForSpeaker(ENarr_DialogueSpeaker Speaker) const;
+    // Trigger dialogue by condition
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void TriggerDialogueByCondition(ENarr_DialogueTrigger Trigger);
 
-    // Register a new NPC profile at runtime
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterNPCProfile(const FNarr_NPCVoiceProfile& Profile);
+    // Advance to next line in active sequence
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void AdvanceDialogue();
 
-    // Load default dialogue lines from game bible
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative")
-    void LoadDefaultDialogueLines();
+    // Skip current dialogue
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void SkipDialogue();
+
+    // Register a new dialogue line at runtime
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void RegisterDialogueLine(const FString& SequenceID, const FNarr_DialogueLine& Line);
+
+    // Get all lines for a speaker type
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueLine> GetLinesForSpeaker(ENarr_DialogueSpeaker Speaker);
+
+    // Check if a sequence has been completed
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    bool IsSequenceComplete(const FString& SequenceID) const;
 
 protected:
-    void InitializeDefaultProfiles();
+    void InitializeDefaultDialogue();
+    void PlayDialogueLine(const FNarr_DialogueLine& Line);
+    void OnDialogueLineComplete();
+
+    FTimerHandle DialogueTimerHandle;
+    int32 ActiveSequenceIndex;
 };
