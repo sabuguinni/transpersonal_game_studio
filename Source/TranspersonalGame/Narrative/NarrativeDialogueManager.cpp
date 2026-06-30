@@ -1,157 +1,259 @@
-// NarrativeDialogueManager.cpp
-// Agent #15 — Narrative & Dialogue Agent
-// CYCLE: PROD_CYCLE_AUTO_20260627_005
-
 #include "NarrativeDialogueManager.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 
 ANarrativeDialogueManager::ANarrativeDialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
     bDialogueActive = false;
+    DialogueTimeRemaining = 0.0f;
+    ActiveSequenceIndex = -1;
 }
 
 void ANarrativeDialogueManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultProfiles();
+    InitializeDefaultDialogue();
 }
 
-void ANarrativeDialogueManager::InitializeDefaultProfiles()
+void ANarrativeDialogueManager::Tick(float DeltaTime)
 {
-    // --- Tribe Elder ---
-    FNarr_NPCVoiceProfile ElderProfile;
-    ElderProfile.Speaker = ENarr_DialogueSpeaker::TribeElder;
-    ElderProfile.CharacterName = TEXT("The Elder");
+    Super::Tick(DeltaTime);
 
-    FNarr_DialogueLine ElderLine1;
-    ElderLine1.Speaker = ENarr_DialogueSpeaker::TribeElder;
-    ElderLine1.Trigger = ENarr_DialogueTrigger::OnApproach;
-    ElderLine1.LineText = TEXT("Three winters ago, a man from the northern clan tried to cross the valley alone. We found his bones near the river bend — cracked open, marrow sucked clean. That was one raptor. There are seven now.");
-    ElderLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548764065_TribeElder.mp3");
-    ElderLine1.Duration = 27.0f;
-    ElderProfile.DialogueLines.Add(ElderLine1);
-
-    FNarr_DialogueLine ElderLine2;
-    ElderLine2.Speaker = ENarr_DialogueSpeaker::TribeElder;
-    ElderLine2.Trigger = ENarr_DialogueTrigger::OnQuestStart;
-    ElderLine2.LineText = TEXT("The old hunter crouches by the fire. His eyes do not leave the treeline. You want to hunt in that valley? Bring four spears and two good men. Or do not go at all.");
-    ElderLine2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548764065_TribeElder.mp3");
-    ElderLine2.Duration = 27.0f;
-    ElderProfile.DialogueLines.Add(ElderLine2);
-
-    NPCProfiles.Add(ElderProfile);
-
-    // --- Hunt Leader ---
-    FNarr_NPCVoiceProfile HuntProfile;
-    HuntProfile.Speaker = ENarr_DialogueSpeaker::HuntLeader;
-    HuntProfile.CharacterName = TEXT("Hunt Leader");
-
-    FNarr_DialogueLine HuntLine1;
-    HuntLine1.Speaker = ENarr_DialogueSpeaker::HuntLeader;
-    HuntLine1.Trigger = ENarr_DialogueTrigger::OnQuestStart;
-    HuntLine1.LineText = TEXT("Move. Now. The herd is crossing the ridge — if we lose sight of them before the canyon narrows, we lose the hunt. Stay low. Stay quiet. One clean throw to the flank. We eat tonight.");
-    HuntLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548768754_HuntLeader.mp3");
-    HuntLine1.Duration = 21.0f;
-    HuntProfile.DialogueLines.Add(HuntLine1);
-
-    NPCProfiles.Add(HuntProfile);
-
-    // --- Scout ---
-    FNarr_NPCVoiceProfile ScoutProfile;
-    ScoutProfile.Speaker = ENarr_DialogueSpeaker::Scout;
-    ScoutProfile.CharacterName = TEXT("Scout");
-
-    FNarr_DialogueLine ScoutLine1;
-    ScoutLine1.Speaker = ENarr_DialogueSpeaker::Scout;
-    ScoutLine1.Trigger = ENarr_DialogueTrigger::OnDanger;
-    ScoutLine1.LineText = TEXT("You found the cache. Good. The ones who hid it — they are gone now. Taken by the large one, the one with the scarred hide. We call it the Shadow. It hunts at dusk, always from downwind. Take what you need. Then move camp. Tonight.");
-    ScoutLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548790894_ScoutNPC.mp3");
-    ScoutLine1.Duration = 23.0f;
-    ScoutProfile.DialogueLines.Add(ScoutLine1);
-
-    NPCProfiles.Add(ScoutProfile);
-
-    // --- Tribal Warrior ---
-    FNarr_NPCVoiceProfile WarriorProfile;
-    WarriorProfile.Speaker = ENarr_DialogueSpeaker::TribalWarrior;
-    WarriorProfile.CharacterName = TEXT("Tribal Warrior");
-
-    FNarr_DialogueLine WarriorLine1;
-    WarriorLine1.Speaker = ENarr_DialogueSpeaker::TribalWarrior;
-    WarriorLine1.Trigger = ENarr_DialogueTrigger::OnDanger;
-    WarriorLine1.LineText = TEXT("The child ran back to camp screaming. Said she saw it at the river — standing still, watching. Not hunting. Watching. That is worse. The pack leader does not attack until it knows the numbers. We have twelve people here. Six fighters. It knows that now. We need to move.");
-    WarriorLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782548803486_TribalWarrior.mp3");
-    WarriorLine1.Duration = 26.0f;
-    WarriorProfile.DialogueLines.Add(WarriorLine1);
-
-    NPCProfiles.Add(WarriorProfile);
-
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Initialized %d NPC profiles"), NPCProfiles.Num());
-}
-
-void ANarrativeDialogueManager::TriggerDialogue(ENarr_DialogueSpeaker Speaker, ENarr_DialogueTrigger Trigger)
-{
-    if (bDialogueActive)
+    if (bDialogueActive && DialogueTimeRemaining > 0.0f)
     {
-        return;
-    }
-
-    for (const FNarr_NPCVoiceProfile& Profile : NPCProfiles)
-    {
-        if (Profile.Speaker == Speaker)
+        DialogueTimeRemaining -= DeltaTime;
+        if (DialogueTimeRemaining <= 0.0f)
         {
-            for (const FNarr_DialogueLine& Line : Profile.DialogueLines)
+            OnDialogueLineComplete();
+        }
+    }
+}
+
+void ANarrativeDialogueManager::InitializeDefaultDialogue()
+{
+    // --- Sequence: Raptor Warning (Tribal Leader Kora) ---
+    FNarr_DialogueSequence RaptorWarning;
+    RaptorWarning.SequenceID = TEXT("SEQ_RaptorWarning");
+    RaptorWarning.bIsActive = false;
+    RaptorWarning.CurrentLineIndex = 0;
+
+    FNarr_DialogueLine Line_Kora1;
+    Line_Kora1.LineID = TEXT("KORA_001");
+    Line_Kora1.SpeakerName = TEXT("Kora");
+    Line_Kora1.SpeakerType = ENarr_DialogueSpeaker::TribalLeader;
+    Line_Kora1.DialogueText = TEXT("The eastern ridge is raptor territory now. We lost two scouts last moon cycle. Anyone who crosses that valley alone does not come back.");
+    Line_Kora1.TriggerCondition = ENarr_DialogueTrigger::OnQuestStart;
+    Line_Kora1.DisplayDuration = 9.0f;
+    Line_Kora1.bHasBeenPlayed = false;
+    RaptorWarning.Lines.Add(Line_Kora1);
+
+    DialogueSequences.Add(RaptorWarning);
+
+    // --- Sequence: Triceratops Tracking (Scout Davan) ---
+    FNarr_DialogueSequence TriceratopsTracking;
+    TriceratopsTracking.SequenceID = TEXT("SEQ_TriceratopsTracking");
+    TriceratopsTracking.bIsActive = false;
+    TriceratopsTracking.CurrentLineIndex = 0;
+
+    FNarr_DialogueLine Line_Davan1;
+    Line_Davan1.LineID = TEXT("DAVAN_001");
+    Line_Davan1.SpeakerName = TEXT("Davan");
+    Line_Davan1.SpeakerType = ENarr_DialogueSpeaker::Scout;
+    Line_Davan1.DialogueText = TEXT("We have tracked the Triceratops herd for three days. They know where the water is. Follow them, stay downwind, and we will survive the dry season.");
+    Line_Davan1.TriggerCondition = ENarr_DialogueTrigger::OnDinosaurSeen;
+    Line_Davan1.DisplayDuration = 10.0f;
+    Line_Davan1.bHasBeenPlayed = false;
+    TriceratopsTracking.Lines.Add(Line_Davan1);
+
+    DialogueSequences.Add(TriceratopsTracking);
+
+    // --- Sequence: TRex Knowledge (Elder Maren) ---
+    FNarr_DialogueSequence TRexKnowledge;
+    TRexKnowledge.SequenceID = TEXT("SEQ_TRexKnowledge");
+    TRexKnowledge.bIsActive = false;
+    TRexKnowledge.CurrentLineIndex = 0;
+
+    FNarr_DialogueLine Line_Maren1;
+    Line_Maren1.LineID = TEXT("MAREN_001");
+    Line_Maren1.SpeakerName = TEXT("Maren");
+    Line_Maren1.SpeakerType = ENarr_DialogueSpeaker::Elder;
+    Line_Maren1.DialogueText = TEXT("The T-Rex does not hunt by sight alone. It reads the ground — your footprints, your warmth, the way the grass bends when you pass. You cannot hide from it. You can only make it choose a different meal.");
+    Line_Maren1.TriggerCondition = ENarr_DialogueTrigger::OnDinosaurSeen;
+    Line_Maren1.DisplayDuration = 14.0f;
+    Line_Maren1.bHasBeenPlayed = false;
+    TRexKnowledge.Lines.Add(Line_Maren1);
+
+    DialogueSequences.Add(TRexKnowledge);
+
+    // --- Sequence: Fire Warning (Hunter Brek) ---
+    FNarr_DialogueSequence FireWarning;
+    FireWarning.SequenceID = TEXT("SEQ_FireWarning");
+    FireWarning.bIsActive = false;
+    FireWarning.CurrentLineIndex = 0;
+
+    FNarr_DialogueLine Line_Brek1;
+    Line_Brek1.LineID = TEXT("BREK_001");
+    Line_Brek1.SpeakerName = TEXT("Brek");
+    Line_Brek1.SpeakerType = ENarr_DialogueSpeaker::Hunter;
+    Line_Brek1.DialogueText = TEXT("Fire. That is the only thing they fear. Keep it burning through the night. Let it go out and you will not see morning.");
+    Line_Brek1.TriggerCondition = ENarr_DialogueTrigger::OnNightfall;
+    Line_Brek1.DisplayDuration = 8.0f;
+    Line_Brek1.bHasBeenPlayed = false;
+    FireWarning.Lines.Add(Line_Brek1);
+
+    DialogueSequences.Add(FireWarning);
+
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Initialized %d dialogue sequences"), DialogueSequences.Num());
+}
+
+void ANarrativeDialogueManager::TriggerDialogueSequence(const FString& SequenceID)
+{
+    for (int32 i = 0; i < DialogueSequences.Num(); i++)
+    {
+        if (DialogueSequences[i].SequenceID == SequenceID)
+        {
+            if (bDialogueActive)
             {
-                if (Line.Trigger == Trigger)
+                SkipDialogue();
+            }
+            DialogueSequences[i].bIsActive = true;
+            DialogueSequences[i].CurrentLineIndex = 0;
+            ActiveSequenceIndex = i;
+
+            if (DialogueSequences[i].Lines.Num() > 0)
+            {
+                PlayDialogueLine(DialogueSequences[i].Lines[0]);
+            }
+            return;
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Sequence '%s' not found"), *SequenceID);
+}
+
+void ANarrativeDialogueManager::TriggerDialogueByCondition(ENarr_DialogueTrigger Trigger)
+{
+    for (int32 i = 0; i < DialogueSequences.Num(); i++)
+    {
+        FNarr_DialogueSequence& Seq = DialogueSequences[i];
+        if (!Seq.bIsActive && Seq.Lines.Num() > 0)
+        {
+            for (const FNarr_DialogueLine& Line : Seq.Lines)
+            {
+                if (Line.TriggerCondition == Trigger && !Line.bHasBeenPlayed)
                 {
-                    ActiveLine = Line;
-                    bDialogueActive = true;
-                    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Playing dialogue for %s — %s"),
-                        *Profile.CharacterName, *Line.LineText.Left(60));
+                    TriggerDialogueSequence(Seq.SequenceID);
                     return;
                 }
             }
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: No dialogue found for speaker %d, trigger %d"),
-        (int32)Speaker, (int32)Trigger);
 }
 
-void ANarrativeDialogueManager::EndDialogue()
+void ANarrativeDialogueManager::AdvanceDialogue()
 {
-    bDialogueActive = false;
-    ActiveLine = FNarr_DialogueLine();
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue ended"));
-}
-
-TArray<FNarr_DialogueLine> ANarrativeDialogueManager::GetLinesForSpeaker(ENarr_DialogueSpeaker Speaker) const
-{
-    for (const FNarr_NPCVoiceProfile& Profile : NPCProfiles)
+    if (ActiveSequenceIndex < 0 || ActiveSequenceIndex >= DialogueSequences.Num())
     {
-        if (Profile.Speaker == Speaker)
+        return;
+    }
+
+    FNarr_DialogueSequence& ActiveSeq = DialogueSequences[ActiveSequenceIndex];
+    ActiveSeq.CurrentLineIndex++;
+
+    if (ActiveSeq.CurrentLineIndex < ActiveSeq.Lines.Num())
+    {
+        PlayDialogueLine(ActiveSeq.Lines[ActiveSeq.CurrentLineIndex]);
+    }
+    else
+    {
+        // Sequence complete
+        ActiveSeq.bIsActive = false;
+        bDialogueActive = false;
+        ActiveSequenceIndex = -1;
+        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Sequence complete"));
+    }
+}
+
+void ANarrativeDialogueManager::SkipDialogue()
+{
+    GetWorldTimerManager().ClearTimer(DialogueTimerHandle);
+    bDialogueActive = false;
+    DialogueTimeRemaining = 0.0f;
+}
+
+void ANarrativeDialogueManager::RegisterDialogueLine(const FString& SequenceID, const FNarr_DialogueLine& Line)
+{
+    for (FNarr_DialogueSequence& Seq : DialogueSequences)
+    {
+        if (Seq.SequenceID == SequenceID)
         {
-            return Profile.DialogueLines;
+            Seq.Lines.Add(Line);
+            return;
         }
     }
-    return TArray<FNarr_DialogueLine>();
+
+    // Create new sequence if not found
+    FNarr_DialogueSequence NewSeq;
+    NewSeq.SequenceID = SequenceID;
+    NewSeq.bIsActive = false;
+    NewSeq.CurrentLineIndex = 0;
+    NewSeq.Lines.Add(Line);
+    DialogueSequences.Add(NewSeq);
 }
 
-void ANarrativeDialogueManager::RegisterNPCProfile(const FNarr_NPCVoiceProfile& Profile)
+TArray<FNarr_DialogueLine> ANarrativeDialogueManager::GetLinesForSpeaker(ENarr_DialogueSpeaker Speaker)
 {
-    // Remove existing profile for this speaker if present
-    NPCProfiles.RemoveAll([&Profile](const FNarr_NPCVoiceProfile& Existing)
+    TArray<FNarr_DialogueLine> Result;
+    for (const FNarr_DialogueSequence& Seq : DialogueSequences)
     {
-        return Existing.Speaker == Profile.Speaker;
-    });
-    NPCProfiles.Add(Profile);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Registered profile for %s"), *Profile.CharacterName);
+        for (const FNarr_DialogueLine& Line : Seq.Lines)
+        {
+            if (Line.SpeakerType == Speaker)
+            {
+                Result.Add(Line);
+            }
+        }
+    }
+    return Result;
 }
 
-void ANarrativeDialogueManager::LoadDefaultDialogueLines()
+bool ANarrativeDialogueManager::IsSequenceComplete(const FString& SequenceID) const
 {
-    NPCProfiles.Empty();
-    InitializeDefaultProfiles();
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Default dialogue lines reloaded"));
+    for (const FNarr_DialogueSequence& Seq : DialogueSequences)
+    {
+        if (Seq.SequenceID == SequenceID)
+        {
+            return !Seq.bIsActive && Seq.CurrentLineIndex >= Seq.Lines.Num();
+        }
+    }
+    return false;
+}
+
+void ANarrativeDialogueManager::PlayDialogueLine(const FNarr_DialogueLine& Line)
+{
+    ActiveDialogueLine = Line;
+    bDialogueActive = true;
+    DialogueTimeRemaining = Line.DisplayDuration;
+
+    // Play voice audio if assigned
+    if (Line.VoiceAudio && GetWorld())
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), Line.VoiceAudio);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: [%s] %s"), *Line.SpeakerName, *Line.DialogueText);
+}
+
+void ANarrativeDialogueManager::OnDialogueLineComplete()
+{
+    if (ActiveSequenceIndex >= 0 && ActiveSequenceIndex < DialogueSequences.Num())
+    {
+        FNarr_DialogueSequence& ActiveSeq = DialogueSequences[ActiveSequenceIndex];
+        if (ActiveSeq.CurrentLineIndex < ActiveSeq.Lines.Num())
+        {
+            ActiveSeq.Lines[ActiveSeq.CurrentLineIndex].bHasBeenPlayed = true;
+        }
+    }
+    AdvanceDialogue();
 }
