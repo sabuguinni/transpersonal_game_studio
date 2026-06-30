@@ -1,463 +1,255 @@
-// DialogueSystem.cpp
-// Narrative & Dialogue Agent #15 — Cycle PROD_CYCLE_AUTO_20260630_005
-// Elder Kael NPC — "First Craft" quest arc dialogue tree
-// Full implementation: greeting → resource gathering → crafting → completion
 
 #include "DialogueSystem.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 
 // ============================================================
-// ANarr_ElderKaelNPC — Constructor
+// UNarr_DialogueComponent
 // ============================================================
-ANarr_ElderKaelNPC::ANarr_ElderKaelNPC()
+
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Root: Interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    RootComponent = InteractionSphere;
-    InteractionSphere->SetSphereRadius(300.0f);
-    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
-
-    // NPC mesh (placeholder cylinder — replaced by Character Artist)
-    NPCMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NPCMesh"));
-    NPCMesh->SetupAttachment(RootComponent);
-    NPCMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
-
-    // Defaults
-    CurrentDialogueState = ENarr_DialogueState::Greeting;
-    CurrentQuestStage = ENarr_QuestStage::NotStarted;
+    PrimaryComponentTick.bCanEverTick = false;
+    NPCSpeaker = ENarr_DialogueSpeaker::Unknown;
     InteractionRadius = 300.0f;
-    bPlayerInRange = false;
-    DialogueTimer = 0.0f;
+    bIsInDialogue = false;
     CurrentLineIndex = 0;
 }
 
-void ANarr_ElderKaelNPC::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_ElderKaelNPC::OnPlayerEnterRange);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_ElderKaelNPC::OnPlayerExitRange);
-
-    // Build dialogue tree
-    InitializeDialogueTree();
-
-    // Build quest objectives
-    InitializeObjectives();
-
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Elder Kael NPC initialized — First Craft quest ready"));
-}
-
-void ANarr_ElderKaelNPC::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Auto-advance dialogue timer
-    if (bPlayerInRange && DialogueLines.IsValidIndex(CurrentLineIndex))
-    {
-        DialogueTimer -= DeltaTime;
-        if (DialogueTimer <= 0.0f)
-        {
-            AdvanceDialogue();
-        }
-    }
-}
-
-// ============================================================
-// InitializeDialogueTree — Full Elder Kael dialogue lines
-// ============================================================
-void ANarr_ElderKaelNPC::InitializeDialogueTree()
-{
-    DialogueLines.Empty();
-
-    // --- GREETING ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("You are new. I can tell by the way you look at the trees — like they are just trees. They are not just trees. Sit.");
-        Line.TriggerState = ENarr_DialogueState::Greeting;
-        Line.DisplayDuration = 6.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("My name is Kael. I have been here longer than anyone. That is not something to be proud of — it means I have watched everyone else die.");
-        Line.TriggerState = ENarr_DialogueState::Greeting;
-        Line.DisplayDuration = 7.0f;
-        DialogueLines.Add(Line);
-    }
-
-    // --- QUEST INTRO ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("You need three things to survive the night. Shelter, fire, and water. The river is east, but raptors hunt that bank after dusk.");
-        Line.TriggerState = ENarr_DialogueState::QuestIntro;
-        Line.DisplayDuration = 7.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("Start with the axe. Two rocks, one stick. Knock them together at the right angle — you will know when you hear the crack. Bring me the axe when it is done.");
-        Line.TriggerState = ENarr_DialogueState::QuestIntro;
-        Line.DisplayDuration = 8.0f;
-        DialogueLines.Add(Line);
-    }
-
-    // --- CRAFTING GUIDE ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("Craft the axe first. Then the spear. Then the shelter. In that order. Every time. Anyone who changes that order does not survive to argue about it.");
-        Line.TriggerState = ENarr_DialogueState::CraftingGuide;
-        Line.DisplayDuration = 8.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("The grey rocks near the stream — those are the ones you want. Flint. Harder than the brown ones. Takes longer to find but splits clean.");
-        Line.TriggerState = ENarr_DialogueState::CraftingGuide;
-        Line.DisplayDuration = 7.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("For fire: three dry sticks, stacked. Not wet ones — wet ones just smoke and draw attention. Smoke draws the big ones.");
-        Line.TriggerState = ENarr_DialogueState::CraftingGuide;
-        Line.DisplayDuration = 7.0f;
-        DialogueLines.Add(Line);
-    }
-
-    // --- DANGER WARNING ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("The river bends east, past the grey stones. That is where they found the last scout — nothing left but his spear. Do not go there alone.");
-        Line.TriggerState = ENarr_DialogueState::DangerWarning;
-        Line.DisplayDuration = 8.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("You hear that? Low rumble, from the north ridge. That is the big one. The one that took Mara's brother. We do not hunt it. We avoid it. We survive it.");
-        Line.TriggerState = ENarr_DialogueState::DangerWarning;
-        Line.DisplayDuration = 8.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("The small ones — raptors — they are worse than the big one. The big one you can hear coming. Raptors you cannot. Stay in groups of three or more.");
-        Line.TriggerState = ENarr_DialogueState::DangerWarning;
-        Line.DisplayDuration = 8.0f;
-        DialogueLines.Add(Line);
-    }
-
-    // --- QUEST COMPLETE ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("You made the axe. Good. Now you are not completely useless. The spear is next — two sticks, one flint head. Bind them with the sinew from the deer carcass south of camp.");
-        Line.TriggerState = ENarr_DialogueState::QuestComplete;
-        Line.DisplayDuration = 9.0f;
-        DialogueLines.Add(Line);
-    }
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("I have seen three winters here. The first winter, half our people died. The second, we learned. The third — we were ready. You will learn too. Start with fire. Always start with fire.");
-        Line.TriggerState = ENarr_DialogueState::QuestComplete;
-        Line.DisplayDuration = 10.0f;
-        DialogueLines.Add(Line);
-    }
-
-    // --- IDLE ---
-    {
-        FNarr_DialogueLine Line;
-        Line.SpeakerName = TEXT("Elder Kael");
-        Line.LineText = TEXT("...");
-        Line.TriggerState = ENarr_DialogueState::Idle;
-        Line.DisplayDuration = 3.0f;
-        DialogueLines.Add(Line);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue tree initialized: %d lines for Elder Kael"), DialogueLines.Num());
-}
-
-// ============================================================
-// InitializeObjectives — First Craft quest objectives
-// ============================================================
-void ANarr_ElderKaelNPC::InitializeObjectives()
-{
-    ActiveObjectives.Empty();
-
-    // Objective 1: Collect rocks
-    {
-        FNarr_QuestObjective Obj;
-        Obj.ObjectiveText = TEXT("Collect rocks (0/2)");
-        Obj.bCompleted = false;
-        Obj.RequiredCount = 2;
-        Obj.CurrentCount = 0;
-        ActiveObjectives.Add(Obj);
-    }
-
-    // Objective 2: Collect sticks
-    {
-        FNarr_QuestObjective Obj;
-        Obj.ObjectiveText = TEXT("Collect sticks (0/1)");
-        Obj.bCompleted = false;
-        Obj.RequiredCount = 1;
-        Obj.CurrentCount = 0;
-        ActiveObjectives.Add(Obj);
-    }
-
-    // Objective 3: Craft stone axe
-    {
-        FNarr_QuestObjective Obj;
-        Obj.ObjectiveText = TEXT("Craft a Stone Axe (press C near crafting station)");
-        Obj.bCompleted = false;
-        Obj.RequiredCount = 1;
-        Obj.CurrentCount = 0;
-        ActiveObjectives.Add(Obj);
-    }
-
-    // Objective 4: Return to Elder Kael
-    {
-        FNarr_QuestObjective Obj;
-        Obj.ObjectiveText = TEXT("Return to Elder Kael");
-        Obj.bCompleted = false;
-        Obj.RequiredCount = 1;
-        Obj.CurrentCount = 0;
-        ActiveObjectives.Add(Obj);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Quest objectives initialized: %d objectives"), ActiveObjectives.Num());
-}
-
-// ============================================================
-// TriggerDialogue — Set state and reset to first matching line
-// ============================================================
-void ANarr_ElderKaelNPC::TriggerDialogue(ENarr_DialogueState State)
-{
-    CurrentDialogueState = State;
+    CurrentNodeID = DialogueTree.RootNodeID;
     CurrentLineIndex = 0;
-
-    // Find first line matching this state
-    for (int32 i = 0; i < DialogueLines.Num(); ++i)
-    {
-        if (DialogueLines[i].TriggerState == State)
-        {
-            CurrentLineIndex = i;
-            break;
-        }
-    }
-
-    if (DialogueLines.IsValidIndex(CurrentLineIndex))
-    {
-        const FNarr_DialogueLine& Line = DialogueLines[CurrentLineIndex];
-        DialogueTimer = Line.DisplayDuration;
-
-        // Display on screen
-        if (GEngine)
-        {
-            FString Display = FString::Printf(TEXT("[%s]: %s"), *Line.SpeakerName, *Line.LineText);
-            GEngine->AddOnScreenDebugMessage(-1, Line.DisplayDuration, FColor::Yellow, Display);
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue triggered — State: %d, Line: %s"),
-            (int32)State, *Line.LineText);
-    }
 }
 
-// ============================================================
-// GetCurrentLine
-// ============================================================
-FNarr_DialogueLine ANarr_ElderKaelNPC::GetCurrentLine() const
+bool UNarr_DialogueComponent::StartDialogue(AActor* Initiator)
 {
-    if (DialogueLines.IsValidIndex(CurrentLineIndex))
+    if (!Initiator || bIsInDialogue)
     {
-        return DialogueLines[CurrentLineIndex];
+        return false;
+    }
+
+    // Range check
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        float Distance = FVector::Dist(Owner->GetActorLocation(), Initiator->GetActorLocation());
+        if (Distance > InteractionRadius)
+        {
+            return false;
+        }
+    }
+
+    bIsInDialogue = true;
+    CurrentNodeID = DialogueTree.RootNodeID;
+    CurrentLineIndex = 0;
+    return true;
+}
+
+void UNarr_DialogueComponent::EndDialogue()
+{
+    bIsInDialogue = false;
+    CurrentNodeID = DialogueTree.RootNodeID;
+    CurrentLineIndex = 0;
+}
+
+FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
+{
+    // Find current node
+    for (const FNarr_DialogueNode& Node : DialogueTree.Nodes)
+    {
+        if (Node.NodeID == CurrentNodeID)
+        {
+            if (Node.Lines.IsValidIndex(CurrentLineIndex))
+            {
+                return Node.Lines[CurrentLineIndex];
+            }
+        }
     }
     return FNarr_DialogueLine();
 }
 
-// ============================================================
-// AdvanceDialogue — Move to next line in current state
-// ============================================================
-void ANarr_ElderKaelNPC::AdvanceDialogue()
+bool UNarr_DialogueComponent::AdvanceDialogue()
 {
-    int32 NextIndex = CurrentLineIndex + 1;
-
-    // Check if next line is still in the same state
-    if (DialogueLines.IsValidIndex(NextIndex) &&
-        DialogueLines[NextIndex].TriggerState == CurrentDialogueState)
+    if (!bIsInDialogue)
     {
-        CurrentLineIndex = NextIndex;
-        const FNarr_DialogueLine& Line = DialogueLines[CurrentLineIndex];
-        DialogueTimer = Line.DisplayDuration;
+        return false;
+    }
 
-        if (GEngine)
+    for (const FNarr_DialogueNode& Node : DialogueTree.Nodes)
+    {
+        if (Node.NodeID == CurrentNodeID)
         {
-            FString Display = FString::Printf(TEXT("[%s]: %s"), *Line.SpeakerName, *Line.LineText);
-            GEngine->AddOnScreenDebugMessage(-1, Line.DisplayDuration, FColor::Yellow, Display);
-        }
-    }
-    else
-    {
-        // End of this state's lines — transition to idle
-        CurrentDialogueState = ENarr_DialogueState::Idle;
-        DialogueTimer = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("[Narrative] Dialogue state complete — returning to Idle"));
-    }
-}
-
-// ============================================================
-// OnQuestStageAdvanced — Respond to quest progression
-// ============================================================
-void ANarr_ElderKaelNPC::OnQuestStageAdvanced(ENarr_QuestStage NewStage)
-{
-    CurrentQuestStage = NewStage;
-
-    switch (NewStage)
-    {
-    case ENarr_QuestStage::GatherResources:
-        TriggerDialogue(ENarr_DialogueState::CraftingGuide);
-        break;
-
-    case ENarr_QuestStage::CraftAxe:
-        TriggerDialogue(ENarr_DialogueState::CraftingGuide);
-        break;
-
-    case ENarr_QuestStage::ReturnToElder:
-        TriggerDialogue(ENarr_DialogueState::QuestComplete);
-        break;
-
-    case ENarr_QuestStage::Completed:
-        TriggerDialogue(ENarr_DialogueState::QuestComplete);
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green,
-                TEXT("QUEST COMPLETE: First Craft — Stone Axe crafted. New quests unlocked: Hunt, Build Shelter"));
-        }
-        break;
-
-    default:
-        break;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[Narrative] Quest stage advanced to: %d"), (int32)NewStage);
-}
-
-// ============================================================
-// UpdateObjective
-// ============================================================
-void ANarr_ElderKaelNPC::UpdateObjective(int32 ObjectiveIndex, int32 NewCount)
-{
-    if (!ActiveObjectives.IsValidIndex(ObjectiveIndex)) return;
-
-    FNarr_QuestObjective& Obj = ActiveObjectives[ObjectiveIndex];
-    Obj.CurrentCount = NewCount;
-
-    if (Obj.CurrentCount >= Obj.RequiredCount)
-    {
-        Obj.bCompleted = true;
-        UE_LOG(LogTemp, Log, TEXT("[Narrative] Objective %d complete: %s"), ObjectiveIndex, *Obj.ObjectiveText);
-    }
-
-    // Check if all objectives done
-    if (AreAllObjectivesComplete())
-    {
-        OnQuestStageAdvanced(ENarr_QuestStage::Completed);
-    }
-}
-
-// ============================================================
-// AreAllObjectivesComplete
-// ============================================================
-bool ANarr_ElderKaelNPC::AreAllObjectivesComplete() const
-{
-    for (const FNarr_QuestObjective& Obj : ActiveObjectives)
-    {
-        if (!Obj.bCompleted) return false;
-    }
-    return ActiveObjectives.Num() > 0;
-}
-
-// ============================================================
-// GetObjectiveSummary — Returns formatted string of objectives
-// ============================================================
-FString ANarr_ElderKaelNPC::GetObjectiveSummary() const
-{
-    FString Summary = TEXT("=== FIRST CRAFT QUEST ===\n");
-    for (int32 i = 0; i < ActiveObjectives.Num(); ++i)
-    {
-        const FNarr_QuestObjective& Obj = ActiveObjectives[i];
-        FString Status = Obj.bCompleted ? TEXT("[X]") : TEXT("[ ]");
-        Summary += FString::Printf(TEXT("%s %s (%d/%d)\n"),
-            *Status, *Obj.ObjectiveText, Obj.CurrentCount, Obj.RequiredCount);
-    }
-    return Summary;
-}
-
-// ============================================================
-// Overlap callbacks
-// ============================================================
-void ANarr_ElderKaelNPC::OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!OtherActor || OtherActor == this) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar)
-    {
-        bPlayerInRange = true;
-
-        // First interaction — trigger greeting then quest intro
-        if (CurrentQuestStage == ENarr_QuestStage::NotStarted)
-        {
-            TriggerDialogue(ENarr_DialogueState::Greeting);
-            CurrentQuestStage = ENarr_QuestStage::GatherResources;
-
-            // Show quest objectives on screen
-            if (GEngine)
+            // More lines in this node?
+            if (CurrentLineIndex + 1 < Node.Lines.Num())
             {
-                GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Cyan, GetObjectiveSummary());
+                CurrentLineIndex++;
+                return true;
             }
-        }
-        else if (CurrentQuestStage == ENarr_QuestStage::ReturnToElder)
-        {
-            TriggerDialogue(ENarr_DialogueState::QuestComplete);
-            OnQuestStageAdvanced(ENarr_QuestStage::Completed);
-        }
-        else
-        {
-            TriggerDialogue(ENarr_DialogueState::DangerWarning);
-        }
 
-        UE_LOG(LogTemp, Log, TEXT("[Narrative] Player entered Elder Kael range — dialogue triggered"));
+            // Move to next node
+            if (Node.bIsTerminal || Node.NextNodeIDs.Num() == 0)
+            {
+                EndDialogue();
+                return false;
+            }
+
+            CurrentNodeID = Node.NextNodeIDs[0];
+            CurrentLineIndex = 0;
+            return true;
+        }
+    }
+
+    EndDialogue();
+    return false;
+}
+
+bool UNarr_DialogueComponent::CheckCondition(ENarr_DialogueCondition Condition, AActor* Player) const
+{
+    if (Condition == ENarr_DialogueCondition::None)
+    {
+        return true;
+    }
+
+    // Condition checks are resolved by game state — stub returns true for now
+    // Full implementation hooks into TranspersonalGameState
+    switch (Condition)
+    {
+        case ENarr_DialogueCondition::HasCraftedAxe:
+        case ENarr_DialogueCondition::SurvivedNight:
+        case ENarr_DialogueCondition::KilledRaptor:
+        case ENarr_DialogueCondition::FoundHerdTracks:
+            return true; // Resolved via GameState in full integration
+        case ENarr_DialogueCondition::HealthBelow30:
+        case ENarr_DialogueCondition::HungerBelow50:
+            return false; // Default: not in danger state
+        default:
+            return true;
     }
 }
 
-void ANarr_ElderKaelNPC::OnPlayerExitRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor || OtherActor == this) return;
+// ============================================================
+// ANarr_DialogueManager
+// ============================================================
 
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar)
+ANarr_DialogueManager::ANarr_DialogueManager()
+{
+    PrimaryActorTick.bCanEverTick = false;
+}
+
+void ANarr_DialogueManager::BeginPlay()
+{
+    Super::BeginPlay();
+    PopulateDefaultDialogue();
+}
+
+void ANarr_DialogueManager::RegisterVoiceLine(FName LineID, const FString& AudioURL)
+{
+    VoiceLineAudioURLs.Add(LineID, AudioURL);
+}
+
+FString ANarr_DialogueManager::GetVoiceLineURL(FName LineID) const
+{
+    const FString* URL = VoiceLineAudioURLs.Find(LineID);
+    return URL ? *URL : FString();
+}
+
+void ANarr_DialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& Tree)
+{
+    // Remove existing tree for this NPC if present
+    AllDialogueTrees.RemoveAll([&Tree](const FNarr_DialogueTree& Existing)
     {
-        bPlayerInRange = false;
-        DialogueTimer = 0.0f;
-        UE_LOG(LogTemp, Log, TEXT("[Narrative] Player left Elder Kael range"));
+        return Existing.OwnerNPC == Tree.OwnerNPC;
+    });
+    AllDialogueTrees.Add(Tree);
+}
+
+FNarr_DialogueTree ANarr_DialogueManager::FindTreeByNPC(ENarr_DialogueSpeaker NPC) const
+{
+    for (const FNarr_DialogueTree& Tree : AllDialogueTrees)
+    {
+        if (Tree.OwnerNPC == NPC)
+        {
+            return Tree;
+        }
     }
+    return FNarr_DialogueTree();
+}
+
+void ANarr_DialogueManager::PopulateDefaultDialogue()
+{
+    // --- Elder Kael — survival wisdom ---
+    FNarr_DialogueTree KaelTree;
+    KaelTree.TreeID = FName("ElderKael_Main");
+    KaelTree.OwnerNPC = ENarr_DialogueSpeaker::ElderKael;
+    KaelTree.RootNodeID = FName("Kael_Root");
+
+    // Root node — greeting
+    FNarr_DialogueNode KaelRoot;
+    KaelRoot.NodeID = FName("Kael_Root");
+    KaelRoot.bIsTerminal = false;
+    KaelRoot.NextNodeIDs.Add(FName("Kael_Raptor_Tip"));
+
+    FNarr_DialogueLine KaelLine1;
+    KaelLine1.LineID = FName("Kael_001");
+    KaelLine1.Speaker = ENarr_DialogueSpeaker::ElderKael;
+    KaelLine1.LineText = FText::FromString(TEXT("Stay low. Do not run. The Raptor sees movement, not stillness."));
+    KaelLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805103468_Elder_Kael_Survival_Tip.mp3");
+    KaelLine1.DisplayDuration = 5.0f;
+    KaelLine1.RequiredCondition = ENarr_DialogueCondition::None;
+    KaelRoot.Lines.Add(KaelLine1);
+
+    KaelTree.Nodes.Add(KaelRoot);
+
+    // Second node — philosophy
+    FNarr_DialogueNode KaelRaptorTip;
+    KaelRaptorTip.NodeID = FName("Kael_Raptor_Tip");
+    KaelRaptorTip.bIsTerminal = true;
+
+    FNarr_DialogueLine KaelLine2;
+    KaelLine2.LineID = FName("Kael_002");
+    KaelLine2.Speaker = ENarr_DialogueSpeaker::ElderKael;
+    KaelLine2.LineText = FText::FromString(TEXT("We do not name the beasts. Names give them power over your fear. Fear is information. Use it."));
+    KaelLine2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805111003_Elder_Kael_Philosophy.mp3");
+    KaelLine2.DisplayDuration = 5.5f;
+    KaelLine2.RequiredCondition = ENarr_DialogueCondition::None;
+    KaelRaptorTip.Lines.Add(KaelLine2);
+
+    KaelTree.Nodes.Add(KaelRaptorTip);
+    RegisterDialogueTree(KaelTree);
+
+    // --- Scout Mira — herd tracking ---
+    FNarr_DialogueTree MiraTree;
+    MiraTree.TreeID = FName("ScoutMira_Main");
+    MiraTree.OwnerNPC = ENarr_DialogueSpeaker::ScoutMira;
+    MiraTree.RootNodeID = FName("Mira_Root");
+
+    FNarr_DialogueNode MiraRoot;
+    MiraRoot.NodeID = FName("Mira_Root");
+    MiraRoot.bIsTerminal = true;
+
+    FNarr_DialogueLine MiraLine1;
+    MiraLine1.LineID = FName("Mira_001");
+    MiraLine1.Speaker = ENarr_DialogueSpeaker::ScoutMira;
+    MiraLine1.LineText = FText::FromString(TEXT("The herd moved south three days ago. Forty, maybe fifty of them. When the big ones move — the hunters follow."));
+    MiraLine1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805113200_Scout_Mira_Herd_Report.mp3");
+    MiraLine1.DisplayDuration = 6.0f;
+    MiraLine1.RequiredCondition = ENarr_DialogueCondition::FoundHerdTracks;
+    MiraRoot.Lines.Add(MiraLine1);
+
+    MiraTree.Nodes.Add(MiraRoot);
+    RegisterDialogueTree(MiraTree);
+
+    // Register voice line URLs
+    RegisterVoiceLine(FName("Narrator_001"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805087261_Narrator_Survival.mp3"));
+    RegisterVoiceLine(FName("Kael_001"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805103468_Elder_Kael_Survival_Tip.mp3"));
+    RegisterVoiceLine(FName("Kael_002"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805111003_Elder_Kael_Philosophy.mp3"));
+    RegisterVoiceLine(FName("Mira_001"),
+        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782805113200_Scout_Mira_Herd_Report.mp3"));
+
+    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Populated %d dialogue trees, %d voice lines"), AllDialogueTrees.Num(), VoiceLineAudioURLs.Num());
 }
