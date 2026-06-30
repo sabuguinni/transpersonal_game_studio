@@ -1,353 +1,340 @@
 // AudioSystemManager.cpp
-// Audio Agent #16 — Transpersonal Game Studio
-// Adaptive audio system: danger-level music, ambient layers, NPC voice proximity triggers
+// Audio Agent #16 — PROD_CYCLE_AUTO_20260630_007
+// Adaptive audio system: danger-driven music, ambient zones, dialogue voice binding
 
 #include "AudioSystemManager.h"
+#include "AudioDevice.h"
+#include "Sound/SoundBase.h"
+#include "Sound/AmbientSound.h"
 #include "Components/AudioComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
-// ============================================================
-// UAudio_AmbientLayerComponent
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_AdaptiveMusicComponent
+// ─────────────────────────────────────────────────────────────────────────────
 
-UAudio_AmbientLayerComponent::UAudio_AmbientLayerComponent()
+UAudio_AdaptiveMusicComponent::UAudio_AdaptiveMusicComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     CurrentDangerLevel = EAudio_DangerLevel::Safe;
     CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
-    DangerUpdateInterval = 1.0f;
-    bAudioInitialized  = false;
+    DangerUpdateInterval = 2.0f;
+    bMusicSystemActive = false;
+    MasterVolume = 1.0f;
+    MusicVolume  = 0.8f;
+    SFXVolume    = 1.0f;
+    AmbienceVolume = 0.9f;
+    DangerBlendSpeed = 1.5f;
+    TargetDangerWeight = 0.0f;
+    CurrentDangerWeight = 0.0f;
 }
 
-void UAudio_AmbientLayerComponent::BeginPlay()
+void UAudio_AdaptiveMusicComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Populate default ambient layers for each time-of-day
-    FAudio_AmbientLayer DawnLayer;
-    DawnLayer.LayerName      = FName("Dawn_Ambient");
-    DawnLayer.bActiveAtDawn  = true;
-    DawnLayer.bActiveAtDay   = false;
-    DawnLayer.bActiveAtDusk  = false;
-    DawnLayer.bActiveAtNight = false;
-    DawnLayer.BaseVolume     = 0.6f;
-    DawnLayer.FadeInTime     = 3.0f;
-    DawnLayer.FadeOutTime    = 2.0f;
-    AmbientLayers.Add(DawnLayer);
-
-    FAudio_AmbientLayer NightLayer;
-    NightLayer.LayerName      = FName("Night_Ambient");
-    NightLayer.bActiveAtDawn  = false;
-    NightLayer.bActiveAtDay   = false;
-    NightLayer.bActiveAtDusk  = false;
-    NightLayer.bActiveAtNight = true;
-    NightLayer.BaseVolume     = 0.8f;
-    NightLayer.FadeInTime     = 4.0f;
-    NightLayer.FadeOutTime    = 3.0f;
-    AmbientLayers.Add(NightLayer);
-
-    bAudioInitialized = true;
-    UE_LOG(LogTemp, Log, TEXT("AudioAmbientLayerComponent initialized with %d layers"), AmbientLayers.Num());
+    StartAdaptiveMusic();
 }
 
-void UAudio_AmbientLayerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAudio_AdaptiveMusicComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    // Tick-based danger update handled via timer in BeginPlay for performance
+
+    // Smoothly blend danger music weight
+    CurrentDangerWeight = FMath::FInterpTo(CurrentDangerWeight, TargetDangerWeight, DeltaTime, DangerBlendSpeed);
 }
 
-void UAudio_AmbientLayerComponent::SetDangerLevel(EAudio_DangerLevel NewLevel)
+void UAudio_AdaptiveMusicComponent::StartAdaptiveMusic()
+{
+    if (bMusicSystemActive) return;
+    bMusicSystemActive = true;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Start periodic danger evaluation
+    World->GetTimerManager().SetTimer(
+        DangerUpdateTimer,
+        this,
+        &UAudio_AdaptiveMusicComponent::EvaluateDangerLevel,
+        DangerUpdateInterval,
+        true
+    );
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Adaptive music started — danger polling every %.1fs"), DangerUpdateInterval);
+}
+
+void UAudio_AdaptiveMusicComponent::StopAdaptiveMusic()
+{
+    bMusicSystemActive = false;
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        World->GetTimerManager().ClearTimer(DangerUpdateTimer);
+    }
+}
+
+void UAudio_AdaptiveMusicComponent::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
     if (CurrentDangerLevel == NewLevel) return;
+
     EAudio_DangerLevel OldLevel = CurrentDangerLevel;
     CurrentDangerLevel = NewLevel;
-    OnDangerLevelChanged(OldLevel, NewLevel);
-    UE_LOG(LogTemp, Log, TEXT("Audio danger level: %d → %d"), (int32)OldLevel, (int32)NewLevel);
+
+    // Map danger level to blend weight
+    switch (NewLevel)
+    {
+        case EAudio_DangerLevel::Safe:       TargetDangerWeight = 0.0f;  break;
+        case EAudio_DangerLevel::Aware:      TargetDangerWeight = 0.33f; break;
+        case EAudio_DangerLevel::Threatened: TargetDangerWeight = 0.66f; break;
+        case EAudio_DangerLevel::Critical:   TargetDangerWeight = 1.0f;  break;
+        default:                             TargetDangerWeight = 0.0f;  break;
+    }
+
+    OnDangerLevelChanged.Broadcast(OldLevel, NewLevel);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Danger level changed %d → %d (blend target: %.2f)"),
+        (int32)OldLevel, (int32)NewLevel, TargetDangerWeight);
 }
 
-void UAudio_AmbientLayerComponent::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+void UAudio_AdaptiveMusicComponent::SetTimeOfDay(EAudio_TimeOfDay NewTime)
 {
     if (CurrentTimeOfDay == NewTime) return;
     CurrentTimeOfDay = NewTime;
-    UpdateAmbientLayers();
-    UE_LOG(LogTemp, Log, TEXT("Audio time of day changed to: %d"), (int32)NewTime);
+    OnTimeOfDayChanged.Broadcast(NewTime);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Time of day changed to %d"), (int32)NewTime);
 }
 
-void UAudio_AmbientLayerComponent::OnDangerLevelChanged(EAudio_DangerLevel OldLevel, EAudio_DangerLevel NewLevel)
+void UAudio_AdaptiveMusicComponent::EvaluateDangerLevel()
 {
-    // Music intensity scales with danger level
-    // Safe=0.3, Aware=0.5, Threatened=0.75, Critical=1.0
-    const float VolumeMap[] = { 0.3f, 0.5f, 0.75f, 1.0f };
-    int32 Idx = FMath::Clamp((int32)NewLevel, 0, 3);
-    float TargetVolume = VolumeMap[Idx];
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    for (UAudioComponent* Comp : ActiveAudioComponents)
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+
+    // Scan registered danger zones
+    EAudio_DangerLevel HighestDanger = EAudio_DangerLevel::Safe;
+
+    for (const FAudio_DangerZone& Zone : RegisteredDangerZones)
     {
-        if (IsValid(Comp))
+        float DistSq = FVector::DistSquared(PlayerLoc, Zone.ZoneCenter);
+        float RadiusSq = Zone.DangerRadius * Zone.DangerRadius;
+
+        if (DistSq <= RadiusSq)
         {
-            Comp->SetVolumeMultiplier(TargetVolume);
+            if ((int32)Zone.DangerLevel > (int32)HighestDanger)
+            {
+                HighestDanger = Zone.DangerLevel;
+            }
         }
     }
+
+    SetDangerLevel(HighestDanger);
 }
 
-void UAudio_AmbientLayerComponent::UpdateAmbientLayers()
+void UAudio_AdaptiveMusicComponent::RegisterDangerZone(const FAudio_DangerZone& Zone)
 {
-    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
-    {
-        bool bShouldBeActive = false;
-        switch (CurrentTimeOfDay)
-        {
-            case EAudio_TimeOfDay::Dawn:  bShouldBeActive = Layer.bActiveAtDawn;  break;
-            case EAudio_TimeOfDay::Day:   bShouldBeActive = Layer.bActiveAtDay;   break;
-            case EAudio_TimeOfDay::Dusk:  bShouldBeActive = Layer.bActiveAtDusk;  break;
-            case EAudio_TimeOfDay::Night: bShouldBeActive = Layer.bActiveAtNight; break;
-        }
-        UE_LOG(LogTemp, Verbose, TEXT("Layer %s active=%d"), *Layer.LayerName.ToString(), bShouldBeActive);
-    }
+    RegisteredDangerZones.Add(Zone);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Registered danger zone '%s' at (%.0f, %.0f, %.0f) r=%.0f"),
+        *Zone.ZoneName.ToString(), Zone.ZoneCenter.X, Zone.ZoneCenter.Y, Zone.ZoneCenter.Z, Zone.DangerRadius);
 }
 
-// ============================================================
-// AAudio_ProximityVoiceTrigger
-// ============================================================
-
-AAudio_ProximityVoiceTrigger::AAudio_ProximityVoiceTrigger()
+void UAudio_AdaptiveMusicComponent::UnregisterDangerZone(FName ZoneName)
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    ProximitySphere = CreateDefaultSubobject<USphereComponent>(TEXT("ProximitySphere"));
-    RootComponent   = ProximitySphere;
-    ProximitySphere->InitSphereRadius(400.0f);
-    ProximitySphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-
-    VoiceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VoiceAudioComponent"));
-    VoiceAudioComponent->SetupAttachment(RootComponent);
-    VoiceAudioComponent->bAutoActivate = false;
-
-    TriggerRadius       = 400.0f;
-    bHasTriggered       = false;
-    bRepeatTrigger      = false;
-    RepeatCooldown      = 30.0f;
-    LastTriggerTime     = -9999.0f;
-    SpeakerName         = FName("Unknown");
+    RegisteredDangerZones.RemoveAll([&ZoneName](const FAudio_DangerZone& Z) {
+        return Z.ZoneName == ZoneName;
+    });
 }
 
-void AAudio_ProximityVoiceTrigger::BeginPlay()
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_DialogueVoiceComponent
+// ─────────────────────────────────────────────────────────────────────────────
+
+UAudio_DialogueVoiceComponent::UAudio_DialogueVoiceComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    bIsPlayingDialogue = false;
+    DialogueVolume = 1.0f;
+    DialogueFadeInTime = 0.1f;
+    DialogueFadeOutTime = 0.3f;
+    ActiveAudioComponent = nullptr;
+}
+
+void UAudio_DialogueVoiceComponent::BeginPlay()
 {
     Super::BeginPlay();
-    ProximitySphere->SetSphereRadius(TriggerRadius);
-    ProximitySphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ProximityVoiceTrigger::OnPlayerEnterRadius);
-    UE_LOG(LogTemp, Log, TEXT("ProximityVoiceTrigger '%s' ready — radius=%.0f, line=%s"),
-        *SpeakerName.ToString(), TriggerRadius, *VoiceLineID.ToString());
 }
 
-void AAudio_ProximityVoiceTrigger::Tick(float DeltaTime)
+void UAudio_DialogueVoiceComponent::RegisterVoiceLine(FName SpeakerName, int32 LineIndex, USoundBase* AudioAsset)
 {
-    Super::Tick(DeltaTime);
-}
-
-void AAudio_ProximityVoiceTrigger::OnPlayerEnterRadius(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
-{
-    if (!IsValid(OtherActor)) return;
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    float Now = GetWorld()->GetTimeSeconds();
-    bool bCooldownPassed = (Now - LastTriggerTime) > RepeatCooldown;
-
-    if (!bHasTriggered || (bRepeatTrigger && bCooldownPassed))
+    if (!AudioAsset)
     {
-        PlayVoiceLine();
-        bHasTriggered   = true;
-        LastTriggerTime = Now;
-        UE_LOG(LogTemp, Log, TEXT("ProximityVoiceTrigger fired: speaker=%s, line=%s"),
-            *SpeakerName.ToString(), *VoiceLineID.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("AudioDialogue: Cannot register null audio for %s line %d"), *SpeakerName.ToString(), LineIndex);
+        return;
+    }
+
+    FAudio_VoiceLineKey Key;
+    Key.SpeakerName = SpeakerName;
+    Key.LineIndex   = LineIndex;
+
+    VoiceLineRegistry.Add(Key, AudioAsset);
+    UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Registered voice line — %s[%d]"), *SpeakerName.ToString(), LineIndex);
+}
+
+void UAudio_DialogueVoiceComponent::PlayDialogueLine(FName SpeakerName, int32 LineIndex)
+{
+    FAudio_VoiceLineKey Key;
+    Key.SpeakerName = SpeakerName;
+    Key.LineIndex   = LineIndex;
+
+    USoundBase** FoundSound = VoiceLineRegistry.Find(Key);
+    if (!FoundSound || !(*FoundSound))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioDialogue: No voice line registered for %s[%d]"), *SpeakerName.ToString(), LineIndex);
+        OnDialogueLineStarted.Broadcast(SpeakerName, LineIndex);
+        return;
+    }
+
+    StopCurrentDialogue();
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    ActiveAudioComponent = UGameplayStatics::SpawnSoundAttached(
+        *FoundSound,
+        Owner->GetRootComponent(),
+        NAME_None,
+        FVector::ZeroVector,
+        EAttachLocation::SnapToTarget,
+        true,
+        DialogueVolume
+    );
+
+    if (ActiveAudioComponent)
+    {
+        bIsPlayingDialogue = true;
+        ActiveSpeakerName = SpeakerName;
+        ActiveLineIndex   = LineIndex;
+
+        // Bind completion callback
+        ActiveAudioComponent->OnAudioFinished.AddDynamic(this, &UAudio_DialogueVoiceComponent::OnDialogueFinished);
+        OnDialogueLineStarted.Broadcast(SpeakerName, LineIndex);
+
+        UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Playing %s[%d]"), *SpeakerName.ToString(), LineIndex);
     }
 }
 
-void AAudio_ProximityVoiceTrigger::PlayVoiceLine()
+void UAudio_DialogueVoiceComponent::StopCurrentDialogue()
 {
-    if (IsValid(VoiceAudioComponent) && VoiceAudioComponent->Sound)
+    if (ActiveAudioComponent && bIsPlayingDialogue)
     {
-        VoiceAudioComponent->Play();
+        ActiveAudioComponent->FadeOut(DialogueFadeOutTime, 0.0f);
+        bIsPlayingDialogue = false;
+    }
+}
+
+void UAudio_DialogueVoiceComponent::OnDialogueFinished()
+{
+    bIsPlayingDialogue = false;
+    OnDialogueLineFinished.Broadcast(ActiveSpeakerName, ActiveLineIndex);
+    UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Finished %s[%d]"), *ActiveSpeakerName.ToString(), ActiveLineIndex);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudio_AmbientZoneComponent
+// ─────────────────────────────────────────────────────────────────────────────
+
+UAudio_AmbientZoneComponent::UAudio_AmbientZoneComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    ZoneRadius = 800.0f;
+    FadeDistance = 200.0f;
+    bPlayerInZone = false;
+    CurrentVolume = 0.0f;
+    TargetVolume  = 0.0f;
+    VolumeBlendSpeed = 2.0f;
+    ActiveAmbientComponent = nullptr;
+}
+
+void UAudio_AmbientZoneComponent::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Start ambient sound at zero volume
+    if (AmbientSound)
+    {
+        AActor* Owner = GetOwner();
+        if (Owner)
+        {
+            ActiveAmbientComponent = UGameplayStatics::SpawnSoundAttached(
+                AmbientSound,
+                Owner->GetRootComponent(),
+                NAME_None,
+                FVector::ZeroVector,
+                EAttachLocation::SnapToTarget,
+                true,
+                0.0f  // Start silent, fade in when player enters
+            );
+        }
+    }
+}
+
+void UAudio_AmbientZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    float Dist = FVector::Dist(PlayerPawn->GetActorLocation(), Owner->GetActorLocation());
+
+    // Calculate target volume based on distance
+    if (Dist <= ZoneRadius - FadeDistance)
+    {
+        TargetVolume = 1.0f;
+        if (!bPlayerInZone)
+        {
+            bPlayerInZone = true;
+            OnPlayerEnteredZone.Broadcast();
+        }
+    }
+    else if (Dist <= ZoneRadius)
+    {
+        float FadeAlpha = 1.0f - ((Dist - (ZoneRadius - FadeDistance)) / FadeDistance);
+        TargetVolume = FMath::Clamp(FadeAlpha, 0.0f, 1.0f);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("ProximityVoiceTrigger: no sound asset assigned for line %s — URL=%s"),
-            *VoiceLineID.ToString(), *VoiceLineURL);
-    }
-}
-
-// ============================================================
-// AAudio_DangerZoneActor
-// ============================================================
-
-AAudio_DangerZoneActor::AAudio_DangerZoneActor()
-{
-    PrimaryActorTick.bCanEverTick = true;
-
-    DangerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("DangerSphere"));
-    RootComponent = DangerSphere;
-    DangerSphere->InitSphereRadius(800.0f);
-    DangerSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-
-    DangerLevel       = EAudio_DangerLevel::Aware;
-    DangerRadius      = 800.0f;
-    bDynamicRadius    = false;
-    bPlayerInside     = false;
-}
-
-void AAudio_DangerZoneActor::BeginPlay()
-{
-    Super::BeginPlay();
-    DangerSphere->SetSphereRadius(DangerRadius);
-    DangerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_DangerZoneActor::OnPlayerEnter);
-    DangerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_DangerZoneActor::OnPlayerExit);
-    UE_LOG(LogTemp, Log, TEXT("DangerZoneActor '%s' ready — level=%d, radius=%.0f"),
-        *GetName(), (int32)DangerLevel, DangerRadius);
-}
-
-void AAudio_DangerZoneActor::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    if (bDynamicRadius)
-    {
-        // Dynamic radius can be driven externally (e.g., by DinosaurAI)
-        DangerSphere->SetSphereRadius(DangerRadius);
-    }
-}
-
-void AAudio_DangerZoneActor::OnPlayerEnter(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
-{
-    if (!IsValid(OtherActor)) return;
-    if (!Cast<ACharacter>(OtherActor)) return;
-
-    bPlayerInside = true;
-    NotifyAudioSystem(DangerLevel);
-    UE_LOG(LogTemp, Log, TEXT("Player entered danger zone '%s' — level=%d"), *GetName(), (int32)DangerLevel);
-}
-
-void AAudio_DangerZoneActor::OnPlayerExit(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex)
-{
-    if (!IsValid(OtherActor)) return;
-    if (!Cast<ACharacter>(OtherActor)) return;
-
-    bPlayerInside = false;
-    NotifyAudioSystem(EAudio_DangerLevel::Safe);
-    UE_LOG(LogTemp, Log, TEXT("Player exited danger zone '%s' — reverting to Safe"), *GetName());
-}
-
-void AAudio_DangerZoneActor::NotifyAudioSystem(EAudio_DangerLevel NewLevel)
-{
-    // Find the ambient layer component on the player character and update it
-    ACharacter* Player = Cast<ACharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-    if (!IsValid(Player)) return;
-
-    UAudio_AmbientLayerComponent* AudioComp = Player->FindComponentByClass<UAudio_AmbientLayerComponent>();
-    if (IsValid(AudioComp))
-    {
-        AudioComp->SetDangerLevel(NewLevel);
-    }
-}
-
-// ============================================================
-// AAudio_SystemManager
-// ============================================================
-
-AAudio_SystemManager::AAudio_SystemManager()
-{
-    PrimaryActorTick.bCanEverTick = true;
-    CurrentDangerLevel = EAudio_DangerLevel::Safe;
-    CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
-    DayNightCycleDuration = 600.0f; // 10 minutes per full cycle
-    ElapsedDayTime     = 0.0f;
-    bDayNightCycleActive = true;
-}
-
-void AAudio_SystemManager::BeginPlay()
-{
-    Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager online — day cycle=%.0fs, danger=%d"),
-        DayNightCycleDuration, (int32)CurrentDangerLevel);
-}
-
-void AAudio_SystemManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (!bDayNightCycleActive) return;
-
-    ElapsedDayTime += DeltaTime;
-    if (ElapsedDayTime >= DayNightCycleDuration)
-    {
-        ElapsedDayTime = 0.0f;
-    }
-
-    // Map elapsed time to time-of-day enum
-    float Phase = ElapsedDayTime / DayNightCycleDuration;
-    EAudio_TimeOfDay NewTime;
-    if      (Phase < 0.1f)  NewTime = EAudio_TimeOfDay::Dawn;
-    else if (Phase < 0.5f)  NewTime = EAudio_TimeOfDay::Day;
-    else if (Phase < 0.6f)  NewTime = EAudio_TimeOfDay::Dusk;
-    else                    NewTime = EAudio_TimeOfDay::Night;
-
-    if (NewTime != CurrentTimeOfDay)
-    {
-        CurrentTimeOfDay = NewTime;
-        BroadcastTimeOfDayChange(NewTime);
-    }
-}
-
-void AAudio_SystemManager::SetGlobalDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    if (CurrentDangerLevel == NewLevel) return;
-    CurrentDangerLevel = NewLevel;
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: global danger → %d"), (int32)NewLevel);
-}
-
-void AAudio_SystemManager::RegisterVoiceLineURL(FName LineID, const FString& URL)
-{
-    VoiceLineURLRegistry.Add(LineID, URL);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: registered voice line '%s'"), *LineID.ToString());
-}
-
-FString AAudio_SystemManager::GetVoiceLineURL(FName LineID) const
-{
-    const FString* Found = VoiceLineURLRegistry.Find(LineID);
-    return Found ? *Found : FString();
-}
-
-void AAudio_SystemManager::BroadcastTimeOfDayChange(EAudio_TimeOfDay NewTime)
-{
-    // Notify all ambient layer components in the world
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    for (AActor* Actor : AllActors)
-    {
-        if (!IsValid(Actor)) continue;
-        UAudio_AmbientLayerComponent* Comp = Actor->FindComponentByClass<UAudio_AmbientLayerComponent>();
-        if (IsValid(Comp))
+        TargetVolume = 0.0f;
+        if (bPlayerInZone)
         {
-            Comp->SetTimeOfDay(NewTime);
+            bPlayerInZone = false;
+            OnPlayerExitedZone.Broadcast();
         }
     }
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: time-of-day broadcast → %d"), (int32)NewTime);
+
+    // Smooth volume blend
+    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, VolumeBlendSpeed);
+
+    if (ActiveAmbientComponent)
+    {
+        ActiveAmbientComponent->SetVolumeMultiplier(CurrentVolume);
+    }
 }
