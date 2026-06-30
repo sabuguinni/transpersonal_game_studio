@@ -1,26 +1,27 @@
+// AudioFeedbackSystem.h
+// Agent #16 — Audio Agent — PROD_CYCLE_AUTO_20260630_009
+// Game-feel audio feedback system: screen shake, damage flash, ambient soundscape, day/night audio phases
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Camera/CameraShakeBase.h"
+#include "Components/AudioComponent.h"
 #include "AudioFeedbackSystem.generated.h"
 
-// ─────────────────────────────────────────────
-//  Enums
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums — Audio_* prefix to avoid collision with other agents
+// ─────────────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EAudio_FeedbackEvent : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    PlayerDamaged   UMETA(DisplayName = "Player Damaged"),
-    TRexNearby      UMETA(DisplayName = "T-Rex Nearby"),
-    RaptorAttack    UMETA(DisplayName = "Raptor Attack"),
-    PlayerDeath     UMETA(DisplayName = "Player Death"),
-    CampfireLit     UMETA(DisplayName = "Campfire Lit"),
-    ItemCrafted     UMETA(DisplayName = "Item Crafted"),
-    DinoKilled      UMETA(DisplayName = "Dino Killed")
+    PlayerDamaged       UMETA(DisplayName = "Player Damaged"),
+    TRexNearby          UMETA(DisplayName = "T-Rex Nearby"),
+    RaptorAttack        UMETA(DisplayName = "Raptor Attack"),
+    PlayerDeath         UMETA(DisplayName = "Player Death"),
+    CampfireLit         UMETA(DisplayName = "Campfire Lit"),
+    DinoKilled          UMETA(DisplayName = "Dinosaur Killed")
 };
 
 UENUM(BlueprintType)
@@ -32,66 +33,42 @@ enum class EAudio_TimeOfDayPhase : uint8
     Night   UMETA(DisplayName = "Night")
 };
 
-// ─────────────────────────────────────────────
-//  Structs
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Structs
+// ─────────────────────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FAudio_ScreenShakeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
     float ShakeScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float ShakeDuration = 0.4f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float ShakeDuration = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float ShakeRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float TriggerRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    bool bFalloffByDistance = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float MaxDistanceForFullShake = 500.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FAudio_DamageFlashConfig
-{
-    GENERATED_BODY()
+// ─────────────────────────────────────────────────────────────────────────────
+// Delegates
+// ─────────────────────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    FLinearColor FlashColor = FLinearColor(1.0f, 0.0f, 0.0f, 0.6f);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDamageFlashStart);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDamageFlashEnd);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFeedbackEventTriggered, EAudio_FeedbackEvent, Event);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimeOfDayPhaseChanged, EAudio_TimeOfDayPhase, NewPhase);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float FlashDuration = 0.25f;
+// ─────────────────────────────────────────────────────────────────────────────
+// UAudioFeedbackSystem — ActorComponent
+// ─────────────────────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float FadeOutTime = 0.5f;
-};
-
-USTRUCT(BlueprintType)
-struct FAudio_FootstepConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float DustParticleScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    float FootstepVolumeMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    bool bSpawnDustOnSoftGround = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
-    bool bSpawnDustOnHardGround = false;
-};
-
-// ─────────────────────────────────────────────
-//  AudioFeedbackSystem Component
-// ─────────────────────────────────────────────
-
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent), DisplayName = "Audio Feedback System")
+UCLASS(ClassGroup = "Audio", meta = (BlueprintSpawnableComponent), DisplayName = "Audio Feedback System")
 class TRANSPERSONALGAME_API UAudioFeedbackSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -99,78 +76,104 @@ class TRANSPERSONALGAME_API UAudioFeedbackSystem : public UActorComponent
 public:
     UAudioFeedbackSystem();
 
-    // ── Screen Shake ──────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerTRexShake(float DistanceToTRex);
+    // ── Delegates ──
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Feedback")
+    FOnDamageFlashStart OnDamageFlashStart;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerDamageShake(float DamageAmount);
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Feedback")
+    FOnDamageFlashEnd OnDamageFlashEnd;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerCustomShake(FAudio_ScreenShakeConfig Config);
+    UPROPERTY(BlueprintAssignable, Category = "Audio|Feedback")
+    FOnFeedbackEventTriggered OnFeedbackEventTriggered;
 
-    // ── Damage Flash ──────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerDamageFlash(float DamageNormalized);
+    UPROPERTY(BlueprintAssignable, Category = "Audio|TimeOfDay")
+    FOnTimeOfDayPhaseChanged OnTimeOfDayPhaseChanged;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerDeathFlash();
-
-    // ── Footstep Dust ─────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void SpawnFootstepDust(FVector FootLocation, bool bIsHeavyCreature);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void SpawnTRexFootstepDust(FVector FootLocation, float TRexMassKg);
-
-    // ── Day/Night Audio Transition ────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void OnTimeOfDayChanged(EAudio_TimeOfDayPhase NewPhase);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void UpdateAmbientMix(float DayNightAlpha);
-
-    // ── Feedback Event Dispatcher ─────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void DispatchFeedbackEvent(EAudio_FeedbackEvent Event, float Intensity = 1.0f);
-
-    // ── Config ────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    // ── Shake Configs ──
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
     FAudio_ScreenShakeConfig TRexShakeConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    FAudio_DamageFlashConfig DamageFlashConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeConfig RaptorShakeConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    FAudio_FootstepConfig FootstepConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeConfig PlayerDamageShakeConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float TRexShakeTriggerDistance = 1500.0f;
+    // ── Camera Shake Class ──
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    TSubclassOf<UCameraShakeBase> CameraShakeClass;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float NightAmbientVolumeMultiplier = 1.4f;
+    // ── Ambient Sound Assets ──
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* CampfireAmbientSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float DayAmbientVolumeMultiplier = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* DawnAmbienceSound;
 
-    // ── State ─────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    EAudio_TimeOfDayPhase CurrentTimePhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* DayAmbienceSound;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    bool bIsInDanger;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* DuskAmbienceSound;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
-    float CurrentDangerIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    USoundBase* NightAmbienceSound;
+
+    // ── Proximity Radii ──
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
+    float TRexProximityRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
+    float RaptorProximityRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Proximity")
+    float CampfireAmbientRadius;
+
+    // ── Damage Flash ──
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DamageFlash")
+    float DamageFlashDuration;
+
+    // ── Public API ──
+    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
+    void TriggerFeedbackEvent(EAudio_FeedbackEvent Event, float DistanceToSource = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
+    void TriggerDamageFlash();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
+    void TriggerCameraShake(const FAudio_ScreenShakeConfig& Config, float DistanceToSource);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|TimeOfDay")
+    void SetTimeOfDayPhase(EAudio_TimeOfDayPhase NewPhase);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void PlayCampfireAmbience();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void StopCampfireAmbience();
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Feedback")
+    float GetDamageFlashIntensity() const;
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Feedback")
+    bool IsDamageFlashActive() const;
+
+    UFUNCTION(BlueprintPure, Category = "Audio|TimeOfDay")
+    EAudio_TimeOfDayPhase GetCurrentTimeOfDayPhase() const;
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    float DamageFlashAlpha;
-    float DamageFlashTimer;
-    bool bFlashActive;
+    UPROPERTY()
+    UAudioComponent* AmbientAudioComponent;
 
-    void UpdateDamageFlash(float DeltaTime);
+    EAudio_TimeOfDayPhase CurrentTimeOfDay;
+
+    bool bDamageFlashActive;
+    float DamageFlashElapsed;
+
+    void unreal_log_warning_stub(const FString& Msg);
+    void unreal_log_info_stub(const FString& Msg);
 };
