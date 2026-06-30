@@ -1,294 +1,154 @@
 #include "DialogueSystem.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Actor.h"
 
-// ─── Constructor ──────────────────────────────────────────────────────────────
+// ============================================================
+// UNarr_DialogueComponent — Implementation
+// ============================================================
 
-ANarr_DialogueManager::ANarr_DialogueManager()
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    bDialogueActive = false;
+    PrimaryComponentTick.bCanEverTick = false;
+
+    NPCRole = ENarr_NPCRole::Survivor;
+    bIsInDialogue = false;
+    InteractionRadius = 300.0f;
     CurrentLineIndex = 0;
-    DialogueTimer = 0.0f;
-    bAutoAdvance = true;
+
+    // Seed a default conversation tree so CDO is never empty
+    ConversationTree.ConversationID = TEXT("default_survivor");
+    ConversationTree.NPCRole = ENarr_NPCRole::Survivor;
+    ConversationTree.RootNodeID = TEXT("root");
+
+    FNarr_DialogueLine DefaultLine;
+    DefaultLine.SpeakerID = TEXT("Survivor");
+    DefaultLine.LineText = FText::FromString(TEXT("Stay close to the fire at night. The big ones do not like the light."));
+    DefaultLine.Tone = ENarr_DialogueTone::Warning;
+    DefaultLine.DisplayDuration = 5.0f;
+
+    FNarr_DialogueNode RootNode;
+    RootNode.NodeID = TEXT("root");
+    RootNode.Lines.Add(DefaultLine);
+    RootNode.bEndsConversation = true;
+
+    ConversationTree.Nodes.Add(RootNode);
+    CurrentNodeID = ConversationTree.RootNodeID;
 }
 
-// ─── BeginPlay ────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueManager::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeVoiceLineRegistry();
+    CurrentNodeID = ConversationTree.RootNodeID;
+    CurrentLineIndex = 0;
+    bIsInDialogue = false;
 }
 
-// ─── Tick ─────────────────────────────────────────────────────────────────────
-
-void ANarr_DialogueManager::Tick(float DeltaTime)
+void UNarr_DialogueComponent::StartDialogue()
 {
-    Super::Tick(DeltaTime);
-
-    if (!bDialogueActive || !bAutoAdvance)
+    if (bIsInDialogue)
     {
         return;
     }
 
-    DialogueTimer -= DeltaTime;
-    if (DialogueTimer <= 0.0f)
-    {
-        AdvanceDialogue();
-    }
-}
-
-// ─── StartDialogueSequence ────────────────────────────────────────────────────
-
-bool ANarr_DialogueManager::StartDialogueSequence(FName SequenceID)
-{
-    int32 Idx = FindSequenceIndex(SequenceID);
-    if (Idx == INDEX_NONE)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ANarr_DialogueManager: Sequence '%s' not found."), *SequenceID.ToString());
-        return false;
-    }
-
-    FNarr_DialogueSequence& Seq = RegisteredSequences[Idx];
-
-    // Don't replay non-repeatable sequences
-    if (Seq.bHasBeenPlayed && !Seq.bIsRepeatable)
-    {
-        return false;
-    }
-
-    if (Seq.Lines.Num() == 0)
-    {
-        return false;
-    }
-
-    ActiveSequenceID = SequenceID;
+    CurrentNodeID = ConversationTree.RootNodeID;
     CurrentLineIndex = 0;
-    bDialogueActive = true;
+    bIsInDialogue = true;
 
-    // Set timer for first line
-    DialogueTimer = Seq.Lines[0].DisplayDuration;
-
-    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Starting sequence '%s' (%d lines)"),
-        *SequenceID.ToString(), Seq.Lines.Num());
-
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("[DialogueSystem] Started conversation: %s | NPC Role: %d"),
+        *ConversationTree.ConversationID,
+        (int32)NPCRole);
 }
 
-// ─── AdvanceDialogue ──────────────────────────────────────────────────────────
-
-bool ANarr_DialogueManager::AdvanceDialogue()
+void UNarr_DialogueComponent::AdvanceDialogue(const FString& ChosenResponseID)
 {
-    if (!bDialogueActive)
+    if (!bIsInDialogue)
     {
-        return false;
+        return;
     }
 
-    int32 SeqIdx = FindSequenceIndex(ActiveSequenceID);
-    if (SeqIdx == INDEX_NONE)
+    FNarr_DialogueNode* Node = FindNode(CurrentNodeID);
+    if (!Node)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[DialogueSystem] Node not found: %s"), *CurrentNodeID);
+        EndDialogue();
+        return;
+    }
+
+    // If a response was chosen, navigate to that node
+    if (!ChosenResponseID.IsEmpty())
+    {
+        CurrentNodeID = ChosenResponseID;
+        CurrentLineIndex = 0;
+        UE_LOG(LogTemp, Log, TEXT("[DialogueSystem] Navigating to node: %s"), *CurrentNodeID);
+        return;
+    }
+
+    // Otherwise follow the linear next node
+    if (!Node->NextNodeID.IsEmpty())
+    {
+        CurrentNodeID = Node->NextNodeID;
+        CurrentLineIndex = 0;
+        UE_LOG(LogTemp, Log, TEXT("[DialogueSystem] Advanced to node: %s"), *CurrentNodeID);
+    }
+    else if (Node->bEndsConversation)
     {
         EndDialogue();
-        return false;
     }
-
-    FNarr_DialogueSequence& Seq = RegisteredSequences[SeqIdx];
-    CurrentLineIndex++;
-
-    if (CurrentLineIndex >= Seq.Lines.Num())
-    {
-        // Sequence complete
-        Seq.bHasBeenPlayed = true;
-        EndDialogue();
-        return false;
-    }
-
-    // Check result of previous line
-    const FNarr_DialogueLine& PrevLine = Seq.Lines[CurrentLineIndex - 1];
-    if (PrevLine.Result == ENarr_DialogueResult::End)
-    {
-        Seq.bHasBeenPlayed = true;
-        EndDialogue();
-        return false;
-    }
-
-    // Set timer for next line
-    DialogueTimer = Seq.Lines[CurrentLineIndex].DisplayDuration;
-    return true;
 }
 
-// ─── EndDialogue ──────────────────────────────────────────────────────────────
-
-void ANarr_DialogueManager::EndDialogue()
+void UNarr_DialogueComponent::EndDialogue()
 {
-    bDialogueActive = false;
+    bIsInDialogue = false;
+    CurrentNodeID = ConversationTree.RootNodeID;
     CurrentLineIndex = 0;
-    DialogueTimer = 0.0f;
-    ActiveSequenceID = NAME_None;
-
-    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Dialogue ended."));
+    UE_LOG(LogTemp, Log, TEXT("[DialogueSystem] Conversation ended: %s"), *ConversationTree.ConversationID);
 }
 
-// ─── GetCurrentLine ───────────────────────────────────────────────────────────
-
-bool ANarr_DialogueManager::GetCurrentLine(FNarr_DialogueLine& OutLine) const
+FNarr_DialogueNode UNarr_DialogueComponent::GetCurrentNode() const
 {
-    if (!bDialogueActive)
+    for (const FNarr_DialogueNode& Node : ConversationTree.Nodes)
     {
-        return false;
-    }
-
-    int32 SeqIdx = FindSequenceIndex(ActiveSequenceID);
-    if (SeqIdx == INDEX_NONE)
-    {
-        return false;
-    }
-
-    const FNarr_DialogueSequence& Seq = RegisteredSequences[SeqIdx];
-    if (!Seq.Lines.IsValidIndex(CurrentLineIndex))
-    {
-        return false;
-    }
-
-    OutLine = Seq.Lines[CurrentLineIndex];
-    return true;
-}
-
-// ─── RegisterVoiceLine ────────────────────────────────────────────────────────
-
-void ANarr_DialogueManager::RegisterVoiceLine(FName LineID,
-    ENarr_DialogueSpeaker Speaker,
-    const FString& AudioURL,
-    float Duration,
-    ENarr_DialogueContext Context)
-{
-    // Check for duplicate
-    for (FNarr_VoiceLineRegistry& Entry : VoiceLineRegistry)
-    {
-        if (Entry.LineID == LineID)
+        if (Node.NodeID == CurrentNodeID)
         {
-            Entry.AudioURL = AudioURL;
-            Entry.DurationSeconds = Duration;
-            UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Updated voice line '%s'"), *LineID.ToString());
-            return;
+            return Node;
         }
     }
-
-    FNarr_VoiceLineRegistry NewEntry;
-    NewEntry.LineID = LineID;
-    NewEntry.Speaker = Speaker;
-    NewEntry.AudioURL = AudioURL;
-    NewEntry.DurationSeconds = Duration;
-    NewEntry.Context = Context;
-    VoiceLineRegistry.Add(NewEntry);
-
-    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Registered voice line '%s' (%.1fs)"),
-        *LineID.ToString(), Duration);
+    return FNarr_DialogueNode();
 }
 
-// ─── GetVoiceLineURL ──────────────────────────────────────────────────────────
-
-FString ANarr_DialogueManager::GetVoiceLineURL(FName LineID) const
+int32 UNarr_DialogueComponent::GetCurrentLineIndex() const
 {
-    for (const FNarr_VoiceLineRegistry& Entry : VoiceLineRegistry)
-    {
-        if (Entry.LineID == LineID)
-        {
-            return Entry.AudioURL;
-        }
-    }
-    return FString();
+    return CurrentLineIndex;
 }
 
-// ─── TriggerContextDialogue ───────────────────────────────────────────────────
-
-bool ANarr_DialogueManager::TriggerContextDialogue(ENarr_DialogueContext Context)
+bool UNarr_DialogueComponent::AdvanceLine()
 {
-    if (bDialogueActive)
+    FNarr_DialogueNode* Node = FindNode(CurrentNodeID);
+    if (!Node)
     {
-        // Don't interrupt active dialogue
         return false;
     }
 
-    // Find first matching non-played sequence for this context
-    for (const FNarr_DialogueSequence& Seq : RegisteredSequences)
+    if (CurrentLineIndex + 1 < Node->Lines.Num())
     {
-        if (Seq.RequiredContext == Context)
-        {
-            if (!Seq.bHasBeenPlayed || Seq.bIsRepeatable)
-            {
-                return StartDialogueSequence(Seq.SequenceID);
-            }
-        }
+        CurrentLineIndex++;
+        UE_LOG(LogTemp, Log, TEXT("[DialogueSystem] Line advanced to %d in node %s"),
+            CurrentLineIndex, *CurrentNodeID);
+        return true;
     }
 
+    // No more lines in this node
     return false;
 }
 
-// ─── HasSequenceBeenPlayed ────────────────────────────────────────────────────
-
-bool ANarr_DialogueManager::HasSequenceBeenPlayed(FName SequenceID) const
+FNarr_DialogueNode* UNarr_DialogueComponent::FindNode(const FString& NodeID)
 {
-    int32 Idx = FindSequenceIndex(SequenceID);
-    if (Idx == INDEX_NONE)
+    for (FNarr_DialogueNode& Node : ConversationTree.Nodes)
     {
-        return false;
-    }
-    return RegisteredSequences[Idx].bHasBeenPlayed;
-}
-
-// ─── FindSequenceIndex ────────────────────────────────────────────────────────
-
-int32 ANarr_DialogueManager::FindSequenceIndex(FName SequenceID) const
-{
-    for (int32 i = 0; i < RegisteredSequences.Num(); i++)
-    {
-        if (RegisteredSequences[i].SequenceID == SequenceID)
+        if (Node.NodeID == NodeID)
         {
-            return i;
+            return &Node;
         }
     }
-    return INDEX_NONE;
-}
-
-// ─── InitializeVoiceLineRegistry ─────────────────────────────────────────────
-
-void ANarr_DialogueManager::InitializeVoiceLineRegistry()
-{
-    // Cycle AUTO_20260630_002 — ElevenLabs TTS voice lines
-    // These URLs are live audio from the production pipeline
-
-    RegisterVoiceLine(
-        FName("TL_MigrationOrder"),
-        ENarr_DialogueSpeaker::TribalLeader,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785903459_TribalLeader.mp3"),
-        9.0f,
-        ENarr_DialogueContext::Migration
-    );
-
-    RegisterVoiceLine(
-        FName("SS_RexWarning"),
-        ENarr_DialogueSpeaker::SurvivorScout,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785921355_SurvivorScout.mp3"),
-        8.0f,
-        ENarr_DialogueContext::Danger
-    );
-
-    RegisterVoiceLine(
-        FName("EH_RiverWarning"),
-        ENarr_DialogueSpeaker::ElderHunter,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785927646_ElderHunter.mp3"),
-        11.0f,
-        ENarr_DialogueContext::Discovery
-    );
-
-    RegisterVoiceLine(
-        FName("YT_BigTracks"),
-        ENarr_DialogueSpeaker::YoungTracker,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782785929604_YoungTracker.mp3"),
-        12.0f,
-        ENarr_DialogueContext::Discovery
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("ANarr_DialogueManager: Initialized %d voice lines"), VoiceLineRegistry.Num());
+    return nullptr;
 }
