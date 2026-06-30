@@ -1,8 +1,3 @@
-// BiomeAudioManager.h
-// Agent #05 — Procedural World Generator | PROD_CYCLE_AUTO_20260624_004
-// Manages environmental audio tied to biome zones and weather states.
-// Priority P1 — World Generation (environmental audio layer).
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,58 +5,92 @@
 #include "SharedTypes.h"
 #include "BiomeAudioManager.generated.h"
 
+/**
+ * EWorld_BiomeType — biome classification for audio and environmental systems.
+ * Prefix: World_ to avoid conflicts with other agents.
+ */
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Plains      UMETA(DisplayName = "Plains"),
-    Rocky       UMETA(DisplayName = "Rocky"),
-    Riverbank   UMETA(DisplayName = "Riverbank"),
-    Volcanic    UMETA(DisplayName = "Volcanic"),
-    Unknown     UMETA(DisplayName = "Unknown")
+    Forest      UMETA(DisplayName = "Prehistoric Forest"),
+    Plains      UMETA(DisplayName = "Open Plains"),
+    RiverDelta  UMETA(DisplayName = "River Delta"),
+    Rocky       UMETA(DisplayName = "Rocky Highlands"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Volcanic    UMETA(DisplayName = "Volcanic Region"),
+    Count       UMETA(Hidden)
 };
 
-UENUM(BlueprintType)
-enum class EWorld_WeatherState : uint8
-{
-    Clear       UMETA(DisplayName = "Clear"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Storm"),
-    Fog         UMETA(DisplayName = "Fog")
-};
-
+/**
+ * FWorld_BiomeAudioConfig — audio configuration per biome.
+ * Defines ambient sound layers, weather audio, and creature call frequency.
+ */
 USTRUCT(BlueprintType)
-struct FWorld_BiomeAudioLayer
+struct FWorld_BiomeAudioConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    EWorld_WeatherState WeatherState = EWorld_WeatherState::Clear;
+    /** Base ambient volume multiplier for this biome (0.0-1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AmbientVolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float AmbientVolume = 1.0f;
+    /** Wind intensity for this biome (affects audio and VFX) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WindIntensity = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float WindIntensity = 0.5f;
+    /** How frequently dinosaur calls occur (calls per minute) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float CreatureCallFrequency = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float RainIntensity = 0.0f;
+    /** Water audio presence (0=none, 1=full river) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WaterAudioPresence = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    bool bPlayInsectChorus = false;
+    /** Whether this biome has active insect/bird ambience */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    bool bHasInsectAmbience = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    bool bPlayBirdCalls = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    bool bPlayWaterFlow = false;
+    /** Whether this biome has active geological sounds (rumble, steam vents) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    bool bHasGeologicalSounds = false;
 };
 
-UCLASS(BlueprintType, Blueprintable)
+/**
+ * FWorld_BiomeZone — defines a biome region in world space.
+ */
+USTRUCT(BlueprintType)
+struct FWorld_BiomeZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    FString ZoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
+
+    /** World-space center of this biome zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    FVector WorldCenter = FVector::ZeroVector;
+
+    /** Radius of influence for this biome zone (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone", meta = (ClampMin = "100.0"))
+    float Radius = 5000.0f;
+
+    /** Audio config for this zone */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zone")
+    FWorld_BiomeAudioConfig AudioConfig;
+};
+
+/**
+ * ABiomeAudioManager — manages environmental audio tied to biome zones and weather.
+ * Placed in the level, detects player position, blends audio between biomes.
+ * Agent #5 — Procedural World Generator.
+ */
+UCLASS(ClassGroup = "TranspersonalGame|World", meta = (DisplayName = "Biome Audio Manager"))
 class TRANSPERSONALGAME_API ABiomeAudioManager : public AActor
 {
     GENERATED_BODY()
@@ -72,52 +101,90 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Current biome the player is in
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BiomeAudio")
-    EWorld_BiomeType CurrentBiome = EWorld_BiomeType::Unknown;
+    // === BIOME ZONES ===
 
-    // Current weather state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "BiomeAudio")
-    EWorld_WeatherState CurrentWeather = EWorld_WeatherState::Clear;
+    /** All registered biome zones in the world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zones")
+    TArray<FWorld_BiomeZone> BiomeZones;
 
-    // Audio layer configurations per biome
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    TArray<FWorld_BiomeAudioLayer> BiomeAudioLayers;
+    /** How often (seconds) to update the active biome detection */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Zones", meta = (ClampMin = "0.1"))
+    float BiomeUpdateInterval = 0.5f;
 
-    // Radius around player to detect biome
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float BiomeDetectionRadius = 500.0f;
+    // === WEATHER AUDIO ===
 
-    // How fast audio transitions between biomes (seconds)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float AudioTransitionSpeed = 3.0f;
+    /** Current weather intensity (0=clear, 1=heavy storm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherIntensity = 0.0f;
 
-    // Weather transition timer (seconds between weather changes)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BiomeAudio")
-    float WeatherChangePeriod = 300.0f;
+    /** Whether it is currently raining */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Audio")
+    bool bIsRaining = false;
 
-    // Detect which biome the player is currently in
-    UFUNCTION(BlueprintCallable, Category = "BiomeAudio")
-    EWorld_BiomeType DetectPlayerBiome() const;
+    /** Whether a thunderstorm is active */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Audio")
+    bool bIsThunderstorm = false;
 
-    // Force a weather state change (called by weather system)
-    UFUNCTION(BlueprintCallable, Category = "BiomeAudio")
-    void SetWeatherState(EWorld_WeatherState NewWeather);
+    // === RUNTIME STATE ===
 
-    // Get the active audio layer for current biome + weather combination
-    UFUNCTION(BlueprintCallable, Category = "BiomeAudio")
-    FWorld_BiomeAudioLayer GetActiveAudioLayer() const;
+    /** Currently active biome type (updated each tick interval) */
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    EWorld_BiomeType ActiveBiomeType = EWorld_BiomeType::Plains;
 
-    // Returns true if audio layer was found for current state
-    UFUNCTION(BlueprintCallable, Category = "BiomeAudio")
-    bool HasAudioLayerForCurrentState() const;
+    /** Blend weight of the active biome (0-1) */
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float ActiveBiomeBlendWeight = 1.0f;
+
+    /** Secondary biome for crossfade blending */
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    EWorld_BiomeType SecondaryBiomeType = EWorld_BiomeType::Plains;
+
+    // === PUBLIC API ===
+
+    /** Set weather state — called by weather system */
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void SetWeatherState(float Intensity, bool bRaining, bool bThunderstorm);
+
+    /** Get the audio config for the current player biome */
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    FWorld_BiomeAudioConfig GetActiveBiomeAudioConfig() const;
+
+    /** Force a biome override (for cutscenes, scripted events) */
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void OverrideBiome(EWorld_BiomeType NewBiome, float BlendTime = 2.0f);
+
+    /** Register a new biome zone at runtime (called by PCG system) */
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void RegisterBiomeZone(const FWorld_BiomeZone& NewZone);
+
+    /** Get biome type at a world position */
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    /** Debug: log all registered biome zones */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugLogBiomeZones() const;
 
 private:
-    float WeatherTimer = 0.0f;
-    float TransitionAlpha = 0.0f;
-    EWorld_BiomeType PreviousBiome = EWorld_BiomeType::Unknown;
+    /** Timer accumulator for biome update interval */
+    float BiomeUpdateTimer = 0.0f;
 
-    void InitDefaultAudioLayers();
-    void UpdateWeatherCycle(float DeltaTime);
-    void UpdateBiomeDetection();
+    /** Whether a biome override is active */
+    bool bBiomeOverrideActive = false;
+
+    /** Override blend time remaining */
+    float OverrideBlendTimeRemaining = 0.0f;
+
+    /** Cached player pawn reference */
+    UPROPERTY()
+    APawn* CachedPlayerPawn = nullptr;
+
+    /** Initialize default biome zones for MinPlayableMap */
+    void InitializeDefaultBiomeZones();
+
+    /** Update active biome based on player position */
+    void UpdateActiveBiome();
+
+    /** Find the dominant biome zone at a given location */
+    int32 FindDominantBiomeZoneIndex(const FVector& Location) const;
 };
