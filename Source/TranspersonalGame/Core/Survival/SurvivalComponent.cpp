@@ -1,209 +1,141 @@
-// SurvivalComponent.cpp
-// Transpersonal Game Studio — Core Systems Programmer (#03)
-// Full implementation of survival stats: drain, regen, status evaluation.
+// SurvivalComponent.cpp — Core Systems Programmer #03 — PROD_CYCLE_AUTO_20260630_002
+// Survival stats component: health, hunger, thirst, stamina, fear
+// Attached to ATranspersonalCharacter in constructor
 
 #include "SurvivalComponent.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 USurvivalComponent::USurvivalComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.0f; // We handle our own interval via accumulator
+    PrimaryComponentTick.bCanEverTick = false; // Tick handled by owning character
 
-    Stats = FCore_SurvivalStats();
-    CurrentStatus = ECore_SurvivalStatus::Healthy;
-    AmbientTemperature = 25.0f;
-    bIsSprinting = false;
-    AccumulatedTime = 0.0f;
+    // Default survival stat values
+    Health    = 100.f;
+    MaxHealth = 100.f;
+    Hunger    = 100.f;
+    MaxHunger = 100.f;
+    Thirst    = 100.f;
+    MaxThirst = 100.f;
+    Stamina   = 100.f;
+    MaxStamina = 100.f;
+    FearLevel = 0.f;
+    MaxFear   = 100.f;
+
+    bIsAlive  = true;
 }
 
 void USurvivalComponent::BeginPlay()
 {
     Super::BeginPlay();
-    UpdateStatus();
+
+    UE_LOG(LogTemp, Log, TEXT("USurvivalComponent: Initialized — Health=%.1f Hunger=%.1f Thirst=%.1f Stamina=%.1f Fear=%.1f"),
+        Health, Hunger, Thirst, Stamina, FearLevel);
 }
 
-void USurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    AccumulatedTime += DeltaTime;
-    if (AccumulatedTime >= TickInterval)
-    {
-        SurvivalTick(AccumulatedTime);
-        AccumulatedTime = 0.0f;
-    }
-}
-
-void USurvivalComponent::SurvivalTick(float DeltaSeconds)
-{
-    if (!IsAlive()) return;
-
-    // Drain hunger
-    Stats.Hunger -= HungerDrainPerSecond * DeltaSeconds;
-
-    // Drain thirst
-    Stats.Thirst -= ThirstDrainPerSecond * DeltaSeconds;
-
-    // Stamina: drain while sprinting, regen otherwise
-    if (bIsSprinting)
-    {
-        Stats.Stamina -= StaminaDrainWhileSprinting * DeltaSeconds;
-        if (Stats.Stamina <= 0.0f)
-        {
-            Stats.Stamina = 0.0f;
-            bIsSprinting = false; // Force stop sprint
-        }
-    }
-    else
-    {
-        Stats.Stamina += StaminaRegenPerSecond * DeltaSeconds;
-    }
-
-    // Health drain from starvation
-    if (Stats.Hunger <= 0.0f)
-    {
-        Stats.Health -= HealthDrainWhenStarving * DeltaSeconds;
-    }
-
-    // Health drain from dehydration
-    if (Stats.Thirst <= 0.0f)
-    {
-        Stats.Health -= HealthDrainWhenDehydrated * DeltaSeconds;
-    }
-
-    // Temperature regulation: body tries to return to 37°C
-    float TempDiff = AmbientTemperature - Stats.Temperature;
-    Stats.Temperature += TempDiff * 0.01f * DeltaSeconds;
-
-    // Hypothermia / hyperthermia damage
-    if (Stats.Temperature < 32.0f)
-    {
-        Stats.Health -= (32.0f - Stats.Temperature) * 0.5f * DeltaSeconds;
-    }
-    else if (Stats.Temperature > 40.0f)
-    {
-        Stats.Health -= (Stats.Temperature - 40.0f) * 0.5f * DeltaSeconds;
-    }
-
-    // Fear decay
-    Stats.Fear -= FearDecayPerSecond * DeltaSeconds;
-
-    ClampStats();
-    UpdateStatus();
-}
-
-void USurvivalComponent::UpdateStatus()
-{
-    if (Stats.Health <= 0.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Dead;
-        return;
-    }
-    if (Stats.Health < 20.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Dying;
-        return;
-    }
-    if (Stats.Temperature < 32.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Hypothermic;
-        return;
-    }
-    if (Stats.Temperature > 40.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Hyperthermic;
-        return;
-    }
-    if (Stats.Stamina < 10.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Exhausted;
-        return;
-    }
-    if (Stats.Thirst < 20.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Thirsty;
-        return;
-    }
-    if (Stats.Hunger < 20.0f)
-    {
-        CurrentStatus = ECore_SurvivalStatus::Hungry;
-        return;
-    }
-    CurrentStatus = ECore_SurvivalStatus::Healthy;
-}
-
-void USurvivalComponent::ClampStats()
-{
-    Stats.Health    = FMath::Clamp(Stats.Health,    0.0f, Stats.MaxHealth);
-    Stats.Hunger    = FMath::Clamp(Stats.Hunger,    0.0f, Stats.MaxHunger);
-    Stats.Thirst    = FMath::Clamp(Stats.Thirst,    0.0f, Stats.MaxThirst);
-    Stats.Stamina   = FMath::Clamp(Stats.Stamina,   0.0f, Stats.MaxStamina);
-    Stats.Fear      = FMath::Clamp(Stats.Fear,      0.0f, Stats.MaxFear);
-    Stats.Temperature = FMath::Clamp(Stats.Temperature, 20.0f, 45.0f);
-}
-
-// --- Public Modifiers ---
+// ── Health ────────────────────────────────────────────────────────────────────
 
 void USurvivalComponent::ApplyDamage(float Amount)
 {
-    if (!IsAlive()) return;
-    Stats.Health -= FMath::Abs(Amount);
-    ClampStats();
-    UpdateStatus();
-}
+    if (!bIsAlive || Amount <= 0.f) return;
 
-void USurvivalComponent::Heal(float Amount)
-{
-    Stats.Health += FMath::Abs(Amount);
-    ClampStats();
-    UpdateStatus();
-}
+    Health = FMath::Clamp(Health - Amount, 0.f, MaxHealth);
+    UE_LOG(LogTemp, Warning, TEXT("USurvivalComponent: Damage %.1f applied — Health=%.1f"), Amount, Health);
 
-void USurvivalComponent::Eat(float NutritionValue)
-{
-    Stats.Hunger += FMath::Abs(NutritionValue);
-    ClampStats();
-    UpdateStatus();
-}
-
-void USurvivalComponent::Drink(float HydrationValue)
-{
-    Stats.Thirst += FMath::Abs(HydrationValue);
-    ClampStats();
-    UpdateStatus();
-}
-
-void USurvivalComponent::Rest(float StaminaRestored)
-{
-    Stats.Stamina += FMath::Abs(StaminaRestored);
-    ClampStats();
-    UpdateStatus();
-}
-
-void USurvivalComponent::AddFear(float FearAmount)
-{
-    Stats.Fear += FMath::Abs(FearAmount);
-    ClampStats();
-}
-
-void USurvivalComponent::ReduceFear(float FearAmount)
-{
-    Stats.Fear -= FMath::Abs(FearAmount);
-    ClampStats();
-}
-
-void USurvivalComponent::SetAmbientTemperature(float AmbientCelsius)
-{
-    AmbientTemperature = FMath::Clamp(AmbientCelsius, -50.0f, 80.0f);
-}
-
-void USurvivalComponent::SetSprinting(bool bSprint)
-{
-    if (bSprint && Stats.Stamina <= 0.0f)
+    if (Health <= 0.f)
     {
-        bIsSprinting = false;
-        return;
+        bIsAlive = false;
+        OnDeath();
     }
-    bIsSprinting = bSprint;
+}
+
+void USurvivalComponent::RestoreHealth(float Amount)
+{
+    if (!bIsAlive || Amount <= 0.f) return;
+    Health = FMath::Clamp(Health + Amount, 0.f, MaxHealth);
+    UE_LOG(LogTemp, Log, TEXT("USurvivalComponent: Health restored %.1f — Health=%.1f"), Amount, Health);
+}
+
+// ── Hunger ────────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::ConsumeFood(float NutritionValue)
+{
+    if (NutritionValue <= 0.f) return;
+    Hunger = FMath::Clamp(Hunger + NutritionValue, 0.f, MaxHunger);
+    UE_LOG(LogTemp, Log, TEXT("USurvivalComponent: Food consumed +%.1f — Hunger=%.1f"), NutritionValue, Hunger);
+}
+
+// ── Thirst ────────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::ConsumeWater(float HydrationValue)
+{
+    if (HydrationValue <= 0.f) return;
+    Thirst = FMath::Clamp(Thirst + HydrationValue, 0.f, MaxThirst);
+    UE_LOG(LogTemp, Log, TEXT("USurvivalComponent: Water consumed +%.1f — Thirst=%.1f"), HydrationValue, Thirst);
+}
+
+// ── Fear ──────────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::AddFear(float Amount)
+{
+    if (Amount <= 0.f) return;
+    FearLevel = FMath::Clamp(FearLevel + Amount, 0.f, MaxFear);
+    UE_LOG(LogTemp, Log, TEXT("USurvivalComponent: Fear +%.1f — FearLevel=%.1f"), Amount, FearLevel);
+}
+
+void USurvivalComponent::ReduceFear(float Amount)
+{
+    if (Amount <= 0.f) return;
+    FearLevel = FMath::Clamp(FearLevel - Amount, 0.f, MaxFear);
+}
+
+// ── Stat Accessors ────────────────────────────────────────────────────────────
+
+float USurvivalComponent::GetHealthPercent() const
+{
+    return MaxHealth > 0.f ? Health / MaxHealth : 0.f;
+}
+
+float USurvivalComponent::GetHungerPercent() const
+{
+    return MaxHunger > 0.f ? Hunger / MaxHunger : 0.f;
+}
+
+float USurvivalComponent::GetThirstPercent() const
+{
+    return MaxThirst > 0.f ? Thirst / MaxThirst : 0.f;
+}
+
+float USurvivalComponent::GetStaminaPercent() const
+{
+    return MaxStamina > 0.f ? Stamina / MaxStamina : 0.f;
+}
+
+float USurvivalComponent::GetFearPercent() const
+{
+    return MaxFear > 0.f ? FearLevel / MaxFear : 0.f;
+}
+
+bool USurvivalComponent::IsCriticalHealth() const
+{
+    return Health <= (MaxHealth * 0.2f); // Below 20% = critical
+}
+
+bool USurvivalComponent::IsStarving() const
+{
+    return Hunger <= 0.f;
+}
+
+bool USurvivalComponent::IsDehydrated() const
+{
+    return Thirst <= 0.f;
+}
+
+// ── Internal ──────────────────────────────────────────────────────────────────
+
+void USurvivalComponent::OnDeath()
+{
+    UE_LOG(LogTemp, Error, TEXT("USurvivalComponent: OWNER DIED — Health=0"));
+    // Broadcast death event — owning character handles ragdoll/respawn
+    // OnOwnerDied.Broadcast(); // Uncomment when delegate is wired
 }
