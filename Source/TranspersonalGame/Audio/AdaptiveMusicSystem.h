@@ -1,332 +1,235 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "MetasoundSource.h"
-#include "AudioComponent.h"
-#include "Sound/SoundClass.h"
-#include "Sound/SoundMix.h"
-#include "GameplayTagContainer.h"
-#include "AudioSystemManager.h"
+#include "GameFramework/Actor.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 #include "AdaptiveMusicSystem.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogAdaptiveMusic, Log, All);
+/**
+ * Adaptive music states for the prehistoric survival game.
+ * Transitions are driven by gameplay events: dinosaur proximity, combat, exploration.
+ */
+UENUM(BlueprintType)
+enum class EAudio_MusicState : uint8
+{
+    Exploration     UMETA(DisplayName = "Exploration"),      // Calm, ambient — player is safe
+    Tension         UMETA(DisplayName = "Tension"),          // Dinosaur detected within 300m
+    Danger          UMETA(DisplayName = "Danger"),           // Dinosaur within 80m or combat active
+    Combat          UMETA(DisplayName = "Combat"),           // Active attack — player or ally targeted
+    Night           UMETA(DisplayName = "Night"),            // Night phase — heightened predator ambience
+    Camp            UMETA(DisplayName = "Camp"),             // Player at campfire — safe zone music
+    Death           UMETA(DisplayName = "Death"),            // Player death sting
+    Discovery       UMETA(DisplayName = "Discovery")         // New area / resource found — brief swell
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DinoThreatLevel : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Distant     UMETA(DisplayName = "Distant"),    // >300m
+    Near        UMETA(DisplayName = "Near"),        // 80-300m
+    Immediate   UMETA(DisplayName = "Immediate"),  // <80m
+    Attacking   UMETA(DisplayName = "Attacking")   // Active aggression
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_MusicLayer
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    USoundBase* SoundAsset = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    float TargetVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    float FadeInTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    float FadeOutTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    bool bLoop = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    FString AssetPath;  // Path to the sound asset in Content Browser
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_ScreenShakeParams
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float ShakeScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Duration = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float TriggerRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float MaxDistance = 2000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_VoiceLineEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString LineText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    FString AudioURL;  // ElevenLabs TTS URL — loaded at runtime
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    EAudio_MusicState TriggerState = EAudio_MusicState::Exploration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    float CooldownSeconds = 120.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Voice")
+    float LastPlayedTime = -999.0f;
+};
 
 /**
- * Adaptive Music System - The Emotional Conductor
- * 
- * This system orchestrates the game's musical narrative, creating seamless
- * transitions between emotional states that the player never consciously notices
- * but always emotionally feels.
- * 
- * Core Philosophy: Music is the subconscious narrator of emotional experience.
- * When perfect, the player thinks about the world, not the music.
+ * UAudio_AdaptiveMusicSystem
+ *
+ * Manages the adaptive music and audio feedback for the prehistoric survival game.
+ * Transitions between music states based on gameplay events.
+ * Integrates with NarrativeDialogueManager for voice line playback.
+ *
+ * Architecture:
+ * - Music layers fade in/out based on EAudio_MusicState
+ * - Screen shake triggered by T-Rex footsteps (distance-based)
+ * - Damage flash audio cue on player hit
+ * - Voice lines registered from TTS URLs and played on trigger
  */
-
-UENUM(BlueprintType)
-enum class EMusicEmotionalState : uint8
-{
-    // Primary Emotional States
-    Wonder_Pure         UMETA(DisplayName = "Pure Wonder"),
-    Wonder_Cautious     UMETA(DisplayName = "Cautious Wonder"),
-    Fear_Creeping       UMETA(DisplayName = "Creeping Dread"),
-    Fear_Immediate      UMETA(DisplayName = "Immediate Terror"),
-    
-    // Survival States
-    Survival_Calm       UMETA(DisplayName = "Calm Survival"),
-    Survival_Urgent     UMETA(DisplayName = "Urgent Survival"),
-    Survival_Desperate  UMETA(DisplayName = "Desperate Survival"),
-    
-    // Discovery States
-    Discovery_Scientific UMETA(DisplayName = "Scientific Discovery"),
-    Discovery_Mystical   UMETA(DisplayName = "Mystical Discovery"),
-    Discovery_Dangerous  UMETA(DisplayName = "Dangerous Discovery"),
-    
-    // Connection States
-    Connection_Nature    UMETA(DisplayName = "Nature Connection"),
-    Connection_Creatures UMETA(DisplayName = "Creature Connection"),
-    Connection_Time      UMETA(DisplayName = "Temporal Connection"),
-    
-    // Isolation States
-    Isolation_Peaceful   UMETA(DisplayName = "Peaceful Solitude"),
-    Isolation_Lonely     UMETA(DisplayName = "Loneliness"),
-    Isolation_Existential UMETA(DisplayName = "Existential Isolation")
-};
-
-UENUM(BlueprintType)
-enum class EMusicLayer : uint8
-{
-    Foundation      UMETA(DisplayName = "Foundation Layer"),
-    Harmony         UMETA(DisplayName = "Harmony Layer"),
-    Melody          UMETA(DisplayName = "Melody Layer"),
-    Rhythm          UMETA(DisplayName = "Rhythm Layer"),
-    Texture         UMETA(DisplayName = "Texture Layer"),
-    Tension         UMETA(DisplayName = "Tension Layer"),
-    Release         UMETA(DisplayName = "Release Layer"),
-    Ethereal        UMETA(DisplayName = "Ethereal Layer")
-};
-
-USTRUCT(BlueprintType)
-struct FMusicLayerState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State")
-    EMusicLayer Layer = EMusicLayer::Foundation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intensity = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Volume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State")
-    float FilterCutoff = 20000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State")
-    bool bIsActive = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer State")
-    float FadeTime = 2.0f;
-};
-
-USTRUCT(BlueprintType)
-struct FMusicEmotionalContext
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    EMusicEmotionalState PrimaryState = EMusicEmotionalState::Wonder_Pure;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    EMusicEmotionalState SecondaryState = EMusicEmotionalState::Wonder_Pure;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float BlendRatio = 0.0f; // 0.0 = Pure Primary, 1.0 = Pure Secondary
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TensionLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float WonderLevel = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float IsolationLevel = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ConnectionLevel = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TemporalDisplacement = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    float TimeOfDay = 0.5f; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    float WeatherIntensity = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    int32 DinosaurProximityCount = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Context")
-    bool bInShelter = false;
-};
-
-USTRUCT(BlueprintType)
-struct FMusicTransitionSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float CrossfadeTime = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float LayerFadeTime = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float ParameterInterpolationTime = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    bool bUseSmartTransitions = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    bool bSyncToMusicalBeat = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float BPM = 80.0f;
-};
-
-UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAdaptiveMusicSystem : public UActorComponent
+UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_AdaptiveMusicSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UAdaptiveMusicSystem();
+    UAudio_AdaptiveMusicSystem();
 
-protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // Core Music Control
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void InitializeMusicSystem(UAudioSystemManager* AudioManager);
+    // === Music State Control ===
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void TransitionToEmotionalState(EMusicEmotionalState TargetState, float TransitionTime = 3.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetMusicState(EAudio_MusicState NewState, float CrossfadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void BlendEmotionalStates(EMusicEmotionalState PrimaryState, EMusicEmotionalState SecondaryState, float BlendRatio);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    EAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
 
-    // Layer Management
-    UFUNCTION(BlueprintCallable, Category = "Music Layers")
-    void SetLayerIntensity(EMusicLayer Layer, float Intensity, float FadeTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnDinosaurThreatChanged(EAudio_DinoThreatLevel NewThreatLevel, FName DinosaurSpecies);
 
-    UFUNCTION(BlueprintCallable, Category = "Music Layers")
-    void ActivateLayer(EMusicLayer Layer, float FadeInTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnPlayerDamaged(float DamageAmount, FVector DamageSourceLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Music Layers")
-    void DeactivateLayer(EMusicLayer Layer, float FadeOutTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnPlayerEnteredCamp();
 
-    UFUNCTION(BlueprintCallable, Category = "Music Layers")
-    void SetAllLayersIntensity(float Intensity, float FadeTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnPlayerLeftCamp();
 
-    // Emotional Context Updates
-    UFUNCTION(BlueprintCallable, Category = "Emotional Context")
-    void UpdateEmotionalContext(const FMusicEmotionalContext& NewContext);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnNightfallBegin();
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Context")
-    void SetTensionLevel(float TensionLevel, float TransitionTime = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnDawnBegin();
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Context")
-    void SetWonderLevel(float WonderLevel, float TransitionTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnPlayerDeath();
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Context")
-    void SetIsolationLevel(float IsolationLevel, float TransitionTime = 3.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void OnDiscovery();
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Context")
-    void SetConnectionLevel(float ConnectionLevel, float TransitionTime = 2.0f);
+    // === Screen Shake ===
 
-    // Environmental Influence
-    UFUNCTION(BlueprintCallable, Category = "Environmental Music")
-    void UpdateTimeOfDay(float TimeOfDay);
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerTRexFootstepShake(FVector TRexLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Music")
-    void UpdateWeatherIntensity(float WeatherIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerDamageShake(float DamageAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Music")
-    void UpdateDinosaurProximity(int32 DinosaurCount, float ClosestDistance);
+    // === Voice Lines ===
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Music")
-    void SetShelterState(bool bInShelter);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
+    void RegisterVoiceLine(const FAudio_VoiceLineEntry& VoiceLine);
 
-    // Event-Driven Music
-    UFUNCTION(BlueprintCallable, Category = "Music Events")
-    void TriggerDiscoveryMoment(bool bPositiveDiscovery, float IntensityLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
+    void PlayVoiceLine(const FString& CharacterName);
 
-    UFUNCTION(BlueprintCallable, Category = "Music Events")
-    void TriggerDangerMoment(float DangerLevel, float Duration);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Voice")
+    void RegisterTTSVoiceLines();
 
-    UFUNCTION(BlueprintCallable, Category = "Music Events")
-    void TriggerConnectionMoment(float ConnectionIntensity);
+    // === Ambient Audio ===
 
-    UFUNCTION(BlueprintCallable, Category = "Music Events")
-    void TriggerMemoryEcho(float TemporalDistance);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void SetAmbientLayer(const FString& LayerName, float TargetVolume, float FadeTime = 1.5f);
 
-    // Advanced Controls
-    UFUNCTION(BlueprintCallable, Category = "Advanced Music")
-    void SetMasterMusicVolume(float Volume, float FadeTime = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
+    void UpdateAmbientForTimeOfDay(float NormalizedTimeOfDay);
 
-    UFUNCTION(BlueprintCallable, Category = "Advanced Music")
-    void SetMusicBPM(float BPM);
+    // === Freesound Asset Registration ===
 
-    UFUNCTION(BlueprintCallable, Category = "Advanced Music")
-    void SyncToGameplayBeat(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Assets")
+    void RegisterFreesoundAsset(const FString& AssetName, const FString& PreviewURL, const FString& Tags);
 
-    // Query Functions
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    EMusicEmotionalState GetCurrentEmotionalState() const { return CurrentEmotionalContext.PrimaryState; }
+    // === Debug ===
 
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    FMusicEmotionalContext GetCurrentEmotionalContext() const { return CurrentEmotionalContext; }
-
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    float GetLayerIntensity(EMusicLayer Layer) const;
-
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    bool IsLayerActive(EMusicLayer Layer) const;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Audio|Debug")
+    void LogAudioSystemState();
 
 protected:
-    // Core System References
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System References")
-    TObjectPtr<UAudioSystemManager> AudioSystemManager;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    EAudio_MusicState CurrentMusicState = EAudio_MusicState::Exploration;
 
-    // MetaSound Assets
-    UPROPERTY(EditDefaultsOnly, Category = "MetaSound Assets")
-    TObjectPtr<UMetaSoundSource> AdaptiveMusicMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    EAudio_MusicState PreviousMusicState = EAudio_MusicState::Exploration;
 
-    UPROPERTY(EditDefaultsOnly, Category = "MetaSound Assets")
-    TMap<EMusicEmotionalState, UMetaSoundSource*> EmotionalStateMetaSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeParams TRexShakeParams;
 
-    // Audio Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> PrimaryMusicComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeParams DamageShakeParams;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> SecondaryMusicComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    TArray<FAudio_VoiceLineEntry> RegisteredVoiceLines;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    TArray<UAudioComponent*> LayerAudioComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    float StateCooldown = 0.0f;
 
-    // Current State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    FMusicEmotionalContext CurrentEmotionalContext;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    float MinStateHoldTime = 5.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    TMap<EMusicLayer, FMusicLayerState> LayerStates;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    EAudio_DinoThreatLevel CurrentThreatLevel = EAudio_DinoThreatLevel::None;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    FMusicTransitionSettings TransitionSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
+    FName DominantDinoSpecies = NAME_None;
 
-    // Transition Management
-    UPROPERTY()
-    FTimerHandle EmotionalTransitionTimer;
+    // Registered Freesound assets (preview URLs for runtime streaming)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Assets")
+    TMap<FString, FString> FreesoundAssetURLs;
 
-    UPROPERTY()
-    TMap<EMusicLayer, FTimerHandle> LayerTransitionTimers;
+    // TTS voice line URLs from ElevenLabs
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Voice")
+    TMap<FString, FString> TTSVoiceLineURLs;
 
 private:
-    // Internal State Management
-    void UpdateMetaSoundParameters();
-    void ProcessEmotionalTransition(float DeltaTime);
-    void ProcessLayerTransitions(float DeltaTime);
-    
-    // Parameter Interpolation
-    struct FParameterInterpolation
-    {
-        float StartValue;
-        float TargetValue;
-        float CurrentTime;
-        float Duration;
-        FString ParameterName;
-    };
-    
-    TMap<FString, FParameterInterpolation> ActiveParameterInterpolations;
-    void UpdateParameterInterpolations(float DeltaTime);
-    
-    // Smart Transition Logic
-    void CalculateOptimalTransition(EMusicEmotionalState FromState, EMusicEmotionalState ToState);
-    float CalculateEmotionalDistance(EMusicEmotionalState StateA, EMusicEmotionalState StateB);
-    
-    // Beat Synchronization
-    float BeatTimer;
-    float CurrentBPM;
-    bool bSyncToGameplayBeat;
-    void UpdateBeatSync(float DeltaTime);
-    
-    // Performance Optimization
-    void OptimizeLayerPerformance();
-    int32 MaxActiveLayers;
-    float CPUBudgetPercentage;
+    void EvaluateMusicStateTransition();
+    void ApplyScreenShake(float Scale, float Duration);
+    float GetCurrentWorldTime() const;
 };
