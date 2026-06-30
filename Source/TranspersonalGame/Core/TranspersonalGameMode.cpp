@@ -1,36 +1,28 @@
 // TranspersonalGameMode.cpp
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260622_008
-// Sets DefaultPawnClass to TranspersonalCharacter and configures game rules.
+// Transpersonal Game Studio — Engine Architect #02
+// Prehistoric survival game — sets DefaultPawnClass to TranspersonalCharacter
 
 #include "TranspersonalGameMode.h"
 #include "TranspersonalCharacter.h"
-#include "TranspersonalGameState.h"
-#include "GameFramework/PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/HUD.h"
 
 ATranspersonalGameMode::ATranspersonalGameMode()
 {
-    // Set the default pawn class to our TranspersonalCharacter
-    // Blueprint override BP_TranspersonalCharacter takes priority if it exists
-    static ConstructorHelpers::FClassFinder<APawn> PlayerPawnBPClass(
-        TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
+    // Set default pawn class to our TranspersonalCharacter
+    DefaultPawnClass = ATranspersonalCharacter::StaticClass();
 
-    if (PlayerPawnBPClass.Class != nullptr)
-    {
-        DefaultPawnClass = PlayerPawnBPClass.Class;
-    }
-    else
-    {
-        DefaultPawnClass = ATranspersonalCharacter::StaticClass();
-    }
-
-    // Use our custom game state
-    GameStateClass = ATranspersonalGameState::StaticClass();
-
-    // Use default player controller (can be subclassed later)
+    // Use default player controller
     PlayerControllerClass = APlayerController::StaticClass();
 
-    // Game rules
+    // Use default HUD
+    HUDClass = AHUD::StaticClass();
+
+    // Spectator pawn class (fallback)
+    SpectatorClass = ASpectatorPawn::StaticClass();
+
+    // Game starts immediately
     bDelayedStart = false;
 }
 
@@ -43,14 +35,16 @@ void ATranspersonalGameMode::BeginPlay()
 void ATranspersonalGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
-    UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: InitGame — Map=%s"), *MapName);
+    UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: InitGame — Map: %s"), *MapName);
 }
 
 void ATranspersonalGameMode::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
-    UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: Player logged in — %s"),
-        NewPlayer ? *NewPlayer->GetName() : TEXT("NULL"));
+    if (NewPlayer)
+    {
+        UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: Player logged in — %s"), *NewPlayer->GetName());
+    }
 }
 
 void ATranspersonalGameMode::Logout(AController* Exiting)
