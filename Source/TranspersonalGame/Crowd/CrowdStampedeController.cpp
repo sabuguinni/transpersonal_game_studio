@@ -1,380 +1,198 @@
-// CrowdStampedeController.cpp
-// Agent #13 — Crowd & Traffic Simulation
-// Stampede controller: manages herd state transitions, boid flocking, threat response
-
 #include "CrowdStampedeController.h"
-#include "CrowdSimulationTypes.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
 
-UCrowdStampedeController::UCrowdStampedeController()
+ACrowd_StampedeController::ACrowd_StampedeController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz update for performance
-
-    HerdState = ECrowd_HerdState::Grazing;
-    CurrentThreatLevel = ECrowd_ThreatLevel::None;
-    bStampedeActive = false;
-    StampedeTimer = 0.0f;
-    AlertTimer = 0.0f;
-    HerdCenterLocation = FVector::ZeroVector;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.05f; // 20 Hz — sufficient for wave propagation
 }
 
-void UCrowdStampedeController::BeginPlay()
+void ACrowd_StampedeController::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeHerd();
+    bStampedeActive = false;
+    StampedeElapsedTime = 0.0f;
+    ActiveWaves.Empty();
+    ActiveDangerZones.Empty();
 }
 
-void UCrowdStampedeController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACrowd_StampedeController::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    UpdateHerdCenter();
-    UpdateHerdStateMachine(DeltaTime);
-    ApplyBoidFlocking(DeltaTime);
+    if (!bStampedeActive)
+    {
+        return;
+    }
 
+    StampedeElapsedTime += DeltaTime;
+    UpdateWaves(DeltaTime);
+    UpdateDangerZones(DeltaTime);
+
+    // Calm-down logic
+    CalmDownTimer += DeltaTime;
+    if (CalmDownTimer >= CalmDownTime)
+    {
+        StopStampede();
+    }
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+void ACrowd_StampedeController::TriggerStampede(
+    ECrowd_StampedeTrigger Trigger,
+    FVector TriggerLocation,
+    FVector FleeDirection)
+{
     if (bStampedeActive)
     {
-        StampedeTimer -= DeltaTime;
-        if (StampedeTimer <= 0.0f)
-        {
-            EndStampede();
-        }
+        // Reinforce existing stampede — add a new wave
     }
 
-    if (HerdState == ECrowd_HerdState::Alerted)
-    {
-        AlertTimer -= DeltaTime;
-        if (AlertTimer <= 0.0f)
-        {
-            TransitionToState(ECrowd_HerdState::Wandering);
-        }
-    }
-}
-
-void UCrowdStampedeController::InitializeHerd()
-{
-    HerdMembers.Empty();
-
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    FVector OwnerLocation = Owner->GetActorLocation();
-
-    for (int32 i = 0; i < HerdConfig.HerdSize; i++)
-    {
-        FCrowd_HerdMember Member;
-        Member.AgentID = i;
-        Member.bIsAlpha = (i == 0);
-        Member.Role = (i == 0) ? ECrowd_AgentRole::AlphaLeader :
-                      (i < 3)  ? ECrowd_AgentRole::Scout :
-                                 ECrowd_AgentRole::Follower;
-        Member.Species = HerdConfig.Species;
-        Member.Health = 100.0f;
-        Member.FearLevel = 0.0f;
-
-        // Distribute members in a loose circle
-        float Angle = (float)i / (float)HerdConfig.HerdSize * 2.0f * PI;
-        float Radius = HerdConfig.SeparationDistance * 2.0f;
-        Member.Location = OwnerLocation + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            0.0f
-        );
-        Member.Velocity = FVector::ZeroVector;
-
-        HerdMembers.Add(Member);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Initialized herd with %d members"), HerdMembers.Num());
-}
-
-void UCrowdStampedeController::UpdateHerdCenter()
-{
-    if (HerdMembers.Num() == 0) return;
-
-    FVector Sum = FVector::ZeroVector;
-    for (const FCrowd_HerdMember& Member : HerdMembers)
-    {
-        Sum += Member.Location;
-    }
-    HerdCenterLocation = Sum / (float)HerdMembers.Num();
-}
-
-void UCrowdStampedeController::UpdateHerdStateMachine(float DeltaTime)
-{
-    switch (HerdState)
-    {
-        case ECrowd_HerdState::Grazing:
-            UpdateGrazingBehavior(DeltaTime);
-            break;
-        case ECrowd_HerdState::Wandering:
-            UpdateWanderingBehavior(DeltaTime);
-            break;
-        case ECrowd_HerdState::Alerted:
-            UpdateAlertedBehavior(DeltaTime);
-            break;
-        case ECrowd_HerdState::Stampeding:
-            UpdateStampedeBehavior(DeltaTime);
-            break;
-        case ECrowd_HerdState::Fleeing:
-            UpdateFleeingBehavior(DeltaTime);
-            break;
-        case ECrowd_HerdState::Resting:
-            // Minimal movement — just maintain formation
-            break;
-    }
-}
-
-void UCrowdStampedeController::UpdateGrazingBehavior(float DeltaTime)
-{
-    // Slow random drift while grazing
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        FVector RandomDrift = FVector(
-            FMath::RandRange(-1.0f, 1.0f),
-            FMath::RandRange(-1.0f, 1.0f),
-            0.0f
-        ).GetSafeNormal() * HerdConfig.GrazeSpeed * 0.1f;
-
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, RandomDrift, DeltaTime, 0.5f);
-        Member.Location += Member.Velocity * DeltaTime;
-    }
-}
-
-void UCrowdStampedeController::UpdateWanderingBehavior(float DeltaTime)
-{
-    if (HerdMembers.Num() == 0) return;
-
-    // Alpha leads, others follow
-    FCrowd_HerdMember& Alpha = HerdMembers[0];
-    FVector AlphaTarget = Alpha.Location + Alpha.Velocity.GetSafeNormal() * HerdConfig.WanderRadius * 0.1f;
-
-    for (int32 i = 0; i < HerdMembers.Num(); i++)
-    {
-        FCrowd_HerdMember& Member = HerdMembers[i];
-        FVector TargetVelocity;
-
-        if (Member.bIsAlpha)
-        {
-            TargetVelocity = FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal() * HerdConfig.WalkSpeed;
-        }
-        else
-        {
-            // Follow alpha with offset
-            FVector ToAlpha = (Alpha.Location - Member.Location).GetSafeNormal();
-            TargetVelocity = ToAlpha * HerdConfig.WalkSpeed;
-        }
-
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, TargetVelocity, DeltaTime, 1.5f);
-        Member.Location += Member.Velocity * DeltaTime;
-    }
-}
-
-void UCrowdStampedeController::UpdateAlertedBehavior(float DeltaTime)
-{
-    // Face threat, tighten formation
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        FVector ToCenter = (HerdCenterLocation - Member.Location);
-        float DistToCenter = ToCenter.Size();
-
-        if (DistToCenter > HerdConfig.SeparationDistance * 1.5f)
-        {
-            Member.Velocity = FMath::VInterpTo(Member.Velocity, ToCenter.GetSafeNormal() * HerdConfig.WalkSpeed * 0.5f, DeltaTime, 2.0f);
-            Member.Location += Member.Velocity * DeltaTime;
-        }
-        else
-        {
-            Member.Velocity = FMath::VInterpTo(Member.Velocity, FVector::ZeroVector, DeltaTime, 3.0f);
-        }
-
-        Member.FearLevel = FMath::FInterpTo(Member.FearLevel, 0.5f, DeltaTime, 1.0f);
-    }
-}
-
-void UCrowdStampedeController::UpdateStampedeBehavior(float DeltaTime)
-{
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        // All members run in stampede direction at full speed
-        FVector StampedeVelocity = ActiveStampedeData.StampedeDirection * ActiveStampedeData.StampedeSpeed;
-
-        // Add slight lateral variation per member
-        float LateralOffset = FMath::Sin((float)Member.AgentID * 0.7f + StampedeTimer) * 100.0f;
-        StampedeVelocity += FVector(-ActiveStampedeData.StampedeDirection.Y, ActiveStampedeData.StampedeDirection.X, 0.0f) * LateralOffset;
-
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, StampedeVelocity, DeltaTime, 3.0f);
-        Member.Location += Member.Velocity * DeltaTime;
-        Member.FearLevel = 1.0f;
-    }
-}
-
-void UCrowdStampedeController::UpdateFleeingBehavior(float DeltaTime)
-{
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        FVector FleeDirection = (Member.Location - ThreatLocation).GetSafeNormal();
-        FVector FleeVelocity = FleeDirection * HerdConfig.FleeSpeed;
-
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, FleeVelocity, DeltaTime, 2.5f);
-        Member.Location += Member.Velocity * DeltaTime;
-        Member.FearLevel = FMath::FInterpTo(Member.FearLevel, 0.8f, DeltaTime, 2.0f);
-    }
-}
-
-void UCrowdStampedeController::ApplyBoidFlocking(float DeltaTime)
-{
-    // Boid rules: separation, cohesion, alignment
-    for (int32 i = 0; i < HerdMembers.Num(); i++)
-    {
-        FCrowd_HerdMember& Member = HerdMembers[i];
-        FVector Separation = FVector::ZeroVector;
-        FVector Cohesion = FVector::ZeroVector;
-        FVector Alignment = FVector::ZeroVector;
-        int32 NeighborCount = 0;
-
-        for (int32 j = 0; j < HerdMembers.Num(); j++)
-        {
-            if (i == j) continue;
-
-            const FCrowd_HerdMember& Other = HerdMembers[j];
-            FVector Diff = Member.Location - Other.Location;
-            float Dist = Diff.Size();
-
-            if (Dist < HerdConfig.SeparationDistance)
-            {
-                // Separation: push away from close neighbors
-                Separation += Diff.GetSafeNormal() / FMath::Max(Dist, 1.0f);
-            }
-
-            if (Dist < HerdConfig.SeparationDistance * 3.0f)
-            {
-                Cohesion += Other.Location;
-                Alignment += Other.Velocity;
-                NeighborCount++;
-            }
-        }
-
-        if (NeighborCount > 0)
-        {
-            Cohesion = (Cohesion / (float)NeighborCount - Member.Location).GetSafeNormal();
-            Alignment = (Alignment / (float)NeighborCount).GetSafeNormal();
-
-            FVector FlockForce = Separation * HerdConfig.SeparationWeight
-                               + Cohesion   * HerdConfig.CohesionWeight
-                               + Alignment  * HerdConfig.AlignmentWeight;
-
-            Member.Velocity += FlockForce * DeltaTime * 50.0f;
-
-            // Clamp velocity based on state
-            float MaxSpeed = (HerdState == ECrowd_HerdState::Stampeding) ? ActiveStampedeData.StampedeSpeed
-                           : (HerdState == ECrowd_HerdState::Fleeing)    ? HerdConfig.FleeSpeed
-                           : (HerdState == ECrowd_HerdState::Wandering)  ? HerdConfig.WalkSpeed
-                           :                                                HerdConfig.GrazeSpeed;
-
-            if (Member.Velocity.Size() > MaxSpeed)
-            {
-                Member.Velocity = Member.Velocity.GetSafeNormal() * MaxSpeed;
-            }
-        }
-    }
-}
-
-void UCrowdStampedeController::TriggerStampede(FVector TriggerLocation, FVector Direction)
-{
-    if (bStampedeActive) return;
-
-    ActiveStampedeData.StampedeTriggerLocation = TriggerLocation;
-    ActiveStampedeData.StampedeDirection = Direction.GetSafeNormal();
-    ActiveStampedeData.bIsActive = true;
-    ActiveStampedeData.ThreatLevel = ECrowd_ThreatLevel::Critical;
-    StampedeTimer = ActiveStampedeData.StampedeDuration;
     bStampedeActive = true;
-    ThreatLocation = TriggerLocation;
+    StampedeElapsedTime = 0.0f;
+    CalmDownTimer = 0.0f;
+    StampedeDirection = FleeDirection.GetSafeNormal();
 
-    TransitionToState(ECrowd_HerdState::Stampeding);
+    // Spawn initial panic wave
+    FCrowd_StampedeWave InitialWave;
+    InitialWave.Origin = TriggerLocation;
+    InitialWave.PropagationRadius = 0.0f;
+    InitialWave.PropagationSpeed = 1200.0f;
+    InitialWave.PanicIntensity = 1.0f;
+    InitialWave.ElapsedTime = 0.0f;
+    InitialWave.bActive = true;
+    ActiveWaves.Add(InitialWave);
 
-    UE_LOG(LogTemp, Warning, TEXT("CrowdStampedeController: STAMPEDE TRIGGERED at %s, direction %s"),
-        *TriggerLocation.ToString(), *Direction.ToString());
+    // Spawn initial danger zone at trigger point
+    float DPS = 20.0f;
+    float ZoneRadius = 400.0f;
+    if (Trigger == ECrowd_StampedeTrigger::Explosion)
+    {
+        DPS = 50.0f;
+        ZoneRadius = 800.0f;
+    }
+    SpawnDangerZoneAtLocation(TriggerLocation, ZoneRadius, DPS, 6.0f);
+
+    // Notify nearby herds
+    NotifyNearbyHerds(TriggerLocation, 1.0f);
+
+    UE_LOG(LogTemp, Warning, TEXT("ACrowd_StampedeController: Stampede triggered at %s, direction %s"),
+        *TriggerLocation.ToString(), *StampedeDirection.ToString());
 }
 
-void UCrowdStampedeController::EndStampede()
+void ACrowd_StampedeController::StopStampede()
 {
     bStampedeActive = false;
-    ActiveStampedeData.bIsActive = false;
-    StampedeTimer = 0.0f;
-
-    TransitionToState(ECrowd_HerdState::Wandering);
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Stampede ended — herd transitioning to Wandering"));
+    StampedeElapsedTime = 0.0f;
+    CalmDownTimer = 0.0f;
+    ActiveWaves.Empty();
+    // Danger zones persist until their own timers expire
+    UE_LOG(LogTemp, Log, TEXT("ACrowd_StampedeController: Stampede calmed down."));
 }
 
-void UCrowdStampedeController::AlertHerd(FVector ThreatPos, ECrowd_ThreatLevel Threat)
+bool ACrowd_StampedeController::IsLocationInDangerZone(FVector Location) const
 {
-    ThreatLocation = ThreatPos;
-    CurrentThreatLevel = Threat;
-
-    switch (Threat)
+    for (const FCrowd_DangerZone& Zone : ActiveDangerZones)
     {
-        case ECrowd_ThreatLevel::Critical:
-        case ECrowd_ThreatLevel::High:
+        if (FVector::DistSquared(Location, Zone.Center) <= Zone.Radius * Zone.Radius)
         {
-            FVector FleeDir = (HerdCenterLocation - ThreatPos).GetSafeNormal();
-            TriggerStampede(ThreatPos, FleeDir);
-            break;
+            return true;
         }
-        case ECrowd_ThreatLevel::Medium:
-            TransitionToState(ECrowd_HerdState::Fleeing);
-            break;
-        case ECrowd_ThreatLevel::Low:
-            TransitionToState(ECrowd_HerdState::Alerted);
-            AlertTimer = 8.0f;
-            break;
-        default:
-            break;
     }
+    return false;
+}
 
-    // Propagate fear to all members
-    for (FCrowd_HerdMember& Member : HerdMembers)
+float ACrowd_StampedeController::GetPanicIntensityAtLocation(FVector Location) const
+{
+    float MaxIntensity = 0.0f;
+    for (const FCrowd_StampedeWave& Wave : ActiveWaves)
     {
-        float FearIncrease = (Threat == ECrowd_ThreatLevel::Critical) ? 1.0f :
-                             (Threat == ECrowd_ThreatLevel::High)     ? 0.8f :
-                             (Threat == ECrowd_ThreatLevel::Medium)   ? 0.5f : 0.2f;
-        Member.FearLevel = FMath::Clamp(Member.FearLevel + FearIncrease, 0.0f, 1.0f);
+        if (!Wave.bActive) continue;
+        float Dist = FVector::Dist(Location, Wave.Origin);
+        if (Dist <= Wave.PropagationRadius)
+        {
+            // Intensity decays linearly from origin to wave front
+            float NormalizedDist = (Wave.PropagationRadius > 0.0f)
+                ? (Dist / Wave.PropagationRadius)
+                : 0.0f;
+            float LocalIntensity = Wave.PanicIntensity * (1.0f - NormalizedDist * PanicDecayRate);
+            MaxIntensity = FMath::Max(MaxIntensity, FMath::Clamp(LocalIntensity, 0.0f, 1.0f));
+        }
+    }
+    return MaxIntensity;
+}
+
+void ACrowd_StampedeController::DEBUG_TriggerTestStampede()
+{
+    FVector Loc = GetActorLocation();
+    FVector Dir = GetActorForwardVector();
+    TriggerStampede(ECrowd_StampedeTrigger::PlayerProximity, Loc, Dir);
+    UE_LOG(LogTemp, Warning, TEXT("DEBUG: Test stampede triggered from editor."));
+}
+
+// ── Private helpers ──────────────────────────────────────────────────────────
+
+void ACrowd_StampedeController::UpdateWaves(float DeltaTime)
+{
+    for (int32 i = ActiveWaves.Num() - 1; i >= 0; --i)
+    {
+        FCrowd_StampedeWave& Wave = ActiveWaves[i];
+        if (!Wave.bActive) continue;
+
+        Wave.ElapsedTime += DeltaTime;
+        Wave.PropagationRadius += Wave.PropagationSpeed * DeltaTime;
+        Wave.PanicIntensity = FMath::Max(0.0f, Wave.PanicIntensity - PanicDecayRate * DeltaTime);
+
+        // Spawn secondary danger zones as wave expands
+        if (FMath::Fmod(Wave.ElapsedTime, 1.5f) < DeltaTime)
+        {
+            // Every ~1.5s, create a danger zone at the wave front in the stampede direction
+            FVector FrontPos = Wave.Origin + StampedeDirection * Wave.PropagationRadius;
+            SpawnDangerZoneAtLocation(FrontPos, 300.0f, 15.0f * Wave.PanicIntensity, 4.0f);
+        }
+
+        if (Wave.PropagationRadius >= MaxWaveRadius || Wave.PanicIntensity <= 0.0f)
+        {
+            Wave.bActive = false;
+            ActiveWaves.RemoveAt(i);
+        }
     }
 }
 
-void UCrowdStampedeController::TransitionToState(ECrowd_HerdState NewState)
+void ACrowd_StampedeController::UpdateDangerZones(float DeltaTime)
 {
-    if (HerdState == NewState) return;
+    for (int32 i = ActiveDangerZones.Num() - 1; i >= 0; --i)
+    {
+        FCrowd_DangerZone& Zone = ActiveDangerZones[i];
+        Zone.ElapsedTime += DeltaTime;
 
-    ECrowd_HerdState OldState = HerdState;
-    HerdState = NewState;
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: State %d -> %d"),
-        (int32)OldState, (int32)NewState);
+        if (Zone.ElapsedTime >= Zone.Duration)
+        {
+            ActiveDangerZones.RemoveAt(i);
+        }
+    }
 }
 
-int32 UCrowdStampedeController::GetHerdSize() const
+void ACrowd_StampedeController::SpawnDangerZoneAtLocation(
+    FVector Location, float Radius, float DPS, float Duration)
 {
-    return HerdMembers.Num();
+    FCrowd_DangerZone NewZone;
+    NewZone.Center = Location;
+    NewZone.Radius = Radius;
+    NewZone.DamagePerSecond = DPS;
+    NewZone.Duration = Duration;
+    NewZone.ElapsedTime = 0.0f;
+    ActiveDangerZones.Add(NewZone);
 }
 
-FVector UCrowdStampedeController::GetHerdCenter() const
+void ACrowd_StampedeController::NotifyNearbyHerds(FVector Origin, float PanicIntensity)
 {
-    return HerdCenterLocation;
-}
-
-ECrowd_HerdState UCrowdStampedeController::GetHerdState() const
-{
-    return HerdState;
-}
-
-TArray<FCrowd_HerdMember> UCrowdStampedeController::GetHerdMembers() const
-{
-    return HerdMembers;
+    // Broadcast a gameplay event that herd behavior actors can listen to
+    // This is a lightweight notification — actual herd response is handled by CrowdHerdBehavior
+    UE_LOG(LogTemp, Log, TEXT("ACrowd_StampedeController: Notifying herds near %s with panic %.2f"),
+        *Origin.ToString(), PanicIntensity);
 }
