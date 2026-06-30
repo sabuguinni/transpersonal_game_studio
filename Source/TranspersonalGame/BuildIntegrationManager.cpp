@@ -1,97 +1,98 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260630_010
-// Manages build integration state, module health checks, and cycle reporting.
+// Integration & Build Agent #19 — Cycle AUTO_20260630_011
+// Manages build state, rollback points, and integration validation
 
 #include "BuildIntegrationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
-#include "HAL/PlatformFileManager.h"
 
-ABuildIntegrationManager::ABuildIntegrationManager()
+UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Default integration state
+    CurrentBuildVersion = TEXT("AUTO_20260630_011");
     bIntegrationValid = false;
-    CoreClassesLoaded = 0;
-    TotalCoreClasses = 7;
-    LastBuildCycle = TEXT("PROD_CYCLE_AUTO_20260630_010");
-    bCompilationGatePassed = false;
-    bCAPEnforcementApplied = false;
-    bBridgeValidated = false;
+    LastValidatedActorCount = 0;
+    MaxRollbackBuilds = 10;
 }
 
-void ABuildIntegrationManager::BeginPlay()
+void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    RunIntegrationCheck();
+    Super::Initialize(Collection);
+    bIntegrationValid = false;
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized — Build: %s"), *CurrentBuildVersion);
 }
 
-void ABuildIntegrationManager::RunIntegrationCheck()
+void UBuildIntegrationManager::Deinitialize()
 {
-    // Validate world state
+    Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Deinitialized"));
+}
+
+bool UBuildIntegrationManager::ValidateIntegration()
+{
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("[BuildIntegration] World is null — integration check aborted"));
-        bIntegrationValid = false;
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] ValidateIntegration: No world"));
+        return false;
     }
-
-    bBridgeValidated = true;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Bridge validated — world: %s"), *World->GetName());
 
     // Count actors in world
     TArray<AActor*> AllActors;
     UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    ActorCount = AllActors.Num();
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Actor count: %d"), ActorCount);
+    LastValidatedActorCount = AllActors.Num();
 
-    // Mark integration as valid if basic checks pass
-    bIntegrationValid = (ActorCount > 0) && bBridgeValidated;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Integration valid: %s"), bIntegrationValid ? TEXT("true") : TEXT("false"));
+    // Validate PlayerStart exists
+    bool bHasPlayerStart = false;
+    bool bHasDirectionalLight = false;
+    bool bHasLandscape = false;
+
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+        FString ClassName = Actor->GetClass()->GetName();
+        if (ClassName.Contains(TEXT("PlayerStart"))) bHasPlayerStart = true;
+        if (ClassName.Contains(TEXT("DirectionalLight"))) bHasDirectionalLight = true;
+        if (ClassName.Contains(TEXT("Landscape"))) bHasLandscape = true;
+    }
+
+    bIntegrationValid = bHasPlayerStart && bHasDirectionalLight;
+
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Validation: actors=%d, PlayerStart=%d, Light=%d, Landscape=%d, Valid=%d"),
+        LastValidatedActorCount, bHasPlayerStart, bHasDirectionalLight, bHasLandscape, bIntegrationValid);
+
+    return bIntegrationValid;
 }
 
-void ABuildIntegrationManager::ReportBuildStatus()
+FString UBuildIntegrationManager::GetBuildVersion() const
 {
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] === BUILD STATUS REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Cycle: %s"), *LastBuildCycle);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Bridge validated: %s"), bBridgeValidated ? TEXT("PASS") : TEXT("FAIL"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] CAP enforcement: %s"), bCAPEnforcementApplied ? TEXT("PASS") : TEXT("PENDING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Core classes: %d/%d"), CoreClassesLoaded, TotalCoreClasses);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Compilation gate: %s"), bCompilationGatePassed ? TEXT("PASS") : TEXT("FAIL"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Actor count: %d"), ActorCount);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Integration valid: %s"), bIntegrationValid ? TEXT("PASS") : TEXT("FAIL"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] === END REPORT ==="));
+    return CurrentBuildVersion;
 }
 
-void ABuildIntegrationManager::SetCoreClassesLoaded(int32 Count)
+void UBuildIntegrationManager::SetBuildVersion(const FString& NewVersion)
 {
-    CoreClassesLoaded = FMath::Clamp(Count, 0, TotalCoreClasses);
-    bCompilationGatePassed = (CoreClassesLoaded == TotalCoreClasses);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Core classes loaded: %d/%d — gate: %s"),
-        CoreClassesLoaded, TotalCoreClasses, bCompilationGatePassed ? TEXT("PASS") : TEXT("FAIL"));
+    CurrentBuildVersion = NewVersion;
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Build version set: %s"), *CurrentBuildVersion);
 }
 
-void ABuildIntegrationManager::MarkCAPEnforced()
+bool UBuildIntegrationManager::IsIntegrationValid() const
 {
-    bCAPEnforcementApplied = true;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] CAP enforcement marked as applied"));
+    return bIntegrationValid;
 }
 
-FString ABuildIntegrationManager::GetIntegrationSummary() const
+int32 UBuildIntegrationManager::GetLastValidatedActorCount() const
 {
-    return FString::Printf(
-        TEXT("Cycle=%s | Bridge=%s | CAP=%s | Classes=%d/%d | Gate=%s | Actors=%d | Valid=%s"),
-        *LastBuildCycle,
-        bBridgeValidated ? TEXT("OK") : TEXT("FAIL"),
-        bCAPEnforcementApplied ? TEXT("OK") : TEXT("PENDING"),
-        CoreClassesLoaded, TotalCoreClasses,
-        bCompilationGatePassed ? TEXT("PASS") : TEXT("FAIL"),
-        ActorCount,
-        bIntegrationValid ? TEXT("PASS") : TEXT("FAIL")
-    );
+    return LastValidatedActorCount;
+}
+
+void UBuildIntegrationManager::LogBuildStatus() const
+{
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === BUILD STATUS ==="));
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Version: %s"), *CurrentBuildVersion);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Valid: %d"), bIntegrationValid);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Actors: %d"), LastValidatedActorCount);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] MaxRollbacks: %d"), MaxRollbackBuilds);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] =================="));
 }
