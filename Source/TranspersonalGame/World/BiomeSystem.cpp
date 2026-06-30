@@ -1,235 +1,192 @@
-// BiomeSystem.cpp — Agent #5 Procedural World Generator
-// Implements 6 prehistoric biome zones with PCG-driven terrain variation
+// BiomeSystem.cpp — Biome zone management for Transpersonal Game
+// Defines 4 Cretaceous biomes: Forest (pond), Plains (south), Rocky (north), Riverbank
 
 #include "BiomeSystem.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 
 ABiomeSystem::ABiomeSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s for performance
-
-    BiomeBlendRadius = 500.0f;
-    bDebugDrawBiomes = false;
-    CurrentPlayerBiome = EWorld_BiomeType::OpenPlains;
+    PrimaryActorTick.bCanEverTick = false;
+    SetActorLabel(TEXT("BiomeSystemManager"));
 }
 
 void ABiomeSystem::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeBiomes();
-    UE_LOG(LogTemp, Log, TEXT("ABiomeSystem: Initialized %d biomes"), Biomes.Num());
+
+    // Auto-register default biomes if none configured
+    if (BiomeZones.Num() == 0)
+    {
+        RegisterDefaultBiomes();
+    }
 }
 
-void ABiomeSystem::Tick(float DeltaTime)
+void ABiomeSystem::RegisterDefaultBiomes()
 {
-    Super::Tick(DeltaTime);
+    BiomeZones.Empty();
 
-    // Update player biome every tick interval
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
+    // ── Forest Biome — around pond/water source ──────────────────────────────
+    FWorld_BiomeZone Forest;
+    Forest.BiomeName = TEXT("Cretaceous Forest");
+    Forest.CenterXY = FVector2D(8000.0f, 0.0f);
+    Forest.Radius = 2000.0f;
+    Forest.VegetationDensity = 2.5f;
+    Forest.RockDensity = 0.3f;
+    Forest.bHasWater = true;
+    Forest.BiomeTint = FLinearColor(0.05f, 0.45f, 0.05f, 1.0f);
+    BiomeZones.Add(Forest);
+
+    // ── Plains Biome — south of river ────────────────────────────────────────
+    FWorld_BiomeZone Plains;
+    Plains.BiomeName = TEXT("Open Plains");
+    Plains.CenterXY = FVector2D(5000.0f, -2000.0f);
+    Plains.Radius = 3500.0f;
+    Plains.VegetationDensity = 0.8f;
+    Plains.RockDensity = 0.1f;
+    Plains.bHasWater = false;
+    Plains.BiomeTint = FLinearColor(0.55f, 0.70f, 0.15f, 1.0f);
+    BiomeZones.Add(Plains);
+
+    // ── Rocky Highland — north cluster ───────────────────────────────────────
+    FWorld_BiomeZone Rocky;
+    Rocky.BiomeName = TEXT("Rocky Highland");
+    Rocky.CenterXY = FVector2D(9700.0f, 2600.0f);
+    Rocky.Radius = 1800.0f;
+    Rocky.VegetationDensity = 0.2f;
+    Rocky.RockDensity = 3.0f;
+    Rocky.bHasWater = false;
+    Rocky.BiomeTint = FLinearColor(0.45f, 0.40f, 0.30f, 1.0f);
+    BiomeZones.Add(Rocky);
+
+    // ── Riverbank Biome — along river corridor ───────────────────────────────
+    FWorld_BiomeZone Riverbank;
+    Riverbank.BiomeName = TEXT("Riverbank");
+    Riverbank.CenterXY = FVector2D(4000.0f, 0.0f);
+    Riverbank.Radius = 4500.0f;
+    Riverbank.VegetationDensity = 1.5f;
+    Riverbank.RockDensity = 0.4f;
+    Riverbank.bHasWater = true;
+    Riverbank.BiomeTint = FLinearColor(0.10f, 0.55f, 0.35f, 1.0f);
+    BiomeZones.Add(Riverbank);
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeSystem: Registered %d biomes"), BiomeZones.Num());
+}
+
+EWorld_BiomeType ABiomeSystem::GetBiomeAtLocation(FVector WorldLocation) const
+{
+    FWorld_BiomeZone ClosestZone;
+    if (GetBiomeZoneAtLocation(WorldLocation, ClosestZone))
     {
-        FVector PlayerLoc = PlayerPawn->GetActorLocation();
-        EWorld_BiomeType NewBiome = GetBiomeAtLocation(PlayerLoc);
-        if (NewBiome != CurrentPlayerBiome)
+        if (ClosestZone.BiomeName.Contains(TEXT("Forest")))   return EWorld_BiomeType::Forest;
+        if (ClosestZone.BiomeName.Contains(TEXT("Plains")))   return EWorld_BiomeType::Plains;
+        if (ClosestZone.BiomeName.Contains(TEXT("Rocky")))    return EWorld_BiomeType::Rocky;
+        if (ClosestZone.BiomeName.Contains(TEXT("River")))    return EWorld_BiomeType::Riverbank;
+        if (ClosestZone.BiomeName.Contains(TEXT("Volcanic"))) return EWorld_BiomeType::Volcanic;
+        if (ClosestZone.BiomeName.Contains(TEXT("Swamp")))    return EWorld_BiomeType::Swamp;
+    }
+    return EWorld_BiomeType::Plains; // Default fallback
+}
+
+bool ABiomeSystem::GetBiomeZoneAtLocation(FVector WorldLocation, FWorld_BiomeZone& OutZone) const
+{
+    if (BiomeZones.Num() == 0)
+    {
+        return false;
+    }
+
+    float ClosestDist = TNumericLimits<float>::Max();
+    int32 ClosestIndex = -1;
+    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
+    {
+        float Dist = FVector2D::Distance(Loc2D, BiomeZones[i].CenterXY);
+        if (Dist < ClosestDist && Dist <= BiomeZones[i].Radius)
         {
-            CurrentPlayerBiome = NewBiome;
-            OnBiomeChanged(NewBiome);
+            ClosestDist = Dist;
+            ClosestIndex = i;
         }
     }
 
-    if (bDebugDrawBiomes)
+    if (ClosestIndex >= 0)
     {
-        DebugDrawBiomeBoundaries();
+        OutZone = BiomeZones[ClosestIndex];
+        return true;
     }
-}
 
-void ABiomeSystem::InitializeBiomes()
-{
-    Biomes.Empty();
-
-    // --- FOREST BIOME (SW quadrant) ---
-    FWorld_BiomeData Forest;
-    Forest.BiomeType = EWorld_BiomeType::DenseForest;
-    Forest.Center = FVector(-1800.0f, -1800.0f, 0.0f);
-    Forest.Radius = 2000.0f;
-    Forest.FoliageDensity = 0.85f;
-    Forest.Temperature = 22.0f;
-    Forest.Humidity = 0.80f;
-    Forest.FogColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
-    Forest.FogDensity = 0.04f;
-    Forest.BiomeName = TEXT("Cretaceous Jungle");
-    Biomes.Add(Forest);
-
-    // --- OPEN PLAINS BIOME (NW quadrant) ---
-    FWorld_BiomeData Plains;
-    Plains.BiomeType = EWorld_BiomeType::OpenPlains;
-    Plains.Center = FVector(-1200.0f, 1600.0f, 0.0f);
-    Plains.Radius = 2200.0f;
-    Plains.FoliageDensity = 0.25f;
-    Plains.Temperature = 28.0f;
-    Plains.Humidity = 0.35f;
-    Plains.FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
-    Plains.FogDensity = 0.01f;
-    Plains.BiomeName = TEXT("Prehistoric Savanna");
-    Biomes.Add(Plains);
-
-    // --- ROCKY HIGHLANDS BIOME (NE quadrant) ---
-    FWorld_BiomeData Highlands;
-    Highlands.BiomeType = EWorld_BiomeType::RockyHighlands;
-    Highlands.Center = FVector(2000.0f, -1200.0f, 200.0f);
-    Highlands.Radius = 1800.0f;
-    Highlands.FoliageDensity = 0.15f;
-    Highlands.Temperature = 15.0f;
-    Highlands.Humidity = 0.20f;
-    Highlands.FogColor = FLinearColor(0.6f, 0.6f, 0.65f, 1.0f);
-    Highlands.FogDensity = 0.02f;
-    Highlands.BiomeName = TEXT("Rocky Highlands");
-    Biomes.Add(Highlands);
-
-    // --- RIVER DELTA BIOME (center) ---
-    FWorld_BiomeData River;
-    River.BiomeType = EWorld_BiomeType::RiverDelta;
-    River.Center = FVector(0.0f, 800.0f, -150.0f);
-    River.Radius = 1200.0f;
-    River.FoliageDensity = 0.55f;
-    River.Temperature = 24.0f;
-    River.Humidity = 0.90f;
-    River.FogColor = FLinearColor(0.5f, 0.7f, 0.8f, 1.0f);
-    River.FogDensity = 0.06f;
-    River.BiomeName = TEXT("River Delta");
-    Biomes.Add(River);
-
-    // --- VOLCANIC ZONE BIOME (SE quadrant) ---
-    FWorld_BiomeData Volcanic;
-    Volcanic.BiomeType = EWorld_BiomeType::VolcanicZone;
-    Volcanic.Center = FVector(2100.0f, 1600.0f, 0.0f);
-    Volcanic.Radius = 1600.0f;
-    Volcanic.FoliageDensity = 0.05f;
-    Volcanic.Temperature = 45.0f;
-    Volcanic.Humidity = 0.15f;
-    Volcanic.FogColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
-    Volcanic.FogDensity = 0.08f;
-    Volcanic.BiomeName = TEXT("Volcanic Badlands");
-    Biomes.Add(Volcanic);
-
-    // --- SWAMPLAND BIOME (south) ---
-    FWorld_BiomeData Swamp;
-    Swamp.BiomeType = EWorld_BiomeType::Swampland;
-    Swamp.Center = FVector(0.0f, 2300.0f, -150.0f);
-    Swamp.Radius = 1500.0f;
-    Swamp.FoliageDensity = 0.70f;
-    Swamp.Temperature = 30.0f;
-    Swamp.Humidity = 0.95f;
-    Swamp.FogColor = FLinearColor(0.3f, 0.5f, 0.3f, 1.0f);
-    Swamp.FogDensity = 0.10f;
-    Swamp.BiomeName = TEXT("Primordial Swamp");
-    Biomes.Add(Swamp);
-}
-
-EWorld_BiomeType ABiomeSystem::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    float ClosestDist = MAX_FLT;
-    EWorld_BiomeType ClosestBiome = EWorld_BiomeType::OpenPlains;
-
-    for (const FWorld_BiomeData& Biome : Biomes)
+    // Return closest even if outside radius
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
     {
-        float Dist = FVector::Dist2D(WorldLocation, Biome.Center);
+        float Dist = FVector2D::Distance(Loc2D, BiomeZones[i].CenterXY);
         if (Dist < ClosestDist)
         {
             ClosestDist = Dist;
-            ClosestBiome = Biome.BiomeType;
+            ClosestIndex = i;
         }
     }
 
-    return ClosestBiome;
+    if (ClosestIndex >= 0)
+    {
+        OutZone = BiomeZones[ClosestIndex];
+        return true;
+    }
+
+    return false;
 }
 
-FWorld_BiomeData ABiomeSystem::GetBiomeData(EWorld_BiomeType BiomeType) const
+float ABiomeSystem::GetVegetationDensityAt(FVector WorldLocation) const
 {
-    for (const FWorld_BiomeData& Biome : Biomes)
+    FWorld_BiomeZone Zone;
+    if (GetBiomeZoneAtLocation(WorldLocation, Zone))
     {
-        if (Biome.BiomeType == BiomeType)
+        // Blend density based on distance from zone center
+        FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+        float Dist = FVector2D::Distance(Loc2D, Zone.CenterXY);
+        float BlendFactor = FMath::Clamp(1.0f - (Dist / Zone.Radius), 0.0f, 1.0f);
+        return Zone.VegetationDensity * BlendFactor;
+    }
+    return 0.5f; // Default density
+}
+
+bool ABiomeSystem::IsNearWater(FVector WorldLocation, float SearchRadius) const
+{
+    FVector2D Loc2D(WorldLocation.X, WorldLocation.Y);
+
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
+    {
+        if (!Zone.bHasWater) continue;
+
+        float Dist = FVector2D::Distance(Loc2D, Zone.CenterXY);
+        if (Dist <= SearchRadius)
         {
-            return Biome;
+            return true;
         }
     }
-
-    // Return default if not found
-    FWorld_BiomeData Default;
-    Default.BiomeType = EWorld_BiomeType::OpenPlains;
-    Default.BiomeName = TEXT("Unknown");
-    return Default;
+    return false;
 }
 
-float ABiomeSystem::GetBlendWeight(const FVector& WorldLocation, EWorld_BiomeType BiomeType) const
-{
-    const FWorld_BiomeData* TargetBiome = nullptr;
-    for (const FWorld_BiomeData& Biome : Biomes)
-    {
-        if (Biome.BiomeType == BiomeType)
-        {
-            TargetBiome = &Biome;
-            break;
-        }
-    }
-
-    if (!TargetBiome)
-    {
-        return 0.0f;
-    }
-
-    float Dist = FVector::Dist2D(WorldLocation, TargetBiome->Center);
-    float BlendStart = TargetBiome->Radius - BiomeBlendRadius;
-    float BlendEnd = TargetBiome->Radius;
-
-    if (Dist <= BlendStart)
-    {
-        return 1.0f;
-    }
-    else if (Dist >= BlendEnd)
-    {
-        return 0.0f;
-    }
-    else
-    {
-        // Smooth blend in transition zone
-        float Alpha = (Dist - BlendStart) / BiomeBlendRadius;
-        return FMath::SmoothStep(1.0f, 0.0f, Alpha);
-    }
-}
-
-void ABiomeSystem::OnBiomeChanged(EWorld_BiomeType NewBiome)
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(NewBiome);
-    UE_LOG(LogTemp, Log, TEXT("ABiomeSystem: Player entered biome '%s' (Temp: %.1f°C, Humidity: %.0f%%)"),
-        *BiomeData.BiomeName, BiomeData.Temperature, BiomeData.Humidity * 100.0f);
-
-    // Broadcast biome change event for other systems (audio, weather, etc.)
-    OnBiomeChangedDelegate.Broadcast(NewBiome, BiomeData);
-}
-
-void ABiomeSystem::DebugDrawBiomeBoundaries()
+void ABiomeSystem::DrawBiomeDebug(float Duration) const
 {
     UWorld* World = GetWorld();
     if (!World) return;
 
-    static const TMap<EWorld_BiomeType, FColor> BiomeColors = {
-        { EWorld_BiomeType::DenseForest,    FColor::Green },
-        { EWorld_BiomeType::OpenPlains,     FColor::Yellow },
-        { EWorld_BiomeType::RockyHighlands, FColor::Silver },
-        { EWorld_BiomeType::RiverDelta,     FColor::Blue },
-        { EWorld_BiomeType::VolcanicZone,   FColor::Red },
-        { EWorld_BiomeType::Swampland,      FColor(0, 100, 0) },
-    };
-
-    for (const FWorld_BiomeData& Biome : Biomes)
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
     {
-        const FColor* Color = BiomeColors.Find(Biome.BiomeType);
-        FColor DrawColor = Color ? *Color : FColor::White;
-        DrawDebugCircle(World, Biome.Center, Biome.Radius, 64, DrawColor, false, 0.6f, 0, 20.0f, FVector(1, 0, 0), FVector(0, 1, 0));
+        FVector Center(Zone.CenterXY.X, Zone.CenterXY.Y, 100.0f);
+        FColor DebugColor = FColor(
+            FMath::Clamp((int32)(Zone.BiomeTint.R * 255), 0, 255),
+            FMath::Clamp((int32)(Zone.BiomeTint.G * 255), 0, 255),
+            FMath::Clamp((int32)(Zone.BiomeTint.B * 255), 0, 255)
+        );
+
+        DrawDebugSphere(World, Center, Zone.Radius, 32, DebugColor, false, Duration, 0, 5.0f);
+        DrawDebugString(World, Center + FVector(0, 0, 200), Zone.BiomeName, nullptr, DebugColor, Duration);
+
+        UE_LOG(LogTemp, Log, TEXT("BiomeDebug: %s at (%.0f, %.0f) r=%.0f water=%s"),
+            *Zone.BiomeName,
+            Zone.CenterXY.X, Zone.CenterXY.Y,
+            Zone.Radius,
+            Zone.bHasWater ? TEXT("YES") : TEXT("NO"));
     }
 }
