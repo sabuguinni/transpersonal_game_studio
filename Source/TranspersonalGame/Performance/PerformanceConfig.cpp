@@ -1,194 +1,131 @@
-// PerformanceConfig.cpp — Performance Optimizer Agent #4
-// Implementation of frame budget and scalability configuration
+// PerformanceConfig.cpp
+// Performance Optimizer Agent #4 — Transpersonal Game Studio
+// CYCLE: PROD_CYCLE_AUTO_20260630_005
+
 #include "PerformanceConfig.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "Kismet/KismetSystemLibrary.h"
 
 UPerf_PerformanceConfig::UPerf_PerformanceConfig()
 {
-    // Default to PC 60fps tier
-    ActiveTier = EPerf_ScalabilityTier::PC_60fps;
+    // Default to High quality (60fps PC target)
+    QualityTier = EPerf_QualityTier::High;
+    DrawCallBudget = 2000;
+    MaxActorCount = 500;
 
-    // PC 60fps frame budget defaults
-    FrameBudget.TargetFrameTimeMs = 16.6f;
-    FrameBudget.ShadowBudgetMs    = 3.0f;
-    FrameBudget.LumenBudgetMs     = 4.0f;
-    FrameBudget.MaxDrawCalls      = 2000;
-    FrameBudget.MaxDynamicActors  = 500;
-    FrameBudget.MaxDynamicLights  = 20;
-    FrameBudget.MaxNiagaraSystems = 50;
-    FrameBudget.TexturePoolMB     = 2048;
+    // Cull distances — tuned for prehistoric open world
+    CullDistances.VegetationCullDistance = 8000.0f;
+    CullDistances.RockCullDistance = 12000.0f;
+    CullDistances.PropCullDistance = 6000.0f;
+    CullDistances.DinosaurCullDistance = 0.0f;  // Never cull dinosaurs
+    CullDistances.NpcCullDistance = 10000.0f;
 
-    // Default LOD settings
-    LODSettings.StaticMeshLODScale      = 1.0f;
-    LODSettings.SkeletalMeshLODBias     = 0;
-    LODSettings.FoliageCullDistance     = 15000.0f;
-    LODSettings.DinoAITickRateNear      = 30.0f;
-    LODSettings.DinoAITickRateMid       = 10.0f;
-    LODSettings.DinoAITickRateFar       = 2.0f;
-    LODSettings.DynamicShadowDistance   = 5000.0f;
+    // Shadow config — 3 cascades for performance
+    ShadowConfig.MaxCascades = 3;
+    ShadowConfig.MaxShadowResolution = 2048;
+    ShadowConfig.ShadowDistanceScale = 1.0f;
+    ShadowConfig.bEnableContactShadows = true;
+
+    // Lumen — enabled for visual quality
+    LumenConfig.bEnableDiffuseIndirect = true;
+    LumenConfig.bEnableReflections = true;
+    LumenConfig.bEnableFastSkyLUT = true;
+    LumenConfig.LumenSceneDetail = 1.0f;
+
+    // LOD
+    StaticMeshLODDistanceScale = 1.0f;
+    SkeletalMeshLODBias = 0;
+    FoliageLODDistanceScale = 1.5f;
 }
 
-FPerf_FrameBudget UPerf_PerformanceConfig::GetBudgetForTier(EPerf_ScalabilityTier Tier) const
+void UPerf_PerformanceConfig::ApplyToWorld()
 {
-    FPerf_FrameBudget Budget;
-
-    switch (Tier)
-    {
-    case EPerf_ScalabilityTier::Console_30fps:
-        Budget.TargetFrameTimeMs = 33.3f;
-        Budget.ShadowBudgetMs    = 5.0f;
-        Budget.LumenBudgetMs     = 8.0f;
-        Budget.MaxDrawCalls      = 1000;
-        Budget.MaxDynamicActors  = 200;
-        Budget.MaxDynamicLights  = 8;
-        Budget.MaxNiagaraSystems = 20;
-        Budget.TexturePoolMB     = 1024;
-        break;
-
-    case EPerf_ScalabilityTier::PC_60fps:
-        Budget.TargetFrameTimeMs = 16.6f;
-        Budget.ShadowBudgetMs    = 3.0f;
-        Budget.LumenBudgetMs     = 4.0f;
-        Budget.MaxDrawCalls      = 2000;
-        Budget.MaxDynamicActors  = 500;
-        Budget.MaxDynamicLights  = 20;
-        Budget.MaxNiagaraSystems = 50;
-        Budget.TexturePoolMB     = 2048;
-        break;
-
-    case EPerf_ScalabilityTier::PC_Ultra:
-        Budget.TargetFrameTimeMs = 11.1f; // 90fps
-        Budget.ShadowBudgetMs    = 2.0f;
-        Budget.LumenBudgetMs     = 3.0f;
-        Budget.MaxDrawCalls      = 4000;
-        Budget.MaxDynamicActors  = 1000;
-        Budget.MaxDynamicLights  = 40;
-        Budget.MaxNiagaraSystems = 100;
-        Budget.TexturePoolMB     = 4096;
-        break;
-
-    default:
-        // Fallback to PC 60fps
-        Budget.TargetFrameTimeMs = 16.6f;
-        Budget.MaxDrawCalls      = 2000;
-        break;
-    }
-
-    return Budget;
-}
-
-void UPerf_PerformanceConfig::ApplyScalabilitySettings(EPerf_ScalabilityTier Tier)
-{
-    // Get a world context — use GWorld as fallback
-    UWorld* World = GWorld;
+    UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr;
     if (!World)
     {
+        // Try editor world
+        if (GEngine && GEngine->GetWorldContexts().Num() > 0)
+        {
+            World = GEngine->GetWorldContexts()[0].World();
+        }
+    }
+
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceConfig: No valid world found for ApplyToWorld()"));
         return;
     }
 
-    switch (Tier)
-    {
-    case EPerf_ScalabilityTier::Console_30fps:
-        // Console quality settings — all groups at 2 (High)
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ResolutionQuality 100"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ViewDistanceQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.AntiAliasingQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadowQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.GlobalIlluminationQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ReflectionQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.PostProcessQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.TextureQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.EffectsQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.FoliageQuality 2"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadingQuality 2"));
-        // Lumen reduced for console
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.MaxTraceDistance 4000"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.MaxResolution 1024"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.CSM.MaxCascades 2"));
-        break;
+    // Shadow cascades
+    FString CascadeCmd = FString::Printf(TEXT("r.Shadow.CSM.MaxCascades %d"), ShadowConfig.MaxCascades);
+    GEngine->Exec(World, *CascadeCmd);
 
-    case EPerf_ScalabilityTier::PC_60fps:
-        // PC Epic quality with performance tweaks
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ResolutionQuality 100"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ViewDistanceQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.AntiAliasingQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadowQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.GlobalIlluminationQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ReflectionQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.PostProcessQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.TextureQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.EffectsQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.FoliageQuality 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadingQuality 3"));
-        // Lumen balanced
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.MaxTraceDistance 8000"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.MaxResolution 2048"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.CSM.MaxCascades 3"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.SkyAtmosphere.FastSkyLUT 1"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.AllowOcclusionQueries 1"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.HZBOcclusion 1"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.MeshDrawCommands.DynamicInstancing 1"));
-        break;
+    // Shadow resolution
+    FString ShadowResCmd = FString::Printf(TEXT("r.Shadow.MaxResolution %d"), ShadowConfig.MaxShadowResolution);
+    GEngine->Exec(World, *ShadowResCmd);
 
-    case EPerf_ScalabilityTier::PC_Ultra:
-        // Maximum quality — no compromises
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ResolutionQuality 100"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ViewDistanceQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.AntiAliasingQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadowQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.GlobalIlluminationQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ReflectionQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.PostProcessQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.TextureQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.EffectsQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.FoliageQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("sg.ShadingQuality 4"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Lumen.MaxTraceDistance 16000"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.MaxResolution 4096"));
-        UKismetSystemLibrary::ExecuteConsoleCommand(World, TEXT("r.Shadow.CSM.MaxCascades 4"));
-        break;
+    // LOD distance scale
+    FString LODCmd = FString::Printf(TEXT("r.StaticMeshLODDistanceScale %f"), StaticMeshLODDistanceScale);
+    GEngine->Exec(World, *LODCmd);
 
-    default:
-        break;
-    }
+    // Skeletal LOD bias
+    FString SkelLODCmd = FString::Printf(TEXT("r.SkeletalMeshLODBias %d"), SkeletalMeshLODBias);
+    GEngine->Exec(World, *SkelLODCmd);
 
-    // Update active tier and budget
-    ActiveTier = Tier;
-    FrameBudget = GetBudgetForTier(Tier);
+    // Foliage LOD
+    FString FoliageCmd = FString::Printf(TEXT("foliage.LODDistanceScale %f"), FoliageLODDistanceScale);
+    GEngine->Exec(World, *FoliageCmd);
+
+    // Lumen
+    GEngine->Exec(World, LumenConfig.bEnableDiffuseIndirect ? TEXT("r.Lumen.DiffuseIndirect.Allow 1") : TEXT("r.Lumen.DiffuseIndirect.Allow 0"));
+    GEngine->Exec(World, LumenConfig.bEnableReflections ? TEXT("r.Lumen.Reflections.Allow 1") : TEXT("r.Lumen.Reflections.Allow 0"));
+    GEngine->Exec(World, LumenConfig.bEnableFastSkyLUT ? TEXT("r.SkyAtmosphere.FastSkyLUT 1") : TEXT("r.SkyAtmosphere.FastSkyLUT 0"));
+
+    UE_LOG(LogTemp, Log, TEXT("PerformanceConfig: Applied quality tier '%s' to world '%s'"),
+        *GetFPSTargetString(),
+        *World->GetName());
 }
 
-EPerf_BudgetWarning UPerf_PerformanceConfig::CheckSceneBudget(
-    int32 ActorCount,
-    int32 DynamicLightCount,
-    int32 DrawCallCount) const
+FString UPerf_PerformanceConfig::GetFPSTargetString() const
 {
-    // Check in priority order — most critical first
-    if (DynamicLightCount > FrameBudget.MaxDynamicLights)
+    switch (QualityTier)
     {
-        return EPerf_BudgetWarning::DynamicLights;
+        case EPerf_QualityTier::Low:
+            return TEXT("Low — Console 30fps target");
+        case EPerf_QualityTier::Medium:
+            return TEXT("Medium — PC 60fps balanced");
+        case EPerf_QualityTier::High:
+            return TEXT("High — PC 60fps ultra");
+        case EPerf_QualityTier::Ultra:
+            return TEXT("Ultra — PC 120fps+");
+        default:
+            return TEXT("Unknown tier");
     }
-
-    if (DrawCallCount > FrameBudget.MaxDrawCalls)
-    {
-        return EPerf_BudgetWarning::DrawCalls;
-    }
-
-    if (ActorCount > FrameBudget.MaxDynamicActors)
-    {
-        return EPerf_BudgetWarning::ActorCount;
-    }
-
-    return EPerf_BudgetWarning::None;
 }
 
-float UPerf_PerformanceConfig::GetLumenTraceDistance(EPerf_ScalabilityTier Tier) const
+bool UPerf_PerformanceConfig::ValidateSceneBudget(int32 ActorCount, int32 EstimatedDrawCalls) const
 {
-    switch (Tier)
+    bool bWithinBudget = true;
+
+    if (ActorCount > MaxActorCount)
     {
-    case EPerf_ScalabilityTier::Console_30fps: return 4000.0f;
-    case EPerf_ScalabilityTier::PC_60fps:      return 8000.0f;
-    case EPerf_ScalabilityTier::PC_Ultra:      return 16000.0f;
-    default:                                    return 8000.0f;
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceConfig: Actor count %d exceeds budget %d — streaming recommended"),
+            ActorCount, MaxActorCount);
+        bWithinBudget = false;
     }
+
+    if (EstimatedDrawCalls > DrawCallBudget)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceConfig: Draw calls %d exceed budget %d — LOD/culling required"),
+            EstimatedDrawCalls, DrawCallBudget);
+        bWithinBudget = false;
+    }
+
+    if (bWithinBudget)
+    {
+        UE_LOG(LogTemp, Log, TEXT("PerformanceConfig: Scene within budget — %d actors, ~%d draw calls"),
+            ActorCount, EstimatedDrawCalls);
+    }
+
+    return bWithinBudget;
 }
