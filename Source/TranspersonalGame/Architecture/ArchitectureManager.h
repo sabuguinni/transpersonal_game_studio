@@ -2,16 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "ArchitectureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    StonePillar     UMETA(DisplayName = "Stone Pillar"),
+    None            UMETA(DisplayName = "None"),
+    RuinPillar      UMETA(DisplayName = "Ruin Pillar"),
     RuinWall        UMETA(DisplayName = "Ruin Wall"),
-    RockOutcrop     UMETA(DisplayName = "Rock Outcrop"),
-    AncientArchway  UMETA(DisplayName = "Ancient Archway"),
+    RuinFoundation  UMETA(DisplayName = "Ruin Foundation"),
     CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    StoneMound      UMETA(DisplayName = "Stone Mound")
 };
 
 USTRUCT(BlueprintType)
@@ -20,41 +23,85 @@ struct FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EArch_StructureType StructureType = EArch_StructureType::StonePillar;
+    EArch_StructureType StructureType = EArch_StructureType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FVector SpawnLocation = FVector::ZeroVector;
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FRotator Rotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     FVector Scale = FVector(1.0f, 1.0f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString AssetLabel = TEXT("Arch_Prop");
+    float WeatheringLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasVegetationGrowth = true;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AArchitectureManager : public AActor
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArch_StructureComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AArchitectureManager();
+    UArch_StructureComponent();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_StructureData> RegisteredStructures;
+    EArch_StructureType StructureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    int32 TotalStructuresSpawned = 0;
+    float WeatheringLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasVegetationGrowth;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterStructure(const FArch_StructureData& StructureData);
+    void InitializeStructure(EArch_StructureType InType, float InWeathering);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    int32 GetStructureCount() const;
+    EArch_StructureType GetStructureType() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ClearAllStructures();
+    float GetWeatheringLevel() const;
+};
+
+UCLASS(ClassGroup = (TranspersonalGame), BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AArch_CretaceousRuin : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AArch_CretaceousRuin();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture",
+        meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* RuinMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture",
+        meta = (AllowPrivateAccess = "true"))
+    UArch_StructureComponent* StructureComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_StructureData StructureData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float CollapseRadius;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeathering(float WeatherAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsStructureIntact() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FVector GetStructureCenter() const;
 
 protected:
     virtual void BeginPlay() override;
+
+private:
+    bool bStructureIntact;
 };
