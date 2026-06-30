@@ -2,166 +2,247 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-UCrowdHerdBehavior::UCrowdHerdBehavior()
+// ============================================================
+// UCrowd_HerdBehaviorComponent
+// ============================================================
+
+UCrowd_HerdBehaviorComponent::UCrowd_HerdBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.05f; // 20 Hz tick for performance
+
+    HerbivoreSpecies = ECrowd_HerbivoreType::Triceratops;
+    CurrentState = ECrowd_HerdBehaviorState::Grazing;
+    HerdSize = 0;
+    HerdCentroid = FVector::ZeroVector;
+    CollectiveFearLevel = 0.f;
+    FearDecayRate = 0.05f;
+    StampedeTriggerFear = 0.75f;
+    StampedeTimer = 0.f;
+    bStampedeActive = false;
+    StampedeDirection = FVector::ForwardVector;
 }
 
-void UCrowdHerdBehavior::BeginPlay()
+void UCrowd_HerdBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
-    CurrentHerdState = ECrowd_HerdState::Grazing;
-    StateTimer = 0.0f;
 }
 
-void UCrowdHerdBehavior::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCrowd_HerdBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Decay fear across all members
-    for (FCrowd_HerdMember& Member : HerdMembers)
+    if (HerdMembers.Num() == 0) return;
+
+    UpdateFearDecay(DeltaTime);
+    UpdateHerdCentroid();
+    UpdateBoidsBehavior(DeltaTime);
+
+    // Stampede timer
+    if (bStampedeActive)
     {
-        Member.FearLevel = FMath::Max(0.0f, Member.FearLevel - FearDecayRate * DeltaTime);
-    }
-
-    StateTimer += DeltaTime;
-
-    switch (CurrentHerdState)
-    {
-        case ECrowd_HerdState::Grazing:    UpdateGrazing(DeltaTime);    break;
-        case ECrowd_HerdState::Wandering:  UpdateWandering(DeltaTime);  break;
-        case ECrowd_HerdState::Fleeing:    UpdateFleeing(DeltaTime);    break;
-        case ECrowd_HerdState::Stampeding: UpdateStampeding(DeltaTime); break;
-        case ECrowd_HerdState::Resting:    UpdateResting(DeltaTime);    break;
-    }
-}
-
-void UCrowdHerdBehavior::AddHerdMember(AActor* Member)
-{
-    if (!Member || HerdMembers.Num() >= MaxHerdSize) return;
-
-    FCrowd_HerdMember NewMember;
-    NewMember.MemberActor = Member;
-    NewMember.Velocity = FVector::ZeroVector;
-    NewMember.FearLevel = 0.0f;
-    NewMember.bIsLeader = (HerdMembers.Num() == 0); // First member is leader
-    HerdMembers.Add(NewMember);
-}
-
-void UCrowdHerdBehavior::RemoveHerdMember(AActor* Member)
-{
-    HerdMembers.RemoveAll([Member](const FCrowd_HerdMember& M) {
-        return M.MemberActor == Member;
-    });
-
-    // Reassign leader if needed
-    if (HerdMembers.Num() > 0)
-    {
-        bool bHasLeader = false;
-        for (const FCrowd_HerdMember& M : HerdMembers)
+        StampedeTimer -= DeltaTime;
+        if (StampedeTimer <= 0.f)
         {
-            if (M.bIsLeader) { bHasLeader = true; break; }
-        }
-        if (!bHasLeader) HerdMembers[0].bIsLeader = true;
-    }
-}
-
-void UCrowdHerdBehavior::TriggerStampede(FVector ThreatLocation)
-{
-    StampedeThreatLocation = ThreatLocation;
-    SetHerdState(ECrowd_HerdState::Stampeding);
-
-    // Spike fear on all members
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        Member.FearLevel = 1.0f;
-    }
-}
-
-void UCrowdHerdBehavior::SetHerdState(ECrowd_HerdState NewState)
-{
-    CurrentHerdState = NewState;
-    StateTimer = 0.0f;
-}
-
-FVector UCrowdHerdBehavior::ComputeFlockingVelocity(const FCrowd_HerdMember& Member)
-{
-    FVector Sep = ComputeSeparation(Member);
-    FVector Coh = ComputeCohesion(Member);
-    FVector Ali = ComputeAlignment(Member);
-
-    // Weight the three forces
-    return (Sep * 1.5f) + (Coh * 0.8f) + (Ali * 1.0f);
-}
-
-FVector UCrowdHerdBehavior::ComputeSeparation(const FCrowd_HerdMember& Member)
-{
-    if (!Member.MemberActor) return FVector::ZeroVector;
-
-    FVector Steer = FVector::ZeroVector;
-    int32 Count = 0;
-    FVector MyPos = Member.MemberActor->GetActorLocation();
-
-    for (const FCrowd_HerdMember& Other : HerdMembers)
-    {
-        if (!Other.MemberActor || Other.MemberActor == Member.MemberActor) continue;
-        float Dist = FVector::Dist(MyPos, Other.MemberActor->GetActorLocation());
-        if (Dist < SeparationRadius && Dist > 0.0f)
-        {
-            FVector Diff = (MyPos - Other.MemberActor->GetActorLocation()).GetSafeNormal() / Dist;
-            Steer += Diff;
-            Count++;
+            bStampedeActive = false;
+            CurrentState = ECrowd_HerdBehaviorState::Alerted;
+            unreal_log("Herd stampede ended — transitioning to Alerted");
         }
     }
-
-    if (Count > 0) Steer /= (float)Count;
-    return Steer;
 }
 
-FVector UCrowdHerdBehavior::ComputeCohesion(const FCrowd_HerdMember& Member)
+void UCrowd_HerdBehaviorComponent::InitializeHerd(int32 NumMembers, FVector SpawnCenter)
 {
-    if (!Member.MemberActor) return FVector::ZeroVector;
+    HerdMembers.Empty();
+    int32 ClampedSize = FMath::Clamp(NumMembers, HerdConfig.MinHerdSize, HerdConfig.MaxHerdSize);
+    HerdSize = ClampedSize;
 
-    FVector Center = FVector::ZeroVector;
-    int32 Count = 0;
-    FVector MyPos = Member.MemberActor->GetActorLocation();
-
-    for (const FCrowd_HerdMember& Other : HerdMembers)
+    for (int32 i = 0; i < ClampedSize; i++)
     {
-        if (!Other.MemberActor || Other.MemberActor == Member.MemberActor) continue;
-        float Dist = FVector::Dist(MyPos, Other.MemberActor->GetActorLocation());
-        if (Dist < CohesionRadius)
+        FCrowd_HerdMemberData Member;
+        float Angle = (float)i / (float)ClampedSize * 2.f * PI;
+        float Radius = FMath::RandRange(100.f, HerdConfig.SeparationDistance * 2.f);
+        Member.Location = SpawnCenter + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.f);
+        Member.Velocity = FVector::ZeroVector;
+        Member.Health = 100.f;
+        Member.bIsAlpha = (i == 0); // First member is alpha
+        Member.Species = HerbivoreSpecies;
+        Member.FearLevel = 0.f;
+        HerdMembers.Add(Member);
+    }
+
+    UpdateHerdCentroid();
+    CurrentState = ECrowd_HerdBehaviorState::Grazing;
+}
+
+void UCrowd_HerdBehaviorComponent::TriggerAlert(FVector ThreatLocation, float ThreatIntensity)
+{
+    CollectiveFearLevel = FMath::Clamp(CollectiveFearLevel + ThreatIntensity, 0.f, 1.f);
+
+    // Propagate fear to individual members based on proximity to threat
+    for (FCrowd_HerdMemberData& Member : HerdMembers)
+    {
+        float DistToThreat = FVector::Dist(Member.Location, ThreatLocation);
+        float ProximityFear = FMath::Clamp(1.f - (DistToThreat / HerdConfig.AlertRadius), 0.f, 1.f);
+        Member.FearLevel = FMath::Clamp(Member.FearLevel + ProximityFear * ThreatIntensity, 0.f, 1.f);
+    }
+
+    if (CurrentState == ECrowd_HerdBehaviorState::Grazing || CurrentState == ECrowd_HerdBehaviorState::Resting)
+    {
+        CurrentState = ECrowd_HerdBehaviorState::Alerted;
+    }
+
+    // Trigger stampede if fear exceeds threshold
+    if (CollectiveFearLevel >= StampedeTriggerFear)
+    {
+        FVector FleeDir = (HerdCentroid - ThreatLocation).GetSafeNormal();
+        TriggerStampede(FleeDir);
+    }
+}
+
+void UCrowd_HerdBehaviorComponent::TriggerStampede(FVector FleeDirection)
+{
+    CurrentState = ECrowd_HerdBehaviorState::Stampeding;
+    StampedeDirection = FleeDirection.GetSafeNormal();
+    StampedeTimer = 15.f; // Stampede lasts 15 seconds
+    bStampedeActive = true;
+
+    // Give all members high velocity in flee direction
+    for (FCrowd_HerdMemberData& Member : HerdMembers)
+    {
+        float SpeedVariance = FMath::RandRange(0.8f, 1.2f);
+        Member.Velocity = StampedeDirection * HerdConfig.StampedeSpeed * SpeedVariance;
+        Member.FearLevel = 1.f;
+    }
+}
+
+void UCrowd_HerdBehaviorComponent::CalmHerd()
+{
+    CollectiveFearLevel = 0.f;
+    bStampedeActive = false;
+    StampedeTimer = 0.f;
+    CurrentState = ECrowd_HerdBehaviorState::Grazing;
+
+    for (FCrowd_HerdMemberData& Member : HerdMembers)
+    {
+        Member.FearLevel = 0.f;
+        Member.Velocity = FVector::ZeroVector;
+    }
+}
+
+FVector UCrowd_HerdBehaviorComponent::GetHerdCentroid() const
+{
+    return HerdCentroid;
+}
+
+bool UCrowd_HerdBehaviorComponent::IsStampeding() const
+{
+    return bStampedeActive;
+}
+
+float UCrowd_HerdBehaviorComponent::GetCollectiveFear() const
+{
+    return CollectiveFearLevel;
+}
+
+int32 UCrowd_HerdBehaviorComponent::GetHerdSize() const
+{
+    return HerdMembers.Num();
+}
+
+void UCrowd_HerdBehaviorComponent::UpdateBoidsBehavior(float DeltaTime)
+{
+    if (CurrentState == ECrowd_HerdBehaviorState::Stampeding)
+    {
+        // During stampede, apply strong flee force + separation
+        for (int32 i = 0; i < HerdMembers.Num(); i++)
         {
-            Center += Other.MemberActor->GetActorLocation();
-            Count++;
+            FVector StampedeForce = ComputeStampedeForce(i);
+            FVector Separation = ComputeSeparation(i) * 2.f; // Extra separation during stampede
+            HerdMembers[i].Velocity = (StampedeForce + Separation).GetClampedToMaxSize(HerdConfig.StampedeSpeed);
+            HerdMembers[i].Location += HerdMembers[i].Velocity * DeltaTime;
+        }
+        return;
+    }
+
+    if (CurrentState == ECrowd_HerdBehaviorState::Grazing || CurrentState == ECrowd_HerdBehaviorState::Wandering)
+    {
+        // Normal boids: separation + alignment + cohesion
+        for (int32 i = 0; i < HerdMembers.Num(); i++)
+        {
+            FVector Sep = ComputeSeparation(i) * 1.5f;
+            FVector Ali = ComputeAlignment(i) * 1.0f;
+            FVector Coh = ComputeCohesion(i) * HerdConfig.CohesionStrength;
+
+            FVector Acceleration = Sep + Ali + Coh;
+            float WanderSpeed = 150.f;
+            HerdMembers[i].Velocity = (HerdMembers[i].Velocity + Acceleration * DeltaTime).GetClampedToMaxSize(WanderSpeed);
+            HerdMembers[i].Location += HerdMembers[i].Velocity * DeltaTime;
         }
     }
-
-    if (Count > 0)
-    {
-        Center /= (float)Count;
-        return (Center - MyPos).GetSafeNormal();
-    }
-    return FVector::ZeroVector;
 }
 
-FVector UCrowdHerdBehavior::ComputeAlignment(const FCrowd_HerdMember& Member)
+void UCrowd_HerdBehaviorComponent::UpdateHerdCentroid()
 {
-    if (!Member.MemberActor) return FVector::ZeroVector;
+    if (HerdMembers.Num() == 0) return;
 
+    FVector Sum = FVector::ZeroVector;
+    for (const FCrowd_HerdMemberData& Member : HerdMembers)
+    {
+        Sum += Member.Location;
+    }
+    HerdCentroid = Sum / (float)HerdMembers.Num();
+}
+
+void UCrowd_HerdBehaviorComponent::UpdateFearDecay(float DeltaTime)
+{
+    CollectiveFearLevel = FMath::Max(0.f, CollectiveFearLevel - FearDecayRate * DeltaTime);
+
+    for (FCrowd_HerdMemberData& Member : HerdMembers)
+    {
+        Member.FearLevel = FMath::Max(0.f, Member.FearLevel - FearDecayRate * DeltaTime);
+    }
+
+    // Transition back to calm states
+    if (CollectiveFearLevel < 0.1f && CurrentState == ECrowd_HerdBehaviorState::Alerted)
+    {
+        CurrentState = ECrowd_HerdBehaviorState::Grazing;
+    }
+}
+
+FVector UCrowd_HerdBehaviorComponent::ComputeSeparation(int32 MemberIndex) const
+{
+    FVector Force = FVector::ZeroVector;
+    const FCrowd_HerdMemberData& Self = HerdMembers[MemberIndex];
+
+    for (int32 i = 0; i < HerdMembers.Num(); i++)
+    {
+        if (i == MemberIndex) continue;
+        float Dist = FVector::Dist(Self.Location, HerdMembers[i].Location);
+        if (Dist < HerdConfig.SeparationDistance && Dist > 0.f)
+        {
+            FVector Away = (Self.Location - HerdMembers[i].Location).GetSafeNormal();
+            Force += Away * (HerdConfig.SeparationDistance - Dist) / HerdConfig.SeparationDistance;
+        }
+    }
+    return Force;
+}
+
+FVector UCrowd_HerdBehaviorComponent::ComputeAlignment(int32 MemberIndex) const
+{
     FVector AvgVelocity = FVector::ZeroVector;
     int32 Count = 0;
-    FVector MyPos = Member.MemberActor->GetActorLocation();
+    const FCrowd_HerdMemberData& Self = HerdMembers[MemberIndex];
 
-    for (const FCrowd_HerdMember& Other : HerdMembers)
+    for (int32 i = 0; i < HerdMembers.Num(); i++)
     {
-        if (!Other.MemberActor || Other.MemberActor == Member.MemberActor) continue;
-        float Dist = FVector::Dist(MyPos, Other.MemberActor->GetActorLocation());
-        if (Dist < AlignmentRadius)
+        if (i == MemberIndex) continue;
+        float Dist = FVector::Dist(Self.Location, HerdMembers[i].Location);
+        if (Dist < HerdConfig.AlertRadius)
         {
-            AvgVelocity += Other.Velocity;
+            AvgVelocity += HerdMembers[i].Velocity;
             Count++;
         }
     }
@@ -169,114 +250,63 @@ FVector UCrowdHerdBehavior::ComputeAlignment(const FCrowd_HerdMember& Member)
     if (Count > 0)
     {
         AvgVelocity /= (float)Count;
-        return AvgVelocity.GetSafeNormal();
+        return (AvgVelocity - Self.Velocity).GetSafeNormal();
     }
     return FVector::ZeroVector;
 }
 
-void UCrowdHerdBehavior::UpdateGrazing(float DeltaTime)
+FVector UCrowd_HerdBehaviorComponent::ComputeCohesion(int32 MemberIndex) const
 {
-    // Occasionally transition to wandering
-    if (StateTimer > 30.0f)
-    {
-        if (FMath::RandBool())
-        {
-            SetHerdState(ECrowd_HerdState::Wandering);
-        }
-        else
-        {
-            SetHerdState(ECrowd_HerdState::Resting);
-        }
-    }
+    const FCrowd_HerdMemberData& Self = HerdMembers[MemberIndex];
+    return (HerdCentroid - Self.Location).GetSafeNormal();
+}
 
-    // Slow drift with separation only
-    for (FCrowd_HerdMember& Member : HerdMembers)
+FVector UCrowd_HerdBehaviorComponent::ComputeStampedeForce(int32 MemberIndex) const
+{
+    const FCrowd_HerdMemberData& Self = HerdMembers[MemberIndex];
+    // Stampede: flee direction + slight randomness for realism
+    FVector RandomOffset = FVector(FMath::RandRange(-0.2f, 0.2f), FMath::RandRange(-0.2f, 0.2f), 0.f);
+    return (StampedeDirection + RandomOffset).GetSafeNormal() * HerdConfig.StampedeSpeed;
+}
+
+// ============================================================
+// ACrowd_HerdActor
+// ============================================================
+
+ACrowd_HerdActor::ACrowd_HerdActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    HerdBehavior = CreateDefaultSubobject<UCrowd_HerdBehaviorComponent>(TEXT("HerdBehavior"));
+    DefaultSpecies = ECrowd_HerbivoreType::Triceratops;
+    InitialHerdSize = 12;
+}
+
+void ACrowd_HerdActor::BeginPlay()
+{
+    Super::BeginPlay();
+    SpawnHerd();
+}
+
+void ACrowd_HerdActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+}
+
+void ACrowd_HerdActor::SpawnHerd()
+{
+    if (HerdBehavior)
     {
-        if (!Member.MemberActor) continue;
-        FVector Sep = ComputeSeparation(Member);
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, Sep * GrazeSpeed, DeltaTime, 2.0f);
-        FVector NewLoc = Member.MemberActor->GetActorLocation() + Member.Velocity * DeltaTime;
-        Member.MemberActor->SetActorLocation(NewLoc, true);
+        HerdBehavior->HerbivoreSpecies = DefaultSpecies;
+        HerdBehavior->InitializeHerd(InitialHerdSize, GetActorLocation());
     }
 }
 
-void UCrowdHerdBehavior::UpdateWandering(float DeltaTime)
+void ACrowd_HerdActor::OnPredatorDetected(FVector PredatorLocation)
 {
-    if (StateTimer > 20.0f)
+    if (HerdBehavior)
     {
-        SetHerdState(ECrowd_HerdState::Grazing);
-    }
-
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        if (!Member.MemberActor) continue;
-        FVector Flock = ComputeFlockingVelocity(Member);
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, Flock * WanderSpeed, DeltaTime, 1.5f);
-        FVector NewLoc = Member.MemberActor->GetActorLocation() + Member.Velocity * DeltaTime;
-        Member.MemberActor->SetActorLocation(NewLoc, true);
-    }
-}
-
-void UCrowdHerdBehavior::UpdateFleeing(float DeltaTime)
-{
-    // Check if fear has subsided
-    float AvgFear = 0.0f;
-    for (const FCrowd_HerdMember& M : HerdMembers) AvgFear += M.FearLevel;
-    if (HerdMembers.Num() > 0) AvgFear /= HerdMembers.Num();
-
-    if (AvgFear < 0.1f)
-    {
-        SetHerdState(ECrowd_HerdState::Grazing);
-        return;
-    }
-
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        if (!Member.MemberActor) continue;
-        FVector AwayFromThreat = (Member.MemberActor->GetActorLocation() - StampedeThreatLocation).GetSafeNormal();
-        FVector Sep = ComputeSeparation(Member);
-        FVector FleeDir = (AwayFromThreat * 2.0f + Sep).GetSafeNormal();
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, FleeDir * StampedeSpeed * 0.6f, DeltaTime, 3.0f);
-        FVector NewLoc = Member.MemberActor->GetActorLocation() + Member.Velocity * DeltaTime;
-        Member.MemberActor->SetActorLocation(NewLoc, true);
-    }
-}
-
-void UCrowdHerdBehavior::UpdateStampeding(float DeltaTime)
-{
-    if (StateTimer > 15.0f)
-    {
-        SetHerdState(ECrowd_HerdState::Fleeing);
-        return;
-    }
-
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        if (!Member.MemberActor) continue;
-        FVector AwayFromThreat = (Member.MemberActor->GetActorLocation() - StampedeThreatLocation).GetSafeNormal();
-        FVector Sep = ComputeSeparation(Member);
-        FVector Ali = ComputeAlignment(Member);
-        FVector StampedeDir = (AwayFromThreat * 3.0f + Sep * 1.5f + Ali).GetSafeNormal();
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, StampedeDir * StampedeSpeed, DeltaTime, 5.0f);
-        FVector NewLoc = Member.MemberActor->GetActorLocation() + Member.Velocity * DeltaTime;
-        Member.MemberActor->SetActorLocation(NewLoc, true);
-    }
-}
-
-void UCrowdHerdBehavior::UpdateResting(float DeltaTime)
-{
-    if (StateTimer > 45.0f)
-    {
-        SetHerdState(ECrowd_HerdState::Grazing);
-    }
-
-    // Slow drift to tight cluster
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        if (!Member.MemberActor) continue;
-        FVector Sep = ComputeSeparation(Member);
-        Member.Velocity = FMath::VInterpTo(Member.Velocity, Sep * 20.0f, DeltaTime, 1.0f);
-        FVector NewLoc = Member.MemberActor->GetActorLocation() + Member.Velocity * DeltaTime;
-        Member.MemberActor->SetActorLocation(NewLoc, true);
+        float ThreatIntensity = 0.8f;
+        HerdBehavior->TriggerAlert(PredatorLocation, ThreatIntensity);
     }
 }
