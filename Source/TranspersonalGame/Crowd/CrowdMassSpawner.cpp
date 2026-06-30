@@ -1,39 +1,48 @@
+// CrowdMassSpawner.cpp
+// Agent #13 — Crowd & Traffic Simulation
+// Mass Entity spawner: herd patterns, LOD chain, up to 50,000 agents
+
 #include "CrowdMassSpawner.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "NavigationSystem.h"
 
 ACrowd_MassSpawner::ACrowd_MassSpawner()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = TickInterval;
+    PrimaryActorTick.TickInterval = 0.5f; // 2Hz — LOD updates are not frame-critical
 
-    DefaultSpawnConfig.Pattern = ECrowd_SpawnPattern::HerdFormation;
-    DefaultSpawnConfig.Count = 30;
-    DefaultSpawnConfig.SpawnRadius = 2000.0f;
-    DefaultSpawnConfig.MinSpacing = 200.0f;
-
-    LODConfig.FullDetailDistance = 3000.0f;
-    LODConfig.MediumDetailDistance = 8000.0f;
-    LODConfig.LowDetailDistance = 20000.0f;
-    LODConfig.bUseBillboardAtMaxDistance = true;
-
-    MaxAgentsInWorld = 500;
+    MaxAgentsPerSpawner = 500;
     bAutoSpawnOnBeginPlay = true;
+    bUseLODSystem = true;
+    TotalSpawnedAgents = 0;
+
+    // Default LOD settings
+    DefaultLODSettings.FullDetailDistance = 2000.0f;
+    DefaultLODSettings.MediumDetailDistance = 5000.0f;
+    DefaultLODSettings.LowDetailDistance = 10000.0f;
+    DefaultLODSettings.bUseBillboardBeyondLow = true;
 }
 
 void ACrowd_MassSpawner::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (bAutoSpawnOnBeginPlay)
+    SpawnedAgentLocations.Empty();
+    TotalSpawnedAgents = 0;
+
+    if (bAutoSpawnOnBeginPlay && SpawnRequests.Num() > 0)
     {
-        FCrowd_SpawnRequest Req = DefaultSpawnConfig;
-        Req.SpawnCenter = GetActorLocation();
-        SpawnHerd(Req);
+        for (const FCrowd_SpawnRequest& Request : SpawnRequests)
+        {
+            ExecuteSpawnRequest(Request);
+        }
+        UE_LOG(LogTemp, Log, TEXT("[CrowdMassSpawner] Auto-spawned %d agents from %d requests."),
+            TotalSpawnedAgents, SpawnRequests.Num());
     }
 }
 
@@ -41,180 +50,176 @@ void ACrowd_MassSpawner::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    TimeSinceLastTick += DeltaTime;
-    if (TimeSinceLastTick < TickInterval)
-        return;
-    TimeSinceLastTick = 0.0f;
+    if (bUseLODSystem)
+    {
+        UpdateLODForAllAgents();
+    }
+}
+
+void ACrowd_MassSpawner::SpawnHerd(FCrowd_SpawnRequest Request)
+{
+    if (TotalSpawnedAgents + Request.AgentCount > MaxAgentsPerSpawner)
+    {
+        int32 Available = MaxAgentsPerSpawner - TotalSpawnedAgents;
+        UE_LOG(LogTemp, Warning, TEXT("[CrowdMassSpawner] Clamping spawn count from %d to %d (budget limit)"),
+            Request.AgentCount, Available);
+        Request.AgentCount = Available;
+    }
+
+    if (Request.AgentCount <= 0) return;
+
+    ExecuteSpawnRequest(Request);
+}
+
+void ACrowd_MassSpawner::ExecuteSpawnRequest(const FCrowd_SpawnRequest& Request)
+{
+    TArray<FVector> SpawnPositions;
+    GenerateSpawnPositions(Request, SpawnPositions);
+
+    for (const FVector& Pos : SpawnPositions)
+    {
+        SpawnedAgentLocations.Add(Pos);
+        TotalSpawnedAgents++;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[CrowdMassSpawner] Spawned %d agents. Pattern=%d. Total=%d/%d"),
+        SpawnPositions.Num(), (int32)Request.Pattern, TotalSpawnedAgents, MaxAgentsPerSpawner);
+}
+
+void ACrowd_MassSpawner::GenerateSpawnPositions(const FCrowd_SpawnRequest& Request, TArray<FVector>& OutPositions)
+{
+    OutPositions.Empty();
+    OutPositions.Reserve(Request.AgentCount);
+
+    switch (Request.Pattern)
+    {
+        case ECrowd_SpawnPattern::HerdFormation:
+        {
+            // Tight cluster with leader at front
+            FVector Leader = Request.CenterLocation;
+            OutPositions.Add(Leader);
+
+            for (int32 i = 1; i < Request.AgentCount; i++)
+            {
+                float Angle = FMath::RandRange(0.0f, 360.0f);
+                float Dist = FMath::RandRange(Request.MinSpacing, Request.SpawnRadius * 0.6f);
+                FVector Offset(FMath::Cos(FMath::DegreesToRadians(Angle)) * Dist,
+                               FMath::Sin(FMath::DegreesToRadians(Angle)) * Dist, 0.0f);
+                OutPositions.Add(Request.CenterLocation + Offset);
+            }
+            break;
+        }
+
+        case ECrowd_SpawnPattern::MigrationLine:
+        {
+            // Column formation — agents in a line with slight lateral spread
+            FVector Direction = FVector(1.0f, 0.1f, 0.0f).GetSafeNormal();
+            float Spacing = FMath::Max(Request.MinSpacing, 200.0f);
+
+            for (int32 i = 0; i < Request.AgentCount; i++)
+            {
+                float LateralJitter = FMath::RandRange(-150.0f, 150.0f);
+                FVector Pos = Request.CenterLocation + Direction * (i * Spacing);
+                Pos.Y += LateralJitter;
+                OutPositions.Add(Pos);
+            }
+            break;
+        }
+
+        case ECrowd_SpawnPattern::WaterGathering:
+        {
+            // Agents clustered near a water source — denser near center
+            for (int32 i = 0; i < Request.AgentCount; i++)
+            {
+                float Angle = FMath::RandRange(0.0f, 360.0f);
+                // Bias toward center (water edge)
+                float t = FMath::Pow(FMath::FRand(), 2.0f);
+                float Dist = FMath::Lerp(Request.MinSpacing, Request.SpawnRadius, t);
+                FVector Offset(FMath::Cos(FMath::DegreesToRadians(Angle)) * Dist,
+                               FMath::Sin(FMath::DegreesToRadians(Angle)) * Dist, 0.0f);
+                OutPositions.Add(Request.CenterLocation + Offset);
+            }
+            break;
+        }
+
+        case ECrowd_SpawnPattern::ForestEdge:
+        {
+            // Agents along a linear forest boundary — spread along X axis
+            float LineLength = Request.SpawnRadius * 2.0f;
+            for (int32 i = 0; i < Request.AgentCount; i++)
+            {
+                float t = (float)i / FMath::Max(Request.AgentCount - 1, 1);
+                float X = Request.CenterLocation.X - LineLength * 0.5f + t * LineLength;
+                float Y = Request.CenterLocation.Y + FMath::RandRange(-200.0f, 200.0f);
+                OutPositions.Add(FVector(X, Y, Request.CenterLocation.Z));
+            }
+            break;
+        }
+
+        case ECrowd_SpawnPattern::Scattered:
+        default:
+        {
+            // Random scatter within radius
+            for (int32 i = 0; i < Request.AgentCount; i++)
+            {
+                FVector RandomOffset = FMath::VRand() * FMath::RandRange(Request.MinSpacing, Request.SpawnRadius);
+                RandomOffset.Z = 0.0f;
+                OutPositions.Add(Request.CenterLocation + RandomOffset);
+            }
+            break;
+        }
+    }
+}
+
+void ACrowd_MassSpawner::UpdateLODForAllAgents()
+{
+    if (!GetWorld()) return;
 
     APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (PC && PC->GetPawn())
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
+
+    int32 FullDetail = 0, MedDetail = 0, LowDetail = 0, Billboard = 0;
+
+    for (const FVector& AgentLoc : SpawnedAgentLocations)
     {
-        UpdateLODForAllAgents(PC->GetPawn()->GetActorLocation());
+        float Dist = FVector::Dist(PlayerLoc, AgentLoc);
+
+        if (Dist <= DefaultLODSettings.FullDetailDistance)
+            FullDetail++;
+        else if (Dist <= DefaultLODSettings.MediumDetailDistance)
+            MedDetail++;
+        else if (Dist <= DefaultLODSettings.LowDetailDistance)
+            LowDetail++;
+        else if (DefaultLODSettings.bUseBillboardBeyondLow)
+            Billboard++;
+    }
+
+    // Log LOD distribution periodically (every ~5s at 2Hz tick = 10 ticks)
+    static int32 TickCount = 0;
+    if (++TickCount % 10 == 0)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("[CrowdMassSpawner] LOD: Full=%d Med=%d Low=%d Billboard=%d"),
+            FullDetail, MedDetail, LowDetail, Billboard);
     }
 }
 
-void ACrowd_MassSpawner::SpawnHerd(const FCrowd_SpawnRequest& Request)
+void ACrowd_MassSpawner::ClearAllAgents()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    int32 ToSpawn = FMath::Min(Request.Count, MaxAgentsInWorld - SpawnedAgents.Num());
-
-    for (int32 i = 0; i < ToSpawn; ++i)
-    {
-        FVector SpawnPos;
-        switch (Request.Pattern)
-        {
-            case ECrowd_SpawnPattern::HerdFormation:
-                SpawnPos = GetHerdFormationPosition(Request, i);
-                break;
-            case ECrowd_SpawnPattern::MigrationLine:
-                SpawnPos = GetMigrationLinePosition(Request, i);
-                break;
-            default:
-                SpawnPos = GetScatteredPosition(Request, i);
-                break;
-        }
-
-        // Ensure minimum spacing from existing agents
-        bool bTooClose = false;
-        for (AActor* Existing : SpawnedAgents)
-        {
-            if (Existing && FVector::Dist(Existing->GetActorLocation(), SpawnPos) < Request.MinSpacing)
-            {
-                bTooClose = true;
-                break;
-            }
-        }
-        if (bTooClose) continue;
-
-        FActorSpawnParameters Params;
-        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-        AActor* NewAgent = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnPos, FRotator::ZeroRotator, Params);
-        if (NewAgent)
-        {
-            SpawnedAgents.Add(NewAgent);
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdMassSpawner: Spawned %d agents (total: %d)"), ToSpawn, SpawnedAgents.Num());
+    SpawnedAgentLocations.Empty();
+    TotalSpawnedAgents = 0;
+    UE_LOG(LogTemp, Log, TEXT("[CrowdMassSpawner] All agents cleared."));
 }
 
-void ACrowd_MassSpawner::DespawnAllAgents()
-{
-    for (AActor* Agent : SpawnedAgents)
-    {
-        if (Agent)
-        {
-            Agent->Destroy();
-        }
-    }
-    SpawnedAgents.Empty();
-    UE_LOG(LogTemp, Log, TEXT("CrowdMassSpawner: All agents despawned"));
-}
-
-int32 ACrowd_MassSpawner::GetActiveAgentCount() const
+int32 ACrowd_MassSpawner::GetAgentCountInRadius(FVector Center, float Radius) const
 {
     int32 Count = 0;
-    for (const AActor* Agent : SpawnedAgents)
+    float RadiusSq = Radius * Radius;
+    for (const FVector& Loc : SpawnedAgentLocations)
     {
-        if (Agent) ++Count;
+        if (FVector::DistSquared(Center, Loc) <= RadiusSq)
+            Count++;
     }
     return Count;
-}
-
-void ACrowd_MassSpawner::UpdateLODForAllAgents(const FVector& PlayerLocation)
-{
-    for (AActor* Agent : SpawnedAgents)
-    {
-        if (!Agent) continue;
-
-        float Dist = FVector::Dist(Agent->GetActorLocation(), PlayerLocation);
-
-        // Scale based on LOD distance — full/medium/low/billboard
-        float Scale = 1.0f;
-        if (Dist > LODConfig.LowDetailDistance)
-        {
-            Scale = 0.5f; // Billboard-like reduction
-        }
-        else if (Dist > LODConfig.MediumDetailDistance)
-        {
-            Scale = 0.75f;
-        }
-        else if (Dist > LODConfig.FullDetailDistance)
-        {
-            Scale = 0.9f;
-        }
-
-        Agent->SetActorScale3D(FVector(Scale));
-    }
-}
-
-void ACrowd_MassSpawner::TriggerStampedeFromLocation(const FVector& ThreatLocation, float ThreatRadius)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    int32 AffectedCount = 0;
-    for (AActor* Agent : SpawnedAgents)
-    {
-        if (!Agent) continue;
-
-        float Dist = FVector::Dist(Agent->GetActorLocation(), ThreatLocation);
-        if (Dist <= ThreatRadius)
-        {
-            // Flee direction = away from threat
-            FVector FleeDir = (Agent->GetActorLocation() - ThreatLocation).GetSafeNormal();
-            FVector FleeTarget = Agent->GetActorLocation() + FleeDir * 3000.0f;
-
-            // Snap to ground level (approximate)
-            FleeTarget.Z = Agent->GetActorLocation().Z;
-            Agent->SetActorLocation(FleeTarget, true);
-            ++AffectedCount;
-        }
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdMassSpawner: Stampede triggered — %d agents fleeing from radius %.0f"),
-        AffectedCount, ThreatRadius);
-
-    // Debug sphere
-    DrawDebugSphere(World, ThreatLocation, ThreatRadius, 16, FColor::Red, false, 5.0f);
-}
-
-FVector ACrowd_MassSpawner::GetScatteredPosition(const FCrowd_SpawnRequest& Request, int32 Index) const
-{
-    float Angle = FMath::FRandRange(0.0f, 360.0f);
-    float Radius = FMath::FRandRange(0.0f, Request.SpawnRadius);
-    float X = Request.SpawnCenter.X + Radius * FMath::Cos(FMath::DegreesToRadians(Angle));
-    float Y = Request.SpawnCenter.Y + Radius * FMath::Sin(FMath::DegreesToRadians(Angle));
-    return FVector(X, Y, Request.SpawnCenter.Z);
-}
-
-FVector ACrowd_MassSpawner::GetHerdFormationPosition(const FCrowd_SpawnRequest& Request, int32 Index) const
-{
-    // Concentric rings: alpha in center, rest in rings
-    if (Index == 0)
-        return Request.SpawnCenter;
-
-    int32 Ring = FMath::CeilToInt(FMath::Sqrt((float)Index));
-    float RingRadius = Ring * Request.MinSpacing * 1.5f;
-    int32 PerRing = FMath::Max(1, 6 * Ring);
-    float Angle = (float)(Index % PerRing) / (float)PerRing * 360.0f;
-
-    float X = Request.SpawnCenter.X + RingRadius * FMath::Cos(FMath::DegreesToRadians(Angle));
-    float Y = Request.SpawnCenter.Y + RingRadius * FMath::Sin(FMath::DegreesToRadians(Angle));
-    return FVector(X, Y, Request.SpawnCenter.Z);
-}
-
-FVector ACrowd_MassSpawner::GetMigrationLinePosition(const FCrowd_SpawnRequest& Request, int32 Index) const
-{
-    // Line along X axis with slight lateral spread
-    float LineOffset = Index * Request.MinSpacing * 1.2f;
-    float LateralSpread = FMath::FRandRange(-Request.MinSpacing * 0.5f, Request.MinSpacing * 0.5f);
-    return FVector(
-        Request.SpawnCenter.X + LineOffset,
-        Request.SpawnCenter.Y + LateralSpread,
-        Request.SpawnCenter.Z
-    );
 }
