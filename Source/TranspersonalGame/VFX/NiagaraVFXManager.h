@@ -1,200 +1,151 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "NiagaraSystem.h"
-#include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
 #include "NiagaraVFXManager.generated.h"
 
 // ============================================================
-// VFX LOD Level — 3-tier chain for performance
+// EVFX_LODTier — 4-tier LOD for Niagara particle systems
 // ============================================================
 UENUM(BlueprintType)
 enum class EVFX_LODTier : uint8
 {
-    High    UMETA(DisplayName = "High (< 20m)"),
-    Medium  UMETA(DisplayName = "Medium (20-60m)"),
-    Low     UMETA(DisplayName = "Low (60-120m)"),
-    Culled  UMETA(DisplayName = "Culled (> 120m)")
+    High    UMETA(DisplayName = "High   (0–1500m)"),
+    Medium  UMETA(DisplayName = "Medium (1500–4000m)"),
+    Low     UMETA(DisplayName = "Low    (4000–8000m)"),
+    Culled  UMETA(DisplayName = "Culled (>8000m)")
 };
 
 // ============================================================
-// VFX Category — maps to Niagara system asset slot
+// EVFX_EffectType — All prehistoric VFX effect categories
 // ============================================================
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
+    // Category 1 — Natural Environment
     CampfireFlame       UMETA(DisplayName = "Campfire Flame"),
     CampfireSmoke       UMETA(DisplayName = "Campfire Smoke"),
     CampfireEmbers      UMETA(DisplayName = "Campfire Embers"),
-    PlayerFootstepDust  UMETA(DisplayName = "Player Footstep Dust"),
-    DinoFootstepDust    UMETA(DisplayName = "Dino Footstep Dust (Small)"),
-    TRexFootstepDust    UMETA(DisplayName = "T-Rex Footstep Dust (Large)"),
-    BloodSplatter       UMETA(DisplayName = "Blood Splatter"),
-    BloodDrip           UMETA(DisplayName = "Blood Drip"),
     RainSplash          UMETA(DisplayName = "Rain Splash"),
-    DustAmbient         UMETA(DisplayName = "Ambient Dust Motes"),
-    VolcanicAsh         UMETA(DisplayName = "Volcanic Ash Fall"),
+    VolcanicAsh         UMETA(DisplayName = "Volcanic Ash"),
     WaterSplash         UMETA(DisplayName = "Water Splash"),
-    BreathVapour        UMETA(DisplayName = "Breath Vapour (Cold)"),
-    SparkCraft          UMETA(DisplayName = "Crafting Sparks"),
-    SmokeCook           UMETA(DisplayName = "Cooking Smoke")
+    WindDust            UMETA(DisplayName = "Wind Dust"),
+
+    // Category 2 — Dinosaurs
+    DinoFootstepDust    UMETA(DisplayName = "Dino Footstep Dust"),
+    DinoBreathVapor     UMETA(DisplayName = "Dino Breath Vapor"),
+    DinoBloodSplatter   UMETA(DisplayName = "Dino Blood Splatter"),
+    DinoRoarDistortion  UMETA(DisplayName = "Dino Roar Air Distortion"),
+
+    // Category 3 — Player & Combat
+    PlayerFootstepDust  UMETA(DisplayName = "Player Footstep Dust"),
+    PlayerBreathVapor   UMETA(DisplayName = "Player Breath Vapor"),
+    WeaponImpactSpark   UMETA(DisplayName = "Weapon Impact Spark"),
+    BloodSplatter       UMETA(DisplayName = "Blood Splatter"),
+    CraftingSpark       UMETA(DisplayName = "Crafting Spark"),
+
+    // Category 4 — World
+    GodRay              UMETA(DisplayName = "God Ray / Volumetric Light"),
+    VolcanicEruption    UMETA(DisplayName = "Volcanic Eruption"),
+    WaterfallSpray      UMETA(DisplayName = "Waterfall Spray"),
+    InsectSwarm         UMETA(DisplayName = "Insect Swarm"),
+    PollenDrift         UMETA(DisplayName = "Pollen Drift")
 };
 
 // ============================================================
-// Spawn parameters struct
+// FVFX_ActiveEffect — Runtime tracking entry for a live effect
 // ============================================================
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_SpawnRequest
+struct FVFX_ActiveEffect
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EffectType EffectType = EVFX_EffectType::PlayerFootstepDust;
+    UPROPERTY()
+    TObjectPtr<UNiagaraComponent> NiagaraComponent = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY()
+    EVFX_EffectType EffectType = EVFX_EffectType::CampfireFlame;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FRotator Rotation = FRotator::ZeroRotator;
+    UPROPERTY()
+    FVector SpawnLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY()
+    float SpawnTime = 0.0f;
 
-    /** If set, the effect attaches to this component */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TObjectPtr<USceneComponent> AttachTarget = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bLooping = false;
-
-    /** Override LOD — Auto means distance-based */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_LODTier LODOverride = EVFX_LODTier::High;
+    UPROPERTY()
+    EVFX_LODTier CurrentLOD = EVFX_LODTier::High;
 };
 
 // ============================================================
-// LOD distance thresholds (cm)
+// UVFX_NiagaraVFXManager — World Subsystem
+// Manages all Niagara particle effects with LOD and pooling.
 // ============================================================
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_LODDistances
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float HighToMedium = 2000.0f;   // 20m
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float MediumToLow = 6000.0f;    // 60m
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float LowToCull = 12000.0f;     // 120m
-};
-
-// ============================================================
-// NiagaraVFXManager — ActorComponent managing all particle FX
-// ============================================================
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
-class TRANSPERSONALGAME_API UNiagaraVFXManager : public UActorComponent
+UCLASS(BlueprintType, meta = (DisplayName = "VFX Niagara Manager"))
+class TRANSPERSONALGAME_API UVFX_NiagaraVFXManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNiagaraVFXManager();
+    UVFX_NiagaraVFXManager();
 
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // ---- Public Spawn API ----
-
-    /** Spawn a one-shot or looping VFX at world location */
+    // --- Spawn / Stop ---
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffect(const FVFX_SpawnRequest& Request);
+    UNiagaraComponent* SpawnEffect(
+        EVFX_EffectType EffectType,
+        const FVector& Location,
+        const FRotator& Rotation,
+        AActor* AttachTarget = nullptr
+    );
 
-    /** Convenience: spawn campfire at location (flame + smoke + embers) */
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnCampfire(FVector Location);
+    void StopEffect(UNiagaraComponent* NiagaraComponent, bool bImmediate = false);
 
-    /** Convenience: spawn player footstep dust */
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnPlayerFootstep(FVector Location, float SpeedScale = 1.0f);
+    void StopAllEffects(bool bImmediate = false);
 
-    /** Convenience: spawn T-Rex footstep dust cloud */
+    // --- Registration ---
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnTRexFootstep(FVector Location, float MassScale = 1.0f);
+    void RegisterEffectSystem(EVFX_EffectType EffectType, UNiagaraSystem* System);
 
-    /** Convenience: spawn blood splatter at impact point */
+    // --- LOD ---
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBloodSplatter(FVector Location, FVector ImpactNormal, float DamageAmount);
+    void UpdateLOD(const FVector& CameraLocation);
 
-    /** Convenience: spawn breath vapour (cold biomes) */
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBreathVapour(USceneComponent* MouthSocket);
+    // --- Queries ---
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "VFX")
+    int32 GetActiveEffectCount() const;
 
-    /** Stop and destroy a looping effect */
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* NiagaraComp);
-
-    // ---- Niagara Asset References ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_CampfireFlame;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_CampfireSmoke;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_CampfireEmbers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_PlayerFootstepDust;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_DinoFootstepDust;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_TRexFootstepDust;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_BloodSplatter;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_RainSplash;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_VolcanicAsh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_BreathVapour;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Assets")
-    TObjectPtr<UNiagaraSystem> NS_SparkCraft;
-
-    // ---- LOD Configuration ----
+    // --- Config ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LODHighMaxDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    FVFX_LODDistances LODDistances;
+    float LODMediumMaxDistance;
 
-    /** Max simultaneous active Niagara components before oldest is culled */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Performance")
-    int32 MaxActiveEffects = 32;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LODLowMaxDistance;
 
-    /** Current active effect count (read-only) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX|Performance")
-    int32 ActiveEffectCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Pool")
+    int32 MaxActiveEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bVFXEnabled;
 
 private:
-    /** Compute LOD tier based on distance to player camera */
-    EVFX_LODTier ComputeLODTier(const FVector& EffectLocation) const;
-
-    /** Get the correct Niagara system for effect type + LOD tier */
-    UNiagaraSystem* ResolveNiagaraSystem(EVFX_EffectType EffectType, EVFX_LODTier LOD) const;
-
-    /** Pool of active looping components for management */
     UPROPERTY()
-    TArray<TObjectPtr<UNiagaraComponent>> ActiveLoopingEffects;
+    TArray<FVFX_ActiveEffect> ActiveEffects;
 
-    /** Evict oldest effect when pool is full */
-    void EvictOldestEffect();
+    UPROPERTY()
+    TMap<EVFX_EffectType, TObjectPtr<UNiagaraSystem>> EffectSystemMap;
+
+    EVFX_LODTier ComputeLODTier(float Distance) const;
+    void ApplyLODToComponent(UNiagaraComponent* Component, EVFX_LODTier LODTier);
+    UNiagaraSystem* GetSystemForEffect(EVFX_EffectType EffectType) const;
+    void CullOldestEffect();
 };
