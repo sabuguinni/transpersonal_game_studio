@@ -1,167 +1,84 @@
+// PerformanceConfig.h — Transpersonal Game Studio
+// Performance Optimizer Agent #04 — Cycle PROD_CYCLE_AUTO_20260630_001
+// Compile-time performance constants and tick budget definitions
+// All systems must respect these limits to maintain 60fps on PC / 30fps console
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "PerformanceConfig.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EPerf_QualityPreset — Target platform quality tier
-// ─────────────────────────────────────────────────────────────────────────────
-UENUM(BlueprintType)
-enum class EPerf_QualityPreset : uint8
+// ============================================================
+// FRAME BUDGET CONSTANTS (milliseconds @ 60fps = 16.67ms)
+// ============================================================
+namespace Perf
 {
-    Console_30fps   UMETA(DisplayName = "Console 30fps"),
-    PC_60fps        UMETA(DisplayName = "PC 60fps"),
-    PC_Ultra        UMETA(DisplayName = "PC Ultra"),
-};
+    // Total frame budget
+    constexpr float FrameBudget_60fps_ms  = 16.67f;
+    constexpr float FrameBudget_30fps_ms  = 33.33f;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FPerf_FrameBudget — Per-system ms allocations within a 16.7ms frame
-// ─────────────────────────────────────────────────────────────────────────────
-USTRUCT(BlueprintType)
-struct FPerf_FrameBudget
-{
-    GENERATED_BODY()
+    // Per-thread budgets (ms)
+    constexpr float GameThread_Budget_ms  = 3.0f;
+    constexpr float RenderThread_Budget_ms = 5.0f;
+    constexpr float GPU_Budget_ms         = 7.0f;
+    constexpr float Physics_Budget_ms     = 1.5f;
+    constexpr float AI_Budget_ms          = 1.0f;
+    constexpr float Audio_Budget_ms       = 0.5f;
 
-    /** Total frame budget in milliseconds (16.7ms = 60fps, 33.3ms = 30fps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float TotalBudgetMs = 16.7f;
+    // ============================================================
+    // LOD DISTANCES (Unreal units = centimetres)
+    // ============================================================
+    constexpr float LOD_Near_cm           = 500.0f;
+    constexpr float LOD_Mid_cm            = 2000.0f;
+    constexpr float LOD_Far_cm            = 5000.0f;
+    constexpr float LOD_Cull_cm           = 8000.0f;
 
-    /** GPU time allocated to shadow rendering */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float ShadowBudgetMs = 3.0f;
+    // ============================================================
+    // TICK RATE INTERVALS (seconds)
+    // Use SetActorTickInterval() or FTimerHandle with these values
+    // NEVER tick these systems every frame — use timers instead
+    // ============================================================
 
-    /** GPU time allocated to Lumen GI + reflections */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float LumenBudgetMs = 4.0f;
+    // Character survival stats
+    constexpr float StaminaDrain_Interval_s      = 0.1f;   // 10Hz
+    constexpr float HungerDecay_Interval_s       = 1.0f;   // 1Hz
+    constexpr float ThirstDecay_Interval_s       = 1.0f;   // 1Hz
+    constexpr float FearDecay_Interval_s         = 0.5f;   // 2Hz
+    constexpr float TemperatureUpdate_Interval_s = 2.0f;   // 0.5Hz
 
-    /** GPU time allocated to skeletal mesh rendering (dinosaurs + character) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float SkeletalMeshBudgetMs = 2.5f;
+    // AI systems
+    constexpr float DinoAI_Perception_Interval_s = 0.25f;  // 4Hz
+    constexpr float DinoAI_Decision_Interval_s   = 0.5f;   // 2Hz
+    constexpr float CrowdSim_Update_Interval_s   = 0.5f;   // 2Hz
+    constexpr float NavMesh_Rebuild_Interval_s   = 5.0f;   // 0.2Hz
 
-    /** GPU time allocated to foliage + static mesh rendering */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float FoliageBudgetMs = 3.0f;
+    // World systems
+    constexpr float Weather_Tick_Interval_s      = 10.0f;  // 0.1Hz
+    constexpr float Foliage_Update_Interval_s    = 2.0f;   // 0.5Hz
+    constexpr float DayNight_Tick_Interval_s     = 1.0f;   // 1Hz
 
-    /** CPU time allocated to AI tick (dinosaur behavior trees) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float AIBudgetMs = 2.0f;
+    // ============================================================
+    // ACTOR COUNT LIMITS
+    // Exceeding these triggers automatic LOD/culling escalation
+    // ============================================================
+    constexpr int32 MaxDinosaurActors            = 50;
+    constexpr int32 MaxFoliageInstancesPerCell   = 10000;
+    constexpr int32 MaxCrowdAgents               = 200;
+    constexpr int32 MaxParticleSystemsActive     = 30;
+    constexpr int32 MaxDynamicLights             = 16;
 
-    /** Remaining budget for post-process, UI, audio, misc */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    float MiscBudgetMs = 2.2f;
-};
+    // ============================================================
+    // MEMORY LIMITS
+    // ============================================================
+    constexpr int32 TexturePool_MB               = 1024;
+    constexpr int32 MeshPool_MB                  = 512;
+    constexpr int32 AudioPool_MB                 = 256;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FPerf_LODSettings — LOD thresholds for dinosaurs and vegetation
-// ─────────────────────────────────────────────────────────────────────────────
-USTRUCT(BlueprintType)
-struct FPerf_LODSettings
-{
-    GENERATED_BODY()
+    // ============================================================
+    // SHADOW SETTINGS
+    // ============================================================
+    constexpr int32 Shadow_MaxResolution         = 2048;
+    constexpr int32 Shadow_MaxCascades           = 3;
+    constexpr float Shadow_DistanceScale         = 0.8f;
+    constexpr float Shadow_RadiusThreshold       = 0.02f;
 
-    /** Distance at which skeletal meshes switch to LOD1 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float SkeletalLOD1Distance = 1500.0f;
-
-    /** Distance at which skeletal meshes switch to LOD2 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float SkeletalLOD2Distance = 4000.0f;
-
-    /** Distance at which skeletal meshes are culled entirely */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float SkeletalCullDistance = 8000.0f;
-
-    /** Distance at which foliage static meshes switch to LOD1 */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float FoliageLOD1Distance = 2000.0f;
-
-    /** Distance at which foliage is culled */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float FoliageCullDistance = 6000.0f;
-
-    /** Global LOD distance scale multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    float LODDistanceScale = 1.5f;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UPerf_PerformanceConfig — Runtime performance configuration object
-// ─────────────────────────────────────────────────────────────────────────────
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Performance")
-class TRANSPERSONALGAME_API UPerf_PerformanceConfig : public UObject
-{
-    GENERATED_BODY()
-
-public:
-    UPerf_PerformanceConfig();
-
-    // ── Quality Preset ────────────────────────────────────────────────────────
-
-    /** Active quality preset — drives all sub-settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerf_QualityPreset QualityPreset = EPerf_QualityPreset::PC_60fps;
-
-    // ── Frame Budget ─────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Budget")
-    FPerf_FrameBudget FrameBudget;
-
-    // ── LOD Settings ─────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|LOD")
-    FPerf_LODSettings LODSettings;
-
-    // ── Streaming ────────────────────────────────────────────────────────────
-
-    /** Texture streaming pool size in MB */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Streaming")
-    int32 StreamingPoolSizeMB = 2048;
-
-    /** Max number of skeletal mesh actors allowed simultaneously */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Limits")
-    int32 MaxSkeletalMeshActors = 20;
-
-    /** Max number of static mesh actors allowed simultaneously */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Limits")
-    int32 MaxStaticMeshActors = 200;
-
-    /** Max number of active dinosaur AI agents */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Limits")
-    int32 MaxActiveDinoAI = 12;
-
-    // ── Methods ───────────────────────────────────────────────────────────────
-
-    /** Apply this config's console variable settings to the running engine */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Performance")
-    void ApplyToEngine();
-
-    /** Switch to Console 30fps preset and apply */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetConsolePreset();
-
-    /** Switch to PC 60fps preset and apply */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPC60Preset();
-
-    /** Switch to PC Ultra preset and apply */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetUltraPreset();
-
-    /** Returns true if current actor counts are within budget */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsWithinBudget(int32 SkeletalCount, int32 StaticCount) const;
-
-    /** Returns the frame budget struct for the active preset */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    FPerf_FrameBudget GetFrameBudget() const { return FrameBudget; }
-
-    /** Returns the LOD settings for the active preset */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    FPerf_LODSettings GetLODSettings() const { return LODSettings; }
-
-private:
-    void ApplyConsolePlatformSettings();
-    void ApplyPC60Settings();
-    void ApplyUltraSettings();
-};
+} // namespace Perf
