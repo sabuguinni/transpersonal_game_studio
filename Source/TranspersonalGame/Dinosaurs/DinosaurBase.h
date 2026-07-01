@@ -1,178 +1,157 @@
-// DinosaurBase.h
-// Transpersonal Game Studio — Core Systems Programmer #03
-// Base class for all dinosaur pawns in the prehistoric survival world.
-// Provides species traits, territory system, hunger/aggression AI hooks,
-// and death/ragdoll delegate. All species inherit from this class.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Perception/AIPerceptionStimuliSourceComponent.h"
+#include "SharedTypes.h"
 #include "DinosaurBase.generated.h"
 
-// ─── Enums (global scope — RULE 1) ────────────────────────────────────────────
-
-/** Dinosaur species identifier. Drives InitializeSpecies() trait tables. */
 UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+enum class EEng_DinosaurSpecies : uint8
 {
-    Unknown         UMETA(DisplayName = "Unknown"),
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Raptor          UMETA(DisplayName = "Raptor"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Pterodactyl     UMETA(DisplayName = "Pterodactyl")
+    TyrannosaurusRex    UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Velociraptor        UMETA(DisplayName = "Velociraptor"),
+    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
+    Triceratops         UMETA(DisplayName = "Triceratops"),
+    Pterodactyl         UMETA(DisplayName = "Pterodactyl"),
+    Unknown             UMETA(DisplayName = "Unknown")
 };
 
-/** Dinosaur behavioral state machine. */
 UENUM(BlueprintType)
-enum class EDinosaurBehavior : uint8
+enum class EEng_DinosaurBehaviorState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Patrolling  UMETA(DisplayName = "Patrolling"),
-    Foraging    UMETA(DisplayName = "Foraging"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
     Hunting     UMETA(DisplayName = "Hunting"),
-    Attacking   UMETA(DisplayName = "Attacking"),
-    Dead        UMETA(DisplayName = "Dead")
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+    Resting     UMETA(DisplayName = "Resting"),
+    Attacking   UMETA(DisplayName = "Attacking")
 };
 
-// ─── Delegate ─────────────────────────────────────────────────────────────────
+USTRUCT(BlueprintType)
+struct FEng_DinosaurStats
+{
+    GENERATED_BODY()
 
-/** Broadcast when this dinosaur dies. Payload: the dead dinosaur actor. */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDinosaurDeathDelegate, ADinosaurBase*, DeadDinosaur);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxHealth = 100.0f;
 
-// ─── Class ────────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float CurrentHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float AttackDamage = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float DetectionRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float AttackRadius = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float PatrolSpeed = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float ChaseSpeed = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Mass = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    bool bIsCarnivore = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    bool bIsPackHunter = false;
+};
 
 /**
- * ADinosaurBase
- *
- * Abstract base pawn for all dinosaur species. Subclasses call
- * InitializeSpecies() in their constructor to load species-specific traits.
- *
- * Key systems:
- *  - Species trait table (HP, damage, speed, capsule)
- *  - Territory system (TerritoryCenter + TerritoryRadius)
- *  - Hunger drain → Foraging state transition
- *  - Aggression state on TakeDamage
- *  - Death → ragdoll physics + OnDinosaurDeath broadcast
- *  - AIPerceptionStimuliSource (Sight + Hearing)
+ * ADinosaurBase — Base class for all dinosaur pawns in the prehistoric survival game.
+ * Provides species identity, survival stats, behavior state machine, and patrol logic.
+ * All specific dinosaur types (TRex, Raptor, Brachiosaurus) inherit from this class.
  */
-UCLASS(Abstract, BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|Dinosaurs")
 class TRANSPERSONALGAME_API ADinosaurBase : public ACharacter
 {
     GENERATED_BODY()
 
 public:
-    // ── Constructor ──────────────────────────────────────────────────────────
     ADinosaurBase();
 
-    // ── UE5 Lifecycle ────────────────────────────────────────────────────────
+protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void Tick(float DeltaTime) override;
 
-    // ── Damage ───────────────────────────────────────────────────────────────
-    /**
-     * Override of AActor::TakeDamage. Reduces Health and switches to Attacking
-     * state when hit. Triggers death when Health reaches 0.
-     */
-    virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
-                             AController* EventInstigator, AActor* DamageCauser) override;
+    // --- Species Identity ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Identity")
+    EEng_DinosaurSpecies Species = EEng_DinosaurSpecies::Unknown;
 
-    // ── Species Initialization ───────────────────────────────────────────────
-    /**
-     * Reads Species and populates MaxHealth, AttackDamage, MovementSpeed,
-     * and capsule dimensions from the species trait table.
-     * Must be called in the subclass constructor after setting Species.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Species")
-    void InitializeSpecies();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Identity")
+    FName DinosaurName = NAME_None;
 
-    // ── Territory ────────────────────────────────────────────────────────────
-    /**
-     * Returns true if WorldLocation is within TerritoryRadius of TerritoryCenter.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Territory")
-    bool IsInTerritory(const FVector& WorldLocation) const;
-
-    // ── State Query ──────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|State")
-    EDinosaurBehavior GetCurrentBehavior() const { return CurrentBehavior; }
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|State")
-    bool IsAlive() const { return CurrentHealth > 0.0f; }
-
-    // ── Delegate ─────────────────────────────────────────────────────────────
-    /** Fired when this dinosaur dies. Subscribe in AI controllers or quest managers. */
-    UPROPERTY(BlueprintAssignable, Category = "Dinosaur|Events")
-    FOnDinosaurDeathDelegate OnDinosaurDeath;
-
-    // ── Species Properties ───────────────────────────────────────────────────
-    /** Which species this dinosaur is. Set in subclass constructor before calling InitializeSpecies(). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Species")
-    EDinosaurSpecies Species;
-
+    // --- Stats ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float MaxHealth;
+    FEng_DinosaurStats DinoStats;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Stats")
-    float CurrentHealth;
+    // --- Behavior State ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Behavior")
+    EEng_DinosaurBehaviorState BehaviorState = EEng_DinosaurBehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float AttackDamage;
+    // --- Patrol Waypoints ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Patrol")
+    TArray<FVector> PatrolWaypoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Stats")
-    float MovementSpeed;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Patrol")
+    int32 CurrentWaypointIndex = 0;
 
-    // ── Hunger ───────────────────────────────────────────────────────────────
-    /** Current hunger level 0-100. Drains over time; triggers Foraging at HungerThreshold. */
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Survival")
-    float Hunger;
+    // --- Target ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Combat")
+    AActor* CurrentTarget = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Survival")
-    float MaxHunger;
+    // --- Public API ---
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Combat")
+    void TakeDinosaurDamage(float DamageAmount, AActor* DamageInstigator);
 
-    /** Hunger drain rate per second. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Survival")
-    float HungerDrainRate;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    void SetBehaviorState(EEng_DinosaurBehaviorState NewState);
 
-    /** Hunger level below which the dinosaur enters Foraging state. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Survival")
-    float HungerThreshold;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Behavior")
+    EEng_DinosaurBehaviorState GetBehaviorState() const { return BehaviorState; }
 
-    // ── Territory ────────────────────────────────────────────────────────────
-    /** World-space center of this dinosaur's territory. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Territory")
-    FVector TerritoryCenter;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Stats")
+    float GetHealthPercent() const;
 
-    /** Radius (cm) of this dinosaur's territory. Default 5000 cm = 50 m. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Territory")
-    float TerritoryRadius;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Stats")
+    bool IsAlive() const;
 
-    // ── Behavior State ───────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|State")
-    EDinosaurBehavior CurrentBehavior;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Patrol")
+    void AddPatrolWaypoint(FVector WaypointLocation);
 
-    // ── Aggression ───────────────────────────────────────────────────────────
-    /** True when the dinosaur is actively pursuing/attacking a target. */
-    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur|Combat")
-    bool bIsAggressive;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Patrol")
+    void ClearPatrolWaypoints();
 
-    /** Aggression cooldown after losing sight of target (seconds). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float AggressionCooldown;
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Dinosaur|Events")
+    void OnDinosaurDeath();
+    virtual void OnDinosaurDeath_Implementation();
+
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Dinosaur|Events")
+    void OnTargetDetected(AActor* DetectedActor);
+    virtual void OnTargetDetected_Implementation(AActor* DetectedActor);
 
 protected:
-    // ── Internal ─────────────────────────────────────────────────────────────
-    /** Called when Health reaches 0. Enables ragdoll and broadcasts OnDinosaurDeath. */
-    virtual void OnDinosaurDeathInternal();
+    // --- Internal Behavior Logic ---
+    void UpdatePatrol(float DeltaTime);
+    void UpdateHunting(float DeltaTime);
+    void ScanForTargets();
+    bool IsTargetInRange(AActor* Target, float Range) const;
+    void MoveToNextWaypoint();
 
-    /** Aggression timer handle — resets bIsAggressive after cooldown. */
-    FTimerHandle AggressionTimerHandle;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Patrol")
+    float WaypointAcceptanceRadius = 150.0f;
 
-    /** AI Perception stimuli source — registers Sight and Hearing for AI perception. */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|AI",
-              meta = (AllowPrivateAccess = "true"))
-    UAIPerceptionStimuliSourceComponent* PerceptionStimuliSource;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dinosaur|Behavior")
+    float BehaviorUpdateInterval = 0.5f;
+
+    float BehaviorUpdateTimer = 0.0f;
 };
