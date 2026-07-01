@@ -1,157 +1,104 @@
-// TranspersonalCharacter.h
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Player character: WASD movement, sprint, survival stats (health/hunger/thirst/stamina/fear)
-// Inherits from ACharacter — uses UCharacterMovementComponent, SpringArm, Camera
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "InputActionValue.h"
+#include "Core/Survival/SurvivalComponent.h"
 #include "TranspersonalCharacter.generated.h"
 
-class USpringArmComponent;
-class UCameraComponent;
-class UInputMappingContext;
-class UInputAction;
-
-UCLASS(config=Game, BlueprintType, Blueprintable)
+/**
+ * ATranspersonalCharacter
+ * Player character for the prehistoric survival game.
+ * Inherits from ACharacter (WASD movement, jump, camera boom).
+ * Integrates USurvivalComponent for hunger/thirst/stamina/health/fear tracking.
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATranspersonalCharacter : public ACharacter
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ATranspersonalCharacter();
+	ATranspersonalCharacter();
 
 protected:
-    virtual void BeginPlay() override;
+	virtual void BeginPlay() override;
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void Tick(float DeltaTime) override;
 
-    // ─── Camera ───────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
-    USpringArmComponent* CameraBoom;
+	// ── Survival Component ──────────────────────────────────────────────────
+	/** Tracks health, hunger, thirst, stamina, and fear for the player */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival",
+		meta = (AllowPrivateAccess = "true"))
+	USurvivalComponent* SurvivalComp;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
-    UCameraComponent* FollowCamera;
+	// ── Camera ──────────────────────────────────────────────────────────────
+	/** Spring arm for third-person camera */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
+		meta = (AllowPrivateAccess = "true"))
+	class USpringArmComponent* CameraBoom;
 
-    // ─── Input Mapping ────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputMappingContext* DefaultMappingContext;
+	/** Follow camera */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera",
+		meta = (AllowPrivateAccess = "true"))
+	class UCameraComponent* FollowCamera;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* JumpAction;
+	// ── Movement ────────────────────────────────────────────────────────────
+	/** Base walk speed (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float WalkSpeed = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* MoveAction;
+	/** Sprint speed (cm/s) — drains stamina */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float SprintSpeed = 700.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* LookAction;
+	/** True while the player is holding the sprint key */
+	UPROPERTY(BlueprintReadOnly, Category = "Movement")
+	bool bIsSprinting = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    UInputAction* SprintAction;
+	// ── Input handlers ──────────────────────────────────────────────────────
+	/** Move forward/backward */
+	void MoveForward(float Value);
+	/** Strafe left/right */
+	void MoveRight(float Value);
+	/** Look up/down (mouse Y) */
+	void LookUp(float Value);
+	/** Turn left/right (mouse X) */
+	void Turn(float Value);
+	/** Start sprinting */
+	void StartSprint();
+	/** Stop sprinting */
+	void StopSprint();
 
-    // ─── Survival Stats ───────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    float Health;
+	// ── Survival helpers ────────────────────────────────────────────────────
+	/** Called when stamina reaches 0 — forces walk speed */
+	UFUNCTION(BlueprintCallable, Category = "Survival")
+	void OnStaminaDepleted();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float MaxHealth;
+	/** Returns current health (0-100) from SurvivalComp */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
+	float GetHealth() const;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    float Hunger;
+	/** Returns current hunger (0-100) from SurvivalComp */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
+	float GetHunger() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float MaxHunger;
+	/** Returns current thirst (0-100) from SurvivalComp */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
+	float GetThirst() const;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    float Thirst;
+	/** Returns current stamina (0-100) from SurvivalComp */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
+	float GetStamina() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float MaxThirst;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    float Stamina;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float MaxStamina;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    float Fear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float MaxFear;
-
-    // ─── Depletion Rates ──────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float HungerDepletionRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float ThirstDepletionRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float StaminaDepletionRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float StaminaRecoveryRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float FearDecayRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float SurvivalTickInterval;
-
-    // ─── State ────────────────────────────────────────────────────────────────
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    bool bIsSprinting;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
-    bool bIsAlive;
-
-    // ─── Public Methods ───────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    float ApplyDamage(float DamageAmount, AActor* DamageCauser);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void HealCharacter(float HealAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ConsumeFood(float NutritionValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ConsumeWater(float HydrationValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void AddFear(float FearAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StartSprint();
-
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StopSprint();
-
-    // ─── Blueprint Events ─────────────────────────────────────────────────────
-    UFUNCTION(BlueprintNativeEvent, Category = "Survival")
-    void OnSurvivalStatsUpdated();
-    virtual void OnSurvivalStatsUpdated_Implementation();
-
-    UFUNCTION(BlueprintNativeEvent, Category = "Survival")
-    void OnHealthChanged(float NewHealth, float NewMaxHealth);
-    virtual void OnHealthChanged_Implementation(float NewHealth, float NewMaxHealth);
-
-    UFUNCTION(BlueprintNativeEvent, Category = "Survival")
-    void OnCharacterDied();
-    virtual void OnCharacterDied_Implementation();
+	/** Returns current fear level (0-100) from SurvivalComp */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Survival")
+	float GetFear() const;
 
 private:
-    FTimerHandle SurvivalTickHandle;
+	/** Stamina drain rate per second while sprinting */
+	static constexpr float SprintStaminaDrainRate = 10.0f;
 
-    void TickSurvivalStats();
-    void UpdateStamina(float DeltaTime);
-    void Die();
-
-    void Move(const FInputActionValue& Value);
-    void Look(const FInputActionValue& Value);
+	/** Stamina recovery rate per second while not sprinting */
+	static constexpr float StaminaRecoveryRate = 5.0f;
 };
