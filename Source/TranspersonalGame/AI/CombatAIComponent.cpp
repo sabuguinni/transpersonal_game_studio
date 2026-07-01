@@ -1,306 +1,73 @@
 // CombatAIComponent.cpp
 // Combat & Enemy AI Agent #12 — Transpersonal Game Studio
-// Implements tactical AI state machine for dinosaur enemies
+// Implements dinosaur combat AI: threat detection, state machine, attack execution
 
 #include "CombatAIComponent.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 UCombatAIComponent::UCombatAIComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for AI — performance friendly
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz AI tick
+
+    // Default combat parameters
+    CurrentState = ECombat_AIState::Idle;
+    Species = ECombat_DinoSpecies::Raptor;
+    DetectionRadius = 1500.0f;
+    AttackRadius = 200.0f;
+    ChaseSpeed = 600.0f;
+    PatrolSpeed = 200.0f;
+    MaxHealth = 300.0f;
+    CurrentHealth = 300.0f;
+    AttackDamage = 35.0f;
+    AttackCooldown = 1.5f;
+    bIsPackHunter = false;
+    PackFlankingAngle = 60.0f;
+    ThreatMemoryDuration = 30.0f;
+    bCanRetreat = true;
+    RetreatHealthThreshold = 0.25f;
+    LastAttackTime = -999.0f;
 }
 
 void UCombatAIComponent::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Apply species-specific defaults
     ApplySpeciesDefaults();
-    SetAIState(ECombat_AIState::Patrol);
+
+    // Start patrol loop
+    GetWorld()->GetTimerManager().SetTimer(
+        PatrolTimerHandle,
+        this,
+        &UCombatAIComponent::UpdatePatrolPoint,
+        5.0f,
+        true
+    );
+
+    // Start threat scan loop
+    GetWorld()->GetTimerManager().SetTimer(
+        ThreatScanTimerHandle,
+        this,
+        &UCombatAIComponent::ScanForThreats,
+        0.5f,
+        true
+    );
 }
 
 void UCombatAIComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    StateTimer += DeltaTime;
-    ScanForThreats();
-
-    switch (CurrentState)
-    {
-        case ECombat_AIState::Idle:      UpdateIdleState(DeltaTime);     break;
-        case ECombat_AIState::Patrol:    UpdatePatrolState(DeltaTime);   break;
-        case ECombat_AIState::Alert:     UpdateAlertState(DeltaTime);    break;
-        case ECombat_AIState::Chase:     UpdateChaseState(DeltaTime);    break;
-        case ECombat_AIState::Attack:    UpdateAttackState(DeltaTime);   break;
-        case ECombat_AIState::Flanking:  UpdateFlankingState(DeltaTime); break;
-        case ECombat_AIState::Retreat:   UpdateRetreatState(DeltaTime);  break;
-        default: break;
-    }
-}
-
-void UCombatAIComponent::SetAIState(ECombat_AIState NewState)
-{
-    if (CurrentState == NewState) return;
-    CurrentState = NewState;
-    StateTimer = 0.0f;
-    UE_LOG(LogTemp, Log, TEXT("CombatAI [%s]: State -> %d"), *GetOwner()->GetName(), (int32)NewState);
-}
-
-void UCombatAIComponent::RegisterThreat(AActor* ThreatActor, float ThreatLevel)
-{
-    if (!ThreatActor) return;
-
-    for (FCombat_ThreatEntry& Entry : ThreatList)
-    {
-        if (Entry.ThreatActor == ThreatActor)
-        {
-            Entry.ThreatLevel = FMath::Max(Entry.ThreatLevel, ThreatLevel);
-            Entry.LastSeenTime = GetWorld()->GetTimeSeconds();
-            Entry.LastKnownLocation = ThreatActor->GetActorLocation();
-            return;
-        }
-    }
-
-    FCombat_ThreatEntry NewEntry;
-    NewEntry.ThreatActor = ThreatActor;
-    NewEntry.ThreatLevel = ThreatLevel;
-    NewEntry.LastSeenTime = GetWorld()->GetTimeSeconds();
-    NewEntry.LastKnownLocation = ThreatActor->GetActorLocation();
-    ThreatList.Add(NewEntry);
-
-    if (CurrentState == ECombat_AIState::Idle || CurrentState == ECombat_AIState::Patrol)
-    {
-        SetAIState(ECombat_AIState::Alert);
-    }
-}
-
-void UCombatAIComponent::ClearThreat(AActor* ThreatActor)
-{
-    ThreatList.RemoveAll([ThreatActor](const FCombat_ThreatEntry& E) {
-        return E.ThreatActor == ThreatActor;
-    });
-}
-
-AActor* UCombatAIComponent::GetHighestThreat() const
-{
-    AActor* Best = nullptr;
-    float BestLevel = -1.0f;
-    for (const FCombat_ThreatEntry& Entry : ThreatList)
-    {
-        if (Entry.ThreatLevel > BestLevel && Entry.ThreatActor != nullptr)
-        {
-            BestLevel = Entry.ThreatLevel;
-            Best = Entry.ThreatActor;
-        }
-    }
-    return Best;
-}
-
-bool UCombatAIComponent::CanAttack() const
-{
-    float Now = GetWorld()->GetTimeSeconds();
-    return (Now - LastAttackTime) >= AttackData.AttackCooldown;
-}
-
-void UCombatAIComponent::ExecuteAttack(AActor* Target)
-{
-    if (!Target || !CanAttack()) return;
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-    if (Distance > AttackData.AttackRange) return;
-
-    LastAttackTime = GetWorld()->GetTimeSeconds();
-
-    // Apply damage via UE5 damage system
-    UGameplayStatics::ApplyDamage(
-        Target,
-        AttackData.BaseDamage * AggressionLevel,
-        nullptr,
-        GetOwner(),
-        UDamageType::StaticClass()
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("CombatAI [%s]: Attack on %s — %.1f damage"),
-        *GetOwner()->GetName(), *Target->GetName(), AttackData.BaseDamage * AggressionLevel);
-}
-
-void UCombatAIComponent::SetFlankingTarget(AActor* Target, int32 FlankIndex)
-{
-    CurrentTarget = Target;
-    PackFlankIndex = FlankIndex;
-    bIsPackMember = true;
-    SetAIState(ECombat_AIState::Flanking);
-}
-
-FVector UCombatAIComponent::CalculateFlankPosition(AActor* Target, int32 FlankIndex) const
-{
-    if (!Target) return FVector::ZeroVector;
-
-    FVector TargetLoc = Target->GetActorLocation();
-    FVector TargetFwd = Target->GetActorForwardVector();
-    FVector TargetRight = Target->GetActorRightVector();
-
-    // 3-raptor flanking pattern: front, left-rear, right-rear
-    const float FlankRadius = 400.0f;
-    switch (FlankIndex % 3)
-    {
-        case 0: return TargetLoc + TargetFwd * FlankRadius;                          // Drive from front
-        case 1: return TargetLoc - TargetFwd * FlankRadius * 0.5f - TargetRight * FlankRadius; // Left rear
-        case 2: return TargetLoc - TargetFwd * FlankRadius * 0.5f + TargetRight * FlankRadius; // Right rear
-        default: return TargetLoc;
-    }
-}
-
-bool UCombatAIComponent::CanSeeActor(AActor* Target) const
-{
-    if (!Target || !GetWorld()) return false;
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-    if (Distance > DetectionRadius) return false;
-
-    // Line of sight check
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(GetOwner());
-
-    bool bBlocked = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        GetOwner()->GetActorLocation() + FVector(0, 0, 50),
-        Target->GetActorLocation() + FVector(0, 0, 50),
-        ECC_Visibility,
-        Params
-    );
-
-    return !bBlocked || HitResult.GetActor() == Target;
-}
-
-bool UCombatAIComponent::CanHearActor(AActor* Target) const
-{
-    if (!Target) return false;
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
-    return Distance <= HearingRadius;
-}
-
-// --- Private State Handlers ---
-
-void UCombatAIComponent::UpdateIdleState(float DeltaTime)
-{
-    if (StateTimer > 5.0f)
-    {
-        SetAIState(ECombat_AIState::Patrol);
-    }
-}
-
-void UCombatAIComponent::UpdatePatrolState(float DeltaTime)
-{
-    // Patrol logic handled by BehaviorTree — this just monitors for threats
-    AActor* Threat = GetHighestThreat();
-    if (Threat)
-    {
-        CurrentTarget = Threat;
-        SetAIState(ECombat_AIState::Alert);
-    }
-}
-
-void UCombatAIComponent::UpdateAlertState(float DeltaTime)
-{
-    if (!CurrentTarget) { SetAIState(ECombat_AIState::Patrol); return; }
-
-    if (CanSeeActor(CurrentTarget))
-    {
-        if (AggressionLevel >= 0.7f)
-            SetAIState(bIsPackMember ? ECombat_AIState::Flanking : ECombat_AIState::Chase);
-        else
-            SetAIState(ECombat_AIState::Chase);
-    }
-    else if (StateTimer > 10.0f)
-    {
-        SetAIState(ECombat_AIState::Patrol);
-    }
-}
-
-void UCombatAIComponent::UpdateChaseState(float DeltaTime)
-{
-    if (!CurrentTarget) { SetAIState(ECombat_AIState::Patrol); return; }
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
-
-    if (Distance <= AttackData.AttackRange)
-    {
-        SetAIState(ECombat_AIState::Attack);
-    }
-    else if (Distance > DetectionRadius * 1.5f)
-    {
-        // Lost the target
-        CurrentTarget = nullptr;
-        SetAIState(ECombat_AIState::Patrol);
-    }
-}
-
-void UCombatAIComponent::UpdateAttackState(float DeltaTime)
-{
-    if (!CurrentTarget) { SetAIState(ECombat_AIState::Patrol); return; }
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
-
-    if (Distance > AttackData.AttackRange * 1.2f)
-    {
-        SetAIState(ECombat_AIState::Chase);
-        return;
-    }
-
-    ExecuteAttack(CurrentTarget);
-}
-
-void UCombatAIComponent::UpdateFlankingState(float DeltaTime)
-{
-    if (!CurrentTarget) { SetAIState(ECombat_AIState::Patrol); return; }
-
-    // Move toward flank position — actual movement handled by AIController/BT
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
-    if (Distance <= AttackData.AttackRange)
-    {
-        SetAIState(ECombat_AIState::Attack);
-    }
-}
-
-void UCombatAIComponent::UpdateRetreatState(float DeltaTime)
-{
-    if (StateTimer > 8.0f)
-    {
-        AggressionLevel = FMath::Min(AggressionLevel + 0.1f, 1.0f); // Recover aggression
-        SetAIState(ECombat_AIState::Patrol);
-    }
-}
-
-void UCombatAIComponent::ScanForThreats()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Find player character
-    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(World, 0);
-    if (!Player) return;
-
-    if (CanSeeActor(Player))
-    {
-        RegisterThreat(Player, 1.0f);
-    }
-    else if (CanHearActor(Player))
-    {
-        RegisterThreat(Player, 0.5f);
-    }
-
-    // Expire old threats (not seen for 30 seconds)
-    float Now = World->GetTimeSeconds();
-    ThreatList.RemoveAll([Now](const FCombat_ThreatEntry& E) {
-        return (Now - E.LastSeenTime) > 30.0f;
-    });
+    UpdateThreatMemory(DeltaTime);
+    UpdateStateMachine(DeltaTime);
 }
 
 void UCombatAIComponent::ApplySpeciesDefaults()
@@ -309,70 +76,403 @@ void UCombatAIComponent::ApplySpeciesDefaults()
     {
         case ECombat_DinoSpecies::TRex:
             DetectionRadius = 2500.0f;
-            HearingRadius = 3000.0f;
-            ChaseSpeed = 700.0f;
+            AttackRadius = 350.0f;
+            ChaseSpeed = 750.0f;
             PatrolSpeed = 150.0f;
-            AttackData.BaseDamage = 80.0f;
-            AttackData.AttackRange = 350.0f;
-            AttackData.AttackCooldown = 3.0f;
-            AttackData.KnockbackForce = 1200.0f;
-            AggressionLevel = 0.9f;
-            bIsPackMember = false;
+            MaxHealth = 1500.0f;
+            CurrentHealth = 1500.0f;
+            AttackDamage = 120.0f;
+            AttackCooldown = 2.5f;
+            bIsPackHunter = false;
+            bCanRetreat = false; // T-Rex never retreats
             break;
 
         case ECombat_DinoSpecies::Raptor:
-            DetectionRadius = 1500.0f;
-            HearingRadius = 2000.0f;
+            DetectionRadius = 1200.0f;
+            AttackRadius = 180.0f;
             ChaseSpeed = 800.0f;
             PatrolSpeed = 300.0f;
-            AttackData.BaseDamage = 30.0f;
-            AttackData.AttackRange = 150.0f;
-            AttackData.AttackCooldown = 1.2f;
-            AttackData.KnockbackForce = 400.0f;
-            AggressionLevel = 0.75f;
-            bIsPackMember = true;
+            MaxHealth = 200.0f;
+            CurrentHealth = 200.0f;
+            AttackDamage = 30.0f;
+            AttackCooldown = 0.8f;
+            bIsPackHunter = true;
+            PackFlankingAngle = 65.0f;
+            bCanRetreat = true;
+            RetreatHealthThreshold = 0.3f;
             break;
 
         case ECombat_DinoSpecies::Triceratops:
-            DetectionRadius = 1000.0f;
-            HearingRadius = 1200.0f;
-            ChaseSpeed = 500.0f;
-            PatrolSpeed = 180.0f;
-            AttackData.BaseDamage = 60.0f;
-            AttackData.AttackRange = 280.0f;
-            AttackData.AttackCooldown = 2.5f;
-            AttackData.KnockbackForce = 900.0f;
-            AggressionLevel = 0.4f; // Defensive, not aggressive by default
-            bIsPackMember = false;
-            break;
-
-        case ECombat_DinoSpecies::Brachiosaurus:
             DetectionRadius = 800.0f;
-            HearingRadius = 1000.0f;
-            ChaseSpeed = 300.0f;
-            PatrolSpeed = 100.0f;
-            AttackData.BaseDamage = 40.0f;
-            AttackData.AttackRange = 400.0f; // Tail sweep
-            AttackData.AttackCooldown = 4.0f;
-            AttackData.KnockbackForce = 1500.0f;
-            AggressionLevel = 0.2f; // Passive unless provoked
-            bIsPackMember = false;
+            AttackRadius = 280.0f;
+            ChaseSpeed = 500.0f;
+            PatrolSpeed = 120.0f;
+            MaxHealth = 800.0f;
+            CurrentHealth = 800.0f;
+            AttackDamage = 60.0f;
+            AttackCooldown = 3.0f;
+            bIsPackHunter = false;
+            bCanRetreat = false; // Territorial — stands ground
             break;
 
         case ECombat_DinoSpecies::Pterodactyl:
             DetectionRadius = 3000.0f;
-            HearingRadius = 1500.0f;
+            AttackRadius = 150.0f;
             ChaseSpeed = 1200.0f;
-            PatrolSpeed = 600.0f;
-            AttackData.BaseDamage = 20.0f;
-            AttackData.AttackRange = 200.0f;
-            AttackData.AttackCooldown = 1.5f;
-            AttackData.KnockbackForce = 200.0f;
-            AggressionLevel = 0.6f;
-            bIsPackMember = false;
+            PatrolSpeed = 400.0f;
+            MaxHealth = 120.0f;
+            CurrentHealth = 120.0f;
+            AttackDamage = 20.0f;
+            AttackCooldown = 1.2f;
+            bIsPackHunter = false;
+            bCanRetreat = true;
+            RetreatHealthThreshold = 0.4f;
             break;
 
-        default:
+        case ECombat_DinoSpecies::Brachiosaurus:
+            DetectionRadius = 600.0f;
+            AttackRadius = 400.0f;
+            ChaseSpeed = 300.0f;
+            PatrolSpeed = 80.0f;
+            MaxHealth = 3000.0f;
+            CurrentHealth = 3000.0f;
+            AttackDamage = 80.0f;
+            AttackCooldown = 4.0f;
+            bIsPackHunter = false;
+            bCanRetreat = false;
             break;
     }
+}
+
+void UCombatAIComponent::ScanForThreats()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Get all pawns in detection radius
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor == Owner) continue;
+
+        float Distance = FVector::Dist(Owner->GetActorLocation(), Actor->GetActorLocation());
+        if (Distance <= DetectionRadius)
+        {
+            float ThreatLevel = CalculateThreatLevel(Actor, Distance);
+            RegisterThreat(Actor, ThreatLevel);
+        }
+    }
+}
+
+float UCombatAIComponent::CalculateThreatLevel(AActor* ThreatActor, float Distance) const
+{
+    if (!ThreatActor) return 0.0f;
+
+    // Base threat from distance (closer = higher threat)
+    float DistanceFactor = 1.0f - FMath::Clamp(Distance / DetectionRadius, 0.0f, 1.0f);
+    float BaseThreat = DistanceFactor * 100.0f;
+
+    // Increase threat if actor is moving toward us
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        FVector ToThreat = (Owner->GetActorLocation() - ThreatActor->GetActorLocation()).GetSafeNormal();
+        FVector ThreatVelocity = ThreatActor->GetVelocity().GetSafeNormal();
+        float ApproachDot = FVector::DotProduct(ThreatVelocity, ToThreat);
+        if (ApproachDot > 0.5f)
+        {
+            BaseThreat *= 1.5f; // 50% more threatening if approaching
+        }
+    }
+
+    return FMath::Clamp(BaseThreat, 0.0f, 100.0f);
+}
+
+void UCombatAIComponent::RegisterThreat(AActor* ThreatActor, float ThreatLevel)
+{
+    if (!ThreatActor) return;
+
+    // Check if already in threat list
+    for (FCombat_ThreatEntry& Entry : ThreatList)
+    {
+        if (Entry.ThreatActor == ThreatActor)
+        {
+            Entry.ThreatLevel = ThreatLevel;
+            Entry.LastSeenTime = GetWorld()->GetTimeSeconds();
+            Entry.LastKnownLocation = ThreatActor->GetActorLocation();
+            return;
+        }
+    }
+
+    // New threat
+    FCombat_ThreatEntry NewEntry;
+    NewEntry.ThreatActor = ThreatActor;
+    NewEntry.ThreatLevel = ThreatLevel;
+    NewEntry.LastSeenTime = GetWorld()->GetTimeSeconds();
+    NewEntry.LastKnownLocation = ThreatActor->GetActorLocation();
+    ThreatList.Add(NewEntry);
+
+    // Transition to alert if idle/patrolling
+    if (CurrentState == ECombat_AIState::Idle || CurrentState == ECombat_AIState::Patrol)
+    {
+        TransitionToState(ECombat_AIState::Alert);
+    }
+}
+
+void UCombatAIComponent::UpdateThreatMemory(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    // Remove expired threats
+    ThreatList.RemoveAll([&](const FCombat_ThreatEntry& Entry) {
+        return (CurrentTime - Entry.LastSeenTime) > ThreatMemoryDuration;
+    });
+
+    // If no threats remain, return to patrol
+    if (ThreatList.Num() == 0 && CurrentState == ECombat_AIState::Alert)
+    {
+        TransitionToState(ECombat_AIState::Patrol);
+    }
+}
+
+AActor* UCombatAIComponent::GetHighestThreat() const
+{
+    AActor* HighestThreatActor = nullptr;
+    float HighestLevel = 0.0f;
+
+    for (const FCombat_ThreatEntry& Entry : ThreatList)
+    {
+        if (Entry.ThreatLevel > HighestLevel && Entry.ThreatActor)
+        {
+            HighestLevel = Entry.ThreatLevel;
+            HighestThreatActor = Entry.ThreatActor;
+        }
+    }
+
+    return HighestThreatActor;
+}
+
+void UCombatAIComponent::UpdateStateMachine(float DeltaTime)
+{
+    AActor* PrimaryTarget = GetHighestThreat();
+
+    switch (CurrentState)
+    {
+        case ECombat_AIState::Idle:
+            // Do nothing — wait for ScanForThreats to trigger
+            break;
+
+        case ECombat_AIState::Patrol:
+            ExecutePatrol(DeltaTime);
+            if (PrimaryTarget)
+            {
+                float Dist = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryTarget->GetActorLocation());
+                if (Dist < DetectionRadius * 0.6f)
+                {
+                    TransitionToState(ECombat_AIState::Chase);
+                }
+            }
+            break;
+
+        case ECombat_AIState::Alert:
+            // Look around, sniff — short alert window before chase
+            if (PrimaryTarget)
+            {
+                TransitionToState(ECombat_AIState::Chase);
+            }
+            break;
+
+        case ECombat_AIState::Chase:
+            ExecuteChase(DeltaTime, PrimaryTarget);
+            if (PrimaryTarget)
+            {
+                float Dist = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryTarget->GetActorLocation());
+                if (Dist <= AttackRadius)
+                {
+                    TransitionToState(ECombat_AIState::Attack);
+                }
+            }
+            else
+            {
+                TransitionToState(ECombat_AIState::Patrol);
+            }
+            break;
+
+        case ECombat_AIState::Attack:
+            ExecuteAttack(DeltaTime, PrimaryTarget);
+            if (!PrimaryTarget)
+            {
+                TransitionToState(ECombat_AIState::Patrol);
+            }
+            else if (bCanRetreat && (CurrentHealth / MaxHealth) < RetreatHealthThreshold)
+            {
+                TransitionToState(ECombat_AIState::Retreat);
+            }
+            break;
+
+        case ECombat_AIState::Flanking:
+            ExecuteFlanking(DeltaTime, PrimaryTarget);
+            break;
+
+        case ECombat_AIState::Retreat:
+            ExecuteRetreat(DeltaTime);
+            break;
+
+        case ECombat_AIState::Dead:
+            // No updates
+            break;
+    }
+}
+
+void UCombatAIComponent::ExecutePatrol(float DeltaTime)
+{
+    // Movement handled by AI Controller — we just set the destination
+    // Actual movement via AIController->MoveToLocation in Blueprint
+}
+
+void UCombatAIComponent::ExecuteChase(float DeltaTime, AActor* Target)
+{
+    if (!Target) return;
+    // Chase target — AI controller handles pathfinding
+    // We broadcast the target location for the AI controller to pick up
+    OnCombatStateChanged.Broadcast(ECombat_AIState::Chase);
+}
+
+void UCombatAIComponent::ExecuteAttack(float DeltaTime, AActor* Target)
+{
+    if (!Target) return;
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if ((CurrentTime - LastAttackTime) < AttackCooldown) return;
+
+    LastAttackTime = CurrentTime;
+
+    // Calculate attack data
+    FCombat_AttackData AttackData;
+    AttackData.AttackType = ECombat_AttackType::Bite;
+    AttackData.Damage = AttackDamage;
+    AttackData.AttackRadius = AttackRadius;
+    AttackData.ImpactLocation = Target->GetActorLocation();
+    AttackData.bIsLethal = false;
+    AttackData.KnockbackForce = 500.0f;
+
+    // Apply damage
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
+    if (Distance <= AttackRadius)
+    {
+        UGameplayStatics::ApplyDamage(Target, AttackData.Damage, nullptr, GetOwner(), nullptr);
+        OnAttackExecuted.Broadcast(AttackData);
+    }
+}
+
+void UCombatAIComponent::ExecuteFlanking(float DeltaTime, AActor* Target)
+{
+    if (!Target || !bIsPackHunter) return;
+
+    // Flanking position is offset from target by PackFlankingAngle
+    // This is set externally by the pack coordinator
+    OnCombatStateChanged.Broadcast(ECombat_AIState::Flanking);
+}
+
+void UCombatAIComponent::ExecuteRetreat(float DeltaTime)
+{
+    // Move away from all threats
+    OnCombatStateChanged.Broadcast(ECombat_AIState::Retreat);
+}
+
+void UCombatAIComponent::TransitionToState(ECombat_AIState NewState)
+{
+    if (CurrentState == NewState) return;
+    if (CurrentState == ECombat_AIState::Dead) return;
+
+    ECombat_AIState OldState = CurrentState;
+    CurrentState = NewState;
+
+    OnCombatStateChanged.Broadcast(NewState);
+
+    UE_LOG(LogTemp, Log, TEXT("[CombatAI] %s: %d -> %d"),
+        *GetOwner()->GetName(),
+        (int32)OldState,
+        (int32)NewState);
+}
+
+void UCombatAIComponent::TakeCombatDamage(float DamageAmount, AActor* DamageSource)
+{
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+
+    if (DamageSource)
+    {
+        RegisterThreat(DamageSource, 100.0f); // Max threat from attacker
+    }
+
+    if (CurrentHealth <= 0.0f)
+    {
+        TransitionToState(ECombat_AIState::Dead);
+    }
+    else if (bCanRetreat && (CurrentHealth / MaxHealth) < RetreatHealthThreshold)
+    {
+        TransitionToState(ECombat_AIState::Retreat);
+    }
+}
+
+void UCombatAIComponent::UpdatePatrolPoint()
+{
+    if (CurrentState != ECombat_AIState::Patrol && CurrentState != ECombat_AIState::Idle) return;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    // Generate random patrol point within 1000 units
+    FVector Origin = Owner->GetActorLocation();
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-1000.0f, 1000.0f),
+        FMath::RandRange(-1000.0f, 1000.0f),
+        0.0f
+    );
+
+    CurrentPatrolTarget = Origin + RandomOffset;
+}
+
+FVector UCombatAIComponent::CalculateFlankingPosition(AActor* Target, int32 FlankIndex, int32 TotalFlankers) const
+{
+    if (!Target) return FVector::ZeroVector;
+
+    AActor* Owner = GetOwner();
+    if (!Owner) return FVector::ZeroVector;
+
+    // Distribute flankers evenly around the target
+    float AngleStep = 360.0f / FMath::Max(TotalFlankers, 1);
+    float MyAngle = FMath::DegreesToRadians(FlankIndex * AngleStep);
+
+    FVector TargetLoc = Target->GetActorLocation();
+    float FlankRadius = AttackRadius * 2.5f;
+
+    return TargetLoc + FVector(
+        FMath::Cos(MyAngle) * FlankRadius,
+        FMath::Sin(MyAngle) * FlankRadius,
+        0.0f
+    );
+}
+
+ECombat_AIState UCombatAIComponent::GetCurrentState() const
+{
+    return CurrentState;
+}
+
+float UCombatAIComponent::GetHealthPercent() const
+{
+    if (MaxHealth <= 0.0f) return 0.0f;
+    return CurrentHealth / MaxHealth;
+}
+
+bool UCombatAIComponent::IsHostile() const
+{
+    return CurrentState != ECombat_AIState::Idle &&
+           CurrentState != ECombat_AIState::Patrol &&
+           CurrentState != ECombat_AIState::Dead;
 }
