@@ -2,139 +2,154 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "TRexBehavior.generated.h"
 
-/** T-Rex AI state enum — drives behavior tree selection */
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
 UENUM(BlueprintType)
 enum class ENPC_TRexState : uint8
 {
-    Patrol     UMETA(DisplayName = "Patrol"),
-    Alert      UMETA(DisplayName = "Alert"),
-    Chase      UMETA(DisplayName = "Chase"),
-    Attack     UMETA(DisplayName = "Attack"),
-    Roar       UMETA(DisplayName = "Roar"),
-    Rest       UMETA(DisplayName = "Rest")
+    Patrolling   UMETA(DisplayName = "Patrolling"),
+    Investigating UMETA(DisplayName = "Investigating"),
+    Chasing      UMETA(DisplayName = "Chasing"),
+    Attacking    UMETA(DisplayName = "Attacking"),
+    Roaring      UMETA(DisplayName = "Roaring"),
+    Resting      UMETA(DisplayName = "Resting")
 };
 
-/** Patrol waypoint data */
+// ─── Structs ──────────────────────────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
-struct FNPC_TRexPatrolPoint
+struct FNPC_TRexConfig
 {
     GENERATED_BODY()
 
+    /** Radius of the patrol area around the home point */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    FVector Location = FVector::ZeroVector;
+    float PatrolRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float WaitTime = 2.0f;
+    /** Distance at which T-Rex detects and starts chasing the player */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
+    float ChaseDetectionRange = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    bool bRoarOnArrival = false;
+    /** Distance at which T-Rex performs a melee attack */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackRange = 300.0f;
+
+    /** Movement speed while patrolling */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
+    float PatrolSpeed = 300.0f;
+
+    /** Movement speed while chasing */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
+    float ChaseSpeed = 900.0f;
+
+    /** Damage dealt per attack hit */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackDamage = 75.0f;
+
+    /** Cooldown between attacks in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackCooldown = 2.5f;
+
+    /** Time before T-Rex gives up the chase and returns to patrol */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|AI")
+    float ChaseGiveUpTime = 12.0f;
+
+    /** Hearing radius — footsteps and loud noises */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
+    float HearingRange = 1500.0f;
 };
 
-/**
- * ATRexBehaviorController — AI Controller for the T-Rex
- *
- * Behavior logic:
- *   PATROL  : Moves between waypoints in a 5000-unit radius area
- *   ALERT   : Stops, looks toward detected stimulus
- *   CHASE   : Pursues player when within 3000 units (sight range)
- *   ATTACK  : Melee attack when within 300 units
- *   ROAR    : Intimidation roar on first detection or kill
- *   REST    : Idle at rest point (night cycle / post-feed)
- */
-UCLASS(ClassGroup = "TranspersonalGame|AI", meta = (DisplayName = "TRex Behavior Controller"))
-class TRANSPERSONALGAME_API ATRexBehaviorController : public AAIController
+// ─── ATRexAIController ────────────────────────────────────────────────────────
+
+UCLASS(ClassGroup = "TranspersonalGame|AI", meta = (DisplayName = "T-Rex AI Controller"))
+class TRANSPERSONALGAME_API ATRexAIController : public AAIController
 {
     GENERATED_BODY()
 
 public:
-    ATRexBehaviorController();
+    ATRexAIController();
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void OnPossess(APawn* InPawn) override;
     virtual void OnUnPossess() override;
 
-    // ── Behavior State ──────────────────────────────────────────────
+    // ── State Machine ──────────────────────────────────────────────────────
+
     UFUNCTION(BlueprintCallable, Category = "TRex|AI")
     ENPC_TRexState GetCurrentState() const { return CurrentState; }
 
     UFUNCTION(BlueprintCallable, Category = "TRex|AI")
     void SetState(ENPC_TRexState NewState);
 
-    // ── Patrol ──────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    TArray<FNPC_TRexPatrolPoint> PatrolWaypoints;
+    UFUNCTION(BlueprintCallable, Category = "TRex|AI")
+    void ForceRoar();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float PatrolRadius = 5000.0f;
+    // ── Config ─────────────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Patrol")
-    float PatrolMoveSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
+    FNPC_TRexConfig Config;
 
-    // ── Detection ───────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
-    float SightRange = 3000.0f;
+    // ── Blackboard Keys ────────────────────────────────────────────────────
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Detection")
-    float SightAngleDegrees = 120.0f;
-
-    // ── Combat ──────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackDamage = 80.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackCooldown = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChaseMoveSpeed = 700.0f;
-
-    // ── Blackboard Keys ─────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Blackboard")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Blackboard")
     FName BB_TargetActor = FName("TargetActor");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Blackboard")
-    FName BB_PatrolLocation = FName("PatrolLocation");
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Blackboard")
+    FName BB_HomeLocation = FName("HomeLocation");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Blackboard")
-    FName BB_AIState = FName("AIState");
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Blackboard")
+    FName BB_PatrolTarget = FName("PatrolTarget");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Blackboard")
-    FName BB_DistanceToTarget = FName("DistanceToTarget");
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TRex|Blackboard")
+    FName BB_CurrentState = FName("CurrentState");
 
 protected:
+    // ── Perception ─────────────────────────────────────────────────────────
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Perception",
+              meta = (AllowPrivateAccess = "true"))
+    UAIPerceptionComponent* PerceptionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Perception",
+              meta = (AllowPrivateAccess = "true"))
+    UAISenseConfig_Sight* SightConfig;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Perception",
+              meta = (AllowPrivateAccess = "true"))
+    UAISenseConfig_Hearing* HearingConfig;
+
     UFUNCTION()
-    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+    void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    void UpdatePatrol(float DeltaTime);
-    void UpdateChase(float DeltaTime);
-    void UpdateAttack(float DeltaTime);
-    void TryDetectPlayer();
-    bool IsPlayerInSightCone(AActor* Player) const;
-    void AdvancePatrolWaypoint();
+    // ── Internal State ─────────────────────────────────────────────────────
 
-private:
-    UPROPERTY()
-    UAIPerceptionComponent* PerceptionComponent = nullptr;
+    ENPC_TRexState CurrentState;
+    FVector HomeLocation;
+    AActor* TargetActor;
 
-    UPROPERTY()
-    UAISenseConfig_Sight* SightConfig = nullptr;
+    float TimeSinceLastAttack;
+    float TimeSinceTargetSeen;
+    float RoarTimer;
 
-    ENPC_TRexState CurrentState = ENPC_TRexState::Patrol;
+    // ── State Handlers ─────────────────────────────────────────────────────
 
-    int32 CurrentWaypointIndex = 0;
-    float AttackCooldownTimer = 0.0f;
-    float WaypointWaitTimer = 0.0f;
-    bool bWaitingAtWaypoint = false;
+    void TickPatrol(float DeltaTime);
+    void TickChase(float DeltaTime);
+    void TickAttack(float DeltaTime);
+    void TickRoar(float DeltaTime);
+    void TickResting(float DeltaTime);
 
-    UPROPERTY()
-    AActor* CurrentTarget = nullptr;
+    void PickNewPatrolPoint();
+    bool CanSeeTarget() const;
+    float DistanceToTarget() const;
+    void ApplyMoveSpeed(float Speed);
 };
