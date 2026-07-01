@@ -1,213 +1,251 @@
 // CrowdStampedeController.cpp
-// Crowd & Traffic Simulation Agent #13
-// Full implementation — all methods implemented, zero stubs
+// Crowd & Traffic Simulation Agent #13 — Cycle AUTO_20260701_004
+// Stampede Controller — coordinates mass panic events across multiple herds
 
 #include "CrowdStampedeController.h"
+#include "CrowdHerdMigration.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Pawn.h"
+#include "DrawDebugHelpers.h"
+
+// ─── ACrowdStampedeController ───────────────────────────────────────────────
 
 ACrowdStampedeController::ACrowdStampedeController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    DefaultPanicRadius = 500.f;
-    DefaultStampedeSpeed = 800.f;
-    MaxStampedeDuration = 20.f;
-    bStampedeActive = false;
-    StampedeElapsed = 0.f;
+    PrimaryActorTick.TickInterval = 0.05f; // 20Hz for stampede responsiveness
+
+    bGlobalStampedeActive = false;
+    PanicPropagationRadius = 2500.0f;
+    PanicPropagationSpeed = 800.0f;
+    MaxConcurrentStampedes = 3;
+    StampedeDecayRate = 0.1f;
+    CurrentStampedeIntensity = 0.0f;
 }
 
 void ACrowdStampedeController::BeginPlay()
 {
     Super::BeginPlay();
-    bStampedeActive = false;
-    StampedeElapsed = 0.f;
+
+    // Discover all herd actors in the world
+    DiscoverHerds();
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Initialized — %d herds registered"),
+        RegisteredHerds.Num());
 }
 
 void ACrowdStampedeController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (!bStampedeActive)
+    if (!bGlobalStampedeActive) return;
+
+    // Propagate panic wave outward
+    PropagateStampedePanic(DeltaTime);
+
+    // Decay stampede intensity
+    CurrentStampedeIntensity = FMath::Max(0.0f,
+        CurrentStampedeIntensity - StampedeDecayRate * DeltaTime);
+
+    if (CurrentStampedeIntensity <= 0.0f)
     {
-        return;
-    }
-
-    StampedeElapsed += DeltaTime;
-    if (StampedeElapsed >= ActiveEvent.DurationSeconds)
-    {
-        StopStampede();
-        return;
-    }
-
-    UpdateStampedeAgents(DeltaTime);
-
-#if WITH_EDITOR
-    // Debug draw panic radius
-    DrawDebugSphere(
-        GetWorld(),
-        ActiveEvent.TriggerLocation,
-        ActiveEvent.PanicRadius,
-        24,
-        FColor::Red,
-        false,
-        DeltaTime * 2.f
-    );
-#endif
-}
-
-void ACrowdStampedeController::TriggerStampede(FVector Origin, ECrowd_StampedeType Type, float Radius)
-{
-    if (bStampedeActive)
-    {
-        // Override existing stampede with new one
-        StopStampede();
-    }
-
-    ActiveEvent.TriggerLocation = Origin;
-    ActiveEvent.StampedeType = Type;
-    ActiveEvent.PanicRadius = (Radius > 0.f) ? Radius : DefaultPanicRadius;
-    ActiveEvent.StampedeSpeed = DefaultStampedeSpeed;
-    ActiveEvent.DurationSeconds = MaxStampedeDuration;
-    ActiveEvent.AffectedAgentCount = 0;
-
-    bStampedeActive = true;
-    StampedeElapsed = 0.f;
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Stampede triggered at (%.1f, %.1f, %.1f) Type=%d Radius=%.1f"),
-        Origin.X, Origin.Y, Origin.Z, (int32)Type, ActiveEvent.PanicRadius);
-}
-
-void ACrowdStampedeController::StopStampede()
-{
-    if (!bStampedeActive)
-    {
-        return;
-    }
-
-    bStampedeActive = false;
-    StampedeElapsed = 0.f;
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Stampede ended. Affected agents: %d"),
-        ActiveEvent.AffectedAgentCount);
-
-    ActiveEvent.AffectedAgentCount = 0;
-}
-
-FVector ACrowdStampedeController::ComputeFleeDirection(FVector AgentLocation, FVector PanicOrigin) const
-{
-    switch (ActiveEvent.StampedeType)
-    {
-        case ECrowd_StampedeType::PanicFlee:
-        {
-            // Flee directly away from panic origin
-            FVector Dir = (AgentLocation - PanicOrigin);
-            Dir.Z = 0.f;
-            if (!Dir.IsNearlyZero())
-            {
-                Dir.Normalize();
-            }
-            else
-            {
-                // If agent is at origin, pick a random direction
-                Dir = FVector(FMath::RandRange(-1.f, 1.f), FMath::RandRange(-1.f, 1.f), 0.f).GetSafeNormal();
-            }
-            return Dir;
-        }
-
-        case ECrowd_StampedeType::DirectionalRush:
-        {
-            // All agents rush in the same direction (away from threat, normalized)
-            FVector Dir = (AgentLocation - PanicOrigin);
-            Dir.Z = 0.f;
-            // Clamp to a cone — agents within 45 degrees of the main flee direction
-            FVector MainDir = Dir.GetSafeNormal();
-            return MainDir;
-        }
-
-        case ECrowd_StampedeType::Scatter:
-            return ComputeScatterDirection(AgentLocation, PanicOrigin);
-
-        case ECrowd_StampedeType::CircleStampede:
-            return ComputeCircleDirection(AgentLocation, PanicOrigin);
-
-        default:
-        {
-            FVector Dir = (AgentLocation - PanicOrigin).GetSafeNormal();
-            Dir.Z = 0.f;
-            return Dir;
-        }
+        EndGlobalStampede();
     }
 }
 
-void ACrowdStampedeController::UpdateStampedeAgents(float DeltaTime)
+void ACrowdStampedeController::DiscoverHerds()
 {
-    // In a full Mass AI integration this would update agent processors.
-    // For now, count pawns within panic radius and track affected count.
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
+    RegisteredHerds.Empty();
 
     TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(),
+        ACrowdHerdMigration::StaticClass(), FoundActors);
 
-    int32 Count = 0;
     for (AActor* Actor : FoundActors)
     {
-        if (!Actor)
+        ACrowdHerdMigration* Herd = Cast<ACrowdHerdMigration>(Actor);
+        if (Herd)
         {
-            continue;
-        }
-
-        float Dist = FVector::Dist(Actor->GetActorLocation(), ActiveEvent.TriggerLocation);
-        if (Dist <= ActiveEvent.PanicRadius)
-        {
-            Count++;
-            // Compute flee direction and apply as velocity hint
-            FVector FleeDir = ComputeFleeDirection(Actor->GetActorLocation(), ActiveEvent.TriggerLocation);
-
-            // Apply movement impulse if the pawn has a movement component
-            APawn* Pawn = Cast<APawn>(Actor);
-            if (Pawn)
-            {
-                // Velocity hint stored — actual movement handled by Mass AI processor
-                // or character movement component in full integration
-                (void)FleeDir; // Suppress unused warning — used by Mass AI processor
-            }
+            RegisteredHerds.Add(Herd);
         }
     }
 
-    ActiveEvent.AffectedAgentCount = Count;
+    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Discovered %d herds"),
+        RegisteredHerds.Num());
 }
 
-FVector ACrowdStampedeController::ComputeScatterDirection(FVector AgentLocation, FVector Origin) const
+void ACrowdStampedeController::RegisterHerd(ACrowdHerdMigration* Herd)
 {
-    // Scatter — each agent flees in a unique radial direction based on their position angle
-    FVector ToAgent = AgentLocation - Origin;
-    ToAgent.Z = 0.f;
-
-    float Angle = FMath::Atan2(ToAgent.Y, ToAgent.X);
-    // Add slight random offset to prevent perfectly uniform scatter
-    Angle += FMath::RandRange(-0.3f, 0.3f);
-
-    return FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f);
+    if (Herd && !RegisteredHerds.Contains(Herd))
+    {
+        RegisteredHerds.Add(Herd);
+        UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Registered herd %s"),
+            *Herd->GetName());
+    }
 }
 
-FVector ACrowdStampedeController::ComputeCircleDirection(FVector AgentLocation, FVector Origin) const
+void ACrowdStampedeController::TriggerGlobalStampede(
+    FVector EpicentreLocation,
+    ECrowd_StampedeType StampedeType,
+    float Intensity)
 {
-    // Circle stampede — agents orbit the panic origin in a spiral outward
-    FVector ToAgent = AgentLocation - Origin;
-    ToAgent.Z = 0.f;
+    if (bGlobalStampedeActive && ActiveStampedeEvents.Num() >= MaxConcurrentStampedes)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CrowdStampedeController: Max concurrent stampedes reached"));
+        return;
+    }
 
-    float Angle = FMath::Atan2(ToAgent.Y, ToAgent.X);
-    // Perpendicular + outward component
-    float PerpAngle = Angle + HALF_PI;
-    FVector Perp = FVector(FMath::Cos(PerpAngle), FMath::Sin(PerpAngle), 0.f);
-    FVector Outward = ToAgent.GetSafeNormal();
+    // Create stampede event
+    FCrowd_StampedeEvent NewEvent;
+    NewEvent.TriggerLocation = EpicentreLocation;
+    NewEvent.StampedeType = StampedeType;
+    NewEvent.TriggerRadius = PanicPropagationRadius;
+    NewEvent.AgentSpeed = PanicPropagationSpeed;
+    NewEvent.Duration = 15.0f + (Intensity * 10.0f);
+    NewEvent.AffectedAgentCount = 0;
+    NewEvent.bIsActive = true;
 
-    // 60% perpendicular (orbit) + 40% outward (spiral)
-    return (Perp * 0.6f + Outward * 0.4f).GetSafeNormal();
+    ActiveStampedeEvents.Add(NewEvent);
+
+    bGlobalStampedeActive = true;
+    CurrentStampedeIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    GlobalEpicentre = EpicentreLocation;
+
+    // Trigger all nearby herds
+    for (ACrowdHerdMigration* Herd : RegisteredHerds)
+    {
+        if (!Herd) continue;
+
+        float DistToHerd = FVector::Dist(Herd->GetActorLocation(), EpicentreLocation);
+        if (DistToHerd < PanicPropagationRadius)
+        {
+            float LocalRadius = PanicPropagationRadius - DistToHerd;
+            Herd->TriggerStampede(EpicentreLocation, LocalRadius);
+            NewEvent.AffectedAgentCount += Herd->GetActiveAgentCount();
+        }
+    }
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("CrowdStampedeController: GLOBAL STAMPEDE — type %d, epicentre %s, intensity %.2f, %d agents affected"),
+        (int32)StampedeType, *EpicentreLocation.ToString(), Intensity, NewEvent.AffectedAgentCount);
+
+    OnGlobalStampedeStarted.Broadcast(EpicentreLocation, (int32)StampedeType);
+
+    // Schedule auto-end
+    FTimerHandle EndTimer;
+    GetWorldTimerManager().SetTimer(EndTimer, this,
+        &ACrowdStampedeController::EndGlobalStampede, NewEvent.Duration, false);
+}
+
+void ACrowdStampedeController::TriggerDirectionalRush(
+    FVector StartLocation,
+    FVector RushDirection,
+    float Width,
+    float Speed)
+{
+    // Directional rush — all agents in a corridor move in one direction
+    FVector NormDir = RushDirection.GetSafeNormal();
+
+    for (ACrowdHerdMigration* Herd : RegisteredHerds)
+    {
+        if (!Herd) continue;
+
+        FVector ToHerd = Herd->GetActorLocation() - StartLocation;
+        float LateralDist = FVector::CrossProduct(ToHerd, NormDir).Size();
+
+        if (LateralDist < Width)
+        {
+            // Herd is in the rush corridor
+            Herd->TriggerStampede(StartLocation - NormDir * 500.0f, Width);
+            UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Directional rush hit herd %s"),
+                *Herd->GetName());
+        }
+    }
+
+    UE_LOG(LogTemp, Log,
+        TEXT("CrowdStampedeController: Directional rush — dir %s, width %.0f, speed %.0f"),
+        *NormDir.ToString(), Width, Speed);
+}
+
+void ACrowdStampedeController::TriggerScatterPattern(FVector CentreLocation, float ScatterRadius)
+{
+    // Scatter — agents flee outward in all directions from centre
+    for (ACrowdHerdMigration* Herd : RegisteredHerds)
+    {
+        if (!Herd) continue;
+
+        float DistToHerd = FVector::Dist(Herd->GetActorLocation(), CentreLocation);
+        if (DistToHerd < ScatterRadius)
+        {
+            Herd->TriggerStampede(CentreLocation, ScatterRadius);
+        }
+    }
+
+    UE_LOG(LogTemp, Log,
+        TEXT("CrowdStampedeController: Scatter pattern — centre %s, radius %.0f"),
+        *CentreLocation.ToString(), ScatterRadius);
+}
+
+void ACrowdStampedeController::PropagateStampedePanic(float DeltaTime)
+{
+    // Expand panic wave radius over time
+    for (FCrowd_StampedeEvent& Event : ActiveStampedeEvents)
+    {
+        if (!Event.bIsActive) continue;
+
+        Event.TriggerRadius += PanicPropagationSpeed * DeltaTime;
+
+        // Check for newly affected herds as wave expands
+        for (ACrowdHerdMigration* Herd : RegisteredHerds)
+        {
+            if (!Herd) continue;
+
+            float DistToHerd = FVector::Dist(Herd->GetActorLocation(), Event.TriggerLocation);
+            // Trigger herds at the wave front (within 200 units of expanding radius)
+            if (FMath::Abs(DistToHerd - Event.TriggerRadius) < 200.0f)
+            {
+                if (!Herd->IsStampedeActive())
+                {
+                    Herd->TriggerStampede(Event.TriggerLocation, 800.0f);
+                    Event.AffectedAgentCount += Herd->GetActiveAgentCount();
+                }
+            }
+        }
+    }
+}
+
+void ACrowdStampedeController::EndGlobalStampede()
+{
+    bGlobalStampedeActive = false;
+    CurrentStampedeIntensity = 0.0f;
+
+    for (FCrowd_StampedeEvent& Event : ActiveStampedeEvents)
+    {
+        Event.bIsActive = false;
+    }
+    ActiveStampedeEvents.Empty();
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdStampedeController: Global stampede ended — herds calming"));
+    OnGlobalStampedeEnded.Broadcast();
+}
+
+int32 ACrowdStampedeController::GetTotalAffectedAgents() const
+{
+    int32 Total = 0;
+    for (const FCrowd_StampedeEvent& Event : ActiveStampedeEvents)
+    {
+        Total += Event.AffectedAgentCount;
+    }
+    return Total;
+}
+
+float ACrowdStampedeController::GetStampedeIntensity() const
+{
+    return CurrentStampedeIntensity;
+}
+
+bool ACrowdStampedeController::IsStampedeActive() const
+{
+    return bGlobalStampedeActive;
 }
