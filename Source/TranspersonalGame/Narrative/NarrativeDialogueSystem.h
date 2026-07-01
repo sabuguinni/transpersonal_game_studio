@@ -1,6 +1,6 @@
 // NarrativeDialogueSystem.h
-// Agent #15 — Narrative & Dialogue Agent
-// Dialogue trigger, playback, and quest arc binding for the "First Tools" tutorial.
+// Narrative & Dialogue Agent #15 — Transpersonal Game Studio
+// Complete header: dialogue trigger types, speaker roles, line structs, conversation structs, bark system
 
 #pragma once
 
@@ -8,11 +8,9 @@
 #include "Components/ActorComponent.h"
 #include "NarrativeDialogueSystem.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENUMS — must be at global scope (UE5 compilation rule)
-// Prefix: ENarr_ to avoid collisions with other agents
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ============================================================
+// ENarr_DialogueTriggerType — how dialogue is activated
+// ============================================================
 UENUM(BlueprintType)
 enum class ENarr_DialogueTriggerType : uint8
 {
@@ -22,10 +20,13 @@ enum class ENarr_DialogueTriggerType : uint8
     CombatAlert     UMETA(DisplayName = "Combat Alert"),
     ResourceFound   UMETA(DisplayName = "Resource Found"),
     PlayerDeath     UMETA(DisplayName = "Player Death"),
-    DayBreak        UMETA(DisplayName = "Day Break"),
-    Scripted        UMETA(DisplayName = "Scripted")
+    DayNightChange  UMETA(DisplayName = "Day Night Change"),
+    Manual          UMETA(DisplayName = "Manual")
 };
 
+// ============================================================
+// ENarr_SpeakerRole — who is speaking
+// ============================================================
 UENUM(BlueprintType)
 enum class ENarr_SpeakerRole : uint8
 {
@@ -37,136 +38,189 @@ enum class ENarr_SpeakerRole : uint8
     Narrator        UMETA(DisplayName = "Narrator")
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STRUCTS — global scope, Narr_ prefix
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// ENarr_BarkType — single-line NPC reactions
+// ============================================================
+UENUM(BlueprintType)
+enum class ENarr_BarkType : uint8
+{
+    DinosaurSpotted     UMETA(DisplayName = "Dinosaur Spotted"),
+    ResourceNearby      UMETA(DisplayName = "Resource Nearby"),
+    PlayerLowHealth     UMETA(DisplayName = "Player Low Health"),
+    NightFalling        UMETA(DisplayName = "Night Falling"),
+    CraftingSuccess     UMETA(DisplayName = "Crafting Success"),
+    CraftingFailed      UMETA(DisplayName = "Crafting Failed"),
+    QuestObjectiveNear  UMETA(DisplayName = "Quest Objective Near"),
+    Idle                UMETA(DisplayName = "Idle")
+};
 
+// ============================================================
+// FNarr_DialogueLine — a single line of dialogue
+// ============================================================
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FName SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_SpeakerRole SpeakerRole = ENarr_SpeakerRole::Survivor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_SpeakerRole SpeakerRole = ENarr_SpeakerRole::Narrator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue", meta = (MultiLine = "true"))
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FString AudioAssetPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     float DisplayDuration = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsPlayerChoice = false;
 };
 
+// ============================================================
+// FNarr_DialogueConversation — a named sequence of lines
+// ============================================================
 USTRUCT(BlueprintType)
-struct FNarr_Conversation
+struct FNarr_DialogueConversation
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Conversation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     FName ConversationID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Conversation")
-    ENarr_DialogueTriggerType TriggerType = ENarr_DialogueTriggerType::Scripted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Conversation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Conversation")
-    bool bIsRepeatable = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueTriggerType TriggerType = ENarr_DialogueTriggerType::Proximity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bAutoAdvance = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bCanRepeat = false;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELEGATES
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// FNarr_BarkLine — a single-line NPC reaction bark
+// ============================================================
+USTRUCT(BlueprintType)
+struct FNarr_BarkLine
+{
+    GENERATED_BODY()
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnConversationEvent, FName, ConversationID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueLineEvent, FNarr_DialogueLine, Line);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_BarkType BarkType = ENarr_BarkType::Idle;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UCLASS — UNarrDialogueSystem
-// ─────────────────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FText BarkText;
 
-UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent), DisplayName = "Narr Dialogue System")
-class TRANSPERSONALGAME_API UNarrDialogueSystem : public UActorComponent
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FName SpeakerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString AudioAssetPath;
+};
+
+// ============================================================
+// UNarr_DialogueComponent — ActorComponent for NPC dialogue
+// ============================================================
+UCLASS(ClassGroup = "Narrative", meta = (BlueprintSpawnableComponent), BlueprintType)
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarrDialogueSystem();
+    UNarr_DialogueComponent();
 
 protected:
     virtual void BeginPlay() override;
 
-    // ── Internal state ──────────────────────────────────────────────────────
-    UPROPERTY()
-    TMap<FName, FNarr_Conversation> Conversations;
+public:
 
-    UPROPERTY()
-    TSet<FName> PlayedConversations;
+    // --- Dialogue Library ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Library")
+    TArray<FNarr_DialogueConversation> DialogueLibrary;
 
-    UPROPERTY()
-    FNarr_Conversation ActiveConversation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Library")
+    TArray<FNarr_BarkLine> BarkLibrary;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State", meta = (AllowPrivateAccess = "true"))
-    bool bIsDialoguePlaying;
+    // --- State ---
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    bool bIsDialogueActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
     int32 CurrentLineIndex;
 
-    // ── Internal helpers ────────────────────────────────────────────────────
-    void PlayCurrentLine();
-    void AdvanceDialogue();
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    FName CurrentConversationID;
+
+    // --- Config ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float LineDisplayDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    ENarr_SpeakerRole SpeakerRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    ENarr_DialogueTriggerType TriggerType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    float TriggerRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
+    bool bCanRepeatDialogue;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
+    bool bHasBeenTriggered;
+
+    // --- Delegates ---
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueStarted, FName, ConversationID);
+    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
+    FNarr_OnDialogueStarted OnDialogueStarted;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueEnded, FName, ConversationID);
+    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
+    FNarr_OnDialogueEnded OnDialogueEnded;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnLineDisplayed, FNarr_DialogueLine, Line);
+    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
+    FNarr_OnLineDisplayed OnLineDisplayed;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnBarkTriggered, FNarr_BarkLine, Bark);
+    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
+    FNarr_OnBarkTriggered OnBarkTriggered;
+
+    // --- Methods ---
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void StartConversation(FName ConversationID);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceLine();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
     void EndConversation();
-    void InitializeDefaultConversations();
 
-public:
-    // ── Configuration ────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
-    bool bAutoAdvance = true;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerBark(ENarr_BarkType BarkType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Config")
-    float AutoAdvanceDelay = 0.5f;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetCurrentLine() const;
 
-    // ── Delegates ────────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnConversationEvent OnConversationStarted;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterConversation(FNarr_DialogueConversation NewConversation);
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnConversationEvent OnConversationEnded;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    int32 GetLineCount() const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnDialogueLineEvent OnDialogueLineStarted;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    int32 GetCurrentLineIndex() const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnDialogueLineEvent OnDialogueLineEnded;
-
-    // ── Public API ───────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool StartConversation(FName ConversationID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void SkipCurrentLine();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void TriggerConversationByType(ENarr_DialogueTriggerType TriggerType);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void AddConversation(const FNarr_Conversation& NewConversation);
-
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    bool IsConversationPlayed(FName ConversationID) const;
-
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    float GetConversationProgress() const;
-
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    bool IsDialoguePlaying() const { return bIsDialoguePlaying; }
-
-    UFUNCTION(BlueprintPure, Category = "Narrative|Dialogue")
-    int32 GetCurrentLineIndex() const { return CurrentLineIndex; }
+private:
+    FNarr_DialogueConversation ActiveConversation;
+    FTimerHandle LineAdvanceTimer;
 };
