@@ -1,50 +1,40 @@
-// FootIKComponent.h
-// Animation Agent #10 — Cycle PROD_CYCLE_AUTO_20260628_011
-// Per-foot terrain IK component — solves foot placement on uneven ground
-// using line traces and pelvis offset compensation.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "FootIKComponent.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FAnim_FootIKData — per-foot IK solve result
-// ─────────────────────────────────────────────────────────────────────────────
-
 USTRUCT(BlueprintType)
 struct FAnim_FootIKData
 {
     GENERATED_BODY()
 
-    /** World-space target location for the foot effector */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK")
-    FVector TargetLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    FVector LeftFootLocation = FVector::ZeroVector;
 
-    /** Surface normal at the foot contact point */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK")
-    FVector SurfaceNormal = FVector::UpVector;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    FVector RightFootLocation = FVector::ZeroVector;
 
-    /** IK blend weight (0 = no IK, 1 = full IK) */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK")
-    float BlendAlpha = 0.f;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    FRotator LeftFootRotation = FRotator::ZeroRotator;
 
-    /** Pelvis Z offset contribution from this foot */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK")
-    float PelvisOffset = 0.f;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    FRotator RightFootRotation = FRotator::ZeroRotator;
 
-    /** True when foot trace hit valid ground */
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|FootIK")
-    bool bIsGrounded = false;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    float LeftFootOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    float RightFootOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    float PelvisOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation|FootIK")
+    bool bIsOnUnevenTerrain = false;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UFootIKComponent
-// ─────────────────────────────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = "Animation", meta = (BlueprintSpawnableComponent),
-       DisplayName = "Foot IK Component")
+UCLASS(ClassGroup = (Animation), meta = (BlueprintSpawnableComponent), BlueprintType)
 class TRANSPERSONALGAME_API UFootIKComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -52,102 +42,49 @@ class TRANSPERSONALGAME_API UFootIKComponent : public UActorComponent
 public:
     UFootIKComponent();
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-                               FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ── Public API ─────────────────────────────────────────────────────────
-
-    /** Solve IK for a single foot socket. Returns solve result. */
+    /** Returns current foot IK data for AnimInstance */
     UFUNCTION(BlueprintCallable, Category = "Animation|FootIK")
-    FAnim_FootIKData SolveFootIK(const FName& SocketName, float DeltaTime);
+    FAnim_FootIKData GetFootIKData() const;
 
-    /** Get the last solved data for the left foot */
-    UFUNCTION(BlueprintPure, Category = "Animation|FootIK")
-    FAnim_FootIKData GetLeftFootData() const { return LeftFootData; }
+    /** Trace distance downward from foot bone to ground */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    float TraceDistance = 100.0f;
 
-    /** Get the last solved data for the right foot */
-    UFUNCTION(BlueprintPure, Category = "Animation|FootIK")
-    FAnim_FootIKData GetRightFootData() const { return RightFootData; }
+    /** Interpolation speed for smooth foot placement */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    float InterpSpeed = 15.0f;
 
-    /** Combined pelvis offset (lowest foot drives this) */
-    UFUNCTION(BlueprintPure, Category = "Animation|FootIK")
-    FVector GetPelvisOffset() const { return CombinedPelvisOffset; }
+    /** Offset from foot bone to actual foot bottom */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    float FootHeight = 10.0f;
 
-    // ── Configuration ──────────────────────────────────────────────────────
+    /** Enable/disable foot IK system */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    bool bEnableFootIK = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Sockets")
-    FName LeftFootSocket = FName("foot_l");
+    /** Left foot bone name */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    FName LeftFootBoneName = FName("foot_l");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Sockets")
-    FName RightFootSocket = FName("foot_r");
-
-    /** How far above the socket to start the trace */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Trace",
-              meta = (ClampMin = "0", ClampMax = "200"))
-    float TraceStartOffset = 50.f;
-
-    /** How far below the socket to end the trace */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Trace",
-              meta = (ClampMin = "0", ClampMax = "300"))
-    float TraceEndOffset = 75.f;
-
-    /** Collision channel for foot traces */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Trace")
-    TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
-
-    /** Interpolation speed for foot target position */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Interp",
-              meta = (ClampMin = "1", ClampMax = "30"))
-    float FootInterpSpeed = 12.f;
-
-    /** Interpolation speed for pelvis offset */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Interp",
-              meta = (ClampMin = "1", ClampMax = "20"))
-    float PelvisInterpSpeed = 6.f;
-
-    /** Maximum pelvis Z displacement allowed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Limits",
-              meta = (ClampMin = "0", ClampMax = "50"))
-    float MaxPelvisOffset = 20.f;
-
-    /** IK blend-in speed when grounded */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Interp",
-              meta = (ClampMin = "1", ClampMax = "20"))
-    float IKBlendInSpeed = 8.f;
-
-    /** IK blend-out speed when in air */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Interp",
-              meta = (ClampMin = "1", ClampMax = "20"))
-    float IKBlendOutSpeed = 4.f;
-
-    /** Draw debug traces in editor */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK|Debug")
-    bool bDrawDebugTraces = false;
+    /** Right foot bone name */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|FootIK")
+    FName RightFootBoneName = FName("foot_r");
 
 private:
-    // ── Cached references ──────────────────────────────────────────────────
-    UPROPERTY()
-    class ACharacter* OwnerCharacter;
+    FAnim_FootIKData CurrentIKData;
 
-    UPROPERTY()
-    class USkeletalMeshComponent* OwnerMesh;
+    /** Perform a line trace from foot position downward to find ground */
+    bool TraceFootToGround(const FVector& FootWorldLocation, FVector& OutHitLocation, FVector& OutHitNormal) const;
 
-    // ── Solve results ──────────────────────────────────────────────────────
-    FAnim_FootIKData LeftFootData;
-    FAnim_FootIKData RightFootData;
+    /** Compute pelvis offset to prevent foot sliding */
+    float ComputePelvisOffset(float LeftOffset, float RightOffset) const;
 
-    FVector CombinedPelvisOffset;
+    /** Smoothly interpolate foot offset toward target */
+    float InterpFootOffset(float Current, float Target, float DeltaTime) const;
 
-    // ── Smoothed targets ───────────────────────────────────────────────────
-    FVector SmoothedLeftTarget;
-    FVector SmoothedRightTarget;
-    float   SmoothedPelvisZ;
-
-    // ── Internal helpers ───────────────────────────────────────────────────
-    bool PerformFootTrace(const FVector& StartLoc, const FVector& EndLoc,
-                          FHitResult& OutHit) const;
-    void UpdatePelvisOffset(float DeltaTime);
-    void PushDataToAnimInstance();
+    /** Cached owner skeletal mesh */
+    class USkeletalMeshComponent* OwnerMesh = nullptr;
 };
