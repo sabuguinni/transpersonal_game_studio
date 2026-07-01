@@ -1,340 +1,260 @@
-// AudioSystemManager.cpp
-// Audio Agent #16 — PROD_CYCLE_AUTO_20260630_007
-// Adaptive audio system: danger-driven music, ambient zones, dialogue voice binding
-
 #include "AudioSystemManager.h"
-#include "AudioDevice.h"
-#include "Sound/SoundBase.h"
-#include "Sound/AmbientSound.h"
-#include "Components/AudioComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Camera/CameraShakeBase.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
 // UAudio_AdaptiveMusicComponent
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
 
 UAudio_AdaptiveMusicComponent::UAudio_AdaptiveMusicComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    CurrentDangerLevel = EAudio_DangerLevel::Safe;
-    CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
-    DangerUpdateInterval = 2.0f;
-    bMusicSystemActive = false;
-    MasterVolume = 1.0f;
-    MusicVolume  = 0.8f;
-    SFXVolume    = 1.0f;
-    AmbienceVolume = 0.9f;
-    DangerBlendSpeed = 1.5f;
-    TargetDangerWeight = 0.0f;
-    CurrentDangerWeight = 0.0f;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    MusicTransitionSpeed = 2.0f;
+    TRexProximityRadius = 4000.f;
+    ThreatDecayTimer = 0.f;
+    CurrentMusicIntensity = 0.f;
 }
 
 void UAudio_AdaptiveMusicComponent::BeginPlay()
 {
     Super::BeginPlay();
-    StartAdaptiveMusic();
 }
 
 void UAudio_AdaptiveMusicComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Smoothly blend danger music weight
-    CurrentDangerWeight = FMath::FInterpTo(CurrentDangerWeight, TargetDangerWeight, DeltaTime, DangerBlendSpeed);
-}
-
-void UAudio_AdaptiveMusicComponent::StartAdaptiveMusic()
-{
-    if (bMusicSystemActive) return;
-    bMusicSystemActive = true;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Start periodic danger evaluation
-    World->GetTimerManager().SetTimer(
-        DangerUpdateTimer,
-        this,
-        &UAudio_AdaptiveMusicComponent::EvaluateDangerLevel,
-        DangerUpdateInterval,
-        true
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Adaptive music started — danger polling every %.1fs"), DangerUpdateInterval);
-}
-
-void UAudio_AdaptiveMusicComponent::StopAdaptiveMusic()
-{
-    bMusicSystemActive = false;
-    UWorld* World = GetWorld();
-    if (World)
+    // Decay threat level over time when no dinosaur is nearby
+    if (CurrentThreatLevel != EAudio_ThreatLevel::Safe)
     {
-        World->GetTimerManager().ClearTimer(DangerUpdateTimer);
-    }
-}
-
-void UAudio_AdaptiveMusicComponent::SetDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    if (CurrentDangerLevel == NewLevel) return;
-
-    EAudio_DangerLevel OldLevel = CurrentDangerLevel;
-    CurrentDangerLevel = NewLevel;
-
-    // Map danger level to blend weight
-    switch (NewLevel)
-    {
-        case EAudio_DangerLevel::Safe:       TargetDangerWeight = 0.0f;  break;
-        case EAudio_DangerLevel::Aware:      TargetDangerWeight = 0.33f; break;
-        case EAudio_DangerLevel::Threatened: TargetDangerWeight = 0.66f; break;
-        case EAudio_DangerLevel::Critical:   TargetDangerWeight = 1.0f;  break;
-        default:                             TargetDangerWeight = 0.0f;  break;
-    }
-
-    OnDangerLevelChanged.Broadcast(OldLevel, NewLevel);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Danger level changed %d → %d (blend target: %.2f)"),
-        (int32)OldLevel, (int32)NewLevel, TargetDangerWeight);
-}
-
-void UAudio_AdaptiveMusicComponent::SetTimeOfDay(EAudio_TimeOfDay NewTime)
-{
-    if (CurrentTimeOfDay == NewTime) return;
-    CurrentTimeOfDay = NewTime;
-    OnTimeOfDayChanged.Broadcast(NewTime);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Time of day changed to %d"), (int32)NewTime);
-}
-
-void UAudio_AdaptiveMusicComponent::EvaluateDangerLevel()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
-
-    FVector PlayerLoc = PlayerPawn->GetActorLocation();
-
-    // Scan registered danger zones
-    EAudio_DangerLevel HighestDanger = EAudio_DangerLevel::Safe;
-
-    for (const FAudio_DangerZone& Zone : RegisteredDangerZones)
-    {
-        float DistSq = FVector::DistSquared(PlayerLoc, Zone.ZoneCenter);
-        float RadiusSq = Zone.DangerRadius * Zone.DangerRadius;
-
-        if (DistSq <= RadiusSq)
+        ThreatDecayTimer += DeltaTime;
+        if (ThreatDecayTimer > 8.0f)
         {
-            if ((int32)Zone.DangerLevel > (int32)HighestDanger)
+            // Step down threat level
+            uint8 Level = (uint8)CurrentThreatLevel;
+            if (Level > 0)
             {
-                HighestDanger = Zone.DangerLevel;
+                CurrentThreatLevel = (EAudio_ThreatLevel)(Level - 1);
             }
+            ThreatDecayTimer = 0.f;
         }
     }
 
-    SetDangerLevel(HighestDanger);
+    // Smooth music intensity toward target
+    float TargetIntensity = (float)CurrentThreatLevel / 3.0f;
+    CurrentMusicIntensity = FMath::FInterpTo(CurrentMusicIntensity, TargetIntensity, DeltaTime, MusicTransitionSpeed);
 }
 
-void UAudio_AdaptiveMusicComponent::RegisterDangerZone(const FAudio_DangerZone& Zone)
+void UAudio_AdaptiveMusicComponent::SetThreatLevel(EAudio_ThreatLevel NewLevel)
 {
-    RegisteredDangerZones.Add(Zone);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Registered danger zone '%s' at (%.0f, %.0f, %.0f) r=%.0f"),
-        *Zone.ZoneName.ToString(), Zone.ZoneCenter.X, Zone.ZoneCenter.Y, Zone.ZoneCenter.Z, Zone.DangerRadius);
-}
-
-void UAudio_AdaptiveMusicComponent::UnregisterDangerZone(FName ZoneName)
-{
-    RegisteredDangerZones.RemoveAll([&ZoneName](const FAudio_DangerZone& Z) {
-        return Z.ZoneName == ZoneName;
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UAudio_DialogueVoiceComponent
-// ─────────────────────────────────────────────────────────────────────────────
-
-UAudio_DialogueVoiceComponent::UAudio_DialogueVoiceComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    bIsPlayingDialogue = false;
-    DialogueVolume = 1.0f;
-    DialogueFadeInTime = 0.1f;
-    DialogueFadeOutTime = 0.3f;
-    ActiveAudioComponent = nullptr;
-}
-
-void UAudio_DialogueVoiceComponent::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
-void UAudio_DialogueVoiceComponent::RegisterVoiceLine(FName SpeakerName, int32 LineIndex, USoundBase* AudioAsset)
-{
-    if (!AudioAsset)
+    if (NewLevel > CurrentThreatLevel)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioDialogue: Cannot register null audio for %s line %d"), *SpeakerName.ToString(), LineIndex);
-        return;
-    }
-
-    FAudio_VoiceLineKey Key;
-    Key.SpeakerName = SpeakerName;
-    Key.LineIndex   = LineIndex;
-
-    VoiceLineRegistry.Add(Key, AudioAsset);
-    UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Registered voice line — %s[%d]"), *SpeakerName.ToString(), LineIndex);
-}
-
-void UAudio_DialogueVoiceComponent::PlayDialogueLine(FName SpeakerName, int32 LineIndex)
-{
-    FAudio_VoiceLineKey Key;
-    Key.SpeakerName = SpeakerName;
-    Key.LineIndex   = LineIndex;
-
-    USoundBase** FoundSound = VoiceLineRegistry.Find(Key);
-    if (!FoundSound || !(*FoundSound))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioDialogue: No voice line registered for %s[%d]"), *SpeakerName.ToString(), LineIndex);
-        OnDialogueLineStarted.Broadcast(SpeakerName, LineIndex);
-        return;
-    }
-
-    StopCurrentDialogue();
-
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    ActiveAudioComponent = UGameplayStatics::SpawnSoundAttached(
-        *FoundSound,
-        Owner->GetRootComponent(),
-        NAME_None,
-        FVector::ZeroVector,
-        EAttachLocation::SnapToTarget,
-        true,
-        DialogueVolume
-    );
-
-    if (ActiveAudioComponent)
-    {
-        bIsPlayingDialogue = true;
-        ActiveSpeakerName = SpeakerName;
-        ActiveLineIndex   = LineIndex;
-
-        // Bind completion callback
-        ActiveAudioComponent->OnAudioFinished.AddDynamic(this, &UAudio_DialogueVoiceComponent::OnDialogueFinished);
-        OnDialogueLineStarted.Broadcast(SpeakerName, LineIndex);
-
-        UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Playing %s[%d]"), *SpeakerName.ToString(), LineIndex);
+        CurrentThreatLevel = NewLevel;
+        ThreatDecayTimer = 0.f;
     }
 }
 
-void UAudio_DialogueVoiceComponent::StopCurrentDialogue()
+void UAudio_AdaptiveMusicComponent::OnDinosaurNearby(FName Species, float Distance)
 {
-    if (ActiveAudioComponent && bIsPlayingDialogue)
+    // T-Rex at close range = Critical
+    if (Species == FName("TRex") && Distance < 1500.f)
     {
-        ActiveAudioComponent->FadeOut(DialogueFadeOutTime, 0.0f);
-        bIsPlayingDialogue = false;
+        SetThreatLevel(EAudio_ThreatLevel::Critical);
+    }
+    else if (Species == FName("TRex") && Distance < TRexProximityRadius)
+    {
+        SetThreatLevel(EAudio_ThreatLevel::Danger);
+    }
+    else if (Distance < 2000.f)
+    {
+        SetThreatLevel(EAudio_ThreatLevel::Cautious);
     }
 }
 
-void UAudio_DialogueVoiceComponent::OnDialogueFinished()
+void UAudio_AdaptiveMusicComponent::OnPlayerEnteredSafeZone()
 {
-    bIsPlayingDialogue = false;
-    OnDialogueLineFinished.Broadcast(ActiveSpeakerName, ActiveLineIndex);
-    UE_LOG(LogTemp, Log, TEXT("AudioDialogue: Finished %s[%d]"), *ActiveSpeakerName.ToString(), ActiveLineIndex);
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    ThreatDecayTimer = 0.f;
+    CurrentMusicIntensity = 0.f;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UAudio_AmbientZoneComponent
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================
+// AAudio_SystemManager
+// ============================================================
 
-UAudio_AmbientZoneComponent::UAudio_AmbientZoneComponent()
+AAudio_SystemManager::AAudio_SystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    ZoneRadius = 800.0f;
-    FadeDistance = 200.0f;
-    bPlayerInZone = false;
-    CurrentVolume = 0.0f;
-    TargetVolume  = 0.0f;
-    VolumeBlendSpeed = 2.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    ActiveZone = EAudio_EnvironmentZone::OpenPlains;
+    bIsNightTime = false;
     ActiveAmbientComponent = nullptr;
+
+    // Default dinosaur profiles
+    FAudio_DinosaurSoundProfile TRexProfile;
+    TRexProfile.DinosaurSpecies = FName("TRex");
+    TRexProfile.RoarRadius = 5000.f;
+    TRexProfile.FootstepGroundShakeRadius = 2000.f;
+    DinosaurProfiles.Add(TRexProfile);
+
+    FAudio_DinosaurSoundProfile RaptorProfile;
+    RaptorProfile.DinosaurSpecies = FName("Raptor");
+    RaptorProfile.RoarRadius = 2500.f;
+    RaptorProfile.FootstepGroundShakeRadius = 800.f;
+    DinosaurProfiles.Add(RaptorProfile);
+
+    FAudio_DinosaurSoundProfile BrachioProfile;
+    BrachioProfile.DinosaurSpecies = FName("Brachiosaurus");
+    BrachioProfile.RoarRadius = 4000.f;
+    BrachioProfile.FootstepGroundShakeRadius = 3000.f;
+    DinosaurProfiles.Add(BrachioProfile);
 }
 
-void UAudio_AmbientZoneComponent::BeginPlay()
+void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
+    SetEnvironmentZone(ActiveZone);
+}
 
-    // Start ambient sound at zero volume
-    if (AmbientSound)
+void AAudio_SystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    UpdateDinosaurAwareness(DeltaTime);
+}
+
+void AAudio_SystemManager::SetEnvironmentZone(EAudio_EnvironmentZone NewZone)
+{
+    ActiveZone = NewZone;
+
+    // Find matching ambient layer and crossfade
+    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
     {
-        AActor* Owner = GetOwner();
-        if (Owner)
+        if (Layer.Zone == NewZone)
         {
-            ActiveAmbientComponent = UGameplayStatics::SpawnSoundAttached(
-                AmbientSound,
-                Owner->GetRootComponent(),
-                NAME_None,
-                FVector::ZeroVector,
-                EAttachLocation::SnapToTarget,
-                true,
-                0.0f  // Start silent, fade in when player enters
-            );
+            USoundCue* Target = bIsNightTime ? Layer.NightAmbience : Layer.DayAmbience;
+            if (Target)
+            {
+                CrossfadeToNewAmbient(Target, Layer.CrossfadeDuration);
+            }
+            break;
         }
     }
 }
 
-void UAudio_AmbientZoneComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudio_SystemManager::SetDayNightState(bool bNight)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    if (bIsNightTime != bNight)
+    {
+        bIsNightTime = bNight;
+        SetEnvironmentZone(ActiveZone); // Refresh ambient for new time of day
+    }
+}
 
-    UWorld* World = GetWorld();
-    if (!World) return;
+void AAudio_SystemManager::TriggerDinosaurRoar(FName Species, FVector Location)
+{
+    FAudio_DinosaurSoundProfile Profile = GetDinosaurProfile(Species);
+    if (Profile.RoarSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), Profile.RoarSound, Location, 1.0f, 1.0f, 0.f);
+    }
 
-    APlayerController* PC = World->GetFirstPlayerController();
+    // Apply screen shake based on distance to player
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC && PC->GetPawn())
+    {
+        float Distance = FVector::Dist(Location, PC->GetPawn()->GetActorLocation());
+        ApplyScreenShakeFromDinosaur(Species, Distance);
+    }
+}
+
+void AAudio_SystemManager::TriggerFootstepImpact(FName Species, FVector Location, float Weight)
+{
+    FAudio_DinosaurSoundProfile Profile = GetDinosaurProfile(Species);
+    if (Profile.FootstepSound)
+    {
+        float VolumeScale = FMath::Clamp(Weight / 5000.f, 0.3f, 1.0f);
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), Profile.FootstepSound, Location, VolumeScale);
+    }
+
+    // Ground shake: apply camera shake if player is within radius
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC && PC->GetPawn())
+    {
+        float Distance = FVector::Dist(Location, PC->GetPawn()->GetActorLocation());
+        if (Distance < Profile.FootstepGroundShakeRadius)
+        {
+            float ShakeIntensity = 1.0f - (Distance / Profile.FootstepGroundShakeRadius);
+            ApplyScreenShakeFromDinosaur(Species, Distance);
+        }
+    }
+}
+
+void AAudio_SystemManager::TriggerCraftingSound(FName ToolType)
+{
+    // Crafting sounds are short, positional — played at player location
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLoc = PC->GetPawn()->GetActorLocation();
+
+    // Log crafting event for audio debug
+    UE_LOG(LogTemp, Log, TEXT("AudioSystem: Crafting sound triggered — Tool: %s at %s"),
+        *ToolType.ToString(), *PlayerLoc.ToString());
+}
+
+FAudio_DinosaurSoundProfile AAudio_SystemManager::GetDinosaurProfile(FName Species) const
+{
+    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
+    {
+        if (Profile.DinosaurSpecies == Species)
+        {
+            return Profile;
+        }
+    }
+    return FAudio_DinosaurSoundProfile(); // Return default empty profile
+}
+
+void AAudio_SystemManager::ApplyScreenShakeFromDinosaur(FName Species, float Distance)
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
     if (!PC) return;
 
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return;
+    // Scale shake by species weight and distance
+    float MaxRadius = 3000.f;
+    if (Species == FName("TRex")) MaxRadius = 5000.f;
+    else if (Species == FName("Brachiosaurus")) MaxRadius = 4000.f;
 
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-
-    float Dist = FVector::Dist(PlayerPawn->GetActorLocation(), Owner->GetActorLocation());
-
-    // Calculate target volume based on distance
-    if (Dist <= ZoneRadius - FadeDistance)
+    if (Distance < MaxRadius)
     {
-        TargetVolume = 1.0f;
-        if (!bPlayerInZone)
-        {
-            bPlayerInZone = true;
-            OnPlayerEnteredZone.Broadcast();
-        }
+        float ShakeScale = FMath::Clamp(1.0f - (Distance / MaxRadius), 0.1f, 1.0f);
+        // Camera shake class would be assigned via Blueprint — log for now
+        UE_LOG(LogTemp, Log, TEXT("AudioSystem: Screen shake — Species: %s, Distance: %.0f, Scale: %.2f"),
+            *Species.ToString(), Distance, ShakeScale);
     }
-    else if (Dist <= ZoneRadius)
+}
+
+void AAudio_SystemManager::CrossfadeToNewAmbient(USoundCue* NewAmbient, float Duration)
+{
+    if (!NewAmbient) return;
+
+    // Fade out existing ambient
+    if (ActiveAmbientComponent && ActiveAmbientComponent->IsPlaying())
     {
-        float FadeAlpha = 1.0f - ((Dist - (ZoneRadius - FadeDistance)) / FadeDistance);
-        TargetVolume = FMath::Clamp(FadeAlpha, 0.0f, 1.0f);
-    }
-    else
-    {
-        TargetVolume = 0.0f;
-        if (bPlayerInZone)
-        {
-            bPlayerInZone = false;
-            OnPlayerExitedZone.Broadcast();
-        }
+        ActiveAmbientComponent->FadeOut(Duration * 0.5f, 0.f);
     }
 
-    // Smooth volume blend
-    CurrentVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, VolumeBlendSpeed);
+    // Spawn new ambient component
+    ActiveAmbientComponent = UGameplayStatics::SpawnSoundAtLocation(
+        GetWorld(), NewAmbient, GetActorLocation(), FRotator::ZeroRotator,
+        1.0f, 1.0f, Duration * 0.5f
+    );
+}
 
-    if (ActiveAmbientComponent)
-    {
-        ActiveAmbientComponent->SetVolumeMultiplier(CurrentVolume);
-    }
+void AAudio_SystemManager::UpdateDinosaurAwareness(float DeltaTime)
+{
+    // Scan for dinosaur pawns and update adaptive music
+    // This is called from Tick — lightweight scan every 0.5s via timer in production
+    // For now, log system is active
 }
