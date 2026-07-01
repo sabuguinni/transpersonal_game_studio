@@ -4,23 +4,35 @@
 #include "Components/ActorComponent.h"
 #include "CraftingSystem.generated.h"
 
-// ─── Resource Types ───────────────────────────────────────────────────────────
+// ─── Enums (global scope — RULE 1) ───────────────────────────────────────────
+
 UENUM(BlueprintType)
 enum class EQuest_ResourceType : uint8
 {
-    None      UMETA(DisplayName = "None"),
-    Stone     UMETA(DisplayName = "Stone"),
-    Stick     UMETA(DisplayName = "Stick"),
-    Leaf      UMETA(DisplayName = "Leaf"),
-    Bone      UMETA(DisplayName = "Bone"),
-    Hide      UMETA(DisplayName = "Hide"),
-    Flint     UMETA(DisplayName = "Flint"),
-    Vine      UMETA(DisplayName = "Vine")
+    None        UMETA(DisplayName = "None"),
+    Stone       UMETA(DisplayName = "Stone"),
+    Stick       UMETA(DisplayName = "Stick"),
+    Leaf        UMETA(DisplayName = "Leaf"),
+    Bone        UMETA(DisplayName = "Bone"),
+    Hide        UMETA(DisplayName = "Hide"),
+    Flint       UMETA(DisplayName = "Flint"),
+    Vine        UMETA(DisplayName = "Vine"),
+    Feather     UMETA(DisplayName = "Feather")
 };
 
-// ─── Crafting Ingredient ──────────────────────────────────────────────────────
+UENUM(BlueprintType)
+enum class EQuest_CraftResult : uint8
+{
+    Success             UMETA(DisplayName = "Success"),
+    InsufficientItems   UMETA(DisplayName = "InsufficientItems"),
+    RecipeNotFound      UMETA(DisplayName = "RecipeNotFound"),
+    InventoryFull       UMETA(DisplayName = "InventoryFull")
+};
+
+// ─── Structs (global scope — RULE 1) ─────────────────────────────────────────
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CraftingIngredient
+struct FQuest_CraftingIngredient
 {
     GENERATED_BODY()
 
@@ -31,9 +43,8 @@ struct TRANSPERSONALGAME_API FQuest_CraftingIngredient
     int32 Quantity = 1;
 };
 
-// ─── Crafting Recipe ──────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CraftingRecipe
+struct FQuest_CraftingRecipe
 {
     GENERATED_BODY()
 
@@ -50,15 +61,17 @@ struct TRANSPERSONALGAME_API FQuest_CraftingRecipe
     FName OutputItemID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
+    int32 OutputQuantity = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
     float CraftTimeSeconds = 3.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting")
-    bool bUnlockedByDefault = true;
+    FText Description;
 };
 
-// ─── Inventory Slot ───────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_InventorySlot
+struct FQuest_InventorySlot
 {
     GENERATED_BODY()
 
@@ -66,27 +79,33 @@ struct TRANSPERSONALGAME_API FQuest_InventorySlot
     EQuest_ResourceType ResourceType = EQuest_ResourceType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-    int32 Count = 0;
+    int32 Quantity = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    FName ItemID;
 };
 
-// ─── Craft Result ─────────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CraftResult
+struct FQuest_CraftResultData
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Crafting")
-    bool bSuccess = false;
+    EQuest_CraftResult Result = EQuest_CraftResult::RecipeNotFound;
 
     UPROPERTY(BlueprintReadOnly, Category = "Crafting")
     FName OutputItemID;
 
     UPROPERTY(BlueprintReadOnly, Category = "Crafting")
-    FText FailReason;
+    int32 OutputQuantity = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crafting")
+    FText ResultMessage;
 };
 
-// ─── Crafting System Component ────────────────────────────────────────────────
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+UCLASS(ClassGroup = (Quest), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCraftingSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -94,69 +113,97 @@ class TRANSPERSONALGAME_API UCraftingSystem : public UActorComponent
 public:
     UCraftingSystem();
 
+    // Lifecycle
     virtual void BeginPlay() override;
 
-    // ── Inventory ──────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Crafting|Inventory")
-    void AddResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
-
-    UFUNCTION(BlueprintCallable, Category = "Crafting|Inventory")
-    bool RemoveResource(EQuest_ResourceType ResourceType, int32 Amount = 1);
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting|Inventory")
-    int32 GetResourceCount(EQuest_ResourceType ResourceType) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting|Inventory")
-    TArray<FQuest_InventorySlot> GetInventory() const;
-
-    // ── Recipes ────────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Crafting|Recipes")
-    void InitializeDefaultRecipes();
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting|Recipes")
-    TArray<FQuest_CraftingRecipe> GetAvailableRecipes() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting|Recipes")
-    bool CanCraft(FName RecipeID) const;
+    // ── Recipe Management ──────────────────────────────────────────────────
 
     UFUNCTION(BlueprintCallable, Category = "Crafting")
-    FQuest_CraftResult TryCraft(FName RecipeID);
+    void InitializeDefaultRecipes();
 
-    // ── UI Trigger ─────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Crafting|UI")
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    bool AddRecipe(const FQuest_CraftingRecipe& Recipe);
+
+    UFUNCTION(BlueprintPure, Category = "Crafting")
+    bool GetRecipe(FName RecipeID, FQuest_CraftingRecipe& OutRecipe) const;
+
+    UFUNCTION(BlueprintPure, Category = "Crafting")
+    TArray<FQuest_CraftingRecipe> GetAllRecipes() const;
+
+    UFUNCTION(BlueprintPure, Category = "Crafting")
+    TArray<FQuest_CraftingRecipe> GetAvailableRecipes() const;
+
+    // ── Inventory ──────────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool AddResource(EQuest_ResourceType Type, int32 Amount = 1);
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool RemoveResource(EQuest_ResourceType Type, int32 Amount = 1);
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    int32 GetResourceCount(EQuest_ResourceType Type) const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    TArray<FQuest_InventorySlot> GetInventory() const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    bool HasIngredients(FName RecipeID) const;
+
+    // ── Crafting ───────────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
+    FQuest_CraftResultData TryCraft(FName RecipeID);
+
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
     void OpenCraftingMenu();
 
-    UFUNCTION(BlueprintCallable, Category = "Crafting|UI")
+    UFUNCTION(BlueprintCallable, Category = "Crafting")
     void CloseCraftingMenu();
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crafting|UI")
+    UFUNCTION(BlueprintPure, Category = "Crafting")
     bool IsCraftingMenuOpen() const { return bCraftingMenuOpen; }
 
-    // ── Delegates ──────────────────────────────────────────────────────────
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnItemCrafted, FName, ItemID);
-    UPROPERTY(BlueprintAssignable, Category = "Crafting|Events")
-    FOnItemCrafted OnItemCrafted;
+    // ── Delegates ─────────────────────────────────────────────────────────
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryChanged, EQuest_ResourceType, ChangedResource);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCraftSuccess, FQuest_CraftResultData, Result);
     UPROPERTY(BlueprintAssignable, Category = "Crafting|Events")
-    FOnInventoryChanged OnInventoryChanged;
+    FOnCraftSuccess OnCraftSuccess;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCraftingMenuToggled, bool, bIsOpen);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCraftFailed, EQuest_CraftResult, Reason);
+    UPROPERTY(BlueprintAssignable, Category = "Crafting|Events")
+    FOnCraftFailed OnCraftFailed;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnResourceChanged, EQuest_ResourceType, Type, int32, NewCount);
+    UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
+    FOnResourceChanged OnResourceChanged;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneBoolParam(FOnCraftingMenuToggled, bool, bIsOpen);
     UPROPERTY(BlueprintAssignable, Category = "Crafting|Events")
     FOnCraftingMenuToggled OnCraftingMenuToggled;
 
+    // ── Config ────────────────────────────────────────────────────────────
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting|Config")
+    int32 MaxInventorySlots = 20;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting|Config")
+    int32 MaxStackSize = 99;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crafting|Config")
+    bool bRequireProximityToCampfire = false;
+
 private:
-    UPROPERTY(VisibleAnywhere, Category = "Crafting|State")
+    UPROPERTY()
+    TMap<FName, FQuest_CraftingRecipe> RecipeMap;
+
+    UPROPERTY()
     TArray<FQuest_InventorySlot> Inventory;
 
-    UPROPERTY(VisibleAnywhere, Category = "Crafting|State")
-    TArray<FQuest_CraftingRecipe> Recipes;
-
-    UPROPERTY(VisibleAnywhere, Category = "Crafting|State")
+    UPROPERTY()
     bool bCraftingMenuOpen = false;
 
     // Internal helpers
-    FQuest_InventorySlot* FindSlot(EQuest_ResourceType ResourceType);
-    const FQuest_InventorySlot* FindSlotConst(EQuest_ResourceType ResourceType) const;
-    const FQuest_CraftingRecipe* FindRecipe(FName RecipeID) const;
+    int32 FindInventorySlot(EQuest_ResourceType Type) const;
+    bool ConsumeIngredients(const FQuest_CraftingRecipe& Recipe);
 };
