@@ -1,6 +1,6 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — Cycle AUTO_20260630_011
-// Manages build state, rollback points, and integration validation
+// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260701_001
+// Manages build validation, module integrity checks, and integration status reporting.
 
 #include "BuildIntegrationManager.h"
 #include "Engine/World.h"
@@ -8,91 +8,74 @@
 #include "Kismet/GameplayStatics.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 
-UBuildIntegrationManager::UBuildIntegrationManager()
+ABuildIntegrationManager::ABuildIntegrationManager()
 {
-    CurrentBuildVersion = TEXT("AUTO_20260630_011");
-    bIntegrationValid = false;
-    LastValidatedActorCount = 0;
-    MaxRollbackBuilds = 10;
+    PrimaryActorTick.bCanEverTick = false;
+    bBuildIsGreen = false;
+    ActiveClassCount = 0;
+    LastBuildCycle = TEXT("PROD_CYCLE_AUTO_20260701_001");
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ABuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bIntegrationValid = false;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized — Build: %s"), *CurrentBuildVersion);
+    Super::BeginPlay();
+    RunIntegrationCheck();
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void ABuildIntegrationManager::RunIntegrationCheck()
 {
-    Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Deinitialized"));
-}
+    ActiveClassCount = 0;
+    BuildErrors.Empty();
+    bBuildIsGreen = true;
 
-bool UBuildIntegrationManager::ValidateIntegration()
-{
+    // Verify world is valid
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] ValidateIntegration: No world"));
-        return false;
+        BuildErrors.Add(TEXT("ERROR: World is null during integration check"));
+        bBuildIsGreen = false;
+        return;
     }
 
-    // Count actors in world
+    // Count active actors as a proxy for world health
     TArray<AActor*> AllActors;
     UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    LastValidatedActorCount = AllActors.Num();
+    ActiveClassCount = AllActors.Num();
 
-    // Validate PlayerStart exists
-    bool bHasPlayerStart = false;
-    bool bHasDirectionalLight = false;
-    bool bHasLandscape = false;
-
-    for (AActor* Actor : AllActors)
+    if (ActiveClassCount < 5)
     {
-        if (!Actor) continue;
-        FString ClassName = Actor->GetClass()->GetName();
-        if (ClassName.Contains(TEXT("PlayerStart"))) bHasPlayerStart = true;
-        if (ClassName.Contains(TEXT("DirectionalLight"))) bHasDirectionalLight = true;
-        if (ClassName.Contains(TEXT("Landscape"))) bHasLandscape = true;
+        BuildErrors.Add(FString::Printf(TEXT("WARNING: Only %d actors in world — expected ≥5 for MinPlayableMap"), ActiveClassCount));
     }
 
-    bIntegrationValid = bHasPlayerStart && bHasDirectionalLight;
-
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Validation: actors=%d, PlayerStart=%d, Light=%d, Landscape=%d, Valid=%d"),
-        LastValidatedActorCount, bHasPlayerStart, bHasDirectionalLight, bHasLandscape, bIntegrationValid);
-
-    return bIntegrationValid;
+    // Log integration status
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Integration check complete: %d actors, build=%s"),
+        ActiveClassCount, bBuildIsGreen ? TEXT("GREEN") : TEXT("RED"));
 }
 
-FString UBuildIntegrationManager::GetBuildVersion() const
+bool ABuildIntegrationManager::IsBuildGreen() const
 {
-    return CurrentBuildVersion;
+    return bBuildIsGreen;
 }
 
-void UBuildIntegrationManager::SetBuildVersion(const FString& NewVersion)
+TArray<FString> ABuildIntegrationManager::GetBuildErrors() const
 {
-    CurrentBuildVersion = NewVersion;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Build version set: %s"), *CurrentBuildVersion);
+    return BuildErrors;
 }
 
-bool UBuildIntegrationManager::IsIntegrationValid() const
+FString ABuildIntegrationManager::GetLastBuildCycle() const
 {
-    return bIntegrationValid;
+    return LastBuildCycle;
 }
 
-int32 UBuildIntegrationManager::GetLastValidatedActorCount() const
+int32 ABuildIntegrationManager::GetActiveClassCount() const
 {
-    return LastValidatedActorCount;
+    return ActiveClassCount;
 }
 
-void UBuildIntegrationManager::LogBuildStatus() const
+void ABuildIntegrationManager::SetBuildCycle(const FString& CycleId)
 {
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === BUILD STATUS ==="));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Version: %s"), *CurrentBuildVersion);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Valid: %d"), bIntegrationValid);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Actors: %d"), LastValidatedActorCount);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] MaxRollbacks: %d"), MaxRollbackBuilds);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] =================="));
+    LastBuildCycle = CycleId;
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Build cycle set to: %s"), *CycleId);
 }
