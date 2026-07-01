@@ -1,18 +1,22 @@
 // TranspersonalCharacter.h
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260627_009
-// Playable prehistoric survival character — ACharacter subclass with camera, movement, survival stats.
+// Engine Architect #02 — Cycle AUTO_005
+// Prehistoric survival game — player character header
+// Milestone 1: Walk Around — ACharacter subclass with WASD, camera boom, survival stats
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "TimerManager.h"
+#include "InputActionValue.h"
 #include "TranspersonalCharacter.generated.h"
 
+// Forward declarations
 class USpringArmComponent;
 class UCameraComponent;
+class UInputMappingContext;
+class UInputAction;
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(config=Game)
 class TRANSPERSONALGAME_API ATranspersonalCharacter : public ACharacter
 {
     GENERATED_BODY()
@@ -22,10 +26,29 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+        AController* EventInstigator, AActor* DamageCauser) override;
+
+    // ─── Enhanced Input ───────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputMappingContext* DefaultMappingContext;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputAction* MoveAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputAction* LookAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputAction* JumpAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputAction* SprintAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    UInputAction* CrouchAction;
 
     // ─── Camera ───────────────────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
@@ -35,47 +58,37 @@ public:
     UCameraComponent* FollowCamera;
 
     // ─── Survival Stats ───────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Health")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float Health;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Health")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float MaxHealth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Hunger")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float Hunger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Hunger")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float MaxHunger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Thirst")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float Thirst;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Thirst")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float MaxThirst;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Stamina")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float Stamina;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Stamina")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float MaxStamina;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Fear")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float Fear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Fear")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
     float MaxFear;
 
-    // ─── State Flags ──────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsRunning;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsAlive;
-
-    // ─── Stat Drain Rates ─────────────────────────────────────────────────────
+    // ─── Drain Rates ──────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
     float HungerDrainRate;
 
@@ -83,17 +96,45 @@ public:
     float ThirstDrainRate;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
-    float StaminaRecoveryRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
     float StaminaDrainRate;
 
-    // ─── Survival Actions ─────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ApplyDamage(float DamageAmount);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival|Rates")
+    float StaminaRegenRate;
 
+    // ─── Movement ─────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float WalkSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float RunSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float CrouchSpeed;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    bool bIsRunning;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    bool bIsCrouching;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival")
+    bool bIsAlive;
+
+    // ─── Input Handlers ───────────────────────────────────────────────────────
+    void Move(const FInputActionValue& Value);
+    void Look(const FInputActionValue& Value);
+    void StartSprint();
+    void StopSprint();
+    void ToggleCrouch();
+
+    // ─── Internal ─────────────────────────────────────────────────────────────
+    void UpdateSurvivalStats(float DeltaTime);
+    void OnCharacterDied();
+
+public:
+    // ─── Public API ───────────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Survival")
-    void Heal(float HealAmount);
+    void AddFear(float Amount);
 
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void Eat(float NutritionValue);
@@ -101,26 +142,25 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Survival")
     void Drink(float HydrationValue);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void AddFear(float FearAmount);
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    bool IsAlive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void Die();
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetHealthPercent() const;
 
-    // ─── Movement Actions ─────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StartRunning();
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetHungerPercent() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void StopRunning();
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetThirstPercent() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Movement")
-    void ToggleCrouch();
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetStaminaPercent() const;
 
-private:
-    void MoveForward(float Value);
-    void MoveRight(float Value);
-    void TickSurvivalStats();
+    UFUNCTION(BlueprintPure, Category = "Survival")
+    float GetFearPercent() const;
 
-    FTimerHandle SurvivalTimerHandle;
+    // Accessors for camera components (Blueprint-accessible)
+    FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+    FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 };
