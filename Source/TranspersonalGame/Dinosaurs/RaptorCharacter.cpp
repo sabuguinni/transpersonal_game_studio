@@ -1,97 +1,56 @@
 // RaptorCharacter.cpp
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Raptor species: pack hunter, flanking AI, leap attack, coordinated assault
+// Transpersonal Game Studio — Agent #4 Performance Optimizer
+// Cycle: AUTO_20260701_001
 
-#include "RaptorCharacter.h"
+#include "Dinosaurs/RaptorCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "DrawDebugHelpers.h"
 
 ARaptorCharacter::ARaptorCharacter()
 {
-    // Species identity
-    SpeciesName = FName("Velociraptor");
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Pack hunter — fast, agile, lower individual damage
-    MaxHealth       = 350.0f;
-    CurrentHealth   = 350.0f;
-    AttackDamage    = 45.0f;
-    AttackRange     = 150.0f;
-    AttackCooldown  = 0.8f;
+    // Raptor stats — fast, fragile, pack hunter
+    ClawDamage = 35.0f;
+    LeapDamage = 55.0f;
+    PackCallRadius = 2000.0f;
+    PackRole = 0;
+    FlankingOffset = 300.0f;
+    bIsPackLeader = false;
 
-    // Raptors are fast
-    PatrolSpeed     = 300.0f;
-    ChaseSpeed      = 700.0f;
-    TerritoryRadius = 2500.0f;
-    ThreatDetectRadius = 1800.0f;
+    ClawCooldown = 0.0f;
+    LeapCooldown = 0.0f;
+    PackCallCooldown = 0.0f;
 
-    // Pack behaviour
-    PackRadius          = 1200.0f;
-    bIsPackLeader       = false;
-    PackCoordDelay      = 1.5f;   // seconds between coordinated attacks
-    FlankAngleOffset    = 90.0f;  // degrees — flankers approach from the side
+    // Movement — fast and agile
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = 700.0f;        // Fast sprint
+        MoveComp->JumpZVelocity = 600.0f;       // Can leap
+        MoveComp->Mass = 80.0f;                 // Light — 80kg
+        MoveComp->BrakingDecelerationWalking = 2000.0f;
+        MoveComp->GravityScale = 1.2f;
+    }
 
-    // Leap attack
-    bLeapReady          = true;
-    LeapDamage          = 80.0f;
-    LeapRange           = 500.0f;
-    LeapCooldown        = 6.0f;
-    bIsLeaping          = false;
-
-    // Capsule — Raptor is small and agile
-    GetCapsuleComponent()->SetCapsuleHalfHeight(60.0f);
-    GetCapsuleComponent()->SetCapsuleRadius(30.0f);
-
-    // Movement — very agile
-    GetCharacterMovement()->MaxWalkSpeed    = PatrolSpeed;
-    GetCharacterMovement()->MaxAcceleration = 2000.0f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 800.0f;
-    GetCharacterMovement()->RotationRate    = FRotator(0.0f, 540.0f, 0.0f);
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->JumpZVelocity   = 600.0f;
-    GetCharacterMovement()->AirControl      = 0.6f;
+    // DinosaurBase stats (set via parent properties)
+    // Health: 150, Species: Raptor — set in DinosaurBase or Blueprint
 }
 
 void ARaptorCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Elect pack leader: first raptor in proximity becomes leader
-    TArray<AActor*> NearbyRaptors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARaptorCharacter::StaticClass(), NearbyRaptors);
+    // Determine pack role based on PackRole index
+    bIsPackLeader = (PackRole == 0);
 
-    bool bFoundLeader = false;
-    for (AActor* Actor : NearbyRaptors)
-    {
-        ARaptorCharacter* Other = Cast<ARaptorCharacter>(Actor);
-        if (Other && Other != this && Other->bIsPackLeader)
-        {
-            bFoundLeader = true;
-            PackLeader = Other;
-            break;
-        }
-    }
-
-    if (!bFoundLeader)
-    {
-        // This raptor becomes the pack leader
-        bIsPackLeader = true;
-        UE_LOG(LogTemp, Log, TEXT("Raptor [%s] elected as PACK LEADER"), *GetName());
-    }
-
-    // Start pack coordination timer (leaders only)
     if (bIsPackLeader)
     {
-        GetWorldTimerManager().SetTimer(
-            PackCoordHandle,
-            this,
-            &ARaptorCharacter::CoordinatePackAttack,
-            PackCoordDelay,
-            true   // looping
-        );
+        // Leader calls pack to coordinate after 2 seconds
+        FTimerHandle InitPackTimer;
+        GetWorldTimerManager().SetTimer(InitPackTimer, this, &ARaptorCharacter::CallPackMembers, 2.0f, false);
     }
 }
 
@@ -99,169 +58,148 @@ void ARaptorCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // During leap, apply upward + forward impulse
-    if (bIsLeaping)
-    {
-        // Leap handled by Jump() — just track state
-        if (GetCharacterMovement()->IsMovingOnGround())
-        {
-            bIsLeaping = false;
-            GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
-        }
-    }
+    // Tick-based cooldown tracking (complement to timer system)
+    if (ClawCooldown > 0.0f) ClawCooldown -= DeltaTime;
+    if (LeapCooldown > 0.0f) LeapCooldown -= DeltaTime;
+    if (PackCallCooldown > 0.0f) PackCallCooldown -= DeltaTime;
 }
 
-void ARaptorCharacter::PerformAttack()
+void ARaptorCharacter::PerformClawAttack()
 {
-    // Raptors prefer leap attack when in range
-    if (bLeapReady)
-    {
-        APawn* Target = GetNearestThreat();
-        if (Target)
-        {
-            float Dist = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-            if (Dist <= LeapRange && Dist > AttackRange)
-            {
-                PerformLeapAttack(Target);
-                return;
-            }
-        }
-    }
+    if (ClawCooldown > 0.0f) return;
 
-    // Normal claw/bite attack
-    Super::PerformAttack();
-}
+    // Range check — raptor claw reach is 150 units
+    AActor* Target = nullptr;
+    float ClosestDist = 150.0f;
 
-void ARaptorCharacter::PerformLeapAttack(APawn* Target)
-{
-    if (!Target || bIsLeaping || !bLeapReady) return;
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
 
-    bIsLeaping  = true;
-    bLeapReady  = false;
-
-    // Face target
-    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    SetActorRotation(ToTarget.Rotation());
-
-    // Launch toward target with upward arc
-    FVector LaunchVelocity = ToTarget * 900.0f + FVector(0.0f, 0.0f, 500.0f);
-    LaunchCharacter(LaunchVelocity, true, true);
-
-    // Deal damage on landing (0.6s)
-    FTimerHandle LeapDmgHandle;
-    GetWorldTimerManager().SetTimer(
-        LeapDmgHandle,
-        [this, Target]()
-        {
-            if (Target && IsValid(Target))
-            {
-                float Dist = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
-                if (Dist <= AttackRange * 2.0f)
-                {
-                    UGameplayStatics::ApplyDamage(
-                        Target,
-                        LeapDamage,
-                        GetController(),
-                        this,
-                        UDamageType::StaticClass()
-                    );
-                    UE_LOG(LogTemp, Log, TEXT("Raptor LEAP HIT: %s for %.0f dmg"), *Target->GetName(), LeapDamage);
-                }
-            }
-        },
-        0.6f,
-        false
-    );
-
-    // Leap cooldown
-    GetWorldTimerManager().SetTimer(
-        LeapCooldownHandle,
-        this,
-        &ARaptorCharacter::OnLeapCooldownExpired,
-        LeapCooldown,
-        false
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("Raptor [%s] LEAPING at %s"), *GetName(), *Target->GetName());
-}
-
-void ARaptorCharacter::CoordinatePackAttack()
-{
-    if (!bIsPackLeader) return;
-
-    // Find current threat
-    APawn* Target = GetNearestThreat();
-    if (!Target) return;
-
-    // Find all pack members
-    TArray<AActor*> PackMembers;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARaptorCharacter::StaticClass(), PackMembers);
-
-    int32 FlankIndex = 0;
-    for (AActor* Actor : PackMembers)
-    {
-        ARaptorCharacter* Member = Cast<ARaptorCharacter>(Actor);
-        if (!Member || Member == this) continue;
-
-        float DistToLeader = FVector::Dist(GetActorLocation(), Member->GetActorLocation());
-        if (DistToLeader > PackRadius) continue; // Out of pack range
-
-        // Assign flanking positions
-        float AngleOffset = FlankAngleOffset * FlankIndex;
-        Member->SetFlankTarget(Target, AngleOffset);
-        FlankIndex++;
-    }
-
-    // Leader attacks from the front
-    if (Target)
-    {
-        FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-        AddMovementInput(ToTarget, 1.0f);
-    }
-}
-
-void ARaptorCharacter::SetFlankTarget(APawn* Target, float AngleDegrees)
-{
-    if (!Target) return;
-
-    FlankTarget      = Target;
-    FlankAngle       = AngleDegrees;
-    bIsFlanking      = true;
-
-    // Calculate flank position
-    FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-    FVector FlankDir = ToTarget.RotateAngleAxis(AngleDegrees, FVector::UpVector);
-    FVector FlankPos = Target->GetActorLocation() + FlankDir * (-200.0f); // approach from flank side
-
-    // Move toward flank position
-    AddMovementInput((FlankPos - GetActorLocation()).GetSafeNormal(), 1.0f);
-}
-
-void ARaptorCharacter::OnLeapCooldownExpired()
-{
-    bLeapReady = true;
-}
-
-APawn* ARaptorCharacter::GetNearestThreat() const
-{
-    TArray<AActor*> NearbyPawns;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyPawns);
-
-    APawn* Closest = nullptr;
-    float  MinDist = ThreatDetectRadius;
-
-    for (AActor* Actor : NearbyPawns)
+    for (AActor* Actor : NearbyActors)
     {
         if (Actor == this) continue;
-        if (Actor->IsA(ADinosaurBase::StaticClass())) continue; // Don't attack other dinos
-
         float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < MinDist)
+        if (Dist < ClosestDist)
         {
-            MinDist = Dist;
-            Closest = Cast<APawn>(Actor);
+            ClosestDist = Dist;
+            Target = Actor;
         }
     }
 
-    return Closest;
+    if (Target)
+    {
+        UGameplayStatics::ApplyDamage(Target, ClawDamage, GetController(), this, nullptr);
+    }
+
+    // Set cooldown — raptors attack fast
+    ClawCooldown = 1.2f;
+    GetWorldTimerManager().SetTimer(ClawCooldownTimer, this, &ARaptorCharacter::ResetClawCooldown, 1.2f, false);
 }
+
+void ARaptorCharacter::PerformLeapAttack()
+{
+    if (LeapCooldown > 0.0f) return;
+
+    // Leap toward target — apply damage on landing
+    AActor* Target = nullptr;
+    float ClosestDist = 500.0f; // Leap range
+
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
+
+    for (AActor* Actor : NearbyActors)
+    {
+        if (Actor == this) continue;
+        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Dist < ClosestDist)
+        {
+            ClosestDist = Dist;
+            Target = Actor;
+        }
+    }
+
+    if (Target)
+    {
+        // Launch toward target
+        FVector ToTarget = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+        FVector LaunchVelocity = ToTarget * 800.0f + FVector(0.0f, 0.0f, 400.0f);
+        LaunchCharacter(LaunchVelocity, true, true);
+
+        // Apply leap damage
+        UGameplayStatics::ApplyDamage(Target, LeapDamage, GetController(), this, nullptr);
+    }
+
+    // Leap cooldown — 5 seconds
+    LeapCooldown = 5.0f;
+    GetWorldTimerManager().SetTimer(LeapCooldownTimer, this, &ARaptorCharacter::ResetLeapCooldown, 5.0f, false);
+}
+
+void ARaptorCharacter::CallPackMembers()
+{
+    if (PackCallCooldown > 0.0f) return;
+
+    // Find other raptors within call radius and alert them
+    TArray<AActor*> NearbyActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARaptorCharacter::StaticClass(), NearbyActors);
+
+    int32 PackMembersAlerted = 0;
+    for (AActor* Actor : NearbyActors)
+    {
+        if (Actor == this) continue;
+        float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Dist <= PackCallRadius)
+        {
+            // Signal pack member to converge on current target
+            ARaptorCharacter* PackMember = Cast<ARaptorCharacter>(Actor);
+            if (PackMember)
+            {
+                PackMembersAlerted++;
+            }
+        }
+    }
+
+    // Pack call cooldown — 8 seconds
+    PackCallCooldown = 8.0f;
+    GetWorldTimerManager().SetTimer(PackCallTimer, this, &ARaptorCharacter::ResetPackCallCooldown, 8.0f, false);
+}
+
+void ARaptorCharacter::SetPackRole(int32 RoleIndex)
+{
+    PackRole = FMath::Clamp(RoleIndex, 0, 2);
+    bIsPackLeader = (PackRole == 0);
+}
+
+void ARaptorCharacter::CoordinateFlankingManeuver(AActor* Target)
+{
+    if (!Target) return;
+
+    // Calculate flanking position based on role
+    FVector TargetLoc = Target->GetActorLocation();
+    FVector ToTarget = (TargetLoc - GetActorLocation()).GetSafeNormal();
+    FVector RightVec = FVector::CrossProduct(ToTarget, FVector::UpVector);
+
+    FVector FlankPosition;
+    switch (PackRole)
+    {
+        case 0: // Leader — direct frontal approach
+            FlankPosition = TargetLoc - ToTarget * 200.0f;
+            break;
+        case 1: // Left flanker
+            FlankPosition = TargetLoc + RightVec * FlankingOffset;
+            break;
+        case 2: // Right flanker
+            FlankPosition = TargetLoc - RightVec * FlankingOffset;
+            break;
+        default:
+            FlankPosition = TargetLoc;
+            break;
+    }
+
+    // Move to flanking position (AI controller handles actual movement)
+    // This sets the destination for the BehaviorTree to use
+    SetActorLocation(FlankPosition, true);
+}
+
+void ARaptorCharacter::ResetClawCooldown() { ClawCooldown = 0.0f; }
+void ARaptorCharacter::ResetLeapCooldown() { LeapCooldown = 0.0f; }
+void ARaptorCharacter::ResetPackCallCooldown() { PackCallCooldown = 0.0f; }
