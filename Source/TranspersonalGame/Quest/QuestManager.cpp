@@ -1,175 +1,183 @@
+// QuestManager.cpp
+// Transpersonal Game Studio — Agent #4 Performance Optimizer
+// Tutorial quest system: "Find Water" — player walks to water source at (8000,0,0)
+// Optimized: event-driven, no per-frame polling
+
 #include "QuestManager.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
 
-AQuestManager::AQuestManager()
+UQuestManager::UQuestManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    TutorialWaterSourceLocation = FVector(8000.0f, 0.0f, 50.0f);
-    ProximityCheckInterval = 0.5f;
-    TimeSinceLastProximityCheck = 0.0f;
-    CurrentObjectiveText = TEXT("Survive the prehistoric world.");
+    ActiveQuestIndex = -1;
+    bTutorialComplete = false;
 }
 
-void AQuestManager::BeginPlay()
+void UQuestManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    // Auto-start tutorial quest on begin play
-    StartTutorialQuest_FindWater();
+    Super::Initialize(Collection);
+
+    // Register tutorial quests on startup
+    RegisterTutorialQuests();
+
+    // Auto-start first quest
+    StartQuest(0);
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager initialized — Tutorial quest active: %s"),
+        ActiveQuestIndex >= 0 ? *Quests[ActiveQuestIndex].QuestName : TEXT("NONE"));
 }
 
-void AQuestManager::Tick(float DeltaTime)
+void UQuestManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    Quests.Empty();
+    Super::Deinitialize();
+}
 
-    TimeSinceLastProximityCheck += DeltaTime;
-    if (TimeSinceLastProximityCheck >= ProximityCheckInterval)
+void UQuestManager::RegisterTutorialQuests()
+{
+    // Quest 0: Find Water
+    FPerf_QuestData FindWater;
+    FindWater.QuestID = 0;
+    FindWater.QuestName = TEXT("Find Water");
+    FindWater.Description = TEXT("You are thirsty. Find a water source to survive.");
+    FindWater.ObjectiveText = TEXT("Reach the water source to the east.");
+    FindWater.State = EPerf_QuestState::NotStarted;
+    FindWater.TargetLocation = FVector(8000.0f, 0.0f, 50.0f);
+    FindWater.CompletionRadius = 500.0f;
+    FindWater.bHasLocationObjective = true;
+    Quests.Add(FindWater);
+
+    // Quest 1: Find Food
+    FPerf_QuestData FindFood;
+    FindFood.QuestID = 1;
+    FindFood.QuestName = TEXT("Find Food");
+    FindFood.Description = TEXT("You are hungry. Find something to eat.");
+    FindFood.ObjectiveText = TEXT("Gather berries or hunt small prey.");
+    FindFood.State = EPerf_QuestState::NotStarted;
+    FindFood.bHasLocationObjective = false;
+    Quests.Add(FindFood);
+
+    // Quest 2: Survive the Night
+    FPerf_QuestData SurviveNight;
+    SurviveNight.QuestID = 2;
+    SurviveNight.QuestName = TEXT("Survive the Night");
+    SurviveNight.Description = TEXT("Darkness brings danger. Find shelter before nightfall.");
+    SurviveNight.ObjectiveText = TEXT("Find or build a shelter before night.");
+    SurviveNight.State = EPerf_QuestState::NotStarted;
+    SurviveNight.bHasLocationObjective = false;
+    Quests.Add(SurviveNight);
+
+    UE_LOG(LogTemp, Log, TEXT("QuestManager: Registered %d tutorial quests"), Quests.Num());
+}
+
+void UQuestManager::StartQuest(int32 QuestIndex)
+{
+    if (!Quests.IsValidIndex(QuestIndex)) return;
+
+    FPerf_QuestData& Quest = Quests[QuestIndex];
+    if (Quest.State != EPerf_QuestState::NotStarted) return;
+
+    Quest.State = EPerf_QuestState::Active;
+    ActiveQuestIndex = QuestIndex;
+
+    OnQuestStarted.Broadcast(Quest);
+    UE_LOG(LogTemp, Log, TEXT("Quest started: %s — %s"), *Quest.QuestName, *Quest.ObjectiveText);
+}
+
+void UQuestManager::CompleteQuest(int32 QuestID)
+{
+    for (FPerf_QuestData& Quest : Quests)
     {
-        TimeSinceLastProximityCheck = 0.0f;
-        // Check player location for proximity
-        if (GetWorld())
+        if (Quest.QuestID == QuestID && Quest.State == EPerf_QuestState::Active)
         {
-            APlayerController* PC = GetWorld()->GetFirstPlayerController();
-            if (PC && PC->GetPawn())
+            Quest.State = EPerf_QuestState::Completed;
+            OnQuestCompleted.Broadcast(Quest);
+            UE_LOG(LogTemp, Log, TEXT("Quest COMPLETED: %s"), *Quest.QuestName);
+
+            // Auto-start next quest
+            int32 NextIndex = QuestID + 1;
+            if (Quests.IsValidIndex(NextIndex))
             {
-                CheckQuestProximity(PC->GetPawn()->GetActorLocation());
+                StartQuest(NextIndex);
             }
-        }
-    }
-}
-
-void AQuestManager::StartTutorialQuest_FindWater()
-{
-    FPerf_QuestData TutorialQuest;
-    TutorialQuest.QuestID = TEXT("TUTORIAL_FIND_WATER");
-    TutorialQuest.QuestTitle = TEXT("Find Water");
-    TutorialQuest.QuestDescription = TEXT("You are thirsty. Find a water source to survive. Follow the sound of water.");
-    TutorialQuest.QuestType = EPerf_QuestType::Tutorial;
-    TutorialQuest.QuestState = EPerf_QuestState::Active;
-
-    // Objective 1: Reach the water source
-    FPerf_QuestObjective WaterObjective;
-    WaterObjective.ObjectiveText = TEXT("Find a water source (follow the blue light to the north)");
-    WaterObjective.bCompleted = false;
-    WaterObjective.TargetLocation = TutorialWaterSourceLocation;
-    WaterObjective.ProximityRadius = 600.0f;
-    TutorialQuest.Objectives.Add(WaterObjective);
-
-    // Objective 2: Drink water (auto-complete after reaching)
-    FPerf_QuestObjective DrinkObjective;
-    DrinkObjective.ObjectiveText = TEXT("Drink from the water source");
-    DrinkObjective.bCompleted = false;
-    DrinkObjective.TargetLocation = TutorialWaterSourceLocation;
-    DrinkObjective.ProximityRadius = 300.0f;
-    TutorialQuest.Objectives.Add(DrinkObjective);
-
-    ActiveQuests.Add(TutorialQuest);
-    UpdateCurrentObjectiveText();
-
-    UE_LOG(LogTemp, Log, TEXT("QuestManager: Tutorial quest 'Find Water' started. Water at (%.0f, %.0f, %.0f)"),
-        TutorialWaterSourceLocation.X, TutorialWaterSourceLocation.Y, TutorialWaterSourceLocation.Z);
-}
-
-bool AQuestManager::ActivateQuest(const FString& QuestID)
-{
-    for (FPerf_QuestData& Quest : ActiveQuests)
-    {
-        if (Quest.QuestID == QuestID && Quest.QuestState == EPerf_QuestState::Inactive)
-        {
-            Quest.QuestState = EPerf_QuestState::Active;
-            UpdateCurrentObjectiveText();
-            UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' activated"), *QuestID);
-            return true;
-        }
-    }
-    return false;
-}
-
-bool AQuestManager::CompleteObjective(const FString& QuestID, int32 ObjectiveIndex)
-{
-    for (FPerf_QuestData& Quest : ActiveQuests)
-    {
-        if (Quest.QuestID == QuestID && Quest.QuestState == EPerf_QuestState::Active)
-        {
-            if (Quest.Objectives.IsValidIndex(ObjectiveIndex))
+            else
             {
-                Quest.Objectives[ObjectiveIndex].bCompleted = true;
-                UE_LOG(LogTemp, Log, TEXT("QuestManager: Objective %d completed for quest '%s'"), ObjectiveIndex, *QuestID);
-
-                // Check if all objectives complete
-                bool bAllComplete = true;
-                for (const FPerf_QuestObjective& Obj : Quest.Objectives)
-                {
-                    if (!Obj.bCompleted)
-                    {
-                        bAllComplete = false;
-                        break;
-                    }
-                }
-
-                if (bAllComplete)
-                {
-                    Quest.QuestState = EPerf_QuestState::Completed;
-                    CompletedQuests.Add(Quest);
-                    ActiveQuests.Remove(Quest);
-                    UE_LOG(LogTemp, Log, TEXT("QuestManager: Quest '%s' COMPLETED!"), *QuestID);
-                }
-
-                UpdateCurrentObjectiveText();
-                return true;
+                bTutorialComplete = true;
+                UE_LOG(LogTemp, Log, TEXT("Tutorial sequence COMPLETE"));
             }
+            return;
         }
     }
-    return false;
 }
 
-void AQuestManager::CheckQuestProximity(FVector PlayerLocation)
+void UQuestManager::FailQuest(int32 QuestID)
 {
-    for (FPerf_QuestData& Quest : ActiveQuests)
+    for (FPerf_QuestData& Quest : Quests)
     {
-        if (Quest.QuestState != EPerf_QuestState::Active) continue;
-
-        for (int32 i = 0; i < Quest.Objectives.Num(); i++)
+        if (Quest.QuestID == QuestID && Quest.State == EPerf_QuestState::Active)
         {
-            FPerf_QuestObjective& Obj = Quest.Objectives[i];
-            if (Obj.bCompleted) continue;
-
-            float Distance = FVector::Dist(PlayerLocation, Obj.TargetLocation);
-            if (Distance <= Obj.ProximityRadius)
-            {
-                CompleteObjective(Quest.QuestID, i);
-                break; // Complete one at a time
-            }
+            Quest.State = EPerf_QuestState::Failed;
+            OnQuestFailed.Broadcast(Quest);
+            UE_LOG(LogTemp, Log, TEXT("Quest FAILED: %s"), *Quest.QuestName);
+            return;
         }
     }
 }
 
-int32 AQuestManager::GetActiveQuestCount() const
+void UQuestManager::CheckLocationObjective(FVector PlayerLocation)
 {
-    int32 Count = 0;
-    for (const FPerf_QuestData& Quest : ActiveQuests)
+    if (!Quests.IsValidIndex(ActiveQuestIndex)) return;
+
+    FPerf_QuestData& Quest = Quests[ActiveQuestIndex];
+    if (Quest.State != EPerf_QuestState::Active) return;
+    if (!Quest.bHasLocationObjective) return;
+
+    float DistSq = FVector::DistSquared(PlayerLocation, Quest.TargetLocation);
+    float RadiusSq = Quest.CompletionRadius * Quest.CompletionRadius;
+
+    if (DistSq <= RadiusSq)
     {
-        if (Quest.QuestState == EPerf_QuestState::Active) Count++;
+        CompleteQuest(Quest.QuestID);
     }
-    return Count;
 }
 
-void AQuestManager::UpdateCurrentObjectiveText()
+void UQuestManager::OnPlayerDrankWater()
 {
-    for (const FPerf_QuestData& Quest : ActiveQuests)
+    // Called by SurvivalComponent::OnWaterConsumed
+    // Completes "Find Water" quest if active
+    if (Quests.IsValidIndex(ActiveQuestIndex) &&
+        Quests[ActiveQuestIndex].QuestID == 0 &&
+        Quests[ActiveQuestIndex].State == EPerf_QuestState::Active)
     {
-        if (Quest.QuestState == EPerf_QuestState::Active)
+        CompleteQuest(0);
+    }
+}
+
+FPerf_QuestData UQuestManager::GetActiveQuest() const
+{
+    if (Quests.IsValidIndex(ActiveQuestIndex))
+    {
+        return Quests[ActiveQuestIndex];
+    }
+    return FPerf_QuestData();
+}
+
+bool UQuestManager::HasActiveQuest() const
+{
+    return Quests.IsValidIndex(ActiveQuestIndex) &&
+           Quests[ActiveQuestIndex].State == EPerf_QuestState::Active;
+}
+
+TArray<FPerf_QuestData> UQuestManager::GetCompletedQuests() const
+{
+    TArray<FPerf_QuestData> Completed;
+    for (const FPerf_QuestData& Quest : Quests)
+    {
+        if (Quest.State == EPerf_QuestState::Completed)
         {
-            for (const FPerf_QuestObjective& Obj : Quest.Objectives)
-            {
-                if (!Obj.bCompleted)
-                {
-                    CurrentObjectiveText = FString::Printf(TEXT("[%s] %s"), *Quest.QuestTitle, *Obj.ObjectiveText);
-                    return;
-                }
-            }
+            Completed.Add(Quest);
         }
     }
-    CurrentObjectiveText = TEXT("Explore the prehistoric world. Stay alive.");
+    return Completed;
 }
