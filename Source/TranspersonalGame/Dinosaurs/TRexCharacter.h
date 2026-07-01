@@ -1,7 +1,7 @@
 // TRexCharacter.h
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// T-Rex apex predator character — inherits ADinosaurBase
-// Cycle: PROD_CYCLE_AUTO_20260630_010
+// Transpersonal Game Studio — Core Systems Programmer (#03)
+// Tyrannosaurus Rex — apex predator, 2000 HP, 150 damage per bite
+// Inherits from ADinosaurBase
 
 #pragma once
 
@@ -9,14 +9,7 @@
 #include "Dinosaurs/DinosaurBase.h"
 #include "TRexCharacter.generated.h"
 
-/**
- * ATRexCharacter — Tyrannosaurus Rex apex predator
- * 
- * Stats: MaxHealth=2000, AttackDamage=150, RunSpeed=800
- * Behaviour: Territorial, solitary, ambush predator
- * Special: Roar ability that causes Fear status on nearby players
- */
-UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="T-Rex Character"))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATRexCharacter : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -27,73 +20,75 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── T-Rex Specific Abilities ───────────────────────────────────────────
+    // TRex-specific attack: Bite with massive damage
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void PerformBiteAttack();
 
-    /** Roar ability — causes Fear on nearby players within RoarRadius */
-    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
-    void PerformRoar();
+    // Stomp attack — AoE damage in small radius
+    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
+    void PerformStompAttack();
 
-    /** Stomp attack — AoE damage in front of T-Rex */
-    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
-    void PerformStomp();
+    // Territorial roar that scares smaller dinosaurs
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    void TerritorialRoar();
 
-    /** Bite attack — single target high damage */
-    UFUNCTION(BlueprintCallable, Category="TRex|Abilities")
-    void PerformBite();
+    // TRex charges toward target when health > 50%
+    UFUNCTION(BlueprintCallable, Category = "TRex|Movement")
+    void ChargeTowardTarget(AActor* Target);
 
-    // ─── T-Rex Specific Properties ──────────────────────────────────────────
-
-    /** Radius of roar fear effect (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
-    float RoarRadius;
-
-    /** Fear duration applied to players by roar (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
-    float RoarFearDuration;
-
-    /** Stomp AoE radius (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
-    float StompRadius;
-
-    /** Stomp AoE damage */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
-    float StompDamage;
-
-    /** Cooldown between roars (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Stats")
-    float RoarCooldown;
-
-    /** Whether T-Rex is currently in ambush mode (reduced detection by prey) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="TRex|State")
-    bool bIsAmbushing;
-
-    /** Territory radius — T-Rex will patrol and defend this area (cm) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TRex|Territory")
-    float TerritoryRadius;
-
-    /** Home location for territory patrol */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="TRex|Territory")
-    FVector TerritoryCenter;
+    // Override: TRex is immune to fear (apex predator)
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "TRex|Behavior")
+    bool IsFearless() const;
+    virtual bool IsFearless_Implementation() const;
 
 protected:
-    /** Timer handle for roar cooldown */
-    FTimerHandle RoarCooldownTimer;
+    // Bite cooldown timer
+    FTimerHandle BiteAttackTimer;
 
-    /** Whether roar is on cooldown */
-    bool bRoarOnCooldown;
+    // Stomp cooldown timer
+    FTimerHandle StompAttackTimer;
 
-    /** Last time stomp was performed */
-    float LastStompTime;
+    // Charge state
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
+    bool bIsCharging;
 
-    /** Stomp cooldown (seconds) */
-    float StompCooldown;
+    // Charge speed multiplier (3x normal speed)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
+    float ChargeSpeedMultiplier;
 
-    /** Apply fear effect to a character */
-    void ApplyFearToActor(AActor* Target, float Duration);
+    // Stomp radius (units)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompRadius;
 
-    /** Reset roar cooldown */
-    void ResetRoarCooldown();
+    // Stomp damage
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float StompDamage;
 
-    /** Override base attack to use bite */
-    virtual void PerformAttack() override;
+    // Bite cooldown (seconds)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float BiteCooldown;
+
+    // Territorial radius — TRex defends this zone
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
+    float TerritorialRadius;
+
+    // Home territory center
+    UPROPERTY(BlueprintReadOnly, Category = "TRex|Behavior", meta = (AllowPrivateAccess = "true"))
+    FVector TerritoryCenter;
+
+    // Check if intruder is in territory
+    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
+    bool IsInTerritory(AActor* Actor) const;
+
+    // Reset bite cooldown
+    void ResetBiteCooldown();
+
+    // Reset stomp cooldown
+    void ResetStompCooldown();
+
+    // Called when TRex enters charge state
+    void StartCharge(AActor* Target);
+
+    // Called when charge ends
+    void EndCharge();
 };
