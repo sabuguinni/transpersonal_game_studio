@@ -5,12 +5,11 @@
 #include "VelociraptorDinosaur.generated.h"
 
 /**
- * AVelociraptorDinosaur — Pack hunter, high speed, coordinated ambush attacks.
- * Stats: HP=800, DMG=120, Speed=1200, DetectionRadius=2500, Mass=80
- * Pack behaviour: bIsPackHunter=true, PackRadius=1500u, MaxPackSize=6
- * Abilities: LeapAttack(), FlankTarget(), CallPack()
+ * AVelociraptorDinosaur — Pack hunter, fast ambush predator
+ * Speed: 900 cm/s, Pack coordination, Leap attack
+ * Performance budget: lightweight AI, shared pack state pointer
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Dinosaurs))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVelociraptorDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -18,68 +17,66 @@ class TRANSPERSONALGAME_API AVelociraptorDinosaur : public ADinosaurBase
 public:
     AVelociraptorDinosaur();
 
-    // --- Pack Hunt Abilities ---
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    /** Leap at target — short-range burst (600u), deals 180 DMG on landing */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Abilities")
-    void PerformLeapAttack();
+    // --- Pack Coordination ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    bool bIsPackLeader;
 
-    /** Flank target — circle strafe to attack from the side */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Abilities")
-    void FlankTarget();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    int32 PackID;
 
-    /** Emit pack call — alerts all raptors within PackCallRadius to converge on target */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur|Abilities")
-    void CallPack();
-
-    // --- Pack Configuration ---
-
-    /** Maximum number of raptors that will join this pack */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
-    int32 MaxPackSize;
-
-    /** Radius within which pack members coordinate attacks (units) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
     float PackCoordinationRadius;
 
-    /** Radius of pack call broadcast (units) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
-    float PackCallRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
+    int32 MaxPackSize;
 
-    /** Leap attack damage (separate from base AttackDamage for tuning) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float LeapDamage;
-
-    /** Leap attack range (units) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    // --- Leap Attack ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
     float LeapRange;
 
-    /** Cooldown between leap attacks (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
+    float LeapDamage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
     float LeapCooldown;
 
-    /** Cooldown between pack calls (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Combat")
-    float PackCallCooldown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
+    float LeapImpulseForce;
 
-    /** Is this raptor the pack alpha (leads flanking decisions)? */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur|Pack")
-    bool bIsPackAlpha;
+    // --- Flanking ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Tactics")
+    float FlankingAngle;
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void UpdateBehavior() override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Tactics")
+    bool bIsFlankingTarget;
+
+    // --- State ---
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|State")
+    bool bIsLeaping;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Raptor|State")
+    float LeapCooldownRemaining;
+
+    // --- Abilities ---
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
+    void ExecuteLeapAttack(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
+    void SignalPackToAttack(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Raptor|Tactics")
+    void ExecuteFlankingManeuver(AActor* Target);
+
+    UFUNCTION(BlueprintPure, Category = "Raptor|State")
+    bool CanLeap() const;
+
+    UFUNCTION(BlueprintPure, Category = "Raptor|Pack")
+    bool IsPackLeader() const { return bIsPackLeader; }
 
 private:
-    float LastLeapTime;
-    float LastPackCallTime;
-
-    /** Tracks current flank angle around target */
-    float CurrentFlankAngle;
-
-    /** Perform the actual leap movement and damage application */
-    void ExecuteLeap(AActor* Target);
-
-    /** Find all friendly raptors within PackCallRadius */
-    TArray<AVelociraptorDinosaur*> FindPackMembers() const;
+    void UpdateLeapCooldown(float DeltaTime);
+    void AttemptPackCoordination();
 };
