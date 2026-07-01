@@ -5,28 +5,64 @@
 #include "DinoAnimInstance.generated.h"
 
 UENUM(BlueprintType)
-enum class ENPC_DinoLocomotionState : uint8
+enum class ENPC_DinoLocoState : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Walk        UMETA(DisplayName = "Walk"),
-    Trot        UMETA(DisplayName = "Trot"),
-    Run         UMETA(DisplayName = "Run"),
+    Resting     UMETA(DisplayName = "Resting"),
+    Patrol      UMETA(DisplayName = "Patrol"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Chase       UMETA(DisplayName = "Chase"),
     Attack      UMETA(DisplayName = "Attack"),
-    Feeding     UMETA(DisplayName = "Feeding"),
-    Sleeping    UMETA(DisplayName = "Sleeping"),
+    Feed        UMETA(DisplayName = "Feed"),
+    Roar        UMETA(DisplayName = "Roar"),
     Dead        UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
-enum class ENPC_DinoAlertLevel : uint8
+enum class ENPC_DinoGait : uint8
 {
-    Passive     UMETA(DisplayName = "Passive"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Fleeing     UMETA(DisplayName = "Fleeing")
+    Stationary  UMETA(DisplayName = "Stationary"),
+    Walk        UMETA(DisplayName = "Walk"),
+    Trot        UMETA(DisplayName = "Trot"),
+    Run         UMETA(DisplayName = "Run"),
+    Sprint      UMETA(DisplayName = "Sprint")
 };
 
+USTRUCT(BlueprintType)
+struct FNPC_DinoFootIK
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FVector FootLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FRotator FootRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    float IKAlpha = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    bool bGroundContact = false;
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_DinoLeanData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Lean")
+    float LeanForwardBack = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Lean")
+    float LeanLeftRight = 0.0f;
+};
+
+/**
+ * UDinoAnimInstance
+ * Animation instance for all dinosaur pawns.
+ * Drives locomotion state machine, foot IK terrain adaptation,
+ * directional lean, and attack root motion.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDinoAnimInstance : public UAnimInstance
 {
@@ -38,115 +74,96 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
-    // ── Locomotion ──────────────────────────────────────────────────────────
+    // ── Locomotion ──────────────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float Direction;
+    ENPC_DinoLocoState LocoState = ENPC_DinoLocoState::Resting;
 
     UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    float LeanAngle;
+    ENPC_DinoGait CurrentGait = ENPC_DinoGait::Stationary;
 
     UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    bool bIsMoving;
+    float GroundSpeed = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    bool bIsInAir;
+    float VerticalSpeed = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
-    ENPC_DinoLocomotionState LocomotionState;
+    bool bIsMoving = false;
 
-    // ── Predator States ──────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    bool bIsAttacking;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    bool bIsAttacking = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    bool bIsAlert;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    bool bIsRoaring = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    bool bIsFeeding;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Locomotion")
+    bool bIsDead = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    bool bIsSleeping;
+    // ── Speed thresholds (tunable in editor) ────────────────────
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dino|Thresholds")
+    float WalkSpeed = 150.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    bool bIsFleeing;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dino|Thresholds")
+    float TrotSpeed = 400.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Behavior")
-    ENPC_DinoAlertLevel AlertLevel;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dino|Thresholds")
+    float RunSpeed = 800.0f;
 
-    // ── Pack Dynamics ────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Pack")
-    float PackThreatLevel;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dino|Thresholds")
+    float SprintSpeed = 1400.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Pack")
-    bool bIsPackLeader;
+    // ── Foot IK ─────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FNPC_DinoFootIK FrontLeftFoot;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Pack")
-    int32 NearbyPackMemberCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FNPC_DinoFootIK FrontRightFoot;
 
-    // ── Foot IK ──────────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    FVector LeftFootIKLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FNPC_DinoFootIK RearLeftFoot;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    FVector RightFootIKLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    FNPC_DinoFootIK RearRightFoot;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    FRotator LeftFootIKRotation;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|IK")
+    float PelvisOffset = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    FRotator RightFootIKRotation;
+    // ── Lean ────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Lean")
+    FNPC_DinoLeanData LeanData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    float FootIKAlpha;
+    // ── Head tracking ───────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Head")
+    FRotator HeadAimRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|FootIK")
-    float PelvisOffset;
+    UPROPERTY(BlueprintReadOnly, Category = "Dino|Head")
+    float HeadTrackAlpha = 0.0f;
 
-    // ── Aim / Head Tracking ──────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|AimOffset")
-    float HeadPitch;
+    // ── State setters (called by AI controller) ──────────────────
+    UFUNCTION(BlueprintCallable, Category = "Dino|State")
+    void SetLocoState(ENPC_DinoLocoState NewState);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|AimOffset")
-    float HeadYaw;
+    UFUNCTION(BlueprintCallable, Category = "Dino|State")
+    void SetAttacking(bool bAttacking);
 
-    // ── Damage / Health ──────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Health")
-    float HealthNormalized;
+    UFUNCTION(BlueprintCallable, Category = "Dino|State")
+    void SetRoaring(bool bRoaring);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Health")
-    bool bIsInjured;
+    UFUNCTION(BlueprintCallable, Category = "Dino|State")
+    void SetDead(bool bDead);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Health")
-    bool bIsDead;
-
-    // ── Attack ───────────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Attack")
-    float AttackPhase;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Attack")
-    bool bBiteActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Attack")
-    bool bTailSwipeActive;
-
-    // ── Tail Physics ─────────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Tail")
-    float TailSwingAmount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Dino|Tail")
-    float TailSwingSpeed;
+    UFUNCTION(BlueprintCallable, Category = "Dino|Head")
+    void SetHeadTarget(FVector WorldTarget, float Alpha);
 
 private:
-    UPROPERTY()
-    class APawn* OwnerPawn;
-
-    float PreviousSpeed;
-
-    bool TraceFootIK(FName SocketName, FVector& OutLocation, FRotator& OutRotation);
+    void UpdateGait();
     void UpdateFootIK(float DeltaSeconds);
-    void UpdateLocomotionState();
-    void UpdateTailPhysics(float DeltaSeconds);
+    void UpdateLean(float DeltaSeconds);
+    void UpdateHeadTracking(float DeltaSeconds);
+    FNPC_DinoFootIK TraceFootIK(FName SocketName, float TraceLength = 80.0f);
+
+    FVector PreviousVelocity = FVector::ZeroVector;
+    FVector HeadTargetWorld = FVector::ZeroVector;
+    float LeanInterpSpeed = 6.0f;
+    float HeadInterpSpeed = 4.0f;
 };
