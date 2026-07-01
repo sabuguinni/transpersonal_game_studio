@@ -3,134 +3,135 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
-#include "CollisionQueryParams.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UFootIKComponent::UFootIKComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.016f; // ~60fps
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.0f;
 }
 
 void UFootIKComponent::BeginPlay()
 {
-    Super::BeginPlay();
-
-    // Cache the skeletal mesh from owner character
-    if (ACharacter* OwnerChar = Cast<ACharacter>(GetOwner()))
-    {
-        OwnerMesh = OwnerChar->GetMesh();
-        if (OwnerMesh)
-        {
-            UE_LOG(LogTemp, Log, TEXT("FootIKComponent: Cached SkeletalMesh '%s' on '%s'"),
-                *OwnerMesh->GetName(), *GetOwner()->GetName());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("FootIKComponent: No SkeletalMesh found on owner '%s'"),
-                *GetOwner()->GetName());
-        }
-    }
+	Super::BeginPlay();
+	CurrentIKData = FAnim_FootIKData();
 }
 
 void UFootIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bEnableFootIK || !OwnerMesh)
-    {
-        return;
-    }
-
-    // Get foot bone world locations
-    FVector LeftFootWorld = OwnerMesh->GetBoneLocation(LeftFootBoneName, EBoneSpaces::WorldSpace);
-    FVector RightFootWorld = OwnerMesh->GetBoneLocation(RightFootBoneName, EBoneSpaces::WorldSpace);
-
-    // Trace left foot
-    FVector LeftHitLoc, LeftHitNormal;
-    float TargetLeftOffset = 0.0f;
-    if (TraceFootToGround(LeftFootWorld, LeftHitLoc, LeftHitNormal))
-    {
-        TargetLeftOffset = LeftHitLoc.Z - LeftFootWorld.Z + FootHeight;
-        CurrentIKData.LeftFootLocation = LeftHitLoc;
-        CurrentIKData.LeftFootRotation = FRotator(
-            FMath::RadiansToDegrees(FMath::Atan2(LeftHitNormal.X, LeftHitNormal.Z)),
-            0.0f,
-            FMath::RadiansToDegrees(FMath::Atan2(LeftHitNormal.Y, LeftHitNormal.Z)) * -1.0f
-        );
-    }
-
-    // Trace right foot
-    FVector RightHitLoc, RightHitNormal;
-    float TargetRightOffset = 0.0f;
-    if (TraceFootToGround(RightFootWorld, RightHitLoc, RightHitNormal))
-    {
-        TargetRightOffset = RightHitLoc.Z - RightFootWorld.Z + FootHeight;
-        CurrentIKData.RightFootLocation = RightHitLoc;
-        CurrentIKData.RightFootRotation = FRotator(
-            FMath::RadiansToDegrees(FMath::Atan2(RightHitNormal.X, RightHitNormal.Z)),
-            0.0f,
-            FMath::RadiansToDegrees(FMath::Atan2(RightHitNormal.Y, RightHitNormal.Z)) * -1.0f
-        );
-    }
-
-    // Smooth interpolation
-    CurrentIKData.LeftFootOffset = InterpFootOffset(CurrentIKData.LeftFootOffset, TargetLeftOffset, DeltaTime);
-    CurrentIKData.RightFootOffset = InterpFootOffset(CurrentIKData.RightFootOffset, TargetRightOffset, DeltaTime);
-
-    // Pelvis correction
-    CurrentIKData.PelvisOffset = ComputePelvisOffset(CurrentIKData.LeftFootOffset, CurrentIKData.RightFootOffset);
-
-    // Detect uneven terrain
-    float OffsetDifference = FMath::Abs(CurrentIKData.LeftFootOffset - CurrentIKData.RightFootOffset);
-    CurrentIKData.bIsOnUnevenTerrain = OffsetDifference > 5.0f;
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdateFootIK(DeltaTime);
 }
 
 FAnim_FootIKData UFootIKComponent::GetFootIKData() const
 {
-    return CurrentIKData;
+	return CurrentIKData;
 }
 
-bool UFootIKComponent::TraceFootToGround(const FVector& FootWorldLocation, FVector& OutHitLocation, FVector& OutHitNormal) const
+void UFootIKComponent::UpdateFootIK(float DeltaTime)
 {
-    if (!GetWorld())
-    {
-        return false;
-    }
+	ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+	if (!OwnerCharacter)
+	{
+		return;
+	}
 
-    FVector TraceStart = FootWorldLocation + FVector(0.0f, 0.0f, TraceDistance * 0.5f);
-    FVector TraceEnd = FootWorldLocation - FVector(0.0f, 0.0f, TraceDistance);
+	USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+	if (!MeshComp)
+	{
+		return;
+	}
 
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = false;
+	// Get bone world locations
+	FVector LeftFootWorld = MeshComp->GetBoneLocation(LeftFootBoneName, EBoneSpaces::WorldSpace);
+	FVector RightFootWorld = MeshComp->GetBoneLocation(RightFootBoneName, EBoneSpaces::WorldSpace);
 
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
+	// Trace for each foot
+	FVector LeftHitLoc, LeftHitNormal;
+	FVector RightHitLoc, RightHitNormal;
 
-    if (bHit)
-    {
-        OutHitLocation = HitResult.ImpactPoint;
-        OutHitNormal = HitResult.ImpactNormal;
-        return true;
-    }
+	bool bLeftHit = TraceForFoot(LeftFootWorld, LeftHitLoc, LeftHitNormal);
+	bool bRightHit = TraceForFoot(RightFootWorld, RightHitLoc, RightHitNormal);
 
-    return false;
+	// Calculate offsets
+	float TargetLeftOffset = 0.0f;
+	float TargetRightOffset = 0.0f;
+	FRotator TargetLeftRot = FRotator::ZeroRotator;
+	FRotator TargetRightRot = FRotator::ZeroRotator;
+
+	if (bLeftHit)
+	{
+		TargetLeftOffset = FMath::Clamp(LeftHitLoc.Z - LeftFootWorld.Z, -MaxFootOffset, MaxFootOffset);
+		// Align foot to surface normal
+		FVector Forward = OwnerCharacter->GetActorForwardVector();
+		FVector Right = FVector::CrossProduct(LeftHitNormal, Forward).GetSafeNormal();
+		FVector AdjustedForward = FVector::CrossProduct(Right, LeftHitNormal).GetSafeNormal();
+		TargetLeftRot = UKismetMathLibrary::MakeRotFromXZ(AdjustedForward, LeftHitNormal);
+	}
+
+	if (bRightHit)
+	{
+		TargetRightOffset = FMath::Clamp(RightHitLoc.Z - RightFootWorld.Z, -MaxFootOffset, MaxFootOffset);
+		FVector Forward = OwnerCharacter->GetActorForwardVector();
+		FVector Right = FVector::CrossProduct(RightHitNormal, Forward).GetSafeNormal();
+		FVector AdjustedForward = FVector::CrossProduct(Right, RightHitNormal).GetSafeNormal();
+		TargetRightRot = UKismetMathLibrary::MakeRotFromXZ(AdjustedForward, RightHitNormal);
+	}
+
+	// Interpolate smoothly
+	CurrentIKData.LeftFootOffset = FMath::FInterpTo(CurrentIKData.LeftFootOffset, TargetLeftOffset, DeltaTime, InterpSpeed);
+	CurrentIKData.RightFootOffset = FMath::FInterpTo(CurrentIKData.RightFootOffset, TargetRightOffset, DeltaTime, InterpSpeed);
+	CurrentIKData.LeftFootRotation = FMath::RInterpTo(CurrentIKData.LeftFootRotation, TargetLeftRot, DeltaTime, InterpSpeed);
+	CurrentIKData.RightFootRotation = FMath::RInterpTo(CurrentIKData.RightFootRotation, TargetRightRot, DeltaTime, InterpSpeed);
+
+	// Update pelvis offset
+	float TargetPelvis = CalculatePelvisOffset(CurrentIKData.LeftFootOffset, CurrentIKData.RightFootOffset);
+	CurrentIKData.PelvisOffset = FMath::FInterpTo(CurrentIKData.PelvisOffset, TargetPelvis, DeltaTime, InterpSpeed * 0.5f);
+
+	// Update foot world locations
+	CurrentIKData.LeftFootLocation = LeftFootWorld;
+	CurrentIKData.RightFootLocation = RightFootWorld;
+
+	// Detect uneven terrain
+	float OffsetDiff = FMath::Abs(CurrentIKData.LeftFootOffset - CurrentIKData.RightFootOffset);
+	CurrentIKData.bIsOnUnevenTerrain = OffsetDiff > 5.0f;
 }
 
-float UFootIKComponent::ComputePelvisOffset(float LeftOffset, float RightOffset) const
+bool UFootIKComponent::TraceForFoot(const FVector& FootLocation, FVector& OutHitLocation, FVector& OutHitNormal) const
 {
-    // Pelvis drops to accommodate the lower foot
-    float MinOffset = FMath::Min(LeftOffset, RightOffset);
-    return FMath::Clamp(MinOffset, -30.0f, 0.0f);
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	FVector TraceStart = FootLocation + FVector(0.0f, 0.0f, TraceDistance);
+	FVector TraceEnd = FootLocation - FVector(0.0f, 0.0f, TraceDistance);
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(GetOwner());
+	QueryParams.bTraceComplex = false;
+
+	bool bHit = World->LineTraceSingleByChannel(
+		HitResult,
+		TraceStart,
+		TraceEnd,
+		ECC_Visibility,
+		QueryParams
+	);
+
+	if (bHit)
+	{
+		OutHitLocation = HitResult.ImpactPoint;
+		OutHitNormal = HitResult.ImpactNormal;
+	}
+
+	return bHit;
 }
 
-float UFootIKComponent::InterpFootOffset(float Current, float Target, float DeltaTime) const
+float UFootIKComponent::CalculatePelvisOffset(float LeftOffset, float RightOffset) const
 {
-    return FMath::FInterpTo(Current, Target, DeltaTime, InterpSpeed);
+	// Pelvis drops to the lower foot to prevent stretching
+	return FMath::Min(LeftOffset, RightOffset);
 }
