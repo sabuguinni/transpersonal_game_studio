@@ -4,6 +4,10 @@
 #include "Components/ActorComponent.h"
 #include "NPCBehaviorComponent.generated.h"
 
+// ============================================================
+// ENUMS — must be at global scope (UHT rule)
+// ============================================================
+
 UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
 {
@@ -20,12 +24,16 @@ enum class ENPC_BehaviorState : uint8
 UENUM(BlueprintType)
 enum class ENPC_DinosaurSpecies : uint8
 {
-    TRex            UMETA(DisplayName = "T-Rex"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Pterodactyl     UMETA(DisplayName = "Pterodactyl")
+    TRex         UMETA(DisplayName = "T-Rex"),
+    Raptor       UMETA(DisplayName = "Raptor"),
+    Brachiosaurus UMETA(DisplayName = "Brachiosaurus"),
+    Triceratops  UMETA(DisplayName = "Triceratops"),
+    Pterodactyl  UMETA(DisplayName = "Pterodactyl")
 };
+
+// ============================================================
+// STRUCTS — must be at global scope (UHT rule)
+// ============================================================
 
 USTRUCT(BlueprintType)
 struct FNPC_BehaviorConfig
@@ -42,22 +50,19 @@ struct FNPC_BehaviorConfig
     float AttackRange = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
-    float ChaseSpeed = 800.0f;
+    float PatrolSpeed = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
-    float PatrolSpeed = 300.0f;
+    float ChaseSpeed = 600.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
-    float AttackDamage = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
-    float AttackCooldown = 2.0f;
+    float AttackDamage = 40.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
     bool bIsPackHunter = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
-    float PackAlertRadius = 1000.0f;
+    float MemoryDuration = 15.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -65,83 +70,98 @@ struct FNPC_StimulusMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
     FVector LastKnownPlayerLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    float TimeSinceLastSighting = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
+    float LastSeenTime = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
+    float MemoryAge = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
     float ThreatLevel = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    bool bPlayerDetected = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "NPC|Memory")
-    bool bAlertedByPackMember = false;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
+    bool bIsValid = false;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), BlueprintType)
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+// ============================================================
+// DELEGATE
+// ============================================================
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FNPC_OnBehaviorStateChanged,
+    ENPC_BehaviorState, OldState,
+    ENPC_BehaviorState, NewState
+);
+
+// ============================================================
+// COMPONENT CLASS
+// ============================================================
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent), DisplayName = "NPC Behavior Component")
+class TRANSPERSONALGAME_API UNPC_BehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPC_BehaviorComponent();
 
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // ---- State ----
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
+    ENPC_BehaviorState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Species")
-    ENPC_DinosaurSpecies Species = ENPC_DinosaurSpecies::TRex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
+    ENPC_DinosaurSpecies Species;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Behavior")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Config")
     FNPC_BehaviorConfig BehaviorConfig;
-
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|State", meta = (AllowPrivateAccess = "true"))
-    ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Patrol;
 
     UPROPERTY(BlueprintReadOnly, Category = "NPC|Memory")
     FNPC_StimulusMemory StimulusMemory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC|Patrol")
-    FVector HomeLocation = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly, Category = "NPC|State")
+    bool bIsAlerted;
 
-    UPROPERTY(BlueprintReadOnly, Category = "NPC|Patrol")
-    FVector CurrentPatrolTarget = FVector::ZeroVector;
+    // ---- Events ----
+    UPROPERTY(BlueprintAssignable, Category = "NPC|Events")
+    FNPC_OnBehaviorStateChanged OnBehaviorStateChanged;
+
+    // ---- Blueprint callable ----
+    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
+    void SetSpecies(ENPC_DinosaurSpecies NewSpecies);
 
     UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
+    void ForceState(ENPC_BehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Behavior")
-    ENPC_BehaviorState GetCurrentState() const { return CurrentState; }
+    UFUNCTION(BlueprintPure, Category = "NPC|Behavior")
+    FString GetCurrentStateName() const;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC|Detection")
-    bool CanSeePlayer() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Detection")
-    float GetDistanceToPlayer() const;
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Pack")
-    void AlertPackMembers();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Pack")
-    void OnPackAlert(FVector ThreatLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC|Patrol")
-    FVector PickNewPatrolPoint();
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    void UpdateBehaviorLogic(float DeltaTime);
-    void UpdatePatrol(float DeltaTime);
-    void UpdateChase(float DeltaTime);
-    void UpdateAttack(float DeltaTime);
-    void UpdateMemoryDecay(float DeltaTime);
+    FVector PatrolHomeLocation;
+    FVector CurrentPatrolTarget;
+    float AttackCooldown;
+    float StateTimeElapsed;
 
-    float AttackCooldownTimer = 0.0f;
-    float PatrolWaitTimer = 0.0f;
-    float MemoryDecayRate = 0.5f;
+    void ApplySpeciesConfig();
+    void UpdateStateMachine(float DeltaTime);
+    APawn* SensePlayer();
 
-    UPROPERTY()
-    AActor* CachedPlayerActor = nullptr;
+    void UpdateIdle(float DeltaTime, APawn* Player);
+    void UpdatePatrol(float DeltaTime, APawn* Player);
+    void UpdateInvestigate(float DeltaTime, APawn* Player);
+    void UpdateChase(float DeltaTime, APawn* Player);
+    void UpdateAttack(float DeltaTime, APawn* Player);
+    void UpdateFlee(float DeltaTime, APawn* Player);
+    void UpdateGraze(float DeltaTime, APawn* Player);
+    void UpdateSleep(float DeltaTime, APawn* Player);
+
+    void TransitionToState(ENPC_BehaviorState NewState);
+    void PickNewPatrolTarget();
+    void ExecuteAttack(APawn* Target);
 };
