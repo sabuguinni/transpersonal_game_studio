@@ -1,35 +1,42 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Components/SphereComponent.h"
-#include "Sound/SoundBase.h"
+#include "Engine/DataTable.h"
 #include "DialogueSystem.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums & Structs — Narr_ prefix to avoid cross-agent collisions
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueTriggerType : uint8
+enum class ENarr_DialogueState : uint8
 {
-    Proximity       UMETA(DisplayName = "Proximity"),
-    Interaction     UMETA(DisplayName = "Interaction (E key)"),
-    QuestComplete   UMETA(DisplayName = "Quest Complete"),
-    CraftingDone    UMETA(DisplayName = "Crafting Done"),
-    DayNight        UMETA(DisplayName = "Day/Night Transition"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Speaking    UMETA(DisplayName = "Speaking"),
+    Waiting     UMETA(DisplayName = "Waiting for Player"),
+    Finished    UMETA(DisplayName = "Finished")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_SpeakerID : uint8
+enum class ENarr_SpeakerRole : uint8
 {
-    Elder           UMETA(DisplayName = "Elder"),
-    HerdTracker     UMETA(DisplayName = "Herd Tracker"),
-    YoungHunter     UMETA(DisplayName = "Young Hunter"),
-    Narrator        UMETA(DisplayName = "Narrator"),
-    LoreStone       UMETA(DisplayName = "Lore Stone"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Tracker     UMETA(DisplayName = "Tracker"),
+    Crafter     UMETA(DisplayName = "Crafter"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Narrator    UMETA(DisplayName = "Narrator")
 };
+
+UENUM(BlueprintType)
+enum class ENarr_QuestArc : uint8
+{
+    None            UMETA(DisplayName = "None"),
+    FirstTools      UMETA(DisplayName = "First Tools"),
+    RaptorNest      UMETA(DisplayName = "Raptor Nest"),
+    MammothHunt     UMETA(DisplayName = "Mammoth Hunt"),
+    TribeLeader     UMETA(DisplayName = "Tribe Leader")
+};
+
+// ─── Structs ──────────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FNarr_DialogueLine
@@ -37,22 +44,53 @@ struct FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FString LineText;
+    FName LineID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_SpeakerID Speaker = ENarr_SpeakerID::Elder;
+    ENarr_SpeakerRole Speaker;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TSoftObjectPtr<USoundBase> VoiceAudio;
+    FText LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    float DisplayDuration = 5.0f;
+    FString AudioURL;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bRequiresQuestActive = false;
+    float DisplayDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    FName RequiredQuestID = NAME_None;
+    ENarr_QuestArc TriggerArc;
+
+    FNarr_DialogueLine()
+        : LineID(NAME_None)
+        , Speaker(ENarr_SpeakerRole::Narrator)
+        , DisplayDuration(4.0f)
+        , TriggerArc(ENarr_QuestArc::None)
+    {}
+};
+
+USTRUCT(BlueprintType)
+struct FNarr_DialogueChoice
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FText ChoiceText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FName NextNodeID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    bool bUnlocksQuest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_QuestArc UnlockedArc;
+
+    FNarr_DialogueChoice()
+        : NextNodeID(NAME_None)
+        , bUnlocksQuest(false)
+        , UnlockedArc(ENarr_QuestArc::None)
+    {}
 };
 
 USTRUCT(BlueprintType)
@@ -64,49 +102,58 @@ struct FNarr_DialogueNode
     FName NodeID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueLine> Lines;
+    FNarr_DialogueLine Line;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    ENarr_DialogueTriggerType TriggerType = ENarr_DialogueTriggerType::Proximity;
+    TArray<FNarr_DialogueChoice> Choices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    bool bPlayOnce = true;
+    bool bIsEndNode;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    float CooldownSeconds = 30.0f;
+    FNarr_DialogueNode()
+        : NodeID(NAME_None)
+        , bIsEndNode(false)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_LoreEntry
+struct FNarr_DialogueTree
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
-    FName LoreID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FName TreeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
-    FString Title;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_SpeakerRole OwnerRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
-    FString BodyText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    FName RootNodeID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
-    bool bDiscovered = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueNode> Nodes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
+    ENarr_QuestArc RequiredArc;
+
+    FNarr_DialogueTree()
+        : TreeID(NAME_None)
+        , OwnerRole(ENarr_SpeakerRole::Narrator)
+        , RootNodeID(NAME_None)
+        , RequiredArc(ENarr_QuestArc::None)
+    {}
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Delegates
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Delegates ────────────────────────────────────────────────────────────────
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FNarr_OnDialogueStarted, FName, NodeID, ENarr_SpeakerID, Speaker);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueEnded,    FName, NodeID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnLoreDiscovered,   FName, LoreID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueStarted, FName, TreeID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnDialogueLineShown, FNarr_DialogueLine, Line);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FNarr_OnQuestArcUnlocked, ENarr_QuestArc, Arc);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FNarr_OnDialogueEnded);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UDialogueSystem — ActorComponent
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 
-UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent), DisplayName = "Dialogue System")
+UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -114,87 +161,83 @@ class TRANSPERSONALGAME_API UDialogueSystem : public UActorComponent
 public:
     UDialogueSystem();
 
-    // ── Dialogue nodes configured in editor ──────────────────────────────────
+    // ── Dialogue Trees ────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueNode> DialogueNodes;
+    TArray<FNarr_DialogueTree> DialogueTrees;
 
-    // ── Lore entries this actor carries ─────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Lore")
-    TArray<FNarr_LoreEntry> LoreEntries;
+    // ── Active State ──────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    ENarr_DialogueState CurrentState;
 
-    // ── Proximity trigger radius ─────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Trigger", meta = (ClampMin = "50.0", ClampMax = "2000.0"))
-    float ProximityRadius = 300.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    FName ActiveTreeID;
 
-    // ── Currently playing ────────────────────────────────────────────────────
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    bool bIsDialoguePlaying = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    FName ActiveNodeID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    FName ActiveNodeID = NAME_None;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue")
+    TArray<ENarr_QuestArc> UnlockedArcs;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|State")
-    int32 ActiveLineIndex = 0;
-
-    // ── Delegates ────────────────────────────────────────────────────────────
+    // ── Delegates ─────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
     FNarr_OnDialogueStarted OnDialogueStarted;
 
     UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnDialogueEnded OnDialogueEnded;
+    FNarr_OnDialogueLineShown OnDialogueLineShown;
 
     UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
-    FNarr_OnLoreDiscovered OnLoreDiscovered;
+    FNarr_OnQuestArcUnlocked OnQuestArcUnlocked;
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintAssignable, Category = "Narrative|Events")
+    FNarr_OnDialogueEnded OnDialogueEnded;
+
+    // ── Functions ─────────────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void TriggerDialogueNode(FName NodeID);
+    bool StartDialogue(FName TreeID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void AdvanceDialogue();
+    void SelectChoice(int32 ChoiceIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
     void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool IsNodeOnCooldown(FName NodeID) const;
+    bool IsDialogueActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void TriggerProximityCheck(AActor* PlayerActor);
+    FNarr_DialogueNode GetCurrentNode() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Lore")
-    bool DiscoverLoreEntry(FName LoreID);
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    bool HasUnlockedArc(ENarr_QuestArc Arc) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Lore")
-    FNarr_LoreEntry GetLoreEntry(FName LoreID) const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void UnlockArc(ENarr_QuestArc Arc);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Lore")
-    TArray<FNarr_LoreEntry> GetAllDiscoveredLore() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    void RegisterDialogueTree(const FNarr_DialogueTree& Tree);
 
-    // ── Called by CraftingSystem delegate ────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Quest")
-    void OnItemCrafted(FName ItemID);
+    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
+    TArray<FNarr_DialogueChoice> GetCurrentChoices() const;
 
-    // ── Pre-built Elder dialogue setup ───────────────────────────────────────
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Narrative|Setup")
-    void InitializeElderDialogue();
+    // ── Audio URLs (set from TTS generation) ─────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Audio")
+    FString ElderCraftedURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Audio")
+    FString TrackerRaptorURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Audio")
+    FString TrackerMammothURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Audio")
+    FString ElderReturnURL;
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Cooldown tracking: NodeID → world time when last played
-    UPROPERTY()
-    TMap<FName, float> NodeCooldownMap;
-
-    // Nodes played once and done
-    UPROPERTY()
-    TSet<FName> PlayedOnceNodes;
-
-    // Timer handle for auto-advancing lines
-    FTimerHandle LineAdvanceTimer;
-
-    void AdvanceToNextLine();
-    const FNarr_DialogueNode* FindNode(FName NodeID) const;
+    FNarr_DialogueTree* FindTree(FName TreeID);
+    FNarr_DialogueNode* FindNode(FNarr_DialogueTree* Tree, FName NodeID);
+    void ShowNode(FNarr_DialogueNode* Node);
+    void BuildDefaultTrees();
 };
