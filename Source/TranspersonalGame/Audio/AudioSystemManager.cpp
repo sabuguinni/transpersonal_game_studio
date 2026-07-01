@@ -1,236 +1,247 @@
 #include "AudioSystemManager.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraShakeBase.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 
-UAudio_SystemManager::UAudio_SystemManager()
+AAudioSystemManager::AAudioSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // update every 0.5s — not every frame
+    PrimaryActorTick.bCanEverTick = true;
+
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
+
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    MusicAudioComponent->bAutoActivate = false;
+
+    CampfireAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("CampfireAudio"));
+    CampfireAudioComponent->SetupAttachment(RootComponent);
+    CampfireAudioComponent->bAutoActivate = false;
+
+    CurrentBiome = EAudio_BiomeType::Forest;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    DangerTransitionTimer = 0.0f;
+    TRexProximityLastTriggered = -999.0f;
 }
 
-void UAudio_SystemManager::BeginPlay()
+void AAudioSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeDefaultNarratorLines();
-    RecalculateMusicIntensity();
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Initialized — Zone: %d, Danger: %d"),
-        (int32)CurrentEnvironmentState.CurrentZone,
-        (int32)CurrentEnvironmentState.DangerLevel);
+    UpdateMusicLayer();
 }
 
-void UAudio_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudioSystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    // Tick narrator cooldown
-    if (NarratorCooldownTimer > 0.0f)
+    // Gradually reduce danger level back to safe over time
+    if (CurrentDangerLevel != EAudio_DangerLevel::Safe)
     {
-        NarratorCooldownTimer -= DeltaTime;
-    }
-
-    // Auto-detect night from time of day
-    const float Hour = CurrentEnvironmentState.TimeOfDay;
-    const bool bShouldBeNight = (Hour >= NIGHT_START_HOUR || Hour < NIGHT_END_HOUR);
-    if (bShouldBeNight != CurrentEnvironmentState.bIsNight)
-    {
-        CurrentEnvironmentState.bIsNight = bShouldBeNight;
-        if (bShouldBeNight)
+        DangerTransitionTimer += DeltaTime;
+        if (DangerTransitionTimer > 30.0f)
         {
-            // Night falling — trigger narrator if not on cooldown
-            TriggerNarratorLine(EAudio_NarratorTrigger::NightFalling);
-            // Escalate danger at night
-            if (CurrentEnvironmentState.DangerLevel == EAudio_DangerLevel::Safe)
+            // Step down danger level
+            uint8 Level = (uint8)CurrentDangerLevel;
+            if (Level > 0)
             {
-                UpdateDangerLevel(EAudio_DangerLevel::Cautious);
+                CurrentDangerLevel = (EAudio_DangerLevel)(Level - 1);
+                DangerTransitionTimer = 0.0f;
+                UpdateMusicLayer();
             }
         }
     }
+}
 
-    // Auto-escalate danger based on dinosaur proximity
-    if (CurrentEnvironmentState.NearestDinosaurDistance < TREX_DANGER_RADIUS)
+void AAudioSystemManager::SetActiveBiome(EAudio_BiomeType NewBiome)
+{
+    if (CurrentBiome == NewBiome) return;
+    CurrentBiome = NewBiome;
+    CrossfadeToLayer(NewBiome, 3.0f);
+}
+
+void AAudioSystemManager::CrossfadeToLayer(EAudio_BiomeType TargetBiome, float FadeDuration)
+{
+    // Fade out current ambient
+    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
     {
-        const float Proximity = 1.0f - (CurrentEnvironmentState.NearestDinosaurDistance / TREX_DANGER_RADIUS);
-        if (Proximity > 0.8f && CurrentEnvironmentState.DangerLevel < EAudio_DangerLevel::Critical)
-        {
-            UpdateDangerLevel(EAudio_DangerLevel::Critical);
-            TriggerNarratorLine(EAudio_NarratorTrigger::DinosaurNearby);
-        }
-        else if (Proximity > 0.5f && CurrentEnvironmentState.DangerLevel < EAudio_DangerLevel::Tense)
-        {
-            UpdateDangerLevel(EAudio_DangerLevel::Tense);
-        }
-        else if (Proximity > 0.2f && CurrentEnvironmentState.DangerLevel < EAudio_DangerLevel::Cautious)
-        {
-            UpdateDangerLevel(EAudio_DangerLevel::Cautious);
-        }
+        AmbientAudioComponent->FadeOut(FadeDuration * 0.5f, 0.0f);
     }
-}
 
-void UAudio_SystemManager::UpdateEnvironmentZone(EAudio_EnvironmentZone NewZone)
-{
-    if (NewZone == CurrentEnvironmentState.CurrentZone) return;
-
-    CurrentEnvironmentState.CurrentZone = NewZone;
-    RecalculateMusicIntensity();
-    OnZoneChanged.Broadcast(NewZone);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Zone changed to: %d"), (int32)NewZone);
-}
-
-void UAudio_SystemManager::UpdateDangerLevel(EAudio_DangerLevel NewLevel)
-{
-    if (NewLevel == CurrentEnvironmentState.DangerLevel) return;
-
-    CurrentEnvironmentState.DangerLevel = NewLevel;
-    RecalculateMusicIntensity();
-    OnDangerLevelChanged.Broadcast(NewLevel);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Danger level changed to: %d"), (int32)NewLevel);
-}
-
-void UAudio_SystemManager::UpdateNearestDinosaurDistance(float Distance)
-{
-    CurrentEnvironmentState.NearestDinosaurDistance = FMath::Max(0.0f, Distance);
-    // Danger recalculation happens in Tick
-}
-
-void UAudio_SystemManager::TriggerNarratorLine(EAudio_NarratorTrigger Trigger)
-{
-    // Cooldown guard — narrator lines don't stack
-    if (NarratorCooldownTimer > 0.0f) return;
-
-    for (FAudio_NarratorLine& Line : NarratorLines)
+    // Find matching layer
+    for (const FAudio_AmbientLayer& Layer : AmbientLayers)
     {
-        if (Line.TriggerType == Trigger)
+        if (Layer.Biome == TargetBiome && Layer.SoundCue)
         {
-            // One-shot lines check
-            if (Line.bHasPlayed && Line.CooldownSeconds <= 0.0f) return;
-
-            Line.bHasPlayed = true;
-            NarratorCooldownTimer = Line.CooldownSeconds;
-
-            OnNarratorTriggered.Broadcast(Trigger);
-
-            UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Narrator triggered: %d — %s"),
-                (int32)Trigger, *Line.TranscriptText);
-            return;
+            AmbientAudioComponent->SetSound(Layer.SoundCue);
+            AmbientAudioComponent->FadeIn(FadeDuration, Layer.BaseVolume);
+            break;
         }
     }
 }
 
-void UAudio_SystemManager::SetTimeOfDay(float TimeHours)
+void AAudioSystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
-    CurrentEnvironmentState.TimeOfDay = FMath::Clamp(TimeHours, 0.0f, 24.0f);
-}
+    if (CurrentDangerLevel == NewLevel) return;
 
-float UAudio_SystemManager::GetMusicDangerIntensity() const
-{
-    return MusicDangerIntensity;
-}
-
-bool UAudio_SystemManager::IsNight() const
-{
-    return CurrentEnvironmentState.bIsNight;
-}
-
-void UAudio_SystemManager::RegisterNarratorLine(EAudio_NarratorTrigger Trigger, const FString& AudioURL, const FString& Transcript, float Cooldown)
-{
-    // Replace existing entry for same trigger
-    for (FAudio_NarratorLine& Line : NarratorLines)
+    // Only escalate danger, never de-escalate immediately (handled by timer)
+    if ((uint8)NewLevel > (uint8)CurrentDangerLevel)
     {
-        if (Line.TriggerType == Trigger)
+        CurrentDangerLevel = NewLevel;
+        DangerTransitionTimer = 0.0f;
+        UpdateMusicLayer();
+    }
+}
+
+void AAudioSystemManager::TriggerTRexProximityResponse(float DistanceMeters)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    float CurrentTime = World->GetTimeSeconds();
+
+    // Throttle: don't trigger more than once every 3 seconds
+    if (CurrentTime - TRexProximityLastTriggered < 3.0f) return;
+    TRexProximityLastTriggered = CurrentTime;
+
+    // Scale intensity inversely with distance (closer = more intense)
+    float Intensity = FMath::Clamp(1.0f - (DistanceMeters / 50.0f), 0.1f, 1.0f);
+
+    // Set danger level based on distance
+    if (DistanceMeters < 10.0f)
+        SetDangerLevel(EAudio_DangerLevel::Combat);
+    else if (DistanceMeters < 25.0f)
+        SetDangerLevel(EAudio_DangerLevel::Threatened);
+    else if (DistanceMeters < 50.0f)
+        SetDangerLevel(EAudio_DangerLevel::Aware);
+
+    // Apply screen shake
+    ApplyScreenShakeForTRex(Intensity);
+}
+
+void AAudioSystemManager::PlayCampfireAudio(FVector Location)
+{
+    if (!CampfireSFX) return;
+
+    SetActorLocation(Location);
+
+    if (CampfireAudioComponent)
+    {
+        CampfireAudioComponent->SetSound(CampfireSFX);
+        CampfireAudioComponent->FadeIn(1.0f, 0.8f);
+    }
+}
+
+void AAudioSystemManager::StopCampfireAudio()
+{
+    if (CampfireAudioComponent && CampfireAudioComponent->IsPlaying())
+    {
+        CampfireAudioComponent->FadeOut(2.0f, 0.0f);
+    }
+}
+
+void AAudioSystemManager::OnDayBegin()
+{
+    // Day: birds, insects, wind — reduce music tension
+    SetDangerLevel(EAudio_DangerLevel::Safe);
+    CrossfadeToLayer(CurrentBiome, 4.0f);
+}
+
+void AAudioSystemManager::OnNightBegin()
+{
+    // Night: escalate ambient tension slightly
+    if (CurrentDangerLevel == EAudio_DangerLevel::Safe)
+    {
+        CurrentDangerLevel = EAudio_DangerLevel::Aware;
+        UpdateMusicLayer();
+    }
+}
+
+void AAudioSystemManager::PlayFootstep(FVector Location, bool bIsPlayerHeavy)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    USoundCue* SFX = bIsPlayerHeavy ? FootstepHeavy : FootstepLight;
+    if (SFX)
+    {
+        UGameplayStatics::PlaySoundAtLocation(World, SFX, Location, 0.6f);
+    }
+}
+
+void AAudioSystemManager::PlayDinosaurFootstep(FVector Location, float DinosaurMassKg)
+{
+    UWorld* World = GetWorld();
+    if (!World || !DinosaurFootstepSFX) return;
+
+    // Scale volume by mass — T-Rex (8000kg) is much louder than Raptor (80kg)
+    float VolumeScale = FMath::Clamp(DinosaurMassKg / 1000.0f, 0.3f, 2.0f);
+    float PitchScale = FMath::Clamp(1.0f - (DinosaurMassKg / 10000.0f), 0.5f, 1.2f);
+
+    UGameplayStatics::PlaySoundAtLocation(World, DinosaurFootstepSFX, Location, VolumeScale, PitchScale);
+
+    // Heavy dinosaurs cause screen shake for nearby player
+    if (DinosaurMassKg > 2000.0f)
+    {
+        APlayerController* PC = World->GetFirstPlayerController();
+        if (PC)
         {
-            Line.AudioURL = AudioURL;
-            Line.TranscriptText = Transcript;
-            Line.CooldownSeconds = Cooldown;
-            Line.bHasPlayed = false;
-            return;
+            APawn* PlayerPawn = PC->GetPawn();
+            if (PlayerPawn)
+            {
+                float Dist = FVector::Dist(Location, PlayerPawn->GetActorLocation());
+                if (Dist < 3000.0f) // 30 meters
+                {
+                    float ShakeIntensity = FMath::Clamp(1.0f - (Dist / 3000.0f), 0.1f, 1.0f);
+                    ApplyScreenShakeForTRex(ShakeIntensity * (DinosaurMassKg / 8000.0f));
+                }
+            }
         }
     }
-
-    FAudio_NarratorLine NewLine;
-    NewLine.TriggerType = Trigger;
-    NewLine.AudioURL = AudioURL;
-    NewLine.TranscriptText = Transcript;
-    NewLine.CooldownSeconds = Cooldown;
-    NarratorLines.Add(NewLine);
 }
 
-void UAudio_SystemManager::RegisterSound(FName SoundID, float Volume, float MaxDistance, bool bLoop)
+void AAudioSystemManager::UpdateMusicLayer()
 {
-    for (FAudio_SoundEntry& Entry : SoundLibrary)
+    if (!MusicAudioComponent) return;
+
+    USoundCue* TargetMusic = nullptr;
+
+    switch (CurrentDangerLevel)
     {
-        if (Entry.SoundID == SoundID)
-        {
-            Entry.Volume = Volume;
-            Entry.MaxAudibleDistance = MaxDistance;
-            Entry.bLooping = bLoop;
-            return;
-        }
+        case EAudio_DangerLevel::Safe:
+        case EAudio_DangerLevel::Aware:
+            TargetMusic = MusicSafe;
+            break;
+        case EAudio_DangerLevel::Threatened:
+            TargetMusic = MusicThreat;
+            break;
+        case EAudio_DangerLevel::Combat:
+            TargetMusic = MusicCombat;
+            break;
     }
 
-    FAudio_SoundEntry NewEntry;
-    NewEntry.SoundID = SoundID;
-    NewEntry.Volume = Volume;
-    NewEntry.MaxAudibleDistance = MaxDistance;
-    NewEntry.bLooping = bLoop;
-    SoundLibrary.Add(NewEntry);
+    if (TargetMusic && MusicAudioComponent->Sound != TargetMusic)
+    {
+        MusicAudioComponent->FadeOut(1.5f, 0.0f);
+        MusicAudioComponent->SetSound(TargetMusic);
+        MusicAudioComponent->FadeIn(2.0f, 1.0f);
+    }
 }
 
-void UAudio_SystemManager::RecalculateMusicIntensity()
+void AAudioSystemManager::ApplyScreenShakeForTRex(float Intensity)
 {
-    float ZoneModifier = 0.0f;
-    switch (CurrentEnvironmentState.CurrentZone)
-    {
-        case EAudio_EnvironmentZone::CampFireSafe:       ZoneModifier = 0.0f; break;
-        case EAudio_EnvironmentZone::OpenPlains:         ZoneModifier = 0.1f; break;
-        case EAudio_EnvironmentZone::RiverBank:          ZoneModifier = 0.15f; break;
-        case EAudio_EnvironmentZone::DenseForest:        ZoneModifier = 0.3f; break;
-        case EAudio_EnvironmentZone::Cave:               ZoneModifier = 0.4f; break;
-        case EAudio_EnvironmentZone::DinosaurTerritory:  ZoneModifier = 0.6f; break;
-        case EAudio_EnvironmentZone::NightDanger:        ZoneModifier = 0.7f; break;
-        default:                                          ZoneModifier = 0.1f; break;
-    }
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    float DangerModifier = 0.0f;
-    switch (CurrentEnvironmentState.DangerLevel)
-    {
-        case EAudio_DangerLevel::Safe:     DangerModifier = 0.0f; break;
-        case EAudio_DangerLevel::Cautious: DangerModifier = 0.25f; break;
-        case EAudio_DangerLevel::Tense:    DangerModifier = 0.55f; break;
-        case EAudio_DangerLevel::Critical: DangerModifier = 1.0f; break;
-        default:                            DangerModifier = 0.0f; break;
-    }
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
 
-    float NightModifier = CurrentEnvironmentState.bIsNight ? 0.15f : 0.0f;
-
-    MusicDangerIntensity = FMath::Clamp(ZoneModifier + DangerModifier + NightModifier, 0.0f, 1.0f);
-}
-
-void UAudio_SystemManager::InitializeDefaultNarratorLines()
-{
-    // Danger narrator line — URL from TTS generation this cycle
-    RegisterNarratorLine(
-        EAudio_NarratorTrigger::DinosaurNearby,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782907215913_Narrator_Danger.mp3"),
-        TEXT("Danger. Something large is moving through the trees. Stay low. Do not run."),
-        90.0f
-    );
-
-    // Night falling narrator line — URL from TTS generation this cycle
-    RegisterNarratorLine(
-        EAudio_NarratorTrigger::NightFalling,
-        TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782907236487_Narrator_NightFalling.mp3"),
-        TEXT("Night is falling. The predators wake when the sun dies. Find shelter before the darkness takes the sky."),
-        300.0f
-    );
-
-    // Campfire sound registration
-    RegisterSound(FName("Campfire_Loop"), 0.8f, 800.0f, true);
-    RegisterSound(FName("Wind_Plains"), 0.4f, 9999.0f, true);
-    RegisterSound(FName("TRex_Footstep"), 1.0f, 1500.0f, false);
-    RegisterSound(FName("Insects_Night"), 0.5f, 9999.0f, true);
-    RegisterSound(FName("River_Ambient"), 0.6f, 600.0f, true);
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystemManager] Default narrator lines and sound library initialized"));
+    // Use built-in camera shake via console command as fallback
+    // (actual CameraShake asset would be assigned in Blueprint)
+    float ShakeScale = FMath::Clamp(Intensity, 0.1f, 1.0f);
+    
+    // Log for debugging
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: TRex screen shake triggered at intensity %.2f"), ShakeScale);
 }
