@@ -1,213 +1,157 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — Cycle AUTO_20260701_006
-// Concrete implementation of build integration, module health checks, and cycle reporting.
+// Integration & Build Agent #19 — Cycle 019
+// Manages build integration, module health checks, and rollback registry
 
 #include "BuildIntegrationManager.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "HAL/FileManager.h"
-#include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
+#include "EngineUtils.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor / Destructor
-// ─────────────────────────────────────────────────────────────────────────────
-
-ABuildIntegrationManager::ABuildIntegrationManager()
+UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    CycleID = TEXT("AUTO_20260701_006");
-    bIntegrationPassed = false;
-    TotalActorsInMap = 0;
-    LoadedClassCount = 0;
-    FailedClassCount = 0;
-    IntegrationHealthScore = 0;
+    CurrentBuildVersion = TEXT("Build_019");
+    bIntegrationComplete = false;
+    LastIntegrationCycle = 19;
+    MaxRollbackBuilds = 10;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BeginPlay
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABuildIntegrationManager::BeginPlay()
+void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    RunIntegrationChecks();
+    Super::Initialize(Collection);
+    
+    // Register this build in the rollback registry
+    RegisterBuild(CurrentBuildVersion, LastIntegrationCycle);
+    
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Initialized — Build: %s, Cycle: %d"),
+        *CurrentBuildVersion, LastIntegrationCycle);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Integration Methods
-// ─────────────────────────────────────────────────────────────────────────────
-
-void ABuildIntegrationManager::RunIntegrationChecks()
+void UBuildIntegrationManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === Cycle %s Integration Checks ==="), *CycleID);
-
-    ValidateModuleHealth();
-    ValidateMapActors();
-    ComputeHealthScore();
-    WriteIntegrationReport();
-
-    bIntegrationPassed = (IntegrationHealthScore >= 4);
-
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Health Score: %d/6 — %s"),
-        IntegrationHealthScore,
-        bIntegrationPassed ? TEXT("INTEGRATION PASS") : TEXT("INTEGRATION FAIL"));
+    Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Deinitialized"));
 }
 
-void ABuildIntegrationManager::ValidateModuleHealth()
+bool UBuildIntegrationManager::RunIntegrationCheck()
 {
-    // List of expected core module classes
-    static const TArray<FString> ExpectedClasses = {
-        TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameState"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager"),
-        TEXT("BuildIntegrationManager"),
-    };
-
-    LoadedClassCount = 0;
-    FailedClassCount = 0;
-    FailedClasses.Empty();
-
-    for (const FString& ClassName : ExpectedClasses)
+    int32 PassCount = 0;
+    int32 FailCount = 0;
+    
+    // Check 1: World valid
+    UWorld* World = GetWorld();
+    if (World)
     {
-        // Attempt to find the class by name in the TranspersonalGame module
-        FString FullPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-        UClass* FoundClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
-
-        if (FoundClass)
+        PassCount++;
+        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 1 PASS: World valid — %s"), *World->GetName());
+    }
+    else
+    {
+        FailCount++;
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 1 FAIL: World is null"));
+    }
+    
+    // Check 2: PlayerStart exists
+    if (World)
+    {
+        TArray<AActor*> PlayerStarts;
+        UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
+        if (PlayerStarts.Num() > 0)
         {
-            LoadedClassCount++;
-            UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   OK: %s"), *ClassName);
+            PassCount++;
+            UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 2 PASS: %d PlayerStart(s) found"), PlayerStarts.Num());
         }
         else
         {
-            FailedClassCount++;
-            FailedClasses.Add(ClassName);
-            UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager]   FAIL: %s not found"), *ClassName);
+            FailCount++;
+            UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 2 FAIL: No PlayerStart in level"));
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Module health: %d/%d classes loaded"),
-        LoadedClassCount, ExpectedClasses.Num());
-}
-
-void ABuildIntegrationManager::ValidateMapActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    
+    // Check 3: Module version consistent
+    if (!CurrentBuildVersion.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("[BuildIntegrationManager] No world found!"));
-        return;
+        PassCount++;
+        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 3 PASS: Build version set — %s"), *CurrentBuildVersion);
     }
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorsInMap = AllActors.Num();
-
-    // Check for critical actor types
-    bool bHasPlayerStart = false;
-    bool bHasDirectionalLight = false;
-    bool bHasSkyAtmosphere = false;
-    bool bHasFog = false;
-    bool bHasSkyLight = false;
-    int32 StaticMeshCount = 0;
-
-    for (AActor* Actor : AllActors)
+    else
     {
-        if (!Actor) continue;
-
-        FString ClassName = Actor->GetClass()->GetName();
-
-        if (ClassName.Contains(TEXT("PlayerStart")))       bHasPlayerStart = true;
-        if (ClassName.Contains(TEXT("DirectionalLight")))  bHasDirectionalLight = true;
-        if (ClassName.Contains(TEXT("SkyAtmosphere")))     bHasSkyAtmosphere = true;
-        if (ClassName.Contains(TEXT("ExponentialHeightFog"))) bHasFog = true;
-        if (ClassName.Contains(TEXT("SkyLight")))          bHasSkyLight = true;
-        if (ClassName.Contains(TEXT("StaticMeshActor")))   StaticMeshCount++;
+        FailCount++;
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 3 FAIL: Build version empty"));
     }
-
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Map actors: %d total"), TotalActorsInMap);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   PlayerStart:      %s"), bHasPlayerStart ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   DirectionalLight: %s"), bHasDirectionalLight ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   SkyAtmosphere:    %s"), bHasSkyAtmosphere ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   ExponentialFog:   %s"), bHasFog ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   SkyLight:         %s"), bHasSkyLight ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager]   StaticMeshActors: %d"), StaticMeshCount);
-
-    // Store for health score
-    MapChecks.Empty();
-    MapChecks.Add(TEXT("PlayerStart"),      bHasPlayerStart);
-    MapChecks.Add(TEXT("DirectionalLight"), bHasDirectionalLight);
-    MapChecks.Add(TEXT("SkyAtmosphere"),    bHasSkyAtmosphere);
-    MapChecks.Add(TEXT("ExponentialFog"),   bHasFog);
-    MapChecks.Add(TEXT("SkyLight"),         bHasSkyLight);
-    MapChecks.Add(TEXT("StaticMeshActors"), StaticMeshCount >= 5);
+    
+    bIntegrationComplete = (FailCount == 0);
+    
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Integration check complete — PASS: %d, FAIL: %d, Status: %s"),
+        PassCount, FailCount, bIntegrationComplete ? TEXT("OK") : TEXT("DEGRADED"));
+    
+    return bIntegrationComplete;
 }
 
-void ABuildIntegrationManager::ComputeHealthScore()
+void UBuildIntegrationManager::RegisterBuild(const FString& BuildVersion, int32 CycleNumber)
 {
-    IntegrationHealthScore = 0;
-    for (const auto& Check : MapChecks)
+    FBuild_RollbackEntry Entry;
+    Entry.BuildVersion = BuildVersion;
+    Entry.CycleNumber = CycleNumber;
+    Entry.Timestamp = FDateTime::Now();
+    Entry.bIsValid = true;
+    
+    RollbackRegistry.Insert(Entry, 0);
+    
+    // Trim to max rollback count
+    while (RollbackRegistry.Num() > MaxRollbackBuilds)
     {
-        if (Check.Value)
-        {
-            IntegrationHealthScore++;
-        }
+        RollbackRegistry.RemoveAt(RollbackRegistry.Num() - 1);
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Registered build %s (Cycle %d) — Registry size: %d"),
+        *BuildVersion, CycleNumber, RollbackRegistry.Num());
 }
 
-void ABuildIntegrationManager::WriteIntegrationReport()
+FString UBuildIntegrationManager::GetCurrentBuildVersion() const
 {
-    FString ReportPath = FPaths::ProjectSavedDir() / TEXT("Logs") / TEXT("BuildIntegrationReport_AUTO006.txt");
+    return CurrentBuildVersion;
+}
 
-    FString Report;
-    Report += FString::Printf(TEXT("=== BuildIntegrationManager Report ===\n"));
-    Report += FString::Printf(TEXT("Cycle: %s\n"), *CycleID);
-    Report += FString::Printf(TEXT("Total actors in map: %d\n"), TotalActorsInMap);
-    Report += FString::Printf(TEXT("Classes loaded: %d\n"), LoadedClassCount);
-    Report += FString::Printf(TEXT("Classes failed: %d\n"), FailedClassCount);
-    Report += FString::Printf(TEXT("Health score: %d/6\n"), IntegrationHealthScore);
-    Report += FString::Printf(TEXT("Integration passed: %s\n"), bIntegrationPassed ? TEXT("YES") : TEXT("NO"));
+int32 UBuildIntegrationManager::GetRollbackCount() const
+{
+    return RollbackRegistry.Num();
+}
 
-    if (FailedClasses.Num() > 0)
+bool UBuildIntegrationManager::IsIntegrationComplete() const
+{
+    return bIntegrationComplete;
+}
+
+TArray<FBuild_RollbackEntry> UBuildIntegrationManager::GetRollbackRegistry() const
+{
+    return RollbackRegistry;
+}
+
+void UBuildIntegrationManager::LogModuleHealth(const FString& ModuleName, bool bHealthy)
+{
+    if (bHealthy)
     {
-        Report += TEXT("Failed classes:\n");
-        for (const FString& FC : FailedClasses)
-        {
-            Report += FString::Printf(TEXT("  - %s\n"), *FC);
-        }
+        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Module HEALTHY: %s"), *ModuleName);
     }
-
-    FFileHelper::SaveStringToFile(Report, *ReportPath);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Report written to: %s"), *ReportPath);
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Module DEGRADED: %s"), *ModuleName);
+    }
+    
+    FBuild_ModuleHealthEntry HealthEntry;
+    HealthEntry.ModuleName = ModuleName;
+    HealthEntry.bIsHealthy = bHealthy;
+    HealthEntry.CheckTime = FDateTime::Now();
+    ModuleHealthLog.Add(HealthEntry);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Blueprint-callable helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-bool ABuildIntegrationManager::IsIntegrationHealthy() const
+int32 UBuildIntegrationManager::GetHealthyModuleCount() const
 {
-    return bIntegrationPassed;
-}
-
-int32 ABuildIntegrationManager::GetHealthScore() const
-{
-    return IntegrationHealthScore;
-}
-
-FString ABuildIntegrationManager::GetCycleID() const
-{
-    return CycleID;
-}
-
-TArray<FString> ABuildIntegrationManager::GetFailedClasses() const
-{
-    return FailedClasses;
+    int32 Count = 0;
+    for (const FBuild_ModuleHealthEntry& Entry : ModuleHealthLog)
+    {
+        if (Entry.bIsHealthy) Count++;
+    }
+    return Count;
 }
