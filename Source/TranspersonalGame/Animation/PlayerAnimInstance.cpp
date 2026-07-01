@@ -1,328 +1,263 @@
-// PlayerAnimInstance.cpp
-// Animation Agent #10 — Transpersonal Game Studio
-// Full implementation of the player character AnimInstance with locomotion state machine,
-// montage support (jump/attack/death), and foot IK integration.
-
 #include "PlayerAnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/Character.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Construction
-// ─────────────────────────────────────────────────────────────────────────────
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Kismet/GameplayStatics.h"
 
 UPlayerAnimInstance::UPlayerAnimInstance()
 {
-    // Locomotion defaults
-    Speed               = 0.0f;
-    Direction           = 0.0f;
-    bIsInAir            = false;
-    bIsCrouching        = false;
-    bIsSprinting        = false;
-    bIsMoving           = false;
-
-    // Survival stat defaults
-    StaminaNormalized   = 1.0f;
-    HealthNormalized    = 1.0f;
-    FearNormalized      = 0.0f;
-
-    // Foot IK defaults
-    bFootIKEnabled      = true;
-    LeftFootOffset      = FVector::ZeroVector;
-    RightFootOffset     = FVector::ZeroVector;
-    LeftFootRotation    = FRotator::ZeroRotator;
-    RightFootRotation   = FRotator::ZeroRotator;
-    PelvisOffset        = 0.0f;
-    FootIKInterpSpeed   = 15.0f;
-
-    // Montage slot names
-    UpperBodySlotName   = FName("UpperBody");
-    FullBodySlotName    = FName("FullBody");
-
-    // Blend config
-    LeanInterpSpeed     = 8.0f;
-    LeanAmount          = 0.0f;
-    AimPitch            = 0.0f;
-    AimYaw              = 0.0f;
+    // Default thresholds — tuned for prehistoric survival pacing
+    WalkThreshold   = 10.0f;
+    RunThreshold    = 200.0f;
+    SprintThreshold = 500.0f;
+    LeanInterpSpeed = 4.0f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NativeInitializeAnimation
+// Called once when the AnimInstance is created and linked to a skeletal mesh.
+// Cache character and movement component references here — never in tick.
 // ─────────────────────────────────────────────────────────────────────────────
-
 void UPlayerAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+    // GetOwningActor() returns the actor that owns the SkeletalMeshComponent
+    AActor* Owner = GetOwningActor();
+    if (!Owner)
+    {
+        return;
+    }
+
+    OwnerCharacter = Cast<ACharacter>(Owner);
     if (OwnerCharacter)
     {
         MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("[PlayerAnimInstance] Initialized for: %s"), *OwnerCharacter->GetName());
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NativeUpdateAnimation — called every frame
+// NativeUpdateAnimation
+// Called every frame. Update all anim properties that Blueprint reads.
+// Keep this lean — no heavy computation, no allocations.
 // ─────────────────────────────────────────────────────────────────────────────
-
 void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
     if (!OwnerCharacter || !MovementComponent)
     {
-        OwnerCharacter    = Cast<ACharacter>(TryGetPawnOwner());
-        MovementComponent = OwnerCharacter ? OwnerCharacter->GetCharacterMovement() : nullptr;
+        // Re-attempt cache if refs were lost (e.g., after hot reload)
+        NativeInitializeAnimation();
         return;
     }
 
-    UpdateLocomotionState(DeltaSeconds);
-    UpdateAimOffset(DeltaSeconds);
+    // ── Velocity & Speed ────────────────────────────────────────────────────
+    const FVector Velocity = MovementComponent->Velocity;
+    Speed = Velocity.Size2D(); // Horizontal speed only — vertical handled separately
+    VerticalVelocity = Velocity.Z;
+
+    // ── Direction (for strafe blend space) ──────────────────────────────────
+    if (Speed > WalkThreshold)
+    {
+        const FRotator ActorRotation = OwnerCharacter->GetActorRotation();
+        const FRotator VelocityRotation = Velocity.Rotation();
+        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRotation, ActorRotation).Yaw;
+    }
+    else
+    {
+        Direction = 0.0f;
+    }
+
+    // ── Air State ────────────────────────────────────────────────────────────
+    const bool bWasInAir = bIsInAir;
+    bIsInAir = MovementComponent->IsFalling();
+
+    if (bIsInAir)
+    {
+        TimeInAir += DeltaSeconds;
+    }
+    else
+    {
+        if (bWasInAir && TimeInAir > 0.1f)
+        {
+            // Just landed — state machine will pick up Landing state
+        }
+        TimeInAir = 0.0f;
+    }
+
+    // ── Crouch State ─────────────────────────────────────────────────────────
+    bIsCrouching = OwnerCharacter->bIsCrouched;
+
+    // ── Sprint State ─────────────────────────────────────────────────────────
+    bIsSprinting = (Speed >= SprintThreshold);
+
+    // ── Locomotion State Machine ─────────────────────────────────────────────
+    UpdateLocomotionState();
+
+    // ── Aim Offset ───────────────────────────────────────────────────────────
+    UpdateAimOffset();
+
+    // ── Lean ─────────────────────────────────────────────────────────────────
     UpdateLean(DeltaSeconds);
 
-    if (bFootIKEnabled)
-    {
-        UpdateFootIK(DeltaSeconds);
-    }
+    // ── Foot IK active when grounded ─────────────────────────────────────────
+    bFootIKActive = !bIsInAir && !bIsDead;
+
+    // Store previous values for next frame
+    PreviousSpeed = Speed;
+    PreviousYaw   = OwnerCharacter->GetActorRotation().Yaw;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UpdateLocomotionState
+// Determines the current state for the state machine.
+// Priority: Dead > InAir > Landing > Crouching > Sprint > Run > Walk > Idle
 // ─────────────────────────────────────────────────────────────────────────────
-
-void UPlayerAnimInstance::UpdateLocomotionState(float DeltaSeconds)
+void UPlayerAnimInstance::UpdateLocomotionState()
 {
-    const FVector Velocity      = MovementComponent->Velocity;
-    const FVector VelocityXY    = FVector(Velocity.X, Velocity.Y, 0.0f);
-
-    Speed       = VelocityXY.Size();
-    bIsInAir    = MovementComponent->IsFalling();
-    bIsCrouching = OwnerCharacter->bIsCrouched;
-    bIsMoving   = Speed > 10.0f;
-
-    // Sprint detection: speed above walk threshold (300 cm/s default walk = 600 sprint)
-    bIsSprinting = Speed > 400.0f && !bIsInAir && !bIsCrouching;
-
-    // Direction relative to actor forward (for strafe blend)
-    if (bIsMoving)
+    if (bIsDead)
     {
-        const FRotator ActorRot  = OwnerCharacter->GetActorRotation();
-        const FRotator VelRot    = UKismetMathLibrary::MakeRotFromX(VelocityXY);
-        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot).Yaw;
+        LocomotionState = EAnim_LocomotionState::Dead;
+        return;
+    }
+
+    if (bIsInAir)
+    {
+        LocomotionState = EAnim_LocomotionState::InAir;
+        return;
+    }
+
+    // Landing: just touched ground after meaningful air time
+    if (LocomotionState == EAnim_LocomotionState::InAir && !bIsInAir)
+    {
+        LocomotionState = EAnim_LocomotionState::Landing;
+        return;
+    }
+
+    if (bIsCrouching)
+    {
+        LocomotionState = EAnim_LocomotionState::Crouching;
+        return;
+    }
+
+    if (Speed >= SprintThreshold)
+    {
+        LocomotionState = EAnim_LocomotionState::Sprint;
+    }
+    else if (Speed >= RunThreshold)
+    {
+        LocomotionState = EAnim_LocomotionState::Run;
+    }
+    else if (Speed >= WalkThreshold)
+    {
+        LocomotionState = EAnim_LocomotionState::Walk;
     }
     else
     {
-        Direction = FMath::FInterpTo(Direction, 0.0f, DeltaSeconds, 5.0f);
+        LocomotionState = EAnim_LocomotionState::Idle;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UpdateAimOffset
+// Computes aim pitch/yaw from the controller rotation delta vs actor rotation.
+// Clamped to [-90, 90] for blend space compatibility.
 // ─────────────────────────────────────────────────────────────────────────────
-
-void UPlayerAnimInstance::UpdateAimOffset(float DeltaSeconds)
+void UPlayerAnimInstance::UpdateAimOffset()
 {
-    if (!OwnerCharacter) return;
+    if (!OwnerCharacter)
+    {
+        return;
+    }
 
-    const AController* Controller = OwnerCharacter->GetController();
-    if (!Controller) return;
+    AController* Controller = OwnerCharacter->GetController();
+    if (!Controller)
+    {
+        AimPitch = 0.0f;
+        AimYaw   = 0.0f;
+        return;
+    }
 
-    const FRotator ControlRot   = Controller->GetControlRotation();
-    const FRotator ActorRot     = OwnerCharacter->GetActorRotation();
-    const FRotator DeltaRot     = UKismetMathLibrary::NormalizedDeltaRotator(ControlRot, ActorRot);
+    const FRotator ControlRotation = Controller->GetControlRotation();
+    const FRotator ActorRotation   = OwnerCharacter->GetActorRotation();
+    const FRotator Delta = UKismetMathLibrary::NormalizedDeltaRotator(ControlRotation, ActorRotation);
 
-    AimPitch = FMath::ClampAngle(DeltaRot.Pitch, -90.0f, 90.0f);
-    AimYaw   = FMath::ClampAngle(DeltaRot.Yaw,   -90.0f, 90.0f);
+    AimPitch = FMath::Clamp(Delta.Pitch, -90.0f, 90.0f);
+    AimYaw   = FMath::Clamp(Delta.Yaw,   -90.0f, 90.0f);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UpdateLean
+// Computes lean from yaw rate. Smoothly interpolated to avoid pop.
+// Positive = leaning right (turning right), Negative = leaning left.
 // ─────────────────────────────────────────────────────────────────────────────
-
 void UPlayerAnimInstance::UpdateLean(float DeltaSeconds)
 {
-    // Lean based on lateral acceleration
-    if (!MovementComponent) return;
+    if (!OwnerCharacter || DeltaSeconds <= 0.0f)
+    {
+        return;
+    }
 
-    const FVector Accel     = MovementComponent->GetCurrentAcceleration();
-    const FVector LocalAccel = OwnerCharacter->GetActorTransform().InverseTransformVector(Accel);
-    const float TargetLean  = FMath::Clamp(LocalAccel.Y / 600.0f, -1.0f, 1.0f);
+    const float CurrentYaw = OwnerCharacter->GetActorRotation().Yaw;
+    const float YawDelta   = FMath::FindDeltaAngleDegrees(PreviousYaw, CurrentYaw);
+    const float YawRate    = (DeltaSeconds > 0.0f) ? (YawDelta / DeltaSeconds) : 0.0f;
 
+    // Normalise to [-1, 1] range (max lean at 180 deg/s turn rate)
+    const float TargetLean = FMath::Clamp(YawRate / 180.0f, -1.0f, 1.0f);
     LeanAmount = FMath::FInterpTo(LeanAmount, TargetLean, DeltaSeconds, LeanInterpSpeed);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UpdateFootIK — two-bone IK via line traces
+// IsPlayingMontageInSlot
+// Returns true if any montage is currently playing in the specified slot.
 // ─────────────────────────────────────────────────────────────────────────────
-
-void UPlayerAnimInstance::UpdateFootIK(float DeltaSeconds)
+bool UPlayerAnimInstance::IsPlayingMontageInSlot(EAnim_MontageSlot Slot) const
 {
-    if (!OwnerCharacter) return;
-
-    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
-    if (!Mesh) return;
-
-    UWorld* World = OwnerCharacter->GetWorld();
-    if (!World) return;
-
-    // Trace parameters
-    const float TraceDistance   = 80.0f;
-    const float InterpSpeed     = FootIKInterpSpeed;
-
-    // ── Left foot ──
+    FName SlotName = NAME_None;
+    switch (Slot)
     {
-        const FName BoneName    = FName("foot_l");
-        const FVector BoneLoc   = Mesh->GetSocketLocation(BoneName);
-        const FVector TraceStart = FVector(BoneLoc.X, BoneLoc.Y, BoneLoc.Z + 30.0f);
-        const FVector TraceEnd   = FVector(BoneLoc.X, BoneLoc.Y, BoneLoc.Z - TraceDistance);
-
-        FHitResult Hit;
-        FCollisionQueryParams Params;
-        Params.AddIgnoredActor(OwnerCharacter);
-
-        if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
-        {
-            const FVector TargetOffset = FVector(0.0f, 0.0f, (Hit.Location.Z - BoneLoc.Z));
-            LeftFootOffset = FMath::VInterpTo(LeftFootOffset, TargetOffset, DeltaSeconds, InterpSpeed);
-
-            // Foot rotation from surface normal
-            const FRotator TargetRot = FRotator(
-                FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)),
-                0.0f,
-                -FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z))
-            );
-            LeftFootRotation = FMath::RInterpTo(LeftFootRotation, TargetRot, DeltaSeconds, InterpSpeed);
-        }
-        else
-        {
-            LeftFootOffset   = FMath::VInterpTo(LeftFootOffset, FVector::ZeroVector, DeltaSeconds, InterpSpeed);
-            LeftFootRotation = FMath::RInterpTo(LeftFootRotation, FRotator::ZeroRotator, DeltaSeconds, InterpSpeed);
-        }
+        case EAnim_MontageSlot::DefaultSlot: SlotName = FName("DefaultSlot");  break;
+        case EAnim_MontageSlot::UpperBody:   SlotName = FName("UpperBody");    break;
+        case EAnim_MontageSlot::FullBody:    SlotName = FName("FullBody");     break;
+        case EAnim_MontageSlot::Additive:    SlotName = FName("Additive");     break;
+        default: break;
     }
 
-    // ── Right foot ──
+    if (SlotName == NAME_None)
     {
-        const FName BoneName    = FName("foot_r");
-        const FVector BoneLoc   = Mesh->GetSocketLocation(BoneName);
-        const FVector TraceStart = FVector(BoneLoc.X, BoneLoc.Y, BoneLoc.Z + 30.0f);
-        const FVector TraceEnd   = FVector(BoneLoc.X, BoneLoc.Y, BoneLoc.Z - TraceDistance);
-
-        FHitResult Hit;
-        FCollisionQueryParams Params;
-        Params.AddIgnoredActor(OwnerCharacter);
-
-        if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
-        {
-            const FVector TargetOffset = FVector(0.0f, 0.0f, (Hit.Location.Z - BoneLoc.Z));
-            RightFootOffset = FMath::VInterpTo(RightFootOffset, TargetOffset, DeltaSeconds, InterpSpeed);
-
-            const FRotator TargetRot = FRotator(
-                FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)),
-                0.0f,
-                -FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z))
-            );
-            RightFootRotation = FMath::RInterpTo(RightFootRotation, TargetRot, DeltaSeconds, InterpSpeed);
-        }
-        else
-        {
-            RightFootOffset   = FMath::VInterpTo(RightFootOffset, FVector::ZeroVector, DeltaSeconds, InterpSpeed);
-            RightFootRotation = FMath::RInterpTo(RightFootRotation, FRotator::ZeroRotator, DeltaSeconds, InterpSpeed);
-        }
+        return false;
     }
 
-    // ── Pelvis offset — lowest foot drives pelvis down ──
-    const float LowestFoot = FMath::Min(LeftFootOffset.Z, RightFootOffset.Z);
-    PelvisOffset = FMath::FInterpTo(PelvisOffset, LowestFoot, DeltaSeconds, InterpSpeed * 0.5f);
+    return IsAnyMontagePlaying() && IsSlotActive(SlotName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PlayMontageByType — Blueprint callable montage dispatcher
+// GetLocomotionStateString
+// Debug helper — returns the current state as a readable string.
 // ─────────────────────────────────────────────────────────────────────────────
-
-void UPlayerAnimInstance::PlayMontageByType(EAnim_MontageType MontageType, float PlayRate)
+FString UPlayerAnimInstance::GetLocomotionStateString() const
 {
-    UAnimMontage* TargetMontage = nullptr;
-
-    switch (MontageType)
+    switch (LocomotionState)
     {
-        case EAnim_MontageType::Jump:
-            TargetMontage = JumpMontage;
-            break;
-        case EAnim_MontageType::MeleeAttack:
-            TargetMontage = MeleeAttackMontage;
-            break;
-        case EAnim_MontageType::ThrowSpear:
-            TargetMontage = ThrowSpearMontage;
-            break;
-        case EAnim_MontageType::Death:
-            TargetMontage = DeathMontage;
-            break;
-        case EAnim_MontageType::Interact:
-            TargetMontage = InteractMontage;
-            break;
-        case EAnim_MontageType::Eat:
-            TargetMontage = EatMontage;
-            break;
-        case EAnim_MontageType::Drink:
-            TargetMontage = DrinkMontage;
-            break;
-        case EAnim_MontageType::Craft:
-            TargetMontage = CraftMontage;
-            break;
-        default:
-            break;
-    }
-
-    if (TargetMontage)
-    {
-        Montage_Play(TargetMontage, PlayRate);
-        UE_LOG(LogTemp, Log, TEXT("[PlayerAnimInstance] Playing montage: %s at rate %.2f"),
-            *TargetMontage->GetName(), PlayRate);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PlayerAnimInstance] Montage not assigned for type %d"),
-            static_cast<int32>(MontageType));
+        case EAnim_LocomotionState::Idle:       return TEXT("Idle");
+        case EAnim_LocomotionState::Walk:       return TEXT("Walk");
+        case EAnim_LocomotionState::Run:        return TEXT("Run");
+        case EAnim_LocomotionState::Sprint:     return TEXT("Sprint");
+        case EAnim_LocomotionState::InAir:      return TEXT("InAir");
+        case EAnim_LocomotionState::Landing:    return TEXT("Landing");
+        case EAnim_LocomotionState::Crouching:  return TEXT("Crouching");
+        case EAnim_LocomotionState::Dead:       return TEXT("Dead");
+        default:                                return TEXT("Unknown");
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UpdateSurvivalStats — called by character to push survival data into anim
+// SetFootIKState
+// Called by FootIKComponent each tick to push updated IK data into the AnimInstance.
 // ─────────────────────────────────────────────────────────────────────────────
-
-void UPlayerAnimInstance::UpdateSurvivalStats(float Health, float MaxHealth,
-                                               float Stamina, float MaxStamina,
-                                               float Fear, float MaxFear)
+void UPlayerAnimInstance::SetFootIKState(const FAnim_FootIKState& NewState)
 {
-    HealthNormalized  = (MaxHealth  > 0.0f) ? FMath::Clamp(Health  / MaxHealth,  0.0f, 1.0f) : 1.0f;
-    StaminaNormalized = (MaxStamina > 0.0f) ? FMath::Clamp(Stamina / MaxStamina, 0.0f, 1.0f) : 1.0f;
-    FearNormalized    = (MaxFear    > 0.0f) ? FMath::Clamp(Fear    / MaxFear,    0.0f, 1.0f) : 0.0f;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IsPlayingMontageOfType
-// ─────────────────────────────────────────────────────────────────────────────
-
-bool UPlayerAnimInstance::IsPlayingMontageOfType(EAnim_MontageType MontageType) const
-{
-    UAnimMontage* TargetMontage = nullptr;
-
-    switch (MontageType)
-    {
-        case EAnim_MontageType::Jump:        TargetMontage = JumpMontage;        break;
-        case EAnim_MontageType::MeleeAttack: TargetMontage = MeleeAttackMontage; break;
-        case EAnim_MontageType::ThrowSpear:  TargetMontage = ThrowSpearMontage;  break;
-        case EAnim_MontageType::Death:       TargetMontage = DeathMontage;       break;
-        case EAnim_MontageType::Interact:    TargetMontage = InteractMontage;    break;
-        case EAnim_MontageType::Eat:         TargetMontage = EatMontage;         break;
-        case EAnim_MontageType::Drink:       TargetMontage = DrinkMontage;       break;
-        case EAnim_MontageType::Craft:       TargetMontage = CraftMontage;       break;
-        default:                             break;
-    }
-
-    if (!TargetMontage) return false;
-    return Montage_IsPlaying(TargetMontage);
+    FootIKState = NewState;
 }
