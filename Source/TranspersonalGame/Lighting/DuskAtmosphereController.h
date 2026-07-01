@@ -5,102 +5,86 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/SkyLight.h"
 #include "DuskAtmosphereController.generated.h"
 
 /**
- * FLight_DuskPaletteSettings
- * Dusk/sunset lighting palette configuration for the Cretaceous prehistoric world.
- * Controls sun angle, color temperature, fog density, and volumetric atmosphere.
+ * Lighting palette identifiers for the prehistoric world's day/night cycle.
+ * Each palette represents a distinct time-of-day with unique emotional tone.
  */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_DuskPaletteSettings
+UENUM(BlueprintType)
+enum class ELight_DayPalette : uint8
 {
-    GENERATED_BODY()
-
-    /** Sun pitch angle for dusk (low horizon, -10 to -20 degrees) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk")
-    float SunPitchAngle = -12.0f;
-
-    /** Sun yaw for directional variation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk")
-    float SunYawAngle = 45.0f;
-
-    /** Sun intensity at dusk (warm, slightly dimmer than noon) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk")
-    float SunIntensity = 2.5f;
-
-    /** Sun color — warm orange at dusk */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.55f, 0.18f, 1.0f);
-
-    /** Color temperature in Kelvin (3200K = warm sunset) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk")
-    float ColorTemperatureKelvin = 3200.0f;
-
-    /** Fog density — moderate amber haze */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Fog")
-    float FogDensity = 0.06f;
-
-    /** Fog inscattering color — warm amber */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Fog")
-    FLinearColor FogInscatteringColor = FLinearColor(0.9f, 0.45f, 0.12f, 1.0f);
-
-    /** Fog max opacity */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Fog")
-    float FogMaxOpacity = 0.85f;
-
-    /** Sky light intensity at dusk */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Sky")
-    float SkyLightIntensity = 1.2f;
-
-    /** Sky light tint — warm amber sky */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Sky")
-    FLinearColor SkyLightColor = FLinearColor(0.95f, 0.75f, 0.55f, 1.0f);
-
-    /** Enable volumetric fog for god rays */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Volumetric")
-    bool bEnableVolumetricFog = true;
-
-    /** Volumetric fog scattering distribution */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Volumetric")
-    float VolumetricFogScatteringDistribution = 0.4f;
-
-    /** Volumetric fog albedo — warm amber particles */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Volumetric")
-    FLinearColor VolumetricFogAlbedo = FLinearColor(0.85f, 0.65f, 0.35f, 1.0f);
-
-    /** Volumetric fog extinction scale */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Dusk|Volumetric")
-    float VolumetricFogExtinctionScale = 1.2f;
+    Dawn        UMETA(DisplayName = "Dawn — Golden Sunrise"),
+    Midday      UMETA(DisplayName = "Midday — Harsh Overhead Sun"),
+    Dusk        UMETA(DisplayName = "Dusk — Golden Hour Sunset"),
+    Night       UMETA(DisplayName = "Night — Moonlit Darkness"),
+    Overcast    UMETA(DisplayName = "Overcast — Storm Approaching"),
+    Volcanic    UMETA(DisplayName = "Volcanic — Ash & Ember Sky")
 };
 
 /**
- * ELight_TimeOfDay
- * Enumeration of the main time-of-day lighting states for the Cretaceous world.
+ * Data container for a single lighting palette configuration.
+ * All values are physically-based and tuned for Lumen GI.
  */
-UENUM(BlueprintType)
-enum class ELight_TimeOfDay : uint8
+USTRUCT(BlueprintType)
+struct FLight_PaletteConfig
 {
-    Dawn        UMETA(DisplayName = "Dawn"),
-    Morning     UMETA(DisplayName = "Morning"),
-    Noon        UMETA(DisplayName = "Noon"),
-    Afternoon   UMETA(DisplayName = "Afternoon"),
-    Dusk        UMETA(DisplayName = "Dusk"),
-    Night       UMETA(DisplayName = "Night"),
-    Storm       UMETA(DisplayName = "Storm"),
-    Overcast    UMETA(DisplayName = "Overcast")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float SunPitch = -45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float SunYaw = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    float SunIntensity = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sun")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    float FogDensity = 0.015f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    FLinearColor FogColor = FLinearColor(0.6f, 0.75f, 0.9f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Fog")
+    bool bVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sky")
+    float SkyLightIntensity = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Sky")
+    FLinearColor SkyLightColor = FLinearColor(0.8f, 0.85f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Atmosphere")
+    float MieAnisotropy = 0.72f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Atmosphere")
+    float RayleighScale = 0.0331f;
 };
 
 /**
  * ADuskAtmosphereController
- * Runtime lighting controller for the Cretaceous prehistoric world.
- * Manages dusk/sunset palette, day-night cycle transitions, and volumetric atmosphere.
- * Designed for Unreal Engine 5 Lumen global illumination pipeline.
  *
- * Placement: Place one instance in the persistent level.
- * The controller auto-discovers DirectionalLight, SkyLight, and ExponentialHeightFog actors.
+ * Runtime lighting controller for the prehistoric survival game.
+ * Manages day/night cycle transitions, palette blending, and Lumen GI settings.
+ * Designed as a singleton actor placed in the persistent level.
+ *
+ * Director of Photography philosophy: light serves emotional intent, not just rendering.
+ * Each palette is crafted to evoke a specific survival emotion:
+ *   - Dawn: hope, new beginning, cautious optimism
+ *   - Midday: exposure, vulnerability, harsh reality
+ *   - Dusk: urgency, beauty before darkness, last chance
+ *   - Night: fear, stealth, primal danger
+ *   - Overcast: dread, storm survival, oppressive weight
+ *   - Volcanic: apocalyptic, awe, existential threat
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "TranspersonalGame|Lighting")
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Dusk Atmosphere Controller"))
 class TRANSPERSONALGAME_API ADuskAtmosphereController : public AActor
 {
     GENERATED_BODY()
@@ -108,87 +92,103 @@ class TRANSPERSONALGAME_API ADuskAtmosphereController : public AActor
 public:
     ADuskAtmosphereController();
 
+protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── Time of Day ───────────────────────────────────────────────────────────
+public:
+    // =========================================================
+    // PALETTE CONFIGURATION
+    // =========================================================
 
-    /** Current time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|TimeOfDay",
-        meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TimeOfDayNormalized = 0.75f;  // Default: dusk
+    /** Current active lighting palette */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
+    ELight_DayPalette CurrentPalette = ELight_DayPalette::Dusk;
 
-    /** Speed of the day-night cycle (full cycle per real-world second) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|TimeOfDay")
-    float DayCycleSpeed = 0.0f;  // 0 = static, >0 = animated
+    /** Target palette for blending transitions */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
+    ELight_DayPalette TargetPalette = ELight_DayPalette::Night;
 
-    /** Whether to animate the day-night cycle in real-time */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|TimeOfDay")
-    bool bAnimateDayCycle = false;
+    /** Blend alpha [0..1] between CurrentPalette and TargetPalette */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BlendAlpha = 0.0f;
 
-    /** Current time of day enum state */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting|TimeOfDay")
-    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::Dusk;
+    /** Speed of automatic palette transition (alpha units per second) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
+    float TransitionSpeed = 0.05f;
 
-    // ─── Dusk Palette ──────────────────────────────────────────────────────────
+    /** Whether the day/night cycle advances automatically */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Cycle")
+    bool bAutoCycle = false;
 
-    /** Dusk/sunset lighting palette settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palettes")
-    FLight_DuskPaletteSettings DuskPalette;
+    /** Duration of a full day/night cycle in real seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Cycle")
+    float FullDayDurationSeconds = 1200.0f;
 
-    // ─── Scene References (auto-discovered) ───────────────────────────────────
+    // =========================================================
+    // SCENE REFERENCES (auto-found on BeginPlay if null)
+    // =========================================================
 
-    /** Reference to the scene's directional light (sun/moon) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting|References")
-    TObjectPtr<ADirectionalLight> SceneSun;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|References")
+    ADirectionalLight* SunLight = nullptr;
 
-    /** Reference to the scene's sky light */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting|References")
-    TObjectPtr<ASkyLight> SceneSkyLight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|References")
+    AExponentialHeightFog* HeightFog = nullptr;
 
-    /** Reference to the scene's exponential height fog */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting|References")
-    TObjectPtr<AExponentialHeightFog> SceneFog;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|References")
+    ASkyLight* SkyLightActor = nullptr;
 
-    // ─── Functions ─────────────────────────────────────────────────────────────
+    // =========================================================
+    // PALETTE PRESETS
+    // =========================================================
 
-    /** Apply the dusk palette immediately */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Lighting|Palettes")
-    void ApplyDuskPalette();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig DawnPreset;
 
-    /** Apply a specific time of day palette */
-    UFUNCTION(BlueprintCallable, Category = "Lighting|TimeOfDay")
-    void SetTimeOfDay(ELight_TimeOfDay NewTimeOfDay);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig MiddayPreset;
 
-    /** Get the current sun direction vector */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Lighting|TimeOfDay")
-    FVector GetSunDirection() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig DuskPreset;
 
-    /** Get normalized sun elevation (0=horizon, 1=zenith, -1=nadir) */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Lighting|TimeOfDay")
-    float GetSunElevationNormalized() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig NightPreset;
 
-    /** Auto-discover scene lighting actors */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig OvercastPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Presets")
+    FLight_PaletteConfig VolcanicPreset;
+
+    // =========================================================
+    // BLUEPRINT-CALLABLE FUNCTIONS
+    // =========================================================
+
+    /** Instantly apply a palette with no transition */
+    UFUNCTION(BlueprintCallable, Category = "Lighting|Control")
+    void ApplyPaletteImmediate(ELight_DayPalette Palette);
+
+    /** Begin a smooth transition to the target palette */
+    UFUNCTION(BlueprintCallable, Category = "Lighting|Control")
+    void BeginTransitionTo(ELight_DayPalette NewTarget, float Speed = 0.05f);
+
+    /** Force-find all scene lighting actors (call after level load) */
     UFUNCTION(BlueprintCallable, Category = "Lighting|Setup")
-    void DiscoverSceneLightingActors();
+    void AutoFindLightingActors();
 
-    /** Enable/disable volumetric fog god rays */
-    UFUNCTION(BlueprintCallable, Category = "Lighting|Volumetric")
-    void SetVolumetricFogEnabled(bool bEnabled);
+    /** Get the palette config for a given palette enum */
+    UFUNCTION(BlueprintCallable, Category = "Lighting|Query")
+    FLight_PaletteConfig GetPaletteConfig(ELight_DayPalette Palette) const;
 
-protected:
-    virtual void OnConstruction(const FTransform& Transform) override;
+    /** Returns current time-of-day as normalized [0..1] (0=midnight, 0.5=noon) */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Lighting|Query")
+    float GetTimeOfDayNormalized() const;
 
 private:
-    /** Internal: apply sun rotation and color for current time */
-    void ApplySunSettings(float PitchDeg, float YawDeg, float Intensity, FLinearColor Color, float TempKelvin);
+    void ApplyConfig(const FLight_PaletteConfig& Config);
+    FLight_PaletteConfig BlendConfigs(const FLight_PaletteConfig& A, const FLight_PaletteConfig& B, float Alpha) const;
+    void InitDefaultPresets();
 
-    /** Internal: apply fog settings */
-    void ApplyFogSettings(float Density, FLinearColor InscatterColor, float MaxOpacity, bool bVolumetric);
-
-    /** Internal: apply sky light settings */
-    void ApplySkyLightSettings(float Intensity, FLinearColor Color);
-
-    /** Accumulated time for day cycle animation */
-    float DayCycleAccumulator = 0.0f;
+    float CycleElapsedSeconds = 0.0f;
+    bool bTransitioning = false;
 };
