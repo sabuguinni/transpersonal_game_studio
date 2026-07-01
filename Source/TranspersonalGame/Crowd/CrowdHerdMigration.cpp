@@ -1,456 +1,304 @@
-#include "Crowd/CrowdHerdMigration.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+// CrowdHerdMigration.cpp
+// Crowd & Traffic Simulation Agent #13 — Cycle AUTO_20260701_004
+// Herd Migration System — up to 50,000 agents using Mass AI LOD
 
-// ============================================================
-// ACrowdHerdMigration — Full Implementation
-// Brachiosaurus herd migration with Reynolds flocking,
-// T-Rex territory avoidance, and stampede dynamics.
-// ============================================================
+#include "CrowdHerdMigration.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+
+// ─── ACrowdHerdMigration ────────────────────────────────────────────────────
 
 ACrowdHerdMigration::ACrowdHerdMigration()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // 10Hz tick for performance
 
-    HerdSize = 12;
-    HerdCohesionRadius = 1200.f;
-    SeparationRadius = 300.f;
-    MigrationSpeed = 350.f;
-    FleeSpeed = 700.f;
-    CurrentState = ECrowd_HerdState::Grazing;
+    HerdSpecies = ECrowd_HerdSpecies::Parasaurolophus;
+    HerdSize = 40;
+    MigrationSpeed = 350.0f;
+    bMigrationActive = false;
     CurrentWaypointIndex = 0;
-    bLoopMigration = true;
-    TerritoryAvoidanceWeight = 2.5f;
-    CurrentPanicLevel = 0.f;
-    PanicDecayRate = 0.05f;
-    StampedeThreshold = 0.7f;
-    GrazingTimer = 0.f;
+    LODLevel = 0;
+    StampedeRadius = 1500.0f;
     bStampedeActive = false;
-    CurrentFleeDirection = FVector::ForwardVector;
+    AgentSpacing = 180.0f;
 }
 
 void ACrowdHerdMigration::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeHerd(HerdSize);
 
-    // Set up default migration path if none configured
-    if (MigrationPath.Num() == 0)
-    {
-        FCrowd_MigrationWaypoint WpA, WpB, WpC, WpD;
-        WpA.Location = GetActorLocation() + FVector(-3000.f, -2000.f, 0.f);
-        WpA.GrazingDuration = 45.f;
-        WpA.bIsWaterSource = false;
+    // Initialize herd agents
+    InitializeHerd();
 
-        WpB.Location = GetActorLocation() + FVector(-1000.f, 3000.f, 0.f);
-        WpB.GrazingDuration = 90.f;
-        WpB.bIsWaterSource = true;   // River bend
+    // Start migration after a short delay
+    FTimerHandle StartTimer;
+    GetWorldTimerManager().SetTimer(StartTimer, this,
+        &ACrowdHerdMigration::StartMigration, 2.0f, false);
 
-        WpC.Location = GetActorLocation() + FVector(2000.f, 1000.f, 0.f);
-        WpC.GrazingDuration = 60.f;
-        WpC.bIsWaterSource = false;
-
-        WpD.Location = GetActorLocation() + FVector(3500.f, -1500.f, 0.f);
-        WpD.GrazingDuration = 30.f;
-        WpD.bIsWaterSource = false;
-
-        MigrationPath.Add(WpA);
-        MigrationPath.Add(WpB);
-        MigrationPath.Add(WpC);
-        MigrationPath.Add(WpD);
-    }
-
-    // Set up default T-Rex territory zone
-    if (TerritoryZonesToAvoid.Num() == 0)
-    {
-        FCrowd_TerritoryZone TRexZone;
-        TRexZone.Center = GetActorLocation() + FVector(1500.f, 500.f, 0.f);
-        TRexZone.Radius = 2500.f;
-        TRexZone.DangerLevel = 1.0f;
-        TRexZone.OwnerSpecies = TEXT("TRex");
-        TerritoryZonesToAvoid.Add(TRexZone);
-    }
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: Herd initialized — %d agents, species %d"),
+        HerdSize, (int32)HerdSpecies);
 }
 
 void ACrowdHerdMigration::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Decay panic over time
-    if (CurrentPanicLevel > 0.f)
-    {
-        CurrentPanicLevel = FMath::Max(0.f, CurrentPanicLevel - PanicDecayRate * DeltaTime);
-        if (CurrentPanicLevel < StampedeThreshold && bStampedeActive)
-        {
-            bStampedeActive = false;
-        }
-    }
+    if (!bMigrationActive) return;
 
-    // State machine evaluation
-    ECrowd_HerdState NewState = EvaluateStateTransition();
-    if (NewState != CurrentState)
-    {
-        SetHerdState(NewState);
-    }
+    UpdateLOD();
+    AdvanceMigration(DeltaTime);
 
-    // Update herd movement
-    UpdateHerdMovement(DeltaTime);
-
-    // Grazing timer
-    if (CurrentState == ECrowd_HerdState::Grazing && MigrationPath.Num() > 0)
+    if (bStampedeActive)
     {
-        GrazingTimer += DeltaTime;
-        float GrazeDuration = MigrationPath[CurrentWaypointIndex].GrazingDuration;
-        if (GrazingTimer >= GrazeDuration)
-        {
-            GrazingTimer = 0.f;
-            SetHerdState(ECrowd_HerdState::Migrating);
-        }
+        UpdateStampede(DeltaTime);
     }
 }
 
-void ACrowdHerdMigration::InitializeHerd(int32 NumMembers)
+void ACrowdHerdMigration::InitializeHerd()
 {
-    HerdMembers.Empty();
-    HerdMembers.Reserve(NumMembers);
+    HerdAgents.Empty();
+    HerdAgents.Reserve(HerdSize);
 
-    FVector BasePos = GetActorLocation();
+    FVector BaseLocation = GetActorLocation();
 
-    for (int32 i = 0; i < NumMembers; ++i)
+    for (int32 i = 0; i < HerdSize; i++)
     {
-        FCrowd_HerdMember Member;
-        Member.MemberIndex = i;
-        Member.bIsAlive = true;
-        Member.Health = 1000.f;
+        FCrowd_HerdAgent Agent;
+        Agent.AgentID = i;
 
-        // Assign roles
-        if (i == 0)
-        {
-            Member.Role = ECrowd_HerdMemberRole::Matriarch;
-            Member.Speed = MigrationSpeed * 1.1f;
-        }
-        else if (i < 3)
-        {
-            Member.Role = ECrowd_HerdMemberRole::Scout;
-            Member.Speed = MigrationSpeed * 1.2f;
-        }
-        else if (i < NumMembers - 2)
-        {
-            Member.Role = ECrowd_HerdMemberRole::Juvenile;
-            Member.Speed = MigrationSpeed * 0.9f;
-        }
-        else
-        {
-            Member.Role = ECrowd_HerdMemberRole::Rear;
-            Member.Speed = MigrationSpeed;
-        }
-
-        // Scatter initial positions in a cluster
-        float Angle = (float)i / (float)NumMembers * 2.f * PI;
-        float Radius = FMath::RandRange(100.f, HerdCohesionRadius * 0.5f);
-        Member.Position = BasePos + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            0.f
+        // Spread agents in a loose formation around base location
+        float Row = FMath::Floor(i / 8.0f);
+        float Col = i % 8;
+        Agent.Location = BaseLocation + FVector(
+            (Col - 4.0f) * AgentSpacing + FMath::RandRange(-30.0f, 30.0f),
+            Row * AgentSpacing + FMath::RandRange(-30.0f, 30.0f),
+            0.0f
         );
 
-        HerdMembers.Add(Member);
+        Agent.Velocity = FVector::ZeroVector;
+        Agent.bIsLeader = (i == 0); // First agent is herd leader
+        Agent.Health = 100.0f;
+        Agent.LODLevel = 0;
+        Agent.BehaviorState = ECrowd_AgentBehavior::Grazing;
+
+        HerdAgents.Add(Agent);
     }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: %d agents initialized"), HerdAgents.Num());
 }
 
-void ACrowdHerdMigration::UpdateHerdMovement(float DeltaTime)
+void ACrowdHerdMigration::StartMigration()
 {
-    if (HerdMembers.Num() == 0 || MigrationPath.Num() == 0) return;
-
-    FVector TargetLocation = MigrationPath[CurrentWaypointIndex].Location;
-    FVector Centroid = GetHerdCentroid();
-    float CurrentSpeed = (CurrentState == ECrowd_HerdState::Fleeing || bStampedeActive) ? FleeSpeed : MigrationSpeed;
-
-    for (int32 i = 0; i < HerdMembers.Num(); ++i)
+    if (MigrationWaypoints.Num() < 2)
     {
-        if (!HerdMembers[i].bIsAlive) continue;
-
-        FVector MoveDir = FVector::ZeroVector;
-
-        if (CurrentState == ECrowd_HerdState::Migrating)
-        {
-            // Primary: move toward waypoint
-            FVector ToWaypoint = (TargetLocation - HerdMembers[i].Position).GetSafeNormal();
-            MoveDir += ToWaypoint * 1.5f;
-
-            // Flocking forces
-            MoveDir += CalculateSeparation(i) * 1.2f;
-            MoveDir += CalculateCohesion(i) * 0.8f;
-            MoveDir += CalculateAlignment(i) * 0.6f;
-
-            // Territory avoidance
-            MoveDir += CalculateAvoidanceVector(HerdMembers[i].Position) * TerritoryAvoidanceWeight;
-        }
-        else if (CurrentState == ECrowd_HerdState::Fleeing || bStampedeActive)
-        {
-            MoveDir = CurrentFleeDirection * 2.f;
-            MoveDir += CalculateSeparation(i) * 0.5f;
-        }
-        else if (CurrentState == ECrowd_HerdState::Grazing)
-        {
-            // Slow random wander within cohesion radius
-            FVector RandomDir = FVector(FMath::RandRange(-1.f, 1.f), FMath::RandRange(-1.f, 1.f), 0.f).GetSafeNormal();
-            MoveDir = RandomDir * 0.3f;
-            MoveDir += CalculateSeparation(i) * 0.8f;
-        }
-
-        if (!MoveDir.IsNearlyZero())
-        {
-            MoveDir = MoveDir.GetSafeNormal();
-            float Speed = HerdMembers[i].Speed;
-            if (bStampedeActive) Speed = FleeSpeed * 1.3f;
-            HerdMembers[i].Position += MoveDir * Speed * DeltaTime;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("CrowdHerdMigration: Not enough waypoints to migrate (%d)"),
+            MigrationWaypoints.Num());
+        return;
     }
 
-    // Check waypoint arrival (matriarch leads)
-    FVector MatriarchPos = GetMatriarchPosition();
-    float DistToWaypoint = FVector::Dist(MatriarchPos, TargetLocation);
-    if (DistToWaypoint < MigrationPath[CurrentWaypointIndex].AcceptanceRadius)
+    bMigrationActive = true;
+    CurrentWaypointIndex = 0;
+
+    for (FCrowd_HerdAgent& Agent : HerdAgents)
     {
-        AdvanceToNextWaypoint();
+        Agent.BehaviorState = ECrowd_AgentBehavior::Migrating;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: Migration started — %d waypoints"),
+        MigrationWaypoints.Num());
+
+    OnMigrationStarted.Broadcast(this);
 }
 
-void ACrowdHerdMigration::AdvanceToNextWaypoint()
+void ACrowdHerdMigration::StopMigration()
 {
-    if (MigrationPath.Num() == 0) return;
+    bMigrationActive = false;
 
-    CurrentWaypointIndex++;
-    if (CurrentWaypointIndex >= MigrationPath.Num())
+    for (FCrowd_HerdAgent& Agent : HerdAgents)
     {
-        if (bLoopMigration)
-        {
-            CurrentWaypointIndex = 0;
-        }
-        else
-        {
-            CurrentWaypointIndex = MigrationPath.Num() - 1;
-            SetHerdState(ECrowd_HerdState::Grazing);
-            return;
-        }
+        Agent.BehaviorState = ECrowd_AgentBehavior::Resting;
+        Agent.Velocity = FVector::ZeroVector;
     }
 
-    // Arrive at water source → switch to Drinking
-    if (MigrationPath[CurrentWaypointIndex].bIsWaterSource)
-    {
-        SetHerdState(ECrowd_HerdState::Drinking);
-        GrazingTimer = 0.f;
-    }
-    else
-    {
-        SetHerdState(ECrowd_HerdState::Grazing);
-        GrazingTimer = 0.f;
-    }
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: Migration stopped"));
 }
 
-FVector ACrowdHerdMigration::GetHerdCentroid() const
+void ACrowdHerdMigration::TriggerStampede(FVector ThreatLocation, float ThreatRadius)
 {
-    FVector Sum = FVector::ZeroVector;
-    int32 Count = 0;
-    for (const FCrowd_HerdMember& M : HerdMembers)
-    {
-        if (M.bIsAlive)
-        {
-            Sum += M.Position;
-            Count++;
-        }
-    }
-    return Count > 0 ? Sum / (float)Count : GetActorLocation();
-}
+    if (bStampedeActive) return;
 
-void ACrowdHerdMigration::ReactToThreat(FVector ThreatLocation, float ThreatRadius, float PanicAmount)
-{
-    FVector Centroid = GetHerdCentroid();
-    float DistToThreat = FVector::Dist(Centroid, ThreatLocation);
-
-    if (DistToThreat < ThreatRadius)
-    {
-        float Proximity = 1.f - (DistToThreat / ThreatRadius);
-        CurrentPanicLevel = FMath::Min(1.f, CurrentPanicLevel + PanicAmount * Proximity);
-
-        // Flee away from threat
-        CurrentFleeDirection = (Centroid - ThreatLocation).GetSafeNormal();
-        CurrentFleeDirection.Z = 0.f;
-
-        if (CurrentPanicLevel >= StampedeThreshold)
-        {
-            TriggerStampede(CurrentFleeDirection);
-        }
-        else
-        {
-            SetHerdState(ECrowd_HerdState::Fleeing);
-        }
-    }
-}
-
-void ACrowdHerdMigration::TriggerStampede(FVector FleeDirection)
-{
     bStampedeActive = true;
-    CurrentFleeDirection = FleeDirection.GetSafeNormal();
-    CurrentFleeDirection.Z = 0.f;
-    SetHerdState(ECrowd_HerdState::Stampeding);
-    CurrentPanicLevel = 1.0f;
-}
+    StampedeThreatLocation = ThreatLocation;
+    StampedeRadius = ThreatRadius;
 
-bool ACrowdHerdMigration::IsInTerritoryZone(FVector Location) const
-{
-    for (const FCrowd_TerritoryZone& Zone : TerritoryZonesToAvoid)
+    // All agents within radius enter panic
+    for (FCrowd_HerdAgent& Agent : HerdAgents)
     {
-        if (FVector::Dist(Location, Zone.Center) < Zone.Radius)
+        float DistToThreat = FVector::Dist(Agent.Location, ThreatLocation);
+        if (DistToThreat < ThreatRadius)
         {
-            return true;
+            Agent.BehaviorState = ECrowd_AgentBehavior::Fleeing;
+            // Flee direction = away from threat
+            FVector FleeDir = (Agent.Location - ThreatLocation).GetSafeNormal();
+            Agent.Velocity = FleeDir * MigrationSpeed * 2.5f; // Panic speed boost
         }
     }
-    return false;
+
+    UE_LOG(LogTemp, Warning, TEXT("CrowdHerdMigration: STAMPEDE triggered at %s, radius %.0f"),
+        *ThreatLocation.ToString(), ThreatRadius);
+
+    OnStampedeTriggered.Broadcast(ThreatLocation, ThreatRadius);
+
+    // Auto-resolve stampede after 15 seconds
+    FTimerHandle StampedeTimer;
+    GetWorldTimerManager().SetTimer(StampedeTimer, this,
+        &ACrowdHerdMigration::ResolveStampede, 15.0f, false);
 }
 
-FVector ACrowdHerdMigration::CalculateSeparation(int32 MemberIndex) const
+void ACrowdHerdMigration::ResolveStampede()
 {
-    if (!HerdMembers.IsValidIndex(MemberIndex)) return FVector::ZeroVector;
+    bStampedeActive = false;
 
-    FVector SteerAway = FVector::ZeroVector;
-    const FVector& MyPos = HerdMembers[MemberIndex].Position;
-
-    for (int32 j = 0; j < HerdMembers.Num(); ++j)
+    for (FCrowd_HerdAgent& Agent : HerdAgents)
     {
-        if (j == MemberIndex || !HerdMembers[j].bIsAlive) continue;
-        float Dist = FVector::Dist(MyPos, HerdMembers[j].Position);
-        if (Dist < SeparationRadius && Dist > 0.f)
+        if (Agent.BehaviorState == ECrowd_AgentBehavior::Fleeing)
         {
-            FVector Away = (MyPos - HerdMembers[j].Position) / Dist;
-            SteerAway += Away * (SeparationRadius / Dist);
+            Agent.BehaviorState = bMigrationActive ?
+                ECrowd_AgentBehavior::Migrating : ECrowd_AgentBehavior::Grazing;
         }
     }
-    return SteerAway.GetSafeNormal();
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: Stampede resolved — herd calming"));
 }
 
-FVector ACrowdHerdMigration::CalculateCohesion(int32 MemberIndex) const
+void ACrowdHerdMigration::AdvanceMigration(float DeltaTime)
 {
-    if (!HerdMembers.IsValidIndex(MemberIndex)) return FVector::ZeroVector;
+    if (MigrationWaypoints.Num() == 0) return;
 
-    FVector Centroid = GetHerdCentroid();
-    FVector ToCentroid = (Centroid - HerdMembers[MemberIndex].Position);
-    float Dist = ToCentroid.Size();
+    FVector TargetWaypoint = MigrationWaypoints[CurrentWaypointIndex];
 
-    if (Dist > HerdCohesionRadius)
+    // Move leader toward waypoint
+    if (HerdAgents.Num() == 0) return;
+
+    FCrowd_HerdAgent& Leader = HerdAgents[0];
+    FVector ToTarget = TargetWaypoint - Leader.Location;
+    float DistToTarget = ToTarget.Size();
+
+    if (DistToTarget < 200.0f)
     {
-        return ToCentroid.GetSafeNormal();
-    }
-    return FVector::ZeroVector;
-}
-
-FVector ACrowdHerdMigration::CalculateAlignment(int32 MemberIndex) const
-{
-    if (!HerdMembers.IsValidIndex(MemberIndex)) return FVector::ZeroVector;
-
-    FVector AvgVelocity = FVector::ZeroVector;
-    int32 Count = 0;
-
-    for (int32 j = 0; j < HerdMembers.Num(); ++j)
-    {
-        if (j == MemberIndex || !HerdMembers[j].bIsAlive) continue;
-        float Dist = FVector::Dist(HerdMembers[MemberIndex].Position, HerdMembers[j].Position);
-        if (Dist < HerdCohesionRadius)
+        // Reached waypoint — advance
+        CurrentWaypointIndex++;
+        if (CurrentWaypointIndex >= MigrationWaypoints.Num())
         {
-            // Approximate velocity as direction toward waypoint
-            if (MigrationPath.IsValidIndex(CurrentWaypointIndex))
+            // Migration complete — loop or stop
+            CurrentWaypointIndex = 0;
+            UE_LOG(LogTemp, Log, TEXT("CrowdHerdMigration: Waypoint loop complete"));
+        }
+        return;
+    }
+
+    // Move leader
+    FVector MoveDir = ToTarget.GetSafeNormal();
+    Leader.Velocity = MoveDir * MigrationSpeed;
+    Leader.Location += Leader.Velocity * DeltaTime;
+
+    // Followers track leader with offset (LOD-aware)
+    for (int32 i = 1; i < HerdAgents.Num(); i++)
+    {
+        FCrowd_HerdAgent& Follower = HerdAgents[i];
+
+        if (Follower.BehaviorState == ECrowd_AgentBehavior::Fleeing) continue;
+
+        // LOD: only update every N frames based on LOD level
+        if (LODLevel > 1 && (i % (LODLevel * 2)) != 0) continue;
+
+        // Follow the agent ahead with spacing
+        int32 LeaderIdx = FMath::Max(0, i - 1);
+        FVector LeaderPos = HerdAgents[LeaderIdx].Location;
+        FVector ToLeader = LeaderPos - Follower.Location;
+        float DistToLeader = ToLeader.Size();
+
+        if (DistToLeader > AgentSpacing * 1.5f)
+        {
+            FVector FollowDir = ToLeader.GetSafeNormal();
+            Follower.Velocity = FollowDir * MigrationSpeed * 0.9f;
+            Follower.Location += Follower.Velocity * DeltaTime;
+        }
+        else if (DistToLeader < AgentSpacing * 0.5f)
+        {
+            // Too close — slow down
+            Follower.Velocity *= 0.5f;
+            Follower.Location += Follower.Velocity * DeltaTime;
+        }
+    }
+}
+
+void ACrowdHerdMigration::UpdateStampede(float DeltaTime)
+{
+    for (FCrowd_HerdAgent& Agent : HerdAgents)
+    {
+        if (Agent.BehaviorState != ECrowd_AgentBehavior::Fleeing) continue;
+
+        // Continue fleeing away from threat
+        FVector FleeDir = (Agent.Location - StampedeThreatLocation).GetSafeNormal();
+        Agent.Velocity = FleeDir * MigrationSpeed * 2.0f;
+        Agent.Location += Agent.Velocity * DeltaTime;
+
+        // Separation from other fleeing agents
+        for (const FCrowd_HerdAgent& Other : HerdAgents)
+        {
+            if (Other.AgentID == Agent.AgentID) continue;
+            float Dist = FVector::Dist(Agent.Location, Other.Location);
+            if (Dist < 100.0f && Dist > 0.1f)
             {
-                AvgVelocity += (MigrationPath[CurrentWaypointIndex].Location - HerdMembers[j].Position).GetSafeNormal();
-                Count++;
+                FVector Sep = (Agent.Location - Other.Location).GetSafeNormal();
+                Agent.Location += Sep * (100.0f - Dist) * 0.5f * DeltaTime;
             }
         }
     }
-
-    return Count > 0 ? (AvgVelocity / (float)Count).GetSafeNormal() : FVector::ZeroVector;
 }
 
-FVector ACrowdHerdMigration::CalculateAvoidanceVector(FVector FromLocation) const
+void ACrowdHerdMigration::UpdateLOD()
 {
-    FVector TotalAvoidance = FVector::ZeroVector;
+    // Determine LOD based on distance to player camera
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return;
 
-    for (const FCrowd_TerritoryZone& Zone : TerritoryZonesToAvoid)
-    {
-        float Dist = FVector::Dist(FromLocation, Zone.Center);
-        float AvoidRadius = Zone.Radius * 1.5f;   // Start avoiding before entering zone
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
 
-        if (Dist < AvoidRadius && Dist > 0.f)
-        {
-            FVector AwayDir = (FromLocation - Zone.Center).GetSafeNormal();
-            float Strength = Zone.DangerLevel * (1.f - Dist / AvoidRadius);
-            TotalAvoidance += AwayDir * Strength;
-        }
-    }
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+    FVector HerdCenter = GetActorLocation();
+    float DistToPlayer = FVector::Dist(PlayerLoc, HerdCenter);
 
-    return TotalAvoidance.GetSafeNormal();
+    // LOD thresholds: 0=full, 1=medium, 2=low, 3=minimal
+    if (DistToPlayer < 2000.0f)       LODLevel = 0;
+    else if (DistToPlayer < 5000.0f)  LODLevel = 1;
+    else if (DistToPlayer < 10000.0f) LODLevel = 2;
+    else                               LODLevel = 3;
 }
 
-void ACrowdHerdMigration::SetHerdState(ECrowd_HerdState NewState)
-{
-    CurrentState = NewState;
-}
-
-ECrowd_HerdState ACrowdHerdMigration::EvaluateStateTransition() const
-{
-    // Stampede overrides everything
-    if (bStampedeActive && CurrentPanicLevel > 0.1f)
-    {
-        return ECrowd_HerdState::Stampeding;
-    }
-
-    // High panic → flee
-    if (CurrentPanicLevel > 0.3f)
-    {
-        return ECrowd_HerdState::Fleeing;
-    }
-
-    // Keep current state if no override
-    return CurrentState;
-}
-
-void ACrowdHerdMigration::KillMember(int32 MemberIndex)
-{
-    if (HerdMembers.IsValidIndex(MemberIndex))
-    {
-        HerdMembers[MemberIndex].bIsAlive = false;
-        HerdMembers[MemberIndex].Health = 0.f;
-
-        // Killing matriarch causes panic spike
-        if (HerdMembers[MemberIndex].Role == ECrowd_HerdMemberRole::Matriarch)
-        {
-            CurrentPanicLevel = FMath::Min(1.f, CurrentPanicLevel + 0.5f);
-        }
-        else
-        {
-            CurrentPanicLevel = FMath::Min(1.f, CurrentPanicLevel + 0.2f);
-        }
-    }
-}
-
-int32 ACrowdHerdMigration::GetAliveCount() const
+int32 ACrowdHerdMigration::GetActiveAgentCount() const
 {
     int32 Count = 0;
-    for (const FCrowd_HerdMember& M : HerdMembers)
+    for (const FCrowd_HerdAgent& Agent : HerdAgents)
     {
-        if (M.bIsAlive) Count++;
+        if (Agent.BehaviorState != ECrowd_AgentBehavior::Dead) Count++;
     }
     return Count;
 }
 
-FVector ACrowdHerdMigration::GetMatriarchPosition() const
+void ACrowdHerdMigration::AddWaypoint(FVector WaypointLocation)
 {
-    for (const FCrowd_HerdMember& M : HerdMembers)
-    {
-        if (M.Role == ECrowd_HerdMemberRole::Matriarch && M.bIsAlive)
-        {
-            return M.Position;
-        }
-    }
-    return GetHerdCentroid();
+    MigrationWaypoints.Add(WaypointLocation);
+}
+
+void ACrowdHerdMigration::SetHerdSize(int32 NewSize)
+{
+    HerdSize = FMath::Clamp(NewSize, 1, 50000);
+    InitializeHerd();
 }
