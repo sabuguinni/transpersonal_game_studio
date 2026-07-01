@@ -1,271 +1,272 @@
-// BiomeManager.cpp — Transpersonal Game Studio
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260701_003
-// Biome system: classifies terrain into biomes, drives foliage/weather/fauna density
+// BiomeManager.cpp
+// Prehistoric survival game — biome authority system
+// Agent #02 — Engine Architect
 
 #include "BiomeManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogBiomeManager, Log, All);
 
 // ============================================================
-// Constructor
+//  Constructor
 // ============================================================
 ABiomeManager::ABiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 2.0f; // Update every 2 seconds — not every frame
+    PrimaryActorTick.bCanEverTick = false;
 
-    WorldSizeKm = 4.0f;
-    BiomeGridResolution = 32;
-    bBiomesInitialized = false;
-
-    // Default biome weights for a Cretaceous world
-    // 40% forest, 25% plains, 20% swamp, 10% volcanic, 5% coastal
-    BiomeWeights.Add(EEng_BiomeType::CretaceousForest, 0.40f);
-    BiomeWeights.Add(EEng_BiomeType::OpenPlains, 0.25f);
-    BiomeWeights.Add(EEng_BiomeType::SwampDelta, 0.20f);
-    BiomeWeights.Add(EEng_BiomeType::VolcanicBadlands, 0.10f);
-    BiomeWeights.Add(EEng_BiomeType::CoastalShallows, 0.05f);
+    // Default biome: open savanna
+    DefaultBiome.BiomeType          = EEng_BiomeType::Savanna;
+    DefaultBiome.DisplayName        = TEXT("Savanna");
+    DefaultBiome.RadiusCm           = 1000000.0f; // 10 km catch-all
+    DefaultBiome.CentreLocation     = FVector::ZeroVector;
+    DefaultBiome.AmbientTemperatureC = 30.0f;
+    DefaultBiome.Humidity           = 0.3f;
+    DefaultBiome.PredatorDensity    = 1.0f;
+    DefaultBiome.FoodAvailability   = 0.4f;
+    DefaultBiome.FogDensityMultiplier = 0.8f;
+    DefaultBiome.GroundTint         = FLinearColor(0.55f, 0.48f, 0.25f, 1.0f);
+    DefaultBiome.FoliageDensity     = 0.3f;
 }
 
 // ============================================================
-// BeginPlay
+//  BeginPlay
 // ============================================================
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeBiomeGrid();
-}
 
-// ============================================================
-// Tick
-// ============================================================
-void ABiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    // Future: update dynamic biome transitions (flooding, volcanic activity)
-}
-
-// ============================================================
-// InitializeBiomeGrid
-// ============================================================
-void ABiomeManager::InitializeBiomeGrid()
-{
-    if (bBiomesInitialized)
+    if (BiomeZones.Num() == 0)
     {
-        UE_LOG(LogBiomeManager, Warning, TEXT("BiomeGrid already initialized — skipping"));
-        return;
+        InitializeDefaultBiomes();
+    }
+}
+
+// ============================================================
+//  InitializeDefaultBiomes — 8 prehistoric biomes
+// ============================================================
+void ABiomeManager::InitializeDefaultBiomes()
+{
+    BiomeZones.Empty();
+
+    // --- Jungle (dense, humid, high predator) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::Jungle;
+        b.DisplayName           = TEXT("Cretaceous Jungle");
+        b.RadiusCm              = 80000.0f;
+        b.CentreLocation        = FVector(60000.0f, 40000.0f, 0.0f);
+        b.AmbientTemperatureC   = 35.0f;
+        b.Humidity              = 0.9f;
+        b.PredatorDensity       = 1.8f;
+        b.FoodAvailability      = 0.8f;
+        b.FogDensityMultiplier  = 1.5f;
+        b.GroundTint            = FLinearColor(0.1f, 0.3f, 0.05f, 1.0f);
+        b.FoliageDensity        = 0.95f;
+        BiomeZones.Add(b);
     }
 
-    const int32 TotalCells = BiomeGridResolution * BiomeGridResolution;
-    BiomeGrid.SetNum(TotalCells);
-
-    UE_LOG(LogBiomeManager, Log, TEXT("Initializing biome grid: %dx%d (%d cells) for %.1fkm world"),
-        BiomeGridResolution, BiomeGridResolution, TotalCells, WorldSizeKm);
-
-    // Seed biome grid using deterministic noise-like distribution
-    // Cells near center = forest/plains, edges = coastal/volcanic
-    const float HalfGrid = BiomeGridResolution * 0.5f;
-
-    for (int32 Y = 0; Y < BiomeGridResolution; Y++)
+    // --- Savanna (open plains, moderate predator) ---
     {
-        for (int32 X = 0; X < BiomeGridResolution; X++)
-        {
-            const int32 Index = Y * BiomeGridResolution + X;
-            const float NormX = (X - HalfGrid) / HalfGrid; // -1..1
-            const float NormY = (Y - HalfGrid) / HalfGrid; // -1..1
-            const float DistFromCenter = FMath::Sqrt(NormX * NormX + NormY * NormY);
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::Savanna;
+        b.DisplayName           = TEXT("Open Savanna");
+        b.RadiusCm              = 100000.0f;
+        b.CentreLocation        = FVector(0.0f, 0.0f, 0.0f);
+        b.AmbientTemperatureC   = 30.0f;
+        b.Humidity              = 0.3f;
+        b.PredatorDensity       = 1.0f;
+        b.FoodAvailability      = 0.4f;
+        b.FogDensityMultiplier  = 0.7f;
+        b.GroundTint            = FLinearColor(0.55f, 0.48f, 0.25f, 1.0f);
+        b.FoliageDensity        = 0.3f;
+        BiomeZones.Add(b);
+    }
 
-            // Assign biome based on distance + deterministic hash
-            EEng_BiomeType AssignedBiome = ClassifyBiomeByPosition(NormX, NormY, DistFromCenter, Index);
-            BiomeGrid[Index] = AssignedBiome;
+    // --- Swamp (slow movement, disease risk) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::Swamp;
+        b.DisplayName           = TEXT("Primordial Swamp");
+        b.RadiusCm              = 60000.0f;
+        b.CentreLocation        = FVector(-50000.0f, 70000.0f, -500.0f);
+        b.AmbientTemperatureC   = 28.0f;
+        b.Humidity              = 0.95f;
+        b.PredatorDensity       = 1.4f;
+        b.FoodAvailability      = 0.6f;
+        b.FogDensityMultiplier  = 2.0f;
+        b.GroundTint            = FLinearColor(0.15f, 0.2f, 0.08f, 1.0f);
+        b.FoliageDensity        = 0.7f;
+        BiomeZones.Add(b);
+    }
+
+    // --- Volcanic (extreme heat, low food) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::Volcanic;
+        b.DisplayName           = TEXT("Volcanic Badlands");
+        b.RadiusCm              = 40000.0f;
+        b.CentreLocation        = FVector(90000.0f, -60000.0f, 2000.0f);
+        b.AmbientTemperatureC   = 55.0f;
+        b.Humidity              = 0.05f;
+        b.PredatorDensity       = 0.5f;
+        b.FoodAvailability      = 0.1f;
+        b.FogDensityMultiplier  = 1.8f;
+        b.GroundTint            = FLinearColor(0.3f, 0.1f, 0.05f, 1.0f);
+        b.FoliageDensity        = 0.05f;
+        BiomeZones.Add(b);
+    }
+
+    // --- Coastal Plain (rich resources, amphibious predators) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::CoastalPlain;
+        b.DisplayName           = TEXT("Coastal Plain");
+        b.RadiusCm              = 70000.0f;
+        b.CentreLocation        = FVector(-80000.0f, -30000.0f, 0.0f);
+        b.AmbientTemperatureC   = 26.0f;
+        b.Humidity              = 0.65f;
+        b.PredatorDensity       = 1.2f;
+        b.FoodAvailability      = 0.75f;
+        b.FogDensityMultiplier  = 1.1f;
+        b.GroundTint            = FLinearColor(0.4f, 0.45f, 0.3f, 1.0f);
+        b.FoliageDensity        = 0.5f;
+        BiomeZones.Add(b);
+    }
+
+    // --- River Delta (fresh water, high food) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::RiverDelta;
+        b.DisplayName           = TEXT("River Delta");
+        b.RadiusCm              = 50000.0f;
+        b.CentreLocation        = FVector(30000.0f, -80000.0f, -200.0f);
+        b.AmbientTemperatureC   = 27.0f;
+        b.Humidity              = 0.8f;
+        b.PredatorDensity       = 1.3f;
+        b.FoodAvailability      = 0.9f;
+        b.FogDensityMultiplier  = 1.3f;
+        b.GroundTint            = FLinearColor(0.2f, 0.35f, 0.15f, 1.0f);
+        b.FoliageDensity        = 0.65f;
+        BiomeZones.Add(b);
+    }
+
+    // --- Montane Forest (cold, low predator, high stamina drain) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::MontaneForest;
+        b.DisplayName           = TEXT("Montane Forest");
+        b.RadiusCm              = 55000.0f;
+        b.CentreLocation        = FVector(-20000.0f, -90000.0f, 3000.0f);
+        b.AmbientTemperatureC   = 12.0f;
+        b.Humidity              = 0.6f;
+        b.PredatorDensity       = 0.7f;
+        b.FoodAvailability      = 0.5f;
+        b.FogDensityMultiplier  = 1.4f;
+        b.GroundTint            = FLinearColor(0.2f, 0.28f, 0.12f, 1.0f);
+        b.FoliageDensity        = 0.75f;
+        BiomeZones.Add(b);
+    }
+
+    // --- Badlands (arid, sparse, T-Rex territory) ---
+    {
+        FEng_BiomeData b;
+        b.BiomeType             = EEng_BiomeType::Badlands;
+        b.DisplayName           = TEXT("Badlands");
+        b.RadiusCm              = 65000.0f;
+        b.CentreLocation        = FVector(70000.0f, 80000.0f, 500.0f);
+        b.AmbientTemperatureC   = 42.0f;
+        b.Humidity              = 0.1f;
+        b.PredatorDensity       = 2.0f;   // T-Rex territory
+        b.FoodAvailability      = 0.2f;
+        b.FogDensityMultiplier  = 0.5f;
+        b.GroundTint            = FLinearColor(0.5f, 0.35f, 0.2f, 1.0f);
+        b.FoliageDensity        = 0.1f;
+        BiomeZones.Add(b);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized %d default biomes"), BiomeZones.Num());
+}
+
+// ============================================================
+//  FindClosestBiome — internal helper
+// ============================================================
+const FEng_BiomeData* ABiomeManager::FindClosestBiome(const FVector& WorldLocation) const
+{
+    const FEng_BiomeData* Closest = nullptr;
+    float ClosestDist = FLT_MAX;
+
+    for (const FEng_BiomeData& Biome : BiomeZones)
+    {
+        const float Dist = FVector::Dist2D(WorldLocation, Biome.CentreLocation);
+        if (Dist < Biome.RadiusCm && Dist < ClosestDist)
+        {
+            ClosestDist = Dist;
+            Closest = &Biome;
         }
     }
 
-    bBiomesInitialized = true;
-    UE_LOG(LogBiomeManager, Log, TEXT("Biome grid initialized successfully"));
+    return Closest;
 }
 
 // ============================================================
-// ClassifyBiomeByPosition — deterministic biome assignment
+//  Public API
 // ============================================================
-EEng_BiomeType ABiomeManager::ClassifyBiomeByPosition(float NormX, float NormY, float DistFromCenter, int32 Seed) const
+EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Coastal ring at edges
-    if (DistFromCenter > 0.85f)
-    {
-        return EEng_BiomeType::CoastalShallows;
-    }
-
-    // Volcanic badlands in SW quadrant (NormX < -0.3, NormY < -0.3)
-    if (NormX < -0.3f && NormY < -0.3f && DistFromCenter > 0.4f)
-    {
-        return EEng_BiomeType::VolcanicBadlands;
-    }
-
-    // Swamp delta in NE quadrant
-    if (NormX > 0.2f && NormY > 0.2f && DistFromCenter > 0.3f)
-    {
-        return EEng_BiomeType::SwampDelta;
-    }
-
-    // Open plains in N strip
-    if (NormY < -0.2f && FMath::Abs(NormX) < 0.5f)
-    {
-        return EEng_BiomeType::OpenPlains;
-    }
-
-    // Everything else = dense Cretaceous forest
-    return EEng_BiomeType::CretaceousForest;
+    const FEng_BiomeData* Found = FindClosestBiome(WorldLocation);
+    return Found ? Found->BiomeType : DefaultBiome.BiomeType;
 }
 
-// ============================================================
-// GetBiomeAtWorldLocation — query biome for any world position
-// ============================================================
-EEng_BiomeType ABiomeManager::GetBiomeAtWorldLocation(const FVector& WorldLocation) const
+FEng_BiomeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
 {
-    if (!bBiomesInitialized)
-    {
-        UE_LOG(LogBiomeManager, Warning, TEXT("GetBiomeAtWorldLocation called before initialization"));
-        return EEng_BiomeType::CretaceousForest;
-    }
-
-    const float WorldSizeCm = WorldSizeKm * 100000.0f; // km to cm
-    const float HalfWorld = WorldSizeCm * 0.5f;
-
-    // Clamp to world bounds
-    const float ClampedX = FMath::Clamp(WorldLocation.X, -HalfWorld, HalfWorld);
-    const float ClampedY = FMath::Clamp(WorldLocation.Y, -HalfWorld, HalfWorld);
-
-    // Map to grid coordinates
-    const int32 GridX = FMath::FloorToInt(((ClampedX + HalfWorld) / WorldSizeCm) * BiomeGridResolution);
-    const int32 GridY = FMath::FloorToInt(((ClampedY + HalfWorld) / WorldSizeCm) * BiomeGridResolution);
-
-    const int32 SafeX = FMath::Clamp(GridX, 0, BiomeGridResolution - 1);
-    const int32 SafeY = FMath::Clamp(GridY, 0, BiomeGridResolution - 1);
-    const int32 Index = SafeY * BiomeGridResolution + SafeX;
-
-    if (BiomeGrid.IsValidIndex(Index))
-    {
-        return BiomeGrid[Index];
-    }
-
-    return EEng_BiomeType::CretaceousForest;
+    const FEng_BiomeData* Found = FindClosestBiome(WorldLocation);
+    return Found ? *Found : DefaultBiome;
 }
 
-// ============================================================
-// GetBiomeDisplayName — human-readable biome name
-// ============================================================
-FString ABiomeManager::GetBiomeDisplayName(EEng_BiomeType BiomeType) const
+bool ABiomeManager::IsLocationInBiome(const FVector& WorldLocation, EEng_BiomeType BiomeType) const
 {
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::CretaceousForest:   return TEXT("Cretaceous Forest");
-        case EEng_BiomeType::OpenPlains:          return TEXT("Open Plains");
-        case EEng_BiomeType::SwampDelta:          return TEXT("Swamp Delta");
-        case EEng_BiomeType::VolcanicBadlands:    return TEXT("Volcanic Badlands");
-        case EEng_BiomeType::CoastalShallows:     return TEXT("Coastal Shallows");
-        default:                                   return TEXT("Unknown Biome");
-    }
+    return GetBiomeAtLocation(WorldLocation) == BiomeType;
 }
 
-// ============================================================
-// GetFoliageDensityForBiome — drives FoliageManager density
-// ============================================================
-float ABiomeManager::GetFoliageDensityForBiome(EEng_BiomeType BiomeType) const
+float ABiomeManager::GetPredatorDensityAt(const FVector& WorldLocation) const
 {
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::CretaceousForest:   return 1.0f;   // Maximum density
-        case EEng_BiomeType::SwampDelta:          return 0.8f;   // Dense but water-logged
-        case EEng_BiomeType::OpenPlains:          return 0.3f;   // Sparse ground cover
-        case EEng_BiomeType::CoastalShallows:     return 0.2f;   // Beach vegetation
-        case EEng_BiomeType::VolcanicBadlands:    return 0.05f;  // Almost barren
-        default:                                   return 0.5f;
-    }
+    const FEng_BiomeData* Found = FindClosestBiome(WorldLocation);
+    return Found ? Found->PredatorDensity : DefaultBiome.PredatorDensity;
 }
 
-// ============================================================
-// GetDinosaurDensityForBiome — drives DinosaurSpawner density
-// ============================================================
-float ABiomeManager::GetDinosaurDensityForBiome(EEng_BiomeType BiomeType) const
+float ABiomeManager::GetTemperatureAt(const FVector& WorldLocation) const
 {
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::OpenPlains:          return 1.0f;   // Herds roam plains
-        case EEng_BiomeType::CretaceousForest:    return 0.7f;   // Predators in forest
-        case EEng_BiomeType::SwampDelta:          return 0.5f;   // Aquatic species
-        case EEng_BiomeType::CoastalShallows:     return 0.3f;   // Coastal species
-        case EEng_BiomeType::VolcanicBadlands:    return 0.1f;   // Extreme survivors only
-        default:                                   return 0.5f;
-    }
+    const FEng_BiomeData* Found = FindClosestBiome(WorldLocation);
+    return Found ? Found->AmbientTemperatureC : DefaultBiome.AmbientTemperatureC;
 }
 
-// ============================================================
-// GetWeatherIntensityForBiome — drives Weather system
-// ============================================================
-float ABiomeManager::GetWeatherIntensityForBiome(EEng_BiomeType BiomeType) const
+float ABiomeManager::GetFoodAvailabilityAt(const FVector& WorldLocation) const
 {
-    switch (BiomeType)
-    {
-        case EEng_BiomeType::SwampDelta:          return 0.9f;   // Constant rain
-        case EEng_BiomeType::CoastalShallows:     return 0.7f;   // Coastal storms
-        case EEng_BiomeType::CretaceousForest:    return 0.5f;   // Tropical showers
-        case EEng_BiomeType::OpenPlains:          return 0.3f;   // Dry season
-        case EEng_BiomeType::VolcanicBadlands:    return 0.1f;   // Ash clouds only
-        default:                                   return 0.4f;
-    }
+    const FEng_BiomeData* Found = FindClosestBiome(WorldLocation);
+    return Found ? Found->FoodAvailability : DefaultBiome.FoodAvailability;
 }
 
-// ============================================================
-// DebugDrawBiomeGrid — visualize biome boundaries in editor
-// ============================================================
-void ABiomeManager::DebugDrawBiomeGrid()
+void ABiomeManager::RegisterBiome(const FEng_BiomeData& BiomeData)
 {
-    if (!bBiomesInitialized)
+    // Replace existing biome of same type if present
+    for (FEng_BiomeData& Existing : BiomeZones)
     {
-        InitializeBiomeGrid();
-    }
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    const float WorldSizeCm = WorldSizeKm * 100000.0f;
-    const float CellSize = WorldSizeCm / BiomeGridResolution;
-    const float HalfWorld = WorldSizeCm * 0.5f;
-    const float DrawZ = 200.0f;
-    const float DrawDuration = 30.0f;
-
-    // Color map per biome
-    TMap<EEng_BiomeType, FColor> BiomeColors;
-    BiomeColors.Add(EEng_BiomeType::CretaceousForest,  FColor(34, 139, 34));    // Forest green
-    BiomeColors.Add(EEng_BiomeType::OpenPlains,         FColor(210, 180, 140));  // Tan
-    BiomeColors.Add(EEng_BiomeType::SwampDelta,         FColor(0, 100, 80));     // Dark teal
-    BiomeColors.Add(EEng_BiomeType::VolcanicBadlands,   FColor(180, 60, 20));    // Dark red
-    BiomeColors.Add(EEng_BiomeType::CoastalShallows,    FColor(64, 164, 223));   // Ocean blue
-
-    for (int32 Y = 0; Y < BiomeGridResolution; Y++)
-    {
-        for (int32 X = 0; X < BiomeGridResolution; X++)
+        if (Existing.BiomeType == BiomeData.BiomeType &&
+            FVector::Dist(Existing.CentreLocation, BiomeData.CentreLocation) < 1000.0f)
         {
-            const int32 Index = Y * BiomeGridResolution + X;
-            if (!BiomeGrid.IsValidIndex(Index)) continue;
-
-            const EEng_BiomeType Biome = BiomeGrid[Index];
-            const FColor* ColorPtr = BiomeColors.Find(Biome);
-            const FColor Color = ColorPtr ? *ColorPtr : FColor::White;
-
-            const float WorldX = -HalfWorld + (X + 0.5f) * CellSize;
-            const float WorldY = -HalfWorld + (Y + 0.5f) * CellSize;
-            const FVector Center(WorldX, WorldY, DrawZ);
-
-            DrawDebugBox(World, Center, FVector(CellSize * 0.45f, CellSize * 0.45f, 50.0f),
-                Color, false, DrawDuration, 0, 10.0f);
+            Existing = BiomeData;
+            return;
         }
     }
+    BiomeZones.Add(BiomeData);
+}
 
-    UE_LOG(LogBiomeManager, Log, TEXT("Biome grid debug draw complete (%d cells)"), BiomeGrid.Num());
+TArray<FEng_BiomeData> ABiomeManager::GetAllBiomes() const
+{
+    return BiomeZones;
+}
+
+void ABiomeManager::RebuildDefaultBiomes()
+{
+    BiomeZones.Empty();
+    InitializeDefaultBiomes();
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Rebuilt %d default biomes"), BiomeZones.Num());
 }
