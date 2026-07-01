@@ -1,111 +1,15 @@
-// TRexDinosaur.h
-// Transpersonal Game Studio — Core Systems Programmer #03
-// Cycle: PROD_CYCLE_AUTO_20260629_011
-// T-Rex species-specific dinosaur — apex predator with ambush and charge behaviours
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Dinosaurs/DinosaurBase.h"
 #include "TRexDinosaur.generated.h"
 
-// ─── T-Rex Charge State ───────────────────────────────────────────────────────
-UENUM(BlueprintType)
-enum class ECore_TRexChargeState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Winding     UMETA(DisplayName = "Winding Up"),
-    Charging    UMETA(DisplayName = "Charging"),
-    Recovering  UMETA(DisplayName = "Recovering")
-};
-
-// ─── T-Rex Sense Mode ─────────────────────────────────────────────────────────
-UENUM(BlueprintType)
-enum class ECore_TRexSenseMode : uint8
-{
-    Visual      UMETA(DisplayName = "Visual"),
-    Vibration   UMETA(DisplayName = "Ground Vibration"),
-    Scent       UMETA(DisplayName = "Scent Trail")
-};
-
-// ─── T-Rex Combat Stats ───────────────────────────────────────────────────────
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TRexCombatStats
-{
-    GENERATED_BODY()
-
-    /** Bite force in Newtons (realistic: ~35,000 N) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float BiteForceNewtons = 35000.0f;
-
-    /** Charge speed multiplier over base movement speed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChargeSpeedMultiplier = 2.2f;
-
-    /** Charge windup duration in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChargeWindupSeconds = 1.5f;
-
-    /** Charge duration before recovery */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChargeDurationSeconds = 3.0f;
-
-    /** Charge cooldown before next charge attempt */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float ChargeCooldownSeconds = 8.0f;
-
-    /** Stomp radius — knocks back nearby actors */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompRadiusCm = 300.0f;
-
-    /** Stomp damage */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float StompDamage = 40.0f;
-
-    /** Bite damage per hit */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float BiteDamage = 120.0f;
-};
-
-// ─── T-Rex Sensory Stats ──────────────────────────────────────────────────────
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_TRexSensoryStats
-{
-    GENERATED_BODY()
-
-    /** Visual detection radius (poor eyesight — movement-based) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float VisualRadiusCm = 2500.0f;
-
-    /** Ground vibration detection radius (footsteps) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float VibrationRadiusCm = 1800.0f;
-
-    /** Scent detection radius */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    float ScentRadiusCm = 3500.0f;
-
-    /** Whether the T-Rex is currently tracking a scent trail */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Senses")
-    bool bTrackingScent = false;
-
-    /** Last known scent position */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|Senses")
-    FVector LastScentPosition = FVector::ZeroVector;
-};
-
 /**
- * ATRexDinosaur
- *
- * Tyrannosaurus Rex — apex predator of the prehistoric world.
- * Inherits from ADinosaurBase and adds species-specific:
- *   - Charge attack with windup/charge/recovery phases
- *   - Stomp area-of-effect attack
- *   - Multi-modal sensory system (visual, vibration, scent)
- *   - Territorial roar that intimidates nearby prey
- *   - Realistic hunger-driven hunting behaviour
+ * ATRexDinosaur — Tyrannosaurus Rex
+ * Apex predator. Massive health pool, devastating damage, wide detection radius.
+ * Solitary hunter. Charges when target is within 600cm. Roars to stun nearby prey.
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs")
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
@@ -113,96 +17,78 @@ class TRANSPERSONALGAME_API ATRexDinosaur : public ADinosaurBase
 public:
     ATRexDinosaur();
 
-    // ─── UE5 Lifecycle ────────────────────────────────────────────────────────
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // ─── Combat ───────────────────────────────────────────────────────────────
+    /** Roar ability — stuns player within RoarRadius for RoarStunDuration seconds */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void ExecuteRoar();
 
-    /** Initiates a charge attack toward the target location */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void InitiateCharge(FVector TargetLocation);
+    /** Charge attack — sprint directly at target if within ChargeActivationDistance */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void InitiateCharge();
 
-    /** Performs a stomp attack — damages all actors within StompRadius */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void PerformStomp();
+    /** Stomp — AoE ground slam dealing StompDamage in StompRadius */
+    UFUNCTION(BlueprintCallable, Category = "TRex|Abilities")
+    void ExecuteStomp();
 
-    /** Performs a bite attack on the current target */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void PerformBite();
-
-    /** Territorial roar — intimidates prey within 1500cm, triggers flee response */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Combat")
-    void TerritorialRoar();
-
-    // ─── Senses ───────────────────────────────────────────────────────────────
-
-    /** Detects prey using all available sense modes */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Senses")
-    bool DetectPreyMultiSense(AActor*& OutDetectedPrey);
-
-    /** Updates scent trail tracking */
-    UFUNCTION(BlueprintCallable, Category = "TRex|Senses")
-    void UpdateScentTracking(float DeltaTime);
-
-    // ─── State Queries ────────────────────────────────────────────────────────
-
+    /** Returns true if TRex is currently in charge state */
     UFUNCTION(BlueprintPure, Category = "TRex|State")
-    ECore_TRexChargeState GetChargeState() const { return ChargeState; }
+    bool IsCharging() const { return bIsCharging; }
 
+    /** Returns true if TRex roar is on cooldown */
     UFUNCTION(BlueprintPure, Category = "TRex|State")
-    bool IsCharging() const { return ChargeState == ECore_TRexChargeState::Charging; }
-
-    UFUNCTION(BlueprintPure, Category = "TRex|State")
-    bool CanCharge() const;
-
-    // ─── Properties ───────────────────────────────────────────────────────────
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    FCore_TRexCombatStats CombatStats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Senses")
-    FCore_TRexSensoryStats SensoryStats;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    ECore_TRexChargeState ChargeState = ECore_TRexChargeState::Idle;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    ECore_TRexSenseMode ActiveSenseMode = ECore_TRexSenseMode::Visual;
-
-    /** Current charge target location */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    FVector ChargeTargetLocation = FVector::ZeroVector;
-
-    /** Time since last charge (for cooldown) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    float TimeSinceLastCharge = 0.0f;
-
-    /** Time remaining in current charge phase */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    float ChargePhaseTimer = 0.0f;
-
-    /** Whether the T-Rex has detected a target this frame */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
-    bool bHasActiveTarget = false;
+    bool IsRoarOnCooldown() const { return RoarCooldownRemaining > 0.0f; }
 
 protected:
-    // ─── Internal Charge Logic ────────────────────────────────────────────────
-    void TickCharge(float DeltaTime);
-    void BeginWindup();
-    void BeginChargePhase();
-    void BeginRecovery();
-    void EndCharge();
+    /** Radius within which TRex roar stuns targets (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarRadius = 1500.0f;
 
-    // ─── Internal Sense Logic ─────────────────────────────────────────────────
-    bool CheckVisualDetection(AActor*& OutPrey) const;
-    bool CheckVibrationDetection(AActor*& OutPrey) const;
-    bool CheckScentDetection(AActor*& OutPrey) const;
+    /** Duration of roar stun effect (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarStunDuration = 3.0f;
 
-    /** Cached reference to detected prey */
-    UPROPERTY()
-    AActor* CurrentPrey = nullptr;
+    /** Cooldown between roars (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float RoarCooldown = 15.0f;
 
-    /** Scent tracking accumulator */
-    float ScentTrackingTimer = 0.0f;
+    /** Current roar cooldown remaining */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    float RoarCooldownRemaining = 0.0f;
+
+    /** Distance at which TRex transitions to charge attack (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float ChargeActivationDistance = 800.0f;
+
+    /** Speed multiplier during charge */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float ChargeSpeedMultiplier = 1.8f;
+
+    /** Stomp damage (AoE) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompDamage = 120.0f;
+
+    /** Stomp AoE radius (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float StompRadius = 400.0f;
+
+    /** Whether TRex is currently charging */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    bool bIsCharging = false;
+
+    /** Charge duration timer */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    float ChargeDurationRemaining = 0.0f;
+
+    /** Max charge duration (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Abilities")
+    float MaxChargeDuration = 3.0f;
+
+private:
+    /** Tick roar cooldown and charge timer */
+    void UpdateAbilityCooldowns(float DeltaTime);
+
+    /** Base walk speed stored before charge */
+    float BaseWalkSpeed = 0.0f;
 };
