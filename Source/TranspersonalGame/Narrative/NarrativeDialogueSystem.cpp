@@ -1,6 +1,6 @@
 // NarrativeDialogueSystem.cpp
-// Narrative & Dialogue Agent #15 — Transpersonal Game Studio
-// Full implementation: dialogue trigger, quest dialogue, NPC bark system
+// Transpersonal Game Studio — Agent #15 Narrative & Dialogue
+// Full implementation of the NPC dialogue and narrative trigger system
 
 #include "NarrativeDialogueSystem.h"
 #include "GameFramework/Actor.h"
@@ -9,214 +9,321 @@
 #include "Kismet/GameplayStatics.h"
 
 // ============================================================
-// UNarr_DialogueComponent — Constructor
+// UNarr_DialogueLibrary
 // ============================================================
 
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UNarr_DialogueLibrary::UNarr_DialogueLibrary()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-
-    bIsDialogueActive = false;
-    CurrentLineIndex = 0;
-    CurrentConversationID = NAME_None;
-    LineDisplayDuration = 4.0f;
-    SpeakerRole = ENarr_SpeakerRole::Narrator;
-    TriggerType = ENarr_DialogueTriggerType::Proximity;
-    TriggerRadius = 300.0f;
-    bCanRepeatDialogue = false;
-    bHasBeenTriggered = false;
+    DialogueLines.Empty();
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UNarr_DialogueLibrary::AddLine(const FNarr_DialogueLine& Line)
 {
-    Super::BeginPlay();
+    DialogueLines.Add(Line);
 }
 
-// ============================================================
-// StartConversation — begin a named dialogue sequence
-// ============================================================
-
-void UNarr_DialogueComponent::StartConversation(FName ConversationID)
+bool UNarr_DialogueLibrary::GetLineByID(const FName& LineID, FNarr_DialogueLine& OutLine) const
 {
-    if (bIsDialogueActive)
+    for (const FNarr_DialogueLine& Line : DialogueLines)
     {
-        return;
-    }
-
-    // Find matching conversation in library
-    const FNarr_DialogueConversation* Found = nullptr;
-    for (const FNarr_DialogueConversation& Conv : DialogueLibrary)
-    {
-        if (Conv.ConversationID == ConversationID)
+        if (Line.LineID == LineID)
         {
-            Found = &Conv;
-            break;
+            OutLine = Line;
+            return true;
         }
     }
+    return false;
+}
 
-    if (!Found || Found->Lines.Num() == 0)
+TArray<FNarr_DialogueLine> UNarr_DialogueLibrary::GetLinesByTrigger(ENarr_DialogueTriggerType TriggerType) const
+{
+    TArray<FNarr_DialogueLine> Result;
+    for (const FNarr_DialogueLine& Line : DialogueLines)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogue: Conversation '%s' not found or empty."), *ConversationID.ToString());
-        return;
+        if (Line.TriggerType == TriggerType)
+        {
+            Result.Add(Line);
+        }
     }
+    return Result;
+}
 
-    if (bHasBeenTriggered && !bCanRepeatDialogue)
+TArray<FNarr_DialogueLine> UNarr_DialogueLibrary::GetLinesBySpeaker(ENarr_SpeakerRole SpeakerRole) const
+{
+    TArray<FNarr_DialogueLine> Result;
+    for (const FNarr_DialogueLine& Line : DialogueLines)
     {
-        return;
+        if (Line.SpeakerRole == SpeakerRole)
+        {
+            Result.Add(Line);
+        }
     }
-
-    bIsDialogueActive = true;
-    bHasBeenTriggered = true;
-    CurrentConversationID = ConversationID;
-    CurrentLineIndex = 0;
-    ActiveConversation = *Found;
-
-    OnDialogueStarted.Broadcast(ConversationID);
-    DisplayCurrentLine();
+    return Result;
 }
 
 // ============================================================
-// AdvanceLine — move to next line or end conversation
+// ANarr_DialogueTriggerActor
 // ============================================================
 
-void UNarr_DialogueComponent::AdvanceLine()
+ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
 {
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
+    PrimaryActorTick.bCanEverTick = false;
 
-    CurrentLineIndex++;
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    RootComponent = TriggerSphere;
+    TriggerSphere->SetSphereRadius(300.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
 
-    if (CurrentLineIndex >= ActiveConversation.Lines.Num())
-    {
-        EndConversation();
-        return;
-    }
-
-    DisplayCurrentLine();
+    TriggerType = ENarr_DialogueTriggerType::Proximity;
+    SpeakerRole = ENarr_SpeakerRole::Scout;
+    bHasTriggered = false;
+    bRepeatTrigger = false;
+    CooldownSeconds = 30.0f;
+    bIsOnCooldown = false;
 }
 
-// ============================================================
-// EndConversation — clean up and broadcast
-// ============================================================
-
-void UNarr_DialogueComponent::EndConversation()
+void ANarr_DialogueTriggerActor::BeginPlay()
 {
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-
-    bIsDialogueActive = false;
-
-    // Clear auto-advance timer if running
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(LineAdvanceTimer);
-    }
-
-    OnDialogueEnded.Broadcast(CurrentConversationID);
-    CurrentConversationID = NAME_None;
-    CurrentLineIndex = 0;
+    Super::BeginPlay();
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTriggerActor::OnSphereBeginOverlap);
 }
 
-// ============================================================
-// DisplayCurrentLine — show line and schedule auto-advance
-// ============================================================
-
-void UNarr_DialogueComponent::DisplayCurrentLine()
+void ANarr_DialogueTriggerActor::OnSphereBeginOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
 {
-    if (!ActiveConversation.Lines.IsValidIndex(CurrentLineIndex))
+    if (!OtherActor || bIsOnCooldown)
     {
-        EndConversation();
         return;
     }
 
-    const FNarr_DialogueLine& Line = ActiveConversation.Lines[CurrentLineIndex];
-    OnLineDisplayed.Broadcast(Line);
-
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogue [%s | %s]: %s"),
-        *Line.SpeakerName.ToString(),
-        *UEnum::GetValueAsString(Line.SpeakerRole),
-        *Line.DialogueText.ToString());
-
-    // Auto-advance after display duration
-    float Duration = Line.DisplayDuration > 0.0f ? Line.DisplayDuration : LineDisplayDuration;
-    if (GetWorld() && ActiveConversation.bAutoAdvance)
+    // Only trigger for the player pawn
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor != PlayerPawn)
     {
-        GetWorld()->GetTimerManager().SetTimer(
-            LineAdvanceTimer,
+        return;
+    }
+
+    if (bHasTriggered && !bRepeatTrigger)
+    {
+        return;
+    }
+
+    FireDialogue();
+}
+
+void ANarr_DialogueTriggerActor::FireDialogue()
+{
+    if (!DialogueLibrary)
+    {
+        return;
+    }
+
+    TArray<FNarr_DialogueLine> Lines = DialogueLibrary->GetLinesByTrigger(TriggerType);
+    if (Lines.Num() == 0)
+    {
+        return;
+    }
+
+    // Pick a random line from matching trigger type
+    int32 Index = FMath::RandRange(0, Lines.Num() - 1);
+    FNarr_DialogueLine& SelectedLine = Lines[Index];
+
+    OnDialogueTriggered.Broadcast(SelectedLine);
+    bHasTriggered = true;
+
+    if (bRepeatTrigger)
+    {
+        bIsOnCooldown = true;
+        GetWorldTimerManager().SetTimer(
+            CooldownTimerHandle,
             this,
-            &UNarr_DialogueComponent::AdvanceLine,
-            Duration,
+            &ANarr_DialogueTriggerActor::ResetCooldown,
+            CooldownSeconds,
             false
         );
     }
 }
 
+void ANarr_DialogueTriggerActor::ResetCooldown()
+{
+    bIsOnCooldown = false;
+}
+
 // ============================================================
-// TriggerBark — single-line NPC reaction
+// UNarr_DialogueManagerComponent
 // ============================================================
 
-void UNarr_DialogueComponent::TriggerBark(ENarr_BarkType BarkType)
+UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
 {
-    // Find a matching bark line in the library
-    for (const FNarr_BarkLine& Bark : BarkLibrary)
+    PrimaryComponentTick.bCanEverTick = false;
+    ActiveLineIndex = 0;
+    bIsDialogueActive = false;
+    LineDisplayDuration = 4.0f;
+}
+
+void UNarr_DialogueManagerComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    ActiveLines.Empty();
+}
+
+void UNarr_DialogueManagerComponent::StartDialogueSequence(const TArray<FNarr_DialogueLine>& Lines)
+{
+    if (Lines.Num() == 0 || bIsDialogueActive)
     {
-        if (Bark.BarkType == BarkType)
-        {
-            OnBarkTriggered.Broadcast(Bark);
-            UE_LOG(LogTemp, Log, TEXT("NarrativeBark [%s]: %s"),
-                *UEnum::GetValueAsString(BarkType),
-                *Bark.BarkText.ToString());
-            return;
-        }
+        return;
+    }
+
+    ActiveLines = Lines;
+    ActiveLineIndex = 0;
+    bIsDialogueActive = true;
+
+    DisplayCurrentLine();
+}
+
+void UNarr_DialogueManagerComponent::DisplayCurrentLine()
+{
+    if (ActiveLineIndex >= ActiveLines.Num())
+    {
+        EndDialogue();
+        return;
+    }
+
+    const FNarr_DialogueLine& CurrentLine = ActiveLines[ActiveLineIndex];
+    OnLineDisplayed.Broadcast(CurrentLine);
+
+    // Auto-advance after display duration
+    GetWorld()->GetTimerManager().SetTimer(
+        LineAdvanceTimerHandle,
+        this,
+        &UNarr_DialogueManagerComponent::AdvanceLine,
+        LineDisplayDuration,
+        false
+    );
+}
+
+void UNarr_DialogueManagerComponent::AdvanceLine()
+{
+    ActiveLineIndex++;
+    DisplayCurrentLine();
+}
+
+void UNarr_DialogueManagerComponent::EndDialogue()
+{
+    bIsDialogueActive = false;
+    ActiveLines.Empty();
+    ActiveLineIndex = 0;
+    OnDialogueEnded.Broadcast();
+}
+
+void UNarr_DialogueManagerComponent::SkipCurrentLine()
+{
+    if (!bIsDialogueActive)
+    {
+        return;
+    }
+
+    GetWorld()->GetTimerManager().ClearTimer(LineAdvanceTimerHandle);
+    AdvanceLine();
+}
+
+bool UNarr_DialogueManagerComponent::IsDialogueActive() const
+{
+    return bIsDialogueActive;
+}
+
+// ============================================================
+// ANarr_NPCDialogueActor — NPC that speaks contextual lines
+// ============================================================
+
+ANarr_NPCDialogueActor::ANarr_NPCDialogueActor()
+{
+    PrimaryActorTick.bCanEverTick = false;
+
+    MeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MeshComponent"));
+    RootComponent = MeshComponent;
+
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(200.0f);
+    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
+
+    DialogueManager = CreateDefaultSubobject<UNarr_DialogueManagerComponent>(TEXT("DialogueManager"));
+
+    SpeakerRole = ENarr_SpeakerRole::TribalElder;
+    NPCName = FText::FromString(TEXT("Elder"));
+    bCanInteract = true;
+    InteractionCooldown = 20.0f;
+    bOnInteractionCooldown = false;
+}
+
+void ANarr_NPCDialogueActor::BeginPlay()
+{
+    Super::BeginPlay();
+    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerEnterRange);
+    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerExitRange);
+}
+
+void ANarr_NPCDialogueActor::OnPlayerEnterRange(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult)
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor == PlayerPawn)
+    {
+        OnPlayerNearby.Broadcast(true);
     }
 }
 
-// ============================================================
-// GetCurrentLine — safe accessor for UI
-// ============================================================
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentLine() const
+void ANarr_NPCDialogueActor::OnPlayerExitRange(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bOnlyTouchingTrigger)
 {
-    if (bIsDialogueActive && ActiveConversation.Lines.IsValidIndex(CurrentLineIndex))
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (OtherActor == PlayerPawn)
     {
-        return ActiveConversation.Lines[CurrentLineIndex];
+        OnPlayerNearby.Broadcast(false);
     }
-    return FNarr_DialogueLine();
 }
 
-// ============================================================
-// RegisterConversation — runtime registration of new dialogue
-// ============================================================
-
-void UNarr_DialogueComponent::RegisterConversation(FNarr_DialogueConversation NewConversation)
+void ANarr_NPCDialogueActor::Interact()
 {
-    // Check for duplicate ID
-    for (const FNarr_DialogueConversation& Existing : DialogueLibrary)
+    if (!bCanInteract || bOnInteractionCooldown || !DialogueLibrary)
     {
-        if (Existing.ConversationID == NewConversation.ConversationID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogue: Conversation '%s' already registered. Skipping."),
-                *NewConversation.ConversationID.ToString());
-            return;
-        }
+        return;
     }
-    DialogueLibrary.Add(NewConversation);
+
+    TArray<FNarr_DialogueLine> Lines = DialogueLibrary->GetLinesBySpeaker(SpeakerRole);
+    if (Lines.Num() == 0)
+    {
+        return;
+    }
+
+    DialogueManager->StartDialogueSequence(Lines);
+
+    bOnInteractionCooldown = true;
+    GetWorldTimerManager().SetTimer(
+        InteractionCooldownHandle,
+        this,
+        &ANarr_NPCDialogueActor::ResetInteractionCooldown,
+        InteractionCooldown,
+        false
+    );
 }
 
-// ============================================================
-// GetLineCount — utility for UI progress display
-// ============================================================
-
-int32 UNarr_DialogueComponent::GetLineCount() const
+void ANarr_NPCDialogueActor::ResetInteractionCooldown()
 {
-    return ActiveConversation.Lines.Num();
-}
-
-int32 UNarr_DialogueComponent::GetCurrentLineIndex() const
-{
-    return CurrentLineIndex;
+    bOnInteractionCooldown = false;
 }
