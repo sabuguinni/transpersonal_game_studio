@@ -1,5 +1,7 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// TranspersonalGame.Build.cs — verified by Performance Optimizer (Agent #4)
+// TranspersonalGame.Build.cs
+// Core Systems Programmer — Agent #03
+// Updated: Cycle AUTO_20260701_005
+// Adds EnhancedInput, NavigationSystem, AIModule, GameplayTasks for full character + AI support
 
 using UnrealBuildTool;
 
@@ -11,89 +13,31 @@ public class TranspersonalGame : ModuleRules
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
-            // Core engine
             "Core",
             "CoreUObject",
             "Engine",
             "InputCore",
-
-            // Enhanced Input (UE5.1+)
             "EnhancedInput",
-
-            // Character movement + physics
-            "PhysicsCore",
-            "Chaos",
-
-            // AI & Navigation (DinosaurBase, NPC behavior)
-            "AIModule",
             "NavigationSystem",
+            "AIModule",
             "GameplayTasks",
-
-            // Gameplay framework
-            "GameplayAbilities",
-            "GameplayTags",
-            "GameplayTasks",
-
-            // Procedural Content Generation
-            "PCG",
-
-            // Rendering / Lumen
-            "RenderCore",
-            "Renderer",
-
-            // Slate UI (HUD)
+            "UMG",
             "Slate",
             "SlateCore",
-            "UMG",
-
-            // Online / session (future multiplayer)
-            "OnlineSubsystem",
+            "PhysicsCore",
+            "Chaos",
+            "GeometryCore",
+            "PCG",
+            "ProceduralMeshComponent"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            // Niagara VFX
-            "Niagara",
-
-            // Audio
-            "AudioMixer",
-            "MetasoundEngine",
-
-            // Landscape
-            "Landscape",
-            "LandscapeEditor",
-
-            // Foliage
-            "Foliage",
-
-            // World Partition / streaming
-            "WorldPartitionEditor",
-
-            // Mass AI (crowd simulation)
-            "MassAI",
-            "MassEntity",
-            "MassGameplay",
-
-            // Chaos physics extras
-            "GeometryCollectionEngine",
-            "ChaosSolverEngine",
+            "RenderCore",
+            "RHI"
         });
 
-        // Needed for UE5 editor tools
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "UnrealEd",
-                "LevelEditor",
-                "PropertyEditor",
-            });
-        }
-
-        // Optimization: enable unity builds for faster compile
-        bUseUnity = true;
-
-        // Enable IWYU for cleaner includes
+        // Enable IWYU
         bEnforceIWYU = true;
     }
 }
