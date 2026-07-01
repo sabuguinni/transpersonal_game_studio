@@ -1,476 +1,540 @@
 #include "DinosaurCombatAIController.h"
-#include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "BehaviorTree/BlackboardComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "NavigationSystem.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
 ADinosaurCombatAIController::ADinosaurCombatAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // Setup AI Perception
-    PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
-    SetPerceptionComponent(*PerceptionComponent);
-
-    // Sight config
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = 3000.0f;
-    SightConfig->LoseSightRadius = 3500.0f;
-    SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-    SightConfig->SetMaxAge(5.0f);
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    PerceptionComponent->ConfigureSense(*SightConfig);
-
-    // Hearing config
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = 1500.0f;
-    HearingConfig->SetMaxAge(3.0f);
-    PerceptionComponent->ConfigureSense(*HearingConfig);
-
-    PerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+    PrimaryActorTick.TickInterval = 0.05f; // 20Hz AI tick
 }
 
 void ADinosaurCombatAIController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Record home location from possessed pawn
-    if (GetPawn())
-    {
-        HomeLocation = GetPawn()->GetActorLocation();
-    }
-
-    // Configure species-specific parameters
-    ConfigureForSpecies(DinoSpecies);
-
-    // Bind perception delegate
-    if (PerceptionComponent)
-    {
-        PerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(
-            this, &ADinosaurCombatAIController::OnTargetPerceived);
-    }
-
-    SetCombatState(ECombat_DinoState::Patrolling);
-}
-
-void ADinosaurCombatAIController::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    UpdateStateMachine(DeltaTime);
+    ApplySpeciesDefaults();
+    CurrentHealth = MaxHealth;
+    CurrentPhase = ECombat_TacticalPhase::Idle;
 }
 
 void ADinosaurCombatAIController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn);
-    if (InPawn)
+    ControlledPawn = InPawn;
+
+    // Auto-generate patrol points if none provided
+    if (PatrolPoints.Num() == 0 && InPawn)
     {
-        HomeLocation = InPawn->GetActorLocation();
+        FVector Origin = InPawn->GetActorLocation();
+        for (int32 i = 0; i < 4; ++i)
+        {
+            float Angle = (float)i * 90.0f;
+            FCombat_PatrolPoint PP;
+            PP.Location = Origin + FVector(
+                FMath::Cos(FMath::DegreesToRadians(Angle)) * PatrolRadius,
+                FMath::Sin(FMath::DegreesToRadians(Angle)) * PatrolRadius,
+                0.0f
+            );
+            PP.WaitTime = 2.0f;
+            PatrolPoints.Add(PP);
+        }
     }
+
+    SetTacticalPhase(ECombat_TacticalPhase::Patrol);
 }
 
 void ADinosaurCombatAIController::OnUnPossess()
 {
     Super::OnUnPossess();
+    ControlledPawn = nullptr;
     CurrentTarget = nullptr;
-    SetCombatState(ECombat_DinoState::Idle);
 }
 
-// ─── State Machine ─────────────────────────────────────────────────────────
-
-void ADinosaurCombatAIController::SetCombatState(ECombat_DinoState NewState)
+void ADinosaurCombatAIController::Tick(float DeltaTime)
 {
-    if (CurrentState == NewState) return;
+    Super::Tick(DeltaTime);
 
-    CurrentState = NewState;
-    StateEntryTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if (!ControlledPawn || CurrentPhase == ECombat_TacticalPhase::Dead)
+        return;
 
-    // Update movement speed based on state
-    APawn* Pawn = GetPawn();
-    if (!Pawn) return;
+    AttackCooldownRemaining = FMath::Max(0.0f, AttackCooldownRemaining - DeltaTime);
+    PhaseTimer += DeltaTime;
 
-    ACharacter* Char = Cast<ACharacter>(Pawn);
-    if (Char && Char->GetCharacterMovement())
+    // Periodic scan for player (every 0.1s)
+    ScanTimer += DeltaTime;
+    if (ScanTimer >= 0.1f)
     {
-        float Speed = (NewState == ECombat_DinoState::Charging || NewState == ECombat_DinoState::Attacking)
-            ? CombatParams.MoveSpeed_Chase
-            : CombatParams.MoveSpeed_Patrol;
-        Char->GetCharacterMovement()->MaxWalkSpeed = Speed;
+        ScanTimer = 0.0f;
+        AActor* Found = ScanForPlayer();
+        if (Found && CurrentPhase != ECombat_TacticalPhase::Flee)
+        {
+            CurrentTarget = Found;
+            if (CurrentPhase == ECombat_TacticalPhase::Patrol ||
+                CurrentPhase == ECombat_TacticalPhase::Idle)
+            {
+                SetTacticalPhase(ECombat_TacticalPhase::Alert);
+                AlertPackMembers(Found);
+            }
+        }
+        else if (!Found && CurrentTarget)
+        {
+            float Dist = GetDistanceToTarget();
+            if (Dist > LoseTargetRange)
+            {
+                CurrentTarget = nullptr;
+                SetTacticalPhase(ECombat_TacticalPhase::Patrol);
+            }
+        }
+    }
+
+    // Dispatch to phase tick
+    switch (CurrentPhase)
+    {
+        case ECombat_TacticalPhase::Idle:    TickIdle(DeltaTime);    break;
+        case ECombat_TacticalPhase::Patrol:  TickPatrol(DeltaTime);  break;
+        case ECombat_TacticalPhase::Alert:   TickAlert(DeltaTime);   break;
+        case ECombat_TacticalPhase::Stalk:   TickStalk(DeltaTime);   break;
+        case ECombat_TacticalPhase::Charge:  TickCharge(DeltaTime);  break;
+        case ECombat_TacticalPhase::Attack:  TickAttack(DeltaTime);  break;
+        case ECombat_TacticalPhase::Recover: TickRecover(DeltaTime); break;
+        case ECombat_TacticalPhase::Flee:    TickFlee(DeltaTime);    break;
+        default: break;
     }
 }
 
-void ADinosaurCombatAIController::UpdateStateMachine(float DeltaTime)
+// ── Phase Transitions ────────────────────────────────────────────────────────
+
+void ADinosaurCombatAIController::SetTacticalPhase(ECombat_TacticalPhase NewPhase)
 {
-    switch (CurrentState)
+    if (CurrentPhase == NewPhase) return;
+    CurrentPhase = NewPhase;
+    PhaseTimer = 0.0f;
+
+    // Adjust movement speed per phase
+    ACharacter* Char = Cast<ACharacter>(ControlledPawn);
+    if (!Char) return;
+
+    UCharacterMovementComponent* Move = Char->GetCharacterMovement();
+    if (!Move) return;
+
+    switch (NewPhase)
     {
-        case ECombat_DinoState::Idle:
-            HandleIdleState(DeltaTime);
+        case ECombat_TacticalPhase::Patrol:
+            Move->MaxWalkSpeed = 200.0f;
             break;
-        case ECombat_DinoState::Patrolling:
-            HandlePatrolState(DeltaTime);
+        case ECombat_TacticalPhase::Alert:
+        case ECombat_TacticalPhase::Stalk:
+            Move->MaxWalkSpeed = 350.0f;
             break;
-        case ECombat_DinoState::Stalking:
-        case ECombat_DinoState::Charging:
-            HandleChaseState(DeltaTime);
+        case ECombat_TacticalPhase::Charge:
+            Move->MaxWalkSpeed = AttackData.ChargeSpeed;
             break;
-        case ECombat_DinoState::Attacking:
-            HandleAttackState(DeltaTime);
+        case ECombat_TacticalPhase::Attack:
+            Move->MaxWalkSpeed = 600.0f;
             break;
-        case ECombat_DinoState::Retreating:
-            HandleRetreatState(DeltaTime);
+        case ECombat_TacticalPhase::Flee:
+            Move->MaxWalkSpeed = 700.0f;
+            break;
+        case ECombat_TacticalPhase::Recover:
+            Move->MaxWalkSpeed = 100.0f;
             break;
         default:
+            Move->MaxWalkSpeed = 150.0f;
             break;
     }
 }
 
-void ADinosaurCombatAIController::HandleIdleState(float DeltaTime)
+// ── Phase Tick Implementations ───────────────────────────────────────────────
+
+void ADinosaurCombatAIController::TickIdle(float DeltaTime)
 {
-    float TimeInState = GetWorld()->GetTimeSeconds() - StateEntryTime;
-    if (TimeInState > 3.0f)
+    // After 5 seconds idle, start patrol
+    if (PhaseTimer > 5.0f)
     {
-        SetCombatState(ECombat_DinoState::Patrolling);
+        SetTacticalPhase(ECombat_TacticalPhase::Patrol);
     }
 }
 
-void ADinosaurCombatAIController::HandlePatrolState(float DeltaTime)
+void ADinosaurCombatAIController::TickPatrol(float DeltaTime)
 {
-    APawn* Pawn = GetPawn();
-    if (!Pawn) return;
+    if (PatrolPoints.Num() == 0) return;
 
-    // Check if far from territory — return home
-    float DistFromHome = FVector::Dist(Pawn->GetActorLocation(), HomeLocation);
-    if (DistFromHome > CombatParams.TerritoryReturnRange)
+    PatrolWaitRemaining -= DeltaTime;
+    if (PatrolWaitRemaining > 0.0f) return;
+
+    MoveToPatrolPoint();
+
+    // Check if reached patrol point
+    if (GetMoveStatus() == EPathFollowingStatus::Idle)
     {
-        ReturnToTerritory();
-        return;
+        PatrolWaitRemaining = PatrolPoints[CurrentPatrolIndex].WaitTime;
+        AdvancePatrolIndex();
     }
-
-    // Move to next patrol point
-    FVector PatrolTarget = GetNextPatrolPoint();
-    MoveToLocation(PatrolTarget, 200.0f);
 }
 
-void ADinosaurCombatAIController::HandleChaseState(float DeltaTime)
+void ADinosaurCombatAIController::TickAlert(float DeltaTime)
 {
     if (!CurrentTarget)
     {
-        SetCombatState(ECombat_DinoState::Investigating);
+        SetTacticalPhase(ECombat_TacticalPhase::Patrol);
         return;
     }
 
     float Dist = GetDistanceToTarget();
 
-    // Switch to attack if close enough
-    if (Dist <= CombatParams.AttackRange)
+    // Transition to charge if close enough
+    if (Dist <= AlertRange)
     {
-        SetCombatState(ECombat_DinoState::Attacking);
+        SetTacticalPhase(ECombat_TacticalPhase::Charge);
         return;
     }
 
-    // Lose target if too far
-    if (Dist > CombatParams.ChaseActivationRange * 1.5f)
-    {
-        RecordThreatMemory(CurrentTarget);
-        CurrentTarget = nullptr;
-        SetCombatState(ECombat_DinoState::Investigating);
-        return;
-    }
-
-    // Chase target
-    MoveToActor(CurrentTarget, CombatParams.AttackRange * 0.8f);
-
-    // Signal pack members if pack hunter
-    if (CombatParams.bIsPackHunter)
-    {
-        float TimeInState = GetWorld()->GetTimeSeconds() - StateEntryTime;
-        if (TimeInState < 0.5f) // Signal once on state entry
-        {
-            SignalPackMembers(CurrentTarget);
-        }
-    }
+    // Move toward target cautiously
+    MoveToTarget(AlertRange * 0.8f);
 }
 
-void ADinosaurCombatAIController::HandleAttackState(float DeltaTime)
+void ADinosaurCombatAIController::TickStalk(float DeltaTime)
 {
     if (!CurrentTarget)
     {
-        SetCombatState(ECombat_DinoState::Patrolling);
+        SetTacticalPhase(ECombat_TacticalPhase::Patrol);
         return;
     }
 
     float Dist = GetDistanceToTarget();
 
-    // Target escaped attack range — resume chase
-    if (Dist > CombatParams.AttackRange * 1.5f)
+    if (Dist <= AttackData.AttackRange * 2.0f)
     {
-        SetCombatState(ECombat_DinoState::Charging);
+        SetTacticalPhase(ECombat_TacticalPhase::Charge);
         return;
     }
 
-    // Execute attack on cooldown
-    float Now = GetWorld()->GetTimeSeconds();
-    if (Now - LastAttackTime >= CombatParams.AttackCooldown)
+    // Stalk: move to flanking position
+    FVector TargetLoc = CurrentTarget->GetActorLocation();
+    FVector MyLoc = ControlledPawn->GetActorLocation();
+    FVector ToTarget = (TargetLoc - MyLoc).GetSafeNormal();
+    FVector Perp = FVector::CrossProduct(ToTarget, FVector::UpVector);
+    FVector FlankPos = TargetLoc + Perp * 600.0f;
+
+    MoveToLocation(FlankPos, 150.0f);
+}
+
+void ADinosaurCombatAIController::TickCharge(float DeltaTime)
+{
+    if (!CurrentTarget)
+    {
+        SetTacticalPhase(ECombat_TacticalPhase::Patrol);
+        return;
+    }
+
+    float Dist = GetDistanceToTarget();
+
+    if (Dist <= AttackData.AttackRange)
+    {
+        SetTacticalPhase(ECombat_TacticalPhase::Attack);
+        return;
+    }
+
+    MoveToTarget(AttackData.AttackRange * 0.9f);
+}
+
+void ADinosaurCombatAIController::TickAttack(float DeltaTime)
+{
+    if (!CurrentTarget)
+    {
+        SetTacticalPhase(ECombat_TacticalPhase::Recover);
+        return;
+    }
+
+    float Dist = GetDistanceToTarget();
+
+    if (Dist > AttackData.AttackRange * 1.5f)
+    {
+        SetTacticalPhase(ECombat_TacticalPhase::Charge);
+        return;
+    }
+
+    if (AttackCooldownRemaining <= 0.0f)
     {
         ExecuteAttack();
-        LastAttackTime = Now;
+        AttackCooldownRemaining = AttackData.AttackCooldown;
+
+        // After attack, brief recover
+        if (PhaseTimer > 3.0f)
+        {
+            SetTacticalPhase(ECombat_TacticalPhase::Recover);
+        }
     }
 }
 
-void ADinosaurCombatAIController::HandleRetreatState(float DeltaTime)
+void ADinosaurCombatAIController::TickRecover(float DeltaTime)
 {
-    ReturnToTerritory();
-    float DistFromHome = FVector::Dist(GetPawn()->GetActorLocation(), HomeLocation);
-    if (DistFromHome < 500.0f)
+    // Short recovery window — then re-engage or flee
+    if (PhaseTimer > 2.0f)
     {
-        SetCombatState(ECombat_DinoState::Idle);
+        if (CurrentHealth / MaxHealth <= FleeHealthThreshold)
+        {
+            SetTacticalPhase(ECombat_TacticalPhase::Flee);
+        }
+        else if (CurrentTarget)
+        {
+            SetTacticalPhase(ECombat_TacticalPhase::Charge);
+        }
+        else
+        {
+            SetTacticalPhase(ECombat_TacticalPhase::Patrol);
+        }
     }
 }
 
-// ─── Perception ────────────────────────────────────────────────────────────
-
-void ADinosaurCombatAIController::OnTargetPerceived(AActor* Actor, FAIStimulus Stimulus)
+void ADinosaurCombatAIController::TickFlee(float DeltaTime)
 {
-    if (!Actor || Actor == GetPawn()) return;
+    FVector FleeDir = GetFleeDirection();
+    FVector FleeTarget = ControlledPawn->GetActorLocation() + FleeDir * 3000.0f;
+    MoveToLocation(FleeTarget, 200.0f);
 
-    // Only react to player characters
-    ACharacter* PlayerChar = Cast<ACharacter>(Actor);
-    if (!PlayerChar) return;
-
-    if (Stimulus.WasSuccessfullySensed())
+    // After 10 seconds of fleeing, stop
+    if (PhaseTimer > 10.0f)
     {
-        // Detected — transition to chase
-        if (CurrentState == ECombat_DinoState::Patrolling ||
-            CurrentState == ECombat_DinoState::Idle ||
-            CurrentState == ECombat_DinoState::Investigating)
+        CurrentTarget = nullptr;
+        SetTacticalPhase(ECombat_TacticalPhase::Idle);
+    }
+}
+
+// ── Combat Functions ─────────────────────────────────────────────────────────
+
+void ADinosaurCombatAIController::TakeCombatDamage(float DamageAmount, AActor* DamageSource)
+{
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+
+    if (CurrentHealth <= 0.0f)
+    {
+        SetTacticalPhase(ECombat_TacticalPhase::Dead);
+        StopMovement();
+        return;
+    }
+
+    if (CurrentHealth / MaxHealth <= FleeHealthThreshold)
+    {
+        CurrentTarget = DamageSource;
+        SetTacticalPhase(ECombat_TacticalPhase::Flee);
+        return;
+    }
+
+    // If hit, become aggressive
+    if (DamageSource && CurrentPhase == ECombat_TacticalPhase::Patrol)
+    {
+        CurrentTarget = DamageSource;
+        SetTacticalPhase(ECombat_TacticalPhase::Charge);
+        AlertPackMembers(DamageSource);
+    }
+}
+
+void ADinosaurCombatAIController::AlertPackMembers(AActor* ThreatActor)
+{
+    if (!bIsPackHunter || !ControlledPawn) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ADinosaurCombatAIController::StaticClass(), AllActors);
+
+    FVector MyLoc = ControlledPawn->GetActorLocation();
+    int32 AlertCount = 0;
+
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor == this) continue;
+        ADinosaurCombatAIController* PackMember = Cast<ADinosaurCombatAIController>(Actor);
+        if (!PackMember) continue;
+        if (PackMember->Species != Species) continue;
+
+        float Dist = FVector::Dist(MyLoc, Actor->GetActorLocation());
+        if (Dist <= PackCoordinationRadius)
         {
-            TransitionToChase(Actor);
+            PackMember->CurrentTarget = ThreatActor;
+            PackMember->SetTacticalPhase(ECombat_TacticalPhase::Stalk);
+            AlertCount++;
+            if (AlertCount >= PackSize - 1) break;
         }
     }
-    else
+}
+
+void ADinosaurCombatAIController::SetPatrolPoints(const TArray<FCombat_PatrolPoint>& NewPoints)
+{
+    PatrolPoints = NewPoints;
+    CurrentPatrolIndex = 0;
+}
+
+// ── Helper Implementations ───────────────────────────────────────────────────
+
+AActor* ADinosaurCombatAIController::ScanForPlayer()
+{
+    if (!ControlledPawn) return nullptr;
+
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC) return nullptr;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return nullptr;
+
+    float Dist = FVector::Dist(ControlledPawn->GetActorLocation(), PlayerPawn->GetActorLocation());
+    if (Dist <= DetectionRange)
     {
-        // Lost sight — record last known position
-        if (CurrentTarget == Actor)
-        {
-            RecordThreatMemory(Actor);
-            SetCombatState(ECombat_DinoState::Investigating);
-        }
+        return PlayerPawn;
     }
+    return nullptr;
 }
 
 float ADinosaurCombatAIController::GetDistanceToTarget() const
 {
-    if (!CurrentTarget || !GetPawn()) return TNumericLimits<float>::Max();
-    return FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
+    if (!CurrentTarget || !ControlledPawn) return TNumericLimits<float>::Max();
+    return FVector::Dist(ControlledPawn->GetActorLocation(), CurrentTarget->GetActorLocation());
 }
-
-bool ADinosaurCombatAIController::IsTargetInAttackRange() const
-{
-    return GetDistanceToTarget() <= CombatParams.AttackRange;
-}
-
-// ─── Transitions ───────────────────────────────────────────────────────────
-
-void ADinosaurCombatAIController::TransitionToChase(AActor* Target)
-{
-    CurrentTarget = Target;
-    float Dist = GetDistanceToTarget();
-
-    // Stalk first if far, charge if close
-    if (Dist > CombatParams.ChaseActivationRange * 0.5f)
-    {
-        SetCombatState(ECombat_DinoState::Stalking);
-    }
-    else
-    {
-        SetCombatState(ECombat_DinoState::Charging);
-    }
-}
-
-void ADinosaurCombatAIController::TransitionToPatrol()
-{
-    CurrentTarget = nullptr;
-    SetCombatState(ECombat_DinoState::Patrolling);
-}
-
-// ─── Pack Hunting ──────────────────────────────────────────────────────────
-
-void ADinosaurCombatAIController::SignalPackMembers(AActor* SharedTarget)
-{
-    if (!SharedTarget || !GetWorld()) return;
-
-    // Find nearby dinosaurs of same class
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), GetPawn()->GetClass(), NearbyActors);
-
-    int32 FlankIndex = 0;
-    for (AActor* NearbyActor : NearbyActors)
-    {
-        if (NearbyActor == GetPawn()) continue;
-
-        float Dist = FVector::Dist(GetPawn()->GetActorLocation(), NearbyActor->GetActorLocation());
-        if (Dist > CombatParams.PackSignalRadius) continue;
-
-        ADinosaurCombatAIController* PackMember = Cast<ADinosaurCombatAIController>(
-            Cast<APawn>(NearbyActor) ? Cast<APawn>(NearbyActor)->GetController() : nullptr);
-
-        if (PackMember)
-        {
-            FVector FlankPos = CalculateFlankPosition(SharedTarget, FlankIndex);
-            PackMember->ReceivePackSignal(SharedTarget, FlankPos);
-            FlankIndex++;
-        }
-    }
-}
-
-void ADinosaurCombatAIController::ReceivePackSignal(AActor* SharedTarget, FVector FlankPosition)
-{
-    if (!SharedTarget) return;
-    CurrentTarget = SharedTarget;
-    // Move to assigned flank position first, then engage
-    MoveToLocation(FlankPosition, 150.0f);
-    SetCombatState(ECombat_DinoState::Stalking);
-}
-
-FVector ADinosaurCombatAIController::CalculateFlankPosition(AActor* Target, int32 FlankIndex) const
-{
-    if (!Target) return FVector::ZeroVector;
-
-    FVector TargetLoc = Target->GetActorLocation();
-    float AngleDeg = 90.0f + (FlankIndex * 60.0f); // 90°, 150°, 210°...
-    float AngleRad = FMath::DegreesToRadians(AngleDeg);
-    float FlankDist = 600.0f;
-
-    return TargetLoc + FVector(FMath::Cos(AngleRad) * FlankDist, FMath::Sin(AngleRad) * FlankDist, 0.0f);
-}
-
-// ─── Attack ────────────────────────────────────────────────────────────────
 
 void ADinosaurCombatAIController::ExecuteAttack()
 {
-    if (!CurrentTarget) return;
+    if (!CurrentTarget || !ControlledPawn) return;
 
-    if (IsTargetInAttackRange())
+    float Dist = GetDistanceToTarget();
+    if (Dist > AttackData.AttackRange) return;
+
+    // Apply damage to target
+    UGameplayStatics::ApplyDamage(
+        CurrentTarget,
+        AttackData.BaseDamage,
+        this,
+        ControlledPawn,
+        UDamageType::StaticClass()
+    );
+
+    // Apply knockback to character
+    ACharacter* TargetChar = Cast<ACharacter>(CurrentTarget);
+    if (TargetChar)
     {
-        ApplyDamageToTarget(CurrentTarget, CombatParams.AttackDamage);
+        FVector KnockDir = (CurrentTarget->GetActorLocation() - ControlledPawn->GetActorLocation()).GetSafeNormal();
+        KnockDir.Z = 0.4f;
+        TargetChar->LaunchCharacter(KnockDir * AttackData.KnockbackForce, true, true);
     }
 }
 
-void ADinosaurCombatAIController::ApplyDamageToTarget(AActor* Target, float Damage)
+void ADinosaurCombatAIController::MoveToTarget(float AcceptanceRadius)
 {
-    if (!Target || !GetWorld()) return;
-
-    UGameplayStatics::ApplyDamage(
-        Target,
-        Damage,
-        this,
-        GetPawn(),
-        UDamageType::StaticClass()
-    );
+    if (!CurrentTarget) return;
+    MoveToActor(CurrentTarget, AcceptanceRadius, true, true, true);
 }
 
-// ─── Patrol ────────────────────────────────────────────────────────────────
-
-FVector ADinosaurCombatAIController::GetNextPatrolPoint() const
+void ADinosaurCombatAIController::MoveToPatrolPoint()
 {
-    UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-    if (!NavSys) return HomeLocation;
-
-    FNavLocation RandomPoint;
-    bool bFound = NavSys->GetRandomReachablePointInRadius(HomeLocation, CombatParams.PatrolRadius, RandomPoint);
-    return bFound ? RandomPoint.Location : HomeLocation;
+    if (PatrolPoints.Num() == 0) return;
+    MoveToLocation(PatrolPoints[CurrentPatrolIndex].Location, 100.0f);
 }
 
-void ADinosaurCombatAIController::ReturnToTerritory()
+void ADinosaurCombatAIController::AdvancePatrolIndex()
 {
-    MoveToLocation(HomeLocation, 300.0f);
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
 }
 
-// ─── Threat Memory ─────────────────────────────────────────────────────────
-
-void ADinosaurCombatAIController::RecordThreatMemory(AActor* ThreatActor)
+FVector ADinosaurCombatAIController::GetFleeDirection() const
 {
-    if (!ThreatActor || !GetWorld()) return;
-
-    ThreatMemory.LastKnownLocation = ThreatActor->GetActorLocation();
-    ThreatMemory.ThreatLevel = 1.0f;
-    ThreatMemory.Timestamp = GetWorld()->GetTimeSeconds();
-    ThreatMemory.bIsActive = true;
+    if (!CurrentTarget || !ControlledPawn) return FVector::ForwardVector;
+    FVector Away = (ControlledPawn->GetActorLocation() - CurrentTarget->GetActorLocation()).GetSafeNormal();
+    Away.Z = 0.0f;
+    return Away;
 }
 
-// ─── Species Configuration ─────────────────────────────────────────────────
+float ADinosaurCombatAIController::GetHealthPercent() const
+{
+    if (MaxHealth <= 0.0f) return 0.0f;
+    return CurrentHealth / MaxHealth;
+}
 
-void ADinosaurCombatAIController::ConfigureForSpecies(ECombat_DinoSpecies Species)
+bool ADinosaurCombatAIController::IsHostile() const
+{
+    return CurrentPhase == ECombat_TacticalPhase::Charge ||
+           CurrentPhase == ECombat_TacticalPhase::Attack ||
+           CurrentPhase == ECombat_TacticalPhase::Stalk  ||
+           CurrentPhase == ECombat_TacticalPhase::Alert;
+}
+
+void ADinosaurCombatAIController::ApplySpeciesDefaults()
 {
     switch (Species)
     {
         case ECombat_DinoSpecies::TRex:
-            CombatParams.PatrolRadius = 5000.0f;
-            CombatParams.ChaseActivationRange = 3000.0f;
-            CombatParams.AttackRange = 350.0f;
-            CombatParams.HearingRadius = 2000.0f;
-            CombatParams.AttackDamage = 80.0f;
-            CombatParams.AttackCooldown = 3.0f;
-            CombatParams.MoveSpeed_Patrol = 180.0f;
-            CombatParams.MoveSpeed_Chase = 550.0f;
-            CombatParams.bIsPackHunter = false;
+            MaxHealth = 2000.0f;
+            DetectionRange = 3000.0f;
+            AttackData.BaseDamage = 120.0f;
+            AttackData.AttackRange = 350.0f;
+            AttackData.AttackCooldown = 3.0f;
+            AttackData.ChargeSpeed = 700.0f;
+            AttackData.KnockbackForce = 2000.0f;
+            PatrolRadius = 2500.0f;
+            bIsPackHunter = false;
             break;
 
-        case ECombat_DinoSpecies::Velociraptor:
-            CombatParams.PatrolRadius = 3000.0f;
-            CombatParams.ChaseActivationRange = 2500.0f;
-            CombatParams.AttackRange = 200.0f;
-            CombatParams.HearingRadius = 1200.0f;
-            CombatParams.AttackDamage = 25.0f;
-            CombatParams.AttackCooldown = 1.2f;
-            CombatParams.MoveSpeed_Patrol = 300.0f;
-            CombatParams.MoveSpeed_Chase = 750.0f;
-            CombatParams.bIsPackHunter = true;
-            CombatParams.PackSignalRadius = 2000.0f;
+        case ECombat_DinoSpecies::Raptor:
+            MaxHealth = 300.0f;
+            DetectionRange = 2000.0f;
+            AttackData.BaseDamage = 40.0f;
+            AttackData.AttackRange = 200.0f;
+            AttackData.AttackCooldown = 1.2f;
+            AttackData.ChargeSpeed = 900.0f;
+            AttackData.KnockbackForce = 600.0f;
+            PatrolRadius = 1200.0f;
+            bIsPackHunter = true;
+            PackSize = 3;
+            PackCoordinationRadius = 1500.0f;
             break;
 
         case ECombat_DinoSpecies::Triceratops:
-            CombatParams.PatrolRadius = 2000.0f;
-            CombatParams.ChaseActivationRange = 1500.0f;
-            CombatParams.AttackRange = 400.0f;
-            CombatParams.HearingRadius = 800.0f;
-            CombatParams.AttackDamage = 60.0f;
-            CombatParams.AttackCooldown = 4.0f;
-            CombatParams.MoveSpeed_Patrol = 150.0f;
-            CombatParams.MoveSpeed_Chase = 400.0f;
-            CombatParams.bIsPackHunter = false;
+            MaxHealth = 1500.0f;
+            DetectionRange = 1500.0f;
+            AttackData.BaseDamage = 80.0f;
+            AttackData.AttackRange = 400.0f;
+            AttackData.AttackCooldown = 4.0f;
+            AttackData.ChargeSpeed = 650.0f;
+            AttackData.KnockbackForce = 2500.0f;
+            PatrolRadius = 1800.0f;
+            bIsPackHunter = false;
             break;
 
         case ECombat_DinoSpecies::Brachiosaurus:
-            CombatParams.PatrolRadius = 4000.0f;
-            CombatParams.ChaseActivationRange = 800.0f;
-            CombatParams.AttackRange = 500.0f;
-            CombatParams.HearingRadius = 1000.0f;
-            CombatParams.AttackDamage = 100.0f;
-            CombatParams.AttackCooldown = 5.0f;
-            CombatParams.MoveSpeed_Patrol = 120.0f;
-            CombatParams.MoveSpeed_Chase = 280.0f;
-            CombatParams.bIsPackHunter = false;
+            MaxHealth = 5000.0f;
+            DetectionRange = 800.0f;
+            AttackData.BaseDamage = 200.0f;
+            AttackData.AttackRange = 600.0f;
+            AttackData.AttackCooldown = 6.0f;
+            AttackData.ChargeSpeed = 400.0f;
+            AttackData.KnockbackForce = 5000.0f;
+            PatrolRadius = 3000.0f;
+            bIsPackHunter = false;
+            FleeHealthThreshold = 0.1f;
             break;
 
         case ECombat_DinoSpecies::Pterodactyl:
-            CombatParams.PatrolRadius = 8000.0f;
-            CombatParams.ChaseActivationRange = 4000.0f;
-            CombatParams.AttackRange = 250.0f;
-            CombatParams.HearingRadius = 500.0f;
-            CombatParams.AttackDamage = 30.0f;
-            CombatParams.AttackCooldown = 2.0f;
-            CombatParams.MoveSpeed_Patrol = 400.0f;
-            CombatParams.MoveSpeed_Chase = 900.0f;
-            CombatParams.bIsPackHunter = false;
+            MaxHealth = 200.0f;
+            DetectionRange = 3500.0f;
+            AttackData.BaseDamage = 25.0f;
+            AttackData.AttackRange = 150.0f;
+            AttackData.AttackCooldown = 0.8f;
+            AttackData.ChargeSpeed = 1200.0f;
+            AttackData.KnockbackForce = 300.0f;
+            PatrolRadius = 5000.0f;
+            bIsPackHunter = true;
+            PackSize = 5;
+            PackCoordinationRadius = 3000.0f;
             break;
 
         default:
             break;
     }
+
+    CurrentHealth = MaxHealth;
 }
