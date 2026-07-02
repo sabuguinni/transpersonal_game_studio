@@ -1,0 +1,184 @@
+{
+  "audio_zone_manifest_version": "1.0",
+  "agent": "Audio_Agent_16",
+  "cycle": "PROD_CYCLE_AUTO_20260702_008",
+  "description": "Audio zone definitions for ambient soundscape system — prehistoric survival game",
+
+  "voice_lines": [
+    {
+      "id": "VL_SurvivorJournal_Day4",
+      "character": "Survivor_Journal_Day4",
+      "text": "Day four. No rain. The river is dropping — I can see the mud flats now where the water used to be. That means the big ones will come to drink at the shallows. I need to move my camp before dark.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782992138765_Survivor_Journal_Day4.mp3",
+      "duration_estimate": "~13s",
+      "trigger": "day_4_morning_journal",
+      "context": "Player journal entry — environmental awareness, water source danger"
+    },
+    {
+      "id": "VL_SurvivorTip_BirdScatter",
+      "character": "Survivor_Tip_BirdScatter",
+      "text": "Watch the sky before you move. Birds scatter before a predator — not during, before. If you see a flock lift from the trees all at once, something is already moving beneath them. Stop. Wait. Let it pass.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782992155012_Survivor_Tip_BirdScatter.mp3",
+      "duration_estimate": "~14s",
+      "trigger": "first_time_near_forest_edge",
+      "context": "Survival tip — predator awareness via environmental cues"
+    }
+  ],
+
+  "ambient_sound_sources": [
+    {
+      "id": "SFX_JungleNight_Rainforest",
+      "freesound_id": 669357,
+      "name": "D117 Walking at Night (Amazon Rainforest)",
+      "preview_url": "https://cdn.freesound.org/previews/669/669357_53551-hq.mp3",
+      "duration_seconds": 90.11,
+      "tags": ["amazon", "ambience", "bird", "insects", "forest", "cicada"],
+      "use_case": "Jungle night ambient loop — forest biome at night",
+      "loop": true,
+      "volume_curve": "distance_falloff_soft",
+      "zone_actor": "AudioZone_JungleNight_001"
+    },
+    {
+      "id": "SFX_Campfire_Position1",
+      "freesound_id": 681366,
+      "name": "Campfire (Position 1)",
+      "preview_url": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+      "duration_seconds": 83.62,
+      "tags": ["campfire", "crackling", "fire", "burning", "wood"],
+      "use_case": "Campfire ambient loop — base camp, safe zone audio cue",
+      "loop": true,
+      "volume_curve": "point_source_3d",
+      "zone_actor": "AudioZone_Campfire_001"
+    },
+    {
+      "id": "SFX_Campfire_Position2",
+      "freesound_id": 681367,
+      "name": "Campfire (Position 2)",
+      "preview_url": "https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3",
+      "duration_seconds": 22.06,
+      "tags": ["campfire", "crackling", "fire", "sizzle"],
+      "use_case": "Short campfire variant — use for random variation in loop",
+      "loop": false,
+      "volume_curve": "point_source_3d",
+      "zone_actor": "AudioZone_Campfire_001"
+    },
+    {
+      "id": "SFX_FireNature_LongAmbience",
+      "freesound_id": 802195,
+      "name": "Fire-Nature Sounds (4 min campfire + nature)",
+      "preview_url": "https://cdn.freesound.org/previews/802/802195_17223245-hq.mp3",
+      "duration_seconds": 247.15,
+      "tags": ["campfire", "fire", "nature", "outdoors"],
+      "use_case": "Extended campfire + nature ambient — evening/night camp scenes",
+      "loop": true,
+      "volume_curve": "distance_falloff_soft",
+      "zone_actor": "AudioZone_Campfire_001"
+    }
+  ],
+
+  "audio_zones_in_map": [
+    {
+      "actor_label": "AudioZone_Campfire_001",
+      "location": [200, 0, 50],
+      "scale": [5, 5, 3],
+      "sound_id": "SFX_Campfire_Position1",
+      "priority": "high",
+      "blend_radius_ue_units": 500
+    },
+    {
+      "actor_label": "AudioZone_JungleNight_001",
+      "location": [-800, 600, 50],
+      "scale": [20, 20, 5],
+      "sound_id": "SFX_JungleNight_Rainforest",
+      "priority": "medium",
+      "blend_radius_ue_units": 2000
+    },
+    {
+      "actor_label": "AudioZone_River_001",
+      "location": [1200, -400, 30],
+      "scale": [15, 15, 4],
+      "sound_id": "SFX_River_Ambient",
+      "priority": "medium",
+      "blend_radius_ue_units": 1500,
+      "note": "River sound asset pending — use water/stream SFX from Freesound"
+    },
+    {
+      "actor_label": "AudioZone_TRexTension_001",
+      "location": [2000, 800, 50],
+      "scale": [30, 30, 8],
+      "sound_id": "SFX_TRex_TensionStinger",
+      "priority": "critical",
+      "blend_radius_ue_units": 3000,
+      "note": "Tension music stinger — triggers when TRex enters detection range"
+    }
+  ],
+
+  "adaptive_music_states": [
+    {
+      "state": "SAFE_DAY",
+      "description": "Player at camp, no predators nearby, daytime",
+      "music_mood": "calm_ambient_percussion",
+      "instruments": ["bone_percussion", "wood_flute", "stone_rhythm"],
+      "bpm_range": [60, 80],
+      "intensity": 0.2
+    },
+    {
+      "state": "EXPLORE_DAY",
+      "description": "Player exploring open terrain, no immediate threat",
+      "music_mood": "curious_adventurous",
+      "instruments": ["bone_percussion", "animal_horn", "rhythmic_wood"],
+      "bpm_range": [80, 100],
+      "intensity": 0.4
+    },
+    {
+      "state": "PREDATOR_NEARBY",
+      "description": "Predator within detection radius, player not yet spotted",
+      "music_mood": "tension_building",
+      "instruments": ["low_drone", "sparse_percussion", "breath_rhythm"],
+      "bpm_range": [50, 70],
+      "intensity": 0.7
+    },
+    {
+      "state": "COMBAT_ACTIVE",
+      "description": "Player in active combat or being chased",
+      "music_mood": "urgent_survival",
+      "instruments": ["heavy_percussion", "bone_rattles", "primal_drums"],
+      "bpm_range": [120, 160],
+      "intensity": 1.0
+    },
+    {
+      "state": "NIGHT_CAMP",
+      "description": "Player at camp at night, fire burning",
+      "music_mood": "uneasy_rest",
+      "instruments": ["distant_percussion", "insect_rhythm", "low_wind"],
+      "bpm_range": [40, 60],
+      "intensity": 0.3
+    }
+  ],
+
+  "screen_feedback_audio": [
+    {
+      "event": "player_damage_taken",
+      "sfx": "impact_flesh_hit",
+      "ducking": "music_duck_50pct_for_0.5s",
+      "screen_effect": "red_flash_overlay"
+    },
+    {
+      "event": "trex_footstep_nearby",
+      "sfx": "heavy_ground_thud",
+      "screen_effect": "camera_shake_magnitude_2",
+      "distance_threshold_ue_units": 1500
+    },
+    {
+      "event": "player_near_water",
+      "sfx": "SFX_River_Ambient",
+      "fade_in_seconds": 2.0
+    },
+    {
+      "event": "campfire_lit",
+      "sfx": "SFX_Campfire_Position1",
+      "fade_in_seconds": 1.5,
+      "music_transition": "SAFE_DAY_to_NIGHT_CAMP"
+    }
+  ]
+}
