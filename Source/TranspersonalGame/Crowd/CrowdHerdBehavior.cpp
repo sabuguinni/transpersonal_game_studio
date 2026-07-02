@@ -1,383 +1,311 @@
 // CrowdHerdBehavior.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Implements herd flocking, grazing, scatter, and migration behaviors for herbivore crowds.
+// Boids flocking algorithm + herd state machine for prehistoric herbivore herds.
+// Supports up to 200 agents with separation, alignment, cohesion forces.
 
 #include "CrowdHerdBehavior.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "Math/UnrealMathUtility.h"
 
-UCrowd_HerdBehaviorComponent::UCrowd_HerdBehaviorComponent()
+UCrowdHerdBehavior::UCrowdHerdBehavior()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for performance
-
-    HerdState = ECrowd_HerdState::Grazing;
-    FlockingRadius = 800.0f;
-    SeparationRadius = 150.0f;
-    CohesionWeight = 1.2f;
-    SeparationWeight = 2.0f;
-    AlignmentWeight = 0.8f;
-    MaxHerdSpeed = 400.0f;
-    PanicSpeedMultiplier = 2.5f;
-    MigrationTargetRadius = 500.0f;
-    bIsMigrating = false;
-    MigrationProgress = 0.0f;
-    LeaderIndex = 0;
-    HerdDensityScore = 0.0f;
-    ThreatLevel = 0.0f;
-    bDebugDraw = false;
+    PrimaryComponentTick.TickInterval = 0.05f; // 20Hz tick for crowd sim
 }
 
-void UCrowd_HerdBehaviorComponent::BeginPlay()
+void UCrowdHerdBehavior::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeHerd();
 }
 
-void UCrowd_HerdBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCrowdHerdBehavior::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    UpdateHerdBehavior(DeltaTime);
+    if (HerdMembers.Num() == 0) return;
 
-    if (bDebugDraw)
+    UpdateHerdCenter();
+    UpdatePanicLevels(DeltaTime);
+    EvaluateHerdStateTransition();
+
+    // Update velocities using Boids for Wandering/Fleeing/Stampeding states
+    if (CurrentHerdState == ECrowd_HerdState::Wandering ||
+        CurrentHerdState == ECrowd_HerdState::Fleeing ||
+        CurrentHerdState == ECrowd_HerdState::Stampeding)
     {
-        DrawDebugHerdState();
+        for (FCrowd_HerdMember& Member : HerdMembers)
+        {
+            if (!Member.bIsAlive) continue;
+
+            FVector SteeringForce = ComputeBoidForce(Member);
+            Member.Velocity += SteeringForce * DeltaTime;
+            Member.Velocity = LimitVector(Member.Velocity, BoidParams.MaxSpeed);
+            Member.Location += Member.Velocity * DeltaTime;
+        }
     }
 }
 
-void UCrowd_HerdBehaviorComponent::InitializeHerd()
+void UCrowdHerdBehavior::InitializeHerd(int32 NumMembers, FVector SpawnCenter, float SpawnRadius)
 {
-    // Initialize agents from member actors if provided
-    HerdAgents.Empty();
-    
-    if (HerdMemberActors.Num() == 0) return;
+    HerdMembers.Empty();
+    int32 ClampedNum = FMath::Clamp(NumMembers, 1, MaxHerdSize);
 
-    for (int32 i = 0; i < HerdMemberActors.Num(); ++i)
+    for (int32 i = 0; i < ClampedNum; ++i)
     {
-        AActor* Actor = HerdMemberActors[i];
-        if (!IsValid(Actor)) continue;
+        FCrowd_HerdMember Member;
+        Member.AgentID = i;
+        Member.bIsAlive = true;
+        Member.PanicLevel = 0.0f;
 
-        FCrowd_HerdAgent Agent;
-        Agent.AgentLocation = Actor->GetActorLocation();
-        Agent.AgentVelocity = FVector::ZeroVector;
-        Agent.CurrentSpeed = 0.0f;
-        Agent.bIsLeader = (i == LeaderIndex);
-        Agent.bIsPanicking = false;
-        Agent.PanicLevel = 0.0f;
-        Agent.AgentActor = Actor;
-        HerdAgents.Add(Agent);
-    }
+        // Random position within spawn radius
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Dist = FMath::RandRange(0.0f, SpawnRadius);
+        Member.Location = SpawnCenter + FVector(FMath::Cos(Angle) * Dist, FMath::Sin(Angle) * Dist, 0.0f);
 
-    // Compute initial density
-    HerdDensityScore = ComputeHerdDensity();
-    unreal_log_herd_state();
-}
+        // Random initial velocity
+        Member.Velocity = FVector(FMath::RandRange(-100.0f, 100.0f), FMath::RandRange(-100.0f, 100.0f), 0.0f);
 
-void UCrowd_HerdBehaviorComponent::UpdateHerdBehavior(float DeltaTime)
-{
-    if (HerdAgents.Num() == 0) return;
-
-    // Decay threat level over time
-    ThreatLevel = FMath::Max(0.0f, ThreatLevel - DeltaTime * 0.5f);
-
-    // State transitions
-    if (ThreatLevel > 0.7f && HerdState != ECrowd_HerdState::Scattering)
-    {
-        SetHerdState(ECrowd_HerdState::Scattering);
-    }
-    else if (ThreatLevel > 0.3f && HerdState == ECrowd_HerdState::Grazing)
-    {
-        SetHerdState(ECrowd_HerdState::Alert);
-    }
-    else if (ThreatLevel <= 0.1f && (HerdState == ECrowd_HerdState::Alert || HerdState == ECrowd_HerdState::Scattering))
-    {
-        if (!bIsMigrating)
-            SetHerdState(ECrowd_HerdState::Grazing);
+        // Assign roles: 1 leader, 10% scouts, rest followers
+        if (i == 0)
+            Member.Role = ECrowd_HerdRole::Leader;
+        else if (i < FMath::Max(1, ClampedNum / 10))
+            Member.Role = ECrowd_HerdRole::Scout;
+        else if (i >= ClampedNum - FMath::Max(1, ClampedNum / 5))
+            Member.Role = ECrowd_HerdRole::Juvenile;
         else
-            SetHerdState(ECrowd_HerdState::Migrating);
+            Member.Role = ECrowd_HerdRole::Follower;
+
+        HerdMembers.Add(Member);
     }
 
-    // Per-agent flocking update
-    for (int32 i = 0; i < HerdAgents.Num(); ++i)
+    UpdateHerdCenter();
+    UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Initialized herd with %d members at %s"), ClampedNum, *SpawnCenter.ToString());
+}
+
+void UCrowdHerdBehavior::ApplyThreatAtLocation(FVector ThreatLocation, float ThreatRadius, float PanicAmount)
+{
+    for (FCrowd_HerdMember& Member : HerdMembers)
     {
-        FCrowd_HerdAgent& Agent = HerdAgents[i];
+        if (!Member.bIsAlive) continue;
 
-        FVector Steering = FVector::ZeroVector;
-
-        switch (HerdState)
+        float Dist = FVector::Dist(Member.Location, ThreatLocation);
+        if (Dist <= ThreatRadius)
         {
-        case ECrowd_HerdState::Grazing:
-            Steering = ComputeGrazingForce(Agent, i);
-            break;
-        case ECrowd_HerdState::Alert:
-            Steering = ComputeFlockingForce(Agent, i) * 0.5f;
-            break;
-        case ECrowd_HerdState::Migrating:
-            Steering = ComputeMigrationForce(Agent, i);
-            break;
-        case ECrowd_HerdState::Scattering:
-            Steering = ComputeScatterForce(Agent, i);
-            break;
-        case ECrowd_HerdState::Regrouping:
-            Steering = ComputeFlockingForce(Agent, i);
-            break;
-        default:
-            break;
-        }
-
-        // Apply steering to velocity
-        float SpeedLimit = MaxHerdSpeed;
-        if (Agent.bIsPanicking)
-            SpeedLimit *= PanicSpeedMultiplier;
-
-        Agent.AgentVelocity = FMath::VInterpTo(Agent.AgentVelocity, Steering, DeltaTime, 3.0f);
-        Agent.AgentVelocity = Agent.AgentVelocity.GetClampedToMaxSize(SpeedLimit);
-        Agent.CurrentSpeed = Agent.AgentVelocity.Size();
-
-        // Update location
-        Agent.AgentLocation += Agent.AgentVelocity * DeltaTime;
-
-        // Sync actor if valid
-        if (IsValid(Agent.AgentActor))
-        {
-            FVector NewLoc = Agent.AgentLocation;
-            Agent.AgentActor->SetActorLocation(NewLoc, true);
-            if (!Agent.AgentVelocity.IsNearlyZero())
-            {
-                FRotator FaceDir = Agent.AgentVelocity.Rotation();
-                Agent.AgentActor->SetActorRotation(FaceDir);
-            }
+            float DistFactor = 1.0f - (Dist / ThreatRadius);
+            float AppliedPanic = PanicAmount * DistFactor;
+            Member.PanicLevel = FMath::Clamp(Member.PanicLevel + AppliedPanic, 0.0f, 1.0f);
         }
     }
+    EvaluateHerdStateTransition();
+}
 
-    HerdDensityScore = ComputeHerdDensity();
-
-    // Migration progress
-    if (bIsMigrating && MigrationWaypoints.Num() > 0)
+void UCrowdHerdBehavior::SetHerdState(ECrowd_HerdState NewState)
+{
+    if (CurrentHerdState != NewState)
     {
-        FVector LeaderLoc = HerdAgents.IsValidIndex(LeaderIndex) ? HerdAgents[LeaderIndex].AgentLocation : FVector::ZeroVector;
-        FVector Target = MigrationWaypoints[FMath::Min((int32)(MigrationProgress * MigrationWaypoints.Num()), MigrationWaypoints.Num() - 1)];
-        float DistToTarget = FVector::Dist(LeaderLoc, Target);
-        if (DistToTarget < MigrationTargetRadius)
+        UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Herd state transition %d -> %d"), (int32)CurrentHerdState, (int32)NewState);
+        CurrentHerdState = NewState;
+    }
+}
+
+FVector UCrowdHerdBehavior::ComputeBoidForce(const FCrowd_HerdMember& Agent) const
+{
+    FVector Separation = ComputeSeparation(Agent) * BoidParams.SeparationWeight;
+    FVector Alignment = ComputeAlignment(Agent) * BoidParams.AlignmentWeight;
+    FVector Cohesion = ComputeCohesion(Agent) * BoidParams.CohesionWeight;
+
+    // In panic/stampede, separation and flee dominate
+    if (CurrentHerdState == ECrowd_HerdState::Stampeding)
+    {
+        Separation *= 2.0f;
+        Alignment *= 1.5f;
+    }
+
+    FVector TotalForce = Separation + Alignment + Cohesion;
+    return LimitVector(TotalForce, BoidParams.MaxForce);
+}
+
+FVector UCrowdHerdBehavior::GetHerdFleeDirection(FVector ThreatLocation) const
+{
+    FVector FleeDir = (HerdCenter - ThreatLocation);
+    FleeDir.Z = 0.0f;
+    return FleeDir.GetSafeNormal();
+}
+
+int32 UCrowdHerdBehavior::GetAliveCount() const
+{
+    int32 Count = 0;
+    for (const FCrowd_HerdMember& M : HerdMembers)
+    {
+        if (M.bIsAlive) Count++;
+    }
+    return Count;
+}
+
+void UCrowdHerdBehavior::KillMember(int32 AgentID)
+{
+    for (FCrowd_HerdMember& M : HerdMembers)
+    {
+        if (M.AgentID == AgentID)
         {
-            MigrationProgress = FMath::Min(1.0f, MigrationProgress + (1.0f / FMath::Max(1, MigrationWaypoints.Num())));
-            if (MigrationProgress >= 1.0f)
-            {
-                bIsMigrating = false;
-                SetHerdState(ECrowd_HerdState::Grazing);
-                OnMigrationComplete.Broadcast();
-            }
+            M.bIsAlive = false;
+            UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Agent %d killed — herd size now %d"), AgentID, GetAliveCount());
+            return;
         }
     }
 }
 
-FVector UCrowd_HerdBehaviorComponent::ComputeFlockingForce(const FCrowd_HerdAgent& Agent, int32 AgentIndex)
+bool UCrowdHerdBehavior::IsHerdInPanic() const
 {
-    FVector Cohesion = FVector::ZeroVector;
-    FVector Separation = FVector::ZeroVector;
-    FVector Alignment = FVector::ZeroVector;
-    int32 NeighborCount = 0;
+    return AveragePanicLevel >= PanicThresholdFlee;
+}
 
-    for (int32 j = 0; j < HerdAgents.Num(); ++j)
+// ---- Private ----
+
+void UCrowdHerdBehavior::UpdateHerdCenter()
+{
+    FVector Sum = FVector::ZeroVector;
+    int32 AliveCount = 0;
+    for (const FCrowd_HerdMember& M : HerdMembers)
     {
-        if (j == AgentIndex) continue;
-        const FCrowd_HerdAgent& Other = HerdAgents[j];
-        float Dist = FVector::Dist(Agent.AgentLocation, Other.AgentLocation);
-
-        if (Dist < FlockingRadius)
+        if (M.bIsAlive)
         {
-            Cohesion += Other.AgentLocation;
-            Alignment += Other.AgentVelocity;
-            ++NeighborCount;
-
-            if (Dist < SeparationRadius && Dist > 0.0f)
-            {
-                FVector Away = (Agent.AgentLocation - Other.AgentLocation).GetSafeNormal();
-                Separation += Away * (SeparationRadius / Dist);
-            }
+            Sum += M.Location;
+            AliveCount++;
         }
     }
+    HerdCenter = (AliveCount > 0) ? (Sum / (float)AliveCount) : FVector::ZeroVector;
+}
 
-    FVector Result = FVector::ZeroVector;
-    if (NeighborCount > 0)
+void UCrowdHerdBehavior::UpdatePanicLevels(float DeltaTime)
+{
+    float TotalPanic = 0.0f;
+    int32 AliveCount = 0;
+
+    for (FCrowd_HerdMember& M : HerdMembers)
     {
-        Cohesion = ((Cohesion / NeighborCount) - Agent.AgentLocation).GetSafeNormal() * CohesionWeight;
-        Alignment = (Alignment / NeighborCount).GetSafeNormal() * AlignmentWeight;
-        Result = Cohesion + Alignment;
+        if (!M.bIsAlive) continue;
+
+        // Panic decays over time
+        M.PanicLevel = FMath::Clamp(M.PanicLevel - PanicDecayRate * DeltaTime, 0.0f, 1.0f);
+        TotalPanic += M.PanicLevel;
+        AliveCount++;
     }
-    Result += Separation.GetSafeNormal() * SeparationWeight;
 
-    return Result * MaxHerdSpeed;
+    AveragePanicLevel = (AliveCount > 0) ? (TotalPanic / (float)AliveCount) : 0.0f;
 }
 
-FVector UCrowd_HerdBehaviorComponent::ComputeGrazingForce(const FCrowd_HerdAgent& Agent, int32 AgentIndex)
+void UCrowdHerdBehavior::EvaluateHerdStateTransition()
 {
-    // Slow wandering with flocking
-    FVector Wander = FVector(
-        FMath::RandRange(-1.0f, 1.0f),
-        FMath::RandRange(-1.0f, 1.0f),
-        0.0f
-    ).GetSafeNormal() * 80.0f;
-
-    FVector Flock = ComputeFlockingForce(Agent, AgentIndex) * 0.3f;
-    return Wander + Flock;
-}
-
-FVector UCrowd_HerdBehaviorComponent::ComputeMigrationForce(const FCrowd_HerdAgent& Agent, int32 AgentIndex)
-{
-    if (MigrationWaypoints.Num() == 0) return FVector::ZeroVector;
-
-    int32 WaypointIdx = FMath::Min((int32)(MigrationProgress * MigrationWaypoints.Num()), MigrationWaypoints.Num() - 1);
-    FVector Target = MigrationWaypoints[WaypointIdx];
-
-    FVector ToTarget = (Target - Agent.AgentLocation).GetSafeNormal();
-    FVector Flock = ComputeFlockingForce(Agent, AgentIndex) * 0.4f;
-
-    // Leader follows waypoint directly; others follow leader
-    if (Agent.bIsLeader)
-        return ToTarget * MaxHerdSpeed + Flock;
-
-    FVector LeaderLoc = HerdAgents.IsValidIndex(LeaderIndex) ? HerdAgents[LeaderIndex].AgentLocation : Target;
-    FVector ToLeader = (LeaderLoc - Agent.AgentLocation).GetSafeNormal();
-    return ToLeader * MaxHerdSpeed * 0.9f + Flock;
-}
-
-FVector UCrowd_HerdBehaviorComponent::ComputeScatterForce(const FCrowd_HerdAgent& Agent, int32 AgentIndex)
-{
-    // Flee from herd center
-    FVector HerdCenter = FVector::ZeroVector;
-    for (const FCrowd_HerdAgent& A : HerdAgents)
-        HerdCenter += A.AgentLocation;
-    if (HerdAgents.Num() > 0)
-        HerdCenter /= HerdAgents.Num();
-
-    FVector AwayFromCenter = (Agent.AgentLocation - HerdCenter).GetSafeNormal();
-    FVector RandomOffset = FVector(
-        FMath::RandRange(-1.0f, 1.0f),
-        FMath::RandRange(-1.0f, 1.0f),
-        0.0f
-    ).GetSafeNormal() * 0.3f;
-
-    return (AwayFromCenter + RandomOffset).GetSafeNormal() * MaxHerdSpeed * PanicSpeedMultiplier;
-}
-
-float UCrowd_HerdBehaviorComponent::ComputeHerdDensity()
-{
-    if (HerdAgents.Num() < 2) return 0.0f;
-
-    float TotalDist = 0.0f;
-    int32 Pairs = 0;
-    for (int32 i = 0; i < HerdAgents.Num(); ++i)
+    if (AveragePanicLevel >= PanicThresholdStampede)
     {
-        for (int32 j = i + 1; j < HerdAgents.Num(); ++j)
+        SetHerdState(ECrowd_HerdState::Stampeding);
+    }
+    else if (AveragePanicLevel >= PanicThresholdFlee)
+    {
+        SetHerdState(ECrowd_HerdState::Fleeing);
+    }
+    else if (AveragePanicLevel < 0.05f)
+    {
+        // Calm — return to grazing or wandering
+        if (CurrentHerdState == ECrowd_HerdState::Fleeing || CurrentHerdState == ECrowd_HerdState::Stampeding)
         {
-            TotalDist += FVector::Dist(HerdAgents[i].AgentLocation, HerdAgents[j].AgentLocation);
-            ++Pairs;
+            SetHerdState(ECrowd_HerdState::Wandering);
         }
     }
-    float AvgDist = Pairs > 0 ? TotalDist / Pairs : 0.0f;
-    // Density score: inverse of average distance, normalized
-    return FMath::Clamp(1.0f - (AvgDist / FlockingRadius), 0.0f, 1.0f);
 }
 
-void UCrowd_HerdBehaviorComponent::SetHerdState(ECrowd_HerdState NewState)
+FVector UCrowdHerdBehavior::ComputeSeparation(const FCrowd_HerdMember& Agent) const
 {
-    if (HerdState == NewState) return;
-    HerdState = NewState;
+    FVector SteeringForce = FVector::ZeroVector;
+    int32 Count = 0;
 
-    // Propagate panic flag
-    bool bPanic = (NewState == ECrowd_HerdState::Scattering);
-    for (FCrowd_HerdAgent& Agent : HerdAgents)
+    for (const FCrowd_HerdMember& Other : HerdMembers)
     {
-        Agent.bIsPanicking = bPanic;
-        Agent.PanicLevel = bPanic ? 1.0f : 0.0f;
-    }
+        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
 
-    OnHerdStateChanged.Broadcast(NewState);
-}
-
-void UCrowd_HerdBehaviorComponent::TriggerPanic(FVector ThreatLocation, float ThreatRadius)
-{
-    ThreatLevel = 1.0f;
-
-    for (FCrowd_HerdAgent& Agent : HerdAgents)
-    {
-        float Dist = FVector::Dist(Agent.AgentLocation, ThreatLocation);
-        if (Dist < ThreatRadius)
+        float Dist = FVector::Dist(Agent.Location, Other.Location);
+        if (Dist > 0.0f && Dist < BoidParams.SeparationRadius)
         {
-            Agent.bIsPanicking = true;
-            Agent.PanicLevel = FMath::Clamp(1.0f - (Dist / ThreatRadius), 0.3f, 1.0f);
+            FVector Diff = (Agent.Location - Other.Location).GetSafeNormal();
+            Diff /= Dist; // Weight by distance
+            SteeringForce += Diff;
+            Count++;
         }
     }
 
-    SetHerdState(ECrowd_HerdState::Scattering);
-    OnHerdPanic.Broadcast(ThreatLocation);
-}
-
-void UCrowd_HerdBehaviorComponent::BeginMigration(const TArray<FVector>& Waypoints)
-{
-    if (Waypoints.Num() == 0) return;
-    MigrationWaypoints = Waypoints;
-    MigrationProgress = 0.0f;
-    bIsMigrating = true;
-    SetHerdState(ECrowd_HerdState::Migrating);
-}
-
-void UCrowd_HerdBehaviorComponent::AddHerdMember(AActor* NewMember)
-{
-    if (!IsValid(NewMember)) return;
-
-    FCrowd_HerdAgent Agent;
-    Agent.AgentLocation = NewMember->GetActorLocation();
-    Agent.AgentVelocity = FVector::ZeroVector;
-    Agent.CurrentSpeed = 0.0f;
-    Agent.bIsLeader = false;
-    Agent.bIsPanicking = false;
-    Agent.PanicLevel = 0.0f;
-    Agent.AgentActor = NewMember;
-    HerdAgents.Add(Agent);
-    HerdMemberActors.Add(NewMember);
-}
-
-void UCrowd_HerdBehaviorComponent::RemoveHerdMember(AActor* Member)
-{
-    if (!IsValid(Member)) return;
-    HerdMemberActors.Remove(Member);
-    HerdAgents.RemoveAll([Member](const FCrowd_HerdAgent& A) { return A.AgentActor == Member; });
-}
-
-void UCrowd_HerdBehaviorComponent::DrawDebugHerdState()
-{
-#if ENABLE_DRAW_DEBUG
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    FColor StateColor = FColor::Green;
-    switch (HerdState)
+    if (Count > 0)
     {
-    case ECrowd_HerdState::Alert:      StateColor = FColor::Yellow; break;
-    case ECrowd_HerdState::Migrating:  StateColor = FColor::Cyan;   break;
-    case ECrowd_HerdState::Scattering: StateColor = FColor::Red;    break;
-    case ECrowd_HerdState::Regrouping: StateColor = FColor::Orange; break;
-    default: break;
+        SteeringForce /= (float)Count;
+        SteeringForce = LimitVector(SteeringForce, BoidParams.MaxSpeed);
+        SteeringForce -= Agent.Velocity;
+        SteeringForce = LimitVector(SteeringForce, BoidParams.MaxForce);
     }
 
-    for (const FCrowd_HerdAgent& Agent : HerdAgents)
+    return SteeringForce;
+}
+
+FVector UCrowdHerdBehavior::ComputeAlignment(const FCrowd_HerdMember& Agent) const
+{
+    FVector AvgVelocity = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (const FCrowd_HerdMember& Other : HerdMembers)
     {
-        DrawDebugSphere(World, Agent.AgentLocation, 60.0f, 8, StateColor, false, 0.15f);
-        if (!Agent.AgentVelocity.IsNearlyZero())
+        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
+
+        float Dist = FVector::Dist(Agent.Location, Other.Location);
+        if (Dist < BoidParams.AlignmentRadius)
         {
-            DrawDebugLine(World, Agent.AgentLocation, Agent.AgentLocation + Agent.AgentVelocity * 0.3f, StateColor, false, 0.15f, 0, 3.0f);
+            AvgVelocity += Other.Velocity;
+            Count++;
         }
     }
-#endif
+
+    if (Count > 0)
+    {
+        AvgVelocity /= (float)Count;
+        AvgVelocity = LimitVector(AvgVelocity, BoidParams.MaxSpeed);
+        FVector Steering = AvgVelocity - Agent.Velocity;
+        return LimitVector(Steering, BoidParams.MaxForce);
+    }
+
+    return FVector::ZeroVector;
 }
 
-void UCrowd_HerdBehaviorComponent::unreal_log_herd_state()
+FVector UCrowdHerdBehavior::ComputeCohesion(const FCrowd_HerdMember& Agent) const
 {
-    UE_LOG(LogTemp, Log, TEXT("[CrowdHerd] State: %d | Agents: %d | Density: %.2f | Threat: %.2f"),
-        (int32)HerdState, HerdAgents.Num(), HerdDensityScore, ThreatLevel);
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (const FCrowd_HerdMember& Other : HerdMembers)
+    {
+        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
+
+        float Dist = FVector::Dist(Agent.Location, Other.Location);
+        if (Dist < BoidParams.CohesionRadius)
+        {
+            CenterOfMass += Other.Location;
+            Count++;
+        }
+    }
+
+    if (Count > 0)
+    {
+        CenterOfMass /= (float)Count;
+        FVector Desired = (CenterOfMass - Agent.Location).GetSafeNormal() * BoidParams.MaxSpeed;
+        FVector Steering = Desired - Agent.Velocity;
+        return LimitVector(Steering, BoidParams.MaxForce);
+    }
+
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdHerdBehavior::LimitVector(FVector V, float MaxMagnitude) const
+{
+    float Mag = V.Size();
+    if (Mag > MaxMagnitude && Mag > 0.0f)
+    {
+        return V * (MaxMagnitude / Mag);
+    }
+    return V;
 }
