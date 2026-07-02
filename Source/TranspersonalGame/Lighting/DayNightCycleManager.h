@@ -5,65 +5,61 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/SkyLight.h"
 #include "DayNightCycleManager.generated.h"
 
-// ============================================================
-// Day/Night Cycle Lighting Palettes — Agent #08
-// Prehistoric survival game — realistic Cretaceous atmosphere
-// ============================================================
-
+// === Light_DayPhase: Current phase of the day/night cycle ===
 UENUM(BlueprintType)
-enum class ELight_TimeOfDay : uint8
+enum class ELight_DayPhase : uint8
 {
     Dawn        UMETA(DisplayName = "Dawn"),
     Morning     UMETA(DisplayName = "Morning"),
     Midday      UMETA(DisplayName = "Midday"),
     Afternoon   UMETA(DisplayName = "Afternoon"),
     Dusk        UMETA(DisplayName = "Dusk"),
+    Twilight    UMETA(DisplayName = "Twilight"),
     Night       UMETA(DisplayName = "Night"),
     Midnight    UMETA(DisplayName = "Midnight")
 };
 
+// === Light_SkyPalette: Per-phase lighting parameters ===
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLight_SkyPalette
+struct FLight_SkyPalette
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    ELight_TimeOfDay TimeOfDay = ELight_TimeOfDay::Midday;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunPitch = -25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float SunPitch = -75.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunYaw = 180.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float SunYaw = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunIntensity = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float SunIntensity = 12.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.85f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    FLinearColor SunColor = FLinearColor(1.0f, 0.97f, 0.86f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float FogDensity = 0.020f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float FogDensity = 0.012f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    FLinearColor FogColor = FLinearColor(0.85f, 0.78f, 0.62f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SkyLightIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float SkyLightIntensity = 2.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SkyLightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    FLinearColor SkyLightColor = FLinearColor(0.78f, 0.86f, 1.0f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    bool bVolumetricFog = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting|Palette")
-    float VolumetricFogExtinction = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float VolumetricFogScattering = 0.5f;
 };
 
-UCLASS(ClassGroup = (Lighting), meta = (BlueprintSpawnableComponent))
+// === ADayNightCycleManager: Drives the full day/night cycle ===
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADayNightCycleManager : public AActor
 {
     GENERATED_BODY()
@@ -74,59 +70,78 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // --- Current time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight) ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|Time")
-    float TimeOfDayNormalized = 0.5f;
+    // === Day/Night Cycle Config ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    float DayDurationSeconds = 600.0f;  // 10 real minutes = 1 game day
 
-    // --- Cycle speed: 1.0 = real-time, 60.0 = 1 minute per game day ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|Time")
-    float CycleSpeedMultiplier = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    float CurrentTimeOfDay = 0.35f;  // 0.0=midnight, 0.25=dawn, 0.5=midday, 0.75=dusk, 1.0=midnight
 
-    // --- Whether the cycle is running ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|Time")
-    bool bCycleActive = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    bool bPauseCycle = false;
 
-    // --- Lighting palette presets ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|Palettes")
-    TArray<FLight_SkyPalette> Palettes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    float TimeMultiplier = 1.0f;
 
-    // --- References to scene lights ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|References")
+    // === Scene References ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
     ADirectionalLight* SunLight = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|References")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
     AExponentialHeightFog* HeightFog = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight|References")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene References")
     ASkyLight* SkyLightActor = nullptr;
 
-    // --- Current resolved time of day enum ---
-    UPROPERTY(BlueprintReadOnly, Category = "DayNight|State")
-    ELight_TimeOfDay CurrentTimeOfDay = ELight_TimeOfDay::Midday;
+    // === Palette Overrides ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette DawnPalette;
 
-    // --- Functions ---
-    UFUNCTION(BlueprintCallable, Category = "DayNight")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette MorningPalette;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette MiddayPalette;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette AfternoonPalette;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette DuskPalette;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette TwilightPalette;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Palettes")
+    FLight_SkyPalette NightPalette;
+
+    // === Blueprint-callable API ===
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
     void SetTimeOfDay(float NormalizedTime);
 
-    UFUNCTION(BlueprintCallable, Category = "DayNight")
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    ELight_DayPhase GetCurrentPhase() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    FLight_SkyPalette GetPaletteForPhase(ELight_DayPhase Phase) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
     void ApplyPalette(const FLight_SkyPalette& Palette);
 
-    UFUNCTION(BlueprintCallable, Category = "DayNight")
-    ELight_TimeOfDay GetCurrentTimeOfDay() const;
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
 
-    UFUNCTION(BlueprintCallable, Category = "DayNight")
-    FLight_SkyPalette InterpolatePalettes(const FLight_SkyPalette& A, const FLight_SkyPalette& B, float Alpha) const;
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    FString GetPhaseDisplayName() const;
 
-    UFUNCTION(BlueprintCallable, Category = "DayNight")
-    void AutoFindSceneLights();
-
-    UFUNCTION(CallInEditor, Category = "DayNight")
-    void SnapToCurrentTime();
+    UFUNCTION(CallInEditor, Category = "Day Night Cycle")
+    void AutoFindSceneActors();
 
 private:
+    void TickCycle(float DeltaTime);
+    void BlendPalettes(const FLight_SkyPalette& From, const FLight_SkyPalette& To, float Alpha);
     void InitDefaultPalettes();
-    void UpdateLighting(float DeltaTime);
-    float GetSunPitchForTime(float NormalizedTime) const;
-    float GetSunYawForTime(float NormalizedTime) const;
-    FLinearColor GetSkyColorForTime(float NormalizedTime) const;
+
+    float PreviousTimeOfDay = 0.0f;
+    ELight_DayPhase CachedPhase = ELight_DayPhase::Morning;
 };
