@@ -1,329 +1,357 @@
-// NarrativeDialogueSystem.cpp
-// Transpersonal Game Studio — Agent #15 Narrative & Dialogue
-// Full implementation of the NPC dialogue and narrative trigger system
-
 #include "NarrativeDialogueSystem.h"
-#include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
 
-// ============================================================
-// UNarr_DialogueLibrary
-// ============================================================
-
-UNarr_DialogueLibrary::UNarr_DialogueLibrary()
+ANarrativeDialogueSystem::ANarrativeDialogueSystem()
 {
-    DialogueLines.Empty();
+    PrimaryActorTick.bCanEverTick = true;
+
+    ActiveOutcome = ENarr_QuestOutcome::None;
+    CurrentLineIndex = 0;
+    bDialoguePlaying = false;
+    LineTimer = 0.0f;
+
+    PopulateDefaultDialogue();
 }
 
-void UNarr_DialogueLibrary::AddLine(const FNarr_DialogueLine& Line)
-{
-    DialogueLines.Add(Line);
-}
-
-bool UNarr_DialogueLibrary::GetLineByID(const FName& LineID, FNarr_DialogueLine& OutLine) const
-{
-    for (const FNarr_DialogueLine& Line : DialogueLines)
-    {
-        if (Line.LineID == LineID)
-        {
-            OutLine = Line;
-            return true;
-        }
-    }
-    return false;
-}
-
-TArray<FNarr_DialogueLine> UNarr_DialogueLibrary::GetLinesByTrigger(ENarr_DialogueTriggerType TriggerType) const
-{
-    TArray<FNarr_DialogueLine> Result;
-    for (const FNarr_DialogueLine& Line : DialogueLines)
-    {
-        if (Line.TriggerType == TriggerType)
-        {
-            Result.Add(Line);
-        }
-    }
-    return Result;
-}
-
-TArray<FNarr_DialogueLine> UNarr_DialogueLibrary::GetLinesBySpeaker(ENarr_SpeakerRole SpeakerRole) const
-{
-    TArray<FNarr_DialogueLine> Result;
-    for (const FNarr_DialogueLine& Line : DialogueLines)
-    {
-        if (Line.SpeakerRole == SpeakerRole)
-        {
-            Result.Add(Line);
-        }
-    }
-    return Result;
-}
-
-// ============================================================
-// ANarr_DialogueTriggerActor
-// ============================================================
-
-ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
-{
-    PrimaryActorTick.bCanEverTick = false;
-
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    RootComponent = TriggerSphere;
-    TriggerSphere->SetSphereRadius(300.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
-
-    TriggerType = ENarr_DialogueTriggerType::Proximity;
-    SpeakerRole = ENarr_SpeakerRole::Scout;
-    bHasTriggered = false;
-    bRepeatTrigger = false;
-    CooldownSeconds = 30.0f;
-    bIsOnCooldown = false;
-}
-
-void ANarr_DialogueTriggerActor::BeginPlay()
+void ANarrativeDialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTriggerActor::OnSphereBeginOverlap);
 }
 
-void ANarr_DialogueTriggerActor::OnSphereBeginOverlap(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
+void ANarrativeDialogueSystem::Tick(float DeltaTime)
 {
-    if (!OtherActor || bIsOnCooldown)
-    {
+    Super::Tick(DeltaTime);
+
+    if (!bDialoguePlaying || ActiveSequence.Num() == 0)
         return;
-    }
 
-    // Only trigger for the player pawn
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (OtherActor != PlayerPawn)
+    LineTimer -= DeltaTime;
+    if (LineTimer <= 0.0f)
     {
-        return;
+        AdvanceToNextLine();
     }
-
-    if (bHasTriggered && !bRepeatTrigger)
-    {
-        return;
-    }
-
-    FireDialogue();
-}
-
-void ANarr_DialogueTriggerActor::FireDialogue()
-{
-    if (!DialogueLibrary)
-    {
-        return;
-    }
-
-    TArray<FNarr_DialogueLine> Lines = DialogueLibrary->GetLinesByTrigger(TriggerType);
-    if (Lines.Num() == 0)
-    {
-        return;
-    }
-
-    // Pick a random line from matching trigger type
-    int32 Index = FMath::RandRange(0, Lines.Num() - 1);
-    FNarr_DialogueLine& SelectedLine = Lines[Index];
-
-    OnDialogueTriggered.Broadcast(SelectedLine);
-    bHasTriggered = true;
-
-    if (bRepeatTrigger)
-    {
-        bIsOnCooldown = true;
-        GetWorldTimerManager().SetTimer(
-            CooldownTimerHandle,
-            this,
-            &ANarr_DialogueTriggerActor::ResetCooldown,
-            CooldownSeconds,
-            false
-        );
-    }
-}
-
-void ANarr_DialogueTriggerActor::ResetCooldown()
-{
-    bIsOnCooldown = false;
 }
 
 // ============================================================
-// UNarr_DialogueManagerComponent
+// Core dialogue trigger
 // ============================================================
 
-UNarr_DialogueManagerComponent::UNarr_DialogueManagerComponent()
+void ANarrativeDialogueSystem::TriggerDialogue(ENarr_QuestOutcome Outcome, ENarr_StampedeCause Cause)
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    ActiveLineIndex = 0;
-    bIsDialogueActive = false;
-    LineDisplayDuration = 4.0f;
-}
+    FNarr_DialogueSet* Set = FindDialogueSet(Outcome, Cause);
 
-void UNarr_DialogueManagerComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    ActiveLines.Empty();
-}
-
-void UNarr_DialogueManagerComponent::StartDialogueSequence(const TArray<FNarr_DialogueLine>& Lines)
-{
-    if (Lines.Num() == 0 || bIsDialogueActive)
+    // Fallback: try Unknown cause if specific cause not found
+    if (!Set)
     {
+        Set = FindDialogueSet(Outcome, ENarr_StampedeCause::Unknown);
+    }
+
+    if (!Set || Set->Lines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("NarrativeDialogueSystem: No dialogue found for Outcome=%d Cause=%d"),
+            (int32)Outcome, (int32)Cause);
         return;
     }
 
-    ActiveLines = Lines;
-    ActiveLineIndex = 0;
-    bIsDialogueActive = true;
+    // Start sequence
+    ActiveSequence = Set->Lines;
+    ActiveOutcome = Outcome;
+    CurrentLineIndex = 0;
+    bDialoguePlaying = true;
 
-    DisplayCurrentLine();
+    // Fire first line immediately
+    const FNarr_DialogueLine& FirstLine = ActiveSequence[0];
+    LineTimer = FirstLine.AudioDurationSeconds + 1.5f; // 1.5s pause between lines
+    OnDialogueTriggered.Broadcast(FirstLine, Outcome);
+
+    UE_LOG(LogTemp, Log,
+        TEXT("NarrativeDialogueSystem: Starting dialogue sequence — %d lines, Outcome=%d"),
+        ActiveSequence.Num(), (int32)Outcome);
 }
 
-void UNarr_DialogueManagerComponent::DisplayCurrentLine()
+void ANarrativeDialogueSystem::TriggerDialogueByOutcome(ENarr_QuestOutcome Outcome)
 {
-    if (ActiveLineIndex >= ActiveLines.Num())
-    {
-        EndDialogue();
-        return;
-    }
-
-    const FNarr_DialogueLine& CurrentLine = ActiveLines[ActiveLineIndex];
-    OnLineDisplayed.Broadcast(CurrentLine);
-
-    // Auto-advance after display duration
-    GetWorld()->GetTimerManager().SetTimer(
-        LineAdvanceTimerHandle,
-        this,
-        &UNarr_DialogueManagerComponent::AdvanceLine,
-        LineDisplayDuration,
-        false
-    );
+    TriggerDialogue(Outcome, ENarr_StampedeCause::Unknown);
 }
 
-void UNarr_DialogueManagerComponent::AdvanceLine()
+void ANarrativeDialogueSystem::StopDialogue()
 {
-    ActiveLineIndex++;
-    DisplayCurrentLine();
-}
-
-void UNarr_DialogueManagerComponent::EndDialogue()
-{
-    bIsDialogueActive = false;
-    ActiveLines.Empty();
-    ActiveLineIndex = 0;
-    OnDialogueEnded.Broadcast();
-}
-
-void UNarr_DialogueManagerComponent::SkipCurrentLine()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-
-    GetWorld()->GetTimerManager().ClearTimer(LineAdvanceTimerHandle);
-    AdvanceLine();
-}
-
-bool UNarr_DialogueManagerComponent::IsDialogueActive() const
-{
-    return bIsDialogueActive;
+    bDialoguePlaying = false;
+    ActiveSequence.Empty();
+    CurrentLineIndex = 0;
+    LineTimer = 0.0f;
 }
 
 // ============================================================
-// ANarr_NPCDialogueActor — NPC that speaks contextual lines
+// State queries
 // ============================================================
 
-ANarr_NPCDialogueActor::ANarr_NPCDialogueActor()
+FText ANarrativeDialogueSystem::GetCurrentSubtitleText() const
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    MeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MeshComponent"));
-    RootComponent = MeshComponent;
-
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(200.0f);
-    InteractionSphere->SetCollisionProfileName(TEXT("Trigger"));
-
-    DialogueManager = CreateDefaultSubobject<UNarr_DialogueManagerComponent>(TEXT("DialogueManager"));
-
-    SpeakerRole = ENarr_SpeakerRole::TribalElder;
-    NPCName = FText::FromString(TEXT("Elder"));
-    bCanInteract = true;
-    InteractionCooldown = 20.0f;
-    bOnInteractionCooldown = false;
+    if (!bDialoguePlaying || !ActiveSequence.IsValidIndex(CurrentLineIndex))
+        return FText::GetEmpty();
+    return ActiveSequence[CurrentLineIndex].LineText;
 }
 
-void ANarr_NPCDialogueActor::BeginPlay()
+FText ANarrativeDialogueSystem::GetCurrentSpeakerName() const
 {
-    Super::BeginPlay();
-    InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerEnterRange);
-    InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerExitRange);
+    if (!bDialoguePlaying || !ActiveSequence.IsValidIndex(CurrentLineIndex))
+        return FText::GetEmpty();
+    return ActiveSequence[CurrentLineIndex].SpeakerName;
 }
 
-void ANarr_NPCDialogueActor::OnPlayerEnterRange(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
+bool ANarrativeDialogueSystem::IsDialoguePlaying() const
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (OtherActor == PlayerPawn)
+    return bDialoguePlaying;
+}
+
+FString ANarrativeDialogueSystem::GetCurrentLineAudioURL() const
+{
+    if (!bDialoguePlaying || !ActiveSequence.IsValidIndex(CurrentLineIndex))
+        return FString();
+    return ActiveSequence[CurrentLineIndex].AudioURL;
+}
+
+// ============================================================
+// Internal helpers
+// ============================================================
+
+void ANarrativeDialogueSystem::AdvanceToNextLine()
+{
+    CurrentLineIndex++;
+
+    if (!ActiveSequence.IsValidIndex(CurrentLineIndex))
     {
-        OnPlayerNearby.Broadcast(true);
-    }
-}
-
-void ANarr_NPCDialogueActor::OnPlayerExitRange(
-    UPrimitiveComponent* OverlappedComponent,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bOnlyTouchingTrigger)
-{
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (OtherActor == PlayerPawn)
-    {
-        OnPlayerNearby.Broadcast(false);
-    }
-}
-
-void ANarr_NPCDialogueActor::Interact()
-{
-    if (!bCanInteract || bOnInteractionCooldown || !DialogueLibrary)
-    {
+        // Sequence complete
+        bDialoguePlaying = false;
+        OnDialogueSequenceComplete.Broadcast(ActiveOutcome);
+        UE_LOG(LogTemp, Log,
+            TEXT("NarrativeDialogueSystem: Dialogue sequence complete for Outcome=%d"),
+            (int32)ActiveOutcome);
         return;
     }
 
-    TArray<FNarr_DialogueLine> Lines = DialogueLibrary->GetLinesBySpeaker(SpeakerRole);
-    if (Lines.Num() == 0)
-    {
-        return;
-    }
-
-    DialogueManager->StartDialogueSequence(Lines);
-
-    bOnInteractionCooldown = true;
-    GetWorldTimerManager().SetTimer(
-        InteractionCooldownHandle,
-        this,
-        &ANarr_NPCDialogueActor::ResetInteractionCooldown,
-        InteractionCooldown,
-        false
-    );
+    const FNarr_DialogueLine& NextLine = ActiveSequence[CurrentLineIndex];
+    LineTimer = NextLine.AudioDurationSeconds + 1.5f;
+    OnDialogueTriggered.Broadcast(NextLine, ActiveOutcome);
 }
 
-void ANarr_NPCDialogueActor::ResetInteractionCooldown()
+FNarr_DialogueSet* ANarrativeDialogueSystem::FindDialogueSet(
+    ENarr_QuestOutcome Outcome, ENarr_StampedeCause Cause)
 {
-    bOnInteractionCooldown = false;
+    for (FNarr_DialogueSet& Set : DialogueSets)
+    {
+        if (Set.Outcome == Outcome && Set.Cause == Cause)
+            return &Set;
+    }
+    return nullptr;
+}
+
+// ============================================================
+// Default dialogue population — all stampede quest variants
+// ============================================================
+
+void ANarrativeDialogueSystem::PopulateDefaultDialogue()
+{
+    // --------------------------------------------------------
+    // OUTCOME: SurvivedFast (<10s) — Cause: Unknown/Any
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet FastSet;
+        FastSet.Outcome = ENarr_QuestOutcome::SurvivedFast;
+        FastSet.Cause = ENarr_StampedeCause::Unknown;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Tribal Elder"));
+        Line1.LineText = FText::FromString(
+            TEXT("You made it. I watched from the ridge — I thought the herd would take you. "
+                 "But you ran smart. You found the high ground. Not many survive their first stampede. "
+                 "The tribe will remember this."));
+        Line1.SpeakerRole = ENarr_NPCRole::TribalElder;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::SurvivedFast;
+        Line1.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782981562782_TribalElder_StampedeComplete.mp3");
+        Line1.AudioDurationSeconds = 13.0f;
+        FastSet.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = FText::FromString(TEXT("Chief Hunter"));
+        Line2.LineText = FText::FromString(
+            TEXT("Fast feet. Good instincts. You read the herd before it broke. "
+                 "That is a hunter's eye. Come — I have more to teach you."));
+        Line2.SpeakerRole = ENarr_NPCRole::ChiefHunter;
+        Line2.TriggerOutcome = ENarr_QuestOutcome::SurvivedFast;
+        Line2.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line2.AudioDurationSeconds = 10.0f;
+        FastSet.Lines.Add(Line2);
+
+        DialogueSets.Add(FastSet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: SurvivedFast — Cause: Predator
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet FastPredSet;
+        FastPredSet.Outcome = ENarr_QuestOutcome::SurvivedFast;
+        FastPredSet.Cause = ENarr_StampedeCause::Predator;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Tracker"));
+        Line1.LineText = FText::FromString(
+            TEXT("The herd ran from a predator — you saw it before I did. "
+                 "That T-Rex was downwind. The herd smelled it first. "
+                 "You survived because you moved when they moved. Smart."));
+        Line1.SpeakerRole = ENarr_NPCRole::Tracker;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::SurvivedFast;
+        Line1.TriggerCause = ENarr_StampedeCause::Predator;
+        Line1.AudioDurationSeconds = 12.0f;
+        FastPredSet.Lines.Add(Line1);
+
+        DialogueSets.Add(FastPredSet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: SurvivedBarely (10-20s) — Cause: Unknown/Any
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet BarelySet;
+        BarelySet.Outcome = ENarr_QuestOutcome::SurvivedBarely;
+        BarelySet.Cause = ENarr_StampedeCause::Unknown;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Tribal Elder"));
+        Line1.LineText = FText::FromString(
+            TEXT("The herd passed through here three days ago. See these tracks? Deep — a full-grown Brachiosaurus. "
+                 "But look here — something spooked them. They ran hard, broke trees, crushed everything. "
+                 "Something big was hunting them. Stay alert."));
+        Line1.SpeakerRole = ENarr_NPCRole::TribalElder;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::SurvivedBarely;
+        Line1.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782981547329_TribalElder_QuestReact.mp3");
+        Line1.AudioDurationSeconds = 16.0f;
+        BarelySet.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = FText::FromString(TEXT("Scout Runner"));
+        Line2.LineText = FText::FromString(
+            TEXT("You cut it close. Another few seconds and the herd would have taken you. "
+                 "Next time — do not wait to see which way they turn. "
+                 "When the ground shakes, you are already moving."));
+        Line2.SpeakerRole = ENarr_NPCRole::ScoutRunner;
+        Line2.TriggerOutcome = ENarr_QuestOutcome::SurvivedBarely;
+        Line2.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line2.AudioDurationSeconds = 11.0f;
+        BarelySet.Lines.Add(Line2);
+
+        DialogueSets.Add(BarelySet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: SurvivedBarely — Cause: Earthquake
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet BarelyEqSet;
+        BarelyEqSet.Outcome = ENarr_QuestOutcome::SurvivedBarely;
+        BarelyEqSet.Cause = ENarr_StampedeCause::Earthquake;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Camp Builder"));
+        Line1.LineText = FText::FromString(
+            TEXT("The earth moved and the herd panicked. You cannot predict the ground shaking — "
+                 "but you can read the animals. When they stop eating and look up all at once, "
+                 "something is wrong. Get to high ground before they start running."));
+        Line1.SpeakerRole = ENarr_NPCRole::CampBuilder;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::SurvivedBarely;
+        Line1.TriggerCause = ENarr_StampedeCause::Earthquake;
+        Line1.AudioDurationSeconds = 13.0f;
+        BarelyEqSet.Lines.Add(Line1);
+
+        DialogueSets.Add(BarelyEqSet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: SurvivedBarely — Cause: Fire
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet BarelyFireSet;
+        BarelyFireSet.Outcome = ENarr_QuestOutcome::SurvivedBarely;
+        BarelyFireSet.Cause = ENarr_StampedeCause::Fire;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Chief Hunter"));
+        Line1.LineText = FText::FromString(
+            TEXT("Fire drives them mad. They cannot think — only run from the smoke. "
+                 "If you smell burning grass, you have maybe two minutes before the herd moves. "
+                 "Use that time. Do not waste it watching the flames."));
+        Line1.SpeakerRole = ENarr_NPCRole::ChiefHunter;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::SurvivedBarely;
+        Line1.TriggerCause = ENarr_StampedeCause::Fire;
+        Line1.AudioDurationSeconds = 12.0f;
+        BarelyFireSet.Lines.Add(Line1);
+
+        DialogueSets.Add(BarelyFireSet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: Failed — Cause: Unknown/Any
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet FailedSet;
+        FailedSet.Outcome = ENarr_QuestOutcome::Failed;
+        FailedSet.Cause = ENarr_StampedeCause::Unknown;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Chief Hunter"));
+        Line1.LineText = FText::FromString(
+            TEXT("Too slow. You hesitated when the herd broke. "
+                 "Next time — when the ground shakes, you do not think. You run. "
+                 "Always run to high ground. Always. "
+                 "The valley is a death trap when the great beasts move."));
+        Line1.SpeakerRole = ENarr_NPCRole::ChiefHunter;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::Failed;
+        Line1.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line1.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782981574400_ChiefHunter_StampedeFail.mp3");
+        Line1.AudioDurationSeconds = 14.0f;
+        FailedSet.Lines.Add(Line1);
+
+        FNarr_DialogueLine Line2;
+        Line2.SpeakerName = FText::FromString(TEXT("Tribal Elder"));
+        Line2.LineText = FText::FromString(
+            TEXT("The ground shook and I froze. The herd was everywhere — I could not see the sky. "
+                 "I ran but my legs would not move fast enough. I fell. I thought — this is how I die. "
+                 "Then I saw the rocks above me and I climbed. I did not stop climbing until the thunder was behind me."));
+        Line2.SpeakerRole = ENarr_NPCRole::TribalElder;
+        Line2.TriggerOutcome = ENarr_QuestOutcome::Failed;
+        Line2.TriggerCause = ENarr_StampedeCause::Unknown;
+        Line2.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782981571907_PlayerNarrator_StampedeFailed.mp3");
+        Line2.AudioDurationSeconds = 18.0f;
+        FailedSet.Lines.Add(Line2);
+
+        DialogueSets.Add(FailedSet);
+    }
+
+    // --------------------------------------------------------
+    // OUTCOME: Failed — Cause: Predator (T-Rex triggered stampede)
+    // --------------------------------------------------------
+    {
+        FNarr_DialogueSet FailedPredSet;
+        FailedPredSet.Outcome = ENarr_QuestOutcome::Failed;
+        FailedPredSet.Cause = ENarr_StampedeCause::Predator;
+
+        FNarr_DialogueLine Line1;
+        Line1.SpeakerName = FText::FromString(TEXT("Tracker"));
+        Line1.LineText = FText::FromString(
+            TEXT("A T-Rex drove the herd and you were caught in the middle. "
+                 "That is the worst place to be. The predator does not care about you — "
+                 "but the herd will crush anything in its path. "
+                 "Remember: the predator comes from one direction. Run the other way."));
+        Line1.SpeakerRole = ENarr_NPCRole::Tracker;
+        Line1.TriggerOutcome = ENarr_QuestOutcome::Failed;
+        Line1.TriggerCause = ENarr_StampedeCause::Predator;
+        Line1.AudioDurationSeconds = 14.0f;
+        FailedPredSet.Lines.Add(Line1);
+
+        DialogueSets.Add(FailedPredSet);
+    }
 }
