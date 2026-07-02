@@ -1,202 +1,198 @@
-// TRex.cpp
-// Core Systems Programmer #03 — Transpersonal Game Studio
-// Tyrannosaurus Rex: apex predator implementation
-// Inherits AI state machine from ADinosaurBase
-
 #include "Dinosaurs/TRex.h"
+#include "Components/SphereComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 ATRex::ATRex()
 {
-	PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = true;
 
-	// Species stats — apex predator
-	DinoStats.MaxHealth        = 2500.0f;
-	DinoStats.CurrentHealth    = 2500.0f;
-	DinoStats.AttackDamage     = 180.0f;
-	DinoStats.AttackRange      = 250.0f;
-	DinoStats.DetectionRadius  = 3500.0f;
-	DinoStats.WalkSpeed        = 450.0f;
-	DinoStats.RunSpeed         = 900.0f;
-	DinoStats.BodyMass         = 8000.0f;
+    // Apply TRex stats immediately in constructor
+    ApplyTRexStats();
 
-	Diet = EEng_DinosaurDiet::Carnivore;
+    // TRex detection sphere — wider than base (1000cm)
+    if (DetectionSphere)
+    {
+        DetectionSphere->SetSphereRadius(1000.0f);
+    }
 
-	// TRex-specific
-	RoarFearRadius       = 1200.0f;
-	ChargeSpeedMultiplier = 1.8f;
-	bIsCharging          = false;
-	bRoarOnCooldown      = false;
-	ChargeElapsed        = 0.0f;
-	ChargeDuration       = 2.5f;
+    // TRex movement — slower top speed but massive momentum
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = 400.0f;       // Patrol speed
+        MoveComp->Mass = 8000.0f;              // 8 tonnes
+        MoveComp->MaxStepHeight = 120.0f;      // Can step over large obstacles
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate = FRotator(0.0f, 90.0f, 0.0f); // Slow turning radius
+        MoveComp->GravityScale = 1.2f;
+    }
+}
 
-	// Scale mesh to TRex proportions
-	GetMesh()->SetRelativeScale3D(FVector(3.5f, 3.5f, 3.5f));
+void ATRex::ApplyTRexStats()
+{
+    // Override base DinosaurStats with TRex-specific values
+    DinosaurStats.MaxHealth = 2000.0f;
+    DinosaurStats.CurrentHealth = 2000.0f;
+    DinosaurStats.AttackDamage = 250.0f;
+    DinosaurStats.AttackRange = 300.0f;
+    DinosaurStats.PatrolSpeed = 400.0f;
+    DinosaurStats.SprintSpeed = 720.0f;     // Charge speed
+    DinosaurStats.BodyMass = 8000.0f;
+    DinosaurStats.bIsCarnivore = true;
+    DinosaurStats.bIsPackHunter = false;
+    DinosaurStats.AggressionLevel = 0.9f;   // Very aggressive
+    DinosaurStats.DetectionRadius = 1000.0f;
 
-	// Movement config — heavy, powerful
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		MoveComp->MaxWalkSpeed        = DinoStats.WalkSpeed;
-		MoveComp->MaxAcceleration     = 600.0f;
-		MoveComp->BrakingDecelerationWalking = 800.0f;
-		MoveComp->RotationRate        = FRotator(0.0f, 120.0f, 0.0f);
-		MoveComp->bOrientRotationToMovement = true;
-		MoveComp->Mass                = DinoStats.BodyMass;
-	}
-
-	// Capsule for large body
-	GetCapsuleComponent()->SetCapsuleHalfHeight(180.0f);
-	GetCapsuleComponent()->SetCapsuleRadius(90.0f);
+    Species = EEng_DinosaurSpecies::TRex;
 }
 
 void ATRex::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	// Start with a roar to announce presence
-	FTimerHandle StartupRoarHandle;
-	GetWorldTimerManager().SetTimer(StartupRoarHandle, this, &ATRex::PerformRoar, 3.0f, false);
+    // Ensure stats are correct after BeginPlay base init
+    ApplyTRexStats();
+    DinosaurStats.CurrentHealth = DinosaurStats.MaxHealth;
 
-	UE_LOG(LogTemp, Log, TEXT("TRex [%s] spawned — apex predator active"), *GetName());
+    UE_LOG(LogTemp, Log, TEXT("ATRex::BeginPlay — %s initialized. Health=%.0f Damage=%.0f"),
+        *GetName(), DinosaurStats.CurrentHealth, DinosaurStats.AttackDamage);
 }
 
 void ATRex::Tick(float DeltaTime)
 {
-	Super::Tick(DeltaTime);
+    Super::Tick(DeltaTime);
 
-	// Handle charge duration
-	if (bIsCharging)
-	{
-		ChargeElapsed += DeltaTime;
-		if (ChargeElapsed >= ChargeDuration)
-		{
-			bIsCharging = false;
-			ChargeElapsed = 0.0f;
+    // Update charge movement if charging
+    if (bIsCharging)
+    {
+        UpdateCharge(DeltaTime);
+    }
+}
 
-			// Restore normal hunting speed
-			if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-			{
-				MoveComp->MaxWalkSpeed = DinoStats.RunSpeed;
-			}
-			UE_LOG(LogTemp, Log, TEXT("TRex [%s] charge ended"), *GetName());
-		}
-	}
+float ATRex::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+                         AController* EventInstigator, AActor* DamageCauser)
+{
+    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+
+    // TRex enrages when below 50% health — roar immediately
+    if (DinosaurStats.CurrentHealth < DinosaurStats.MaxHealth * 0.5f && !bRoarOnCooldown)
+    {
+        PerformRoar();
+    }
+
+    return ActualDamage;
 }
 
 void ATRex::PerformRoar()
 {
-	if (bRoarOnCooldown || !IsAlive())
-	{
-		return;
-	}
+    if (bRoarOnCooldown) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("TRex [%s] ROARS! Fear radius: %.0fcm"), *GetName(), RoarFearRadius);
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-	// Apply fear to players within radius
-	TArray<AActor*> NearbyActors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+    bRoarOnCooldown = true;
 
-	for (AActor* Actor : NearbyActors)
-	{
-		if (Actor && Actor != this)
-		{
-			float Dist = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-			if (Dist <= RoarFearRadius)
-			{
-				// Broadcast fear event — SurvivalComponent listens for this
-				UE_LOG(LogTemp, Warning, TEXT("TRex roar: fear applied to %s (dist=%.0f)"), *Actor->GetName(), Dist);
-			}
-		}
-	}
+    UE_LOG(LogTemp, Log, TEXT("ATRex::PerformRoar — %s ROARS! Stun radius=%.0fcm"), *GetName(), RoarStunRadius);
 
-	// Set cooldown
-	bRoarOnCooldown = true;
-	GetWorldTimerManager().SetTimer(RoarCooldownHandle, this, &ATRex::ResetRoarCooldown, 15.0f, false);
+    // Find all actors within roar radius and apply stun (via damage event with stun tag)
+    TArray<AActor*> OverlappingActors;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), OverlappingActors);
 
-#if WITH_EDITOR
-	// Debug sphere showing fear radius
-	DrawDebugSphere(GetWorld(), GetActorLocation(), RoarFearRadius, 16, FColor::Orange, false, 3.0f);
-#endif
+    for (AActor* Target : OverlappingActors)
+    {
+        if (Target == this) continue;
+
+        float Distance = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+        if (Distance <= RoarStunRadius)
+        {
+            // Apply minimal roar damage as stun signal (gameplay systems can intercept)
+            UGameplayStatics::ApplyDamage(Target, 10.0f, GetController(), this, nullptr);
+            UE_LOG(LogTemp, Log, TEXT("ATRex::PerformRoar — Stun applied to %s (dist=%.0f)"),
+                *Target->GetName(), Distance);
+        }
+    }
+
+    // Reset roar cooldown
+    World->GetTimerManager().SetTimer(RoarCooldownTimer, [this]()
+    {
+        bRoarOnCooldown = false;
+        UE_LOG(LogTemp, Log, TEXT("ATRex::RoarCooldown — Roar ready again"));
+    }, RoarCooldown, false);
 }
 
-void ATRex::ChargeAttack()
+void ATRex::InitiateCharge(const FVector& TargetLocation)
 {
-	if (bIsCharging || !IsAlive())
-	{
-		return;
-	}
+    if (bIsCharging) return;
 
-	bIsCharging = true;
-	ChargeElapsed = 0.0f;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-	// Apply charge speed
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		MoveComp->MaxWalkSpeed = DinoStats.RunSpeed * ChargeSpeedMultiplier;
-	}
+    bIsCharging = true;
+    ChargeTarget = TargetLocation;
 
-	UE_LOG(LogTemp, Warning, TEXT("TRex [%s] CHARGING! Speed: %.0f"), *GetName(), DinoStats.RunSpeed * ChargeSpeedMultiplier);
+    // Boost movement speed for charge
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = DinosaurStats.SprintSpeed * ChargeSpeedMultiplier;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("ATRex::InitiateCharge — Charging toward %s"), *TargetLocation.ToString());
+
+    // End charge after 3 seconds
+    World->GetTimerManager().SetTimer(ChargeTimer, this, &ATRex::EndCharge, 3.0f, false);
 }
 
-void ATRex::OnDinosaurDeath_Implementation()
+void ATRex::EndCharge()
 {
-	// TRex death — dramatic collapse
-	UE_LOG(LogTemp, Warning, TEXT("TRex [%s] DIES — apex predator fallen"), *GetName());
+    if (!bIsCharging) return;
 
-	// Disable collision and movement (from base)
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    bIsCharging = false;
+    ChargeTarget = FVector::ZeroVector;
 
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		MoveComp->DisableMovement();
-	}
+    // Restore patrol speed
+    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+    if (MoveComp)
+    {
+        MoveComp->MaxWalkSpeed = DinosaurStats.PatrolSpeed;
+    }
 
-	// TRex corpse persists longer — valuable resource
-	SetLifeSpan(30.0f);
-
-#if WITH_EDITOR
-	DrawDebugSphere(GetWorld(), GetActorLocation(), 500.0f, 12, FColor::Red, false, 5.0f);
-#endif
+    UE_LOG(LogTemp, Log, TEXT("ATRex::EndCharge — Charge ended, returning to patrol speed"));
 }
 
-void ATRex::OnPlayerDetected_Implementation(AActor* Player, float Distance)
+void ATRex::UpdateCharge(float DeltaTime)
 {
-	// TRex has narrow forward arc (120 degrees) but extreme range
-	if (!Player)
-	{
-		return;
-	}
+    if (!bIsCharging || ChargeTarget.IsZero()) return;
 
-	FVector ToPlayer = (Player->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-	FVector Forward  = GetActorForwardVector();
-	float DotProduct = FVector::DotProduct(Forward, ToPlayer);
-	float AngleDeg   = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+    // Move toward charge target
+    FVector Direction = (ChargeTarget - GetActorLocation()).GetSafeNormal();
+    float DistToTarget = FVector::Dist(GetActorLocation(), ChargeTarget);
 
-	// Only detect within 120-degree forward arc
-	if (AngleDeg <= 60.0f)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TRex [%s] detected player %s at %.0fcm (angle=%.1f°) — HUNTING"),
-			*GetName(), *Player->GetName(), Distance, AngleDeg);
+    if (DistToTarget < 200.0f)
+    {
+        // Reached target — end charge and attack
+        EndCharge();
 
-		// Trigger roar if not on cooldown
-		if (!bRoarOnCooldown)
-		{
-			PerformRoar();
-		}
+        // Perform attack at charge destination
+        TArray<AActor*> NearbyActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
+        for (AActor* Target : NearbyActors)
+        {
+            if (Target == this) continue;
+            if (FVector::Dist(GetActorLocation(), Target->GetActorLocation()) < DinosaurStats.AttackRange)
+            {
+                UGameplayStatics::ApplyDamage(Target, DinosaurStats.AttackDamage * 1.5f,
+                    GetController(), this, nullptr);
+                UE_LOG(LogTemp, Log, TEXT("ATRex::ChargeImpact — Hit %s for %.0f damage"),
+                    *Target->GetName(), DinosaurStats.AttackDamage * 1.5f);
+            }
+        }
+        return;
+    }
 
-		// Trigger charge if close enough
-		if (Distance < 800.0f)
-		{
-			ChargeAttack();
-		}
-	}
-}
-
-void ATRex::ResetRoarCooldown()
-{
-	bRoarOnCooldown = false;
-	UE_LOG(LogTemp, Log, TEXT("TRex [%s] roar cooldown reset"), *GetName());
+    // Add movement input toward target
+    AddMovementInput(Direction, 1.0f);
 }
