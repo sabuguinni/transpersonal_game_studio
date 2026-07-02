@@ -1,267 +1,466 @@
-// QuestObjectiveSystem.cpp
-// Agent #15 — Narrative & Dialogue | PROD_CYCLE_AUTO_20260630_007
-// Full implementation of quest objective tracking for dinosaur survival game
+// QuestObjectiveSystem.cpp — Agent #14 Quest & Mission Designer
+// Cycle: AUTO_20260702_005
+// Full implementation of AQuest_ObjectiveManager
 
 #include "QuestObjectiveSystem.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "GameFramework/Actor.h"
 
-// ============================================================
-// UNarr_QuestObjectiveComponent
-// ============================================================
+// ─── Constructor ──────────────────────────────────────────────────────────────
 
-UNarr_QuestObjectiveComponent::UNarr_QuestObjectiveComponent()
+AQuest_ObjectiveManager::AQuest_ObjectiveManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    ActiveQuestID = NAME_None;
-    bQuestActive = false;
-    CurrentObjectiveIndex = 0;
-    TotalObjectivesCompleted = 0;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 1.0f; // Check timed objectives every second
+    CompletedMissionCount = 0;
 }
 
-void UNarr_QuestObjectiveComponent::BeginPlay()
+// ─── BeginPlay ────────────────────────────────────────────────────────────────
+
+void AQuest_ObjectiveManager::BeginPlay()
 {
     Super::BeginPlay();
-    // Register with world subsystem if available
-    UWorld* World = GetWorld();
-    if (World)
+
+    // Register the 3 core survival missions at game start
+    // ── Mission 1: First Hunt ─────────────────────────────────────────────────
     {
-        unregisterTimer = false;
-        World->GetTimerManager().SetTimer(
-            ObjectiveCheckTimer,
-            this,
-            &UNarr_QuestObjectiveComponent::CheckObjectiveConditions,
-            2.0f,
-            true
-        );
+        FQuest_MissionData Hunt;
+        Hunt.MissionID = FName("MISSION_FIRST_HUNT");
+        Hunt.MissionTitle = FText::FromString("First Blood");
+        Hunt.MissionDescription = FText::FromString(
+            "The tribe is starving. Hunt a small dinosaur to bring back meat and bones.");
+        Hunt.QuestGiverTag = FName("NPC_Tracker");
+
+        FQuest_ObjectiveData KillObj;
+        KillObj.ObjectiveID = FName("OBJ_KILL_RAPTOR");
+        KillObj.ObjectiveDescription = FText::FromString("Kill 1 Raptor");
+        KillObj.ObjectiveType = EQuest_ObjectiveType::Hunt;
+        KillObj.Priority = EQuest_Priority::Primary;
+        KillObj.RequiredCount = 1;
+        KillObj.TargetActorTag = FName("Dinosaur_Raptor");
+        Hunt.Objectives.Add(KillObj);
+
+        FQuest_ObjectiveData GatherObj;
+        GatherObj.ObjectiveID = FName("OBJ_GATHER_BONES");
+        GatherObj.ObjectiveDescription = FText::FromString("Collect 2 Raptor Bones");
+        GatherObj.ObjectiveType = EQuest_ObjectiveType::Gather;
+        GatherObj.Priority = EQuest_Priority::Primary;
+        GatherObj.RequiredCount = 2;
+        GatherObj.TargetActorTag = FName("Resource_Bone");
+        Hunt.Objectives.Add(GatherObj);
+
+        Hunt.Reward.BoneMaterialCount = 3;
+        Hunt.Reward.HideCount = 1;
+        Hunt.Reward.RewardNarration = FText::FromString(
+            "You return with meat and bone. The tribe eats tonight.");
+        RegisterMission(Hunt);
     }
+
+    // ── Mission 2: Rescue Kara ────────────────────────────────────────────────
+    {
+        FQuest_MissionData Rescue;
+        Rescue.MissionID = FName("MISSION_RESCUE_KARA");
+        Rescue.MissionTitle = FText::FromString("Into the Canyon");
+        Rescue.MissionDescription = FText::FromString(
+            "Kara was taken by raptors into the canyon. Reach her before nightfall.");
+        Rescue.QuestGiverTag = FName("NPC_Elder");
+        Rescue.PrerequisiteMissionIDs.Add(FName("MISSION_FIRST_HUNT"));
+
+        FQuest_ObjectiveData ExploreObj;
+        ExploreObj.ObjectiveID = FName("OBJ_REACH_CANYON");
+        ExploreObj.ObjectiveDescription = FText::FromString("Reach the Raptor Canyon");
+        ExploreObj.ObjectiveType = EQuest_ObjectiveType::Explore;
+        ExploreObj.Priority = EQuest_Priority::Primary;
+        ExploreObj.RequiredCount = 1;
+        ExploreObj.TargetLocation = FVector(3500.f, -2000.f, 200.f);
+        ExploreObj.TargetRadius = 800.f;
+        Rescue.Objectives.Add(ExploreObj);
+
+        FQuest_ObjectiveData DefendObj;
+        DefendObj.ObjectiveID = FName("OBJ_DEFEND_KARA");
+        DefendObj.ObjectiveDescription = FText::FromString("Protect Kara from 3 Raptors");
+        DefendObj.ObjectiveType = EQuest_ObjectiveType::Defend;
+        DefendObj.Priority = EQuest_Priority::Critical;
+        DefendObj.RequiredCount = 3;
+        DefendObj.TargetActorTag = FName("Dinosaur_Raptor");
+        DefendObj.TimeLimitSeconds = 120.f; // 2 minutes to defend
+        Rescue.Objectives.Add(DefendObj);
+
+        FQuest_ObjectiveData EscapeObj;
+        EscapeObj.ObjectiveID = FName("OBJ_ESCAPE_CANYON");
+        EscapeObj.ObjectiveDescription = FText::FromString("Escape the canyon with Kara");
+        EscapeObj.ObjectiveType = EQuest_ObjectiveType::Escape;
+        EscapeObj.Priority = EQuest_Priority::Critical;
+        EscapeObj.RequiredCount = 1;
+        EscapeObj.TargetLocation = FVector(0.f, 0.f, 0.f); // Camp location
+        EscapeObj.TargetRadius = 1000.f;
+        Rescue.Objectives.Add(EscapeObj);
+
+        Rescue.Reward.HideCount = 2;
+        Rescue.Reward.FlintCount = 3;
+        Rescue.Reward.bUnlocksNewArea = true;
+        Rescue.Reward.UnlockedAreaTag = FName("Area_RiverDelta");
+        Rescue.Reward.RewardNarration = FText::FromString(
+            "Kara is safe. She knows a path to the river delta — new hunting grounds.");
+        RegisterMission(Rescue);
+    }
+
+    // ── Mission 3: Follow the Herd ────────────────────────────────────────────
+    {
+        FQuest_MissionData Herd;
+        Herd.MissionID = FName("MISSION_FOLLOW_HERD");
+        Herd.MissionTitle = FText::FromString("The Migration");
+        Herd.MissionDescription = FText::FromString(
+            "A hadrosaur herd is moving north. Follow them to find new territory.");
+        Herd.QuestGiverTag = FName("NPC_Tracker");
+
+        FQuest_ObjectiveData TrackObj;
+        TrackObj.ObjectiveID = FName("OBJ_TRACK_HERD");
+        TrackObj.ObjectiveDescription = FText::FromString("Track the hadrosaur herd (follow for 300m)");
+        TrackObj.ObjectiveType = EQuest_ObjectiveType::Track;
+        TrackObj.Priority = EQuest_Priority::Primary;
+        TrackObj.RequiredCount = 1;
+        TrackObj.TargetActorTag = FName("Dinosaur_Hadrosaur");
+        Herd.Objectives.Add(TrackObj);
+
+        FQuest_ObjectiveData SurviveObj;
+        SurviveObj.ObjectiveID = FName("OBJ_SURVIVE_NIGHT");
+        SurviveObj.ObjectiveDescription = FText::FromString("Survive one full night in the open");
+        SurviveObj.ObjectiveType = EQuest_ObjectiveType::Survive;
+        SurviveObj.Priority = EQuest_Priority::Secondary;
+        SurviveObj.RequiredCount = 1;
+        SurviveObj.TimeLimitSeconds = 300.f; // 5 min real = 1 night in-game
+        Herd.Objectives.Add(SurviveObj);
+
+        FQuest_ObjectiveData CraftObj;
+        CraftObj.ObjectiveID = FName("OBJ_CRAFT_CAMPFIRE");
+        CraftObj.ObjectiveDescription = FText::FromString("Craft a campfire before nightfall");
+        CraftObj.ObjectiveType = EQuest_ObjectiveType::Craft;
+        CraftObj.Priority = EQuest_Priority::Bonus;
+        CraftObj.RequiredCount = 1;
+        CraftObj.TargetActorTag = FName("Item_Campfire");
+        Herd.Objectives.Add(CraftObj);
+
+        Herd.Reward.BoneMaterialCount = 5;
+        Herd.Reward.bUnlocksNewArea = true;
+        Herd.Reward.UnlockedAreaTag = FName("Area_NorthernPlains");
+        Herd.Reward.RewardNarration = FText::FromString(
+            "The northern plains. Rich with prey. The tribe can survive here.");
+        RegisterMission(Herd);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestObjectiveManager: %d missions registered"), AllMissions.Num());
 }
 
-void UNarr_QuestObjectiveComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+// ─── Tick ─────────────────────────────────────────────────────────────────────
+
+void AQuest_ObjectiveManager::Tick(float DeltaTime)
 {
-    UWorld* World = GetWorld();
-    if (World)
+    Super::Tick(DeltaTime);
+
+    for (FQuest_MissionData& Mission : AllMissions)
     {
-        World->GetTimerManager().ClearTimer(ObjectiveCheckTimer);
-    }
-    Super::EndPlay(EndPlayReason);
-}
-
-bool UNarr_QuestObjectiveComponent::StartQuest(FName QuestID, const TArray<FNarr_ObjectiveData>& Objectives)
-{
-    if (bQuestActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestObjectiveSystem: Cannot start quest %s — quest %s already active"),
-            *QuestID.ToString(), *ActiveQuestID.ToString());
-        return false;
-    }
-
-    if (Objectives.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestObjectiveSystem: Cannot start quest %s — no objectives provided"), *QuestID.ToString());
-        return false;
-    }
-
-    ActiveQuestID = QuestID;
-    ActiveObjectives = Objectives;
-    CurrentObjectiveIndex = 0;
-    bQuestActive = true;
-
-    // Mark first objective as active
-    if (ActiveObjectives.IsValidIndex(0))
-    {
-        ActiveObjectives[0].Status = ENarr_ObjectiveStatus::Active;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("QuestObjectiveSystem: Quest '%s' started with %d objectives"),
-        *QuestID.ToString(), Objectives.Num());
-
-    OnQuestStarted.Broadcast(QuestID);
-    return true;
-}
-
-bool UNarr_QuestObjectiveComponent::CompleteCurrentObjective()
-{
-    if (!bQuestActive || !ActiveObjectives.IsValidIndex(CurrentObjectiveIndex))
-    {
-        return false;
-    }
-
-    FNarr_ObjectiveData& Obj = ActiveObjectives[CurrentObjectiveIndex];
-    Obj.Status = ENarr_ObjectiveStatus::Completed;
-    Obj.CurrentCount = Obj.RequiredCount;
-    TotalObjectivesCompleted++;
-
-    UE_LOG(LogTemp, Log, TEXT("QuestObjectiveSystem: Objective '%s' completed (%d/%d)"),
-        *Obj.ObjectiveID.ToString(), CurrentObjectiveIndex + 1, ActiveObjectives.Num());
-
-    OnObjectiveCompleted.Broadcast(ActiveQuestID, Obj.ObjectiveID);
-
-    // Advance to next objective
-    int32 NextIndex = CurrentObjectiveIndex + 1;
-    if (ActiveObjectives.IsValidIndex(NextIndex))
-    {
-        CurrentObjectiveIndex = NextIndex;
-        ActiveObjectives[NextIndex].Status = ENarr_ObjectiveStatus::Active;
-        UE_LOG(LogTemp, Log, TEXT("QuestObjectiveSystem: Advancing to objective '%s'"),
-            *ActiveObjectives[NextIndex].ObjectiveID.ToString());
-    }
-    else
-    {
-        // All objectives done — complete the quest
-        CompleteQuest();
-    }
-
-    return true;
-}
-
-void UNarr_QuestObjectiveComponent::CompleteQuest()
-{
-    if (!bQuestActive) return;
-
-    FName CompletedQuestID = ActiveQuestID;
-    bQuestActive = false;
-    ActiveQuestID = NAME_None;
-
-    UE_LOG(LogTemp, Log, TEXT("QuestObjectiveSystem: Quest '%s' COMPLETED — total objectives: %d"),
-        *CompletedQuestID.ToString(), TotalObjectivesCompleted);
-
-    OnQuestCompleted.Broadcast(CompletedQuestID);
-}
-
-bool UNarr_QuestObjectiveComponent::FailQuest(FName Reason)
-{
-    if (!bQuestActive) return false;
-
-    FName FailedQuestID = ActiveQuestID;
-    bQuestActive = false;
-    ActiveQuestID = NAME_None;
-
-    // Mark current objective as failed
-    if (ActiveObjectives.IsValidIndex(CurrentObjectiveIndex))
-    {
-        ActiveObjectives[CurrentObjectiveIndex].Status = ENarr_ObjectiveStatus::Failed;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("QuestObjectiveSystem: Quest '%s' FAILED — reason: %s"),
-        *FailedQuestID.ToString(), *Reason.ToString());
-
-    OnQuestFailed.Broadcast(FailedQuestID, Reason);
-    return true;
-}
-
-void UNarr_QuestObjectiveComponent::UpdateObjectiveCount(FName ObjectiveID, int32 Delta)
-{
-    for (FNarr_ObjectiveData& Obj : ActiveObjectives)
-    {
-        if (Obj.ObjectiveID == ObjectiveID && Obj.Status == ENarr_ObjectiveStatus::Active)
+        if (Mission.MissionState == EQuest_ObjectiveState::Active)
         {
-            Obj.CurrentCount = FMath::Clamp(Obj.CurrentCount + Delta, 0, Obj.RequiredCount);
+            TickTimedObjectives(Mission, DeltaTime);
+        }
+    }
+}
 
-            UE_LOG(LogTemp, Log, TEXT("QuestObjectiveSystem: Objective '%s' progress: %d/%d"),
-                *ObjectiveID.ToString(), Obj.CurrentCount, Obj.RequiredCount);
+// ─── Mission Registration ─────────────────────────────────────────────────────
 
+void AQuest_ObjectiveManager::RegisterMission(const FQuest_MissionData& MissionData)
+{
+    // Prevent duplicate registration
+    for (const FQuest_MissionData& Existing : AllMissions)
+    {
+        if (Existing.MissionID == MissionData.MissionID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Mission %s already registered — skipping"),
+                   *MissionData.MissionID.ToString());
+            return;
+        }
+    }
+    AllMissions.Add(MissionData);
+    UE_LOG(LogTemp, Log, TEXT("Mission registered: %s"), *MissionData.MissionID.ToString());
+}
+
+bool AQuest_ObjectiveManager::ActivateMission(FName MissionID)
+{
+    FQuest_MissionData* Mission = FindMission(MissionID);
+    if (!Mission) return false;
+
+    // Check prerequisites
+    for (const FName& PrereqID : Mission->PrerequisiteMissionIDs)
+    {
+        if (!IsMissionComplete(PrereqID))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Mission %s blocked — prerequisite %s not complete"),
+                   *MissionID.ToString(), *PrereqID.ToString());
+            return false;
+        }
+    }
+
+    Mission->MissionState = EQuest_ObjectiveState::Active;
+    for (FQuest_ObjectiveData& Obj : Mission->Objectives)
+    {
+        Obj.State = EQuest_ObjectiveState::Active;
+    }
+
+    OnMissionActivated.Broadcast(MissionID, Mission->MissionTitle);
+    UE_LOG(LogTemp, Log, TEXT("Mission ACTIVATED: %s"), *MissionID.ToString());
+    return true;
+}
+
+bool AQuest_ObjectiveManager::CompleteMission(FName MissionID)
+{
+    FQuest_MissionData* Mission = FindMission(MissionID);
+    if (!Mission) return false;
+
+    Mission->MissionState = EQuest_ObjectiveState::Completed;
+    CompletedMissionCount++;
+    OnMissionCompleted.Broadcast(MissionID, Mission->Reward);
+    UE_LOG(LogTemp, Log, TEXT("Mission COMPLETED: %s"), *MissionID.ToString());
+    return true;
+}
+
+bool AQuest_ObjectiveManager::FailMission(FName MissionID)
+{
+    FQuest_MissionData* Mission = FindMission(MissionID);
+    if (!Mission) return false;
+
+    Mission->MissionState = EQuest_ObjectiveState::Failed;
+    OnMissionFailed.Broadcast(MissionID);
+    UE_LOG(LogTemp, Log, TEXT("Mission FAILED: %s"), *MissionID.ToString());
+    return true;
+}
+
+// ─── Progress Reporting ───────────────────────────────────────────────────────
+
+void AQuest_ObjectiveManager::ReportProgress(FName MissionID, FName ObjectiveID, int32 ProgressAmount)
+{
+    FQuest_MissionData* Mission = FindMission(MissionID);
+    if (!Mission || Mission->MissionState != EQuest_ObjectiveState::Active) return;
+
+    for (FQuest_ObjectiveData& Obj : Mission->Objectives)
+    {
+        if (Obj.ObjectiveID == ObjectiveID && Obj.State == EQuest_ObjectiveState::Active)
+        {
+            Obj.CurrentCount = FMath::Min(Obj.CurrentCount + ProgressAmount, Obj.RequiredCount);
             if (Obj.CurrentCount >= Obj.RequiredCount)
             {
-                CompleteCurrentObjective();
+                Obj.State = EQuest_ObjectiveState::Completed;
             }
+            OnObjectiveUpdated.Broadcast(MissionID, Obj);
+            EvaluateObjectiveCompletion(*Mission);
             return;
         }
     }
 }
 
-FNarr_ObjectiveData UNarr_QuestObjectiveComponent::GetCurrentObjective() const
+void AQuest_ObjectiveManager::ReportKill(FName ActorTag)
 {
-    if (ActiveObjectives.IsValidIndex(CurrentObjectiveIndex))
+    for (FQuest_MissionData& Mission : AllMissions)
     {
-        return ActiveObjectives[CurrentObjectiveIndex];
-    }
-    return FNarr_ObjectiveData();
-}
-
-TArray<FNarr_ObjectiveData> UNarr_QuestObjectiveComponent::GetAllObjectives() const
-{
-    return ActiveObjectives;
-}
-
-void UNarr_QuestObjectiveComponent::CheckObjectiveConditions()
-{
-    // Periodic check — subclasses or Blueprint can override via event
-    if (!bQuestActive) return;
-
-    if (ActiveObjectives.IsValidIndex(CurrentObjectiveIndex))
-    {
-        const FNarr_ObjectiveData& Obj = ActiveObjectives[CurrentObjectiveIndex];
-        if (Obj.Status == ENarr_ObjectiveStatus::Active)
+        if (Mission.MissionState != EQuest_ObjectiveState::Active) continue;
+        for (FQuest_ObjectiveData& Obj : Mission.Objectives)
         {
-            // Broadcast for Blueprint polling
-            OnObjectiveProgressCheck.Broadcast(ActiveQuestID, Obj.ObjectiveID, Obj.CurrentCount, Obj.RequiredCount);
+            if (Obj.State != EQuest_ObjectiveState::Active) continue;
+            if ((Obj.ObjectiveType == EQuest_ObjectiveType::Hunt ||
+                 Obj.ObjectiveType == EQuest_ObjectiveType::Defend) &&
+                Obj.TargetActorTag == ActorTag)
+            {
+                Obj.CurrentCount = FMath::Min(Obj.CurrentCount + 1, Obj.RequiredCount);
+                if (Obj.CurrentCount >= Obj.RequiredCount)
+                    Obj.State = EQuest_ObjectiveState::Completed;
+                OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                EvaluateObjectiveCompletion(Mission);
+            }
         }
     }
 }
 
-// ============================================================
-// ANarr_DialogueTriggerActor
-// ============================================================
-
-ANarr_DialogueTriggerActor::ANarr_DialogueTriggerActor()
+void AQuest_ObjectiveManager::ReportGather(FName ResourceTag, int32 Amount)
 {
-    PrimaryActorTick.bCanEverTick = false;
-    bDialogueTriggered = false;
-    bOneShot = true;
-    TriggerRadius = 300.0f;
-    SpeakerName = FName("Unknown");
-    DialogueLineIndex = 0;
-
-    // Root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
-    SetRootComponent(RootSceneComponent);
-
-    // Trigger sphere
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetupAttachment(RootSceneComponent);
-    TriggerSphere->SetSphereRadius(TriggerRadius);
-    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    for (FQuest_MissionData& Mission : AllMissions)
+    {
+        if (Mission.MissionState != EQuest_ObjectiveState::Active) continue;
+        for (FQuest_ObjectiveData& Obj : Mission.Objectives)
+        {
+            if (Obj.State != EQuest_ObjectiveState::Active) continue;
+            if (Obj.ObjectiveType == EQuest_ObjectiveType::Gather &&
+                Obj.TargetActorTag == ResourceTag)
+            {
+                Obj.CurrentCount = FMath::Min(Obj.CurrentCount + Amount, Obj.RequiredCount);
+                if (Obj.CurrentCount >= Obj.RequiredCount)
+                    Obj.State = EQuest_ObjectiveState::Completed;
+                OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                EvaluateObjectiveCompletion(Mission);
+            }
+        }
+    }
 }
 
-void ANarr_DialogueTriggerActor::BeginPlay()
+void AQuest_ObjectiveManager::ReportLocationReached(FVector PlayerLocation)
 {
-    Super::BeginPlay();
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTriggerActor::OnTriggerOverlap);
-    TriggerSphere->SetSphereRadius(TriggerRadius);
+    for (FQuest_MissionData& Mission : AllMissions)
+    {
+        if (Mission.MissionState != EQuest_ObjectiveState::Active) continue;
+        for (FQuest_ObjectiveData& Obj : Mission.Objectives)
+        {
+            if (Obj.State != EQuest_ObjectiveState::Active) continue;
+            if (Obj.ObjectiveType == EQuest_ObjectiveType::Explore ||
+                Obj.ObjectiveType == EQuest_ObjectiveType::Escape)
+            {
+                float Dist = FVector::Dist(PlayerLocation, Obj.TargetLocation);
+                if (Dist <= Obj.TargetRadius)
+                {
+                    Obj.CurrentCount = Obj.RequiredCount;
+                    Obj.State = EQuest_ObjectiveState::Completed;
+                    OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                    EvaluateObjectiveCompletion(Mission);
+                }
+            }
+        }
+    }
 }
 
-void ANarr_DialogueTriggerActor::OnTriggerOverlap(
-    UPrimitiveComponent* OverlappedComp,
-    AActor* OtherActor,
-    UPrimitiveComponent* OtherComp,
-    int32 OtherBodyIndex,
-    bool bFromSweep,
-    const FHitResult& SweepResult)
+void AQuest_ObjectiveManager::ReportCraft(FName ItemTag)
 {
-    if (!OtherActor) return;
-    if (bOneShot && bDialogueTriggered) return;
-
-    // Only trigger for player pawn
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC) return;
-    APawn* PlayerPawn = PC->GetPawn();
-    if (OtherActor != PlayerPawn) return;
-
-    bDialogueTriggered = true;
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger: Player entered trigger zone — speaker: %s, line index: %d"),
-        *SpeakerName.ToString(), DialogueLineIndex);
-
-    OnDialogueTriggered.Broadcast(SpeakerName, DialogueLineIndex, DialogueLines.IsValidIndex(DialogueLineIndex)
-        ? DialogueLines[DialogueLineIndex]
-        : FText::FromString(TEXT("")));
+    for (FQuest_MissionData& Mission : AllMissions)
+    {
+        if (Mission.MissionState != EQuest_ObjectiveState::Active) continue;
+        for (FQuest_ObjectiveData& Obj : Mission.Objectives)
+        {
+            if (Obj.State != EQuest_ObjectiveState::Active) continue;
+            if (Obj.ObjectiveType == EQuest_ObjectiveType::Craft &&
+                Obj.TargetActorTag == ItemTag)
+            {
+                Obj.CurrentCount = Obj.RequiredCount;
+                Obj.State = EQuest_ObjectiveState::Completed;
+                OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                EvaluateObjectiveCompletion(Mission);
+            }
+        }
+    }
 }
 
-void ANarr_DialogueTriggerActor::ResetTrigger()
+// ─── Query ────────────────────────────────────────────────────────────────────
+
+bool AQuest_ObjectiveManager::IsMissionActive(FName MissionID) const
 {
-    bDialogueTriggered = false;
-    DialogueLineIndex = 0;
-    UE_LOG(LogTemp, Log, TEXT("DialogueTrigger: Reset — speaker: %s"), *SpeakerName.ToString());
+    for (const FQuest_MissionData& M : AllMissions)
+        if (M.MissionID == MissionID)
+            return M.MissionState == EQuest_ObjectiveState::Active;
+    return false;
+}
+
+bool AQuest_ObjectiveManager::IsMissionComplete(FName MissionID) const
+{
+    for (const FQuest_MissionData& M : AllMissions)
+        if (M.MissionID == MissionID)
+            return M.MissionState == EQuest_ObjectiveState::Completed;
+    return false;
+}
+
+TArray<FQuest_MissionData> AQuest_ObjectiveManager::GetActiveMissions() const
+{
+    TArray<FQuest_MissionData> Active;
+    for (const FQuest_MissionData& M : AllMissions)
+        if (M.MissionState == EQuest_ObjectiveState::Active)
+            Active.Add(M);
+    return Active;
+}
+
+FQuest_ObjectiveData AQuest_ObjectiveManager::GetObjectiveStatus(FName MissionID, FName ObjectiveID) const
+{
+    for (const FQuest_MissionData& M : AllMissions)
+    {
+        if (M.MissionID == MissionID)
+        {
+            for (const FQuest_ObjectiveData& Obj : M.Objectives)
+                if (Obj.ObjectiveID == ObjectiveID)
+                    return Obj;
+        }
+    }
+    return FQuest_ObjectiveData();
+}
+
+int32 AQuest_ObjectiveManager::GetTotalCompletedMissions() const
+{
+    return CompletedMissionCount;
+}
+
+// ─── Private Helpers ──────────────────────────────────────────────────────────
+
+void AQuest_ObjectiveManager::EvaluateObjectiveCompletion(FQuest_MissionData& Mission)
+{
+    // Mission completes when ALL Critical and Primary objectives are done
+    bool bAllCriticalDone = true;
+    bool bAllPrimaryDone = true;
+
+    for (const FQuest_ObjectiveData& Obj : Mission.Objectives)
+    {
+        if (Obj.Priority == EQuest_Priority::Critical &&
+            Obj.State != EQuest_ObjectiveState::Completed)
+        {
+            bAllCriticalDone = false;
+        }
+        if (Obj.Priority == EQuest_Priority::Primary &&
+            Obj.State != EQuest_ObjectiveState::Completed)
+        {
+            bAllPrimaryDone = false;
+        }
+    }
+
+    if (bAllCriticalDone && bAllPrimaryDone)
+    {
+        CompleteMission(Mission.MissionID);
+    }
+}
+
+void AQuest_ObjectiveManager::TickTimedObjectives(FQuest_MissionData& Mission, float DeltaTime)
+{
+    for (FQuest_ObjectiveData& Obj : Mission.Objectives)
+    {
+        if (Obj.State != EQuest_ObjectiveState::Active) continue;
+        if (Obj.TimeLimitSeconds <= 0.f) continue;
+
+        if (Obj.ObjectiveType == EQuest_ObjectiveType::Survive)
+        {
+            // Survive objectives complete when time runs out (player survived)
+            Obj.ElapsedSeconds += DeltaTime;
+            if (Obj.ElapsedSeconds >= Obj.TimeLimitSeconds)
+            {
+                Obj.CurrentCount = Obj.RequiredCount;
+                Obj.State = EQuest_ObjectiveState::Completed;
+                OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                EvaluateObjectiveCompletion(Mission);
+            }
+        }
+        else
+        {
+            // Other timed objectives FAIL when time runs out
+            Obj.ElapsedSeconds += DeltaTime;
+            if (Obj.ElapsedSeconds >= Obj.TimeLimitSeconds &&
+                Obj.State != EQuest_ObjectiveState::Completed)
+            {
+                Obj.State = EQuest_ObjectiveState::Failed;
+                OnObjectiveUpdated.Broadcast(Mission.MissionID, Obj);
+                // If critical objective fails, fail the whole mission
+                if (Obj.Priority == EQuest_Priority::Critical)
+                {
+                    FailMission(Mission.MissionID);
+                }
+            }
+        }
+    }
+}
+
+FQuest_MissionData* AQuest_ObjectiveManager::FindMission(FName MissionID)
+{
+    for (FQuest_MissionData& M : AllMissions)
+        if (M.MissionID == MissionID)
+            return &M;
+    return nullptr;
 }
