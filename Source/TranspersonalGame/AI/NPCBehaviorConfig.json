@@ -1,0 +1,181 @@
+{
+  "npc_behavior_system": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260702_010",
+    "agent": "NPC Behavior Agent #11",
+    "description": "NPC Behavior Tree configuration for prehistoric survival NPCs"
+  },
+
+  "behavior_types": {
+    "Hunter_Patrol": {
+      "description": "Armed hunters patrolling territory perimeter",
+      "patrol_radius_units": 3000,
+      "threat_detection_range_units": 2000,
+      "attack_range_units": 250,
+      "daily_routine": {
+        "dawn": "Forage",
+        "morning": "Patrol",
+        "midday": "Rest",
+        "afternoon": "Patrol",
+        "dusk": "Forage",
+        "night": "Rest"
+      },
+      "threat_response": {
+        "dinosaur_detected": "Flee",
+        "player_hostile": "Attack",
+        "player_neutral": "Alert",
+        "unknown_entity": "Alert"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 30.0,
+        "last_known_position_decay_seconds": 15.0
+      }
+    },
+
+    "Gatherer_Forage": {
+      "description": "Resource gatherers collecting food and materials",
+      "patrol_radius_units": 1500,
+      "threat_detection_range_units": 1500,
+      "attack_range_units": 0,
+      "daily_routine": {
+        "dawn": "Forage",
+        "morning": "Forage",
+        "midday": "Rest",
+        "afternoon": "Forage",
+        "dusk": "Return_Camp",
+        "night": "Rest"
+      },
+      "threat_response": {
+        "dinosaur_detected": "Flee",
+        "player_hostile": "Flee",
+        "player_neutral": "Interact",
+        "unknown_entity": "Alert"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 45.0,
+        "last_known_position_decay_seconds": 20.0
+      }
+    },
+
+    "Scout_Patrol": {
+      "description": "Long-range scouts covering wide territory",
+      "patrol_radius_units": 5000,
+      "threat_detection_range_units": 3000,
+      "attack_range_units": 200,
+      "daily_routine": {
+        "dawn": "Patrol",
+        "morning": "Patrol",
+        "midday": "Patrol",
+        "afternoon": "Patrol",
+        "dusk": "Return_Camp",
+        "night": "Rest"
+      },
+      "threat_response": {
+        "dinosaur_detected": "Alert_Camp",
+        "player_hostile": "Attack",
+        "player_neutral": "Observe",
+        "unknown_entity": "Investigate"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 60.0,
+        "last_known_position_decay_seconds": 30.0
+      }
+    },
+
+    "Elder_Rest": {
+      "description": "Camp elder — stationary, provides dialogue and quest hooks",
+      "patrol_radius_units": 200,
+      "threat_detection_range_units": 1000,
+      "attack_range_units": 0,
+      "daily_routine": {
+        "dawn": "Rest",
+        "morning": "Interact",
+        "midday": "Interact",
+        "afternoon": "Interact",
+        "dusk": "Rest",
+        "night": "Rest"
+      },
+      "threat_response": {
+        "dinosaur_detected": "Flee",
+        "player_hostile": "Flee",
+        "player_neutral": "Interact",
+        "unknown_entity": "Observe"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 120.0,
+        "last_known_position_decay_seconds": 60.0
+      }
+    }
+  },
+
+  "npc_instances": [
+    {
+      "label": "NPC_Hunter_Savana_001",
+      "behavior_type": "Hunter_Patrol",
+      "spawn_location": {"x": -2000, "y": 1500, "z": 100},
+      "home_location": {"x": -2000, "y": 1500, "z": 100}
+    },
+    {
+      "label": "NPC_Hunter_Savana_002",
+      "behavior_type": "Hunter_Patrol",
+      "spawn_location": {"x": -2500, "y": 2000, "z": 100},
+      "home_location": {"x": -2500, "y": 2000, "z": 100}
+    },
+    {
+      "label": "NPC_Gatherer_Floresta_001",
+      "behavior_type": "Gatherer_Forage",
+      "spawn_location": {"x": 1800, "y": -1200, "z": 100},
+      "home_location": {"x": 1800, "y": -1200, "z": 100}
+    },
+    {
+      "label": "NPC_Gatherer_Floresta_002",
+      "behavior_type": "Gatherer_Forage",
+      "spawn_location": {"x": 2200, "y": -1500, "z": 100},
+      "home_location": {"x": 2200, "y": -1500, "z": 100}
+    },
+    {
+      "label": "NPC_Scout_Savana_001",
+      "behavior_type": "Scout_Patrol",
+      "spawn_location": {"x": 3000, "y": 3000, "z": 100},
+      "home_location": {"x": 3000, "y": 3000, "z": 100}
+    },
+    {
+      "label": "NPC_Elder_Camp_001",
+      "behavior_type": "Elder_Rest",
+      "spawn_location": {"x": 0, "y": -500, "z": 100},
+      "home_location": {"x": 0, "y": -500, "z": 100}
+    }
+  ],
+
+  "voice_lines": {
+    "SurvivorNPC_ThreatWarning": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007699708_SurvivorNPC_ThreatWarning.mp3",
+      "text": "Stay still. Don't run. The Raptors track movement — fast movement triggers the chase reflex. Back away slowly, keep your eyes forward, and find cover before they close the distance. You have maybe thirty seconds.",
+      "trigger": "raptor_threat_detected",
+      "speaker": "Hunter NPC"
+    },
+    "NPC_Elder_Camp_001": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007702521_NPC_Elder_Camp_001.mp3",
+      "text": "The elder says the valley floods every wet season. Three moons from now, this whole basin will be underwater. We need to move the camp to higher ground before the rains come, or we lose everything we've built.",
+      "trigger": "player_interact_elder",
+      "speaker": "Elder NPC"
+    }
+  },
+
+  "global_behavior_settings": {
+    "state_machine_update_rate_hz": 10,
+    "threat_check_interval_seconds": 0.5,
+    "memory_decay_check_interval_seconds": 1.0,
+    "max_flee_distance_units": 5000,
+    "group_alert_radius_units": 1500,
+    "daily_cycle_hours": 24,
+    "time_of_day_transitions": {
+      "dawn_hour": 6,
+      "morning_hour": 8,
+      "midday_hour": 12,
+      "afternoon_hour": 14,
+      "dusk_hour": 18,
+      "night_hour": 20
+    }
+  }
+}
