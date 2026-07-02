@@ -1,21 +1,30 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Components/SphereComponent.h"
 #include "Sound/SoundBase.h"
 #include "DialogueSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class ENarr_DialogueTrigger : uint8
+enum class ENarr_DialogueTriggerType : uint8
 {
-    OnProximity     UMETA(DisplayName = "On Proximity"),
-    OnQuestStart    UMETA(DisplayName = "On Quest Start"),
-    OnQuestComplete UMETA(DisplayName = "On Quest Complete"),
-    OnCombatStart   UMETA(DisplayName = "On Combat Start"),
-    OnDanger        UMETA(DisplayName = "On Danger"),
-    OnIdle          UMETA(DisplayName = "On Idle"),
-    OnDeath         UMETA(DisplayName = "On Death")
+    Proximity       UMETA(DisplayName = "Proximity"),
+    QuestStart      UMETA(DisplayName = "QuestStart"),
+    QuestComplete   UMETA(DisplayName = "QuestComplete"),
+    CombatAlert     UMETA(DisplayName = "CombatAlert"),
+    ResourceFound   UMETA(DisplayName = "ResourceFound"),
+    PlayerDeath     UMETA(DisplayName = "PlayerDeath")
+};
+
+UENUM(BlueprintType)
+enum class ENarr_SpeakerRole : uint8
+{
+    ChiefHunter     UMETA(DisplayName = "ChiefHunter"),
+    TribalElder     UMETA(DisplayName = "TribalElder"),
+    ScoutRunner     UMETA(DisplayName = "ScoutRunner"),
+    CampBuilder     UMETA(DisplayName = "CampBuilder"),
+    Narrator        UMETA(DisplayName = "Narrator")
 };
 
 USTRUCT(BlueprintType)
@@ -24,82 +33,127 @@ struct FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString SpeakerID;
+    FString LineText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText LineText;
+    ENarr_SpeakerRole Speaker;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TSoftObjectPtr<USoundBase> VoiceAsset;
+    ENarr_DialogueTriggerType TriggerType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DisplayDuration = 4.0f;
+    USoundBase* VoiceAsset;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_DialogueTrigger Trigger = ENarr_DialogueTrigger::OnProximity;
+    float CooldownSeconds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bPlayedThisSession;
+
+    FNarr_DialogueLine()
+        : LineText(TEXT(""))
+        , Speaker(ENarr_SpeakerRole::Narrator)
+        , TriggerType(ENarr_DialogueTriggerType::Proximity)
+        , VoiceAsset(nullptr)
+        , CooldownSeconds(30.0f)
+        , bPlayedThisSession(false)
+    {}
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueSequence
+struct FNarr_NPCDialogueBank
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName SequenceID;
+    ENarr_SpeakerRole Role;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     TArray<FNarr_DialogueLine> Lines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bPlayOnce = true;
+    int32 CurrentLineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bHasPlayed = false;
+    FNarr_NPCDialogueBank()
+        : Role(ENarr_SpeakerRole::Narrator)
+        , CurrentLineIndex(0)
+    {}
 };
 
 UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+class TRANSPERSONALGAME_API UNarr_DialogueTriggerComponent : public USphereComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
+    UNarr_DialogueTriggerComponent();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    TArray<FNarr_DialogueSequence> DialogueSequences;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueTriggerType TriggerType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative|Dialogue")
-    float ProximityTriggerRadius = 400.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_SpeakerRole AssignedSpeaker;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue", meta = (AllowPrivateAccess = "true"))
-    bool bIsPlayingDialogue = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float TriggerRadius;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative|Dialogue", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentLineIndex = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bOneShot;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void TriggerDialogueSequence(FName SequenceID);
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    bool bHasTriggered;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void AdvanceLine();
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ActivateTrigger(AActor* InstigatorActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void StopDialogue();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    bool IsDialoguePlaying() const { return bIsPlayingDialogue; }
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    FNarr_DialogueLine GetCurrentLine() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative|Dialogue")
-    void CheckProximityTrigger(FVector PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ResetTrigger();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UFUNCTION()
+    void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+        bool bFromSweep, const FHitResult& SweepResult);
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API ANarr_DialogueManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_DialogueManager();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_NPCDialogueBank> DialogueBanks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float GlobalDialogueCooldown;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative", meta = (AllowPrivateAccess = "true"))
+    float LastDialogueTime;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDialogue(ENarr_SpeakerRole Speaker, ENarr_DialogueTriggerType TriggerType);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetNextLine(ENarr_SpeakerRole Speaker);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterDialogueBank(FNarr_NPCDialogueBank Bank);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ResetAllDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool CanPlayDialogue() const;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
 private:
-    FNarr_DialogueSequence* ActiveSequence = nullptr;
-    float LineTimer = 0.0f;
+    void InitialiseDefaultBanks();
 };
