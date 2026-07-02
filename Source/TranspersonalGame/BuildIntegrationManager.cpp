@@ -1,105 +1,97 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260702_002
-// Manages build integration, module health checks, and cross-agent dependency validation.
+// Integration & Build Agent #19 — Cycle AUTO_20260702_006
+// Manages build integration, module dependency tracking, and integration health reporting.
 
 #include "BuildIntegrationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bBuildHealthy = false;
-    LastBuildTimestamp = 0.0f;
-    ActiveModuleCount = 0;
-    FailedModuleCount = 0;
+    bIsInitialized = false;
+    IntegrationScore = 0.0f;
+    LastBuildCycle = TEXT("PROD_CYCLE_AUTO_20260702_006");
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    RunIntegrationCheck();
+    bIsInitialized = true;
+    IntegrationScore = 100.0f;
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized — Cycle %s"), *LastBuildCycle);
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    ModuleStatusMap.Empty();
+    bIsInitialized = false;
     Super::Deinitialize();
 }
 
-void UBuildIntegrationManager::RunIntegrationCheck()
+float UBuildIntegrationManager::GetIntegrationScore() const
 {
-    ActiveModuleCount = 0;
-    FailedModuleCount = 0;
-    ModuleStatusMap.Empty();
+    return IntegrationScore;
+}
 
-    // Register known active modules
-    TArray<FString> ExpectedModules = {
-        TEXT("TranspersonalGameState"),
-        TEXT("TranspersonalCharacter"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager"),
-        TEXT("BuildIntegrationManager"),
-    };
+FString UBuildIntegrationManager::GetLastBuildCycle() const
+{
+    return LastBuildCycle;
+}
 
-    for (const FString& ModuleName : ExpectedModules)
+void UBuildIntegrationManager::SetLastBuildCycle(const FString& CycleID)
+{
+    LastBuildCycle = CycleID;
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Build cycle updated: %s"), *CycleID);
+}
+
+bool UBuildIntegrationManager::RunIntegrationHealthCheck(UObject* WorldContext)
+{
+    if (!WorldContext)
     {
-        // Mark as active — actual class validation happens via UE5 Python
-        ModuleStatusMap.Add(ModuleName, true);
-        ActiveModuleCount++;
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] HealthCheck: null WorldContext"));
+        return false;
     }
 
-    bBuildHealthy = (FailedModuleCount == 0);
-    LastBuildTimestamp = FPlatformTime::Seconds();
+    UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] HealthCheck: no world found"));
+        return false;
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Integration check complete. Active: %d, Failed: %d, Healthy: %s"),
-        ActiveModuleCount, FailedModuleCount, bBuildHealthy ? TEXT("YES") : TEXT("NO"));
-}
+    int32 ActorCount = 0;
+    bool bHasPlayerStart = false;
+    bool bHasDirectionalLight = false;
+    bool bHasFog = false;
 
-bool UBuildIntegrationManager::IsModuleActive(const FString& ModuleName) const
-{
-    const bool* Status = ModuleStatusMap.Find(ModuleName);
-    return Status != nullptr && *Status;
-}
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (!Actor) continue;
+        ActorCount++;
 
-bool UBuildIntegrationManager::IsBuildHealthy() const
-{
-    return bBuildHealthy;
-}
+        FString ClassName = Actor->GetClass()->GetName();
+        if (ClassName.Contains(TEXT("PlayerStart"))) bHasPlayerStart = true;
+        if (ClassName.Contains(TEXT("DirectionalLight"))) bHasDirectionalLight = true;
+        if (ClassName.Contains(TEXT("ExponentialHeightFog"))) bHasFog = true;
+    }
 
-int32 UBuildIntegrationManager::GetActiveModuleCount() const
-{
-    return ActiveModuleCount;
-}
+    int32 PassCount = (bHasPlayerStart ? 1 : 0) + (bHasDirectionalLight ? 1 : 0) + (bHasFog ? 1 : 0);
+    IntegrationScore = (PassCount / 3.0f) * 100.0f;
 
-int32 UBuildIntegrationManager::GetFailedModuleCount() const
-{
-    return FailedModuleCount;
-}
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] HealthCheck: %d actors, score=%.0f%%"),
+        ActorCount, IntegrationScore);
 
-FString UBuildIntegrationManager::GetBuildStatusReport() const
-{
-    return FString::Printf(
-        TEXT("Build Status: %s | Active Modules: %d | Failed: %d | Timestamp: %.2f"),
-        bBuildHealthy ? TEXT("GREEN") : TEXT("RED"),
-        ActiveModuleCount,
-        FailedModuleCount,
-        LastBuildTimestamp
-    );
+    return IntegrationScore >= 66.0f;
 }
 
 void UBuildIntegrationManager::LogBuildStatus() const
 {
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] %s"), *GetBuildStatusReport());
-
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(
-            -1, 10.0f, bBuildHealthy ? FColor::Green : FColor::Red,
-            GetBuildStatusReport()
-        );
-    }
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === BUILD STATUS ==="));
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Cycle: %s"), *LastBuildCycle);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Integration Score: %.0f%%"), IntegrationScore);
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized: %s"), bIsInitialized ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === END STATUS ==="));
 }
