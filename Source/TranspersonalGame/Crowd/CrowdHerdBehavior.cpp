@@ -1,311 +1,393 @@
 // CrowdHerdBehavior.cpp
 // Agent #13 — Crowd & Traffic Simulation
-// Boids flocking algorithm + herd state machine for prehistoric herbivore herds.
-// Supports up to 200 agents with separation, alignment, cohesion forces.
+// Full implementation of UCrowdHerdBehavior component
+// Boid-based flocking with stampede integration and LOD-aware simulation
 
 #include "CrowdHerdBehavior.h"
-#include "Math/UnrealMathUtility.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 
 UCrowdHerdBehavior::UCrowdHerdBehavior()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.05f; // 20Hz tick for crowd sim
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick for performance
+
+    // Default boid parameters
+    BoidParams.SeparationRadius = 350.0f;
+    BoidParams.AlignmentRadius = 600.0f;
+    BoidParams.CohesionRadius = 800.0f;
+    BoidParams.SeparationWeight = 1.5f;
+    BoidParams.AlignmentWeight = 0.6f;
+    BoidParams.CohesionWeight = 0.8f;
+    BoidParams.FleeWeight = 2.5f;
+    BoidParams.MaxSpeed = 400.0f;
+    BoidParams.MaxForce = 120.0f;
+
+    // Default herd state
+    CurrentHerdState = ECrowd_HerdState::Grazing;
+    CurrentRole = ECrowd_HerdRole::Follower;
+    PanicLevel = 0.0f;
+    PanicDecayRate = 0.15f;
+    FleeRadius = 1200.0f;
+    StampedeThreshold = 0.7f;
+
+    LODLevel = 0;
+    bIsSimulationActive = true;
 }
 
 void UCrowdHerdBehavior::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Cache owner actor
+    OwnerActor = GetOwner();
+
+    // Register with herd manager if available
+    if (OwnerActor)
+    {
+        InitialLocation = OwnerActor->GetActorLocation();
+    }
+
+    // Start grazing behavior
+    SetHerdState(ECrowd_HerdState::Grazing);
 }
 
 void UCrowdHerdBehavior::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (HerdMembers.Num() == 0) return;
-
-    UpdateHerdCenter();
-    UpdatePanicLevels(DeltaTime);
-    EvaluateHerdStateTransition();
-
-    // Update velocities using Boids for Wandering/Fleeing/Stampeding states
-    if (CurrentHerdState == ECrowd_HerdState::Wandering ||
-        CurrentHerdState == ECrowd_HerdState::Fleeing ||
-        CurrentHerdState == ECrowd_HerdState::Stampeding)
+    if (!bIsSimulationActive || !OwnerActor)
     {
-        for (FCrowd_HerdMember& Member : HerdMembers)
-        {
-            if (!Member.bIsAlive) continue;
+        return;
+    }
 
-            FVector SteeringForce = ComputeBoidForce(Member);
-            Member.Velocity += SteeringForce * DeltaTime;
-            Member.Velocity = LimitVector(Member.Velocity, BoidParams.MaxSpeed);
-            Member.Location += Member.Velocity * DeltaTime;
+    // LOD-based simulation granularity
+    if (LODLevel >= 2)
+    {
+        // LOD2: static impostor, no simulation
+        return;
+    }
+
+    // Decay panic over time
+    if (PanicLevel > 0.0f)
+    {
+        PanicLevel = FMath::Max(0.0f, PanicLevel - PanicDecayRate * DeltaTime);
+
+        // Transition back from flee states when panic subsides
+        if (PanicLevel < 0.1f && CurrentHerdState == ECrowd_HerdState::Fleeing)
+        {
+            SetHerdState(ECrowd_HerdState::Wandering);
+        }
+        else if (PanicLevel < 0.05f && CurrentHerdState == ECrowd_HerdState::Stampeding)
+        {
+            SetHerdState(ECrowd_HerdState::Fleeing);
         }
     }
-}
 
-void UCrowdHerdBehavior::InitializeHerd(int32 NumMembers, FVector SpawnCenter, float SpawnRadius)
-{
-    HerdMembers.Empty();
-    int32 ClampedNum = FMath::Clamp(NumMembers, 1, MaxHerdSize);
-
-    for (int32 i = 0; i < ClampedNum; ++i)
+    // State machine update
+    switch (CurrentHerdState)
     {
-        FCrowd_HerdMember Member;
-        Member.AgentID = i;
-        Member.bIsAlive = true;
-        Member.PanicLevel = 0.0f;
-
-        // Random position within spawn radius
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Dist = FMath::RandRange(0.0f, SpawnRadius);
-        Member.Location = SpawnCenter + FVector(FMath::Cos(Angle) * Dist, FMath::Sin(Angle) * Dist, 0.0f);
-
-        // Random initial velocity
-        Member.Velocity = FVector(FMath::RandRange(-100.0f, 100.0f), FMath::RandRange(-100.0f, 100.0f), 0.0f);
-
-        // Assign roles: 1 leader, 10% scouts, rest followers
-        if (i == 0)
-            Member.Role = ECrowd_HerdRole::Leader;
-        else if (i < FMath::Max(1, ClampedNum / 10))
-            Member.Role = ECrowd_HerdRole::Scout;
-        else if (i >= ClampedNum - FMath::Max(1, ClampedNum / 5))
-            Member.Role = ECrowd_HerdRole::Juvenile;
-        else
-            Member.Role = ECrowd_HerdRole::Follower;
-
-        HerdMembers.Add(Member);
+        case ECrowd_HerdState::Grazing:
+            UpdateGrazingBehavior(DeltaTime);
+            break;
+        case ECrowd_HerdState::Wandering:
+            UpdateWanderingBehavior(DeltaTime);
+            break;
+        case ECrowd_HerdState::Fleeing:
+            UpdateFleeingBehavior(DeltaTime);
+            break;
+        case ECrowd_HerdState::Stampeding:
+            UpdateStampedeBehavior(DeltaTime);
+            break;
+        case ECrowd_HerdState::Resting:
+            // Minimal update — just check for threats
+            CheckForPredatorThreat();
+            break;
+        case ECrowd_HerdState::Migrating:
+            UpdateMigrationBehavior(DeltaTime);
+            break;
+        default:
+            break;
     }
-
-    UpdateHerdCenter();
-    UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Initialized herd with %d members at %s"), ClampedNum, *SpawnCenter.ToString());
-}
-
-void UCrowdHerdBehavior::ApplyThreatAtLocation(FVector ThreatLocation, float ThreatRadius, float PanicAmount)
-{
-    for (FCrowd_HerdMember& Member : HerdMembers)
-    {
-        if (!Member.bIsAlive) continue;
-
-        float Dist = FVector::Dist(Member.Location, ThreatLocation);
-        if (Dist <= ThreatRadius)
-        {
-            float DistFactor = 1.0f - (Dist / ThreatRadius);
-            float AppliedPanic = PanicAmount * DistFactor;
-            Member.PanicLevel = FMath::Clamp(Member.PanicLevel + AppliedPanic, 0.0f, 1.0f);
-        }
-    }
-    EvaluateHerdStateTransition();
 }
 
 void UCrowdHerdBehavior::SetHerdState(ECrowd_HerdState NewState)
 {
-    if (CurrentHerdState != NewState)
+    if (CurrentHerdState == NewState)
     {
-        UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Herd state transition %d -> %d"), (int32)CurrentHerdState, (int32)NewState);
-        CurrentHerdState = NewState;
-    }
-}
-
-FVector UCrowdHerdBehavior::ComputeBoidForce(const FCrowd_HerdMember& Agent) const
-{
-    FVector Separation = ComputeSeparation(Agent) * BoidParams.SeparationWeight;
-    FVector Alignment = ComputeAlignment(Agent) * BoidParams.AlignmentWeight;
-    FVector Cohesion = ComputeCohesion(Agent) * BoidParams.CohesionWeight;
-
-    // In panic/stampede, separation and flee dominate
-    if (CurrentHerdState == ECrowd_HerdState::Stampeding)
-    {
-        Separation *= 2.0f;
-        Alignment *= 1.5f;
+        return;
     }
 
-    FVector TotalForce = Separation + Alignment + Cohesion;
-    return LimitVector(TotalForce, BoidParams.MaxForce);
-}
+    ECrowd_HerdState PreviousState = CurrentHerdState;
+    CurrentHerdState = NewState;
 
-FVector UCrowdHerdBehavior::GetHerdFleeDirection(FVector ThreatLocation) const
-{
-    FVector FleeDir = (HerdCenter - ThreatLocation);
-    FleeDir.Z = 0.0f;
-    return FleeDir.GetSafeNormal();
-}
-
-int32 UCrowdHerdBehavior::GetAliveCount() const
-{
-    int32 Count = 0;
-    for (const FCrowd_HerdMember& M : HerdMembers)
+    // State entry logic
+    switch (NewState)
     {
-        if (M.bIsAlive) Count++;
-    }
-    return Count;
-}
-
-void UCrowdHerdBehavior::KillMember(int32 AgentID)
-{
-    for (FCrowd_HerdMember& M : HerdMembers)
-    {
-        if (M.AgentID == AgentID)
-        {
-            M.bIsAlive = false;
-            UE_LOG(LogTemp, Log, TEXT("CrowdHerdBehavior: Agent %d killed — herd size now %d"), AgentID, GetAliveCount());
-            return;
-        }
-    }
-}
-
-bool UCrowdHerdBehavior::IsHerdInPanic() const
-{
-    return AveragePanicLevel >= PanicThresholdFlee;
-}
-
-// ---- Private ----
-
-void UCrowdHerdBehavior::UpdateHerdCenter()
-{
-    FVector Sum = FVector::ZeroVector;
-    int32 AliveCount = 0;
-    for (const FCrowd_HerdMember& M : HerdMembers)
-    {
-        if (M.bIsAlive)
-        {
-            Sum += M.Location;
-            AliveCount++;
-        }
-    }
-    HerdCenter = (AliveCount > 0) ? (Sum / (float)AliveCount) : FVector::ZeroVector;
-}
-
-void UCrowdHerdBehavior::UpdatePanicLevels(float DeltaTime)
-{
-    float TotalPanic = 0.0f;
-    int32 AliveCount = 0;
-
-    for (FCrowd_HerdMember& M : HerdMembers)
-    {
-        if (!M.bIsAlive) continue;
-
-        // Panic decays over time
-        M.PanicLevel = FMath::Clamp(M.PanicLevel - PanicDecayRate * DeltaTime, 0.0f, 1.0f);
-        TotalPanic += M.PanicLevel;
-        AliveCount++;
+        case ECrowd_HerdState::Stampeding:
+            // Boost tick rate during stampede for responsive simulation
+            PrimaryComponentTick.TickInterval = 0.033f; // ~30Hz
+            break;
+        case ECrowd_HerdState::Grazing:
+        case ECrowd_HerdState::Resting:
+            // Reduce tick rate when calm
+            PrimaryComponentTick.TickInterval = 0.2f; // 5Hz
+            break;
+        default:
+            PrimaryComponentTick.TickInterval = 0.1f; // 10Hz
+            break;
     }
 
-    AveragePanicLevel = (AliveCount > 0) ? (TotalPanic / (float)AliveCount) : 0.0f;
+    OnHerdStateChanged.Broadcast(PreviousState, NewState);
 }
 
-void UCrowdHerdBehavior::EvaluateHerdStateTransition()
+void UCrowdHerdBehavior::ApplyPanic(float PanicAmount, FVector ThreatLocation)
 {
-    if (AveragePanicLevel >= PanicThresholdStampede)
+    PanicLevel = FMath::Min(1.0f, PanicLevel + PanicAmount);
+    LastKnownThreatLocation = ThreatLocation;
+
+    // Escalate state based on panic level
+    if (PanicLevel >= StampedeThreshold && CurrentHerdState != ECrowd_HerdState::Stampeding)
     {
         SetHerdState(ECrowd_HerdState::Stampeding);
     }
-    else if (AveragePanicLevel >= PanicThresholdFlee)
+    else if (PanicLevel >= 0.3f && CurrentHerdState == ECrowd_HerdState::Grazing)
     {
         SetHerdState(ECrowd_HerdState::Fleeing);
     }
-    else if (AveragePanicLevel < 0.05f)
-    {
-        // Calm — return to grazing or wandering
-        if (CurrentHerdState == ECrowd_HerdState::Fleeing || CurrentHerdState == ECrowd_HerdState::Stampeding)
-        {
-            SetHerdState(ECrowd_HerdState::Wandering);
-        }
-    }
 }
 
-FVector UCrowdHerdBehavior::ComputeSeparation(const FCrowd_HerdMember& Agent) const
+FVector UCrowdHerdBehavior::CalculateBoidForce(const TArray<AActor*>& NearbyAgents) const
 {
-    FVector SteeringForce = FVector::ZeroVector;
-    int32 Count = 0;
-
-    for (const FCrowd_HerdMember& Other : HerdMembers)
+    if (!OwnerActor || NearbyAgents.Num() == 0)
     {
-        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
+        return FVector::ZeroVector;
+    }
 
-        float Dist = FVector::Dist(Agent.Location, Other.Location);
-        if (Dist > 0.0f && Dist < BoidParams.SeparationRadius)
+    FVector SeparationForce = FVector::ZeroVector;
+    FVector AlignmentForce = FVector::ZeroVector;
+    FVector CohesionForce = FVector::ZeroVector;
+
+    FVector MyLocation = OwnerActor->GetActorLocation();
+    FVector MyVelocity = OwnerActor->GetVelocity();
+
+    int32 SepCount = 0, AlignCount = 0, CohCount = 0;
+    FVector CohesionCenter = FVector::ZeroVector;
+
+    for (AActor* Other : NearbyAgents)
+    {
+        if (!Other || Other == OwnerActor)
         {
-            FVector Diff = (Agent.Location - Other.Location).GetSafeNormal();
-            Diff /= Dist; // Weight by distance
-            SteeringForce += Diff;
-            Count++;
+            continue;
         }
-    }
 
-    if (Count > 0)
-    {
-        SteeringForce /= (float)Count;
-        SteeringForce = LimitVector(SteeringForce, BoidParams.MaxSpeed);
-        SteeringForce -= Agent.Velocity;
-        SteeringForce = LimitVector(SteeringForce, BoidParams.MaxForce);
-    }
+        FVector ToOther = Other->GetActorLocation() - MyLocation;
+        float Distance = ToOther.Size();
 
-    return SteeringForce;
-}
-
-FVector UCrowdHerdBehavior::ComputeAlignment(const FCrowd_HerdMember& Agent) const
-{
-    FVector AvgVelocity = FVector::ZeroVector;
-    int32 Count = 0;
-
-    for (const FCrowd_HerdMember& Other : HerdMembers)
-    {
-        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
-
-        float Dist = FVector::Dist(Agent.Location, Other.Location);
-        if (Dist < BoidParams.AlignmentRadius)
+        // Separation — push away from too-close neighbors
+        if (Distance < BoidParams.SeparationRadius && Distance > 0.0f)
         {
-            AvgVelocity += Other.Velocity;
-            Count++;
+            FVector AwayDir = -ToOther.GetSafeNormal();
+            SeparationForce += AwayDir * (1.0f - Distance / BoidParams.SeparationRadius);
+            SepCount++;
+        }
+
+        // Alignment — match velocity with neighbors
+        if (Distance < BoidParams.AlignmentRadius)
+        {
+            AlignmentForce += Other->GetVelocity();
+            AlignCount++;
+        }
+
+        // Cohesion — move toward group center
+        if (Distance < BoidParams.CohesionRadius)
+        {
+            CohesionCenter += Other->GetActorLocation();
+            CohCount++;
         }
     }
 
-    if (Count > 0)
+    FVector TotalForce = FVector::ZeroVector;
+
+    if (SepCount > 0)
     {
-        AvgVelocity /= (float)Count;
-        AvgVelocity = LimitVector(AvgVelocity, BoidParams.MaxSpeed);
-        FVector Steering = AvgVelocity - Agent.Velocity;
-        return LimitVector(Steering, BoidParams.MaxForce);
+        SeparationForce /= SepCount;
+        TotalForce += SeparationForce.GetSafeNormal() * BoidParams.SeparationWeight;
     }
 
-    return FVector::ZeroVector;
+    if (AlignCount > 0)
+    {
+        AlignmentForce /= AlignCount;
+        TotalForce += AlignmentForce.GetSafeNormal() * BoidParams.AlignmentWeight;
+    }
+
+    if (CohCount > 0)
+    {
+        CohesionCenter /= CohCount;
+        FVector ToCohesionCenter = (CohesionCenter - MyLocation).GetSafeNormal();
+        TotalForce += ToCohesionCenter * BoidParams.CohesionWeight;
+    }
+
+    // Clamp to max force
+    if (TotalForce.SizeSquared() > BoidParams.MaxForce * BoidParams.MaxForce)
+    {
+        TotalForce = TotalForce.GetSafeNormal() * BoidParams.MaxForce;
+    }
+
+    return TotalForce;
 }
 
-FVector UCrowdHerdBehavior::ComputeCohesion(const FCrowd_HerdMember& Agent) const
+FVector UCrowdHerdBehavior::CalculateFleeForce(FVector ThreatLocation) const
 {
-    FVector CenterOfMass = FVector::ZeroVector;
-    int32 Count = 0;
-
-    for (const FCrowd_HerdMember& Other : HerdMembers)
+    if (!OwnerActor)
     {
-        if (!Other.bIsAlive || Other.AgentID == Agent.AgentID) continue;
+        return FVector::ZeroVector;
+    }
 
-        float Dist = FVector::Dist(Agent.Location, Other.Location);
-        if (Dist < BoidParams.CohesionRadius)
+    FVector MyLocation = OwnerActor->GetActorLocation();
+    FVector FleeDirection = (MyLocation - ThreatLocation).GetSafeNormal();
+
+    // Scale flee force by panic level
+    float FleeStrength = BoidParams.FleeWeight * PanicLevel * BoidParams.MaxForce;
+    return FleeDirection * FleeStrength;
+}
+
+void UCrowdHerdBehavior::SetLODLevel(int32 NewLODLevel)
+{
+    LODLevel = FMath::Clamp(NewLODLevel, 0, 2);
+
+    // Adjust simulation fidelity based on LOD
+    switch (LODLevel)
+    {
+        case 0:
+            bIsSimulationActive = true;
+            PrimaryComponentTick.TickInterval = 0.1f;
+            break;
+        case 1:
+            bIsSimulationActive = true;
+            PrimaryComponentTick.TickInterval = 0.25f; // Reduced frequency
+            break;
+        case 2:
+            bIsSimulationActive = false; // Static impostor
+            break;
+    }
+}
+
+void UCrowdHerdBehavior::UpdateGrazingBehavior(float DeltaTime)
+{
+    // Slow random drift while grazing
+    // Check periodically for predator threats
+    static float ThreatCheckTimer = 0.0f;
+    ThreatCheckTimer += DeltaTime;
+    if (ThreatCheckTimer > 2.0f)
+    {
+        ThreatCheckTimer = 0.0f;
+        CheckForPredatorThreat();
+    }
+}
+
+void UCrowdHerdBehavior::UpdateWanderingBehavior(float DeltaTime)
+{
+    // Move toward next waypoint with boid forces applied
+    CheckForPredatorThreat();
+}
+
+void UCrowdHerdBehavior::UpdateFleeingBehavior(float DeltaTime)
+{
+    if (!OwnerActor)
+    {
+        return;
+    }
+
+    // Move away from last known threat location
+    FVector FleeForce = CalculateFleeForce(LastKnownThreatLocation);
+    FVector NewLocation = OwnerActor->GetActorLocation() + FleeForce.GetSafeNormal() * BoidParams.MaxSpeed * 0.6f * DeltaTime;
+    OwnerActor->SetActorLocation(NewLocation, true);
+}
+
+void UCrowdHerdBehavior::UpdateStampedeBehavior(float DeltaTime)
+{
+    if (!OwnerActor)
+    {
+        return;
+    }
+
+    // Full speed flee with boid cohesion to keep herd together
+    FVector FleeForce = CalculateFleeForce(LastKnownThreatLocation);
+    FVector NewLocation = OwnerActor->GetActorLocation() + FleeForce.GetSafeNormal() * BoidParams.MaxSpeed * DeltaTime;
+    OwnerActor->SetActorLocation(NewLocation, true);
+}
+
+void UCrowdHerdBehavior::UpdateMigrationBehavior(float DeltaTime)
+{
+    // Move toward migration target with boid forces
+    if (!OwnerActor || !MigrationTarget)
+    {
+        return;
+    }
+
+    FVector ToTarget = (MigrationTarget->GetActorLocation() - OwnerActor->GetActorLocation());
+    float DistToTarget = ToTarget.Size();
+
+    if (DistToTarget < 200.0f)
+    {
+        // Reached waypoint — transition to next or start grazing
+        SetHerdState(ECrowd_HerdState::Grazing);
+        return;
+    }
+
+    FVector MoveDir = ToTarget.GetSafeNormal();
+    FVector NewLocation = OwnerActor->GetActorLocation() + MoveDir * BoidParams.MaxSpeed * 0.4f * DeltaTime;
+    OwnerActor->SetActorLocation(NewLocation, true);
+}
+
+void UCrowdHerdBehavior::CheckForPredatorThreat()
+{
+    if (!OwnerActor)
+    {
+        return;
+    }
+
+    UWorld* World = OwnerActor->GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Sphere overlap to detect predator actors (TRex, Raptor)
+    TArray<FOverlapResult> Overlaps;
+    FCollisionShape SphereShape = FCollisionShape::MakeSphere(FleeRadius);
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerActor);
+
+    bool bHit = World->OverlapMultiByChannel(
+        Overlaps,
+        OwnerActor->GetActorLocation(),
+        FQuat::Identity,
+        ECollisionChannel::ECC_Pawn,
+        SphereShape,
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        for (const FOverlapResult& Overlap : Overlaps)
         {
-            CenterOfMass += Other.Location;
-            Count++;
+            AActor* OtherActor = Overlap.GetActor();
+            if (OtherActor)
+            {
+                // Check if it's a predator by tag
+                if (OtherActor->ActorHasTag(FName("Predator")) || OtherActor->ActorHasTag(FName("TRex")))
+                {
+                    float Distance = FVector::Dist(OwnerActor->GetActorLocation(), OtherActor->GetActorLocation());
+                    float PanicAmount = FMath::Lerp(0.8f, 0.2f, Distance / FleeRadius);
+                    ApplyPanic(PanicAmount, OtherActor->GetActorLocation());
+                    break;
+                }
+            }
         }
     }
-
-    if (Count > 0)
-    {
-        CenterOfMass /= (float)Count;
-        FVector Desired = (CenterOfMass - Agent.Location).GetSafeNormal() * BoidParams.MaxSpeed;
-        FVector Steering = Desired - Agent.Velocity;
-        return LimitVector(Steering, BoidParams.MaxForce);
-    }
-
-    return FVector::ZeroVector;
-}
-
-FVector UCrowdHerdBehavior::LimitVector(FVector V, float MaxMagnitude) const
-{
-    float Mag = V.Size();
-    if (Mag > MaxMagnitude && Mag > 0.0f)
-    {
-        return V * (MaxMagnitude / Mag);
-    }
-    return V;
 }
