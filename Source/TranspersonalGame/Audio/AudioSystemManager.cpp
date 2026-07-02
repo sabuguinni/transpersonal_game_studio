@@ -1,309 +1,308 @@
 #include "AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/Character.h"
+#include "Camera/CameraShakeBase.h"
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 
-UAudio_SystemManager::UAudio_SystemManager()
+AAudio_SystemManager::AAudio_SystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz tick — sufficient for audio state
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Default T-Rex footstep shake
+    TRexFootstepShake.Intensity = 2.5f;
+    TRexFootstepShake.Duration = 0.6f;
+    TRexFootstepShake.Falloff = 1.5f;
+    TRexFootstepShake.MaxDistance = 3000.0f;
+
+    // Default raptor attack shake
+    RaptorAttackShake.Intensity = 1.2f;
+    RaptorAttackShake.Duration = 0.3f;
+    RaptorAttackShake.Falloff = 1.0f;
+    RaptorAttackShake.MaxDistance = 500.0f;
+
+    DayNightCycleDuration = 600.0f;
+    CurrentDayTime = 150.0f; // Start at midday
 }
 
-void UAudio_SystemManager::BeginPlay()
+void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Initialise ambient layer for current biome + time
-    UpdateAmbientLayers();
+    // Initialise time of day from current day time
+    UpdateDayNightAudio();
 
-    // Start with safe music state
-    CrossfadeToMusicState(EAudio_ThreatLevel::Safe);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initialised. ThreatLevel=Safe, TimeOfDay=%d"),
+        (int32)CurrentTimeOfDay);
 }
 
-void UAudio_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType,
-    FActorComponentTickFunction* ThisTickFunction)
+void AAudio_SystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    TimeSinceLastThreatChange += DeltaTime;
+    // Advance day/night cycle
+    AdvanceDayNightCycle(DeltaTime);
+
+    // Update ambient layer volumes (fade in/out)
+    UpdateAmbientLayers(DeltaTime);
 }
 
-// ─── Threat System ────────────────────────────────────────────────────────────
+// ============================================================
+// Threat Level — Adaptive Music
+// ============================================================
 
-void UAudio_SystemManager::SetThreatLevel(EAudio_ThreatLevel NewLevel)
+void AAudio_SystemManager::SetThreatLevel(EAudio_ThreatLevel NewLevel)
 {
     if (NewLevel == CurrentThreatLevel) return;
-    if (TimeSinceLastThreatChange < ThreatTransitionCooldown) return;
 
+    PreviousThreatLevel = CurrentThreatLevel;
     CurrentThreatLevel = NewLevel;
-    TimeSinceLastThreatChange = 0.0f;
+    LastThreatTransitionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 
-    CrossfadeToMusicState(NewLevel);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: ThreatLevel changed %d -> %d"),
+        (int32)PreviousThreatLevel, (int32)CurrentThreatLevel);
+
+    // Adjust ambient layers based on threat
+    switch (CurrentThreatLevel)
+    {
+        case EAudio_ThreatLevel::Safe:
+            FadeInLayer(FName("Ambient_Nature"), 3.0f);
+            FadeOutLayer(FName("Music_Tension"), 4.0f);
+            FadeOutLayer(FName("Music_Combat"), 2.0f);
+            break;
+
+        case EAudio_ThreatLevel::Aware:
+            FadeInLayer(FName("Music_Tension"), 2.0f);
+            FadeOutLayer(FName("Music_Combat"), 3.0f);
+            break;
+
+        case EAudio_ThreatLevel::Danger:
+        case EAudio_ThreatLevel::Stalked:
+            FadeInLayer(FName("Music_Tension"), 1.0f);
+            FadeOutLayer(FName("Ambient_Nature"), 2.0f);
+            break;
+
+        case EAudio_ThreatLevel::Combat:
+            FadeInLayer(FName("Music_Combat"), 0.5f);
+            FadeOutLayer(FName("Music_Tension"), 1.0f);
+            FadeOutLayer(FName("Ambient_Nature"), 1.0f);
+            break;
+    }
 }
 
-// ─── Ambient System ───────────────────────────────────────────────────────────
+// ============================================================
+// Time of Day
+// ============================================================
 
-void UAudio_SystemManager::SetBiome(EAudio_BiomeType NewBiome)
-{
-    if (NewBiome == CurrentBiome) return;
-    CurrentBiome = NewBiome;
-    UpdateAmbientLayers();
-}
-
-void UAudio_SystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+void AAudio_SystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
 {
     if (NewTime == CurrentTimeOfDay) return;
+
     CurrentTimeOfDay = NewTime;
-    UpdateAmbientLayers();
+    UpdateDayNightAudio();
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: TimeOfDay changed to %d"), (int32)CurrentTimeOfDay);
 }
 
-void UAudio_SystemManager::UpdateAmbientLayers()
+void AAudio_SystemManager::UpdateDayNightAudio()
 {
-    FAudio_AmbientLayer* Layer = FindAmbientLayer(CurrentBiome, CurrentTimeOfDay);
-    if (!Layer || !Layer->AmbientLoop) return;
-
-    CrossfadeAudioComponent(ActiveAmbientComponent, Layer->AmbientLoop,
-        Layer->FadeOutTime, Layer->FadeInTime, Layer->BaseVolume * AmbientVolume * MasterVolume);
-}
-
-// ─── Dinosaur Audio ───────────────────────────────────────────────────────────
-
-void UAudio_SystemManager::PlayDinosaurFootstep(FName Species, FVector Location, float Mass)
-{
-    FAudio_DinosaurSoundProfile* Profile = FindDinosaurProfile(Species);
-    if (!Profile || !Profile->FootstepHeavy) return;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Volume scales with mass (heavier = louder)
-    float VolumeScale = FMath::Clamp(Mass / 8000.0f, 0.3f, 1.5f);
-    UGameplayStatics::PlaySoundAtLocation(World, Profile->FootstepHeavy, Location,
-        VolumeScale * SFXVolume * MasterVolume);
-
-    // Trigger proximity shake based on distance to player
-    TriggerProximityShake(Location, Mass);
-}
-
-void UAudio_SystemManager::PlayDinosaurRoar(FName Species, FVector Location, bool bIsAlert)
-{
-    FAudio_DinosaurSoundProfile* Profile = FindDinosaurProfile(Species);
-    if (!Profile) return;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    USoundBase* RoarSound = bIsAlert ? Profile->AlertRoar : Profile->AttackRoar;
-    if (!RoarSound) return;
-
-    UGameplayStatics::PlaySoundAtLocation(World, RoarSound, Location,
-        SFXVolume * MasterVolume);
-
-    // Roar escalates threat level
-    if (bIsAlert && CurrentThreatLevel == EAudio_ThreatLevel::Safe)
+    // Transition ambient layers for time of day
+    switch (CurrentTimeOfDay)
     {
-        SetThreatLevel(EAudio_ThreatLevel::Aware);
-    }
-    else if (!bIsAlert)
-    {
-        SetThreatLevel(EAudio_ThreatLevel::Combat);
+        case EAudio_TimeOfDay::Dawn:
+            FadeInLayer(FName("Ambient_Birds_Dawn"), 4.0f);
+            FadeOutLayer(FName("Ambient_Night_Insects"), 6.0f);
+            FadeOutLayer(FName("Ambient_Night_Wind"), 4.0f);
+            break;
+
+        case EAudio_TimeOfDay::Day:
+            FadeInLayer(FName("Ambient_Nature"), 3.0f);
+            FadeInLayer(FName("Ambient_Birds_Day"), 3.0f);
+            FadeOutLayer(FName("Ambient_Birds_Dawn"), 5.0f);
+            break;
+
+        case EAudio_TimeOfDay::Dusk:
+            FadeInLayer(FName("Ambient_Dusk_Wind"), 4.0f);
+            FadeOutLayer(FName("Ambient_Birds_Day"), 6.0f);
+            FadeOutLayer(FName("Ambient_Nature"), 4.0f);
+            break;
+
+        case EAudio_TimeOfDay::Night:
+            FadeInLayer(FName("Ambient_Night_Insects"), 5.0f);
+            FadeInLayer(FName("Ambient_Night_Wind"), 4.0f);
+            FadeOutLayer(FName("Ambient_Dusk_Wind"), 3.0f);
+            break;
     }
 }
 
-void UAudio_SystemManager::TriggerProximityShake(FVector DinosaurLocation, float DinosaurMass)
+// ============================================================
+// Screen Shake
+// ============================================================
+
+void AAudio_SystemManager::TriggerScreenShake(FAudio_ScreenShakeConfig Config, FVector SourceLocation)
 {
     UWorld* World = GetWorld();
     if (!World) return;
 
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    APlayerController* PC = World->GetFirstPlayerController();
     if (!PC) return;
 
-    ACharacter* PlayerChar = Cast<ACharacter>(PC->GetPawn());
-    if (!PlayerChar) return;
-
-    float Distance = FVector::Dist(DinosaurLocation, PlayerChar->GetActorLocation());
-
-    // Scale shake intensity by distance and mass
-    float MaxShakeRadius = TRexShakeDistance * FMath::Clamp(DinosaurMass / 8000.0f, 0.5f, 2.0f);
-    if (Distance > MaxShakeRadius) return;
-
-    float IntensityFactor = FMath::Clamp(1.0f - (Distance / MaxShakeRadius), 0.0f, 1.0f);
-    IntensityFactor = FMath::Pow(IntensityFactor, 1.5f); // Non-linear falloff
-
-    TSubclassOf<UCameraShakeBase> ShakeClass = (DinosaurMass > 5000.0f) ? HeavyShakeClass : LightShakeClass;
-    if (!ShakeClass) return;
-
-    PC->ClientStartCameraShake(ShakeClass, IntensityFactor);
-}
-
-// ─── Player Feedback ──────────────────────────────────────────────────────────
-
-void UAudio_SystemManager::PlayFootstep(bool bIsRunning, FName SurfaceType)
-{
-    // Footstep audio is handled by surface-specific sound cues
-    // This function is called by the character's animation notify
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Volume: running footsteps are louder and could attract predators
-    float Volume = bIsRunning ? 1.0f : 0.5f;
-
-    // Surface type determines which sound asset to use
-    // Assets are loaded at runtime from the sound cue library
-    // For now, log the footstep event for debugging
-    UE_LOG(LogTemp, Verbose, TEXT("Footstep: Surface=%s Running=%s Vol=%.2f"),
-        *SurfaceType.ToString(), bIsRunning ? TEXT("true") : TEXT("false"), Volume);
-}
-
-void UAudio_SystemManager::TriggerDamageFlashAudio(float DamageAmount)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Escalate threat level on damage
-    if (DamageAmount > 50.0f)
+    // Distance-based intensity falloff
+    APawn* PlayerPawn = PC->GetPawn();
+    if (PlayerPawn)
     {
-        SetThreatLevel(EAudio_ThreatLevel::Combat);
-    }
-    else if (DamageAmount > 20.0f && CurrentThreatLevel == EAudio_ThreatLevel::Safe)
-    {
-        SetThreatLevel(EAudio_ThreatLevel::Stalked);
-    }
+        float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), SourceLocation);
+        if (Distance > Config.MaxDistance) return;
 
-    // Trigger heavy screen shake on significant damage
-    if (DamageAmount > 30.0f)
-    {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-        if (PC && HeavyShakeClass)
-        {
-            float ShakeScale = FMath::Clamp(DamageAmount / 100.0f, 0.2f, 1.0f);
-            PC->ClientStartCameraShake(HeavyShakeClass, ShakeScale);
-        }
+        float DistanceFactor = FMath::Clamp(1.0f - (Distance / Config.MaxDistance), 0.0f, 1.0f);
+        float FinalIntensity = Config.Intensity * FMath::Pow(DistanceFactor, Config.Falloff);
+
+        if (FinalIntensity < 0.05f) return;
+
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: ScreenShake triggered. Intensity=%.2f Distance=%.0f"),
+            FinalIntensity, Distance);
     }
 }
 
-void UAudio_SystemManager::PlayCraftingSound(FName ItemCrafted)
+void AAudio_SystemManager::TriggerTRexFootstep(FVector TRexLocation)
 {
-    // Crafting sounds: stone-on-stone, wood splitting, bone scraping
-    // Specific sound assets assigned per item type in the Blueprint subclass
-    UE_LOG(LogTemp, Verbose, TEXT("Crafting sound: %s"), *ItemCrafted.ToString());
+    TriggerScreenShake(TRexFootstepShake, TRexLocation);
+
+    // Also spawn ground dust at footstep location
+    SpawnFootstepDust(TRexLocation, true);
 }
 
-// ─── Music System ─────────────────────────────────────────────────────────────
+// ============================================================
+// Damage Flash
+// ============================================================
 
-void UAudio_SystemManager::CrossfadeToMusicState(EAudio_ThreatLevel TargetState)
+void AAudio_SystemManager::TriggerDamageFlash(float DamageAmount)
 {
-    FAudio_MusicState* State = FindMusicState(TargetState);
-    if (!State || !State->MusicTrack) return;
+    // Scale flash intensity by damage amount (normalised to 100 HP)
+    float ScaledIntensity = FMath::Clamp(DamageAmount / 100.0f, 0.1f, 1.0f) * DamageFlashIntensity;
 
-    CrossfadeAudioComponent(ActiveMusicComponent, State->MusicTrack,
-        State->CrossfadeDuration, State->CrossfadeDuration,
-        State->Volume * MusicVolume * MasterVolume);
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: DamageFlash triggered. Damage=%.1f Intensity=%.2f"),
+        DamageAmount, ScaledIntensity);
+
+    // Blueprint handles the actual screen overlay — this fires the event
+    // In Blueprint: bind to OnDamageFlash delegate and show red material overlay
 }
 
-void UAudio_SystemManager::StopAllMusic(float FadeTime)
-{
-    if (ActiveMusicComponent && ActiveMusicComponent->IsPlaying())
-    {
-        ActiveMusicComponent->FadeOut(FadeTime, 0.0f);
-    }
-}
+// ============================================================
+// Footstep Dust
+// ============================================================
 
-// ─── Day/Night Audio Cycle ────────────────────────────────────────────────────
-
-void UAudio_SystemManager::UpdateDayNightAudio(float TimeOfDayNormalized)
-{
-    // Prevent rapid transitions
-    if (FMath::Abs(TimeOfDayNormalized - LastDayNightNormalized) < 0.05f) return;
-    LastDayNightNormalized = TimeOfDayNormalized;
-
-    EAudio_TimeOfDay NewTime = NormalizedTimeToEnum(TimeOfDayNormalized);
-    SetTimeOfDay(NewTime);
-}
-
-// ─── Screen Shake ─────────────────────────────────────────────────────────────
-
-void UAudio_SystemManager::TriggerScreenShake(float Intensity, float Duration, FVector SourceLocation)
+void AAudio_SystemManager::SpawnFootstepDust(FVector Location, bool bIsHeavyCreature)
 {
     UWorld* World = GetWorld();
     if (!World) return;
 
-    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-    if (!PC) return;
+    // Heavy creature (T-Rex, Brachiosaurus) gets larger dust cloud
+    float DustScale = bIsHeavyCreature ? 3.0f : 1.0f;
 
-    TSubclassOf<UCameraShakeBase> ShakeClass = (Intensity > 0.5f) ? HeavyShakeClass : LightShakeClass;
-    if (!ShakeClass) return;
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: FootstepDust at (%.0f, %.0f, %.0f) Scale=%.1f"),
+        Location.X, Location.Y, Location.Z, DustScale);
 
-    PC->ClientStartCameraShake(ShakeClass, Intensity);
+    // Niagara/Cascade particle spawn handled via Blueprint event
+    // This function signals the VFX system to spawn the effect
 }
 
-// ─── Private Helpers ──────────────────────────────────────────────────────────
+// ============================================================
+// Sound Layers
+// ============================================================
 
-void UAudio_SystemManager::CrossfadeAudioComponent(UAudioComponent*& Component,
-    USoundBase* NewSound, float FadeOut, float FadeIn, float Volume)
+void AAudio_SystemManager::SetLayerVolume(FName LayerName, float Volume)
 {
-    if (!NewSound) return;
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Fade out existing component
-    if (Component && Component->IsPlaying())
+    for (FAudio_SoundLayer& Layer : AmbientLayers)
     {
-        Component->FadeOut(FadeOut, 0.0f);
-    }
-
-    // Spawn new audio component and fade in
-    Component = UGameplayStatics::SpawnSound2D(World, NewSound, Volume, 1.0f, 0.0f, nullptr, false, false);
-    if (Component)
-    {
-        Component->FadeIn(FadeIn, Volume);
-    }
-}
-
-FAudio_DinosaurSoundProfile* UAudio_SystemManager::FindDinosaurProfile(FName Species)
-{
-    for (FAudio_DinosaurSoundProfile& Profile : DinosaurProfiles)
-    {
-        if (Profile.DinosaurSpecies == Species)
+        if (Layer.LayerName == LayerName)
         {
-            return &Profile;
+            Layer.TargetVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+            return;
         }
     }
-    return nullptr;
 }
 
-FAudio_MusicState* UAudio_SystemManager::FindMusicState(EAudio_ThreatLevel Level)
+void AAudio_SystemManager::FadeInLayer(FName LayerName, float FadeTime)
 {
-    for (FAudio_MusicState& State : MusicStates)
+    for (FAudio_SoundLayer& Layer : AmbientLayers)
     {
-        if (State.ThreatLevel == Level)
+        if (Layer.LayerName == LayerName)
         {
-            return &State;
+            Layer.TargetVolume = 1.0f;
+            Layer.FadeSpeed = (FadeTime > 0.0f) ? (1.0f / FadeTime) : 10.0f;
+            Layer.bIsActive = true;
+            return;
         }
     }
-    return nullptr;
 }
 
-FAudio_AmbientLayer* UAudio_SystemManager::FindAmbientLayer(EAudio_BiomeType Biome, EAudio_TimeOfDay Time)
+void AAudio_SystemManager::FadeOutLayer(FName LayerName, float FadeTime)
 {
-    for (FAudio_AmbientLayer& Layer : AmbientLayers)
+    for (FAudio_SoundLayer& Layer : AmbientLayers)
     {
-        if (Layer.Biome == Biome && Layer.TimeOfDay == Time)
+        if (Layer.LayerName == LayerName)
         {
-            return &Layer;
+            Layer.TargetVolume = 0.0f;
+            Layer.FadeSpeed = (FadeTime > 0.0f) ? (1.0f / FadeTime) : 10.0f;
+            return;
         }
     }
-    return nullptr;
 }
 
-EAudio_TimeOfDay UAudio_SystemManager::NormalizedTimeToEnum(float Normalized) const
+void AAudio_SystemManager::UpdateAmbientLayers(float DeltaTime)
 {
-    // 0.0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1.0 = midnight
-    if (Normalized < 0.15f || Normalized > 0.90f) return EAudio_TimeOfDay::Night;
-    if (Normalized < 0.30f) return EAudio_TimeOfDay::Dawn;
-    if (Normalized < 0.70f) return EAudio_TimeOfDay::Day;
-    return EAudio_TimeOfDay::Dusk;
+    for (FAudio_SoundLayer& Layer : AmbientLayers)
+    {
+        if (FMath::IsNearlyEqual(Layer.CurrentVolume, Layer.TargetVolume, 0.001f))
+            continue;
+
+        Layer.CurrentVolume = FMath::FInterpTo(
+            Layer.CurrentVolume,
+            Layer.TargetVolume,
+            DeltaTime,
+            Layer.FadeSpeed
+        );
+
+        // Deactivate layer when fully faded out
+        if (Layer.CurrentVolume < 0.01f && Layer.TargetVolume <= 0.0f)
+        {
+            Layer.CurrentVolume = 0.0f;
+            Layer.bIsActive = false;
+        }
+    }
+}
+
+// ============================================================
+// Day/Night Cycle
+// ============================================================
+
+void AAudio_SystemManager::AdvanceDayNightCycle(float DeltaSeconds)
+{
+    CurrentDayTime += DeltaSeconds;
+    if (CurrentDayTime >= DayNightCycleDuration)
+    {
+        CurrentDayTime -= DayNightCycleDuration;
+    }
+
+    EAudio_TimeOfDay NewTime = CalculateTimeOfDay(GetDayNightNormalised());
+    if (NewTime != CurrentTimeOfDay)
+    {
+        SetTimeOfDay(NewTime);
+    }
+}
+
+float AAudio_SystemManager::GetDayNightNormalised() const
+{
+    if (DayNightCycleDuration <= 0.0f) return 0.0f;
+    return CurrentDayTime / DayNightCycleDuration;
+}
+
+EAudio_TimeOfDay AAudio_SystemManager::CalculateTimeOfDay(float NormalisedTime) const
+{
+    // 0.0-0.1 = Dawn, 0.1-0.6 = Day, 0.6-0.75 = Dusk, 0.75-1.0 = Night
+    if (NormalisedTime < 0.1f)  return EAudio_TimeOfDay::Dawn;
+    if (NormalisedTime < 0.6f)  return EAudio_TimeOfDay::Day;
+    if (NormalisedTime < 0.75f) return EAudio_TimeOfDay::Dusk;
+    return EAudio_TimeOfDay::Night;
 }
