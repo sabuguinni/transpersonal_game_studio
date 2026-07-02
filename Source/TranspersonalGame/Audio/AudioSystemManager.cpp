@@ -1,396 +1,139 @@
+
 #include "AudioSystemManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
-#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraShakeBase.h"
+#include "Components/AudioComponent.h"
 
-// ============================================================
-// Constructor
-// ============================================================
-
-UAudio_SystemManager::UAudio_SystemManager()
+AAudio_SystemManager::AAudio_SystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-
-    // Create ambient audio component
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->VolumeMultiplier = 0.6f;
-
-    // Initialize default narrator lines with ElevenLabs TTS URLs
-    PopulateDefaultNarratorLines();
-    PopulateDefaultDinoProfiles();
+    PrimaryActorTick.bCanEverTick = true;
+    CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    bIsNightMode = false;
+    TimeSinceLastProximityUpdate = 0.0f;
 }
 
-// ============================================================
-// BeginPlay
-// ============================================================
-
-void UAudio_SystemManager::BeginPlay()
+void AAudio_SystemManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Reset state
-    TimeSinceLastNarratorLine = NarratorCooldownSeconds; // Allow first line immediately
-    CurrentMusicBlend = 0.0f;
-    PreviousZone = CurrentAmbientZone;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Initialized. Zone=%d, Threat=%d, NarratorLines=%d, DinoProfiles=%d"),
-        (int32)CurrentAmbientZone,
-        (int32)CurrentThreatLevel,
-        NarratorLines.Num(),
-        DinoSoundProfiles.Num());
+    // Start with day ambient layers at safe level
+    UpdateAmbientLayersForDanger();
 }
 
-// ============================================================
-// TickComponent
-// ============================================================
-
-void UAudio_SystemManager::TickComponent(float DeltaTime, ELevelTick TickType,
-    FActorComponentTickFunction* ThisTickFunction)
+void AAudio_SystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    UpdateMusicBlend(DeltaTime);
-    UpdateNarratorCooldown(DeltaTime);
+    Super::Tick(DeltaTime);
+    TimeSinceLastProximityUpdate += DeltaTime;
 }
 
-// ============================================================
-// SetAmbientZone
-// ============================================================
-
-void UAudio_SystemManager::SetAmbientZone(EAudio_AmbientZone NewZone)
+void AAudio_SystemManager::SetDangerLevel(EAudio_DangerLevel NewLevel)
 {
-    if (NewZone == CurrentAmbientZone)
+    if (CurrentDangerLevel == NewLevel) return;
+    CurrentDangerLevel = NewLevel;
+    UpdateAmbientLayersForDanger();
+
+    // Log for debugging
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: DangerLevel changed to %d"), (int32)NewLevel);
+}
+
+void AAudio_SystemManager::UpdateDangerProximity(float ClosestPredatorDistance)
+{
+    if (TimeSinceLastProximityUpdate < DangerProximityUpdateInterval) return;
+    TimeSinceLastProximityUpdate = 0.0f;
+
+    EAudio_DangerLevel NewLevel = EAudio_DangerLevel::Safe;
+
+    if (ClosestPredatorDistance < 300.0f)
     {
-        return;
+        NewLevel = EAudio_DangerLevel::Critical;
+    }
+    else if (ClosestPredatorDistance < 800.0f)
+    {
+        NewLevel = EAudio_DangerLevel::Threatened;
+    }
+    else if (ClosestPredatorDistance < DangerConfig.TriggerRadius)
+    {
+        NewLevel = EAudio_DangerLevel::Aware;
     }
 
-    PreviousZone = CurrentAmbientZone;
-    CurrentAmbientZone = NewZone;
-    CurrentMusicBlend = 0.0f; // Reset blend for crossfade
+    SetDangerLevel(NewLevel);
+}
 
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Ambient zone changed: %d -> %d"),
-        (int32)PreviousZone, (int32)CurrentAmbientZone);
+void AAudio_SystemManager::TriggerDinosaurFootstepShake(float Intensity, float Distance)
+{
+    if (Distance <= 0.0f) return;
 
-    // Adjust ambient volume based on zone
-    if (AmbientAudioComponent)
+    // Attenuate shake by distance — full shake at 200 units, zero at 2000
+    const float MaxShakeDistance = 2000.0f;
+    const float AttenuatedIntensity = Intensity * FMath::Clamp(1.0f - (Distance / MaxShakeDistance), 0.0f, 1.0f);
+
+    if (AttenuatedIntensity > 0.05f)
     {
-        switch (CurrentAmbientZone)
-        {
-        case EAudio_AmbientZone::CaveEntrance:
-            AmbientAudioComponent->VolumeMultiplier = 0.3f;
-            break;
-        case EAudio_AmbientZone::OpenPlains:
-            AmbientAudioComponent->VolumeMultiplier = 0.8f;
-            break;
-        case EAudio_AmbientZone::DenseForest:
-            AmbientAudioComponent->VolumeMultiplier = 1.0f;
-            break;
-        case EAudio_AmbientZone::NightTime:
-            AmbientAudioComponent->VolumeMultiplier = 0.5f;
-            break;
-        default:
-            AmbientAudioComponent->VolumeMultiplier = 0.6f;
-            break;
-        }
+        ApplyScreenShake(AttenuatedIntensity);
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Footstep shake — intensity=%.2f dist=%.0f"), AttenuatedIntensity, Distance);
     }
 }
 
-// ============================================================
-// SetThreatLevel
-// ============================================================
-
-void UAudio_SystemManager::SetThreatLevel(EAudio_ThreatLevel NewThreat)
+void AAudio_SystemManager::TriggerCampfireAmbience(bool bEnable)
 {
-    if (NewThreat == CurrentThreatLevel)
+    // Campfire ambience toggle — in production, this would fade in/out a looping campfire audio component
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Campfire ambience %s"), bEnable ? TEXT("ENABLED") : TEXT("DISABLED"));
+}
+
+void AAudio_SystemManager::TriggerDamageAudioFeedback(float DamageAmount)
+{
+    // Damage audio feedback — pitch/volume spike proportional to damage
+    const float NormalisedDamage = FMath::Clamp(DamageAmount / 100.0f, 0.0f, 1.0f);
+    const float ShakeIntensity = NormalisedDamage * 2.0f;
+    ApplyScreenShake(ShakeIntensity);
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Damage audio feedback — damage=%.1f shake=%.2f"), DamageAmount, ShakeIntensity);
+}
+
+void AAudio_SystemManager::SetNightMode(bool bIsNight)
+{
+    if (bIsNightMode == bIsNight) return;
+    bIsNightMode = bIsNight;
+    UpdateAmbientLayersForDanger();
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Night mode %s"), bIsNight ? TEXT("ON") : TEXT("OFF"));
+}
+
+void AAudio_SystemManager::PlayNarrationLine(const FString& NarrationID)
+{
+    // Narration playback — in production, looks up audio asset from data table by NarrationID
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing narration line '%s'"), *NarrationID);
+}
+
+void AAudio_SystemManager::UpdateAmbientLayersForDanger()
+{
+    // Adjust volume of all active ambient components based on current danger level
+    for (UAudioComponent* Comp : ActiveAmbientComponents)
     {
-        return;
-    }
-
-    EAudio_ThreatLevel OldThreat = CurrentThreatLevel;
-    CurrentThreatLevel = NewThreat;
-
-    // Map threat to music intensity target
-    switch (CurrentThreatLevel)
-    {
-    case EAudio_ThreatLevel::Safe:       ThreatMusicIntensity = 0.0f; break;
-    case EAudio_ThreatLevel::Aware:      ThreatMusicIntensity = 0.25f; break;
-    case EAudio_ThreatLevel::Stalked:    ThreatMusicIntensity = 0.55f; break;
-    case EAudio_ThreatLevel::Combat:     ThreatMusicIntensity = 0.85f; break;
-    case EAudio_ThreatLevel::Fleeing:    ThreatMusicIntensity = 1.0f; break;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Threat level: %d -> %d (intensity=%.2f)"),
-        (int32)OldThreat, (int32)CurrentThreatLevel, ThreatMusicIntensity);
-
-    // Trigger narrator line on significant threat escalation
-    if ((int32)NewThreat > (int32)OldThreat + 1)
-    {
-        TriggerNarratorLine(NewThreat);
+        if (!Comp) continue;
+        const float AdjustedVolume = ComputeVolumeForDanger(1.0f, CurrentDangerLevel);
+        Comp->SetVolumeMultiplier(AdjustedVolume);
     }
 }
 
-// ============================================================
-// TriggerNarratorLine
-// ============================================================
-
-void UAudio_SystemManager::TriggerNarratorLine(EAudio_ThreatLevel ForThreat)
+void AAudio_SystemManager::ApplyScreenShake(float Intensity)
 {
-    // Cooldown guard
-    if (bNarratorPlaying || TimeSinceLastNarratorLine < NarratorCooldownSeconds)
-    {
-        return;
-    }
-
-    // Find best matching line for this threat level
-    FAudio_NarratorLine* BestLine = nullptr;
-    for (FAudio_NarratorLine& Line : NarratorLines)
-    {
-        if (Line.TriggerThreatLevel == ForThreat)
-        {
-            BestLine = &Line;
-            break;
-        }
-    }
-
-    if (!BestLine)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[AudioSystem] No narrator line for threat level %d"), (int32)ForThreat);
-        return;
-    }
-
-    // Log the audio URL — in production this would be loaded as SoundWave
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Playing narrator: %s | URL: %s | Duration: %.1fs"),
-        *BestLine->CharacterName,
-        *BestLine->AudioURL,
-        BestLine->EstimatedDurationSeconds);
-
-    bNarratorPlaying = true;
-    TimeSinceLastNarratorLine = 0.0f;
-
-    // Schedule narrator end (simulated via timer)
-    FTimerHandle NarratorTimer;
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            NarratorTimer,
-            [this]() { bNarratorPlaying = false; },
-            BestLine->EstimatedDurationSeconds,
-            false
-        );
-    }
-}
-
-// ============================================================
-// TriggerDinoFootstepShake
-// ============================================================
-
-void UAudio_SystemManager::TriggerDinoFootstepShake(EAudio_DinoSpecies Species, float DistanceMeters)
-{
-    FAudio_DinoSoundProfile Profile = GetDinoProfile(Species);
-
-    // Scale shake intensity by distance (inverse square falloff)
-    float MaxShakeDistance = Profile.FootstepRadius / 100.0f; // cm to meters
-    if (DistanceMeters > MaxShakeDistance)
-    {
-        return; // Too far to feel
-    }
-
-    float DistanceFactor = FMath::Clamp(1.0f - (DistanceMeters / MaxShakeDistance), 0.0f, 1.0f);
-    float ShakeStrength = Profile.GroundShakeIntensity * DistanceFactor;
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Dino footstep shake: Species=%d, Dist=%.1fm, Strength=%.2f"),
-        (int32)Species, DistanceMeters, ShakeStrength);
-
-    // Apply camera shake via PlayerController
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    APlayerController* PC = World->GetFirstPlayerController();
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
     if (!PC) return;
 
-    // Use built-in camera shake — intensity drives shake amplitude
-    // In production, reference a UCameraShakeBase subclass asset
-    if (ShakeStrength > 0.1f)
-    {
-        UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Camera shake triggered: strength=%.2f"), ShakeStrength);
-        // PC->ClientStartCameraShake(DinoFootstepShakeClass, ShakeStrength);
-        // Placeholder: log the shake event for Blueprint to pick up
-    }
+    // Screen shake via PlayerController — uses built-in camera shake system
+    // In production, load a UCameraShakeBase subclass from content
+    // For now, log the shake trigger for Blueprint hookup
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Screen shake triggered — intensity=%.2f"), Intensity);
 }
 
-// ============================================================
-// GetDinoProfile
-// ============================================================
-
-FAudio_DinoSoundProfile UAudio_SystemManager::GetDinoProfile(EAudio_DinoSpecies Species) const
+float AAudio_SystemManager::ComputeVolumeForDanger(float BaseVolume, EAudio_DangerLevel Level) const
 {
-    for (const FAudio_DinoSoundProfile& Profile : DinoSoundProfiles)
+    switch (Level)
     {
-        if (Profile.Species == Species)
-        {
-            return Profile;
-        }
-    }
-
-    // Return default profile if not found
-    FAudio_DinoSoundProfile Default;
-    Default.Species = Species;
-    return Default;
-}
-
-// ============================================================
-// PopulateDefaultNarratorLines (ElevenLabs TTS URLs from cycles)
-// ============================================================
-
-void UAudio_SystemManager::PopulateDefaultNarratorLines()
-{
-    NarratorLines.Empty();
-
-    // From PROD_CYCLE_AUTO_20260701_010 — Narrator_TRex
-    {
-        FAudio_NarratorLine Line;
-        Line.CharacterName = TEXT("Narrator_TRex");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782912128787_Narrator_TRex.mp3");
-        Line.TranscriptText = TEXT("The T-Rex is close. I can hear its footsteps — each one shakes the ground beneath me. Do not move. Do not breathe.");
-        Line.EstimatedDurationSeconds = 12.0f;
-        Line.TriggerThreatLevel = EAudio_ThreatLevel::Stalked;
-        NarratorLines.Add(Line);
-    }
-
-    // From PROD_CYCLE_AUTO_20260701_009 — Narrator_Night
-    {
-        FAudio_NarratorLine Line;
-        Line.CharacterName = TEXT("Narrator_Night");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782912149000_Narrator_Night.mp3");
-        Line.TranscriptText = TEXT("Night falls. The predators that sleep in daylight are waking now.");
-        Line.EstimatedDurationSeconds = 8.0f;
-        Line.TriggerThreatLevel = EAudio_ThreatLevel::Aware;
-        NarratorLines.Add(Line);
-    }
-
-    // From PROD_CYCLE_AUTO_20260701_008 — Narrator_Danger
-    {
-        FAudio_NarratorLine Line;
-        Line.CharacterName = TEXT("Narrator_Danger");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782907215913_Narrator_Danger.mp3");
-        Line.TranscriptText = TEXT("Danger. Something large is moving through the trees. Stay low. Do not run.");
-        Line.EstimatedDurationSeconds = 10.0f;
-        Line.TriggerThreatLevel = EAudio_ThreatLevel::Combat;
-        NarratorLines.Add(Line);
-    }
-
-    // From THIS CYCLE — Narrator_Silence
-    {
-        FAudio_NarratorLine Line;
-        Line.CharacterName = TEXT("Narrator_Silence");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782921694481_Narrator_Silence.mp3");
-        Line.TranscriptText = TEXT("The valley is silent. That is the warning. When the birds stop calling — something is hunting.");
-        Line.EstimatedDurationSeconds = 13.0f;
-        Line.TriggerThreatLevel = EAudio_ThreatLevel::Aware;
-        NarratorLines.Add(Line);
-    }
-
-    // From THIS CYCLE — Narrator_Fire
-    {
-        FAudio_NarratorLine Line;
-        Line.CharacterName = TEXT("Narrator_Fire");
-        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782921715500_Narrator_Fire.mp3");
-        Line.TranscriptText = TEXT("Fire. Keep it small. Enough to see your hands, not enough to be seen.");
-        Line.EstimatedDurationSeconds = 14.0f;
-        Line.TriggerThreatLevel = EAudio_ThreatLevel::Safe;
-        NarratorLines.Add(Line);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Loaded %d narrator lines"), NarratorLines.Num());
-}
-
-// ============================================================
-// PopulateDefaultDinoProfiles
-// ============================================================
-
-void UAudio_SystemManager::PopulateDefaultDinoProfiles()
-{
-    DinoSoundProfiles.Empty();
-
-    // T-Rex — massive ground shake, long roar radius
-    {
-        FAudio_DinoSoundProfile Profile;
-        Profile.Species = EAudio_DinoSpecies::TyrannosaurusRex;
-        Profile.RoarRadius = 5000.0f;
-        Profile.FootstepRadius = 2500.0f;
-        Profile.FootstepInterval = 1.8f;
-        Profile.GroundShakeIntensity = 2.0f;
-        Profile.FreesoundQuery = TEXT("tyrannosaurus rex roar footstep heavy dinosaur");
-        DinoSoundProfiles.Add(Profile);
-    }
-
-    // Raptor Pack — fast clicks, short radius, high frequency
-    {
-        FAudio_DinoSoundProfile Profile;
-        Profile.Species = EAudio_DinoSpecies::VelociraptorPack;
-        Profile.RoarRadius = 1500.0f;
-        Profile.FootstepRadius = 600.0f;
-        Profile.FootstepInterval = 0.4f;
-        Profile.GroundShakeIntensity = 0.3f;
-        Profile.FreesoundQuery = TEXT("raptor click hiss predator dinosaur");
-        DinoSoundProfiles.Add(Profile);
-    }
-
-    // Triceratops — medium ground shake, herd rumble
-    {
-        FAudio_DinoSoundProfile Profile;
-        Profile.Species = EAudio_DinoSpecies::Triceratops;
-        Profile.RoarRadius = 2000.0f;
-        Profile.FootstepRadius = 1200.0f;
-        Profile.FootstepInterval = 1.1f;
-        Profile.GroundShakeIntensity = 1.2f;
-        Profile.FreesoundQuery = TEXT("large animal herd stampede rumble ground");
-        DinoSoundProfiles.Add(Profile);
-    }
-
-    // Brachiosaurus — deep low rumble, very large radius
-    {
-        FAudio_DinoSoundProfile Profile;
-        Profile.Species = EAudio_DinoSpecies::Brachiosaurus;
-        Profile.RoarRadius = 4000.0f;
-        Profile.FootstepRadius = 3000.0f;
-        Profile.FootstepInterval = 2.5f;
-        Profile.GroundShakeIntensity = 1.8f;
-        Profile.FreesoundQuery = TEXT("elephant footstep heavy ground vibration low rumble");
-        DinoSoundProfiles.Add(Profile);
-    }
-
-    // Pterodactyl — screech, no ground shake
-    {
-        FAudio_DinoSoundProfile Profile;
-        Profile.Species = EAudio_DinoSpecies::Pterodactyl;
-        Profile.RoarRadius = 2500.0f;
-        Profile.FootstepRadius = 0.0f;
-        Profile.FootstepInterval = 0.0f;
-        Profile.GroundShakeIntensity = 0.0f;
-        Profile.FreesoundQuery = TEXT("bird screech hawk eagle dive swoosh");
-        DinoSoundProfiles.Add(Profile);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("[AudioSystem] Loaded %d dino sound profiles"), DinoSoundProfiles.Num());
-}
-
-// ============================================================
-// Private helpers
-// ============================================================
-
-void UAudio_SystemManager::UpdateMusicBlend(float DeltaTime)
-{
-    // Smoothly blend music intensity toward target
-    float TargetBlend = ThreatMusicIntensity;
-    CurrentMusicBlend = FMath::FInterpTo(CurrentMusicBlend, TargetBlend, DeltaTime, AmbientTransitionSpeed);
-}
-
-void UAudio_SystemManager::UpdateNarratorCooldown(float DeltaTime)
-{
-    if (!bNarratorPlaying)
-    {
-        TimeSinceLastNarratorLine += DeltaTime;
+        case EAudio_DangerLevel::Safe:       return BaseVolume * 1.0f;
+        case EAudio_DangerLevel::Aware:      return BaseVolume * 0.7f;
+        case EAudio_DangerLevel::Threatened: return BaseVolume * 0.4f;
+        case EAudio_DangerLevel::Critical:   return BaseVolume * 0.15f;
+        default:                             return BaseVolume;
     }
 }
