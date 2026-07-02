@@ -1,118 +1,93 @@
 #include "DayNightCycleManager.h"
-#include "Engine/World.h"
-#include "EngineUtils.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/SkyLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
 
 ADayNightCycleManager::ADayNightCycleManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.05f;  // 20Hz — smooth enough for lighting
-    InitDefaultPalettes();
+    PrimaryActorTick.TickInterval = 0.05f; // 20fps tick — sufficient for lighting
+    InitializeDefaultPalettes();
 }
 
 void ADayNightCycleManager::BeginPlay()
 {
     Super::BeginPlay();
-    AutoFindSceneActors();
-    // Apply initial palette
-    ApplyPalette(GetPaletteForPhase(GetCurrentPhase()));
+    AutoFindLightActors();
+    CurrentPhase = HourToPhase(CurrentGameHour);
+    PreviousPhase = CurrentPhase;
+    const FLight_DayPalette* Palette = FindPaletteForPhase(CurrentPhase);
+    if (Palette)
+    {
+        CurrentBlendedPalette = *Palette;
+        TargetPalette = *Palette;
+        ApplyPalette(*Palette, 1.0f);
+    }
 }
 
 void ADayNightCycleManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    if (!bPauseCycle)
+    if (!bCycleActive) return;
+    UpdateLighting(DeltaTime);
+}
+
+void ADayNightCycleManager::UpdateLighting(float DeltaTime)
+{
+    // Advance game time
+    const float HoursPerSecond = 1.0f / RealSecondsPerGameHour;
+    CurrentGameHour += HoursPerSecond * DeltaTime;
+    if (CurrentGameHour >= 24.0f) CurrentGameHour -= 24.0f;
+
+    // Detect phase change
+    ELight_DayPhase NewPhase = HourToPhase(CurrentGameHour);
+    if (NewPhase != CurrentPhase)
     {
-        TickCycle(DeltaTime);
+        PreviousPhase = CurrentPhase;
+        CurrentPhase = NewPhase;
+        PhaseBlendAlpha = 0.0f;
+
+        const FLight_DayPalette* NewPalette = FindPaletteForPhase(CurrentPhase);
+        if (NewPalette) TargetPalette = *NewPalette;
+
+        OnPhaseChanged(CurrentPhase, PreviousPhase);
     }
+
+    // Blend toward target palette
+    PhaseBlendAlpha = FMath::Clamp(PhaseBlendAlpha + DeltaTime * TransitionBlendSpeed, 0.0f, 1.0f);
+    ApplyPalette(TargetPalette, PhaseBlendAlpha);
 }
 
-void ADayNightCycleManager::TickCycle(float DeltaTime)
+void ADayNightCycleManager::ApplyPalette(const FLight_DayPalette& Palette, float BlendAlpha)
 {
-    PreviousTimeOfDay = CurrentTimeOfDay;
+    // Blend sun pitch/yaw from current blended values
+    float BlendedPitch = FMath::Lerp(CurrentBlendedPalette.SunPitch, Palette.SunPitch, BlendAlpha);
+    float BlendedYaw   = FMath::Lerp(CurrentBlendedPalette.SunYaw,   Palette.SunYaw,   BlendAlpha);
+    float BlendedIntensity = FMath::Lerp(CurrentBlendedPalette.SunIntensity, Palette.SunIntensity, BlendAlpha);
+    FLinearColor BlendedSunColor = FLinearColor::LerpUsingHSV(CurrentBlendedPalette.SunColor, Palette.SunColor, BlendAlpha);
+    float BlendedFogDensity = FMath::Lerp(CurrentBlendedPalette.FogDensity, Palette.FogDensity, BlendAlpha);
+    FLinearColor BlendedFogColor = FLinearColor::LerpUsingHSV(CurrentBlendedPalette.FogColor, Palette.FogColor, BlendAlpha);
+    float BlendedSkyIntensity = FMath::Lerp(CurrentBlendedPalette.SkyLightIntensity, Palette.SkyLightIntensity, BlendAlpha);
 
-    float AdvanceRate = (DayDurationSeconds > 0.0f) ? (1.0f / DayDurationSeconds) * TimeMultiplier : 0.0f;
-    CurrentTimeOfDay = FMath::Fmod(CurrentTimeOfDay + DeltaTime * AdvanceRate, 1.0f);
+    // CAP: Sun pitch must never exceed -30° (guard against accidental day-sky during night)
+    BlendedPitch = FMath::Min(BlendedPitch, -30.0f);
+    CurrentSunPitch = BlendedPitch;
+    CurrentSunYaw   = BlendedYaw;
 
-    // Blend between current and next phase
-    ELight_DayPhase CurrentPhase = GetCurrentPhase();
-    CachedPhase = CurrentPhase;
-
-    // Determine blend alpha within phase
-    // Each phase occupies roughly 1/8 of the day
-    float PhaseWidth = 1.0f / 8.0f;
-    float PhaseStart = static_cast<float>(static_cast<uint8>(CurrentPhase)) * PhaseWidth;
-    float AlphaInPhase = FMath::Clamp((CurrentTimeOfDay - PhaseStart) / PhaseWidth, 0.0f, 1.0f);
-
-    // Get next phase
-    ELight_DayPhase NextPhase = static_cast<ELight_DayPhase>((static_cast<uint8>(CurrentPhase) + 1) % 8);
-
-    FLight_SkyPalette FromPalette = GetPaletteForPhase(CurrentPhase);
-    FLight_SkyPalette ToPalette = GetPaletteForPhase(NextPhase);
-
-    BlendPalettes(FromPalette, ToPalette, AlphaInPhase);
-}
-
-void ADayNightCycleManager::SetTimeOfDay(float NormalizedTime)
-{
-    CurrentTimeOfDay = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
-    ApplyPalette(GetPaletteForPhase(GetCurrentPhase()));
-}
-
-ELight_DayPhase ADayNightCycleManager::GetCurrentPhase() const
-{
-    // 0.0 = midnight, 0.25 = dawn, 0.5 = midday, 0.75 = dusk
-    float T = CurrentTimeOfDay;
-    if      (T < 0.125f) return ELight_DayPhase::Midnight;
-    else if (T < 0.25f)  return ELight_DayPhase::Night;
-    else if (T < 0.33f)  return ELight_DayPhase::Dawn;
-    else if (T < 0.42f)  return ELight_DayPhase::Morning;
-    else if (T < 0.58f)  return ELight_DayPhase::Midday;
-    else if (T < 0.67f)  return ELight_DayPhase::Afternoon;
-    else if (T < 0.75f)  return ELight_DayPhase::Dusk;
-    else if (T < 0.875f) return ELight_DayPhase::Twilight;
-    else                 return ELight_DayPhase::Night;
-}
-
-FLight_SkyPalette ADayNightCycleManager::GetPaletteForPhase(ELight_DayPhase Phase) const
-{
-    switch (Phase)
-    {
-        case ELight_DayPhase::Dawn:      return DawnPalette;
-        case ELight_DayPhase::Morning:   return MorningPalette;
-        case ELight_DayPhase::Midday:    return MiddayPalette;
-        case ELight_DayPhase::Afternoon: return AfternoonPalette;
-        case ELight_DayPhase::Dusk:      return DuskPalette;
-        case ELight_DayPhase::Twilight:  return TwilightPalette;
-        case ELight_DayPhase::Night:     return NightPalette;
-        case ELight_DayPhase::Midnight:  return NightPalette;
-        default:                         return MiddayPalette;
-    }
-}
-
-void ADayNightCycleManager::ApplyPalette(const FLight_SkyPalette& Palette)
-{
-    // Apply to Sun
+    // Apply to DirectionalLight
     if (SunLight)
     {
-        float ClampedPitch = FMath::Max(Palette.SunPitch, -30.0f);  // CAP guard
-        SunLight->SetActorRotation(FRotator(ClampedPitch, Palette.SunYaw, 0.0f));
+        SunLight->SetActorRotation(FRotator(BlendedPitch, BlendedYaw, 0.0f));
         UDirectionalLightComponent* DLC = SunLight->GetComponentByClass<UDirectionalLightComponent>();
         if (DLC)
         {
-            DLC->SetIntensity(Palette.SunIntensity);
-            DLC->SetLightColor(Palette.SunColor);
-        }
-    }
-
-    // Apply to Fog
-    if (HeightFog)
-    {
-        UExponentialHeightFogComponent* FogComp = HeightFog->GetComponentByClass<UExponentialHeightFogComponent>();
-        if (FogComp)
-        {
-            FogComp->SetFogDensity(Palette.FogDensity);
-            FogComp->SetFogInscatteringColor(Palette.FogColor);
+            DLC->SetIntensity(BlendedIntensity);
+            DLC->SetLightColor(BlendedSunColor.ToFColor(true));
         }
     }
 
@@ -122,170 +97,255 @@ void ADayNightCycleManager::ApplyPalette(const FLight_SkyPalette& Palette)
         USkyLightComponent* SLC = SkyLightActor->GetComponentByClass<USkyLightComponent>();
         if (SLC)
         {
-            SLC->SetIntensity(Palette.SkyLightIntensity);
-            SLC->SetLightColor(Palette.SkyLightColor);
+            SLC->SetIntensity(BlendedSkyIntensity);
+            SLC->SetLightColor(FLinearColor::LerpUsingHSV(CurrentBlendedPalette.SkyLightColor, Palette.SkyLightColor, BlendAlpha).ToFColor(true));
         }
+    }
+
+    // Apply to ExponentialHeightFog
+    if (FogActor)
+    {
+        UExponentialHeightFogComponent* FogComp = FogActor->GetComponentByClass<UExponentialHeightFogComponent>();
+        if (FogComp)
+        {
+            FogComp->SetFogDensity(BlendedFogDensity);
+            FogComp->SetFogInscatteringColor(BlendedFogColor);
+        }
+    }
+
+    // Update blended state if fully transitioned
+    if (BlendAlpha >= 1.0f)
+    {
+        CurrentBlendedPalette = Palette;
     }
 }
 
-void ADayNightCycleManager::BlendPalettes(const FLight_SkyPalette& From, const FLight_SkyPalette& To, float Alpha)
+ELight_DayPhase ADayNightCycleManager::HourToPhase(float Hour) const
 {
-    FLight_SkyPalette Blended;
-    Blended.SunPitch        = FMath::Lerp(From.SunPitch, To.SunPitch, Alpha);
-    Blended.SunYaw          = FMath::Lerp(From.SunYaw, To.SunYaw, Alpha);
-    Blended.SunIntensity    = FMath::Lerp(From.SunIntensity, To.SunIntensity, Alpha);
-    Blended.SunColor        = FLinearColor(
-                                FMath::Lerp(From.SunColor.R, To.SunColor.R, Alpha),
-                                FMath::Lerp(From.SunColor.G, To.SunColor.G, Alpha),
-                                FMath::Lerp(From.SunColor.B, To.SunColor.B, Alpha), 1.0f);
-    Blended.FogDensity      = FMath::Lerp(From.FogDensity, To.FogDensity, Alpha);
-    Blended.FogColor        = FLinearColor(
-                                FMath::Lerp(From.FogColor.R, To.FogColor.R, Alpha),
-                                FMath::Lerp(From.FogColor.G, To.FogColor.G, Alpha),
-                                FMath::Lerp(From.FogColor.B, To.FogColor.B, Alpha), 1.0f);
-    Blended.SkyLightIntensity = FMath::Lerp(From.SkyLightIntensity, To.SkyLightIntensity, Alpha);
-    Blended.SkyLightColor   = FLinearColor(
-                                FMath::Lerp(From.SkyLightColor.R, To.SkyLightColor.R, Alpha),
-                                FMath::Lerp(From.SkyLightColor.G, To.SkyLightColor.G, Alpha),
-                                FMath::Lerp(From.SkyLightColor.B, To.SkyLightColor.B, Alpha), 1.0f);
-    Blended.VolumetricFogScattering = FMath::Lerp(From.VolumetricFogScattering, To.VolumetricFogScattering, Alpha);
-
-    ApplyPalette(Blended);
+    if (Hour >= 5.0f  && Hour < 7.0f)  return ELight_DayPhase::Dawn;
+    if (Hour >= 7.0f  && Hour < 10.0f) return ELight_DayPhase::Morning;
+    if (Hour >= 10.0f && Hour < 14.0f) return ELight_DayPhase::Midday;
+    if (Hour >= 14.0f && Hour < 17.0f) return ELight_DayPhase::Afternoon;
+    if (Hour >= 17.0f && Hour < 19.5f) return ELight_DayPhase::Dusk;
+    if (Hour >= 19.5f && Hour < 22.0f) return ELight_DayPhase::Evening;
+    if (Hour >= 22.0f || Hour < 2.0f)  return ELight_DayPhase::Night;
+    return ELight_DayPhase::DeepNight;
 }
 
-void ADayNightCycleManager::AutoFindSceneActors()
+const FLight_DayPalette* ADayNightCycleManager::FindPaletteForPhase(ELight_DayPhase Phase) const
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    for (const FLight_DayPalette& P : DayPalettes)
+    {
+        if (P.Phase == Phase) return &P;
+    }
+    return DayPalettes.Num() > 0 ? &DayPalettes[0] : nullptr;
+}
 
-    // Auto-find DirectionalLight (Sun)
+void ADayNightCycleManager::AutoFindLightActors()
+{
     if (!SunLight)
     {
-        for (TActorIterator<ADirectionalLight> It(World); It; ++It)
+        for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
         {
             SunLight = *It;
             break;
         }
     }
-
-    // Auto-find ExponentialHeightFog
-    if (!HeightFog)
-    {
-        for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
-        {
-            HeightFog = *It;
-            break;
-        }
-    }
-
-    // Auto-find SkyLight
     if (!SkyLightActor)
     {
-        for (TActorIterator<ASkyLight> It(World); It; ++It)
+        for (TActorIterator<ASkyLight> It(GetWorld()); It; ++It)
         {
             SkyLightActor = *It;
             break;
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("DayNightCycleManager: AutoFind — Sun=%s, Fog=%s, Sky=%s"),
-        SunLight ? *SunLight->GetName() : TEXT("NONE"),
-        HeightFog ? *HeightFog->GetName() : TEXT("NONE"),
-        SkyLightActor ? *SkyLightActor->GetName() : TEXT("NONE"));
+    if (!FogActor)
+    {
+        for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
+        {
+            FogActor = *It;
+            break;
+        }
+    }
 }
 
-FString ADayNightCycleManager::GetPhaseDisplayName() const
+void ADayNightCycleManager::SetGameHour(float NewHour)
 {
-    switch (GetCurrentPhase())
+    CurrentGameHour = FMath::Clamp(NewHour, 0.0f, 24.0f);
+    CurrentPhase = HourToPhase(CurrentGameHour);
+    const FLight_DayPalette* Palette = FindPaletteForPhase(CurrentPhase);
+    if (Palette)
+    {
+        TargetPalette = *Palette;
+        PhaseBlendAlpha = 0.0f;
+    }
+}
+
+void ADayNightCycleManager::SetPhaseImmediate(ELight_DayPhase Phase)
+{
+    CurrentPhase = Phase;
+    const FLight_DayPalette* Palette = FindPaletteForPhase(Phase);
+    if (Palette)
+    {
+        CurrentBlendedPalette = *Palette;
+        TargetPalette = *Palette;
+        PhaseBlendAlpha = 1.0f;
+        ApplyPalette(*Palette, 1.0f);
+    }
+}
+
+FString ADayNightCycleManager::GetCurrentPhaseString() const
+{
+    switch (CurrentPhase)
     {
         case ELight_DayPhase::Dawn:      return TEXT("Dawn");
         case ELight_DayPhase::Morning:   return TEXT("Morning");
         case ELight_DayPhase::Midday:    return TEXT("Midday");
         case ELight_DayPhase::Afternoon: return TEXT("Afternoon");
         case ELight_DayPhase::Dusk:      return TEXT("Dusk");
-        case ELight_DayPhase::Twilight:  return TEXT("Twilight");
+        case ELight_DayPhase::Evening:   return TEXT("Evening");
         case ELight_DayPhase::Night:     return TEXT("Night");
-        case ELight_DayPhase::Midnight:  return TEXT("Midnight");
-        default:                         return TEXT("Unknown");
+        case ELight_DayPhase::DeepNight: return TEXT("Deep Night");
+        default:                          return TEXT("Unknown");
     }
 }
 
-void ADayNightCycleManager::InitDefaultPalettes()
+float ADayNightCycleManager::GetNormalizedTimeOfDay() const
 {
-    // Dawn — peachy pink, low sun from east
-    DawnPalette.SunPitch = -8.0f;
-    DawnPalette.SunYaw = 85.0f;
-    DawnPalette.SunIntensity = 4.5f;
-    DawnPalette.SunColor = FLinearColor(1.0f, 0.72f, 0.52f, 1.0f);
-    DawnPalette.FogDensity = 0.035f;
-    DawnPalette.FogColor = FLinearColor(0.82f, 0.62f, 0.72f, 1.0f);
-    DawnPalette.SkyLightIntensity = 1.2f;
-    DawnPalette.SkyLightColor = FLinearColor(0.72f, 0.82f, 1.0f, 1.0f);
-    DawnPalette.VolumetricFogScattering = 0.65f;
+    return CurrentGameHour / 24.0f;
+}
 
-    // Morning — warm yellow, rising sun
-    MorningPalette.SunPitch = -18.0f;
-    MorningPalette.SunYaw = 120.0f;
-    MorningPalette.SunIntensity = 6.5f;
-    MorningPalette.SunColor = FLinearColor(1.0f, 0.88f, 0.65f, 1.0f);
-    MorningPalette.FogDensity = 0.022f;
-    MorningPalette.FogColor = FLinearColor(0.78f, 0.88f, 0.95f, 1.0f);
-    MorningPalette.SkyLightIntensity = 1.5f;
-    MorningPalette.SkyLightColor = FLinearColor(0.88f, 0.92f, 1.0f, 1.0f);
-    MorningPalette.VolumetricFogScattering = 0.45f;
+bool ADayNightCycleManager::IsNightTime() const
+{
+    return CurrentPhase == ELight_DayPhase::Night ||
+           CurrentPhase == ELight_DayPhase::DeepNight ||
+           CurrentPhase == ELight_DayPhase::Evening;
+}
 
-    // Midday — harsh white, overhead
-    MiddayPalette.SunPitch = -75.0f;
-    MiddayPalette.SunYaw = 180.0f;
-    MiddayPalette.SunIntensity = 10.0f;
-    MiddayPalette.SunColor = FLinearColor(1.0f, 0.98f, 0.92f, 1.0f);
-    MiddayPalette.FogDensity = 0.012f;
-    MiddayPalette.FogColor = FLinearColor(0.72f, 0.82f, 0.92f, 1.0f);
-    MiddayPalette.SkyLightIntensity = 2.0f;
-    MiddayPalette.SkyLightColor = FLinearColor(0.92f, 0.95f, 1.0f, 1.0f);
-    MiddayPalette.VolumetricFogScattering = 0.28f;
+bool ADayNightCycleManager::IsLowVisibility() const
+{
+    return IsNightTime() ||
+           CurrentWeather == ELight_WeatherState::HeavyRain ||
+           CurrentWeather == ELight_WeatherState::Fog ||
+           CurrentWeather == ELight_WeatherState::Thunderstorm;
+}
 
-    // Afternoon — golden warm
-    AfternoonPalette.SunPitch = -25.0f;
-    AfternoonPalette.SunYaw = 200.0f;
-    AfternoonPalette.SunIntensity = 7.5f;
-    AfternoonPalette.SunColor = FLinearColor(1.0f, 0.82f, 0.52f, 1.0f);
-    AfternoonPalette.FogDensity = 0.022f;
-    AfternoonPalette.FogColor = FLinearColor(0.85f, 0.75f, 0.58f, 1.0f);
-    AfternoonPalette.SkyLightIntensity = 1.4f;
-    AfternoonPalette.SkyLightColor = FLinearColor(1.0f, 0.88f, 0.72f, 1.0f);
-    AfternoonPalette.VolumetricFogScattering = 0.42f;
+void ADayNightCycleManager::ApplyCurrentPaletteInEditor()
+{
+    AutoFindLightActors();
+    const FLight_DayPalette* Palette = FindPaletteForPhase(CurrentPhase);
+    if (Palette)
+    {
+        CurrentBlendedPalette = *Palette;
+        ApplyPalette(*Palette, 1.0f);
+    }
+}
 
-    // Dusk — deep orange-red, setting sun
-    DuskPalette.SunPitch = -12.0f;
-    DuskPalette.SunYaw = 270.0f;
-    DuskPalette.SunIntensity = 3.8f;
-    DuskPalette.SunColor = FLinearColor(1.0f, 0.42f, 0.12f, 1.0f);
-    DuskPalette.FogDensity = 0.028f;
-    DuskPalette.FogColor = FLinearColor(0.85f, 0.38f, 0.12f, 1.0f);
-    DuskPalette.SkyLightIntensity = 0.85f;
-    DuskPalette.SkyLightColor = FLinearColor(1.0f, 0.72f, 0.45f, 1.0f);
-    DuskPalette.VolumetricFogScattering = 0.55f;
+void ADayNightCycleManager::InitializeDefaultPalettes()
+{
+    DayPalettes.Empty();
 
-    // Twilight — purple-blue transition
-    TwilightPalette.SunPitch = -5.0f;
-    TwilightPalette.SunYaw = 285.0f;
-    TwilightPalette.SunIntensity = 1.2f;
-    TwilightPalette.SunColor = FLinearColor(0.62f, 0.42f, 0.82f, 1.0f);
-    TwilightPalette.FogDensity = 0.038f;
-    TwilightPalette.FogColor = FLinearColor(0.28f, 0.22f, 0.52f, 1.0f);
-    TwilightPalette.SkyLightIntensity = 0.45f;
-    TwilightPalette.SkyLightColor = FLinearColor(0.52f, 0.55f, 0.82f, 1.0f);
-    TwilightPalette.VolumetricFogScattering = 0.68f;
+    // DAWN — soft pink-orange, low sun, warm mist
+    FLight_DayPalette Dawn;
+    Dawn.Phase = ELight_DayPhase::Dawn;
+    Dawn.SunPitch = -8.0f; Dawn.SunYaw = 90.0f;
+    Dawn.SunIntensity = 2.5f;
+    Dawn.SunColor = FLinearColor(1.0f, 0.55f, 0.25f, 1.0f);
+    Dawn.SkyLightIntensity = 0.45f;
+    Dawn.SkyLightColor = FLinearColor(0.8f, 0.5f, 0.4f, 1.0f);
+    Dawn.FogDensity = 0.038f;
+    Dawn.FogColor = FLinearColor(0.9f, 0.6f, 0.4f, 1.0f);
+    Dawn.FogHeightFalloff = 0.18f;
+    DayPalettes.Add(Dawn);
 
-    // Night — deep blue, moonlight
-    NightPalette.SunPitch = -30.0f;  // CAP minimum
-    NightPalette.SunYaw = 0.0f;
-    NightPalette.SunIntensity = 0.15f;
-    NightPalette.SunColor = FLinearColor(0.38f, 0.45f, 0.72f, 1.0f);
-    NightPalette.FogDensity = 0.045f;
-    NightPalette.FogColor = FLinearColor(0.08f, 0.10f, 0.22f, 1.0f);
-    NightPalette.SkyLightIntensity = 0.18f;
-    NightPalette.SkyLightColor = FLinearColor(0.35f, 0.42f, 0.72f, 1.0f);
-    NightPalette.VolumetricFogScattering = 0.82f;
+    // MORNING — warm golden light, low angle, long shadows
+    FLight_DayPalette Morning;
+    Morning.Phase = ELight_DayPhase::Morning;
+    Morning.SunPitch = -35.0f; Morning.SunYaw = 120.0f;
+    Morning.SunIntensity = 7.5f;
+    Morning.SunColor = FLinearColor(1.0f, 0.88f, 0.65f, 1.0f);
+    Morning.SkyLightIntensity = 0.8f;
+    Morning.SkyLightColor = FLinearColor(0.5f, 0.65f, 1.0f, 1.0f);
+    Morning.FogDensity = 0.022f;
+    Morning.FogColor = FLinearColor(0.7f, 0.75f, 0.9f, 1.0f);
+    Morning.FogHeightFalloff = 0.20f;
+    DayPalettes.Add(Morning);
+
+    // MIDDAY — harsh overhead white sun, deep blue sky
+    FLight_DayPalette Midday;
+    Midday.Phase = ELight_DayPhase::Midday;
+    Midday.SunPitch = -78.0f; Midday.SunYaw = 180.0f;
+    Midday.SunIntensity = 12.0f;
+    Midday.SunColor = FLinearColor(1.0f, 0.97f, 0.92f, 1.0f);
+    Midday.SkyLightIntensity = 1.2f;
+    Midday.SkyLightColor = FLinearColor(0.35f, 0.55f, 1.0f, 1.0f);
+    Midday.FogDensity = 0.012f;
+    Midday.FogColor = FLinearColor(0.55f, 0.65f, 0.85f, 1.0f);
+    Midday.FogHeightFalloff = 0.25f;
+    DayPalettes.Add(Midday);
+
+    // AFTERNOON — warm amber, slight haze
+    FLight_DayPalette Afternoon;
+    Afternoon.Phase = ELight_DayPhase::Afternoon;
+    Afternoon.SunPitch = -48.0f; Afternoon.SunYaw = 240.0f;
+    Afternoon.SunIntensity = 9.0f;
+    Afternoon.SunColor = FLinearColor(1.0f, 0.85f, 0.55f, 1.0f);
+    Afternoon.SkyLightIntensity = 0.95f;
+    Afternoon.SkyLightColor = FLinearColor(0.45f, 0.6f, 0.95f, 1.0f);
+    Afternoon.FogDensity = 0.018f;
+    Afternoon.FogColor = FLinearColor(0.75f, 0.7f, 0.6f, 1.0f);
+    Afternoon.FogHeightFalloff = 0.22f;
+    DayPalettes.Add(Afternoon);
+
+    // DUSK — deep orange-red, dramatic silhouettes
+    FLight_DayPalette Dusk;
+    Dusk.Phase = ELight_DayPhase::Dusk;
+    Dusk.SunPitch = -12.0f; Dusk.SunYaw = 270.0f;
+    Dusk.SunIntensity = 3.8f;
+    Dusk.SunColor = FLinearColor(1.0f, 0.38f, 0.08f, 1.0f);
+    Dusk.SkyLightIntensity = 0.55f;
+    Dusk.SkyLightColor = FLinearColor(0.7f, 0.35f, 0.2f, 1.0f);
+    Dusk.FogDensity = 0.028f;
+    Dusk.FogColor = FLinearColor(0.85f, 0.45f, 0.2f, 1.0f);
+    Dusk.FogHeightFalloff = 0.18f;
+    DayPalettes.Add(Dusk);
+
+    // EVENING — purple-blue twilight, stars beginning
+    FLight_DayPalette Evening;
+    Evening.Phase = ELight_DayPhase::Evening;
+    Evening.SunPitch = -32.0f; Evening.SunYaw = 285.0f;
+    Evening.SunIntensity = 1.2f;
+    Evening.SunColor = FLinearColor(0.4f, 0.3f, 0.7f, 1.0f);
+    Evening.SkyLightIntensity = 0.3f;
+    Evening.SkyLightColor = FLinearColor(0.2f, 0.2f, 0.55f, 1.0f);
+    Evening.FogDensity = 0.032f;
+    Evening.FogColor = FLinearColor(0.15f, 0.15f, 0.4f, 1.0f);
+    Evening.FogHeightFalloff = 0.20f;
+    DayPalettes.Add(Evening);
+
+    // NIGHT — deep blue moonlight, bioluminescent hints
+    FLight_DayPalette Night;
+    Night.Phase = ELight_DayPhase::Night;
+    Night.SunPitch = -72.0f; Night.SunYaw = 185.0f;
+    Night.SunIntensity = 0.4f;
+    Night.SunColor = FLinearColor(0.08f, 0.12f, 0.32f, 1.0f);
+    Night.SkyLightIntensity = 0.35f;
+    Night.SkyLightColor = FLinearColor(0.06f, 0.08f, 0.24f, 1.0f);
+    Night.FogDensity = 0.042f;
+    Night.FogColor = FLinearColor(0.02f, 0.04f, 0.12f, 1.0f);
+    Night.FogHeightFalloff = 0.22f;
+    DayPalettes.Add(Night);
+
+    // DEEP NIGHT — near-total darkness, maximum danger
+    FLight_DayPalette DeepNight;
+    DeepNight.Phase = ELight_DayPhase::DeepNight;
+    DeepNight.SunPitch = -85.0f; DeepNight.SunYaw = 0.0f;
+    DeepNight.SunIntensity = 0.15f;
+    DeepNight.SunColor = FLinearColor(0.04f, 0.06f, 0.18f, 1.0f);
+    DeepNight.SkyLightIntensity = 0.18f;
+    DeepNight.SkyLightColor = FLinearColor(0.03f, 0.04f, 0.15f, 1.0f);
+    DeepNight.FogDensity = 0.055f;
+    DeepNight.FogColor = FLinearColor(0.01f, 0.02f, 0.08f, 1.0f);
+    DeepNight.FogHeightFalloff = 0.25f;
+    DayPalettes.Add(DeepNight);
 }
