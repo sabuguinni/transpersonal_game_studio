@@ -1,296 +1,392 @@
 // CraftingSystem.cpp
 // Agent #14 — Quest & Mission Designer
-// Full implementation: 3 recipes, resource pickup, crafting tick
+// Implements: AQuest_ResourcePickup, UCraftingSystemComponent
+// Recipes: Stone Axe, Campfire, Water Container, Spear, Leather Wrap
 
-#include "Quest/CraftingSystem.h"
-#include "GameFramework/Character.h"
-#include "Engine/World.h"
+#include "CraftingSystem.h"
 #include "TimerManager.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
-// ─── AQuest_ResourcePickup ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// AQuest_ResourcePickup
+// ─────────────────────────────────────────────────────────────────────────────
 
 AQuest_ResourcePickup::AQuest_ResourcePickup()
 {
     PrimaryActorTick.bCanEverTick = false;
-
-    CollisionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionSphere"));
-    CollisionSphere->SetSphereRadius(80.0f);
-    CollisionSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-    RootComponent = CollisionSphere;
-
-    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-    MeshComponent->SetupAttachment(RootComponent);
-    MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    bPickedUp = false;
 }
 
 void AQuest_ResourcePickup::BeginPlay()
 {
     Super::BeginPlay();
-
-    CollisionSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_ResourcePickup::OnPlayerOverlap);
 }
 
-void AQuest_ResourcePickup::OnPlayerOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+bool AQuest_ResourcePickup::TryPickup(AActor* Collector)
 {
-    if (!OtherActor || bHasBeenPickedUp) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (!PlayerChar) return;
-
-    PickUp(OtherActor);
-}
-
-void AQuest_ResourcePickup::PickUp(AActor* Collector)
-{
-    if (bHasBeenPickedUp) return;
-    bHasBeenPickedUp = true;
-
-    // Find crafting manager in world and add resource
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AQuest_CraftingManager::StaticClass(), FoundActors);
-
-    if (FoundActors.Num() > 0)
+    if (bPickedUp || !Collector)
     {
-        AQuest_CraftingManager* Manager = Cast<AQuest_CraftingManager>(FoundActors[0]);
-        if (Manager)
-        {
-            Manager->AddResource(ResourceType, Quantity);
-            UE_LOG(LogTemp, Log, TEXT("ResourcePickup: Added %d of type %d to inventory"),
-                Quantity, (int32)ResourceType);
-        }
+        return false;
     }
 
-    // Hide and destroy after short delay
+    // Find crafting component on collector
+    UCraftingSystemComponent* CraftComp =
+        Collector->FindComponentByClass<UCraftingSystemComponent>();
+
+    if (!CraftComp)
+    {
+        return false;
+    }
+
+    CraftComp->AddResource(ResourceType, QuantityOnPickup);
+    bPickedUp = true;
+
+    // Hide actor visually
     SetActorHiddenInGame(true);
     SetActorEnableCollision(false);
 
-    FTimerHandle DestroyTimer;
-    GetWorldTimerManager().SetTimer(DestroyTimer, [this]()
+    if (bAutoRespawn && RespawnDelaySec > 0.0f)
     {
-        Destroy();
-    }, 1.0f, false);
+        GetWorldTimerManager().SetTimer(
+            RespawnTimer,
+            this,
+            &AQuest_ResourcePickup::HandleRespawn,
+            RespawnDelaySec,
+            false
+        );
+    }
+
+    return true;
 }
 
-// ─── AQuest_CraftingManager ─────────────────────────────────────────────────
-
-AQuest_CraftingManager::AQuest_CraftingManager()
+FString AQuest_ResourcePickup::GetResourceLabel() const
 {
-    PrimaryActorTick.bCanEverTick = true;
+    switch (ResourceType)
+    {
+        case EQuest_ResourceType::Rock:   return TEXT("Rock");
+        case EQuest_ResourceType::Stick:  return TEXT("Stick");
+        case EQuest_ResourceType::Leaf:   return TEXT("Leaf");
+        case EQuest_ResourceType::Bone:   return TEXT("Bone");
+        case EQuest_ResourceType::Hide:   return TEXT("Hide");
+        case EQuest_ResourceType::Flint:  return TEXT("Flint");
+        case EQuest_ResourceType::Vine:   return TEXT("Vine");
+        case EQuest_ResourceType::Meat:   return TEXT("Meat");
+        default:                          return TEXT("Unknown");
+    }
 }
 
-void AQuest_CraftingManager::BeginPlay()
+void AQuest_ResourcePickup::HandleRespawn()
+{
+    bPickedUp = false;
+    SetActorHiddenInGame(false);
+    SetActorEnableCollision(true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UCraftingSystemComponent
+// ─────────────────────────────────────────────────────────────────────────────
+
+UCraftingSystemComponent::UCraftingSystemComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    bIsCrafting = false;
+    bCraftingMenuOpen = false;
+    CraftingProgress = 0.0f;
+    CraftingTimeRemaining = 0.0f;
+}
+
+void UCraftingSystemComponent::BeginPlay()
 {
     Super::BeginPlay();
     RegisterDefaultRecipes();
-    UE_LOG(LogTemp, Log, TEXT("CraftingManager: Initialized with %d recipes"), Recipes.Num());
 }
 
-void AQuest_CraftingManager::Tick(float DeltaTime)
+void UCraftingSystemComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                              FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (bIsCrafting)
+    if (!bIsCrafting) return;
+
+    CraftingTimeRemaining -= DeltaTime;
+    const FQuest_CraftingRecipe Recipe = GetRecipeForItem(PendingItem);
+    if (Recipe.CraftingTimeSec > 0.0f)
     {
-        CraftingTimer += DeltaTime;
-        CraftingProgress = FMath::Clamp(CraftingTimer / ActiveRecipe.CraftTimeSeconds, 0.0f, 1.0f);
+        CraftingProgress = 1.0f - (CraftingTimeRemaining / Recipe.CraftingTimeSec);
+        CraftingProgress = FMath::Clamp(CraftingProgress, 0.0f, 1.0f);
+    }
 
-        if (CraftingTimer >= ActiveRecipe.CraftTimeSeconds)
+    if (CraftingTimeRemaining <= 0.0f)
+    {
+        CompleteCrafting();
+    }
+}
+
+// ── Recipe Registration ──────────────────────────────────────────────────────
+
+void UCraftingSystemComponent::RegisterDefaultRecipes()
+{
+    AllRecipes.Empty();
+
+    // ── Recipe 1: Stone Axe (2 Rocks + 1 Stick) ──
+    {
+        FQuest_CraftingRecipe R;
+        R.OutputItem = EQuest_CraftedItem::StoneAxe;
+        R.DisplayName = TEXT("Stone Axe");
+        R.Description = TEXT("A basic chopping tool. Useful for cutting wood and as a weapon against smaller predators.");
+        R.CraftingTimeSec = 4.0f;
+        R.bRequiresCampfire = false;
+
+        FQuest_ResourceStack Ing1;
+        Ing1.ResourceType = EQuest_ResourceType::Rock;
+        Ing1.Quantity = 2;
+        R.Ingredients.Add(Ing1);
+
+        FQuest_ResourceStack Ing2;
+        Ing2.ResourceType = EQuest_ResourceType::Stick;
+        Ing2.Quantity = 1;
+        R.Ingredients.Add(Ing2);
+
+        AllRecipes.Add(R);
+    }
+
+    // ── Recipe 2: Campfire (3 Sticks) ──
+    {
+        FQuest_CraftingRecipe R;
+        R.OutputItem = EQuest_CraftedItem::Campfire;
+        R.DisplayName = TEXT("Campfire");
+        R.Description = TEXT("Provides warmth, light, and the ability to cook meat. Deters smaller predators at night.");
+        R.CraftingTimeSec = 6.0f;
+        R.bRequiresCampfire = false;
+
+        FQuest_ResourceStack Ing1;
+        Ing1.ResourceType = EQuest_ResourceType::Stick;
+        Ing1.Quantity = 3;
+        R.Ingredients.Add(Ing1);
+
+        AllRecipes.Add(R);
+    }
+
+    // ── Recipe 3: Water Container (1 Rock + 1 Leaf) ──
+    {
+        FQuest_CraftingRecipe R;
+        R.OutputItem = EQuest_CraftedItem::WaterContainer;
+        R.DisplayName = TEXT("Water Container");
+        R.Description = TEXT("A hollowed rock sealed with leaves. Holds enough water for half a day of travel.");
+        R.CraftingTimeSec = 3.0f;
+        R.bRequiresCampfire = false;
+
+        FQuest_ResourceStack Ing1;
+        Ing1.ResourceType = EQuest_ResourceType::Rock;
+        Ing1.Quantity = 1;
+        R.Ingredients.Add(Ing1);
+
+        FQuest_ResourceStack Ing2;
+        Ing2.ResourceType = EQuest_ResourceType::Leaf;
+        Ing2.Quantity = 1;
+        R.Ingredients.Add(Ing2);
+
+        AllRecipes.Add(R);
+    }
+
+    // ── Recipe 4: Spear (2 Sticks + 1 Flint) ──
+    {
+        FQuest_CraftingRecipe R;
+        R.OutputItem = EQuest_CraftedItem::Spear;
+        R.DisplayName = TEXT("Spear");
+        R.Description = TEXT("A throwing and thrusting weapon. Effective against raptors and medium-sized prey.");
+        R.CraftingTimeSec = 8.0f;
+        R.bRequiresCampfire = false;
+
+        FQuest_ResourceStack Ing1;
+        Ing1.ResourceType = EQuest_ResourceType::Stick;
+        Ing1.Quantity = 2;
+        R.Ingredients.Add(Ing1);
+
+        FQuest_ResourceStack Ing2;
+        Ing2.ResourceType = EQuest_ResourceType::Flint;
+        Ing2.Quantity = 1;
+        R.Ingredients.Add(Ing2);
+
+        AllRecipes.Add(R);
+    }
+
+    // ── Recipe 5: Leather Wrap (2 Hide + 1 Vine) ──
+    {
+        FQuest_CraftingRecipe R;
+        R.OutputItem = EQuest_CraftedItem::LeatherWrap;
+        R.DisplayName = TEXT("Leather Wrap");
+        R.Description = TEXT("Basic body protection. Reduces damage from bites and scratches. Requires campfire to cure.");
+        R.CraftingTimeSec = 10.0f;
+        R.bRequiresCampfire = true;
+
+        FQuest_ResourceStack Ing1;
+        Ing1.ResourceType = EQuest_ResourceType::Hide;
+        Ing1.Quantity = 2;
+        R.Ingredients.Add(Ing1);
+
+        FQuest_ResourceStack Ing2;
+        Ing2.ResourceType = EQuest_ResourceType::Vine;
+        Ing2.Quantity = 1;
+        R.Ingredients.Add(Ing2);
+
+        AllRecipes.Add(R);
+    }
+}
+
+// ── Inventory ────────────────────────────────────────────────────────────────
+
+void UCraftingSystemComponent::AddResource(EQuest_ResourceType Type, int32 Amount)
+{
+    if (Type == EQuest_ResourceType::None || Amount <= 0) return;
+
+    for (FQuest_ResourceStack& Stack : Inventory)
+    {
+        if (Stack.ResourceType == Type)
         {
-            CompleteCrafting();
+            Stack.Quantity += Amount;
+            return;
         }
     }
+
+    // New stack
+    FQuest_ResourceStack NewStack;
+    NewStack.ResourceType = Type;
+    NewStack.Quantity = Amount;
+    Inventory.Add(NewStack);
 }
 
-void AQuest_CraftingManager::RegisterDefaultRecipes()
+int32 UCraftingSystemComponent::GetResourceCount(EQuest_ResourceType Type) const
 {
-    Recipes.Empty();
-
-    // ── Recipe 1: Stone Axe (2 Rocks + 1 Stick) ─────────────────────────
+    for (const FQuest_ResourceStack& Stack : Inventory)
     {
-        FQuest_CraftingRecipe StoneAxe;
-        StoneAxe.ResultItem = EQuest_CraftedItem::StoneAxe;
-        StoneAxe.DisplayName = TEXT("Stone Axe");
-        StoneAxe.CraftTimeSeconds = 3.0f;
-        StoneAxe.Description = TEXT("A crude but effective axe. Useful for chopping wood and fighting predators.");
-
-        FQuest_RecipeIngredient Rock1;
-        Rock1.ResourceType = EQuest_ResourceType::Rock;
-        Rock1.Quantity = 2;
-        StoneAxe.Ingredients.Add(Rock1);
-
-        FQuest_RecipeIngredient Stick1;
-        Stick1.ResourceType = EQuest_ResourceType::Stick;
-        Stick1.Quantity = 1;
-        StoneAxe.Ingredients.Add(Stick1);
-
-        Recipes.Add(StoneAxe);
-    }
-
-    // ── Recipe 2: Campfire (3 Sticks) ────────────────────────────────────
-    {
-        FQuest_CraftingRecipe Campfire;
-        Campfire.ResultItem = EQuest_CraftedItem::Campfire;
-        Campfire.DisplayName = TEXT("Campfire");
-        Campfire.CraftTimeSeconds = 5.0f;
-        Campfire.Description = TEXT("A fire that keeps predators away and cooks meat. Essential for survival.");
-
-        FQuest_RecipeIngredient Stick2;
-        Stick2.ResourceType = EQuest_ResourceType::Stick;
-        Stick2.Quantity = 3;
-        Campfire.Ingredients.Add(Stick2);
-
-        Recipes.Add(Campfire);
-    }
-
-    // ── Recipe 3: Water Container (1 Rock + 1 Leaf) ──────────────────────
-    {
-        FQuest_CraftingRecipe WaterContainer;
-        WaterContainer.ResultItem = EQuest_CraftedItem::WaterContainer;
-        WaterContainer.DisplayName = TEXT("Water Container");
-        WaterContainer.CraftTimeSeconds = 4.0f;
-        WaterContainer.Description = TEXT("A hollowed rock lined with large leaves. Holds water for drinking.");
-
-        FQuest_RecipeIngredient Rock2;
-        Rock2.ResourceType = EQuest_ResourceType::Rock;
-        Rock2.Quantity = 1;
-        WaterContainer.Ingredients.Add(Rock2);
-
-        FQuest_RecipeIngredient Leaf1;
-        Leaf1.ResourceType = EQuest_ResourceType::Leaf;
-        Leaf1.Quantity = 1;
-        WaterContainer.Ingredients.Add(Leaf1);
-
-        Recipes.Add(WaterContainer);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CraftingManager: Registered %d recipes"), Recipes.Num());
-}
-
-bool AQuest_CraftingManager::CanCraft(EQuest_CraftedItem Item) const
-{
-    for (const FQuest_CraftingRecipe& Recipe : Recipes)
-    {
-        if (Recipe.ResultItem != Item) continue;
-
-        for (const FQuest_RecipeIngredient& Ingredient : Recipe.Ingredients)
+        if (Stack.ResourceType == Type)
         {
-            if (GetResourceCount(Ingredient.ResourceType) < Ingredient.Quantity)
-            {
-                return false;
-            }
+            return Stack.Quantity;
         }
-        return true;
     }
-    return false;
+    return 0;
 }
 
-bool AQuest_CraftingManager::StartCrafting(EQuest_CraftedItem Item)
+bool UCraftingSystemComponent::RemoveResource(EQuest_ResourceType Type, int32 Amount)
 {
-    if (bIsCrafting) return false;
-    if (!CanCraft(Item)) return false;
-
-    for (const FQuest_CraftingRecipe& Recipe : Recipes)
+    for (FQuest_ResourceStack& Stack : Inventory)
     {
-        if (Recipe.ResultItem == Item)
+        if (Stack.ResourceType == Type)
         {
-            ActiveRecipe = Recipe;
-
-            // Consume ingredients
-            for (const FQuest_RecipeIngredient& Ingredient : Recipe.Ingredients)
-            {
-                AddResource(Ingredient.ResourceType, -Ingredient.Quantity);
-            }
-
-            bIsCrafting = true;
-            CraftingTimer = 0.0f;
-            CraftingProgress = 0.0f;
-            CurrentlyCrafting = Item;
-
-            UE_LOG(LogTemp, Log, TEXT("CraftingManager: Started crafting %s (%.1fs)"),
-                *Recipe.DisplayName, Recipe.CraftTimeSeconds);
+            if (Stack.Quantity < Amount) return false;
+            Stack.Quantity -= Amount;
             return true;
         }
     }
     return false;
 }
 
-void AQuest_CraftingManager::CompleteCrafting()
+// ── Crafting Logic ───────────────────────────────────────────────────────────
+
+bool UCraftingSystemComponent::CanCraft(EQuest_CraftedItem Item) const
 {
-    bIsCrafting = false;
-    CraftingProgress = 1.0f;
+    const FQuest_CraftingRecipe Recipe = GetRecipeForItem(Item);
+    if (Recipe.OutputItem == EQuest_CraftedItem::None) return false;
 
-    UE_LOG(LogTemp, Log, TEXT("CraftingManager: Completed crafting %s!"),
-        *ActiveRecipe.DisplayName);
-
-    CurrentlyCrafting = EQuest_CraftedItem::None;
-    CraftingTimer = 0.0f;
-    CraftingProgress = 0.0f;
+    for (const FQuest_ResourceStack& Ingredient : Recipe.Ingredients)
+    {
+        if (GetResourceCount(Ingredient.ResourceType) < Ingredient.Quantity)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
-void AQuest_CraftingManager::CancelCrafting()
+bool UCraftingSystemComponent::StartCrafting(EQuest_CraftedItem Item)
+{
+    if (bIsCrafting) return false;
+    if (!CanCraft(Item)) return false;
+
+    const FQuest_CraftingRecipe Recipe = GetRecipeForItem(Item);
+
+    // Consume ingredients
+    for (const FQuest_ResourceStack& Ingredient : Recipe.Ingredients)
+    {
+        RemoveResource(Ingredient.ResourceType, Ingredient.Quantity);
+    }
+
+    PendingItem = Item;
+    CraftingTimeRemaining = Recipe.CraftingTimeSec;
+    CraftingProgress = 0.0f;
+    bIsCrafting = true;
+    CurrentlyCraftingItem = Item;
+
+    return true;
+}
+
+void UCraftingSystemComponent::CancelCrafting()
 {
     if (!bIsCrafting) return;
 
     // Refund ingredients
-    for (const FQuest_RecipeIngredient& Ingredient : ActiveRecipe.Ingredients)
+    const FQuest_CraftingRecipe Recipe = GetRecipeForItem(PendingItem);
+    for (const FQuest_ResourceStack& Ingredient : Recipe.Ingredients)
     {
         AddResource(Ingredient.ResourceType, Ingredient.Quantity);
     }
 
     bIsCrafting = false;
-    CraftingTimer = 0.0f;
     CraftingProgress = 0.0f;
-    CurrentlyCrafting = EQuest_CraftedItem::None;
-
-    UE_LOG(LogTemp, Log, TEXT("CraftingManager: Crafting cancelled, ingredients refunded."));
+    CraftingTimeRemaining = 0.0f;
+    CurrentlyCraftingItem = EQuest_CraftedItem::None;
+    PendingItem = EQuest_CraftedItem::None;
 }
 
-void AQuest_CraftingManager::AddResource(EQuest_ResourceType Type, int32 Amount)
+void UCraftingSystemComponent::CompleteCrafting()
 {
-    switch (Type)
-    {
-    case EQuest_ResourceType::Rock:   PlayerInventory.Rocks  = FMath::Max(0, PlayerInventory.Rocks  + Amount); break;
-    case EQuest_ResourceType::Stick:  PlayerInventory.Sticks = FMath::Max(0, PlayerInventory.Sticks + Amount); break;
-    case EQuest_ResourceType::Leaf:   PlayerInventory.Leaves = FMath::Max(0, PlayerInventory.Leaves + Amount); break;
-    case EQuest_ResourceType::Bone:   PlayerInventory.Bones  = FMath::Max(0, PlayerInventory.Bones  + Amount); break;
-    case EQuest_ResourceType::Hide:   PlayerInventory.Hides  = FMath::Max(0, PlayerInventory.Hides  + Amount); break;
-    case EQuest_ResourceType::Flint:  PlayerInventory.Flints = FMath::Max(0, PlayerInventory.Flints + Amount); break;
-    default: break;
-    }
+    bIsCrafting = false;
+    CraftingProgress = 1.0f;
+    CraftingTimeRemaining = 0.0f;
+    CurrentlyCraftingItem = EQuest_CraftedItem::None;
+
+    // Item is now in player's possession — notify via log
+    UE_LOG(LogTemp, Log, TEXT("CraftingSystem: Crafted item %d successfully"),
+           static_cast<int32>(PendingItem));
+
+    PendingItem = EQuest_CraftedItem::None;
 }
 
-int32 AQuest_CraftingManager::GetResourceCount(EQuest_ResourceType Type) const
-{
-    switch (Type)
-    {
-    case EQuest_ResourceType::Rock:  return PlayerInventory.Rocks;
-    case EQuest_ResourceType::Stick: return PlayerInventory.Sticks;
-    case EQuest_ResourceType::Leaf:  return PlayerInventory.Leaves;
-    case EQuest_ResourceType::Bone:  return PlayerInventory.Bones;
-    case EQuest_ResourceType::Hide:  return PlayerInventory.Hides;
-    case EQuest_ResourceType::Flint: return PlayerInventory.Flints;
-    default: return 0;
-    }
-}
-
-void AQuest_CraftingManager::ToggleCraftingMenu()
-{
-    bCraftingMenuOpen = !bCraftingMenuOpen;
-    UE_LOG(LogTemp, Log, TEXT("CraftingManager: Menu %s"),
-        bCraftingMenuOpen ? TEXT("OPENED") : TEXT("CLOSED"));
-}
-
-TArray<FQuest_CraftingRecipe> AQuest_CraftingManager::GetAvailableRecipes() const
+TArray<FQuest_CraftingRecipe> UCraftingSystemComponent::GetAvailableRecipes() const
 {
     TArray<FQuest_CraftingRecipe> Available;
-    for (const FQuest_CraftingRecipe& Recipe : Recipes)
+    for (const FQuest_CraftingRecipe& Recipe : AllRecipes)
     {
-        if (CanCraft(Recipe.ResultItem))
+        if (CanCraft(Recipe.OutputItem))
         {
             Available.Add(Recipe);
         }
     }
     return Available;
+}
+
+FQuest_CraftingRecipe UCraftingSystemComponent::GetRecipeForItem(EQuest_CraftedItem Item) const
+{
+    for (const FQuest_CraftingRecipe& Recipe : AllRecipes)
+    {
+        if (Recipe.OutputItem == Item)
+        {
+            return Recipe;
+        }
+    }
+    return FQuest_CraftingRecipe(); // empty/None
+}
+
+void UCraftingSystemComponent::OpenCraftingMenu()
+{
+    bCraftingMenuOpen = true;
+    UE_LOG(LogTemp, Log, TEXT("CraftingSystem: Menu opened — %d recipes available"),
+           AllRecipes.Num());
+}
+
+void UCraftingSystemComponent::CloseCraftingMenu()
+{
+    bCraftingMenuOpen = false;
 }
