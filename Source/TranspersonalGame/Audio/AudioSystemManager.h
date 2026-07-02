@@ -3,23 +3,26 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Sound/SoundBase.h"
-#include "Camera/CameraShakeBase.h"
+#include "Sound/SoundCue.h"
 #include "AudioSystemManager.generated.h"
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
-
+// ============================================================
+// Audio_ThreatLevel — adaptive music state based on danger
+// ============================================================
 UENUM(BlueprintType)
 enum class EAudio_ThreatLevel : uint8
 {
-    Safe        UMETA(DisplayName = "Safe — No Predators"),
-    Aware       UMETA(DisplayName = "Aware — Predator Detected"),
-    Stalked     UMETA(DisplayName = "Stalked — Predator Approaching"),
-    Imminent    UMETA(DisplayName = "Imminent — Predator Attacking"),
-    Combat      UMETA(DisplayName = "Combat — Active Fight")
+    Safe        UMETA(DisplayName = "Safe — Ambient Only"),
+    Aware       UMETA(DisplayName = "Aware — Low Tension"),
+    Danger      UMETA(DisplayName = "Danger — High Tension"),
+    Combat      UMETA(DisplayName = "Combat — Full Action"),
+    Stalked     UMETA(DisplayName = "Stalked — Predator Nearby")
 };
 
+// ============================================================
+// Audio_TimeOfDay — drives ambient sound layer transitions
+// ============================================================
 UENUM(BlueprintType)
 enum class EAudio_TimeOfDay : uint8
 {
@@ -29,225 +32,164 @@ enum class EAudio_TimeOfDay : uint8
     Night       UMETA(DisplayName = "Night")
 };
 
-UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
-{
-    DenseJungle UMETA(DisplayName = "Dense Jungle"),
-    OpenPlains  UMETA(DisplayName = "Open Plains"),
-    RiverDelta  UMETA(DisplayName = "River Delta"),
-    Volcanic    UMETA(DisplayName = "Volcanic Region"),
-    Cave        UMETA(DisplayName = "Cave / Underground")
-};
-
-// ─── Structs ──────────────────────────────────────────────────────────────────
-
+// ============================================================
+// FAudio_ScreenShakeConfig — screen shake parameters
+// ============================================================
 USTRUCT(BlueprintType)
-struct FAudio_DinosaurSoundProfile
+struct FAudio_ScreenShakeConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    FName DinosaurSpecies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Intensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    USoundBase* IdleVocalisation = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Duration = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    USoundBase* AlertRoar = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float Falloff = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    USoundBase* AttackRoar = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    USoundBase* FootstepHeavy = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    USoundBase* DeathSound = nullptr;
-
-    // Distance at which footsteps cause camera shake (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float ShakeRadius = 2000.0f;
-
-    // Shake intensity multiplier (1.0 = full shake at ShakeRadius)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
-    float ShakeIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    float MaxDistance = 2000.0f;
 };
 
+// ============================================================
+// FAudio_SoundLayer — one ambient layer with volume/fade
+// ============================================================
 USTRUCT(BlueprintType)
-struct FAudio_AmbientLayer
+struct FAudio_SoundLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    EAudio_BiomeType Biome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    FName LayerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    EAudio_TimeOfDay TimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    USoundBase* Sound = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    USoundBase* AmbientLoop = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    float TargetVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float BaseVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    float CurrentVolume = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float FadeInTime = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    float FadeSpeed = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
-    float FadeOutTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layer")
+    bool bIsActive = false;
 };
 
-USTRUCT(BlueprintType)
-struct FAudio_MusicState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    EAudio_ThreatLevel ThreatLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    USoundBase* MusicTrack = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    float CrossfadeDuration = 2.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    float Volume = 0.6f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Music")
-    bool bLooping = true;
-};
-
-// ─── Main Class ───────────────────────────────────────────────────────────────
-
-UCLASS(ClassGroup = (Audio), meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAudio_SystemManager : public UActorComponent
+// ============================================================
+// AAudio_SystemManager — main audio manager actor
+// ============================================================
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Audio System Manager"))
+class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAudio_SystemManager();
+    AAudio_SystemManager();
 
+protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-        FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // ─── Threat System ────────────────────────────────────────────────────────
+public:
+    // --- Threat / Adaptive Music ---
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Threat")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Adaptive")
+    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Adaptive")
+    float ThreatTransitionSpeed = 2.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Adaptive")
     void SetThreatLevel(EAudio_ThreatLevel NewLevel);
 
-    UFUNCTION(BlueprintPure, Category = "Audio|Threat")
-    EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+    UFUNCTION(BlueprintCallable, Category = "Audio|Adaptive")
+    EAudio_ThreatLevel GetThreatLevel() const { return CurrentThreatLevel; }
 
-    // ─── Ambient System ───────────────────────────────────────────────────────
+    // --- Time of Day Ambient ---
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
-    void SetBiome(EAudio_BiomeType NewBiome);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Ambient")
+    EAudio_TimeOfDay CurrentTimeOfDay = EAudio_TimeOfDay::Day;
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
     void SetTimeOfDay(EAudio_TimeOfDay NewTime);
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Ambient")
-    void UpdateAmbientLayers();
+    EAudio_TimeOfDay GetTimeOfDay() const { return CurrentTimeOfDay; }
 
-    // ─── Dinosaur Audio ───────────────────────────────────────────────────────
+    // --- Screen Shake ---
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void PlayDinosaurFootstep(FName Species, FVector Location, float Mass);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeConfig TRexFootstepShake;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void PlayDinosaurRoar(FName Species, FVector Location, bool bIsAlert);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|ScreenShake")
+    FAudio_ScreenShakeConfig RaptorAttackShake;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
-    void TriggerProximityShake(FVector DinosaurLocation, float DinosaurMass);
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerScreenShake(FAudio_ScreenShakeConfig Config, FVector SourceLocation);
 
-    // ─── Player Feedback ──────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Audio|ScreenShake")
+    void TriggerTRexFootstep(FVector TRexLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
-    void PlayFootstep(bool bIsRunning, FName SurfaceType);
+    // --- Sound Layers ---
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
-    void TriggerDamageFlashAudio(float DamageAmount);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Layers")
+    TArray<FAudio_SoundLayer> AmbientLayers;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
-    void PlayCraftingSound(FName ItemCrafted);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Layers")
+    void SetLayerVolume(FName LayerName, float Volume);
 
-    // ─── Music System ─────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Audio|Layers")
+    void FadeInLayer(FName LayerName, float FadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
-    void CrossfadeToMusicState(EAudio_ThreatLevel TargetState);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Layers")
+    void FadeOutLayer(FName LayerName, float FadeTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
-    void StopAllMusic(float FadeTime = 2.0f);
+    // --- Damage Flash ---
 
-    // ─── Day/Night Audio Cycle ────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    float DamageFlashDuration = 0.3f;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
-    void UpdateDayNightAudio(float TimeOfDayNormalized);
-
-    // ─── Screen Shake ─────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Feedback")
+    float DamageFlashIntensity = 0.8f;
 
     UFUNCTION(BlueprintCallable, Category = "Audio|Feedback")
-    void TriggerScreenShake(float Intensity, float Duration, FVector SourceLocation);
+    void TriggerDamageFlash(float DamageAmount);
 
-    // ─── Properties ───────────────────────────────────────────────────────────
+    // --- Footstep Dust ---
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TArray<FAudio_DinosaurSoundProfile> DinosaurProfiles;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Particles")
+    float FootstepDustThreshold = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TArray<FAudio_AmbientLayer> AmbientLayers;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Particles")
+    void SpawnFootstepDust(FVector Location, bool bIsHeavyCreature = false);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TArray<FAudio_MusicState> MusicStates;
+    // --- Day/Night Cycle Audio ---
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float MasterVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float DayNightCycleDuration = 600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float MusicVolume = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|DayNight")
+    float CurrentDayTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float SFXVolume = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Audio|DayNight")
+    void AdvanceDayNightCycle(float DeltaSeconds);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float AmbientVolume = 0.8f;
-
-    // Minimum time between threat level changes (prevents rapid flickering)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float ThreatTransitionCooldown = 3.0f;
-
-    // Distance threshold for T-Rex proximity shake (cm)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    float TRexShakeDistance = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TSubclassOf<UCameraShakeBase> LightShakeClass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
-    TSubclassOf<UCameraShakeBase> HeavyShakeClass;
+    UFUNCTION(BlueprintPure, Category = "Audio|DayNight")
+    float GetDayNightNormalised() const;
 
 private:
-    EAudio_ThreatLevel CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-    EAudio_BiomeType   CurrentBiome       = EAudio_BiomeType::DenseJungle;
-    EAudio_TimeOfDay   CurrentTimeOfDay   = EAudio_TimeOfDay::Day;
+    void UpdateAmbientLayers(float DeltaTime);
+    void UpdateDayNightAudio();
+    EAudio_TimeOfDay CalculateTimeOfDay(float NormalisedTime) const;
 
     UPROPERTY()
-    UAudioComponent* ActiveMusicComponent = nullptr;
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
-    UPROPERTY()
-    UAudioComponent* ActiveAmbientComponent = nullptr;
-
-    float TimeSinceLastThreatChange = 0.0f;
-    float LastDayNightNormalized    = 0.5f;
-
-    void CrossfadeAudioComponent(UAudioComponent*& Component, USoundBase* NewSound,
-        float FadeOut, float FadeIn, float Volume);
-
-    FAudio_DinosaurSoundProfile* FindDinosaurProfile(FName Species);
-    FAudio_MusicState*           FindMusicState(EAudio_ThreatLevel Level);
-    FAudio_AmbientLayer*         FindAmbientLayer(EAudio_BiomeType Biome, EAudio_TimeOfDay Time);
-
-    EAudio_TimeOfDay NormalizedTimeToEnum(float Normalized) const;
+    float LastThreatTransitionTime = 0.0f;
+    EAudio_ThreatLevel PreviousThreatLevel = EAudio_ThreatLevel::Safe;
 };
