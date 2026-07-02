@@ -1,210 +1,234 @@
-// VFXManager.cpp
-// VFX Agent #17 — Transpersonal Game Studio
-// Prehistoric dinosaur survival game — physical VFX only, no spiritual/magical effects
-
 #include "VFXManager.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
 
-AVFX_Manager::AVFX_Manager()
+UVFX_Manager::UVFX_Manager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.05f; // 20 Hz tick for VFX updates
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5s for cleanup
 
-    MaxActiveEffects = 64;
-    LODDistance_Near = 1500.0f;
-    LODDistance_Mid = 4000.0f;
-    LODDistance_Far = 8000.0f;
-    bVFXEnabled = true;
-    bWeatherVFXActive = false;
-    CurrentWeatherIntensity = 0.0f;
+    // LOD defaults (cm)
+    LOD_HighMaxDistance   = 1500.0f;
+    LOD_MediumMaxDistance = 4000.0f;
+    LOD_LowMaxDistance    = 8000.0f;
+    MaxActiveVFXSystems   = 32;
 }
 
-void AVFX_Manager::BeginPlay()
+void UVFX_Manager::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("[VFXManager] BeginPlay — VFX system initialised. MaxEffects=%d"), MaxActiveEffects);
+    ActiveVFXComponents.Empty();
+    ActiveWeatherComponents.Empty();
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: BeginPlay — VFX system initialized. LOD chain: High=%.0fcm, Medium=%.0fcm, Low=%.0fcm"),
+        LOD_HighMaxDistance, LOD_MediumMaxDistance, LOD_LowMaxDistance);
 }
 
-void AVFX_Manager::Tick(float DeltaTime)
+void UVFX_Manager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    CleanupFinishedVFX();
+}
 
-    if (!bVFXEnabled) return;
+// ============================================================
+// SPAWN FUNCTIONS
+// ============================================================
 
-    // Tick all active effects, remove expired ones
-    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
+UNiagaraComponent* UVFX_Manager::SpawnVFX_Campfire(const FVector& Location, float Scale)
+{
+    UNiagaraComponent* FireComp = SpawnNiagaraAtLocation(NS_Fire_Campfire, Location, FRotator::ZeroRotator, Scale, false);
+    // Also spawn smoke slightly above
+    FVector SmokeLocation = Location + FVector(0.0f, 0.0f, 40.0f);
+    SpawnNiagaraAtLocation(NS_Fire_CampfireSmoke, SmokeLocation, FRotator::ZeroRotator, Scale * 0.8f, false);
+    // Embers at fire level
+    SpawnNiagaraAtLocation(NS_Fire_CampfireEmbers, Location, FRotator::ZeroRotator, Scale, false);
+    return FireComp;
+}
+
+UNiagaraComponent* UVFX_Manager::SpawnVFX_DinoFootstep(const FVector& Location, float DinoMassKg)
+{
+    // Scale dust based on dinosaur mass — heavier dino = bigger dust cloud
+    // T-Rex ~6000kg → scale 1.0, Raptor ~80kg → scale 0.2
+    float DustScale = FMath::Clamp(DinoMassKg / 6000.0f, 0.1f, 2.0f);
+    UNiagaraComponent* DustComp = SpawnNiagaraAtLocation(NS_Dino_FootstepDust, Location, FRotator::ZeroRotator, DustScale, true);
+    if (DustComp)
     {
-        FVFX_EffectEntry& Entry = ActiveEffects[i];
-        Entry.ElapsedTime += DeltaTime;
-
-        if (Entry.Duration > 0.0f && Entry.ElapsedTime >= Entry.Duration)
-        {
-            StopEffect(Entry.EffectID);
-        }
+        // Pass mass as Niagara user parameter for particle count scaling
+        DustComp->SetFloatParameter(TEXT("DinoMassKg"), DinoMassKg);
+        DustComp->SetFloatParameter(TEXT("ImpactScale"), DustScale);
     }
+    return DustComp;
 }
 
-int32 AVFX_Manager::SpawnEffect(FVFX_SpawnRequest Request)
+UNiagaraComponent* UVFX_Manager::SpawnVFX_BloodImpact(const FVector& Location, const FVector& ImpactNormal, float DamageAmount)
 {
-    if (!bVFXEnabled)
+    // Scale blood splatter based on damage
+    float BloodScale = FMath::Clamp(DamageAmount / 50.0f, 0.2f, 3.0f);
+    FRotator ImpactRot = ImpactNormal.Rotation();
+    UNiagaraComponent* BloodComp = SpawnNiagaraAtLocation(NS_Combat_BloodSplatter, Location, ImpactRot, BloodScale, true);
+    if (BloodComp)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[VFXManager] VFX disabled — SpawnEffect ignored"));
-        return -1;
+        BloodComp->SetFloatParameter(TEXT("DamageAmount"), DamageAmount);
+        BloodComp->SetVectorParameter(TEXT("ImpactNormal"), ImpactNormal);
     }
+    return BloodComp;
+}
 
-    if (ActiveEffects.Num() >= MaxActiveEffects)
+UNiagaraComponent* UVFX_Manager::SpawnVFX_WeaponImpact(const FVector& Location, const FVector& ImpactNormal, bool bOnDinosaur)
+{
+    FRotator ImpactRot = ImpactNormal.Rotation();
+    UNiagaraComponent* ImpactComp = nullptr;
+    if (bOnDinosaur)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[VFXManager] MaxActiveEffects (%d) reached — SpawnEffect rejected"), MaxActiveEffects);
-        return -1;
-    }
-
-    // Determine LOD level based on distance from camera
-    EVFX_LODLevel LOD = GetLODForDistance(Request.SpawnLocation);
-
-    // Skip Far LOD effects if budget is tight
-    if (LOD == EVFX_LODLevel::Culled)
-    {
-        return -1;
-    }
-
-    FVFX_EffectEntry NewEntry;
-    NewEntry.EffectID = NextEffectID++;
-    NewEntry.EffectType = Request.EffectType;
-    NewEntry.SpawnLocation = Request.SpawnLocation;
-    NewEntry.SpawnRotation = Request.SpawnRotation;
-    NewEntry.Scale = Request.Scale;
-    NewEntry.Duration = Request.Duration;
-    NewEntry.ElapsedTime = 0.0f;
-    NewEntry.LODLevel = LOD;
-    NewEntry.bLooping = Request.bLooping;
-
-    ActiveEffects.Add(NewEntry);
-
-    UE_LOG(LogTemp, Log, TEXT("[VFXManager] SpawnEffect ID=%d Type=%d LOD=%d at (%.0f,%.0f,%.0f)"),
-        NewEntry.EffectID,
-        (int32)Request.EffectType,
-        (int32)LOD,
-        Request.SpawnLocation.X,
-        Request.SpawnLocation.Y,
-        Request.SpawnLocation.Z);
-
-    return NewEntry.EffectID;
-}
-
-void AVFX_Manager::StopEffect(int32 EffectID)
-{
-    for (int32 i = 0; i < ActiveEffects.Num(); ++i)
-    {
-        if (ActiveEffects[i].EffectID == EffectID)
-        {
-            UE_LOG(LogTemp, Log, TEXT("[VFXManager] StopEffect ID=%d"), EffectID);
-            ActiveEffects.RemoveAt(i);
-            return;
-        }
-    }
-}
-
-void AVFX_Manager::StopAllEffects()
-{
-    UE_LOG(LogTemp, Log, TEXT("[VFXManager] StopAllEffects — clearing %d active effects"), ActiveEffects.Num());
-    ActiveEffects.Empty();
-}
-
-int32 AVFX_Manager::SpawnCampfireEffect(FVector Location, float Duration)
-{
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::CampfireFire;
-    Req.SpawnLocation = Location;
-    Req.SpawnRotation = FRotator::ZeroRotator;
-    Req.Scale = FVector(1.0f);
-    Req.Duration = Duration;
-    Req.bLooping = (Duration <= 0.0f);
-    return SpawnEffect(Req);
-}
-
-int32 AVFX_Manager::SpawnDinoFootstepDust(FVector Location, FRotator Direction)
-{
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::DinoFootstepDust;
-    Req.SpawnLocation = Location;
-    Req.SpawnRotation = Direction;
-    Req.Scale = FVector(1.5f, 1.5f, 1.0f);
-    Req.Duration = 1.2f;
-    Req.bLooping = false;
-    return SpawnEffect(Req);
-}
-
-int32 AVFX_Manager::SpawnBloodImpact(FVector Location, FRotator SurfaceNormal)
-{
-    FVFX_SpawnRequest Req;
-    Req.EffectType = EVFX_EffectType::BloodImpact;
-    Req.SpawnLocation = Location;
-    Req.SpawnRotation = SurfaceNormal;
-    Req.Scale = FVector(1.0f);
-    Req.Duration = 0.6f;
-    Req.bLooping = false;
-    return SpawnEffect(Req);
-}
-
-void AVFX_Manager::SetWeatherVFX(bool bEnable, float Intensity)
-{
-    bWeatherVFXActive = bEnable;
-    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("[VFXManager] SetWeatherVFX — Enabled=%s Intensity=%.2f"),
-        bEnable ? TEXT("true") : TEXT("false"),
-        CurrentWeatherIntensity);
-
-    if (bEnable)
-    {
-        // Spawn rain effect at high altitude above player
-        FVFX_SpawnRequest RainReq;
-        RainReq.EffectType = EVFX_EffectType::Rain;
-        RainReq.SpawnLocation = FVector(0.0f, 0.0f, 800.0f);
-        RainReq.SpawnRotation = FRotator(-90.0f, 0.0f, 0.0f);
-        RainReq.Scale = FVector(CurrentWeatherIntensity * 2.0f);
-        RainReq.Duration = -1.0f; // Indefinite
-        RainReq.bLooping = true;
-        SpawnEffect(RainReq);
+        // On dinosaur: blood + flesh impact
+        ImpactComp = SpawnNiagaraAtLocation(NS_Dino_BloodImpact, Location, ImpactRot, 1.0f, true);
     }
     else
     {
-        // Stop all rain effects
-        for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
-        {
-            if (ActiveEffects[i].EffectType == EVFX_EffectType::Rain ||
-                ActiveEffects[i].EffectType == EVFX_EffectType::Snow)
-            {
-                StopEffect(ActiveEffects[i].EffectID);
-            }
-        }
+        // On rock/ground: rock/dirt chips
+        ImpactComp = SpawnNiagaraAtLocation(NS_Combat_RockImpact, Location, ImpactRot, 1.0f, true);
+    }
+    return ImpactComp;
+}
+
+void UVFX_Manager::SetWeatherVFX(EVFX_Category WeatherType, float Intensity)
+{
+    StopAllWeatherVFX();
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector WeatherLocation = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 1000.0f);
+    UNiagaraComponent* WeatherComp = nullptr;
+
+    switch (WeatherType)
+    {
+        case EVFX_Category::Weather:
+            // Default to rain
+            WeatherComp = SpawnNiagaraAtLocation(NS_Weather_Rain, WeatherLocation, FRotator::ZeroRotator, Intensity * 2.0f, false);
+            break;
+        default:
+            break;
+    }
+
+    if (WeatherComp)
+    {
+        WeatherComp->SetFloatParameter(TEXT("Intensity"), Intensity);
+        ActiveWeatherComponents.Add(WeatherComp);
+        UE_LOG(LogTemp, Log, TEXT("VFX_Manager: Weather VFX started — Intensity=%.2f"), Intensity);
     }
 }
 
-int32 AVFX_Manager::GetActiveEffectCount() const
+void UVFX_Manager::StopAllWeatherVFX()
 {
-    return ActiveEffects.Num();
+    for (UNiagaraComponent* Comp : ActiveWeatherComponents)
+    {
+        if (IsValid(Comp))
+        {
+            Comp->DeactivateImmediate();
+            Comp->DestroyComponent();
+        }
+    }
+    ActiveWeatherComponents.Empty();
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: All weather VFX stopped."));
 }
 
-EVFX_LODLevel AVFX_Manager::GetLODForDistance(FVector EffectLocation) const
+EVFX_LODLevel UVFX_Manager::GetLODLevelForDistance(float DistanceCm) const
 {
-    // Get camera/player location
-    UWorld* World = GetWorld();
-    if (!World) return EVFX_LODLevel::Near;
-
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC) return EVFX_LODLevel::Near;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return EVFX_LODLevel::Near;
-
-    float Distance = FVector::Dist(EffectLocation, PlayerPawn->GetActorLocation());
-
-    if (Distance <= LODDistance_Near)  return EVFX_LODLevel::Near;
-    if (Distance <= LODDistance_Mid)   return EVFX_LODLevel::Mid;
-    if (Distance <= LODDistance_Far)   return EVFX_LODLevel::Far;
+    if (DistanceCm <= LOD_HighMaxDistance)   return EVFX_LODLevel::High;
+    if (DistanceCm <= LOD_MediumMaxDistance) return EVFX_LODLevel::Medium;
+    if (DistanceCm <= LOD_LowMaxDistance)    return EVFX_LODLevel::Low;
     return EVFX_LODLevel::Culled;
+}
+
+int32 UVFX_Manager::GetActiveVFXCount() const
+{
+    int32 Count = 0;
+    for (const UNiagaraComponent* Comp : ActiveVFXComponents)
+    {
+        if (IsValid(Comp) && Comp->IsActive()) Count++;
+    }
+    return Count;
+}
+
+void UVFX_Manager::ClearAllVFX()
+{
+    for (UNiagaraComponent* Comp : ActiveVFXComponents)
+    {
+        if (IsValid(Comp))
+        {
+            Comp->DeactivateImmediate();
+            Comp->DestroyComponent();
+        }
+    }
+    ActiveVFXComponents.Empty();
+    StopAllWeatherVFX();
+    UE_LOG(LogTemp, Log, TEXT("VFX_Manager: All VFX cleared."));
+}
+
+// ============================================================
+// PRIVATE HELPERS
+// ============================================================
+
+void UVFX_Manager::CleanupFinishedVFX()
+{
+    // Remove invalid or finished components from tracking array
+    ActiveVFXComponents.RemoveAll([](UNiagaraComponent* Comp)
+    {
+        return !IsValid(Comp) || !Comp->IsActive();
+    });
+}
+
+UNiagaraComponent* UVFX_Manager::SpawnNiagaraAtLocation(
+    TSoftObjectPtr<UNiagaraSystem> NiagaraAsset,
+    const FVector& Location,
+    const FRotator& Rotation,
+    float Scale,
+    bool bAutoDestroy)
+{
+    UWorld* World = GetWorld();
+    if (!World) return nullptr;
+
+    // Budget check — prevent VFX overload
+    if (GetActiveVFXCount() >= MaxActiveVFXSystems)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_Manager: Active VFX budget exceeded (%d/%d). Skipping spawn."),
+            GetActiveVFXCount(), MaxActiveVFXSystems);
+        return nullptr;
+    }
+
+    // Load the Niagara system (sync load — assets should be pre-loaded in production)
+    UNiagaraSystem* LoadedSystem = NiagaraAsset.LoadSynchronous();
+    if (!LoadedSystem)
+    {
+        // Asset not yet assigned — log but don't crash
+        UE_LOG(LogTemp, Warning, TEXT("VFX_Manager: NiagaraSystem asset not loaded for spawn at (%.0f, %.0f, %.0f). Assign asset in editor."),
+            Location.X, Location.Y, Location.Z);
+        return nullptr;
+    }
+
+    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        World,
+        LoadedSystem,
+        Location,
+        Rotation,
+        FVector(Scale),
+        bAutoDestroy,
+        true,  // bAutoActivate
+        ENCPoolMethod::None
+    );
+
+    if (NiagaraComp)
+    {
+        ActiveVFXComponents.Add(NiagaraComp);
+        UE_LOG(LogTemp, Verbose, TEXT("VFX_Manager: Spawned %s at (%.0f, %.0f, %.0f) scale=%.2f"),
+            *LoadedSystem->GetName(), Location.X, Location.Y, Location.Z, Scale);
+    }
+
+    return NiagaraComp;
 }
