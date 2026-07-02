@@ -1,68 +1,86 @@
 // TranspersonalCharacter.cpp
-// Engine Architect #02 — Cycle PROD_CYCLE_AUTO_20260622_008
-// Full movement bindings + survival stats for the player character.
+// Engine Architect #02 — Cycle AUTO_20260702_001
+// Prehistoric survival game — ACharacter subclass with WASD movement, survival stats, camera boom
 
 #include "TranspersonalCharacter.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 ATranspersonalCharacter::ATranspersonalCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
     // Capsule
-    GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+    GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
-    // Movement defaults
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.f, 500.f, 0.f);
-    GetCharacterMovement()->JumpZVelocity = 600.f;
-    GetCharacterMovement()->AirControl = 0.35f;
-    GetCharacterMovement()->MaxWalkSpeed = 500.f;
-    GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-
-    bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw   = false;
-    bUseControllerRotationRoll  = false;
-
-    // Camera boom
+    // Camera boom — 3rd person follow camera
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 400.f;
+    CameraBoom->TargetArmLength = 400.0f;
     CameraBoom->bUsePawnControlRotation = true;
+    CameraBoom->SocketOffset = FVector(0.0f, 0.0f, 60.0f);
 
     // Follow camera
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
 
-    // Survival stats
-    Health    = 100.f;
-    MaxHealth = 100.f;
-    Hunger    = 100.f;
-    MaxHunger = 100.f;
-    Thirst    = 100.f;
-    MaxThirst = 100.f;
-    Stamina   = 100.f;
-    MaxStamina= 100.f;
-    Fear      = 0.f;
-    MaxFear   = 100.f;
+    // Character movement config
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+    GetCharacterMovement()->JumpZVelocity = 500.0f;
+    GetCharacterMovement()->AirControl = 0.35f;
+    GetCharacterMovement()->MaxWalkSpeed = 400.0f;
+    GetCharacterMovement()->MinAnalogWalkSpeed = 20.0f;
+    GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
+    GetCharacterMovement()->GravityScale = 1.5f;
 
-    bIsRunning = false;
-    bIsCrouching = false;
+    // Don't rotate character with camera
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationRoll = false;
+
+    // Survival stats — initial values
+    Health = 100.0f;
+    MaxHealth = 100.0f;
+    Hunger = 100.0f;
+    MaxHunger = 100.0f;
+    Thirst = 100.0f;
+    MaxThirst = 100.0f;
+    Stamina = 100.0f;
+    MaxStamina = 100.0f;
+    Fear = 0.0f;
+    MaxFear = 100.0f;
+    Temperature = 37.0f;
+
+    // Sprint
+    bIsSprinting = false;
+    WalkSpeed = 400.0f;
+    SprintSpeed = 700.0f;
+    CrouchSpeed = 180.0f;
+
+    // Drain rates per second
+    HungerDrainRate = 0.5f;
+    ThirstDrainRate = 0.8f;
+    StaminaDrainRate = 5.0f;
+    StaminaRegenRate = 8.0f;
+    FearDecayRate = 2.0f;
 }
 
 void ATranspersonalCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Add Enhanced Input mapping context
+    // Add input mapping context
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
         if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
@@ -74,29 +92,41 @@ void ATranspersonalCharacter::BeginPlay()
             }
         }
     }
+
+    // Start survival stat drain timer — tick every 1 second
+    GetWorldTimerManager().SetTimer(
+        SurvivalTimerHandle,
+        this,
+        &ATranspersonalCharacter::UpdateSurvivalStats,
+        1.0f,
+        true
+    );
 }
 
 void ATranspersonalCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Drain survival stats over time
-    const float DrainRate = DeltaTime * 0.5f;
-    Hunger  = FMath::Max(0.f, Hunger  - DrainRate * 0.3f);
-    Thirst  = FMath::Max(0.f, Thirst  - DrainRate * 0.5f);
-
-    // Stamina recovery when not running
-    if (!bIsRunning)
+    // Stamina regeneration when not sprinting
+    if (!bIsSprinting && Stamina < MaxStamina)
     {
-        Stamina = FMath::Min(MaxStamina, Stamina + DeltaTime * 10.f);
+        Stamina = FMath::Min(MaxStamina, Stamina + StaminaRegenRate * DeltaTime);
     }
-    else
+
+    // Sprint stamina drain
+    if (bIsSprinting && GetVelocity().SizeSquared() > 100.0f)
     {
-        Stamina = FMath::Max(0.f, Stamina - DeltaTime * 15.f);
-        if (Stamina <= 0.f)
+        Stamina = FMath::Max(0.0f, Stamina - StaminaDrainRate * DeltaTime);
+        if (Stamina <= 0.0f)
         {
-            StopRunning();
+            StopSprinting();
         }
+    }
+
+    // Fear natural decay
+    if (Fear > 0.0f)
+    {
+        Fear = FMath::Max(0.0f, Fear - FearDecayRate * DeltaTime);
     }
 }
 
@@ -106,103 +136,199 @@ void ATranspersonalCharacter::SetupPlayerInputComponent(UInputComponent* PlayerI
 
     if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
+        // Jump
         if (JumpAction)
         {
-            EIC->BindAction(JumpAction, ETriggerEvent::Started,   this, &ACharacter::Jump);
+            EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
             EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
         }
+
+        // Move
         if (MoveAction)
         {
             EIC->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ATranspersonalCharacter::Move);
         }
+
+        // Look
         if (LookAction)
         {
             EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &ATranspersonalCharacter::Look);
         }
+
+        // Sprint
         if (SprintAction)
         {
-            EIC->BindAction(SprintAction, ETriggerEvent::Started,   this, &ATranspersonalCharacter::StartRunning);
-            EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &ATranspersonalCharacter::StopRunning);
+            EIC->BindAction(SprintAction, ETriggerEvent::Started, this, &ATranspersonalCharacter::StartSprinting);
+            EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &ATranspersonalCharacter::StopSprinting);
         }
+
+        // Crouch
         if (CrouchAction)
         {
             EIC->BindAction(CrouchAction, ETriggerEvent::Started, this, &ATranspersonalCharacter::ToggleCrouch);
+        }
+
+        // Interact
+        if (InteractAction)
+        {
+            EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &ATranspersonalCharacter::Interact);
         }
     }
 }
 
 void ATranspersonalCharacter::Move(const FInputActionValue& Value)
 {
-    const FVector2D MovementVector = Value.Get<FVector2D>();
-    if (Controller)
+    FVector2D MovementVector = Value.Get<FVector2D>();
+
+    if (Controller != nullptr)
     {
         const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0.f, Rotation.Yaw, 0.f);
-        const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector RightDir   = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-        AddMovementInput(ForwardDir, MovementVector.Y);
-        AddMovementInput(RightDir,   MovementVector.X);
+        const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+        const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+        AddMovementInput(ForwardDirection, MovementVector.Y);
+        AddMovementInput(RightDirection, MovementVector.X);
     }
 }
 
 void ATranspersonalCharacter::Look(const FInputActionValue& Value)
 {
-    const FVector2D LookAxisVector = Value.Get<FVector2D>();
-    if (Controller)
+    FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+    if (Controller != nullptr)
     {
         AddControllerYawInput(LookAxisVector.X);
         AddControllerPitchInput(LookAxisVector.Y);
     }
 }
 
-void ATranspersonalCharacter::StartRunning()
+void ATranspersonalCharacter::StartSprinting()
 {
-    if (Stamina > 10.f)
+    if (Stamina > 10.0f)
     {
-        bIsRunning = true;
-        GetCharacterMovement()->MaxWalkSpeed = 900.f;
+        bIsSprinting = true;
+        GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
     }
 }
 
-void ATranspersonalCharacter::StopRunning()
+void ATranspersonalCharacter::StopSprinting()
 {
-    bIsRunning = false;
-    GetCharacterMovement()->MaxWalkSpeed = 500.f;
+    bIsSprinting = false;
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
 void ATranspersonalCharacter::ToggleCrouch()
 {
-    if (bIsCrouching)
+    if (bIsCrouched)
     {
         UnCrouch();
-        bIsCrouching = false;
+        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
     }
     else
     {
         Crouch();
-        bIsCrouching = true;
+        GetCharacterMovement()->MaxWalkSpeed = CrouchSpeed;
     }
 }
 
-float ATranspersonalCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-    AController* EventInstigator, AActor* DamageCauser)
+void ATranspersonalCharacter::Interact()
 {
-    const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
-    Health = FMath::Max(0.f, Health - ActualDamage);
-    if (Health <= 0.f)
+    // Raycast forward for interactable objects
+    FVector Start = GetActorLocation();
+    FVector End = Start + GetActorForwardVector() * 200.0f;
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this);
+
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, Params))
     {
-        OnDeath();
+        if (AActor* HitActor = HitResult.GetActor())
+        {
+            // Broadcast interaction event — Blueprint handles specific logic
+            OnInteract.Broadcast(HitActor);
+        }
     }
-    return ActualDamage;
 }
 
-void ATranspersonalCharacter::OnDeath()
+void ATranspersonalCharacter::UpdateSurvivalStats()
 {
-    // Disable input and ragdoll
-    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    // Drain hunger and thirst over time
+    Hunger = FMath::Max(0.0f, Hunger - HungerDrainRate);
+    Thirst = FMath::Max(0.0f, Thirst - ThirstDrainRate);
+
+    // If starving or dehydrated, apply health damage
+    if (Hunger <= 0.0f)
     {
-        PC->DisableInput(PC);
+        ApplyDamage(1.0f, nullptr);
     }
-    GetMesh()->SetSimulatePhysics(true);
-    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (Thirst <= 0.0f)
+    {
+        ApplyDamage(2.0f, nullptr);
+    }
+}
+
+void ATranspersonalCharacter::ApplyDamage(float DamageAmount, AActor* DamageCauser)
+{
+    Health = FMath::Max(0.0f, Health - DamageAmount);
+    OnHealthChanged.Broadcast(Health, MaxHealth);
+
+    if (Health <= 0.0f)
+    {
+        OnDeath.Broadcast();
+    }
+}
+
+void ATranspersonalCharacter::HealCharacter(float HealAmount)
+{
+    Health = FMath::Min(MaxHealth, Health + HealAmount);
+    OnHealthChanged.Broadcast(Health, MaxHealth);
+}
+
+void ATranspersonalCharacter::ConsumeFood(float FoodValue)
+{
+    Hunger = FMath::Min(MaxHunger, Hunger + FoodValue);
+}
+
+void ATranspersonalCharacter::DrinkWater(float WaterValue)
+{
+    Thirst = FMath::Min(MaxThirst, Thirst + WaterValue);
+}
+
+void ATranspersonalCharacter::AddFear(float FearAmount)
+{
+    Fear = FMath::Min(MaxFear, Fear + FearAmount);
+
+    // High fear causes movement speed penalty
+    if (Fear > 70.0f)
+    {
+        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed * 0.85f;
+    }
+}
+
+float ATranspersonalCharacter::GetHealthPercent() const
+{
+    return (MaxHealth > 0.0f) ? (Health / MaxHealth) : 0.0f;
+}
+
+float ATranspersonalCharacter::GetHungerPercent() const
+{
+    return (MaxHunger > 0.0f) ? (Hunger / MaxHunger) : 0.0f;
+}
+
+float ATranspersonalCharacter::GetThirstPercent() const
+{
+    return (MaxThirst > 0.0f) ? (Thirst / MaxThirst) : 0.0f;
+}
+
+float ATranspersonalCharacter::GetStaminaPercent() const
+{
+    return (MaxStamina > 0.0f) ? (Stamina / MaxStamina) : 0.0f;
+}
+
+float ATranspersonalCharacter::GetFearPercent() const
+{
+    return (MaxFear > 0.0f) ? (Fear / MaxFear) : 0.0f;
 }
