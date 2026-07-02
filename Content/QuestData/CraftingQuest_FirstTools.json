@@ -1,0 +1,82 @@
+{
+  "quest_id": "QUEST_CRAFTING_001",
+  "quest_name": "First Tools",
+  "quest_type": "Crafting",
+  "priority": "P1_Tutorial",
+  "giver_npc": "SurvivorNPC_Camp_001",
+  "description": "You have nothing. No weapons, no shelter, no fire. The first step to surviving this world is making tools from what the land gives you.",
+  "narrative_hook": "A stone catches your eye — flat on one side, sharp on the other. You've seen others use rocks like this. Maybe you can too.",
+
+  "objectives": [
+    {
+      "id": "OBJ_01",
+      "type": "Collect",
+      "resource": "Rock",
+      "quantity_required": 2,
+      "description": "Collect 2 rocks from the riverbed",
+      "hint": "Look near the water — flat grey stones work best",
+      "map_marker": "Rock_Craft_Savana_001"
+    },
+    {
+      "id": "OBJ_02",
+      "type": "Collect",
+      "resource": "Stick",
+      "quantity_required": 1,
+      "description": "Find a sturdy stick",
+      "hint": "Fallen branches near the tree line",
+      "map_marker": "Stick_Craft_Floresta_001"
+    },
+    {
+      "id": "OBJ_03",
+      "type": "Craft",
+      "item": "StoneAxe",
+      "description": "Craft a Stone Axe",
+      "hint": "Press C to open your crafting menu at the workbench",
+      "requires_location": "CraftingBench_Camp_001",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782991837505_CraftingNPC_Hint.mp3"
+    }
+  ],
+
+  "rewards": {
+    "items": ["StoneAxe"],
+    "survival_bonus": {
+      "stamina_max_increase": 10,
+      "description": "Confidence from crafting your first tool"
+    }
+  },
+
+  "failure_conditions": [
+    {
+      "condition": "PlayerDeath",
+      "description": "You died before completing your first tool"
+    }
+  ],
+
+  "follow_up_quest": "QUEST_CRAFTING_002",
+
+  "world_actors": {
+    "crafting_bench": "CraftingBench_Camp_001",
+    "campfire_spot": "CampfireSpot_Camp_001",
+    "quest_marker": "QuestMarker_FirstCraft_001",
+    "resource_pickups": [
+      "Rock_Craft_Savana_001",
+      "Rock_Craft_Savana_002",
+      "Stick_Craft_Floresta_001",
+      "Stick_Craft_Floresta_002",
+      "Leaf_Craft_Floresta_001"
+    ]
+  },
+
+  "audio": {
+    "quest_start_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782991837505_CraftingNPC_Hint.mp3",
+    "danger_warning_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782991850961_SurvivorNPC_Warning.mp3"
+  },
+
+  "meta": {
+    "agent": "#14 Quest & Mission Designer",
+    "cycle": "PROD_CYCLE_AUTO_20260702_008",
+    "estimated_duration_minutes": 5,
+    "difficulty": "Tutorial",
+    "tags": ["crafting", "tutorial", "survival", "tools"]
+  }
+}
