@@ -1,131 +1,175 @@
+// BiomeManager.h — Transpersonal Game Studio
+// Engine Architect #02 — PROD_CYCLE_AUTO_20260702_004
+// Biome system for Cretaceous world — 6 biome types with temperature, humidity, foliage density
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Math/RandomStream.h"
 #include "BiomeManager.generated.h"
 
-// Biome type enum — prehistoric Cretaceous biomes
+// ============================================================
+// ENUMS — must be at global scope (UE5 compilation rule)
+// ============================================================
+
 UENUM(BlueprintType)
-enum class EBiomeType : uint8
+enum class EEng_BiomeType : uint8
 {
-    Jungle         UMETA(DisplayName = "Jungle"),
-    Savanna        UMETA(DisplayName = "Savanna"),
-    Swamp          UMETA(DisplayName = "Swamp"),
-    VolcanicPlains UMETA(DisplayName = "Volcanic Plains"),
-    RiverDelta     UMETA(DisplayName = "River Delta"),
-    ForestCanopy   UMETA(DisplayName = "Forest Canopy"),
-    CoastalFlats   UMETA(DisplayName = "Coastal Flats"),
-    Unknown        UMETA(DisplayName = "Unknown")
+    OpenPlain    UMETA(DisplayName = "Open Plain / Savanna"),
+    Jungle       UMETA(DisplayName = "Dense Jungle"),
+    Swamp        UMETA(DisplayName = "Primordial Swamp"),
+    RiverDelta   UMETA(DisplayName = "River Delta"),
+    Coastal      UMETA(DisplayName = "Coastal Shore"),
+    Volcanic     UMETA(DisplayName = "Volcanic Badlands"),
+    COUNT        UMETA(Hidden)
 };
 
-// Per-biome data
+// ============================================================
+// STRUCTS — must be at global scope (UE5 compilation rule)
+// ============================================================
+
 USTRUCT(BlueprintType)
-struct FBiomeData
+struct FEng_BiomeConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Unknown;
+    EEng_BiomeType BiomeType = EEng_BiomeType::OpenPlain;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogColor = FLinearColor(1.0f, 0.85f, 0.6f, 1.0f);
+    FName DisplayName = FName("Unknown Biome");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    // Climate
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate", meta = (ClampMin = "-20.0", ClampMax = "70.0"))
+    float BaseTemperature = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity = 0.5f;
+
+    // Ecology
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FoliageDensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PredatorSpawnWeight = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HerbivoreSpawnWeight = 0.5f;
+
+    // Visual
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual", meta = (ClampMin = "0.0", ClampMax = "0.2"))
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 28.0f; // Celsius
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.6f; // 0-1
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float DinosaurSpawnMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.5f; // 0-1
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown Biome");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float AmbientLightIntensity = 1.0f;
 };
 
-/**
- * ABiomeManager — manages biome zones, transitions, and environmental properties
- * for the Cretaceous prehistoric survival world.
- * Placed once in the level at origin; queries are made by world position.
- */
+USTRUCT(BlueprintType)
+struct FEng_BiomeZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    int32 ZoneID = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    EEng_BiomeType BiomeType = EEng_BiomeType::OpenPlain;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FVector2D Center = FVector2D::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    float Radius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
+    FEng_BiomeConfig Config;
+};
+
+// ============================================================
+// UCLASS
+// ============================================================
+
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
-class TRANSPERSONALGAME_API ABiomeManager : public AActor
+class TRANSPERSONALGAME_API UBiomeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABiomeManager();
+    UBiomeManager();
 
-protected:
-    virtual void BeginPlay() override;
+    // UGameInstanceSubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    // ---- Query API ----
 
-    // --- Query API ---
+    /** Returns the dominant biome type at a given world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    EEng_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    /** Returns the biome type at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+    /** Returns the full config for a biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    FEng_BiomeConfig GetBiomeConfig(EEng_BiomeType BiomeType) const;
 
-    /** Returns full biome data at a given world location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FBiomeData GetBiomeDataAtLocation(FVector WorldLocation) const;
+    /** Returns 0-1 blend weight of a biome at a location (for smooth transitions) */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    float GetBlendWeightAtLocation(FVector WorldLocation, EEng_BiomeType BiomeType) const;
 
-    /** Returns the blended fog color for a transition between two biomes */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FLinearColor GetBlendedFogColor(FVector WorldLocation) const;
+    /** Returns true if location is within the specified biome zone */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    bool IsLocationInBiome(FVector WorldLocation, EEng_BiomeType BiomeType) const;
 
-    /** Returns temperature at location (affects survival stats) */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    /** Returns all biome types within SearchRadius of WorldLocation */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Query")
+    TArray<EEng_BiomeType> GetNeighboringBiomes(FVector WorldLocation, float SearchRadius = 1000.0f) const;
+
+    /** Returns temperature at location (°C), adjusted for altitude */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Climate")
     float GetTemperatureAtLocation(FVector WorldLocation) const;
 
-    /** Returns humidity at location (affects thirst drain rate) */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    /** Returns humidity at location (0-1) */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Climate")
     float GetHumidityAtLocation(FVector WorldLocation) const;
 
-    /** Returns dinosaur spawn multiplier for the biome at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetDinosaurSpawnMultiplierAtLocation(FVector WorldLocation) const;
+    // ---- Configuration ----
 
-    // --- Configuration ---
+    /** Re-seeds the world and regenerates all biome zones */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Config")
+    void SetWorldSeed(int32 NewSeed);
 
-    /** World radius used for biome zone calculations */
+    /** Returns display name for a biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Config")
+    FName GetBiomeDisplayName(EEng_BiomeType BiomeType) const;
+
+    /** Returns number of active biome zones */
+    UFUNCTION(BlueprintCallable, Category = "Biome|Config")
+    int32 GetActiveBiomeZoneCount() const;
+
+    // ---- State ----
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    EEng_BiomeType CurrentBiomeType;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float WorldRadius = 10000.0f;
+    int32 WorldSeedValue;
 
-    /** Number of biome zones to generate */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    int32 NumBiomeZones = 8;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config", meta = (ClampMin = "100.0", ClampMax = "2000.0"))
+    float BiomeBlendRadius;
 
-    /** Blend transition width in world units */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    float BiomeBlendRadius = 500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|State")
+    bool bBiomesInitialized;
 
-    /** All registered biome data entries */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Data")
-    TArray<FBiomeData> BiomeTable;
-
-    /** Enable debug visualization of biome zones */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
-    bool bDebugDrawBiomes = false;
-
-    // --- Internal ---
+    UPROPERTY(BlueprintReadOnly, Category = "Biome|Zones")
+    TArray<FEng_BiomeZone> ActiveBiomeZones;
 
 private:
-    /** Initialize default biome table with Cretaceous biomes */
-    void InitializeBiomeTable();
+    void InitializeBiomes();
+    void GenerateBiomeZones();
 
-    /** Compute biome index from world XY using angular sectors */
-    int32 ComputeBiomeSectorIndex(FVector WorldLocation) const;
-
-    /** Draw debug spheres for biome zone centers */
-    void DebugDrawBiomeZones() const;
+    TMap<EEng_BiomeType, FEng_BiomeConfig> BiomeConfigs;
+    FRandomStream BiomeRandom;
 };
