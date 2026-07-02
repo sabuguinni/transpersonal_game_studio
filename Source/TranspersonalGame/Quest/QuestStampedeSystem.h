@@ -2,168 +2,137 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "QuestTypes.h"
 #include "QuestStampedeSystem.generated.h"
 
 // ============================================================
-// EQuest_StampedePhase — phases of the Survive the Stampede quest
+// EQuest_StampedeObjective — ordered objectives for stampede quest
 // ============================================================
 UENUM(BlueprintType)
-enum class EQuest_StampedePhase : uint8
+enum class EQuest_StampedeObjective : uint8
 {
-    Inactive        UMETA(DisplayName = "Inactive"),
-    Triggered       UMETA(DisplayName = "Triggered"),       // Player entered danger zone
-    Escaping        UMETA(DisplayName = "Escaping"),        // Countdown active
-    Escaped         UMETA(DisplayName = "Escaped"),         // Reached safe zone in time
-    Crushed         UMETA(DisplayName = "Crushed"),         // Failed — time ran out
-    Completed       UMETA(DisplayName = "Completed")        // Reward collected
+    None            UMETA(DisplayName = "None"),
+    ObserveHerd     UMETA(DisplayName = "Observe the Herd"),
+    DetectThreat    UMETA(DisplayName = "Detect Incoming Predator"),
+    ReachHighGround UMETA(DisplayName = "Reach High Ground"),
+    SurviveWave     UMETA(DisplayName = "Survive Stampede Wave"),
+    Completed       UMETA(DisplayName = "Quest Completed")
 };
 
 // ============================================================
-// FQuest_StampedeObjective — single objective entry
+// EQuest_StampedeCause — mirrors ECrowd_StampedeCause for quest logic
+// ============================================================
+UENUM(BlueprintType)
+enum class EQuest_StampedeCause : uint8
+{
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Predator        UMETA(DisplayName = "Predator Sighting"),
+    Fire            UMETA(DisplayName = "Fire"),
+    Earthquake      UMETA(DisplayName = "Earthquake"),
+    PackLeaderDeath UMETA(DisplayName = "Pack Leader Death")
+};
+
+// ============================================================
+// FQuest_StampedeRecord — tracks one stampede event for journal
 // ============================================================
 USTRUCT(BlueprintType)
-struct FQuest_StampedeObjective
+struct FQuest_StampedeRecord
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    FString ObjectiveName;
+    UPROPERTY(BlueprintReadWrite, Category = "Quest|Stampede")
+    EQuest_StampedeCause Cause = EQuest_StampedeCause::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    FString Description;
+    UPROPERTY(BlueprintReadWrite, Category = "Quest|Stampede")
+    FVector TriggerLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    bool bCompleted = false;
+    UPROPERTY(BlueprintReadWrite, Category = "Quest|Stampede")
+    float PanicPeakLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    bool bOptional = false;
+    UPROPERTY(BlueprintReadWrite, Category = "Quest|Stampede")
+    bool bPlayerSurvived = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Quest|Stampede")
+    float TimeToReachSafety = 0.0f;
 };
 
 // ============================================================
-// AQuestStampedeTrigger — overlap box that starts the quest
+// AQuest_StampedeManager — orchestrates "Survive the Stampede" quest
 // ============================================================
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuestStampedeTrigger : public AActor
+class TRANSPERSONALGAME_API AQuest_StampedeManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AQuestStampedeTrigger();
+    AQuest_StampedeManager();
 
-    // --- Components ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede",
-        meta = (AllowPrivateAccess = "true"))
-    UBoxComponent* TriggerVolume;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede",
-        meta = (AllowPrivateAccess = "true"))
-    UStaticMeshComponent* DebugMarker;
-
-    // --- Quest State ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
-    EQuest_StampedePhase CurrentPhase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    float EscapeTimeLimit = 60.0f;          // seconds to reach safe zone
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
-    float RemainingTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    FVector SafeZoneLocation = FVector(3000.0f, -1500.0f, 400.0f);  // High ground
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    float SafeZoneRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
-    bool bQuestAlreadyCompleted = false;
-
-    // --- Objectives ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|Stampede")
-    TArray<FQuest_StampedeObjective> Objectives;
-
-    // --- Audio ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede|Audio")
-    FString TriggerVoiceURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782653080550_QuestNPC_Elder.mp3";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede|Audio")
-    FString CompletionVoiceURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782653095161_QuestNPC_Elder.mp3";
-
-    // --- UE5 Lifecycle ---
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // --- Quest API ---
+    // ---- Quest State ----
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Stampede")
+    EQuest_StampedeObjective CurrentObjective;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Stampede")
+    bool bQuestActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Stampede")
+    bool bQuestCompleted;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Quest|Stampede")
+    FQuest_StampedeRecord LastStampedeRecord;
+
+    // ---- Configuration ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    float HighGroundMinZ;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    float HerdObserveRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    float StampedeWaveSurviveTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|Stampede")
+    FVector HerdObserveLocation;
+
+    // ---- Quest Control ----
     UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
-    void ActivateStampedeQuest(AActor* PlayerActor);
+    void StartQuest();
 
     UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
-    void CheckSafeZoneReached(AActor* PlayerActor);
+    void AdvanceObjective(EQuest_StampedeObjective NewObjective);
 
     UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
-    void CompleteObjective(int32 ObjectiveIndex);
+    void OnStampedeTriggered(EQuest_StampedeCause Cause, FVector Location, float PanicLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
-    void FailQuest();
+    void OnStampedeEnded(bool bPlayerSurvived);
 
     UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    void CheckPlayerOnHighGround();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest|Stampede")
+    bool IsPlayerNearHerd() const;
+
+    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
+    FString GetObjectiveText() const;
+
+    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
+    float GetQuestProgress() const;
+
+    // ---- Delegates ----
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveChanged, EQuest_StampedeObjective, NewObjective);
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Stampede")
+    FOnObjectiveChanged OnObjectiveChanged;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestCompleted, FQuest_StampedeRecord, Record);
+    UPROPERTY(BlueprintAssignable, Category = "Quest|Stampede")
+    FOnQuestCompleted OnQuestCompleted;
+
+private:
+    float SurviveTimer;
+    bool bOnHighGround;
+
     void CompleteQuest();
-
-    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
-    float GetEscapeProgressPercent() const;
-
-    UFUNCTION(BlueprintPure, Category = "Quest|Stampede")
-    bool IsPlayerInSafeZone(AActor* PlayerActor) const;
-
-    UFUNCTION(CallInEditor, Category = "Quest|Stampede")
-    void ResetQuest();
-
-private:
-    UFUNCTION()
-    void OnTriggerOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
-
-    void InitialiseObjectives();
-    bool bTickActive = false;
-};
-
-// ============================================================
-// AQuestSafeZoneMarker — destination actor on high ground
-// ============================================================
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuestSafeZoneMarker : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AQuestSafeZoneMarker();
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|SafeZone",
-        meta = (AllowPrivateAccess = "true"))
-    UStaticMeshComponent* MarkerMesh;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest|SafeZone",
-        meta = (AllowPrivateAccess = "true"))
-    UBoxComponent* SafeVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest|SafeZone")
-    bool bIsActive = false;
-
-    virtual void BeginPlay() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|SafeZone")
-    void ActivateMarker();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest|SafeZone")
-    void DeactivateMarker();
-
-private:
-    UFUNCTION()
-    void OnSafeZoneOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-        bool bFromSweep, const FHitResult& SweepResult);
+    void FailQuest();
 };
