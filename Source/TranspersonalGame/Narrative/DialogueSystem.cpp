@@ -1,325 +1,336 @@
+// DialogueSystem.cpp — Narrative & Dialogue Agent #15
 #include "DialogueSystem.h"
-#include "Engine/World.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
 
-// ─── Audio URLs from TTS generation (PROD_CYCLE_AUTO_20260701_004) ────────────
-// Elder_Crafted:  https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884624367_QuestNPC_Elder.mp3
-// Tracker_Raptor: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884626228_QuestNPC_Tracker.mp3
-// Tracker_Mamm:   https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884633594_QuestNPC_Tracker_Hunt.mp3
-// Elder_Return:   https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884635451_QuestNPC_Elder_Return.mp3
+// ─────────────────────────────────────────────────────────────────────────────
+// ANarr_NPCDialogueActor
+// ─────────────────────────────────────────────────────────────────────────────
 
-UDialogueSystem::UDialogueSystem()
+ANarr_NPCDialogueActor::ANarr_NPCDialogueActor()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    CurrentState = ENarr_DialogueState::Idle;
-    ActiveTreeID = NAME_None;
-    ActiveNodeID = NAME_None;
+    PrimaryActorTick.bCanEverTick = true;
 
-    // Bake TTS audio URLs into CDO
-    ElderCraftedURL  = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884624367_QuestNPC_Elder.mp3");
-    TrackerRaptorURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884626228_QuestNPC_Tracker.mp3");
-    TrackerMammothURL= TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884633594_QuestNPC_Tracker_Hunt.mp3");
-    ElderReturnURL   = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782884635451_QuestNPC_Elder_Return.mp3");
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetSphereRadius(500.0f);
+    TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+    RootComponent = TriggerSphere;
+
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerEnterRange);
+    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_NPCDialogueActor::OnPlayerExitRange);
 }
 
-void UDialogueSystem::BeginPlay()
+void ANarr_NPCDialogueActor::BeginPlay()
 {
     Super::BeginPlay();
-    BuildDefaultTrees();
+    TriggerSphere->SetSphereRadius(TriggerRadius);
+    ActiveLineIndex = 0;
+    LineDisplayTimer = 0.0f;
+    bPlayerInRange = false;
 }
 
-// ─── Build default dialogue trees for Elder + Tracker ─────────────────────────
-
-void UDialogueSystem::BuildDefaultTrees()
+void ANarr_NPCDialogueActor::Tick(float DeltaTime)
 {
-    // ── Tree 1: Elder — First Tools arc ──────────────────────────────────────
+    Super::Tick(DeltaTime);
+
+    if (bPlayerInRange && LineDisplayTimer > 0.0f)
     {
-        FNarr_DialogueTree ElderTree;
-        ElderTree.TreeID      = FName("Elder_FirstTools");
-        ElderTree.OwnerRole   = ENarr_SpeakerRole::Elder;
-        ElderTree.RootNodeID  = FName("Elder_Node_01");
-        ElderTree.RequiredArc = ENarr_QuestArc::None;
-
-        // Node 01 — opening line (fires after Stone Axe crafted)
-        FNarr_DialogueNode Node01;
-        Node01.NodeID = FName("Elder_Node_01");
-        Node01.Line.LineID        = FName("Elder_Crafted_01");
-        Node01.Line.Speaker       = ENarr_SpeakerRole::Elder;
-        Node01.Line.LineText      = FText::FromString(TEXT("Stone Axe crafted. You are no longer just a survivor — you are a maker. The tribe remembers those who build. Now unlock the Bone Spear and hunt what hunts you."));
-        Node01.Line.AudioURL      = ElderCraftedURL;
-        Node01.Line.DisplayDuration = 11.0f;
-        Node01.Line.TriggerArc    = ENarr_QuestArc::FirstTools;
-        Node01.bIsEndNode         = false;
-
-        // Choice A — accept raptor nest quest
-        FNarr_DialogueChoice ChoiceA;
-        ChoiceA.ChoiceText   = FText::FromString(TEXT("Tell me about the raptor nest."));
-        ChoiceA.NextNodeID   = FName("Elder_Node_02");
-        ChoiceA.bUnlocksQuest = true;
-        ChoiceA.UnlockedArc  = ENarr_QuestArc::RaptorNest;
-        Node01.Choices.Add(ChoiceA);
-
-        // Choice B — ask about mammoth hunt
-        FNarr_DialogueChoice ChoiceB;
-        ChoiceB.ChoiceText   = FText::FromString(TEXT("What about the mammoth herd?"));
-        ChoiceB.NextNodeID   = FName("Elder_Node_03");
-        ChoiceB.bUnlocksQuest = false;
-        ChoiceB.UnlockedArc  = ENarr_QuestArc::None;
-        Node01.Choices.Add(ChoiceB);
-
-        ElderTree.Nodes.Add(Node01);
-
-        // Node 02 — raptor nest briefing
-        FNarr_DialogueNode Node02;
-        Node02.NodeID = FName("Elder_Node_02");
-        Node02.Line.LineID        = FName("Elder_Raptor_01");
-        Node02.Line.Speaker       = ENarr_SpeakerRole::Elder;
-        Node02.Line.LineText      = FText::FromString(TEXT("The nest is two ridges east. Three eggs — maybe four. Bring them back. The tribe needs the protein before the cold season."));
-        Node02.Line.AudioURL      = TEXT("");
-        Node02.Line.DisplayDuration = 8.0f;
-        Node02.Line.TriggerArc    = ENarr_QuestArc::RaptorNest;
-        Node02.bIsEndNode         = true;
-        ElderTree.Nodes.Add(Node02);
-
-        // Node 03 — mammoth briefing
-        FNarr_DialogueNode Node03;
-        Node03.NodeID = FName("Elder_Node_03");
-        Node03.Line.LineID        = FName("Elder_Mammoth_01");
-        Node03.Line.Speaker       = ENarr_SpeakerRole::Elder;
-        Node03.Line.LineText      = FText::FromString(TEXT("You came back. Not everyone does. The tribe needs more than survivors — it needs hunters who remember the land. Tell me what you saw out there."));
-        Node03.Line.AudioURL      = ElderReturnURL;
-        Node03.Line.DisplayDuration = 10.0f;
-        Node03.Line.TriggerArc    = ENarr_QuestArc::MammothHunt;
-        Node03.bIsEndNode         = true;
-        ElderTree.Nodes.Add(Node03);
-
-        DialogueTrees.Add(ElderTree);
-    }
-
-    // ── Tree 2: Tracker — Hunt briefings ─────────────────────────────────────
-    {
-        FNarr_DialogueTree TrackerTree;
-        TrackerTree.TreeID      = FName("Tracker_Hunt");
-        TrackerTree.OwnerRole   = ENarr_SpeakerRole::Tracker;
-        TrackerTree.RootNodeID  = FName("Tracker_Node_01");
-        TrackerTree.RequiredArc = ENarr_QuestArc::FirstTools;
-
-        // Node 01 — raptor nest raid briefing
-        FNarr_DialogueNode TNode01;
-        TNode01.NodeID = FName("Tracker_Node_01");
-        TNode01.Line.LineID        = FName("Tracker_Raptor_01");
-        TNode01.Line.Speaker       = ENarr_SpeakerRole::Tracker;
-        TNode01.Line.LineText      = FText::FromString(TEXT("First tools are done. Now the real test begins. The raptors nest two ridges east — three of them, maybe four. We go at dawn, before they spread out. Bring the spear."));
-        TNode01.Line.AudioURL      = TrackerRaptorURL;
-        TNode01.Line.DisplayDuration = 11.0f;
-        TNode01.Line.TriggerArc    = ENarr_QuestArc::RaptorNest;
-        TNode01.bIsEndNode         = false;
-
-        // Choice — track mammoth instead
-        FNarr_DialogueChoice TChoice;
-        TChoice.ChoiceText   = FText::FromString(TEXT("What about the mammoth herd moving south?"));
-        TChoice.NextNodeID   = FName("Tracker_Node_02");
-        TChoice.bUnlocksQuest = true;
-        TChoice.UnlockedArc  = ENarr_QuestArc::MammothHunt;
-        TNode01.Choices.Add(TChoice);
-
-        TrackerTree.Nodes.Add(TNode01);
-
-        // Node 02 — mammoth tracking briefing
-        FNarr_DialogueNode TNode02;
-        TNode02.NodeID = FName("Tracker_Node_02");
-        TNode02.Line.LineID        = FName("Tracker_Mammoth_01");
-        TNode02.Line.Speaker       = ENarr_SpeakerRole::Tracker;
-        TNode02.Line.LineText      = FText::FromString(TEXT("The mammoth does not fear you yet. But it will. Track it south, past the river bend. Watch where it drinks. That is where you set the ambush. Patience is the first weapon."));
-        TNode02.Line.AudioURL      = TrackerMammothURL;
-        TNode02.Line.DisplayDuration = 12.0f;
-        TNode02.Line.TriggerArc    = ENarr_QuestArc::MammothHunt;
-        TNode02.bIsEndNode         = true;
-        TrackerTree.Nodes.Add(TNode02);
-
-        DialogueTrees.Add(TrackerTree);
-    }
-}
-
-// ─── Core Dialogue API ────────────────────────────────────────────────────────
-
-bool UDialogueSystem::StartDialogue(FName TreeID)
-{
-    if (CurrentState != ENarr_DialogueState::Idle)
-    {
-        return false;
-    }
-
-    FNarr_DialogueTree* Tree = FindTree(TreeID);
-    if (!Tree)
-    {
-        return false;
-    }
-
-    // Check arc requirement
-    if (Tree->RequiredArc != ENarr_QuestArc::None && !HasUnlockedArc(Tree->RequiredArc))
-    {
-        return false;
-    }
-
-    ActiveTreeID = TreeID;
-    ActiveNodeID = Tree->RootNodeID;
-    CurrentState = ENarr_DialogueState::Speaking;
-
-    OnDialogueStarted.Broadcast(TreeID);
-
-    FNarr_DialogueNode* RootNode = FindNode(Tree, Tree->RootNodeID);
-    if (RootNode)
-    {
-        ShowNode(RootNode);
-    }
-
-    return true;
-}
-
-void UDialogueSystem::SelectChoice(int32 ChoiceIndex)
-{
-    if (CurrentState != ENarr_DialogueState::Waiting)
-    {
-        return;
-    }
-
-    FNarr_DialogueTree* Tree = FindTree(ActiveTreeID);
-    if (!Tree) { return; }
-
-    FNarr_DialogueNode* CurrentNode = FindNode(Tree, ActiveNodeID);
-    if (!CurrentNode) { return; }
-
-    if (!CurrentNode->Choices.IsValidIndex(ChoiceIndex))
-    {
-        return;
-    }
-
-    const FNarr_DialogueChoice& Choice = CurrentNode->Choices[ChoiceIndex];
-
-    // Unlock arc if this choice grants one
-    if (Choice.bUnlocksQuest && Choice.UnlockedArc != ENarr_QuestArc::None)
-    {
-        UnlockArc(Choice.UnlockedArc);
-    }
-
-    if (Choice.NextNodeID == NAME_None)
-    {
-        EndDialogue();
-        return;
-    }
-
-    ActiveNodeID = Choice.NextNodeID;
-    FNarr_DialogueNode* NextNode = FindNode(Tree, Choice.NextNodeID);
-    if (NextNode)
-    {
-        CurrentState = ENarr_DialogueState::Speaking;
-        ShowNode(NextNode);
-    }
-    else
-    {
-        EndDialogue();
-    }
-}
-
-void UDialogueSystem::EndDialogue()
-{
-    ActiveTreeID = NAME_None;
-    ActiveNodeID = NAME_None;
-    CurrentState = ENarr_DialogueState::Idle;
-    OnDialogueEnded.Broadcast();
-}
-
-bool UDialogueSystem::IsDialogueActive() const
-{
-    return CurrentState != ENarr_DialogueState::Idle;
-}
-
-FNarr_DialogueNode UDialogueSystem::GetCurrentNode() const
-{
-    FNarr_DialogueTree* Tree = const_cast<UDialogueSystem*>(this)->FindTree(ActiveTreeID);
-    if (!Tree) { return FNarr_DialogueNode(); }
-
-    FNarr_DialogueNode* Node = const_cast<UDialogueSystem*>(this)->FindNode(Tree, ActiveNodeID);
-    if (!Node) { return FNarr_DialogueNode(); }
-
-    return *Node;
-}
-
-bool UDialogueSystem::HasUnlockedArc(ENarr_QuestArc Arc) const
-{
-    return UnlockedArcs.Contains(Arc);
-}
-
-void UDialogueSystem::UnlockArc(ENarr_QuestArc Arc)
-{
-    if (!UnlockedArcs.Contains(Arc))
-    {
-        UnlockedArcs.Add(Arc);
-        OnQuestArcUnlocked.Broadcast(Arc);
-    }
-}
-
-void UDialogueSystem::RegisterDialogueTree(const FNarr_DialogueTree& Tree)
-{
-    // Remove existing tree with same ID if present
-    DialogueTrees.RemoveAll([&Tree](const FNarr_DialogueTree& Existing)
-    {
-        return Existing.TreeID == Tree.TreeID;
-    });
-    DialogueTrees.Add(Tree);
-}
-
-TArray<FNarr_DialogueChoice> UDialogueSystem::GetCurrentChoices() const
-{
-    FNarr_DialogueTree* Tree = const_cast<UDialogueSystem*>(this)->FindTree(ActiveTreeID);
-    if (!Tree) { return TArray<FNarr_DialogueChoice>(); }
-
-    FNarr_DialogueNode* Node = const_cast<UDialogueSystem*>(this)->FindNode(Tree, ActiveNodeID);
-    if (!Node) { return TArray<FNarr_DialogueChoice>(); }
-
-    return Node->Choices;
-}
-
-// ─── Private Helpers ──────────────────────────────────────────────────────────
-
-FNarr_DialogueTree* UDialogueSystem::FindTree(FName TreeID)
-{
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeID == TreeID)
+        LineDisplayTimer -= DeltaTime;
+        if (LineDisplayTimer <= 0.0f)
         {
-            return &Tree;
+            // Auto-advance to next line after display duration
+            if (ActiveLineIndex < DialogueSet.Lines.Num() - 1)
+            {
+                ActiveLineIndex++;
+                FNarr_DialogueLine& Line = DialogueSet.Lines[ActiveLineIndex];
+                Line.bHasBeenPlayed = true;
+                LineDisplayTimer = Line.DisplayDuration;
+            }
         }
     }
-    return nullptr;
 }
 
-FNarr_DialogueNode* UDialogueSystem::FindNode(FNarr_DialogueTree* Tree, FName NodeID)
+void ANarr_NPCDialogueActor::TriggerNextLine()
 {
-    if (!Tree) { return nullptr; }
-    for (FNarr_DialogueNode& Node : Tree->Nodes)
+    if (DialogueSet.Lines.Num() == 0) return;
+
+    if (ActiveLineIndex < DialogueSet.Lines.Num())
     {
-        if (Node.NodeID == NodeID)
+        FNarr_DialogueLine& Line = DialogueSet.Lines[ActiveLineIndex];
+        Line.bHasBeenPlayed = true;
+        LineDisplayTimer = Line.DisplayDuration;
+
+        if (ActiveLineIndex < DialogueSet.Lines.Num() - 1)
         {
-            return &Node;
+            ActiveLineIndex++;
         }
     }
-    return nullptr;
 }
 
-void UDialogueSystem::ShowNode(FNarr_DialogueNode* Node)
+FNarr_DialogueLine ANarr_NPCDialogueActor::GetCurrentLine() const
 {
-    if (!Node) { return; }
-
-    OnDialogueLineShown.Broadcast(Node->Line);
-
-    if (Node->bIsEndNode || Node->Choices.Num() == 0)
+    if (DialogueSet.Lines.IsValidIndex(ActiveLineIndex))
     {
-        CurrentState = ENarr_DialogueState::Finished;
-        EndDialogue();
+        return DialogueSet.Lines[ActiveLineIndex];
     }
-    else
+    return FNarr_DialogueLine();
+}
+
+bool ANarr_NPCDialogueActor::HasCraftingLine(const FString& ItemTag) const
+{
+    for (const FNarr_DialogueLine& Line : CraftingLinkedLines)
     {
-        CurrentState = ENarr_DialogueState::Waiting;
+        if (Line.RequiredItemTag.Equals(ItemTag, ESearchCase::IgnoreCase))
+        {
+            return true;
+        }
     }
+    return false;
+}
+
+FNarr_DialogueLine ANarr_NPCDialogueActor::GetCraftingLine(const FString& ItemTag) const
+{
+    for (const FNarr_DialogueLine& Line : CraftingLinkedLines)
+    {
+        if (Line.RequiredItemTag.Equals(ItemTag, ESearchCase::IgnoreCase))
+        {
+            return Line;
+        }
+    }
+    return FNarr_DialogueLine();
+}
+
+void ANarr_NPCDialogueActor::ResetDialogue()
+{
+    ActiveLineIndex = 0;
+    LineDisplayTimer = 0.0f;
+    for (FNarr_DialogueLine& Line : DialogueSet.Lines)
+    {
+        Line.bHasBeenPlayed = false;
+    }
+}
+
+int32 ANarr_NPCDialogueActor::GetTotalLines() const
+{
+    return DialogueSet.Lines.Num();
+}
+
+void ANarr_NPCDialogueActor::OnPlayerEnterRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
+    bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (OtherActor && OtherActor->IsA(ACharacter::StaticClass()))
+    {
+        bPlayerInRange = true;
+        // Start showing first line
+        if (DialogueSet.Lines.IsValidIndex(ActiveLineIndex))
+        {
+            LineDisplayTimer = DialogueSet.Lines[ActiveLineIndex].DisplayDuration;
+            DialogueSet.Lines[ActiveLineIndex].bHasBeenPlayed = true;
+        }
+    }
+}
+
+void ANarr_NPCDialogueActor::OnPlayerExitRange(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (OtherActor && OtherActor->IsA(ACharacter::StaticClass()))
+    {
+        bPlayerInRange = false;
+        LineDisplayTimer = 0.0f;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANarr_DialogueManager
+// ─────────────────────────────────────────────────────────────────────────────
+
+ANarr_DialogueManager::ANarr_DialogueManager()
+{
+    PrimaryActorTick.bCanEverTick = false;
+}
+
+void ANarr_DialogueManager::BeginPlay()
+{
+    Super::BeginPlay();
+    RegisterDefaultJournalEntries();
+
+    // Auto-discover NPC dialogue actors in the world
+    TArray<AActor*> Found;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANarr_NPCDialogueActor::StaticClass(), Found);
+    for (AActor* A : Found)
+    {
+        ANarr_NPCDialogueActor* NPC = Cast<ANarr_NPCDialogueActor>(A);
+        if (NPC)
+        {
+            RegisteredNPCs.Add(NPC);
+        }
+    }
+}
+
+bool ANarr_DialogueManager::UnlockJournalEntry(const FString& TriggerTag)
+{
+    for (FNarr_JournalEntry& Entry : JournalEntries)
+    {
+        if (!Entry.bIsUnlocked && Entry.UnlockTrigger.Equals(TriggerTag, ESearchCase::IgnoreCase))
+        {
+            Entry.bIsUnlocked = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+TArray<FNarr_JournalEntry> ANarr_DialogueManager::GetUnlockedEntries() const
+{
+    TArray<FNarr_JournalEntry> Result;
+    for (const FNarr_JournalEntry& Entry : JournalEntries)
+    {
+        if (Entry.bIsUnlocked)
+        {
+            Result.Add(Entry);
+        }
+    }
+    return Result;
+}
+
+TArray<FNarr_JournalEntry> ANarr_DialogueManager::GetEntriesByCategory(ENarr_JournalCategory Category) const
+{
+    TArray<FNarr_JournalEntry> Result;
+    for (const FNarr_JournalEntry& Entry : JournalEntries)
+    {
+        if (Entry.bIsUnlocked && Entry.Category == Category)
+        {
+            Result.Add(Entry);
+        }
+    }
+    return Result;
+}
+
+void ANarr_DialogueManager::RegisterNPC(ANarr_NPCDialogueActor* NPC)
+{
+    if (NPC && !RegisteredNPCs.Contains(NPC))
+    {
+        RegisteredNPCs.Add(NPC);
+    }
+}
+
+void ANarr_DialogueManager::OnPlayerCraftedItem(const FString& ItemTag)
+{
+    // Unlock crafting journal entry
+    UnlockJournalEntry(FString::Printf(TEXT("Crafted%s"), *ItemTag));
+
+    // Notify all NPCs that have a crafting-linked line for this item
+    for (ANarr_NPCDialogueActor* NPC : RegisteredNPCs)
+    {
+        if (NPC && NPC->HasCraftingLine(ItemTag))
+        {
+            // NPC will serve crafting-specific dialogue next time player is in range
+            UE_LOG(LogTemp, Log, TEXT("Narr: NPC %s has crafting line for %s"), *NPC->GetName(), *ItemTag);
+        }
+    }
+}
+
+void ANarr_DialogueManager::OnPlayerEncounteredDino(const FString& DinoSpecies)
+{
+    UnlockJournalEntry(FString::Printf(TEXT("Saw%s"), *DinoSpecies));
+    UE_LOG(LogTemp, Log, TEXT("Narr: Journal entry unlocked for dino encounter: %s"), *DinoSpecies);
+}
+
+int32 ANarr_DialogueManager::GetUnlockedEntryCount() const
+{
+    int32 Count = 0;
+    for (const FNarr_JournalEntry& Entry : JournalEntries)
+    {
+        if (Entry.bIsUnlocked) Count++;
+    }
+    return Count;
+}
+
+void ANarr_DialogueManager::RegisterDefaultJournalEntries()
+{
+    JournalEntries.Empty();
+
+    // ── Survival entries ──────────────────────────────────────────────────────
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("First Night");
+        E.EntryBody = TEXT("The cold comes fast after dark. I found shelter under a rock overhang. The sounds in the dark are constant — growls, distant crashes, things moving through the undergrowth. I must build a fire before the next nightfall.");
+        E.Category = ENarr_JournalCategory::Survival;
+        E.UnlockTrigger = TEXT("SurvivedFirstNight");
+        JournalEntries.Add(E);
+    }
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("Reading the Land");
+        E.EntryBody = TEXT("The elder showed me: broken branches at shoulder height mean something large passed through recently. Claw marks on bark mean a predator marked territory. Flattened grass in a circle means a nest. Avoid all three.");
+        E.Category = ENarr_JournalCategory::Survival;
+        E.UnlockTrigger = TEXT("MetHunterElder");
+        JournalEntries.Add(E);
+    }
+
+    // ── Crafting entries ──────────────────────────────────────────────────────
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("The Stone Axe");
+        E.EntryBody = TEXT("Two sharp rocks, struck together at the right angle, produce a blade that holds an edge. Bind it to a straight stick with hide strips. The elder calls it the first tool — the one that separates the hunted from the hunter.");
+        E.Category = ENarr_JournalCategory::Crafting;
+        E.UnlockTrigger = TEXT("CraftedStoneAxe");
+        JournalEntries.Add(E);
+    }
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("Fire");
+        E.EntryBody = TEXT("Three dry sticks, friction, patience. The fire keeps the night hunters away. They fear it — even the large ones. A campfire is not just warmth; it is a boundary that says: this space is claimed.");
+        E.Category = ENarr_JournalCategory::Crafting;
+        E.UnlockTrigger = TEXT("CraftedCampfire");
+        JournalEntries.Add(E);
+    }
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("Water Container");
+        E.EntryBody = TEXT("A hollowed rock sealed with leaf resin holds water for half a day. Not elegant, but it means I can move away from the river without dying of thirst. The craftsman says the next step is clay — if I can find a riverbed deposit.");
+        E.Category = ENarr_JournalCategory::Crafting;
+        E.UnlockTrigger = TEXT("CraftedWaterContainer");
+        JournalEntries.Add(E);
+    }
+
+    // ── Dinosaur lore entries ─────────────────────────────────────────────────
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("The Great Rex");
+        E.EntryBody = TEXT("I saw it from the ridge. Twelve metres of muscle and bone, moving through the valley like a storm. It did not see me. The elder says they hunt by motion and sound, not smell. Stay still. Stay downwind. Do not run.");
+        E.Category = ENarr_JournalCategory::Dinosaur;
+        E.UnlockTrigger = TEXT("SawTRex");
+        JournalEntries.Add(E);
+    }
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("Raptor Pack");
+        E.EntryBody = TEXT("Three of them, working together. One drew my attention from the front while two flanked from the sides. I only survived because I reached the cliff face — they would not climb. They are not just fast. They are intelligent.");
+        E.Category = ENarr_JournalCategory::Dinosaur;
+        E.UnlockTrigger = TEXT("SawRaptors");
+        JournalEntries.Add(E);
+    }
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("The Long-Necks");
+        E.EntryBody = TEXT("The herd of long-necks is moving north. Hundreds of them, shaking the ground with every step. They are not dangerous unless you are beneath their feet. Follow at distance — where they go, there is always water.");
+        E.Category = ENarr_JournalCategory::Dinosaur;
+        E.UnlockTrigger = TEXT("SawBrachiosaurus");
+        JournalEntries.Add(E);
+    }
+
+    // ── Territory entries ─────────────────────────────────────────────────────
+    {
+        FNarr_JournalEntry E;
+        E.EntryTitle = TEXT("The Valley");
+        E.EntryBody = TEXT("The valley runs north to south, cut by a river that never dries. The elder says our tribe has camped here for three generations. The eastern ridge is rex territory — we do not go there after dark. The western forest belongs to the pack hunters.");
+        E.Category = ENarr_JournalCategory::Territory;
+        E.UnlockTrigger = TEXT("ExploredValley");
+        JournalEntries.Add(E);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Narr: Registered %d default journal entries"), JournalEntries.Num());
 }
