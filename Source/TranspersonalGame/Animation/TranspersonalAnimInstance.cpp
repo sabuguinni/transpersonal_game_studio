@@ -1,31 +1,27 @@
 #include "TranspersonalAnimInstance.h"
+
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "CollisionQueryParams.h"
 
 UTranspersonalAnimInstance::UTranspersonalAnimInstance()
 {
-    FootIKTraceDistance = 100.0f;
+    FootTraceLength = 50.0f;
     FootIKInterpSpeed = 15.0f;
-    WalkSpeedThreshold = 180.0f;
-    RunSpeedThreshold = 450.0f;
+    PelvisInterpSpeed = 10.0f;
 }
 
 void UTranspersonalAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-    // Cache owner character and movement component
-    APawn* OwnerPawn = TryGetPawnOwner();
-    if (OwnerPawn)
+    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwnerCharacter)
     {
-        OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-        if (OwnerCharacter)
-        {
-            MovementComponent = OwnerCharacter->GetCharacterMovement();
-        }
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
     }
 }
 
@@ -35,97 +31,62 @@ void UTranspersonalAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
     if (!OwnerCharacter || !MovementComponent)
     {
-        // Re-attempt cache if not set
-        APawn* OwnerPawn = TryGetPawnOwner();
-        if (OwnerPawn)
+        OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+        if (OwnerCharacter)
         {
-            OwnerCharacter = Cast<ACharacter>(OwnerPawn);
-            if (OwnerCharacter)
-            {
-                MovementComponent = OwnerCharacter->GetCharacterMovement();
-            }
+            MovementComponent = OwnerCharacter->GetCharacterMovement();
         }
         return;
     }
 
-    // ─── Velocity & Speed ─────────────────────────────────────────────
-    FVector Velocity = MovementComponent->Velocity;
-    Speed = Velocity.Size2D(); // Horizontal speed only
-    VerticalVelocity = Velocity.Z;
+    // ─── Ground speed ────────────────────────────────────────────
+    FVector Velocity = OwnerCharacter->GetVelocity();
+    Velocity.Z = 0.0f;
+    GroundSpeed = Velocity.Size();
 
-    // Direction (angle between character forward and velocity)
-    if (Speed > 1.0f)
+    bIsMoving = GroundSpeed > 3.0f;
+    bIsInAir = MovementComponent->IsFalling();
+    bIsCrouching = MovementComponent->IsCrouching();
+    bIsSprinting = GroundSpeed > 400.0f;
+
+    // ─── Direction (strafe angle) ─────────────────────────────────
+    if (bIsMoving)
     {
-        FRotator AimRotation = OwnerCharacter->GetActorRotation();
-        FRotator MovementRotation = UKismetMathLibrary::MakeRotFromX(Velocity);
-        FRotator DeltaRot = UKismetMathLibrary::NormalizedDeltaRotator(MovementRotation, AimRotation);
-        Direction = DeltaRot.Yaw;
+        FRotator ActorRot = OwnerCharacter->GetActorRotation();
+        FRotator VelocityRot = Velocity.Rotation();
+        Direction = UKismetMathLibrary::NormalizedDeltaRotator(VelocityRot, ActorRot).Yaw;
     }
     else
     {
         Direction = 0.0f;
     }
 
-    // ─── Movement State ───────────────────────────────────────────────
-    bIsInAir = MovementComponent->IsFalling();
-    bIsCrouching = OwnerCharacter->bIsCrouched;
+    // ─── Lean (lateral acceleration) ─────────────────────────────
+    FVector Accel = MovementComponent->GetCurrentAcceleration();
+    float LateralAccel = FVector::DotProduct(Accel, OwnerCharacter->GetActorRightVector());
+    LeanAngle = FMath::FInterpTo(LeanAngle, FMath::Clamp(LateralAccel * 0.02f, -15.0f, 15.0f), DeltaSeconds, 5.0f);
 
-    // Acceleration magnitude for lean effects
-    AccelerationMagnitude = MovementComponent->GetCurrentAcceleration().Size();
-
-    // Landing detection
-    if (bWasInAir && !bIsInAir)
-    {
-        LandingTimer = 0.35f; // Hold land state for 350ms
-    }
-    bWasInAir = bIsInAir;
-
-    if (LandingTimer > 0.0f)
-    {
-        LandingTimer -= DeltaSeconds;
-    }
-
-    // ─── Locomotion State Machine ──────────────────────────────────────
+    // ─── Update subsystems ────────────────────────────────────────
     UpdateLocomotionState();
+    UpdateFootIK(DeltaSeconds);
+    UpdateSurvivalReactivity();
 
-    // ─── Foot IK ──────────────────────────────────────────────────────
-    if (!bIsInAir && !bIsDead)
-    {
-        UpdateFootIK(FName("foot_l"), LeftFootIK);
-        UpdateFootIK(FName("foot_r"), RightFootIK);
+    // ─── Upper body layer weight (combat) ────────────────────────
+    float TargetUpperBodyWeight = bIsAttacking ? 1.0f : 0.0f;
+    UpperBodyLayerWeight = FMath::FInterpTo(UpperBodyLayerWeight, TargetUpperBodyWeight, DeltaSeconds, 8.0f);
+}
 
-        // Pelvis offset = lowest foot offset to prevent floating
-        PelvisOffset = FMath::Min(LeftFootIK.EffectorOffset, RightFootIK.EffectorOffset);
-        PelvisOffset = FMath::Clamp(PelvisOffset, -30.0f, 0.0f);
-    }
-    else
-    {
-        // Reset foot IK when in air
-        LeftFootIK.EffectorOffset = FMath::FInterpTo(LeftFootIK.EffectorOffset, 0.0f, DeltaSeconds, FootIKInterpSpeed);
-        RightFootIK.EffectorOffset = FMath::FInterpTo(RightFootIK.EffectorOffset, 0.0f, DeltaSeconds, FootIKInterpSpeed);
-        PelvisOffset = FMath::FInterpTo(PelvisOffset, 0.0f, DeltaSeconds, FootIKInterpSpeed);
-    }
+void UTranspersonalAnimInstance::NativePostEvaluateAnimation()
+{
+    Super::NativePostEvaluateAnimation();
+    // Post-evaluate: foot IK bone transforms applied here by AnimGraph
 }
 
 void UTranspersonalAnimInstance::UpdateLocomotionState()
 {
-    PreviousLocomotionState = LocomotionState;
-
-    if (bIsDead)
-    {
-        LocomotionState = EAnim_LocomotionState::Death;
-        return;
-    }
-
-    if (LandingTimer > 0.0f)
-    {
-        LocomotionState = EAnim_LocomotionState::Land;
-        return;
-    }
-
     if (bIsInAir)
     {
-        if (VerticalVelocity > 0.0f)
+        if (OwnerCharacter && OwnerCharacter->GetVelocity().Z > 0.0f)
         {
             LocomotionState = EAnim_LocomotionState::Jump;
         }
@@ -142,51 +103,65 @@ void UTranspersonalAnimInstance::UpdateLocomotionState()
         return;
     }
 
-    // Speed-based locomotion
-    // Low health causes forced walk (limping)
-    float EffectiveRunThreshold = RunSpeedThreshold;
-    if (HealthRatio < 0.3f)
-    {
-        EffectiveRunThreshold = 9999.0f; // Can't run when critically injured
-    }
-
-    if (Speed < 10.0f)
+    if (!bIsMoving)
     {
         LocomotionState = EAnim_LocomotionState::Idle;
+        return;
     }
-    else if (Speed < WalkSpeedThreshold)
+
+    if (bIsSprinting)
     {
-        LocomotionState = EAnim_LocomotionState::Walk;
+        LocomotionState = EAnim_LocomotionState::Sprint;
     }
-    else if (Speed < EffectiveRunThreshold || !bIsSprinting)
+    else if (GroundSpeed > 200.0f)
     {
         LocomotionState = EAnim_LocomotionState::Run;
     }
     else
     {
-        LocomotionState = EAnim_LocomotionState::Sprint;
+        LocomotionState = EAnim_LocomotionState::Walk;
     }
 }
 
-void UTranspersonalAnimInstance::UpdateFootIK(const FName& FootBoneName, FAnim_FootIKData& OutFootData)
+void UTranspersonalAnimInstance::UpdateFootIK(float DeltaSeconds)
+{
+    if (!OwnerCharacter || bIsInAir)
+    {
+        // Reset IK when in air
+        LeftFootIK.IKAlpha = FMath::FInterpTo(LeftFootIK.IKAlpha, 0.0f, DeltaSeconds, 10.0f);
+        RightFootIK.IKAlpha = FMath::FInterpTo(RightFootIK.IKAlpha, 0.0f, DeltaSeconds, 10.0f);
+        PelvisOffset = FMath::FInterpTo(PelvisOffset, 0.0f, DeltaSeconds, PelvisInterpSpeed);
+        return;
+    }
+
+    SolveFootIK(FName("foot_l"), LeftFootIK, DeltaSeconds);
+    SolveFootIK(FName("foot_r"), RightFootIK, DeltaSeconds);
+
+    // Pelvis offset = lower of the two foot offsets to prevent stretching
+    float TargetPelvisOffset = FMath::Min(LeftFootIK.FootLocation.Z, RightFootIK.FootLocation.Z);
+    TargetPelvisOffset = FMath::Clamp(TargetPelvisOffset, -20.0f, 0.0f);
+    PelvisOffset = FMath::FInterpTo(PelvisOffset, TargetPelvisOffset, DeltaSeconds, PelvisInterpSpeed);
+}
+
+void UTranspersonalAnimInstance::SolveFootIK(const FName& FootBoneName, FAnim_FootIKData& OutIKData, float DeltaSeconds)
 {
     if (!OwnerCharacter)
     {
         return;
     }
 
-    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
-    if (!MeshComp)
+    USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+    if (!Mesh)
     {
         return;
     }
 
-    // Get foot bone world location
-    FVector FootWorldLocation = MeshComp->GetSocketLocation(FootBoneName);
+    // Get bone world location
+    FVector FootWorldLocation = Mesh->GetSocketLocation(FootBoneName);
 
-    // Trace downward from foot
-    FVector TraceStart = FootWorldLocation + FVector(0.0f, 0.0f, FootIKTraceDistance * 0.5f);
-    FVector TraceEnd = FootWorldLocation - FVector(0.0f, 0.0f, FootIKTraceDistance);
+    // Trace downward from foot to find ground
+    FVector TraceStart = FootWorldLocation + FVector(0.0f, 0.0f, FootTraceLength);
+    FVector TraceEnd   = FootWorldLocation - FVector(0.0f, 0.0f, FootTraceLength * 2.0f);
 
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
@@ -200,77 +175,79 @@ void UTranspersonalAnimInstance::UpdateFootIK(const FName& FootBoneName, FAnim_F
         QueryParams
     );
 
+    OutIKData.bFootOnGround = bHit;
+
     if (bHit)
     {
-        OutFootData.bFootOnGround = true;
-
-        // Calculate how much the foot needs to move down/up
-        float HitZ = HitResult.ImpactPoint.Z;
-        float FootZ = FootWorldLocation.Z;
-        float TargetOffset = HitZ - FootZ;
+        // Calculate Z offset relative to character capsule base
+        float CharacterBaseZ = OwnerCharacter->GetActorLocation().Z
+            - OwnerCharacter->GetSimpleCollisionHalfHeight();
+        float FootOffsetZ = HitResult.ImpactPoint.Z - CharacterBaseZ;
 
         // Smooth interpolation
-        OutFootData.EffectorOffset = FMath::FInterpTo(
-            OutFootData.EffectorOffset,
-            TargetOffset,
-            GetWorld()->GetDeltaSeconds(),
+        OutIKData.FootLocation = FMath::VInterpTo(
+            OutIKData.FootLocation,
+            FVector(0.0f, 0.0f, FootOffsetZ),
+            DeltaSeconds,
             FootIKInterpSpeed
         );
 
         // Foot rotation from surface normal
-        FVector Normal = HitResult.ImpactNormal;
         FRotator TargetRot = FRotator(
-            FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z)),
+            FMath::RadiansToDegrees(FMath::Atan2(HitResult.ImpactNormal.X, HitResult.ImpactNormal.Z)),
             0.0f,
-            FMath::RadiansToDegrees(FMath::Atan2(-Normal.Y, Normal.Z))
+            -FMath::RadiansToDegrees(FMath::Atan2(HitResult.ImpactNormal.Y, HitResult.ImpactNormal.Z))
         );
-
-        OutFootData.FootRotation = FMath::RInterpTo(
-            OutFootData.FootRotation,
-            TargetRot,
-            GetWorld()->GetDeltaSeconds(),
-            FootIKInterpSpeed
-        );
-
-        OutFootData.FootLocation = HitResult.ImpactPoint;
+        OutIKData.FootRotation = FMath::RInterpTo(OutIKData.FootRotation, TargetRot, DeltaSeconds, FootIKInterpSpeed);
+        OutIKData.IKAlpha = FMath::FInterpTo(OutIKData.IKAlpha, 1.0f, DeltaSeconds, FootIKInterpSpeed);
     }
     else
     {
-        OutFootData.bFootOnGround = false;
-        OutFootData.EffectorOffset = FMath::FInterpTo(
-            OutFootData.EffectorOffset,
-            0.0f,
-            GetWorld()->GetDeltaSeconds(),
-            FootIKInterpSpeed
-        );
+        OutIKData.FootLocation = FMath::VInterpTo(OutIKData.FootLocation, FVector::ZeroVector, DeltaSeconds, FootIKInterpSpeed);
+        OutIKData.FootRotation = FMath::RInterpTo(OutIKData.FootRotation, FRotator::ZeroRotator, DeltaSeconds, FootIKInterpSpeed);
+        OutIKData.IKAlpha = FMath::FInterpTo(OutIKData.IKAlpha, 0.0f, DeltaSeconds, FootIKInterpSpeed);
     }
 }
 
-void UTranspersonalAnimInstance::SetDead(bool bDead)
+void UTranspersonalAnimInstance::UpdateSurvivalReactivity()
 {
-    bIsDead = bDead;
-    if (bDead)
+    // Exhaustion blend: kicks in when stamina < 30%
+    float StaminaRatio = SurvivalState.Stamina / 100.0f;
+    float TargetExhaustion = StaminaRatio < 0.3f ? (1.0f - (StaminaRatio / 0.3f)) : 0.0f;
+    ExhaustionBlend = FMath::FInterpConstantTo(ExhaustionBlend, TargetExhaustion, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f, 0.5f);
+
+    // Wounded limping: kicks in when health < 40%
+    float HealthRatio = SurvivalState.Health / 100.0f;
+    float TargetLimping = HealthRatio < 0.4f ? (1.0f - (HealthRatio / 0.4f)) : 0.0f;
+    WoundedLimping = FMath::FInterpConstantTo(WoundedLimping, TargetLimping, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f, 0.3f);
+
+    // Fear tremor: high fear causes subtle body tremor
+    float TargetTremor = SurvivalState.Fear / 100.0f;
+    FearTremor = FMath::FInterpTo(FearTremor, TargetTremor, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f, 2.0f);
+}
+
+void UTranspersonalAnimInstance::SetLocomotionState(EAnim_LocomotionState NewState)
+{
+    LocomotionState = NewState;
+}
+
+void UTranspersonalAnimInstance::TriggerAttackMontage()
+{
+    bIsAttacking = true;
+    // Montage play is handled by Blueprint or Character — AnimInstance signals readiness
+    // Reset after a short delay (driven by montage notify in BP)
+}
+
+void UTranspersonalAnimInstance::TriggerJumpMontage()
+{
+    if (!bIsInAir)
     {
-        LocomotionState = EAnim_LocomotionState::Death;
+        LocomotionState = EAnim_LocomotionState::Jump;
     }
 }
 
-void UTranspersonalAnimInstance::SetCombatStance(bool bCombat)
+float UTranspersonalAnimInstance::GetSpeedNormalized() const
 {
-    bIsInCombat = bCombat;
-    // Smoothly blend upper body layer weight
-    UpperBodyLayerWeight = bCombat ? 1.0f : 0.0f;
-}
-
-void UTranspersonalAnimInstance::UpdateSurvivalStats(float Health, float Stamina, float Fear)
-{
-    HealthRatio = FMath::Clamp(Health, 0.0f, 1.0f);
-    StaminaRatio = FMath::Clamp(Stamina, 0.0f, 1.0f);
-    FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
-
-    // Low stamina forces walk
-    if (StaminaRatio < 0.1f)
-    {
-        bIsSprinting = false;
-    }
+    // Returns 0.0 (idle) to 1.0 (full sprint at 600 units/s)
+    return FMath::Clamp(GroundSpeed / 600.0f, 0.0f, 1.0f);
 }
