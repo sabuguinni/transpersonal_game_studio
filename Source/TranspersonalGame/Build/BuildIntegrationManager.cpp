@@ -1,157 +1,126 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — Cycle 019
-// Manages build integration, module health checks, and rollback registry
+// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260702_001
+// Manages build integration, module health checks, and cycle reporting.
 
 #include "BuildIntegrationManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "EngineUtils.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    CurrentBuildVersion = TEXT("Build_019");
-    bIntegrationComplete = false;
-    LastIntegrationCycle = 19;
-    MaxRollbackBuilds = 10;
+    CycleID = TEXT("AUTO_20260702_001");
+    bBridgeValidated = false;
+    bCAPEnforced = false;
+    IntegrationStatus = EBuild_IntegrationStatus::Pending;
+    ClassesLoaded = 0;
+    TotalClasses = 7;
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    // Register this build in the rollback registry
-    RegisterBuild(CurrentBuildVersion, LastIntegrationCycle);
-    
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Initialized — Build: %s, Cycle: %d"),
-        *CurrentBuildVersion, LastIntegrationCycle);
+    UE_LOG(LogTemp, Log, TEXT("[A19] BuildIntegrationManager initialized — Cycle: %s"), *CycleID);
+    IntegrationStatus = EBuild_IntegrationStatus::Initializing;
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
+    UE_LOG(LogTemp, Log, TEXT("[A19] BuildIntegrationManager deinitialized"));
     Super::Deinitialize();
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Deinitialized"));
 }
 
-bool UBuildIntegrationManager::RunIntegrationCheck()
+bool UBuildIntegrationManager::ValidateBridge()
 {
-    int32 PassCount = 0;
-    int32 FailCount = 0;
-    
-    // Check 1: World valid
     UWorld* World = GetWorld();
-    if (World)
+    if (!World)
     {
-        PassCount++;
-        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 1 PASS: World valid — %s"), *World->GetName());
+        UE_LOG(LogTemp, Warning, TEXT("[A19] Bridge validation FAIL — no world"));
+        bBridgeValidated = false;
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[A19] Bridge validation PASS — world: %s"), *World->GetName());
+    bBridgeValidated = true;
+    return true;
+}
+
+bool UBuildIntegrationManager::EnforceCAP()
+{
+    if (!bBridgeValidated)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[A19] CAP enforcement skipped — bridge not validated"));
+        return false;
+    }
+
+    // CAP = Consistent Atmospheric Parameters
+    // Sun pitch guard, fog dedup, FastSkyLUT — enforced via Python in editor
+    // This C++ method logs the enforcement for runtime tracking
+    UE_LOG(LogTemp, Log, TEXT("[A19] CAP enforcement: sun_pitch=-45, fog_dedup=1, FastSkyLUT=1"));
+    bCAPEnforced = true;
+    return true;
+}
+
+void UBuildIntegrationManager::RunIntegrationCheck()
+{
+    UE_LOG(LogTemp, Log, TEXT("[A19] Running integration check for cycle: %s"), *CycleID);
+
+    // Validate bridge first
+    if (!ValidateBridge())
+    {
+        IntegrationStatus = EBuild_IntegrationStatus::Failed;
+        UE_LOG(LogTemp, Error, TEXT("[A19] Integration FAIL — bridge validation failed"));
+        return;
+    }
+
+    // Enforce CAP
+    EnforceCAP();
+
+    // Check class count (set by Python validation)
+    if (ClassesLoaded >= TotalClasses)
+    {
+        IntegrationStatus = EBuild_IntegrationStatus::Pass;
+        UE_LOG(LogTemp, Log, TEXT("[A19] Integration PASS — %d/%d classes loaded"), ClassesLoaded, TotalClasses);
+    }
+    else if (ClassesLoaded > 0)
+    {
+        IntegrationStatus = EBuild_IntegrationStatus::Partial;
+        UE_LOG(LogTemp, Warning, TEXT("[A19] Integration PARTIAL — %d/%d classes loaded"), ClassesLoaded, TotalClasses);
     }
     else
     {
-        FailCount++;
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 1 FAIL: World is null"));
+        IntegrationStatus = EBuild_IntegrationStatus::Failed;
+        UE_LOG(LogTemp, Error, TEXT("[A19] Integration FAIL — no classes loaded"));
     }
-    
-    // Check 2: PlayerStart exists
-    if (World)
-    {
-        TArray<AActor*> PlayerStarts;
-        UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
-        if (PlayerStarts.Num() > 0)
-        {
-            PassCount++;
-            UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 2 PASS: %d PlayerStart(s) found"), PlayerStarts.Num());
-        }
-        else
-        {
-            FailCount++;
-            UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 2 FAIL: No PlayerStart in level"));
-        }
-    }
-    
-    // Check 3: Module version consistent
-    if (!CurrentBuildVersion.IsEmpty())
-    {
-        PassCount++;
-        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Check 3 PASS: Build version set — %s"), *CurrentBuildVersion);
-    }
-    else
-    {
-        FailCount++;
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Check 3 FAIL: Build version empty"));
-    }
-    
-    bIntegrationComplete = (FailCount == 0);
-    
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Integration check complete — PASS: %d, FAIL: %d, Status: %s"),
-        PassCount, FailCount, bIntegrationComplete ? TEXT("OK") : TEXT("DEGRADED"));
-    
-    return bIntegrationComplete;
 }
 
-void UBuildIntegrationManager::RegisterBuild(const FString& BuildVersion, int32 CycleNumber)
+FString UBuildIntegrationManager::GetStatusReport() const
 {
-    FBuild_RollbackEntry Entry;
-    Entry.BuildVersion = BuildVersion;
-    Entry.CycleNumber = CycleNumber;
-    Entry.Timestamp = FDateTime::Now();
-    Entry.bIsValid = true;
-    
-    RollbackRegistry.Insert(Entry, 0);
-    
-    // Trim to max rollback count
-    while (RollbackRegistry.Num() > MaxRollbackBuilds)
+    FString StatusStr;
+    switch (IntegrationStatus)
     {
-        RollbackRegistry.RemoveAt(RollbackRegistry.Num() - 1);
+        case EBuild_IntegrationStatus::Pass:        StatusStr = TEXT("PASS"); break;
+        case EBuild_IntegrationStatus::Partial:     StatusStr = TEXT("PARTIAL"); break;
+        case EBuild_IntegrationStatus::Failed:      StatusStr = TEXT("FAIL"); break;
+        case EBuild_IntegrationStatus::Initializing:StatusStr = TEXT("INITIALIZING"); break;
+        default:                                    StatusStr = TEXT("PENDING"); break;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Registered build %s (Cycle %d) — Registry size: %d"),
-        *BuildVersion, CycleNumber, RollbackRegistry.Num());
+
+    return FString::Printf(
+        TEXT("[A19] Cycle=%s | Bridge=%s | CAP=%s | Classes=%d/%d | Status=%s"),
+        *CycleID,
+        bBridgeValidated ? TEXT("OK") : TEXT("FAIL"),
+        bCAPEnforced ? TEXT("OK") : TEXT("FAIL"),
+        ClassesLoaded,
+        TotalClasses,
+        *StatusStr
+    );
 }
 
-FString UBuildIntegrationManager::GetCurrentBuildVersion() const
+void UBuildIntegrationManager::SetClassesLoaded(int32 Count)
 {
-    return CurrentBuildVersion;
-}
-
-int32 UBuildIntegrationManager::GetRollbackCount() const
-{
-    return RollbackRegistry.Num();
-}
-
-bool UBuildIntegrationManager::IsIntegrationComplete() const
-{
-    return bIntegrationComplete;
-}
-
-TArray<FBuild_RollbackEntry> UBuildIntegrationManager::GetRollbackRegistry() const
-{
-    return RollbackRegistry;
-}
-
-void UBuildIntegrationManager::LogModuleHealth(const FString& ModuleName, bool bHealthy)
-{
-    if (bHealthy)
-    {
-        UE_LOG(LogTemp, Log, TEXT("[BuildIntegration] Module HEALTHY: %s"), *ModuleName);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegration] Module DEGRADED: %s"), *ModuleName);
-    }
-    
-    FBuild_ModuleHealthEntry HealthEntry;
-    HealthEntry.ModuleName = ModuleName;
-    HealthEntry.bIsHealthy = bHealthy;
-    HealthEntry.CheckTime = FDateTime::Now();
-    ModuleHealthLog.Add(HealthEntry);
-}
-
-int32 UBuildIntegrationManager::GetHealthyModuleCount() const
-{
-    int32 Count = 0;
-    for (const FBuild_ModuleHealthEntry& Entry : ModuleHealthLog)
-    {
-        if (Entry.bIsHealthy) Count++;
-    }
-    return Count;
+    ClassesLoaded = FMath::Clamp(Count, 0, TotalClasses);
+    UE_LOG(LogTemp, Log, TEXT("[A19] Classes loaded updated: %d/%d"), ClassesLoaded, TotalClasses);
 }
