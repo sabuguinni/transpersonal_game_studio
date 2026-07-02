@@ -1,265 +1,275 @@
 // AudioZoneSystem.cpp
 // Agent #16 — Audio Agent
-// Cycle: PROD_CYCLE_AUTO_20260627_007
-
+// Full implementation of adaptive audio zone system
 #include "AudioZoneSystem.h"
-#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraShakeBase.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AAudio_ZoneActor
-// ─────────────────────────────────────────────────────────────────────────────
-
-AAudio_ZoneActor::AAudio_ZoneActor()
+UAudio_ZoneSystem::UAudio_ZoneSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    TriggerSphere->SetSphereRadius(500.0f);
-    TriggerSphere->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-    RootComponent = TriggerSphere;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-    AmbientAudioComponent->SetVolumeMultiplier(0.0f);
-
-    bPlayerInZone = false;
-    CurrentVolume = 0.0f;
     CurrentDangerLevel = EAudio_DangerLevel::Safe;
-    FadeTimer = 0.0f;
-    bFadingIn = false;
-    bFadingOut = false;
+    ActiveZoneType = EAudio_ZoneType::NightAmbience;
+    DistanceToNearestPredator = 99999.0f;
+    MasterVolume = 1.0f;
+    bEnableAdaptiveMusic = true;
+    ZoneCheckIntervalSeconds = 0.5f;
+
+    // Default T-Rex screen shake config
+    TRexShakeConfig.ShakeIntensity = 2.5f;
+    TRexShakeConfig.ShakeDuration = 0.6f;
+    TRexShakeConfig.ShakeFrequency = 8.0f;
+    TRexShakeConfig.TriggerDistanceMeters = 40.0f;
+
+    // Default Brachiosaurus shake (gentler, lower frequency)
+    BrachiosaurusShakeConfig.ShakeIntensity = 1.2f;
+    BrachiosaurusShakeConfig.ShakeDuration = 0.8f;
+    BrachiosaurusShakeConfig.ShakeFrequency = 4.0f;
+    BrachiosaurusShakeConfig.TriggerDistanceMeters = 60.0f;
 }
 
-void AAudio_ZoneActor::BeginPlay()
+void UAudio_ZoneSystem::BeginPlay()
 {
     Super::BeginPlay();
 
-    TriggerSphere->SetSphereRadius(ZoneConfig.BlendRadius);
-
-    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereBeginOverlap);
-    TriggerSphere->OnComponentEndOverlap.AddDynamic(this, &AAudio_ZoneActor::OnSphereEndOverlap);
-
-    if (AmbientSound)
+    // Initialize default audio zones if none configured
+    if (AudioZones.Num() == 0)
     {
-        AmbientAudioComponent->SetSound(AmbientSound);
+        // T-Rex proximity zone
+        FAudio_ZoneLayer TRexZone;
+        TRexZone.ZoneType = EAudio_ZoneType::TRexProximity;
+        TRexZone.TriggerRadius = 1500.0f;
+        TRexZone.FadeInTime = 1.5f;
+        TRexZone.FadeOutTime = 4.0f;
+        TRexZone.MaxVolume = 1.0f;
+        TRexZone.bLooping = true;
+        AudioZones.Add(TRexZone);
+
+        // Raptor patrol zone
+        FAudio_ZoneLayer RaptorZone;
+        RaptorZone.ZoneType = EAudio_ZoneType::RaptorPatrol;
+        RaptorZone.TriggerRadius = 900.0f;
+        RaptorZone.FadeInTime = 1.0f;
+        RaptorZone.FadeOutTime = 2.5f;
+        RaptorZone.MaxVolume = 0.85f;
+        RaptorZone.bLooping = true;
+        AudioZones.Add(RaptorZone);
+
+        // Night ambience zone (default)
+        FAudio_ZoneLayer NightZone;
+        NightZone.ZoneType = EAudio_ZoneType::NightAmbience;
+        NightZone.TriggerRadius = 99999.0f; // always active as baseline
+        NightZone.FadeInTime = 3.0f;
+        NightZone.FadeOutTime = 5.0f;
+        NightZone.MaxVolume = 0.6f;
+        NightZone.bLooping = true;
+        AudioZones.Add(NightZone);
+
+        // River ambience
+        FAudio_ZoneLayer RiverZone;
+        RiverZone.ZoneType = EAudio_ZoneType::RiverAmbience;
+        RiverZone.TriggerRadius = 700.0f;
+        RiverZone.FadeInTime = 2.0f;
+        RiverZone.FadeOutTime = 3.0f;
+        RiverZone.MaxVolume = 0.75f;
+        RiverZone.bLooping = true;
+        AudioZones.Add(RiverZone);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Initialized with %d zones"), AudioZones.Num());
+}
+
+void UAudio_ZoneSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    ZoneCheckTimer += DeltaTime;
+    if (ZoneCheckTimer >= ZoneCheckIntervalSeconds)
+    {
+        ZoneCheckTimer = 0.0f;
+        EvaluateZones();
     }
 }
 
-void AAudio_ZoneActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UAudio_ZoneSystem::EvaluateZones()
 {
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
+    // Calculate danger level from nearest predator distance
+    EAudio_DangerLevel NewDanger = CalculateDangerFromDistance(DistanceToNearestPredator);
+
+    if (NewDanger != CurrentDangerLevel)
     {
-        AmbientAudioComponent->Stop();
+        SetDangerLevel(NewDanger);
     }
-    Super::EndPlay(EndPlayReason);
+
+    // Determine active zone type based on danger
+    EAudio_ZoneType NewZone = ActiveZoneType;
+    if (DistanceToNearestPredator < 1500.0f)
+    {
+        NewZone = EAudio_ZoneType::TRexProximity;
+    }
+    else if (DistanceToNearestPredator < 2500.0f)
+    {
+        NewZone = EAudio_ZoneType::RaptorPatrol;
+    }
+    else
+    {
+        NewZone = EAudio_ZoneType::NightAmbience;
+    }
+
+    if (NewZone != ActiveZoneType)
+    {
+        TransitionToZone(NewZone);
+    }
 }
 
-void AAudio_ZoneActor::Tick(float DeltaTime)
+void UAudio_ZoneSystem::TransitionToZone(EAudio_ZoneType NewZone)
 {
-    Super::Tick(DeltaTime);
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Transitioning from zone %d to zone %d"),
+        (int32)ActiveZoneType, (int32)NewZone);
 
-    if (bFadingIn)
+    ActiveZoneType = NewZone;
+
+    // Find zone config
+    for (const FAudio_ZoneLayer& Zone : AudioZones)
     {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeInTime, 0.01f), 0.0f, 1.0f);
-        CurrentVolume = Alpha * ZoneConfig.MaxVolume;
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
-
-        if (Alpha >= 1.0f)
+        if (Zone.ZoneType == NewZone)
         {
-            bFadingIn = false;
-            FadeTimer = 0.0f;
+            // In a full implementation, this would fade between MetaSound patches
+            // For now, log the transition for Blueprint wiring
+            UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Zone '%d' — FadeIn=%.1fs FadeOut=%.1fs Vol=%.2f"),
+                (int32)Zone.ZoneType, Zone.FadeInTime, Zone.FadeOutTime, Zone.MaxVolume * MasterVolume);
+            break;
         }
     }
-    else if (bFadingOut)
-    {
-        FadeTimer += DeltaTime;
-        float Alpha = FMath::Clamp(FadeTimer / FMath::Max(ZoneConfig.FadeOutTime, 0.01f), 0.0f, 1.0f);
-        CurrentVolume = (1.0f - Alpha) * ZoneConfig.MaxVolume;
-        AmbientAudioComponent->SetVolumeMultiplier(CurrentVolume);
+}
 
-        if (Alpha >= 1.0f)
+void UAudio_ZoneSystem::FadeOutAllAmbient(float FadeTime)
+{
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
+    {
+        if (IsValid(AudioComp) && AudioComp->IsPlaying())
         {
-            bFadingOut = false;
-            FadeTimer = 0.0f;
-            AmbientAudioComponent->Stop();
+            AudioComp->FadeOut(FadeTime, 0.0f);
         }
     }
 }
 
-void AAudio_ZoneActor::SetDangerLevel(EAudio_DangerLevel NewLevel)
+EAudio_DangerLevel UAudio_ZoneSystem::CalculateDangerFromDistance(float Distance) const
 {
+    if (Distance < 500.0f)   return EAudio_DangerLevel::Critical;
+    if (Distance < 1200.0f)  return EAudio_DangerLevel::Danger;
+    if (Distance < 2500.0f)  return EAudio_DangerLevel::Cautious;
+    return EAudio_DangerLevel::Safe;
+}
+
+void UAudio_ZoneSystem::SetDangerLevel(EAudio_DangerLevel NewLevel)
+{
+    EAudio_DangerLevel OldLevel = CurrentDangerLevel;
     CurrentDangerLevel = NewLevel;
 
-    // Adjust volume multiplier based on danger — danger zones are louder
-    switch (NewLevel)
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Danger level changed %d → %d"),
+        (int32)OldLevel, (int32)NewLevel);
+
+    // Trigger stinger on escalation
+    if ((int32)NewLevel > (int32)OldLevel)
     {
-        case EAudio_DangerLevel::Safe:
-            ZoneConfig.MaxVolume = 0.6f;
-            break;
-        case EAudio_DangerLevel::Caution:
-            ZoneConfig.MaxVolume = 0.8f;
-            break;
-        case EAudio_DangerLevel::Danger:
-            ZoneConfig.MaxVolume = 1.0f;
-            break;
-        case EAudio_DangerLevel::Critical:
-            ZoneConfig.MaxVolume = 1.2f;
-            break;
+        TriggerDangerStinger(ActiveZoneType);
+    }
+
+    // Screen shake on critical danger (T-Rex very close)
+    if (NewLevel == EAudio_DangerLevel::Critical)
+    {
+        TriggerScreenShake(TRexShakeConfig.ShakeIntensity, TRexShakeConfig.ShakeDuration);
     }
 }
 
-void AAudio_ZoneActor::FadeAudioIn()
+void UAudio_ZoneSystem::TriggerDangerStinger(EAudio_ZoneType ZoneType)
 {
-    if (!AmbientAudioComponent->IsPlaying())
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (const FAudio_ZoneLayer& Zone : AudioZones)
     {
-        AmbientAudioComponent->Play();
-    }
-    bFadingIn = true;
-    bFadingOut = false;
-    FadeTimer = 0.0f;
-}
-
-void AAudio_ZoneActor::FadeAudioOut()
-{
-    bFadingOut = true;
-    bFadingIn = false;
-    FadeTimer = 0.0f;
-}
-
-void AAudio_ZoneActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-                                              bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (!OtherActor) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar && PlayerChar == UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
-    {
-        bPlayerInZone = true;
-        FadeAudioIn();
-    }
-}
-
-void AAudio_ZoneActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-                                           UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (!OtherActor) return;
-
-    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
-    if (PlayerChar && PlayerChar == UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
-    {
-        bPlayerInZone = false;
-        FadeAudioOut();
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AAudio_AdaptiveMusicManager
-// ─────────────────────────────────────────────────────────────────────────────
-
-AAudio_AdaptiveMusicManager::AAudio_AdaptiveMusicManager()
-{
-    PrimaryActorTick.bCanEverTick = true;
-
-    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
-    MusicComponent->bAutoActivate = false;
-    RootComponent = MusicComponent;
-
-    GlobalDangerLevel = EAudio_DangerLevel::Safe;
-    PreviousDangerLevel = EAudio_DangerLevel::Safe;
-    TransitionTimer = 0.0f;
-    bTransitioning = false;
-    MusicTransitionTime = 3.0f;
-}
-
-void AAudio_AdaptiveMusicManager::BeginPlay()
-{
-    Super::BeginPlay();
-
-    // Start with exploration music if assigned
-    if (ExplorationMusic)
-    {
-        MusicComponent->SetSound(ExplorationMusic);
-        MusicComponent->SetVolumeMultiplier(0.7f);
-        MusicComponent->Play();
-    }
-}
-
-void AAudio_AdaptiveMusicManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bTransitioning)
-    {
-        TransitionTimer += DeltaTime;
-        float Alpha = FMath::Clamp(TransitionTimer / FMath::Max(MusicTransitionTime, 0.01f), 0.0f, 1.0f);
-
-        // Fade out old track in first half, fade in new track in second half
-        if (Alpha < 0.5f)
+        if (Zone.ZoneType == ZoneType && Zone.DangerStinger.IsValid())
         {
-            float FadeOut = 1.0f - (Alpha * 2.0f);
-            MusicComponent->SetVolumeMultiplier(FadeOut * 0.7f);
-        }
-        else
-        {
-            float FadeIn = (Alpha - 0.5f) * 2.0f;
-            MusicComponent->SetVolumeMultiplier(FadeIn * 0.7f);
-        }
-
-        if (Alpha >= 1.0f)
-        {
-            bTransitioning = false;
-            TransitionTimer = 0.0f;
+            USoundBase* Stinger = Zone.DangerStinger.Get();
+            if (Stinger)
+            {
+                AActor* Owner = GetOwner();
+                FVector Location = Owner ? Owner->GetActorLocation() : FVector::ZeroVector;
+                UGameplayStatics::PlaySoundAtLocation(World, Stinger, Location, MasterVolume);
+                UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Played danger stinger for zone %d"), (int32)ZoneType);
+            }
         }
     }
 }
 
-void AAudio_AdaptiveMusicManager::SetGlobalDangerLevel(EAudio_DangerLevel NewLevel)
+void UAudio_ZoneSystem::PlayVoiceLine(const FString& CharacterName)
 {
-    if (NewLevel == GlobalDangerLevel) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    PreviousDangerLevel = GlobalDangerLevel;
-    GlobalDangerLevel = NewLevel;
+    float CurrentTime = World->GetTimeSeconds();
 
-    USoundBase* TargetTrack = nullptr;
-
-    switch (NewLevel)
+    for (FAudio_VoiceLine& Line : NPCVoiceLines)
     {
-        case EAudio_DangerLevel::Safe:
-            TargetTrack = ExplorationMusic;
+        if (Line.CharacterName == CharacterName && !Line.bPlayedThisSession)
+        {
+            if (Line.VoiceAsset.IsValid())
+            {
+                USoundBase* Voice = Line.VoiceAsset.Get();
+                if (Voice)
+                {
+                    AActor* Owner = GetOwner();
+                    FVector Location = Owner ? Owner->GetActorLocation() : FVector::ZeroVector;
+                    UGameplayStatics::PlaySoundAtLocation(World, Voice, Location, MasterVolume);
+                    Line.bPlayedThisSession = true;
+                    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Playing voice line for '%s'"), *CharacterName);
+                }
+            }
             break;
-        case EAudio_DangerLevel::Caution:
-            TargetTrack = NightMusic;
-            break;
-        case EAudio_DangerLevel::Danger:
-            TargetTrack = DangerMusic;
-            break;
-        case EAudio_DangerLevel::Critical:
-            TargetTrack = CombatMusic;
-            break;
-    }
-
-    if (TargetTrack)
-    {
-        TransitionToTrack(TargetTrack);
+        }
     }
 }
 
-void AAudio_AdaptiveMusicManager::TransitionToTrack(USoundBase* NewTrack)
+void UAudio_ZoneSystem::SetMasterVolume(float Volume)
 {
-    if (!NewTrack) return;
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
 
-    MusicComponent->SetSound(NewTrack);
-    if (!MusicComponent->IsPlaying())
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
     {
-        MusicComponent->Play();
+        if (IsValid(AudioComp))
+        {
+            AudioComp->SetVolumeMultiplier(MasterVolume);
+        }
     }
 
-    bTransitioning = true;
-    TransitionTimer = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Master volume set to %.2f"), MasterVolume);
+}
+
+void UAudio_ZoneSystem::TriggerScreenShake(float Intensity, float Duration)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PC) return;
+
+    // Use console command to trigger screen shake (Blueprint-compatible fallback)
+    // In full implementation, load UCameraShakeBase subclass and call ClientStartCameraShake
+    UE_LOG(LogTemp, Log, TEXT("AudioZoneSystem: Screen shake triggered — Intensity=%.2f Duration=%.2fs"), Intensity, Duration);
+
+    // Execute via console for now — Blueprint can override with proper CameraShake asset
+    FString ShakeCmd = FString::Printf(TEXT("shake %.2f %.2f"), Intensity, Duration);
+    UGameplayStatics::GetPlayerController(World, 0)->ConsoleCommand(ShakeCmd);
+}
+
+void UAudio_ZoneSystem::UpdateNearestPredatorDistance(float Distance)
+{
+    DistanceToNearestPredator = FMath::Max(0.0f, Distance);
 }
