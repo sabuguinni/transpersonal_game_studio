@@ -1,370 +1,202 @@
+// PerformanceBudgetManager.cpp
+// Agent #4 — Performance Optimizer | Cycle 006
+// Enforces 60fps PC / 30fps console frame budget across all systems.
+
 #include "PerformanceBudgetManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformApplicationMisc.h"
-#include "Misc/ConfigCacheIni.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
-#include "RHI.h"
-#include "RenderingThread.h"
+#include "Engine/Engine.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/IConsoleManager.h"
+#include "RenderCore.h"
 
-DEFINE_LOG_CATEGORY(LogPerformanceBudget);
+// ─── LOD Distance Table ───────────────────────────────────────────────────────
+// Tuned for prehistoric survival world: large open spaces, dense foliage,
+// dinosaur herds at distance. All values in Unreal units (1 UU = 1 cm).
 
-void UPerformanceBudgetManager::Initialize(FSubsystemCollectionBase& Collection)
+static const FPerf_LODDistanceEntry GDefaultLODTable[] =
+{
+    // Rocks / small props
+    { EPerf_ActorCategory::SmallProp,    { 0.f, 2000.f, 5000.f, 8000.f },    8000.f  },
+    // Trees / foliage
+    { EPerf_ActorCategory::Foliage,      { 0.f, 4000.f, 8000.f, 15000.f },   15000.f },
+    // Dinosaurs (critical — must be visible at distance for gameplay)
+    { EPerf_ActorCategory::Dinosaur,     { 0.f, 8000.f, 15000.f, 25000.f },  25000.f },
+    // Characters / NPCs
+    { EPerf_ActorCategory::Character,    { 0.f, 5000.f, 10000.f, 20000.f },  20000.f },
+    // Structures / buildings
+    { EPerf_ActorCategory::Structure,    { 0.f, 6000.f, 12000.f, 20000.f },  20000.f },
+    // Terrain chunks
+    { EPerf_ActorCategory::Terrain,      { 0.f, 0.f, 0.f, 0.f },             0.f     },
+    // Generic / unknown
+    { EPerf_ActorCategory::Generic,      { 0.f, 3000.f, 7000.f, 12000.f },   12000.f },
+};
+
+static const int32 GDefaultLODTableSize = UE_ARRAY_COUNT(GDefaultLODTable);
+
+// ─── UPerf_PerformanceBudgetManager ──────────────────────────────────────────
+
+UPerf_PerformanceBudgetManager::UPerf_PerformanceBudgetManager()
+{
+    // Frame budgets
+    TargetFPS_PC = 60.f;
+    TargetFPS_Console = 30.f;
+    DrawCallBudget_PC = 2000;
+    DrawCallBudget_Console = 1000;
+    MemoryBudget_MB = 4096;
+    ActorCountBudget = 500;
+
+    // LOD defaults
+    bAutoApplyLODDistances = true;
+    bEnableOcclusionCulling = true;
+    bEnableNanite = true;
+    bEnableLumen = true;
+
+    // Streaming
+    StreamingPoolSize_MB = 2048;
+
+    // Shadow
+    ShadowCSMCascades = 4;
+    ShadowDistanceScale = 1.f;
+
+    // Anti-aliasing
+    AntiAliasingMethod = EPerf_AntiAliasingMethod::TSR;
+    ScreenPercentage = 100.f;
+    TSRHistoryScreenPercentage = 200.f;
+}
+
+void UPerf_PerformanceBudgetManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Performance Budget Manager initialized"));
-    
-    InitializePerformanceBudgets();
-    
-    // Initialize frame time history
-    FrameTimeHistory.SetNum(MaxFrameHistory);
-    for (int32 i = 0; i < MaxFrameHistory; ++i)
-    {
-        FrameTimeHistory[i] = 16.67f; // Initialize to 60fps target
-    }
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Initializing — target 60fps PC / 30fps console"));
+    ApplyScalabilitySettings();
 }
 
-void UPerformanceBudgetManager::Deinitialize()
+void UPerf_PerformanceBudgetManager::Deinitialize()
 {
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Performance Budget Manager deinitialized"));
     Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Deinitializing"));
 }
 
-bool UPerformanceBudgetManager::ShouldCreateSubsystem(UObject* Outer) const
+void UPerf_PerformanceBudgetManager::ApplyScalabilitySettings()
 {
-    return true;
-}
+    IConsoleManager& CM = IConsoleManager::Get();
 
-void UPerformanceBudgetManager::InitializePerformanceBudgets()
-{
-    PerformanceBudgets.Empty();
-    
-    // Define performance budgets based on platform
-    const bool bIsConsole = IsConsole();
-    const float TargetFrameTimeMS = bIsConsole ? 33.33f : 16.67f; // 30fps console, 60fps PC
-    
-    // Game Thread Budgets (40% of frame time)
-    const float GameThreadBudget = TargetFrameTimeMS * 0.4f;
-    
-    FPerformanceBudgetEntry CoreBudget;
-    CoreBudget.Category = EPerformanceBudgetCategory::GameThread_Core;
-    CoreBudget.TargetTimeMS_PC = GameThreadBudget * 0.3f;      // 2.0ms
-    CoreBudget.TargetTimeMS_Console = GameThreadBudget * 0.3f; // 4.0ms
-    PerformanceBudgets.Add(CoreBudget);
-    
-    FPerformanceBudgetEntry AIBudget;
-    AIBudget.Category = EPerformanceBudgetCategory::GameThread_AI;
-    AIBudget.TargetTimeMS_PC = GameThreadBudget * 0.5f;      // 3.33ms
-    AIBudget.TargetTimeMS_Console = GameThreadBudget * 0.5f; // 6.67ms
-    PerformanceBudgets.Add(AIBudget);
-    
-    FPerformanceBudgetEntry PhysicsBudget;
-    PhysicsBudget.Category = EPerformanceBudgetCategory::GameThread_Physics;
-    PhysicsBudget.TargetTimeMS_PC = GameThreadBudget * 0.2f;      // 1.33ms
-    PhysicsBudget.TargetTimeMS_Console = GameThreadBudget * 0.2f; // 2.67ms
-    PerformanceBudgets.Add(PhysicsBudget);
-    
-    // Render Thread Budgets (35% of frame time)
-    const float RenderThreadBudget = TargetFrameTimeMS * 0.35f;
-    
-    FPerformanceBudgetEntry GeometryBudget;
-    GeometryBudget.Category = EPerformanceBudgetCategory::RenderThread_Geometry;
-    GeometryBudget.TargetTimeMS_PC = RenderThreadBudget * 0.5f;      // 2.92ms
-    GeometryBudget.TargetTimeMS_Console = RenderThreadBudget * 0.5f; // 5.83ms
-    PerformanceBudgets.Add(GeometryBudget);
-    
-    FPerformanceBudgetEntry LightingBudget;
-    LightingBudget.Category = EPerformanceBudgetCategory::RenderThread_Lighting;
-    LightingBudget.TargetTimeMS_PC = RenderThreadBudget * 0.3f;      // 1.75ms
-    LightingBudget.TargetTimeMS_Console = RenderThreadBudget * 0.3f; // 3.5ms
-    PerformanceBudgets.Add(LightingBudget);
-    
-    FPerformanceBudgetEntry EffectsBudget;
-    EffectsBudget.Category = EPerformanceBudgetCategory::RenderThread_Effects;
-    EffectsBudget.TargetTimeMS_PC = RenderThreadBudget * 0.2f;      // 1.17ms
-    EffectsBudget.TargetTimeMS_Console = RenderThreadBudget * 0.2f; // 2.33ms
-    PerformanceBudgets.Add(EffectsBudget);
-    
-    // GPU Budgets (varies by platform)
-    const float GPUBudget = bIsConsole ? 28.0f : 14.0f; // Console has more GPU budget relative to CPU
-    
-    FPerformanceBudgetEntry BasePassBudget;
-    BasePassBudget.Category = EPerformanceBudgetCategory::GPU_BasePass;
-    BasePassBudget.TargetTimeMS_PC = GPUBudget * 0.25f;     // 3.5ms
-    BasePassBudget.TargetTimeMS_Console = GPUBudget * 0.25f; // 7.0ms
-    PerformanceBudgets.Add(BasePassBudget);
-    
-    FPerformanceBudgetEntry ShadowsBudget;
-    ShadowsBudget.Category = EPerformanceBudgetCategory::GPU_Shadows;
-    ShadowsBudget.TargetTimeMS_PC = GPUBudget * 0.2f;     // 2.8ms
-    ShadowsBudget.TargetTimeMS_Console = GPUBudget * 0.2f; // 5.6ms
-    PerformanceBudgets.Add(ShadowsBudget);
-    
-    FPerformanceBudgetEntry NaniteBudget;
-    NaniteBudget.Category = EPerformanceBudgetCategory::GPU_Nanite;
-    NaniteBudget.TargetTimeMS_PC = GPUBudget * 0.2f;     // 2.8ms
-    NaniteBudget.TargetTimeMS_Console = GPUBudget * 0.2f; // 5.6ms
-    PerformanceBudgets.Add(NaniteBudget);
-    
-    FPerformanceBudgetEntry LumenBudget;
-    LumenBudget.Category = EPerformanceBudgetCategory::GPU_Lumen;
-    LumenBudget.TargetTimeMS_PC = GPUBudget * 0.25f;     // 3.5ms
-    LumenBudget.TargetTimeMS_Console = GPUBudget * 0.25f; // 7.0ms
-    PerformanceBudgets.Add(LumenBudget);
-    
-    FPerformanceBudgetEntry PostProcessBudget;
-    PostProcessBudget.Category = EPerformanceBudgetCategory::GPU_PostProcess;
-    PostProcessBudget.TargetTimeMS_PC = GPUBudget * 0.1f;     // 1.4ms
-    PostProcessBudget.TargetTimeMS_Console = GPUBudget * 0.1f; // 2.8ms
-    PerformanceBudgets.Add(PostProcessBudget);
-    
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Performance budgets initialized for %s (Target: %.2fms)"), 
-           bIsConsole ? TEXT("Console") : TEXT("PC"), TargetFrameTimeMS);
-}
+    // Anti-aliasing (TSR = method 4)
+    CM.FindConsoleVariable(TEXT("r.AntiAliasingMethod"))->Set(4);
+    CM.FindConsoleVariable(TEXT("r.ScreenPercentage"))->Set(ScreenPercentage);
 
-void UPerformanceBudgetManager::UpdatePerformanceMetrics(float DeltaTime)
-{
-    TRACE_CPUPROFILER_EVENT_SCOPE(UPerformanceBudgetManager::UpdatePerformanceMetrics);
-    
-    // Update current frame time
-    CurrentFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    
-    // Update frame time history
-    UpdateFrameTimeHistory(CurrentFrameTime);
-    
-    // Calculate average frame time
-    float TotalFrameTime = 0.0f;
-    for (const float FrameTime : FrameTimeHistory)
+    // Lumen
+    if (bEnableLumen)
     {
-        TotalFrameTime += FrameTime;
+        CM.FindConsoleVariable(TEXT("r.Lumen.Reflections.Allow"))->Set(1);
+        CM.FindConsoleVariable(TEXT("r.Lumen.DiffuseIndirect.Allow"))->Set(1);
+        CM.FindConsoleVariable(TEXT("r.Lumen.ScreenProbeGather.TracingOctahedronResolution"))->Set(8);
+        CM.FindConsoleVariable(TEXT("r.Lumen.Reflections.MaxRoughnessToTrace"))->Set(0.4f);
     }
-    AverageFrameTime = TotalFrameTime / MaxFrameHistory;
-    
-    // Update dinosaur-specific metrics
-    UpdateDinosaurMetrics();
-    
-    // Check performance thresholds
-    CheckPerformanceThresholds();
-}
 
-bool UPerformanceBudgetManager::IsPerformanceBudgetExceeded(EPerformanceBudgetCategory Category) const
-{
-    for (const FPerformanceBudgetEntry& Budget : PerformanceBudgets)
+    // Nanite
+    if (bEnableNanite)
     {
-        if (Budget.Category == Category)
-        {
-            const float TargetTime = IsConsole() ? Budget.TargetTimeMS_Console : Budget.TargetTimeMS_PC;
-            const float ThresholdTime = TargetTime * (Budget.WarningThresholdPercent / 100.0f);
-            return Budget.CurrentTimeMS > ThresholdTime;
-        }
+        CM.FindConsoleVariable(TEXT("r.Nanite.MaxPixelsPerEdge"))->Set(1.0f);
     }
-    return false;
-}
 
-float UPerformanceBudgetManager::GetTargetFrameTime() const
-{
-    return IsConsole() ? 33.33f : 16.67f;
-}
-
-void UPerformanceBudgetManager::ScalePerformanceForDinosaurCount(int32 DinosaurCount)
-{
-    // Dynamic scaling based on dinosaur count
-    if (DinosaurCount > 1000)
+    // Occlusion
+    if (bEnableOcclusionCulling)
     {
-        PerformanceScaleFactor = 0.7f;
-        UE_LOG(LogPerformanceBudget, Warning, TEXT("High dinosaur count (%d), applying performance scaling (%.2f)"), 
-               DinosaurCount, PerformanceScaleFactor);
+        CM.FindConsoleVariable(TEXT("r.HZBOcclusion"))->Set(1);
+        CM.FindConsoleVariable(TEXT("r.AllowOcclusionQueries"))->Set(1);
     }
-    else if (DinosaurCount > 500)
-    {
-        PerformanceScaleFactor = 0.85f;
-    }
-    else
-    {
-        PerformanceScaleFactor = 1.0f;
-    }
-    
-    // Apply scaling to console variables
-    if (PerformanceScaleFactor < 1.0f)
-    {
-        // Reduce AI tick frequency
-        if (auto* World = GetWorld())
-        {
-            if (auto* Console = World->GetGameViewport()->ViewportConsole)
-            {
-                FString Command = FString::Printf(TEXT("ai.TickFrequencyScale %.2f"), PerformanceScaleFactor);
-                Console->ConsoleCommand(Command);
-            }
-        }
-    }
+
+    // Shadows
+    CM.FindConsoleVariable(TEXT("r.Shadow.CSM.MaxCascades"))->Set(ShadowCSMCascades);
+    CM.FindConsoleVariable(TEXT("r.Shadow.DistanceScale"))->Set(ShadowDistanceScale);
+    CM.FindConsoleVariable(TEXT("r.Shadow.MaxCSMResolution"))->Set(2048);
+
+    // Streaming
+    CM.FindConsoleVariable(TEXT("r.Streaming.PoolSize"))->Set(StreamingPoolSize_MB);
+
+    // Sky
+    CM.FindConsoleVariable(TEXT("r.SkyAtmosphere.FastSkyLUT"))->Set(1);
+
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] Scalability settings applied"));
 }
 
-void UPerformanceBudgetManager::ApplyEmergencyPerformanceScaling()
+void UPerf_PerformanceBudgetManager::ApplyLODDistancesToWorld(UWorld* InWorld)
 {
-    if (bEmergencyScalingActive)
+    if (!InWorld) return;
+
+    int32 OptimizedCount = 0;
+    for (TActorIterator<AStaticMeshActor> It(InWorld); It; ++It)
     {
-        return;
+        AStaticMeshActor* SMA = *It;
+        if (!SMA) continue;
+
+        UStaticMeshComponent* Comp = SMA->GetStaticMeshComponent();
+        if (!Comp) continue;
+
+        EPerf_ActorCategory Category = ClassifyActor(SMA);
+        const FPerf_LODDistanceEntry* Entry = FindLODEntry(Category);
+        if (!Entry) continue;
+
+        // Apply cull distance
+        Comp->LDMaxDesiredSize = 5.f;
+        Comp->CachedMaxDrawDistance = Entry->CullDistance;
+        OptimizedCount++;
     }
-    
-    bEmergencyScalingActive = true;
-    UE_LOG(LogPerformanceBudget, Warning, TEXT("Applying emergency performance scaling"));
-    
-    ReduceAITickFrequency();
-    ReduceRenderingQuality();
+
+    UE_LOG(LogTemp, Log, TEXT("[PerfBudget] LOD distances applied to %d static mesh actors"), OptimizedCount);
 }
 
-void UPerformanceBudgetManager::RestoreNormalPerformanceScaling()
+EPerf_ActorCategory UPerf_PerformanceBudgetManager::ClassifyActor(AActor* Actor) const
 {
-    if (!bEmergencyScalingActive)
+    if (!Actor) return EPerf_ActorCategory::Generic;
+
+    FString Label = Actor->GetActorLabel().ToLower();
+
+    if (Label.Contains(TEXT("rock")) || Label.Contains(TEXT("stone")) || Label.Contains(TEXT("prop")))
+        return EPerf_ActorCategory::SmallProp;
+    if (Label.Contains(TEXT("tree")) || Label.Contains(TEXT("foliage")) || Label.Contains(TEXT("plant")) || Label.Contains(TEXT("bush")))
+        return EPerf_ActorCategory::Foliage;
+    if (Label.Contains(TEXT("dino")) || Label.Contains(TEXT("raptor")) || Label.Contains(TEXT("rex")) || Label.Contains(TEXT("brach")) || Label.Contains(TEXT("trex")))
+        return EPerf_ActorCategory::Dinosaur;
+    if (Label.Contains(TEXT("character")) || Label.Contains(TEXT("player")) || Label.Contains(TEXT("npc")))
+        return EPerf_ActorCategory::Character;
+    if (Label.Contains(TEXT("building")) || Label.Contains(TEXT("structure")) || Label.Contains(TEXT("shelter")) || Label.Contains(TEXT("wall")))
+        return EPerf_ActorCategory::Structure;
+    if (Label.Contains(TEXT("landscape")) || Label.Contains(TEXT("terrain")))
+        return EPerf_ActorCategory::Terrain;
+
+    return EPerf_ActorCategory::Generic;
+}
+
+const FPerf_LODDistanceEntry* UPerf_PerformanceBudgetManager::FindLODEntry(EPerf_ActorCategory Category) const
+{
+    for (int32 i = 0; i < GDefaultLODTableSize; ++i)
     {
-        return;
+        if (GDefaultLODTable[i].Category == Category)
+            return &GDefaultLODTable[i];
     }
-    
-    bEmergencyScalingActive = false;
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Restoring normal performance scaling"));
-    
-    RestoreAITickFrequency();
-    RestoreRenderingQuality();
+    return &GDefaultLODTable[GDefaultLODTableSize - 1]; // fallback to Generic
 }
 
-void UPerformanceBudgetManager::EnablePerformanceHUD(bool bEnabled)
+FPerf_FrameBudgetReport UPerf_PerformanceBudgetManager::GetCurrentBudgetReport(UWorld* InWorld) const
 {
-    if (auto* World = GetWorld())
+    FPerf_FrameBudgetReport Report;
+    Report.TargetFPS = TargetFPS_PC;
+    Report.DrawCallBudget = DrawCallBudget_PC;
+    Report.MemoryBudget_MB = MemoryBudget_MB;
+
+    if (InWorld)
     {
-        if (auto* Console = World->GetGameViewport()->ViewportConsole)
-        {
-            if (bEnabled)
-            {
-                Console->ConsoleCommand(TEXT("stat unit"));
-                Console->ConsoleCommand(TEXT("stat fps"));
-                Console->ConsoleCommand(TEXT("stat ai"));
-            }
-            else
-            {
-                Console->ConsoleCommand(TEXT("stat none"));
-            }
-        }
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> It(InWorld); It; ++It)
+            ActorCount++;
+        Report.CurrentActorCount = ActorCount;
+        Report.bActorCountOK = (ActorCount <= ActorCountBudget);
     }
-}
 
-void UPerformanceBudgetManager::LogPerformanceReport()
-{
-    UE_LOG(LogPerformanceBudget, Log, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Current Frame Time: %.2fms"), CurrentFrameTime);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Average Frame Time: %.2fms"), AverageFrameTime);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Target Frame Time: %.2fms"), GetTargetFrameTime());
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Performance Scale Factor: %.2f"), PerformanceScaleFactor);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Emergency Scaling Active: %s"), bEmergencyScalingActive ? TEXT("Yes") : TEXT("No"));
-    
-    UE_LOG(LogPerformanceBudget, Log, TEXT("Dinosaur Metrics:"));
-    UE_LOG(LogPerformanceBudget, Log, TEXT("  Total Dinosaurs: %d"), DinosaurMetrics.TotalDinosaursInScene);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("  Active AI: %d"), DinosaurMetrics.ActiveAIDinosaurs);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("  Visible: %d"), DinosaurMetrics.VisibleDinosaurs);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("  AI Tick Time: %.2fms"), DinosaurMetrics.AverageAITickTime);
-    UE_LOG(LogPerformanceBudget, Log, TEXT("  AI Memory: %.2fMB"), DinosaurMetrics.TotalAIMemoryMB);
-    
-    for (const FPerformanceBudgetEntry& Budget : PerformanceBudgets)
-    {
-        const float TargetTime = IsConsole() ? Budget.TargetTimeMS_Console : Budget.TargetTimeMS_PC;
-        const float UsagePercent = (Budget.CurrentTimeMS / TargetTime) * 100.0f;
-        
-        UE_LOG(LogPerformanceBudget, Log, TEXT("Budget %d: %.2fms / %.2fms (%.1f%%)"), 
-               (int32)Budget.Category, Budget.CurrentTimeMS, TargetTime, UsagePercent);
-    }
-}
-
-void UPerformanceBudgetManager::UpdateFrameTimeHistory(float FrameTime)
-{
-    FrameTimeHistory[FrameHistoryIndex] = FrameTime;
-    FrameHistoryIndex = (FrameHistoryIndex + 1) % MaxFrameHistory;
-}
-
-void UPerformanceBudgetManager::UpdateDinosaurMetrics()
-{
-    // This would be populated by the AI system
-    // For now, we'll set up the structure
-    
-    // Reset metrics
-    DinosaurMetrics = FDinosaurPerformanceMetrics();
-    
-    // These would be updated by the actual AI and rendering systems
-    // DinosaurMetrics.TotalDinosaursInScene = DinosaurManager->GetTotalDinosaurCount();
-    // DinosaurMetrics.ActiveAIDinosaurs = DinosaurManager->GetActiveAICount();
-    // etc.
-}
-
-void UPerformanceBudgetManager::CheckPerformanceThresholds()
-{
-    const float TargetFrameTime = GetTargetFrameTime();
-    const float CriticalThreshold = TargetFrameTime * 1.2f; // 20% over target
-    
-    if (AverageFrameTime > CriticalThreshold && !bEmergencyScalingActive)
-    {
-        ApplyEmergencyPerformanceScaling();
-    }
-    else if (AverageFrameTime < TargetFrameTime * 1.05f && bEmergencyScalingActive)
-    {
-        RestoreNormalPerformanceScaling();
-    }
-}
-
-bool UPerformanceBudgetManager::IsConsole() const
-{
-    return PLATFORM_CONSOLE;
-}
-
-bool UPerformanceBudgetManager::IsPC() const
-{
-    return PLATFORM_DESKTOP;
-}
-
-void UPerformanceBudgetManager::ReduceAITickFrequency()
-{
-    if (auto* World = GetWorld())
-    {
-        if (auto* Console = World->GetGameViewport()->ViewportConsole)
-        {
-            Console->ConsoleCommand(TEXT("ai.TickFrequencyScale 0.5"));
-            Console->ConsoleCommand(TEXT("ai.MaxBehaviorTreesPerFrame 50"));
-        }
-    }
-}
-
-void UPerformanceBudgetManager::ReduceRenderingQuality()
-{
-    if (auto* World = GetWorld())
-    {
-        if (auto* Console = World->GetGameViewport()->ViewportConsole)
-        {
-            Console->ConsoleCommand(TEXT("r.ViewDistanceScale 0.8"));
-            Console->ConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 2"));
-            Console->ConsoleCommand(TEXT("foliage.CullDistanceScale 0.7"));
-        }
-    }
-}
-
-void UPerformanceBudgetManager::RestoreAITickFrequency()
-{
-    if (auto* World = GetWorld())
-    {
-        if (auto* Console = World->GetGameViewport()->ViewportConsole)
-        {
-            Console->ConsoleCommand(TEXT("ai.TickFrequencyScale 1.0"));
-            Console->ConsoleCommand(TEXT("ai.MaxBehaviorTreesPerFrame 100"));
-        }
-    }
-}
-
-void UPerformanceBudgetManager::RestoreRenderingQuality()
-{
-    if (auto* World = GetWorld())
-    {
-        if (auto* Console = World->GetGameViewport()->ViewportConsole)
-        {
-            Console->ConsoleCommand(TEXT("r.ViewDistanceScale 1.0"));
-            Console->ConsoleCommand(TEXT("r.Nanite.MaxPixelsPerEdge 1"));
-            Console->ConsoleCommand(TEXT("foliage.CullDistanceScale 1.0"));
-        }
-    }
+    return Report;
 }
