@@ -1,0 +1,258 @@
+{
+  "combat_ai_system": {
+    "version": "1.0.0",
+    "cycle": "PROD_CYCLE_AUTO_20260702_010",
+    "agent": "Agent_12_CombatAI",
+    "description": "Combat AI configuration for dinosaur enemies and NPC combat responses in prehistoric survival game",
+
+    "combat_zones": [
+      {
+        "id": "CombatZone_RaptorAmbush_001",
+        "label": "CombatZone_RaptorAmbush_001",
+        "location": {"x": 1500.0, "y": -800.0, "z": 150.0},
+        "radius": 800.0,
+        "zone_type": "RaptorAmbush",
+        "threat_level": "High",
+        "active_dinos": ["Raptor_Savana_001", "Raptor_Savana_002", "Raptor_Savana_003"],
+        "trigger_condition": "player_enters_radius",
+        "visual_marker": "PointLight_Red",
+        "audio_cue": "raptor_pack_screech"
+      },
+      {
+        "id": "CombatZone_TRex_Territory_001",
+        "label": "CombatZone_TRex_Territory_001",
+        "location": {"x": -1000.0, "y": 2500.0, "z": 200.0},
+        "radius": 1500.0,
+        "zone_type": "ApexPredatorTerritory",
+        "threat_level": "Apex",
+        "active_dinos": ["TRex_Savana_001"],
+        "trigger_condition": "player_enters_radius",
+        "visual_marker": "PointLight_Orange",
+        "audio_cue": "trex_territorial_roar"
+      }
+    ],
+
+    "dinosaur_combat_ai": {
+      "TRex_Savana_001": {
+        "species": "Tyrannosaurus Rex",
+        "threat_level": "Apex",
+        "ai_states": {
+          "Patrol": {
+            "description": "Slow patrol of territory, 1500u radius",
+            "speed": 350.0,
+            "patrol_radius": 1500.0,
+            "head_scan_interval_s": 3.0
+          },
+          "Alert": {
+            "description": "Detected player/prey — stops, scans, orients",
+            "trigger": "sound_or_movement_within_2000u",
+            "duration_s": 4.0,
+            "speed": 0.0
+          },
+          "Chase": {
+            "description": "Full sprint pursuit — locks onto target",
+            "trigger": "visual_confirm_within_2000u",
+            "speed": 900.0,
+            "max_chase_duration_s": 30.0,
+            "give_up_distance_u": 3500.0
+          },
+          "Attack": {
+            "description": "Bite attack when within range",
+            "trigger": "within_attack_radius_300u",
+            "damage_per_hit": 85.0,
+            "attack_cooldown_s": 2.5,
+            "knockback_force": 1200.0,
+            "animation": "TRex_Bite"
+          },
+          "Retreat": {
+            "description": "Backs off after failed chase — territorial, not persistent",
+            "trigger": "chase_failed_or_prey_escaped",
+            "return_to_patrol": true
+          }
+        },
+        "sensory": {
+          "vision_range_u": 2000.0,
+          "vision_cone_degrees": 120.0,
+          "hearing_range_u": 2500.0,
+          "smell_range_u": 800.0,
+          "night_vision_penalty": 0.4
+        },
+        "weaknesses": {
+          "flank_attack_multiplier": 1.5,
+          "fire_fear_radius_u": 600.0,
+          "loud_noise_stun_duration_s": 2.0
+        },
+        "voice_lines": {
+          "warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007819985_CombatNPC_TRexWarning.mp3",
+          "trigger_condition": "player_within_2500u_of_trex"
+        }
+      },
+
+      "Raptor_Pack": {
+        "species": "Velociraptor",
+        "threat_level": "High",
+        "pack_behavior": {
+          "min_pack_size": 2,
+          "max_pack_size": 4,
+          "pack_coordination": true,
+          "roles": {
+            "Driver": {
+              "description": "Charges directly at prey to force movement",
+              "count": 1,
+              "behavior": "direct_charge",
+              "speed": 750.0
+            },
+            "Flanker_Left": {
+              "description": "Circles left to cut off escape",
+              "count": 1,
+              "behavior": "flank_circle_left",
+              "speed": 700.0
+            },
+            "Flanker_Right": {
+              "description": "Circles right to cut off escape",
+              "count": 1,
+              "behavior": "flank_circle_right",
+              "speed": 700.0
+            }
+          },
+          "pack_attack_trigger": "all_raptors_within_500u_of_prey",
+          "simultaneous_attack": true
+        },
+        "instances": {
+          "Raptor_Savana_001": {
+            "role": "Driver",
+            "ai_state": "Pack_Hunt",
+            "location": {"x": 1500.0, "y": -800.0, "z": 100.0},
+            "patrol_radius": 800.0,
+            "aggro_radius": 1200.0,
+            "attack_radius": 180.0,
+            "damage_per_hit": 35.0,
+            "attack_cooldown_s": 1.2
+          },
+          "Raptor_Savana_002": {
+            "role": "Flanker_Left",
+            "ai_state": "Pack_Flank",
+            "location": {"x": 1200.0, "y": -1100.0, "z": 100.0},
+            "patrol_radius": 800.0,
+            "aggro_radius": 1200.0,
+            "attack_radius": 180.0,
+            "damage_per_hit": 35.0,
+            "attack_cooldown_s": 1.2
+          },
+          "Raptor_Savana_003": {
+            "role": "Flanker_Right",
+            "ai_state": "Pack_Drive",
+            "location": {"x": 1800.0, "y": -500.0, "z": 100.0},
+            "patrol_radius": 800.0,
+            "aggro_radius": 1200.0,
+            "attack_radius": 180.0,
+            "damage_per_hit": 35.0,
+            "attack_cooldown_s": 1.2
+          }
+        },
+        "sensory": {
+          "vision_range_u": 1200.0,
+          "vision_cone_degrees": 160.0,
+          "hearing_range_u": 1500.0,
+          "smell_range_u": 600.0
+        },
+        "weaknesses": {
+          "fire_fear_radius_u": 400.0,
+          "high_ground_penalty": 0.6,
+          "loud_noise_stun_duration_s": 1.5
+        },
+        "voice_lines": {
+          "tactics_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007823128_CombatNPC_RaptorTactics.mp3",
+          "trigger_condition": "player_first_raptor_encounter"
+        }
+      }
+    },
+
+    "npc_combat_responses": {
+      "NPC_Hunter_Savana_001": {
+        "response_type": "FightOrFlee",
+        "flee_radius_u": 1500.0,
+        "fight_radius_u": 400.0,
+        "fight_condition": "group_size_gte_2_and_dino_not_apex",
+        "flee_condition": "apex_predator_or_solo_vs_pack",
+        "weapon": "Stone_Spear",
+        "damage_output": 12.0,
+        "coordination": "coordinates_with_NPC_Hunter_Savana_002"
+      },
+      "NPC_Hunter_Savana_002": {
+        "response_type": "FightOrFlee",
+        "flee_radius_u": 1500.0,
+        "fight_radius_u": 400.0,
+        "fight_condition": "group_size_gte_2_and_dino_not_apex",
+        "flee_condition": "apex_predator_or_solo_vs_pack",
+        "weapon": "Stone_Spear",
+        "damage_output": 12.0,
+        "coordination": "coordinates_with_NPC_Hunter_Savana_001"
+      },
+      "NPC_Scout_Savana_001": {
+        "response_type": "AlwaysFlee",
+        "flee_radius_u": 2000.0,
+        "fight_radius_u": 0.0,
+        "flee_condition": "any_predator_detected",
+        "alert_behavior": "warn_nearby_npcs_within_1000u",
+        "weapon": "None"
+      },
+      "NPC_Gatherer_Floresta_001": {
+        "response_type": "AlwaysFlee",
+        "flee_radius_u": 2500.0,
+        "fight_radius_u": 0.0,
+        "flee_condition": "any_predator_detected",
+        "weapon": "None"
+      },
+      "NPC_Gatherer_Floresta_002": {
+        "response_type": "AlwaysFlee",
+        "flee_radius_u": 2500.0,
+        "fight_radius_u": 0.0,
+        "flee_condition": "any_predator_detected",
+        "weapon": "None"
+      },
+      "NPC_Elder_Camp_001": {
+        "response_type": "AlwaysFlee",
+        "flee_radius_u": 3000.0,
+        "fight_radius_u": 0.0,
+        "flee_condition": "any_predator_detected",
+        "special_behavior": "triggers_camp_evacuation_alert",
+        "weapon": "None"
+      }
+    },
+
+    "damage_system": {
+      "player_health_max": 100.0,
+      "damage_sources": {
+        "TRex_Bite": {"damage": 85.0, "knockback": 1200.0, "stagger_duration_s": 2.0},
+        "Raptor_Slash": {"damage": 35.0, "knockback": 400.0, "stagger_duration_s": 0.8},
+        "Raptor_Bite": {"damage": 25.0, "knockback": 300.0, "stagger_duration_s": 0.6},
+        "Fall_Damage": {"damage_per_100u": 10.0, "min_height_u": 300.0},
+        "Starvation": {"damage_per_minute": 2.0, "trigger": "hunger_below_10"},
+        "Dehydration": {"damage_per_minute": 3.0, "trigger": "thirst_below_10"}
+      },
+      "death_conditions": {
+        "health_zero": true,
+        "respawn_location": "PlayerStart",
+        "respawn_delay_s": 3.0,
+        "respawn_health": 50.0
+      }
+    },
+
+    "combat_audio": {
+      "trex_warning_mp3": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007819985_CombatNPC_TRexWarning.mp3",
+      "raptor_tactics_mp3": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783007823128_CombatNPC_RaptorTactics.mp3",
+      "trigger_system": "proximity_based",
+      "max_concurrent_voice_lines": 2
+    },
+
+    "global_combat_settings": {
+      "ai_update_rate_hz": 10.0,
+      "threat_check_interval_s": 0.5,
+      "max_simultaneous_attackers": 4,
+      "friendly_fire": false,
+      "npc_vs_dino_enabled": true,
+      "player_invincibility_frames_s": 0.5
+    }
+  }
+}
