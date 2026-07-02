@@ -1,49 +1,80 @@
 {
-  "cycle": "PROD_CYCLE_AUTO_20260619_002",
-  "agent": "Narrative & Dialogue Agent #15",
+  "cycle": "PROD_CYCLE_AUTO_20260702_010",
+  "agent": "#15 Narrative & Dialogue Agent",
   "dialogue_lines": [
     {
       "id": "DL_001",
-      "character": "TribalLeader",
-      "trigger": "DialogueTrigger_RiverCamp_001",
-      "text": "The river is rising. We must move the camp before nightfall or we lose everything. Follow me — I know a cave in the northern cliffs.",
-      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834748478_TribalLeader.mp3",
-      "duration": "~9s",
-      "context": "Player approaches river camp during flood event"
+      "npc": "ChiefHunter_Kael",
+      "role": "ChiefHunter",
+      "actor_label": "ChiefHunter_Savana_001",
+      "context": "Player approaches eastern canyon for first time",
+      "condition": "FirstVisit",
+      "text": "The eastern canyon is a killing ground. I have seen three hunters go in and none come back. The raptors use the narrow walls to cut off escape. If you must cross, go at midday — that is when they sleep in the shade.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008233273_ChiefHunter_Kael.mp3",
+      "duration_s": 15,
+      "triggers_quest": "QST_RaptorNest_Recon"
     },
     {
       "id": "DL_002",
-      "character": "Scout_Narrator",
-      "trigger": "DialogueTrigger_HerdPath_001",
-      "text": "Winter is coming early this year. The mammoths have already moved south. If we do not follow the herds, we will starve before the first snow melts.",
-      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834763973_Scout_Narrator.mp3",
-      "duration": "~10s",
-      "context": "Player reaches the herd migration path — triggers seasonal survival quest"
+      "npc": "ScoutRunner_Mira",
+      "role": "ScoutRunner",
+      "actor_label": "ScoutRunner_Savana_001",
+      "context": "Player needs to cross river — herd migration active",
+      "condition": "HerdStampeding",
+      "text": "We move at first light. The Brachiosaurus herd crosses the river every three days — we follow them. Their size scares off the predators. Stay close, stay quiet, and do not run unless I say run.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008235491_ScoutRunner_Mira.mp3",
+      "duration_s": 13,
+      "triggers_quest": "QST_HerdCrossing_Escort"
     },
     {
       "id": "DL_003",
-      "character": "Veteran_Hunter",
-      "trigger": "DialogueTrigger_NorthCliff_001",
-      "text": "I have seen what those claws can do to a man. We do not hunt the pack hunters alone. Not ever. You want to survive out here — you learn that rule first.",
-      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834771141_Veteran_Hunter.mp3",
-      "duration": "~11s",
-      "context": "Player encounters veteran hunter near raptor territory on north cliff"
+      "npc": "TribalElder_Voss",
+      "role": "TribalElder",
+      "actor_label": "TribalElder_Savana_001",
+      "context": "Player has no campfire — survival tutorial moment",
+      "condition": "NearCampfire",
+      "text": "Fire is life. Without it, the cold kills you before the predators do. Learn to make fire from dry bark and hard stone. Learn it now, before you need it in the dark.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008249125_TribalElder_Voss.mp3",
+      "duration_s": 11,
+      "triggers_quest": "QST_FirstCampfire_Craft"
     },
     {
       "id": "DL_004",
-      "character": "Crafter_NPC",
-      "trigger": "DialogueTrigger_Quarry_001",
-      "text": "The bone tools are wearing down. We need flint from the quarry before we can make new spear tips. Without better weapons, the next hunt will fail.",
-      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834773049_Crafter_NPC.mp3",
-      "duration": "~10s",
-      "context": "Player reaches quarry — triggers crafting resource quest"
+      "npc": "TribalElder_Voss",
+      "role": "TribalElder",
+      "actor_label": "TribalElder_Savana_001",
+      "context": "Player asks about hunting the T-Rex — high-stakes quest gate",
+      "condition": "HasSpear",
+      "text": "You want to hunt the T-Rex? Then you had better be faster than it, smarter than it, and willing to lose people you care about. That is the cost. Are you ready to pay it?",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008267604_TribalElder_Voss_Quest.mp3",
+      "duration_s": 12,
+      "triggers_quest": "QST_TRex_Hunt_Endgame"
     }
   ],
-  "trigger_volumes": [
-    {"label": "DialogueTrigger_RiverCamp_001",  "location": [500, 800, 50]},
-    {"label": "DialogueTrigger_NorthCliff_001", "location": [-1200, 400, 180]},
-    {"label": "DialogueTrigger_Quarry_001",     "location": [1800, -600, 30]},
-    {"label": "DialogueTrigger_HerdPath_001",   "location": [-400, -1500, 20]}
+  "npcs_spawned_in_map": [
+    {
+      "label": "TribalElder_Savana_001",
+      "location": [800.0, 200.0, 100.0],
+      "role": "TribalElder",
+      "dialogue_ids": ["DL_003", "DL_004"]
+    },
+    {
+      "label": "ChiefHunter_Savana_001",
+      "location": [-600.0, 1200.0, 100.0],
+      "role": "ChiefHunter",
+      "dialogue_ids": ["DL_001"]
+    },
+    {
+      "label": "ScoutRunner_Savana_001",
+      "location": [1500.0, -400.0, 100.0],
+      "role": "ScoutRunner",
+      "dialogue_ids": ["DL_002"]
+    }
   ],
-  "notes": "All 4 TriggerBox volumes spawned in MinPlayableMap. Audio URLs ready for Audio Agent #16 integration."
+  "audio_assets": [
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008233273_ChiefHunter_Kael.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008235491_ScoutRunner_Mira.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008249125_TribalElder_Voss.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008267604_TribalElder_Voss_Quest.mp3"
+  ]
 }
