@@ -1,24 +1,26 @@
 // TRexBehavior.h
-// NPC Behavior Agent #11 — T-Rex AI Controller
-// T-Rex patrols 5000-unit radius, chases player within 3000 units, attacks within 300 units
+// Agent #11 — NPC Behavior Agent
+// T-Rex AI behavior component header
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AIController.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
 #include "TRexBehavior.generated.h"
 
+// T-Rex AI states — 6 states covering full behavioral lifecycle
 UENUM(BlueprintType)
 enum class ENPC_TRexState : uint8
 {
-    Patrol     UMETA(DisplayName = "Patrol"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Patrol      UMETA(DisplayName = "Patrol"),
     Investigate UMETA(DisplayName = "Investigate"),
-    Chase      UMETA(DisplayName = "Chase"),
-    Attack     UMETA(DisplayName = "Attack"),
-    Roar       UMETA(DisplayName = "Roar"),
-    Idle       UMETA(DisplayName = "Idle")
+    Chase       UMETA(DisplayName = "Chase"),
+    Attack      UMETA(DisplayName = "Attack"),
+    Roar        UMETA(DisplayName = "Roar")
 };
 
+// T-Rex behavior configuration — all tunable in editor
 USTRUCT(BlueprintType)
 struct FNPC_TRexConfig
 {
@@ -33,23 +35,24 @@ struct FNPC_TRexConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
     float AttackRange = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
-    float AttackDamage = 120.0f;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
     float PatrolSpeed = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Movement")
-    float ChaseSpeed = 700.0f;
+    float ChaseSpeed = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    float RoarCooldown = 15.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Combat")
+    float AttackDamage = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Behavior")
-    float PatrolWaypointRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Roar")
+    float RoarCooldown = 8.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Roar")
+    float RoarRadius = 2000.0f;
 };
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+// T-Rex behavior component — attach to any Pawn to give it T-Rex AI
+UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UTRexBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -60,46 +63,50 @@ public:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TRex|Config")
     FNPC_TRexConfig Config;
 
-    UPROPERTY(BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
+    // Current state — readable from Blueprint
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State", meta = (AllowPrivateAccess = "true"))
     ENPC_TRexState CurrentState;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    void SetState(ENPC_TRexState NewState);
+    // Home location (set at BeginPlay)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    FVector HomeLocation;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    ENPC_TRexState GetCurrentState() const { return CurrentState; }
+    // Last known player location (shared on roar)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TRex|State")
+    FVector LastKnownPlayerLocation;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    float GetDistanceToPlayer() const;
+    // State query functions
+    UFUNCTION(BlueprintCallable, Category = "TRex|State")
+    ENPC_TRexState GetCurrentState() const;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    bool IsPlayerInChaseRange() const;
+    UFUNCTION(BlueprintCallable, Category = "TRex|State")
+    FVector GetLastKnownPlayerLocation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    bool IsPlayerInAttackRange() const;
-
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    void PerformAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "TRex|Behavior")
-    void TriggerRoar();
+    // Manual state transition (callable from Blueprint)
+    UFUNCTION(BlueprintCallable, Category = "TRex|State")
+    void TransitionToState(ENPC_TRexState NewState);
 
 private:
-    void UpdatePatrol(float DeltaTime);
-    void UpdateChase(float DeltaTime);
-    void UpdateAttack(float DeltaTime);
-    void PickNewPatrolWaypoint();
-    bool HasReachedWaypoint() const;
+    void UpdateBehavior(float DeltaTime);
+    void UpdateIdle(float DeltaTime, APawn* Player);
+    void UpdatePatrol(float DeltaTime, APawn* Player);
+    void UpdateInvestigate(float DeltaTime, APawn* Player);
+    void UpdateChase(float DeltaTime, APawn* Player);
+    void UpdateAttack(float DeltaTime, APawn* Player);
+    void UpdateRoar(float DeltaTime, APawn* Player);
 
-    FVector PatrolAnchor;
-    FVector CurrentWaypoint;
+    APawn* DetectPlayer() const;
+    float GetDistanceToPlayer(APawn* Player) const;
+    void SelectNewPatrolWaypoint();
+    void PerformAttack(APawn* Target);
+    void BroadcastRoarAlert();
+
+    FVector CurrentPatrolWaypoint;
     float TimeSinceLastRoar;
-    float AttackCooldown;
     float StateTimer;
-
-    UPROPERTY()
-    AActor* PlayerActor;
+    bool bIsInitialized;
 };
