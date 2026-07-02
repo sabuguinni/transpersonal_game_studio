@@ -2,14 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "NiagaraSystem.h"
-#include "NiagaraFunctionLibrary.h"
-#include "NiagaraComponent.h"
 #include "VFXSystemManager.generated.h"
 
 // ============================================================
-// ENUMS — VFX categories (prefixed EVFX_ to avoid collisions)
+// VFX SYSTEM MANAGER — Agent #17 (VFX Agent)
+// Prehistoric survival game — ALL effects are physically real.
+// No spiritual/mystical/energy VFX. Only what existed 65Ma ago.
 // ============================================================
+
+// --- Enums (global scope, VFX_ prefix) ---
 
 UENUM(BlueprintType)
 enum class EVFX_WeatherState : uint8
@@ -17,55 +18,77 @@ enum class EVFX_WeatherState : uint8
     Clear       UMETA(DisplayName = "Clear"),
     Overcast    UMETA(DisplayName = "Overcast"),
     Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Storm"),
-    AshFall     UMETA(DisplayName = "Volcanic Ash Fall"),
-    Blizzard    UMETA(DisplayName = "Blizzard")
+    HeavyStorm  UMETA(DisplayName = "Heavy Storm"),
+    Ash         UMETA(DisplayName = "Volcanic Ash Fall"),
+    Snow        UMETA(DisplayName = "Snow"),
 };
 
 UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
+enum class EVFX_ImpactSurface : uint8
 {
-    DinoFootstepDust    UMETA(DisplayName = "Dinosaur Footstep Dust"),
-    BloodSplatter       UMETA(DisplayName = "Blood Splatter"),
-    RockImpact          UMETA(DisplayName = "Rock/Stone Impact"),
-    WaterSplash         UMETA(DisplayName = "Water Splash"),
-    FireSpark           UMETA(DisplayName = "Fire Spark / Crafting"),
-    ArrowImpact         UMETA(DisplayName = "Arrow Impact"),
-    SpearImpact         UMETA(DisplayName = "Spear Impact")
+    Dirt    UMETA(DisplayName = "Dirt"),
+    Mud     UMETA(DisplayName = "Mud"),
+    Rock    UMETA(DisplayName = "Rock"),
+    Water   UMETA(DisplayName = "Water"),
+    Grass   UMETA(DisplayName = "Grass"),
+    Sand    UMETA(DisplayName = "Sand"),
 };
 
 UENUM(BlueprintType)
-enum class EVFX_LODLevel : uint8
+enum class EVFX_CombatImpact : uint8
 {
-    High    UMETA(DisplayName = "High (< 20m)"),
-    Medium  UMETA(DisplayName = "Medium (20-60m)"),
-    Low     UMETA(DisplayName = "Low (60-150m)"),
-    Culled  UMETA(DisplayName = "Culled (> 150m)")
+    SpearHit    UMETA(DisplayName = "Spear Hit"),
+    StoneHit    UMETA(DisplayName = "Stone Hit"),
+    ClawSlash   UMETA(DisplayName = "Claw Slash"),
+    BiteCrush   UMETA(DisplayName = "Bite Crush"),
+    TailSwipe   UMETA(DisplayName = "Tail Swipe"),
 };
 
-// ============================================================
-// STRUCTS — VFX configuration data
-// ============================================================
+// --- Structs (global scope, FVFX_ prefix) ---
 
 USTRUCT(BlueprintType)
-struct FVFX_DinosaurFootstepData
+struct FVFX_FootstepConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
-    float DinosaurMassKg = 6000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    float DustRadius = 80.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
-    float FootprintRadiusCm = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    float DustLifetime = 1.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
-    float DustIntensityScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    int32 ParticleCount = 40;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
-    float GroundShakeRadius = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    EVFX_ImpactSurface SurfaceType = EVFX_ImpactSurface::Dirt;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
-    FLinearColor DustColor = FLinearColor(0.8f, 0.65f, 0.4f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    float ShockwaveRingScale = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FVFX_CampfireConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    float FlameHeight = 120.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    float EmberSpawnRate = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    float SmokeRiseSpeed = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    float LightFlickerFrequency = 3.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    float LightFlickerAmplitude = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    bool bIsWet = false;
 };
 
 USTRUCT(BlueprintType)
@@ -80,44 +103,74 @@ struct FVFX_WeatherConfig
     float RainIntensity = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
-    float WindSpeed = 10.0f;
+    float FogDensityMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
-    float WindDirectionDegrees = 45.0f;
+    float AshFallRate = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
-    float AshDensity = 0.0f;
+    float TransitionDuration = 30.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
-    float TransitionDuration = 5.0f;
+    float WindStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
+    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
 };
 
 USTRUCT(BlueprintType)
-struct FVFX_CampfireData
+struct FVFX_BloodImpactConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
-    float FireIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    EVFX_CombatImpact ImpactType = EVFX_CombatImpact::SpearHit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
-    float SmokeOpacity = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    float BloodSprayRadius = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
-    float EmberSpawnRate = 15.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    int32 BloodDropCount = 25;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
-    bool bIsExtinguishing = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    float DecalSize = 40.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
-    float ExtinguishProgress = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    float DecalLifetime = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    bool bSpawnFleshChunks = false;
+};
+
+USTRUCT(BlueprintType)
+struct FVFX_LODConfig
+{
+    GENERATED_BODY()
+
+    // LOD0 — full quality (< 1500 units from camera)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD0MaxDistance = 1500.0f;
+
+    // LOD1 — reduced particles (1500-4000 units)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD1MaxDistance = 4000.0f;
+
+    // LOD2 — billboard/sprite only (4000-8000 units)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD2MaxDistance = 8000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD1ParticleScalar = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD2ParticleScalar = 0.15f;
 };
 
 // ============================================================
-// UVFX_SystemManager — Main VFX controller actor
+// MAIN VFX SYSTEM MANAGER CLASS
 // ============================================================
 
-UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVFX_SystemManager : public AActor
 {
     GENERATED_BODY()
@@ -130,84 +183,88 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
 public:
-    // ---- Niagara System References (assign in Blueprint/Editor) ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Fire_Campfire = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Dino_FootstepDust = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Combat_BloodSplatter = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Weather_Rain = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Weather_VolcanicAsh = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Combat_RockImpact = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    UNiagaraSystem* NS_Crafting_FireSpark = nullptr;
-
-    // ---- Weather State ----
-
+    // ---- WEATHER SYSTEM ----
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
     FVFX_WeatherConfig WeatherConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX|Weather")
-    UNiagaraComponent* ActiveWeatherComponent = nullptr;
+    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
+    void SetWeatherState(EVFX_WeatherState NewState, float TransitionTime = 30.0f);
 
-    // ---- LOD Settings ----
+    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
+    void UpdateWeatherVFX(float DeltaTime);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float LOD_HighDistance = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float LOD_MediumDistance = 6000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
-    float LOD_LowDistance = 15000.0f;
-
-    // ---- Public API ----
+    // ---- CAMPFIRE SYSTEM ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Campfire")
+    FVFX_CampfireConfig CampfireConfig;
 
     UFUNCTION(BlueprintCallable, Category = "VFX|Campfire")
-    UNiagaraComponent* SpawnCampfireVFX(FVector Location, FVFX_CampfireData CampfireData);
+    void SpawnCampfireVFX(FVector Location, bool bIsWet = false);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
-    void SpawnFootstepDustVFX(FVector Location, FVFX_DinosaurFootstepData FootstepData);
+    UFUNCTION(BlueprintCallable, Category = "VFX|Campfire")
+    void ExtinguishCampfire(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Campfire")
+    void TickCampfireFlicker(float DeltaTime);
+
+    // ---- FOOTSTEP DUST SYSTEM ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Footstep")
+    FVFX_FootstepConfig FootstepConfig;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Footstep")
+    void SpawnFootstepDust(FVector ImpactLocation, EVFX_ImpactSurface Surface, float FootRadius = 80.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Footstep")
+    void SpawnTRexFootstepDust(FVector ImpactLocation, float FootRadius = 200.0f);
+
+    // ---- COMBAT IMPACT SYSTEM ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    FVFX_BloodImpactConfig BloodImpactConfig;
 
     UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
-    void SpawnImpactVFX(FVector Location, FVector Normal, EVFX_ImpactType ImpactType, float IntensityScale = 1.0f);
+    void SpawnBloodImpact(FVector HitLocation, FVector HitNormal, EVFX_CombatImpact ImpactType);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
-    void SetWeatherState(EVFX_WeatherState NewState, float TransitionTime = 5.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    void SpawnSpearImpactDust(FVector HitLocation, EVFX_ImpactSurface Surface);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Weather")
-    void UpdateWeatherIntensity(float RainIntensity, float WindSpeed, float AshDensity);
+    // ---- BREATH VAPOR SYSTEM ----
+    UFUNCTION(BlueprintCallable, Category = "VFX|Breath")
+    void SpawnBreathVapor(FVector MouthLocation, FVector ForwardVector, float TemperatureCelsius);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Breath")
+    bool ShouldShowBreath(float AmbientTemperatureCelsius) const;
+
+    // ---- VOLCANIC ASH SYSTEM ----
+    UFUNCTION(BlueprintCallable, Category = "VFX|Volcanic")
+    void SetVolcanicAshIntensity(float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Volcanic")
+    void SpawnDistantEruptionGlow(FVector VolcanoLocation);
+
+    // ---- LOD MANAGEMENT ----
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    FVFX_LODConfig LODConfig;
 
     UFUNCTION(BlueprintCallable, Category = "VFX|LOD")
-    EVFX_LODLevel GetLODLevelForDistance(float DistanceCm) const;
+    int32 GetVFXLODLevel(FVector EffectLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Crafting")
-    void SpawnCraftingSparkVFX(FVector Location, int32 NumSparks = 10);
+    UFUNCTION(BlueprintCallable, Category = "VFX|LOD")
+    float GetParticleScalarForLOD(int32 LODLevel) const;
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
-    void SpawnDinoBreathVaporVFX(FVector MouthLocation, FVector ForwardDir, float DinoBodyTempC);
+    // ---- RUNTIME STATE ----
+    UPROPERTY(BlueprintReadOnly, Category = "VFX|State")
+    float CurrentVolcanicAshIntensity = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX|State")
+    float WeatherTransitionAlpha = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX|State")
+    EVFX_WeatherState PreviousWeatherState = EVFX_WeatherState::Clear;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX|State")
+    float CampfireFlickerTimer = 0.0f;
 
 private:
-    void UpdateWeatherVFX(float DeltaTime);
-    float WeatherTransitionAlpha = 0.0f;
-    EVFX_WeatherState TargetWeatherState = EVFX_WeatherState::Clear;
+    float WeatherTransitionTimer = 0.0f;
+    float WeatherTransitionDuration = 30.0f;
     bool bWeatherTransitioning = false;
-    float WeatherTransitionTime = 5.0f;
-    float WeatherTransitionElapsed = 0.0f;
-
-    APawn* CachedPlayerPawn = nullptr;
-    float PlayerDistanceCache = 0.0f;
-    float DistanceCacheTimer = 0.0f;
-    static constexpr float DistanceCacheInterval = 0.1f;
 };
