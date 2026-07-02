@@ -1,186 +1,132 @@
+// BiomeManager.h — Engine Architect #02 — PROD_CYCLE_AUTO_20260702_005
+// P1 World Generation: Biome system — 5 biome types for Cretaceous survival world
+// Follows SharedTypes.h conventions, uses Eng_ prefix for all custom types
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Components/ActorComponent.h"
 #include "BiomeManager.generated.h"
 
 // ============================================================
-// Biome system enums and structs — Agent #5 World Generator
+// ENUMS — must be at global scope (UE5 compilation rule)
 // ============================================================
 
 UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
+enum class EEng_BiomeType : uint8
 {
-    Forest      UMETA(DisplayName = "Jungle Forest"),
-    Plains      UMETA(DisplayName = "Open Plains"),
-    Highland    UMETA(DisplayName = "Rocky Highland"),
-    Volcanic    UMETA(DisplayName = "Volcanic Zone"),
-    Wetland     UMETA(DisplayName = "Coastal Wetland"),
-    River       UMETA(DisplayName = "River Corridor"),
-    Count       UMETA(Hidden)
+    Forest    UMETA(DisplayName = "Cretaceous Forest"),
+    Plains    UMETA(DisplayName = "Open Plains"),
+    Swamp     UMETA(DisplayName = "Primordial Swamp"),
+    Volcanic  UMETA(DisplayName = "Volcanic Badlands"),
+    River     UMETA(DisplayName = "River Delta"),
+    Unknown   UMETA(DisplayName = "Unknown")
 };
 
-UENUM(BlueprintType)
-enum class EWorld_WeatherState : uint8
-{
-    Clear       UMETA(DisplayName = "Clear Sky"),
-    Overcast    UMETA(DisplayName = "Overcast"),
-    Rain        UMETA(DisplayName = "Rain"),
-    Storm       UMETA(DisplayName = "Thunderstorm"),
-    Fog         UMETA(DisplayName = "Dense Fog"),
-    AshFall     UMETA(DisplayName = "Volcanic Ash Fall")
-};
+// ============================================================
+// STRUCTS — must be at global scope (UE5 compilation rule)
+// ============================================================
 
 USTRUCT(BlueprintType)
-struct FWorld_BiomeData
+struct FEng_BiomeDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Plains;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector WorldCenter = FVector::ZeroVector;
+    FText DisplayName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float TemperatureMin = 15.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BaseTemperatureCelsius = 25.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float TemperatureMax = 35.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HumidityPercent = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float HumidityMin = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float FoliageDensity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Climate")
+    float HumidityMax = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogTint = FLinearColor(0.6f, 0.8f, 0.7f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EWorld_WeatherState> AllowedWeather;
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
+    float DangerLevel = 0.5f;
 
-USTRUCT(BlueprintType)
-struct FWorld_RiverSegment
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Gameplay")
+    float ResourceMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector StartPoint = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FVector EndPoint = FVector(1000.0f, 0.0f, 0.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float Width = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float FlowSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
+    FLinearColor BiomeColor = FLinearColor::White;
 };
 
 // ============================================================
-// ABiomeManager — manages biome zones, weather, and river data
+// DELEGATE — biome transition event
 // ============================================================
 
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
-class TRANSPERSONALGAME_API ABiomeManager : public AActor
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEng_OnBiomeChanged,
+    EEng_BiomeType, OldBiome,
+    EEng_BiomeType, NewBiome);
+
+// ============================================================
+// UCLASS
+// ============================================================
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent),
+    DisplayName = "Biome Manager")
+class TRANSPERSONALGAME_API UBiomeManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ABiomeManager();
+    UBiomeManager();
 
-protected:
+    // --- Lifecycle ---
     virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType,
+        FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    // --- Biome Queries ---
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    // ---- Biome Query ----
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    const FWorld_BiomeData* GetBiomeData(EWorld_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biome")
-    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
 
-    // ---- Weather ----
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetResourceMultiplierAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Weather")
-    EWorld_WeatherState GetCurrentWeather() const { return CurrentWeather; }
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FText GetBiomeDisplayName(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Weather")
-    void SetWeather(EWorld_WeatherState NewWeather);
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetCurrentBiome() const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Weather")
-    void AdvanceWeatherCycle(float DeltaSeconds);
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void ForceSetBiome(EEng_BiomeType NewBiome);
 
-    // ---- River ----
+    // --- Definition Access ---
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    const FEng_BiomeDefinition* GetBiomeDefinition(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|River")
-    bool IsLocationNearRiver(const FVector& WorldLocation, float CheckRadius = 500.0f) const;
+    // --- Events ---
+    UPROPERTY(BlueprintAssignable, Category = "Biome|Events")
+    FEng_OnBiomeChanged OnBiomeChanged;
 
-    UFUNCTION(BlueprintCallable, Category = "World|River")
-    float GetRiverDistanceAtLocation(const FVector& WorldLocation) const;
-
-    // ---- Day/Night ----
-
-    UFUNCTION(BlueprintCallable, Category = "World|DayNight")
-    float GetTimeOfDay() const { return TimeOfDayHours; }
-
-    UFUNCTION(BlueprintCallable, Category = "World|DayNight")
-    void SetTimeOfDay(float Hours);
-
-    UFUNCTION(BlueprintCallable, Category = "World|DayNight")
-    bool IsDaytime() const { return TimeOfDayHours >= 6.0f && TimeOfDayHours < 20.0f; }
-
-    // ---- Initialization ----
-
-    UFUNCTION(CallInEditor, Category = "World|Setup")
-    void InitializeBiomes();
-
-    UFUNCTION(CallInEditor, Category = "World|Setup")
-    void InitializeRiverPath();
-
-    // ---- Properties ----
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<FWorld_BiomeData> BiomeZones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<FWorld_RiverSegment> RiverPath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    EWorld_WeatherState CurrentWeather = EWorld_WeatherState::Clear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherTransitionDuration = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
-    float TimeOfDayHours = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
-    float DayDurationSeconds = 1200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DayNight")
-    bool bEnableDayNightCycle = true;
+    // --- Data ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    TArray<FEng_BiomeDefinition> BiomeDefinitions;
 
 private:
-    float WeatherTimer = 0.0f;
-    float NextWeatherChangeTime = 300.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome|State",
+        meta = (AllowPrivateAccess = "true"))
+    EEng_BiomeType CurrentBiome = EEng_BiomeType::Forest;
 
-    void UpdateDayNightCycle(float DeltaTime);
-    void UpdateWeather(float DeltaTime);
-    void ApplyBiomeFogSettings(EWorld_BiomeType BiomeType);
+    void InitializeDefaultBiomes();
 };
