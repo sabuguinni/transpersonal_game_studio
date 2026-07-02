@@ -1,388 +1,288 @@
-// TRexBehavior.cpp
-// Agent #11 — NPC Behavior Agent
-// T-Rex AI behavior component: patrol, investigate, chase, attack, roar states
-
 #include "TRexBehavior.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 
 UTRexBehaviorComponent::UTRexBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz AI tick
-
-    // Default config
-    Config.PatrolRadius = 5000.0f;
-    Config.ChaseRange = 3000.0f;
-    Config.AttackRange = 300.0f;
-    Config.PatrolSpeed = 300.0f;
-    Config.ChaseSpeed = 800.0f;
-    Config.AttackDamage = 150.0f;
-    Config.RoarCooldown = 8.0f;
-    Config.RoarRadius = 2000.0f;
-
     CurrentState = ENPC_TRexState::Idle;
-    HomeLocation = FVector::ZeroVector;
-    LastKnownPlayerLocation = FVector::ZeroVector;
-    TimeSinceLastRoar = 0.0f;
+    LastRoarTime = -999.0f;
+    LastAttackTime = -999.0f;
     StateTimer = 0.0f;
-    bIsInitialized = false;
 }
 
 void UTRexBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (Owner)
+    // Record home location for patrol radius
+    if (GetOwner())
     {
-        HomeLocation = Owner->GetActorLocation();
-        bIsInitialized = true;
-        TransitionToState(ENPC_TRexState::Patrol);
+        HomeLocation = GetOwner()->GetActorLocation();
+        CurrentPatrolTarget = HomeLocation;
     }
+
+    // Start in patrol state
+    SetState(ENPC_TRexState::Patrol);
+    PickNextPatrolPoint();
 }
 
 void UTRexBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!bIsInitialized) return;
-
-    TimeSinceLastRoar += DeltaTime;
     StateTimer += DeltaTime;
-
-    UpdateBehavior(DeltaTime);
-}
-
-void UTRexBehaviorComponent::UpdateBehavior(float DeltaTime)
-{
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner) return;
-
-    // Detect player every tick
-    APawn* Player = DetectPlayer();
 
     switch (CurrentState)
     {
-        case ENPC_TRexState::Idle:
-            UpdateIdle(DeltaTime, Player);
-            break;
-        case ENPC_TRexState::Patrol:
-            UpdatePatrol(DeltaTime, Player);
-            break;
-        case ENPC_TRexState::Investigate:
-            UpdateInvestigate(DeltaTime, Player);
-            break;
-        case ENPC_TRexState::Chase:
-            UpdateChase(DeltaTime, Player);
-            break;
-        case ENPC_TRexState::Attack:
-            UpdateAttack(DeltaTime, Player);
-            break;
-        case ENPC_TRexState::Roar:
-            UpdateRoar(DeltaTime, Player);
-            break;
-        default:
-            break;
-    }
-}
-
-void UTRexBehaviorComponent::UpdateIdle(float DeltaTime, APawn* Player)
-{
-    // After 3 seconds idle, start patrolling
-    if (StateTimer > 3.0f)
-    {
-        TransitionToState(ENPC_TRexState::Patrol);
-        return;
-    }
-
-    // If player detected, investigate
-    if (Player)
-    {
-        float Dist = GetDistanceToPlayer(Player);
-        if (Dist < Config.ChaseRange)
+    case ENPC_TRexState::Idle:
+        // After 3 seconds idle, resume patrol
+        if (StateTimer > 3.0f)
         {
-            LastKnownPlayerLocation = Player->GetActorLocation();
-            TransitionToState(ENPC_TRexState::Investigate);
+            SetState(ENPC_TRexState::Patrol);
+            PickNextPatrolPoint();
         }
-    }
-}
-
-void UTRexBehaviorComponent::UpdatePatrol(float DeltaTime, APawn* Player)
-{
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner) return;
-
-    // Check for player detection
-    if (Player)
-    {
-        float Dist = GetDistanceToPlayer(Player);
-        if (Dist < Config.ChaseRange)
+        // Check for player detection
+        if (CanSeePlayer() || CanHearPlayer())
         {
-            LastKnownPlayerLocation = Player->GetActorLocation();
-            // Roar before chasing if cooldown expired
-            if (TimeSinceLastRoar > Config.RoarCooldown)
-            {
-                TransitionToState(ENPC_TRexState::Roar);
-            }
-            else
-            {
-                TransitionToState(ENPC_TRexState::Chase);
-            }
-            return;
+            SetState(ENPC_TRexState::Investigate);
         }
-    }
+        break;
 
-    // Move toward current patrol waypoint
-    FVector ToWaypoint = CurrentPatrolWaypoint - Owner->GetActorLocation();
-    float DistToWaypoint = ToWaypoint.Size();
-
-    if (DistToWaypoint < 200.0f || StateTimer > 15.0f)
-    {
-        // Pick new waypoint
-        SelectNewPatrolWaypoint();
-        StateTimer = 0.0f;
-    }
-    else
-    {
-        // Move toward waypoint
-        FVector MoveDir = ToWaypoint.GetSafeNormal();
-        Owner->AddMovementInput(MoveDir, 1.0f);
-    }
-}
-
-void UTRexBehaviorComponent::UpdateInvestigate(float DeltaTime, APawn* Player)
-{
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner) return;
-
-    // If player is visible and close, chase
-    if (Player)
-    {
-        float Dist = GetDistanceToPlayer(Player);
-        if (Dist < Config.ChaseRange)
+    case ENPC_TRexState::Patrol:
+        UpdatePatrol(DeltaTime);
+        if (CanSeePlayer())
         {
-            LastKnownPlayerLocation = Player->GetActorLocation();
-            TransitionToState(ENPC_TRexState::Chase);
-            return;
+            if (CanRoar()) TriggerRoar();
+            SetState(ENPC_TRexState::Chase);
         }
-    }
+        else if (CanHearPlayer())
+        {
+            SetState(ENPC_TRexState::Investigate);
+        }
+        break;
 
-    // Move toward last known location
-    FVector ToTarget = LastKnownPlayerLocation - Owner->GetActorLocation();
-    float DistToTarget = ToTarget.Size();
+    case ENPC_TRexState::Investigate:
+        UpdateInvestigate(DeltaTime);
+        if (CanSeePlayer())
+        {
+            if (CanRoar()) TriggerRoar();
+            SetState(ENPC_TRexState::Chase);
+        }
+        else if (StateTimer > 8.0f)
+        {
+            SetState(ENPC_TRexState::Patrol);
+            PickNextPatrolPoint();
+        }
+        break;
 
-    if (DistToTarget < 300.0f || StateTimer > 10.0f)
-    {
-        // Lost the player, return to patrol
-        TransitionToState(ENPC_TRexState::Patrol);
-    }
-    else
-    {
-        FVector MoveDir = ToTarget.GetSafeNormal();
-        Owner->AddMovementInput(MoveDir, 0.8f);
-    }
-}
+    case ENPC_TRexState::Chase:
+        UpdateChase(DeltaTime);
+        if (IsInAttackRange())
+        {
+            SetState(ENPC_TRexState::Attack);
+        }
+        else if (!CanSeePlayer() && GetDistanceToPlayer() > Config.ChaseRange * 1.5f)
+        {
+            SetState(ENPC_TRexState::Patrol);
+            PickNextPatrolPoint();
+        }
+        break;
 
-void UTRexBehaviorComponent::UpdateChase(float DeltaTime, APawn* Player)
-{
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner) return;
+    case ENPC_TRexState::Attack:
+        UpdateAttack(DeltaTime);
+        if (!IsInAttackRange())
+        {
+            SetState(ENPC_TRexState::Chase);
+        }
+        break;
 
-    if (!Player)
-    {
-        // Lost player, investigate last known location
-        TransitionToState(ENPC_TRexState::Investigate);
-        return;
-    }
-
-    float Dist = GetDistanceToPlayer(Player);
-    LastKnownPlayerLocation = Player->GetActorLocation();
-
-    // Attack if close enough
-    if (Dist < Config.AttackRange)
-    {
-        TransitionToState(ENPC_TRexState::Attack);
-        return;
-    }
-
-    // Chase player
-    FVector ToPlayer = (Player->GetActorLocation() - Owner->GetActorLocation()).GetSafeNormal();
-    Owner->AddMovementInput(ToPlayer, 1.0f);
-
-    // If player escaped beyond chase range + buffer
-    if (Dist > Config.ChaseRange * 1.5f)
-    {
-        TransitionToState(ENPC_TRexState::Investigate);
-    }
-}
-
-void UTRexBehaviorComponent::UpdateAttack(float DeltaTime, APawn* Player)
-{
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner) return;
-
-    if (!Player)
-    {
-        TransitionToState(ENPC_TRexState::Patrol);
-        return;
-    }
-
-    float Dist = GetDistanceToPlayer(Player);
-
-    // If player moved away, chase again
-    if (Dist > Config.AttackRange * 1.5f)
-    {
-        TransitionToState(ENPC_TRexState::Chase);
-        return;
-    }
-
-    // Attack every 2 seconds
-    if (StateTimer > 2.0f)
-    {
-        PerformAttack(Player);
-        StateTimer = 0.0f;
+    case ENPC_TRexState::Roar:
+        // Roar lasts 2 seconds then transitions to chase
+        if (StateTimer > 2.0f)
+        {
+            SetState(ENPC_TRexState::Chase);
+        }
+        break;
     }
 }
 
-void UTRexBehaviorComponent::UpdateRoar(float DeltaTime, APawn* Player)
-{
-    // Roar lasts 2 seconds, then transition to chase
-    if (StateTimer > 2.0f)
-    {
-        TimeSinceLastRoar = 0.0f;
-        TransitionToState(ENPC_TRexState::Chase);
-    }
-}
-
-void UTRexBehaviorComponent::TransitionToState(ENPC_TRexState NewState)
+void UTRexBehaviorComponent::SetState(ENPC_TRexState NewState)
 {
     if (CurrentState == NewState) return;
-
     CurrentState = NewState;
     StateTimer = 0.0f;
-
-    // State entry actions
-    switch (NewState)
-    {
-        case ENPC_TRexState::Patrol:
-            SelectNewPatrolWaypoint();
-            break;
-        case ENPC_TRexState::Roar:
-            // Broadcast roar to nearby dinosaurs
-            BroadcastRoarAlert();
-            break;
-        default:
-            break;
-    }
 }
 
-APawn* UTRexBehaviorComponent::DetectPlayer() const
+void UTRexBehaviorComponent::PickNextPatrolPoint()
 {
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner || !Owner->GetWorld()) return nullptr;
+    if (!GetOwner()) return;
 
-    APlayerController* PC = Owner->GetWorld()->GetFirstPlayerController();
-    if (!PC) return nullptr;
-
-    APawn* PlayerPawn = PC->GetPawn();
-    if (!PlayerPawn) return nullptr;
-
-    float Dist = FVector::Dist(Owner->GetActorLocation(), PlayerPawn->GetActorLocation());
-    if (Dist > Config.ChaseRange * 1.2f) return nullptr;
-
-    // Line of sight check (simplified — full version uses perception system)
-    FHitResult Hit;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(Owner);
-
-    bool bBlocked = Owner->GetWorld()->LineTraceSingleByChannel(
-        Hit,
-        Owner->GetActorLocation() + FVector(0, 0, 100),
-        PlayerPawn->GetActorLocation() + FVector(0, 0, 100),
-        ECC_Visibility,
-        Params
+    // Pick a random point within patrol radius of home
+    FVector RandomOffset = FVector(
+        FMath::RandRange(-Config.PatrolRadius, Config.PatrolRadius),
+        FMath::RandRange(-Config.PatrolRadius, Config.PatrolRadius),
+        0.0f
     );
-
-    if (!bBlocked || Hit.GetActor() == PlayerPawn)
+    // Clamp to radius
+    if (RandomOffset.Size() > Config.PatrolRadius)
     {
-        return PlayerPawn;
+        RandomOffset = RandomOffset.GetSafeNormal() * Config.PatrolRadius;
     }
-
-    return nullptr;
+    CurrentPatrolTarget = HomeLocation + RandomOffset;
 }
 
-float UTRexBehaviorComponent::GetDistanceToPlayer(APawn* Player) const
+bool UTRexBehaviorComponent::HasReachedPatrolPoint() const
 {
+    if (!GetOwner()) return false;
+    float Dist = FVector::Dist2D(GetOwner()->GetActorLocation(), CurrentPatrolTarget);
+    return Dist < 200.0f;
+}
+
+bool UTRexBehaviorComponent::CanSeePlayer() const
+{
+    AActor* Player = GetPlayerActor();
+    if (!Player || !GetOwner()) return false;
+
+    float Dist = GetDistanceToPlayer();
+    if (Dist > Config.ChaseRange) return false;
+
+    // Check sight angle
+    FVector ToPlayer = (Player->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector Forward = GetOwner()->GetActorForwardVector();
+    float DotProduct = FVector::DotProduct(Forward, ToPlayer);
+    float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+
+    return AngleDeg <= Config.SightAngle;
+}
+
+bool UTRexBehaviorComponent::CanHearPlayer() const
+{
+    float Dist = GetDistanceToPlayer();
+    return Dist <= Config.HearingRange;
+}
+
+float UTRexBehaviorComponent::GetDistanceToPlayer() const
+{
+    AActor* Player = GetPlayerActor();
     if (!Player || !GetOwner()) return TNumericLimits<float>::Max();
     return FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
 }
 
-void UTRexBehaviorComponent::SelectNewPatrolWaypoint()
+void UTRexBehaviorComponent::PerformAttack()
 {
-    // Pick random point within patrol radius of home
-    float Angle = FMath::RandRange(0.0f, 360.0f);
-    float Radius = FMath::RandRange(Config.PatrolRadius * 0.3f, Config.PatrolRadius);
-    float RadAngle = FMath::DegreesToRadians(Angle);
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    CurrentPatrolWaypoint = HomeLocation + FVector(
-        FMath::Cos(RadAngle) * Radius,
-        FMath::Sin(RadAngle) * Radius,
-        0.0f
-    );
+    float Now = World->GetTimeSeconds();
+    if (Now - LastAttackTime < AttackCooldown) return;
+
+    LastAttackTime = Now;
+
+    AActor* Player = GetPlayerActor();
+    if (!Player) return;
+
+    // Apply damage to player
+    UGameplayStatics::ApplyDamage(Player, Config.AttackDamage, nullptr, GetOwner(), nullptr);
+    UE_LOG(LogTemp, Warning, TEXT("TRex attacked player for %.0f damage"), Config.AttackDamage);
 }
 
-void UTRexBehaviorComponent::PerformAttack(APawn* Target)
+bool UTRexBehaviorComponent::IsInAttackRange() const
 {
-    if (!Target) return;
-
-    // Apply damage to target
-    UGameplayStatics::ApplyDamage(
-        Target,
-        Config.AttackDamage,
-        nullptr,
-        GetOwner(),
-        nullptr
-    );
+    return GetDistanceToPlayer() <= Config.AttackRange;
 }
 
-void UTRexBehaviorComponent::BroadcastRoarAlert()
+void UTRexBehaviorComponent::TriggerRoar()
 {
-    APawn* Owner = Cast<APawn>(GetOwner());
-    if (!Owner || !Owner->GetWorld()) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-    // Find all pawns within roar radius and alert them
+    LastRoarTime = World->GetTimeSeconds();
+    SetState(ENPC_TRexState::Roar);
+
+    // Apply fear to nearby players/NPCs within roar radius
     TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(Owner->GetWorld(), APawn::StaticClass(), NearbyActors);
-
-    for (AActor* Actor : NearbyActors)
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), NearbyActors);
+    for (AActor* NearActor : NearbyActors)
     {
-        if (Actor == Owner) continue;
-
-        float Dist = FVector::Dist(Owner->GetActorLocation(), Actor->GetActorLocation());
-        if (Dist < Config.RoarRadius)
+        if (NearActor == GetOwner()) continue;
+        float Dist = FVector::Dist(GetOwner()->GetActorLocation(), NearActor->GetActorLocation());
+        if (Dist <= Config.RoarRadius)
         {
-            // Alert nearby dinosaurs to player's last known location
-            UTRexBehaviorComponent* OtherBehavior = Actor->FindComponentByClass<UTRexBehaviorComponent>();
-            if (OtherBehavior && OtherBehavior->CurrentState == ENPC_TRexState::Patrol)
-            {
-                OtherBehavior->LastKnownPlayerLocation = LastKnownPlayerLocation;
-                OtherBehavior->TransitionToState(ENPC_TRexState::Investigate);
-            }
+            // Tag nearby pawns as "Frightened" for other systems to react
+            NearActor->Tags.AddUnique(FName("Frightened"));
         }
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("TRex ROARED — frightening actors within %.0f units"), Config.RoarRadius);
 }
 
-ENPC_TRexState UTRexBehaviorComponent::GetCurrentState() const
+bool UTRexBehaviorComponent::CanRoar() const
 {
-    return CurrentState;
+    UWorld* World = GetWorld();
+    if (!World) return false;
+    return (World->GetTimeSeconds() - LastRoarTime) >= Config.RoarCooldown;
 }
 
-FVector UTRexBehaviorComponent::GetLastKnownPlayerLocation() const
+void UTRexBehaviorComponent::UpdatePatrol(float DeltaTime)
 {
-    return LastKnownPlayerLocation;
+    if (!GetOwner()) return;
+
+    if (HasReachedPatrolPoint())
+    {
+        SetState(ENPC_TRexState::Idle);
+        return;
+    }
+
+    // Move toward patrol target
+    FVector Direction = (CurrentPatrolTarget - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + Direction * Config.PatrolSpeed * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+
+    // Face movement direction
+    FRotator NewRot = Direction.Rotation();
+    GetOwner()->SetActorRotation(NewRot);
+}
+
+void UTRexBehaviorComponent::UpdateChase(float DeltaTime)
+{
+    AActor* Player = GetPlayerActor();
+    if (!Player || !GetOwner()) return;
+
+    FVector Direction = (Player->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + Direction * Config.ChaseSpeed * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+
+    FRotator NewRot = Direction.Rotation();
+    GetOwner()->SetActorRotation(NewRot);
+}
+
+void UTRexBehaviorComponent::UpdateAttack(float DeltaTime)
+{
+    PerformAttack();
+}
+
+void UTRexBehaviorComponent::UpdateInvestigate(float DeltaTime)
+{
+    AActor* Player = GetPlayerActor();
+    if (!Player || !GetOwner()) return;
+
+    // Move slowly toward last known player position
+    FVector Direction = (Player->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+    FVector NewLocation = GetOwner()->GetActorLocation() + Direction * (Config.PatrolSpeed * 0.5f) * DeltaTime;
+    GetOwner()->SetActorLocation(NewLocation, true);
+}
+
+AActor* UTRexBehaviorComponent::GetPlayerActor() const
+{
+    UWorld* World = GetWorld();
+    if (!World) return nullptr;
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return nullptr;
+    return PC->GetPawn();
 }
