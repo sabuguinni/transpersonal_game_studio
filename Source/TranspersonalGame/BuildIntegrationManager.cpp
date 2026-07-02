@@ -1,97 +1,142 @@
 // BuildIntegrationManager.cpp
-// Integration & Build Agent #19 — Cycle AUTO_20260702_006
-// Manages build integration, module dependency tracking, and integration health reporting.
+// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260702_007
+// Manages build integration, module health checks, and cross-agent validation.
 
 #include "BuildIntegrationManager.h"
+#include "TranspersonalGameState.h"
+#include "TranspersonalCharacter.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
 
-UBuildIntegrationManager::UBuildIntegrationManager()
+ABuildIntegrationManager::ABuildIntegrationManager()
 {
-    bIsInitialized = false;
-    IntegrationScore = 0.0f;
-    LastBuildCycle = TEXT("PROD_CYCLE_AUTO_20260702_006");
+    PrimaryActorTick.bCanEverTick = false;
+    bBuildHealthy = false;
+    LoadedClassCount = 0;
+    TotalClassCount = 7;
+    LastValidationCycle = 0;
+    IntegrationStatus = EBuild_IntegrationStatus::Pending;
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ABuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    bIsInitialized = true;
-    IntegrationScore = 100.0f;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized — Cycle %s"), *LastBuildCycle);
+    Super::BeginPlay();
+    RunIntegrationValidation();
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void ABuildIntegrationManager::RunIntegrationValidation()
 {
-    bIsInitialized = false;
-    Super::Deinitialize();
-}
+    LoadedClassCount = 0;
+    ValidationErrors.Empty();
 
-float UBuildIntegrationManager::GetIntegrationScore() const
-{
-    return IntegrationScore;
-}
-
-FString UBuildIntegrationManager::GetLastBuildCycle() const
-{
-    return LastBuildCycle;
-}
-
-void UBuildIntegrationManager::SetLastBuildCycle(const FString& CycleID)
-{
-    LastBuildCycle = CycleID;
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Build cycle updated: %s"), *CycleID);
-}
-
-bool UBuildIntegrationManager::RunIntegrationHealthCheck(UObject* WorldContext)
-{
-    if (!WorldContext)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] HealthCheck: null WorldContext"));
-        return false;
-    }
-
-    UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull);
+    // Validate world exists
+    UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] HealthCheck: no world found"));
-        return false;
+        ValidationErrors.Add(TEXT("World is null — cannot run integration validation"));
+        IntegrationStatus = EBuild_IntegrationStatus::Failed;
+        bBuildHealthy = false;
+        return;
     }
 
-    int32 ActorCount = 0;
-    bool bHasPlayerStart = false;
-    bool bHasDirectionalLight = false;
-    bool bHasFog = false;
-
-    for (TActorIterator<AActor> It(World); It; ++It)
+    // Validate GameState
+    ATranspersonalGameState* GameState = World->GetGameState<ATranspersonalGameState>();
+    if (GameState)
     {
-        AActor* Actor = *It;
-        if (!Actor) continue;
-        ActorCount++;
-
-        FString ClassName = Actor->GetClass()->GetName();
-        if (ClassName.Contains(TEXT("PlayerStart"))) bHasPlayerStart = true;
-        if (ClassName.Contains(TEXT("DirectionalLight"))) bHasDirectionalLight = true;
-        if (ClassName.Contains(TEXT("ExponentialHeightFog"))) bHasFog = true;
+        LoadedClassCount++;
+    }
+    else
+    {
+        ValidationErrors.Add(TEXT("TranspersonalGameState not found in world"));
     }
 
-    int32 PassCount = (bHasPlayerStart ? 1 : 0) + (bHasDirectionalLight ? 1 : 0) + (bHasFog ? 1 : 0);
-    IntegrationScore = (PassCount / 3.0f) * 100.0f;
+    // Validate PlayerCharacter
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (PlayerPawn)
+    {
+        ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(PlayerPawn);
+        if (Character)
+        {
+            LoadedClassCount++;
+            ValidateCharacterStats(Character);
+        }
+        else
+        {
+            ValidationErrors.Add(TEXT("Player pawn is not a TranspersonalCharacter"));
+        }
+    }
 
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] HealthCheck: %d actors, score=%.0f%%"),
-        ActorCount, IntegrationScore);
+    // Update status
+    bBuildHealthy = (ValidationErrors.Num() == 0);
+    IntegrationStatus = bBuildHealthy
+        ? EBuild_IntegrationStatus::Healthy
+        : EBuild_IntegrationStatus::Degraded;
 
-    return IntegrationScore >= 66.0f;
+    LastValidationCycle++;
+
+    if (GEngine)
+    {
+        FString StatusMsg = FString::Printf(
+            TEXT("[BuildIntegration] Cycle %d: %s — %d errors, %d/%d classes"),
+            LastValidationCycle,
+            bBuildHealthy ? TEXT("HEALTHY") : TEXT("DEGRADED"),
+            ValidationErrors.Num(),
+            LoadedClassCount,
+            TotalClassCount
+        );
+        GEngine->AddOnScreenDebugMessage(-1, 10.0f,
+            bBuildHealthy ? FColor::Green : FColor::Orange,
+            StatusMsg);
+    }
 }
 
-void UBuildIntegrationManager::LogBuildStatus() const
+void ABuildIntegrationManager::ValidateCharacterStats(ATranspersonalCharacter* Character)
 {
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === BUILD STATUS ==="));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Cycle: %s"), *LastBuildCycle);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Integration Score: %.0f%%"), IntegrationScore);
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Initialized: %s"), bIsInitialized ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] === END STATUS ==="));
+    if (!Character) return;
+
+    // Verify survival stats are in valid range
+    if (Character->Health < 0.0f || Character->Health > 100.0f)
+    {
+        ValidationErrors.Add(FString::Printf(
+            TEXT("Character Health out of range: %.1f"), Character->Health));
+    }
+    if (Character->Hunger < 0.0f || Character->Hunger > 100.0f)
+    {
+        ValidationErrors.Add(FString::Printf(
+            TEXT("Character Hunger out of range: %.1f"), Character->Hunger));
+    }
+    if (Character->Thirst < 0.0f || Character->Thirst > 100.0f)
+    {
+        ValidationErrors.Add(FString::Printf(
+            TEXT("Character Thirst out of range: %.1f"), Character->Thirst));
+    }
+    if (Character->Stamina < 0.0f || Character->Stamina > 100.0f)
+    {
+        ValidationErrors.Add(FString::Printf(
+            TEXT("Character Stamina out of range: %.1f"), Character->Stamina));
+    }
+}
+
+bool ABuildIntegrationManager::IsBuildHealthy() const
+{
+    return bBuildHealthy;
+}
+
+int32 ABuildIntegrationManager::GetLoadedClassCount() const
+{
+    return LoadedClassCount;
+}
+
+TArray<FString> ABuildIntegrationManager::GetValidationErrors() const
+{
+    return ValidationErrors;
+}
+
+EBuild_IntegrationStatus ABuildIntegrationManager::GetIntegrationStatus() const
+{
+    return IntegrationStatus;
 }
