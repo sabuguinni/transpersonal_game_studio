@@ -1,6 +1,7 @@
 // BiomeManager.h
-// Agent #5 — Procedural World Generator
-// Manages 5 biome zones: DenseForest, OpenPlains, RockyHighlands, RiverValley, VolcanicBadlands
+// Agent #05 — Procedural World Generator
+// Manages 5 distinct biomes: Forest, Plains, Rocky Highlands, Wetlands, Volcanic Badlands
+// P1 Priority: World Generation
 
 #pragma once
 
@@ -9,39 +10,47 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
+// Biome type enum — unique prefix World_ to avoid conflicts
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    DenseForest      UMETA(DisplayName = "Dense Forest"),
-    OpenPlains       UMETA(DisplayName = "Open Plains"),
-    RockyHighlands   UMETA(DisplayName = "Rocky Highlands"),
-    RiverValley      UMETA(DisplayName = "River Valley"),
+    Forest          UMETA(DisplayName = "Dense Fern Forest"),
+    Plains          UMETA(DisplayName = "Open Plains"),
+    RockyHighlands  UMETA(DisplayName = "Rocky Highlands"),
+    Wetlands        UMETA(DisplayName = "River Wetlands"),
     VolcanicBadlands UMETA(DisplayName = "Volcanic Badlands"),
-    Unknown          UMETA(DisplayName = "Unknown")
+    None            UMETA(DisplayName = "None / Transition")
 };
 
+// Per-biome configuration data
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
+struct FWorld_BiomeConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Center = FVector::ZeroVector;
+    FVector WorldCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 1000.0f;
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HeightOffset = 0.0f;
+    float BaseElevation = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor DebugColor = FLinearColor::White;
+    float ElevationVariance = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 1.0f;
+    FLinearColor AmbientColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float FoliageDensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float DangerLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f;
@@ -50,7 +59,38 @@ struct FWorld_BiomeZone
     float Humidity = 0.5f;
 };
 
-UCLASS(ClassGroup = (WorldGen), meta = (BlueprintSpawnableComponent))
+// Runtime biome query result
+USTRUCT(BlueprintType)
+struct FWorld_BiomeQueryResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EWorld_BiomeType PrimaryBiome = EWorld_BiomeType::None;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EWorld_BiomeType SecondaryBiome = EWorld_BiomeType::None;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float BlendFactor = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float Temperature = 25.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float Humidity = 0.5f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float DangerLevel = 0.5f;
+};
+
+/**
+ * ABiomeManager
+ * Placed once in the level. Defines 5 biome zones and provides
+ * spatial queries for any world position → biome data.
+ * Used by: FoliageManager, DinosaurAI, WeatherSystem, AudioSystem
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "WorldGen")
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -58,59 +98,66 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // === BIOME CONFIGURATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FWorld_BiomeConfig> BiomeConfigs;
 
-    // Initialize all 5 biome zones
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void InitializeBiomes();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    float TransitionBlendRadius = 400.0f;
 
-    // Get the biome type at a given world location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    bool bDebugDrawBiomeBounds = false;
 
-    // Get full biome zone data at location
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool GetBiomeZoneAtLocation(const FVector& WorldLocation, FWorld_BiomeZone& OutZone) const;
+    // === SPATIAL QUERY API ===
 
-    // Get all registered biome zones
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<FWorld_BiomeZone> GetAllBiomeZones() const;
+    /** Get biome data at a world position (with blend between adjacent biomes) */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FWorld_BiomeQueryResult QueryBiomeAtLocation(const FVector& WorldLocation) const;
 
-    // Get vegetation density at location (0.0 - 1.0)
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
+    /** Get the dominant biome type at a world position */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EWorld_BiomeType GetBiomeTypeAtLocation(const FVector& WorldLocation) const;
 
-    // Get temperature at location (Celsius)
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    /** Get temperature at location (affected by biome + elevation) */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
     float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    // Get humidity at location (0.0 - 1.0)
-    UFUNCTION(BlueprintCallable, Category = "Biome")
+    /** Get humidity at location */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
     float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    // Debug: draw biome boundaries
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome|Debug")
-    void DrawBiomeBoundaries();
+    /** Get danger level at location (affects AI spawning) */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
 
-    // Number of registered biomes
-    UFUNCTION(BlueprintPure, Category = "Biome")
-    int32 GetBiomeCount() const;
+    /** Check if a location is in a water biome (wetlands/river) */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    bool IsWaterBiome(const FVector& WorldLocation) const;
+
+    /** Get config for a specific biome type */
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    bool GetBiomeConfig(EWorld_BiomeType BiomeType, FWorld_BiomeConfig& OutConfig) const;
+
+    /** Initialize default 5-biome layout matching MinPlayableMap */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biomes")
+    void InitializeDefaultBiomes();
+
+    // === FOLIAGE DENSITY ===
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    float GetFoliageDensityAtLocation(const FVector& WorldLocation) const;
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
-    bool bAutoInitializeOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
-    bool bDrawDebugBoundaries = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
-    float DebugDrawDuration = 5.0f;
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 private:
-    void SetupDefaultBiomeZones();
-    float CalculateBlendWeight(const FVector& Location, const FWorld_BiomeZone& Zone) const;
+    /** Find the nearest biome config to a world location */
+    int32 FindNearestBiomeIndex(const FVector& WorldLocation) const;
+
+    /** Find the two nearest biomes for blending */
+    void FindTwoNearestBiomes(const FVector& WorldLocation, int32& OutFirst, int32& OutSecond, float& OutBlend) const;
 };
