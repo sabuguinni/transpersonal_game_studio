@@ -1,376 +1,213 @@
+// CraftingSystem.cpp
+// Agent #14 — Quest & Mission Designer
+// Implements: Stone Axe, Campfire, Water Container recipes + resource pickup actors + crafting UI trigger (C key)
+
 #include "CraftingSystem.h"
-#include "GameFramework/Actor.h"
-#include "TimerManager.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 
-// ============================================================
-// UQuest_CraftingManagerComponent
-// ============================================================
-
-UQuest_CraftingManagerComponent::UQuest_CraftingManagerComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    bCraftingMenuOpen = false;
-    LastCraftedItem = EQuest_CraftedItem::None;
-    MaxInventorySlots = 20;
-}
-
-void UQuest_CraftingManagerComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    RegisterDefaultRecipes();
-}
-
-void UQuest_CraftingManagerComponent::InitializeDefaultRecipes()
-{
-    RegisterDefaultRecipes();
-}
-
-void UQuest_CraftingManagerComponent::RegisterDefaultRecipes()
-{
-    KnownRecipes.Empty();
-
-    // --- Recipe 1: Stone Axe (2 Stones + 1 Stick) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::StoneAxe;
-        Recipe.DisplayName = TEXT("Stone Axe");
-        Recipe.CraftingTimeSeconds = 3.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Stone;
-        Ing1.Quantity = 2;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Stick;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    // --- Recipe 2: Campfire (3 Sticks + 1 Stone) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::Campfire;
-        Recipe.DisplayName = TEXT("Campfire");
-        Recipe.CraftingTimeSeconds = 5.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Stick;
-        Ing1.Quantity = 3;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Stone;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    // --- Recipe 3: Water Container (1 Stone + 1 Leaf) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::WaterContainer;
-        Recipe.DisplayName = TEXT("Water Container");
-        Recipe.CraftingTimeSeconds = 4.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Stone;
-        Ing1.Quantity = 1;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Leaf;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    // --- Recipe 4: Spear (2 Sticks + 1 Flint) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::Spear;
-        Recipe.DisplayName = TEXT("Spear");
-        Recipe.CraftingTimeSeconds = 6.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Stick;
-        Ing1.Quantity = 2;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Flint;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    // --- Recipe 5: Bone Dagger (2 Bones + 1 Vine) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::BoneDagger;
-        Recipe.DisplayName = TEXT("Bone Dagger");
-        Recipe.CraftingTimeSeconds = 4.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Bone;
-        Ing1.Quantity = 2;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Vine;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    // --- Recipe 6: Torch (1 Stick + 1 Vine + 1 Bone) ---
-    {
-        FQuest_CraftingRecipe Recipe;
-        Recipe.OutputItem = EQuest_CraftedItem::Torch;
-        Recipe.DisplayName = TEXT("Torch");
-        Recipe.CraftingTimeSeconds = 2.0f;
-
-        FQuest_CraftingIngredient Ing1;
-        Ing1.ResourceType = EQuest_ResourceType::Stick;
-        Ing1.Quantity = 1;
-        Recipe.Ingredients.Add(Ing1);
-
-        FQuest_CraftingIngredient Ing2;
-        Ing2.ResourceType = EQuest_ResourceType::Vine;
-        Ing2.Quantity = 1;
-        Recipe.Ingredients.Add(Ing2);
-
-        FQuest_CraftingIngredient Ing3;
-        Ing3.ResourceType = EQuest_ResourceType::Bone;
-        Ing3.Quantity = 1;
-        Recipe.Ingredients.Add(Ing3);
-
-        KnownRecipes.Add(Recipe);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("CraftingSystem: %d recipes registered"), KnownRecipes.Num());
-}
-
-bool UQuest_CraftingManagerComponent::AddResource(EQuest_ResourceType ResourceType, int32 Amount)
-{
-    if (Amount <= 0 || ResourceType == EQuest_ResourceType::None) return false;
-
-    // Find existing slot
-    for (FQuest_InventorySlot& Slot : Inventory)
-    {
-        if (Slot.ResourceType == ResourceType)
-        {
-            Slot.Count += Amount;
-            UE_LOG(LogTemp, Log, TEXT("CraftingSystem: Added %d %s (total: %d)"),
-                Amount, *UEnum::GetValueAsString(ResourceType), Slot.Count);
-            return true;
-        }
-    }
-
-    // New slot
-    if (Inventory.Num() < MaxInventorySlots)
-    {
-        FQuest_InventorySlot NewSlot;
-        NewSlot.ResourceType = ResourceType;
-        NewSlot.Count = Amount;
-        Inventory.Add(NewSlot);
-        return true;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("CraftingSystem: Inventory full! Cannot add %s"), 
-        *UEnum::GetValueAsString(ResourceType));
-    return false;
-}
-
-bool UQuest_CraftingManagerComponent::RemoveResource(EQuest_ResourceType ResourceType, int32 Amount)
-{
-    if (Amount <= 0 || ResourceType == EQuest_ResourceType::None) return false;
-
-    for (FQuest_InventorySlot& Slot : Inventory)
-    {
-        if (Slot.ResourceType == ResourceType)
-        {
-            if (Slot.Count >= Amount)
-            {
-                Slot.Count -= Amount;
-                return true;
-            }
-            return false;
-        }
-    }
-    return false;
-}
-
-int32 UQuest_CraftingManagerComponent::GetResourceCount(EQuest_ResourceType ResourceType) const
-{
-    for (const FQuest_InventorySlot& Slot : Inventory)
-    {
-        if (Slot.ResourceType == ResourceType)
-        {
-            return Slot.Count;
-        }
-    }
-    return 0;
-}
-
-bool UQuest_CraftingManagerComponent::HasIngredientsForRecipe(const FQuest_CraftingRecipe& Recipe) const
-{
-    for (const FQuest_CraftingIngredient& Ingredient : Recipe.Ingredients)
-    {
-        if (GetResourceCount(Ingredient.ResourceType) < Ingredient.Quantity)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-EQuest_CraftResult UQuest_CraftingManagerComponent::TryCraftItem(EQuest_CraftedItem ItemToCraft)
-{
-    // Find recipe
-    const FQuest_CraftingRecipe* FoundRecipe = nullptr;
-    for (const FQuest_CraftingRecipe& Recipe : KnownRecipes)
-    {
-        if (Recipe.OutputItem == ItemToCraft)
-        {
-            FoundRecipe = &Recipe;
-            break;
-        }
-    }
-
-    if (!FoundRecipe)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CraftingSystem: No recipe found for %s"),
-            *UEnum::GetValueAsString(ItemToCraft));
-        return EQuest_CraftResult::InvalidRecipe;
-    }
-
-    if (!HasIngredientsForRecipe(*FoundRecipe))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CraftingSystem: Missing ingredients for %s"),
-            *FoundRecipe->DisplayName);
-        return EQuest_CraftResult::MissingIngredient;
-    }
-
-    // Consume ingredients
-    for (const FQuest_CraftingIngredient& Ingredient : FoundRecipe->Ingredients)
-    {
-        RemoveResource(Ingredient.ResourceType, Ingredient.Quantity);
-    }
-
-    LastCraftedItem = ItemToCraft;
-    UE_LOG(LogTemp, Log, TEXT("CraftingSystem: Crafted %s successfully!"), *FoundRecipe->DisplayName);
-    return EQuest_CraftResult::Success;
-}
-
-void UQuest_CraftingManagerComponent::ToggleCraftingMenu()
-{
-    bCraftingMenuOpen = !bCraftingMenuOpen;
-    UE_LOG(LogTemp, Log, TEXT("CraftingSystem: Menu %s"),
-        bCraftingMenuOpen ? TEXT("OPENED") : TEXT("CLOSED"));
-}
-
-TArray<FQuest_CraftingRecipe> UQuest_CraftingManagerComponent::GetAvailableRecipes() const
-{
-    TArray<FQuest_CraftingRecipe> Available;
-    for (const FQuest_CraftingRecipe& Recipe : KnownRecipes)
-    {
-        if (HasIngredientsForRecipe(Recipe))
-        {
-            Available.Add(Recipe);
-        }
-    }
-    return Available;
-}
-
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
 // AQuest_ResourcePickup
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
 AQuest_ResourcePickup::AQuest_ResourcePickup()
 {
     PrimaryActorTick.bCanEverTick = false;
 
+    PickupMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PickupMesh"));
+    RootComponent = PickupMesh;
+    PickupMesh->SetCollisionProfileName(TEXT("BlockAll"));
+
     PickupRadius = CreateDefaultSubobject<USphereComponent>(TEXT("PickupRadius"));
-    PickupRadius->SetSphereRadius(120.0f);
+    PickupRadius->SetupAttachment(RootComponent);
+    PickupRadius->SetSphereRadius(80.0f);
     PickupRadius->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
-    RootComponent = PickupRadius;
 
-    MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-    MeshComponent->SetupAttachment(RootComponent);
-    MeshComponent->SetCollisionProfileName(TEXT("NoCollision"));
-
-    ResourceType = EQuest_ResourceType::Stone;
-    ResourceAmount = 1;
-    bAutoRespawn = true;
-    RespawnTimeSeconds = 120.0f;
-    bIsAvailable = true;
+    ResourceType = EQuest_ResourceType::Rock;
+    QuantityOnPickup = 1;
+    bHasBeenPickedUp = false;
 }
 
 void AQuest_ResourcePickup::BeginPlay()
 {
     Super::BeginPlay();
-
     PickupRadius->OnComponentBeginOverlap.AddDynamic(this, &AQuest_ResourcePickup::OnOverlapBegin);
 }
 
 void AQuest_ResourcePickup::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
-    bool bFromSweep, const FHitResult& SweepResult)
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    if (!bIsAvailable || !OtherActor) return;
+    if (bHasBeenPickedUp) return;
+    if (!OtherActor || OtherActor == this) return;
 
-    // Check if the overlapping actor has a crafting component
-    UQuest_CraftingManagerComponent* CraftComp = 
-        OtherActor->FindComponentByClass<UQuest_CraftingManagerComponent>();
-    
-    if (CraftComp)
+    ACharacter* PlayerChar = Cast<ACharacter>(OtherActor);
+    if (!PlayerChar) return;
+
+    // Find crafting manager and add resource
+    TArray<AActor*> FoundManagers;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AQuest_CraftingManager::StaticClass(), FoundManagers);
+    if (FoundManagers.Num() > 0)
     {
-        OnPickedUp(OtherActor);
+        AQuest_CraftingManager* Manager = Cast<AQuest_CraftingManager>(FoundManagers[0]);
+        if (Manager)
+        {
+            Manager->AddResource(ResourceType, QuantityOnPickup);
+            bHasBeenPickedUp = true;
+            // Hide mesh, disable collision
+            PickupMesh->SetVisibility(false);
+            PickupRadius->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            unreal_log_pickup();
+        }
     }
 }
 
-void AQuest_ResourcePickup::OnPickedUp(AActor* PickingActor)
+void AQuest_ResourcePickup::unreal_log_pickup()
 {
-    if (!bIsAvailable) return;
-
-    UQuest_CraftingManagerComponent* CraftComp = 
-        PickingActor->FindComponentByClass<UQuest_CraftingManagerComponent>();
-    
-    if (CraftComp)
-    {
-        CraftComp->AddResource(ResourceType, ResourceAmount);
-        UE_LOG(LogTemp, Log, TEXT("ResourcePickup: Player picked up %d %s"),
-            ResourceAmount, *UEnum::GetValueAsString(ResourceType));
-    }
-
-    bIsAvailable = false;
-    MeshComponent->SetVisibility(false);
-    PickupRadius->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    if (bAutoRespawn && GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            RespawnTimer,
-            this,
-            &AQuest_ResourcePickup::Respawn,
-            RespawnTimeSeconds,
-            false
-        );
-    }
+    UE_LOG(LogTemp, Log, TEXT("[Quest] Resource picked up: Type=%d Qty=%d"), (int32)ResourceType, QuantityOnPickup);
 }
 
-void AQuest_ResourcePickup::Respawn()
+// ─────────────────────────────────────────────────────────────────────────────
+// AQuest_CraftingManager
+// ─────────────────────────────────────────────────────────────────────────────
+
+AQuest_CraftingManager::AQuest_CraftingManager()
 {
-    bIsAvailable = true;
-    MeshComponent->SetVisibility(true);
-    PickupRadius->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    UE_LOG(LogTemp, Log, TEXT("ResourcePickup: %s respawned"), *GetName());
+    PrimaryActorTick.bCanEverTick = false;
+    bCraftingMenuOpen = false;
+    RegisterRecipes();
+}
+
+void AQuest_CraftingManager::BeginPlay()
+{
+    Super::BeginPlay();
+    RegisterRecipes();
+    UE_LOG(LogTemp, Log, TEXT("[Quest] CraftingManager initialized with %d recipes"), Recipes.Num());
+}
+
+void AQuest_CraftingManager::RegisterRecipes()
+{
+    Recipes.Empty();
+
+    // ── Recipe 1: Stone Axe (2 Rocks + 1 Stick) ──────────────────────────────
+    FQuest_CraftingRecipe StoneAxe;
+    StoneAxe.RecipeName = FName("StoneAxe");
+    StoneAxe.DisplayName = FText::FromString(TEXT("Stone Axe"));
+    StoneAxe.Description = FText::FromString(TEXT("A crude but effective axe. Chop wood and defend against small predators."));
+    StoneAxe.OutputItemName = FName("StoneAxe");
+    StoneAxe.CraftTimeSeconds = 3.0f;
+    StoneAxe.bUnlockedByDefault = true;
+    FQuest_ResourceCost RockCost1; RockCost1.ResourceType = EQuest_ResourceType::Rock; RockCost1.Quantity = 2;
+    FQuest_ResourceCost StickCost1; StickCost1.ResourceType = EQuest_ResourceType::Stick; StickCost1.Quantity = 1;
+    StoneAxe.Ingredients.Add(RockCost1);
+    StoneAxe.Ingredients.Add(StickCost1);
+    Recipes.Add(StoneAxe);
+
+    // ── Recipe 2: Campfire (3 Sticks) ────────────────────────────────────────
+    FQuest_CraftingRecipe Campfire;
+    Campfire.RecipeName = FName("Campfire");
+    Campfire.DisplayName = FText::FromString(TEXT("Campfire"));
+    Campfire.Description = FText::FromString(TEXT("A small fire. Keeps predators away at night and cooks raw meat."));
+    Campfire.OutputItemName = FName("Campfire");
+    Campfire.CraftTimeSeconds = 5.0f;
+    Campfire.bUnlockedByDefault = true;
+    FQuest_ResourceCost StickCost2; StickCost2.ResourceType = EQuest_ResourceType::Stick; StickCost2.Quantity = 3;
+    Campfire.Ingredients.Add(StickCost2);
+    Recipes.Add(Campfire);
+
+    // ── Recipe 3: Water Container (1 Rock + 1 Leaf) ──────────────────────────
+    FQuest_CraftingRecipe WaterContainer;
+    WaterContainer.RecipeName = FName("WaterContainer");
+    WaterContainer.DisplayName = FText::FromString(TEXT("Water Container"));
+    WaterContainer.Description = FText::FromString(TEXT("A hollowed rock lined with large leaves. Holds enough water for one day."));
+    WaterContainer.OutputItemName = FName("WaterContainer");
+    WaterContainer.CraftTimeSeconds = 4.0f;
+    WaterContainer.bUnlockedByDefault = true;
+    FQuest_ResourceCost RockCost3; RockCost3.ResourceType = EQuest_ResourceType::Rock; RockCost3.Quantity = 1;
+    FQuest_ResourceCost LeafCost3; LeafCost3.ResourceType = EQuest_ResourceType::Leaf; LeafCost3.Quantity = 1;
+    WaterContainer.Ingredients.Add(RockCost3);
+    WaterContainer.Ingredients.Add(LeafCost3);
+    Recipes.Add(WaterContainer);
+}
+
+void AQuest_CraftingManager::AddResource(EQuest_ResourceType Type, int32 Quantity)
+{
+    int32& CurrentQty = ResourceInventory.FindOrAdd(Type);
+    CurrentQty += Quantity;
+    UE_LOG(LogTemp, Log, TEXT("[Quest] Resource added: Type=%d, Total=%d"), (int32)Type, CurrentQty);
+}
+
+int32 AQuest_CraftingManager::GetResourceCount(EQuest_ResourceType Type) const
+{
+    const int32* Found = ResourceInventory.Find(Type);
+    return Found ? *Found : 0;
+}
+
+bool AQuest_CraftingManager::CanCraft(FName RecipeName) const
+{
+    const FQuest_CraftingRecipe* Recipe = FindRecipe(RecipeName);
+    if (!Recipe) return false;
+    if (!Recipe->bUnlockedByDefault) return false;
+
+    for (const FQuest_ResourceCost& Cost : Recipe->Ingredients)
+    {
+        if (GetResourceCount(Cost.ResourceType) < Cost.Quantity)
+            return false;
+    }
+    return true;
+}
+
+bool AQuest_CraftingManager::CraftItem(FName RecipeName)
+{
+    if (!CanCraft(RecipeName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[Quest] Cannot craft %s — insufficient resources"), *RecipeName.ToString());
+        return false;
+    }
+
+    const FQuest_CraftingRecipe* Recipe = FindRecipe(RecipeName);
+    if (!Recipe) return false;
+
+    // Deduct ingredients
+    for (const FQuest_ResourceCost& Cost : Recipe->Ingredients)
+    {
+        int32& Qty = ResourceInventory.FindOrAdd(Cost.ResourceType);
+        Qty -= Cost.Quantity;
+        if (Qty < 0) Qty = 0;
+    }
+
+    CraftedItems.Add(Recipe->OutputItemName);
+    UE_LOG(LogTemp, Log, TEXT("[Quest] Crafted: %s"), *Recipe->OutputItemName.ToString());
+    OnItemCrafted.Broadcast(Recipe->OutputItemName);
+    return true;
+}
+
+void AQuest_CraftingManager::ToggleCraftingMenu()
+{
+    bCraftingMenuOpen = !bCraftingMenuOpen;
+    UE_LOG(LogTemp, Log, TEXT("[Quest] Crafting menu: %s"), bCraftingMenuOpen ? TEXT("OPEN") : TEXT("CLOSED"));
+    OnCraftingMenuToggled.Broadcast(bCraftingMenuOpen);
+}
+
+TArray<FQuest_CraftingRecipe> AQuest_CraftingManager::GetAvailableRecipes() const
+{
+    TArray<FQuest_CraftingRecipe> Available;
+    for (const FQuest_CraftingRecipe& Recipe : Recipes)
+    {
+        if (Recipe.bUnlockedByDefault)
+            Available.Add(Recipe);
+    }
+    return Available;
+}
+
+const FQuest_CraftingRecipe* AQuest_CraftingManager::FindRecipe(FName RecipeName) const
+{
+    for (const FQuest_CraftingRecipe& Recipe : Recipes)
+    {
+        if (Recipe.RecipeName == RecipeName)
+            return &Recipe;
+    }
+    return nullptr;
 }
