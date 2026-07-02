@@ -1,124 +1,161 @@
 // RaptorDinosaur.h
-// Transpersonal Game Studio — Agent #05 Procedural World Generator
-// Velociraptor pack hunter — fast, intelligent, flanking AI
+// Performance Optimizer #04 — Cycle AUTO_20260702_008
+// Pack predator dinosaur — Velociraptor-class hunter with coordinated pack AI
+// Performance: URO-compatible, distance-based tick throttle, LOD-aware
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
-#include "TimerManager.h"
+#include "Dinosaurs/DinosaurBase.h"
 #include "RaptorDinosaur.generated.h"
 
-// Raptor role within pack
+// Pack role enum — determines behavior priority in group hunts
 UENUM(BlueprintType)
-enum class EWorld_RaptorRole : uint8
+enum class EPerf_RaptorPackRole : uint8
 {
-    Scout    UMETA(DisplayName = "Scout"),
-    Flanker  UMETA(DisplayName = "Flanker"),
-    Alpha    UMETA(DisplayName = "Alpha")
+    Alpha       UMETA(DisplayName = "Alpha"),    // Leads charge, highest priority target
+    Flanker     UMETA(DisplayName = "Flanker"),  // Circles prey, cuts off escape
+    Distractor  UMETA(DisplayName = "Distractor") // Feints to draw attention
 };
 
-// Dinosaur AI state
-UENUM(BlueprintType)
-enum class EWorld_DinoState : uint8
+// Pack coordination signal
+USTRUCT(BlueprintType)
+struct FPerf_PackSignal
 {
-    Idle       UMETA(DisplayName = "Idle"),
-    Patrolling UMETA(DisplayName = "Patrolling"),
-    Chasing    UMETA(DisplayName = "Chasing"),
-    Attacking  UMETA(DisplayName = "Attacking"),
-    Fleeing    UMETA(DisplayName = "Fleeing"),
-    Returning  UMETA(DisplayName = "Returning"),
-    Dead       UMETA(DisplayName = "Dead")
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    AActor* Target = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    EPerf_RaptorPackRole AssignedRole = EPerf_RaptorPackRole::Alpha;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    FVector FlankPosition = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Pack")
+    bool bHuntActive = false;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ARaptorDinosaur : public ACharacter
+/**
+ * ARaptorDinosaur — Velociraptor-class pack predator
+ *
+ * Performance design:
+ * - Tick throttled by distance to player (URO-compatible)
+ * - Pack signals broadcast via timer (not every tick)
+ * - Sphere overlaps cached, not run every frame
+ * - LOD-aware: AI disabled beyond 6000 units
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup = "Dinosaurs",
+    meta = (DisplayName = "Raptor Dinosaur"))
+class TRANSPERSONALGAME_API ARaptorDinosaur : public ADinosaurBase
 {
     GENERATED_BODY()
 
 public:
     ARaptorDinosaur();
 
-protected:
+    // --- Pack System ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    EPerf_RaptorPackRole PackRole = EPerf_RaptorPackRole::Alpha;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    bool bPackHunter = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float PackDetectionRadius = 1200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float CoordinatedAttackBonus = 1.5f; // Damage multiplier when 2+ raptors attack same target
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    int32 MaxPackSize = 5;
+
+    // --- Species Stats ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float LeapAttackRange = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float LeapAttackCooldown = 4.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float FlankingRadius = 500.0f; // Distance flankers maintain from prey
+
+    // --- Performance: Distance-based tick throttle ---
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float AIDisableDistance = 6000.0f; // Beyond this, AI ticks are suspended
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TickThrottleNear = 0.05f;  // Tick interval when player < 2000 units
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TickThrottleFar = 0.25f;   // Tick interval when player 2000-6000 units
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PackSignalBroadcastInterval = 0.5f; // How often pack signals are sent
+
+    // --- Core Overrides ---
+
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
-    virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
-        AController* EventInstigator, AActor* DamageCauser) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // === VITAL STATS ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Stats")
-    float Health;
+    // --- Pack Behavior ---
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Stats")
-    float MaxHealth;
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void BroadcastHuntSignal(AActor* PreyTarget);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float AttackDamage;
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void ReceiveHuntSignal(const FPerf_PackSignal& Signal);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float AttackRange;
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    void AssignFlankPosition(AActor* PreyTarget);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Combat")
-    float AttackCooldown;
+    UFUNCTION(BlueprintCallable, Category = "Pack")
+    TArray<ARaptorDinosaur*> FindNearbyPackMembers();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|AI")
-    float DetectionRange;
+    // --- Attack Behaviors ---
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|AI")
-    float PatrolRadius;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void PerformLeapAttack(AActor* Target);
 
-    // === PACK BEHAVIOUR ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    EWorld_RaptorRole PackRole;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void PerformFlankingManeuver(AActor* Target);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raptor|Pack")
-    bool bIsAlpha;
+    UFUNCTION(BlueprintNativeEvent, Category = "Combat")
+    void OnPackHuntBegin(AActor* PreyTarget);
+    virtual void OnPackHuntBegin_Implementation(AActor* PreyTarget);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
-    bool bIsInPackChase;
+    // --- Performance Utilities ---
 
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|Pack")
-    ARaptorDinosaur* PackLeader;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateTickRate(float DistanceToPlayer);
 
-    // === AI STATE ===
-    UPROPERTY(BlueprintReadOnly, Category = "Raptor|AI")
-    EWorld_DinoState CurrentState;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsWithinAIRange() const;
 
-    // === AI FUNCTIONS ===
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    void UpdateAI();
+protected:
+    // Internal state
+    bool bLeapOnCooldown = false;
+    bool bHuntActive = false;
+    FPerf_PackSignal CurrentPackSignal;
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    AActor* FindNearestThreat();
+    // Cached player ref (updated periodically, not every tick)
+    UPROPERTY()
+    AActor* CachedPlayerActor = nullptr;
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    void ChaseTarget(AActor* Target);
+    float TimeSinceLastPlayerScan = 0.0f;
+    float PlayerScanInterval = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Combat")
-    void PerformAttack(AActor* Target);
+    // Timers
+    FTimerHandle LeapCooldownTimer;
+    FTimerHandle PackSignalTimer;
+    FTimerHandle PlayerScanTimer;
 
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void AlertPackMembers(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Raptor|Pack")
-    void CoordinateWithPack();
-
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    void Patrol();
-
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    void ReturnToHome();
-
-    UFUNCTION(BlueprintCallable, Category = "Raptor|AI")
-    void OnDeath();
-
-private:
-    FVector HomeLocation;
-    FVector PatrolTarget;
-    float TimeSinceLastAttack;
-    FTimerHandle AITickHandle;
-
-    void unreal_log_attack(AActor* Target);
+    void ScanForPlayer();
+    void OnLeapCooldownEnd();
+    void TickPackSignal();
 };
