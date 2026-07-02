@@ -1,386 +1,190 @@
-#include "BiomeManager.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "GameFramework/Actor.h"
+// BiomeManager.cpp — Agent #05 Procedural World Generator — PROD_CYCLE_AUTO_20260702_002
+// Full implementation of 5-biome prehistoric world system
 
+#include "BiomeManager.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+
+// ─── Constructor ──────────────────────────────────────────────────────────────
 ABiomeManager::ABiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Update every 0.5s for performance
-
-    InitializeBiomeDataTable();
+    PrimaryActorTick.bCanEverTick = false;
+    bAutoInitializeBiomes = true;
 }
 
+// ─── BeginPlay ────────────────────────────────────────────────────────────────
 void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Register default biome zones for the MinPlayableMap
-    // These will be overridden by PCGWorldGenerator when it runs
-    RegisterBiomeZone(EEng_BiomeType::Jungle,  FVector(0.0f,    0.0f,    0.0f), 5000.0f);
-    RegisterBiomeZone(EEng_BiomeType::Savanna,  FVector(8000.0f, 0.0f,    0.0f), 4000.0f);
-    RegisterBiomeZone(EEng_BiomeType::Swamp,    FVector(0.0f,    8000.0f, 0.0f), 3500.0f);
-    RegisterBiomeZone(EEng_BiomeType::Volcanic, FVector(-6000.0f,4000.0f, 0.0f), 3000.0f);
-    RegisterBiomeZone(EEng_BiomeType::Coastal,  FVector(0.0f,   -8000.0f, 0.0f), 4500.0f);
-
-    UE_LOG(LogTemp, Log, TEXT("ABiomeManager: Initialized with %d biome zones"), RegisteredZones.Num());
+    if (bAutoInitializeBiomes && BiomeZones.Num() == 0)
+    {
+        InitializeDefaultBiomes();
+    }
 }
 
-void ABiomeManager::Tick(float DeltaTime)
+// ─── InitializeDefaultBiomes ─────────────────────────────────────────────────
+void ABiomeManager::InitializeDefaultBiomes()
 {
-    Super::Tick(DeltaTime);
+    BiomeZones.Empty();
 
-    if (!bEnableAtmosphereUpdates)
+    // Forest Zone — dense jungle, high vegetation, moderate danger
+    FWorld_BiomeZone Forest;
+    Forest.BiomeType        = EWorld_BiomeType::Forest;
+    Forest.CenterLocation   = FVector(-8000.0f, -8000.0f, 0.0f);
+    Forest.Radius           = 6000.0f;
+    Forest.DebugColor       = FLinearColor(0.05f, 0.8f, 0.05f, 1.0f);
+    Forest.VegetationDensity = 2.5f;
+    Forest.WaterPresence    = 0.3f;
+    Forest.DangerLevel      = 0.6f;
+    BiomeZones.Add(Forest);
+
+    // Plains Zone — open grassland, low vegetation, low danger
+    FWorld_BiomeZone Plains;
+    Plains.BiomeType        = EWorld_BiomeType::Plains;
+    Plains.CenterLocation   = FVector(8000.0f, 0.0f, 0.0f);
+    Plains.Radius           = 7000.0f;
+    Plains.DebugColor       = FLinearColor(0.8f, 0.8f, 0.1f, 1.0f);
+    Plains.VegetationDensity = 0.8f;
+    Plains.WaterPresence    = 0.1f;
+    Plains.DangerLevel      = 0.3f;
+    BiomeZones.Add(Plains);
+
+    // Rocky Zone — cliffs and boulders, sparse vegetation, moderate danger
+    FWorld_BiomeZone Rocky;
+    Rocky.BiomeType         = EWorld_BiomeType::Rocky;
+    Rocky.CenterLocation    = FVector(0.0f, 8000.0f, 0.0f);
+    Rocky.Radius            = 5500.0f;
+    Rocky.DebugColor        = FLinearColor(0.5f, 0.35f, 0.2f, 1.0f);
+    Rocky.VegetationDensity = 0.3f;
+    Rocky.WaterPresence     = 0.05f;
+    Rocky.DangerLevel       = 0.7f;
+    BiomeZones.Add(Rocky);
+
+    // Swamp Zone — murky wetlands, dense low vegetation, high danger
+    FWorld_BiomeZone Swamp;
+    Swamp.BiomeType         = EWorld_BiomeType::Swamp;
+    Swamp.CenterLocation    = FVector(-8000.0f, 8000.0f, -50.0f);
+    Swamp.Radius            = 5000.0f;
+    Swamp.DebugColor        = FLinearColor(0.1f, 0.4f, 0.1f, 1.0f);
+    Swamp.VegetationDensity = 1.8f;
+    Swamp.WaterPresence     = 0.75f;
+    Swamp.DangerLevel       = 0.8f;
+    BiomeZones.Add(Swamp);
+
+    // Volcanic Zone — lava fields, near-zero vegetation, extreme danger
+    FWorld_BiomeZone Volcanic;
+    Volcanic.BiomeType         = EWorld_BiomeType::Volcanic;
+    Volcanic.CenterLocation    = FVector(0.0f, -10000.0f, 100.0f);
+    Volcanic.Radius            = 4500.0f;
+    Volcanic.DebugColor        = FLinearColor(1.0f, 0.15f, 0.02f, 1.0f);
+    Volcanic.VegetationDensity = 0.05f;
+    Volcanic.WaterPresence     = 0.0f;
+    Volcanic.DangerLevel       = 1.0f;
+    BiomeZones.Add(Volcanic);
+
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized %d biome zones"), BiomeZones.Num());
+}
+
+// ─── RegisterBiomeZone ────────────────────────────────────────────────────────
+void ABiomeManager::RegisterBiomeZone(const FWorld_BiomeZone& Zone)
+{
+    // Remove existing zone of same type if present
+    BiomeZones.RemoveAll([&Zone](const FWorld_BiomeZone& Existing)
     {
-        return;
-    }
+        return Existing.BiomeType == Zone.BiomeType;
+    });
+    BiomeZones.Add(Zone);
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Registered biome zone type=%d"), (int32)Zone.BiomeType);
+}
 
-    AtmosphereUpdateTimer += DeltaTime;
-    if (AtmosphereUpdateTimer >= AtmosphereUpdateInterval)
+// ─── FindClosestBiomeIndex ────────────────────────────────────────────────────
+int32 ABiomeManager::FindClosestBiomeIndex(const FVector& WorldLocation) const
+{
+    int32 ClosestIndex = -1;
+    float ClosestDistSq = FLT_MAX;
+
+    for (int32 i = 0; i < BiomeZones.Num(); ++i)
     {
-        AtmosphereUpdateTimer = 0.0f;
-
-        // Update atmosphere based on player location
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-        if (PC && PC->GetPawn())
+        const float DistSq = FVector::DistSquaredXY(WorldLocation, BiomeZones[i].CenterLocation);
+        if (DistSq < ClosestDistSq)
         {
-            UpdateAtmosphereForPlayerLocation(PC->GetPawn()->GetActorLocation());
+            ClosestDistSq = DistSq;
+            ClosestIndex  = i;
+        }
+    }
+    return ClosestIndex;
+}
+
+// ─── GetBiomeAtLocation ───────────────────────────────────────────────────────
+EWorld_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    if (BiomeZones.Num() == 0) return EWorld_BiomeType::Unknown;
+
+    // First check if location is within any biome radius
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
+    {
+        const float DistXY = FVector::DistXY(WorldLocation, Zone.CenterLocation);
+        if (DistXY <= Zone.Radius)
+        {
+            return Zone.BiomeType;
         }
     }
 
-    // Debug draw
-    if (bDrawBiomeZones)
-    {
-        DebugDrawAllBiomeZones();
-    }
+    // Fallback: return closest biome type
+    const int32 Idx = FindClosestBiomeIndex(WorldLocation);
+    return (Idx >= 0) ? BiomeZones[Idx].BiomeType : EWorld_BiomeType::Unknown;
 }
 
-EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+// ─── GetBiomeZoneData ─────────────────────────────────────────────────────────
+FWorld_BiomeZone ABiomeManager::GetBiomeZoneData(EWorld_BiomeType BiomeType) const
 {
-    float BestWeight = -1.0f;
-    EEng_BiomeType BestBiome = DefaultBiome;
-
-    for (const FBiomeZone& Zone : RegisteredZones)
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
     {
-        float Dist = FVector::Dist(WorldLocation, Zone.Center);
-        if (Dist <= Zone.Radius)
-        {
-            // Weight by inverse distance (closer = stronger)
-            float Weight = 1.0f - (Dist / Zone.Radius);
-            if (Weight > BestWeight)
-            {
-                BestWeight = Weight;
-                BestBiome = Zone.BiomeType;
-            }
-        }
+        if (Zone.BiomeType == BiomeType) return Zone;
     }
-
-    return BestBiome;
+    return FWorld_BiomeZone(); // Empty/default
 }
 
-FEng_BiomeData ABiomeManager::GetBiomeDataAtLocation(const FVector& WorldLocation) const
+// ─── GetDangerLevelAtLocation ─────────────────────────────────────────────────
+float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
 {
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    return GetBiomeDataForType(BiomeType);
+    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FWorld_BiomeZone Zone  = GetBiomeZoneData(Biome);
+    return Zone.DangerLevel;
 }
 
-FEng_BiomeData ABiomeManager::GetBlendedBiomeData(const FVector& WorldLocation) const
+// ─── GetVegetationDensityAtLocation ──────────────────────────────────────────
+float ABiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
 {
-    // Collect all zones that influence this location
-    struct FZoneInfluence
-    {
-        FEng_BiomeData Data;
-        float Weight;
-    };
-
-    TArray<FZoneInfluence> Influences;
-    float TotalWeight = 0.0f;
-
-    for (const FBiomeZone& Zone : RegisteredZones)
-    {
-        float Dist = FVector::Dist(WorldLocation, Zone.Center);
-        float BlendStart = Zone.Radius - BiomeTransitionBlendRadius;
-
-        if (Dist <= Zone.Radius)
-        {
-            float Weight = 1.0f;
-            if (Dist > BlendStart && BlendStart > 0.0f)
-            {
-                // Smooth blend at edges
-                float BlendT = (Dist - BlendStart) / BiomeTransitionBlendRadius;
-                Weight = FMath::SmoothStep(1.0f, 0.0f, BlendT);
-            }
-
-            if (Weight > 0.0f)
-            {
-                FZoneInfluence Inf;
-                Inf.Data = GetBiomeDataForType(Zone.BiomeType);
-                Inf.Weight = Weight;
-                Influences.Add(Inf);
-                TotalWeight += Weight;
-            }
-        }
-    }
-
-    if (Influences.Num() == 0 || TotalWeight <= 0.0f)
-    {
-        return GetBiomeDataForType(DefaultBiome);
-    }
-
-    // Weighted blend of biome properties
-    FEng_BiomeData Blended;
-    Blended.Temperature = 0.0f;
-    Blended.Humidity = 0.0f;
-    Blended.VegetationDensity = 0.0f;
-    Blended.DinosaurSpawnWeight = 0.0f;
-    Blended.FogDensity = 0.0f;
-    Blended.FogColor = FLinearColor::Black;
-
-    for (const FZoneInfluence& Inf : Influences)
-    {
-        float NormalizedWeight = Inf.Weight / TotalWeight;
-        Blended.Temperature        += Inf.Data.Temperature        * NormalizedWeight;
-        Blended.Humidity           += Inf.Data.Humidity           * NormalizedWeight;
-        Blended.VegetationDensity  += Inf.Data.VegetationDensity  * NormalizedWeight;
-        Blended.DinosaurSpawnWeight+= Inf.Data.DinosaurSpawnWeight * NormalizedWeight;
-        Blended.FogDensity         += Inf.Data.FogDensity         * NormalizedWeight;
-        Blended.FogColor.R         += Inf.Data.FogColor.R         * NormalizedWeight;
-        Blended.FogColor.G         += Inf.Data.FogColor.G         * NormalizedWeight;
-        Blended.FogColor.B         += Inf.Data.FogColor.B         * NormalizedWeight;
-    }
-
-    return Blended;
+    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FWorld_BiomeZone Zone  = GetBiomeZoneData(Biome);
+    return Zone.VegetationDensity;
 }
 
-void ABiomeManager::RegisterBiomeZone(EEng_BiomeType BiomeType, const FVector& Center, float Radius)
+// ─── IsLocationInWater ────────────────────────────────────────────────────────
+bool ABiomeManager::IsLocationInWater(const FVector& WorldLocation) const
 {
-    FBiomeZone NewZone;
-    NewZone.BiomeType = BiomeType;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    RegisteredZones.Add(NewZone);
-
-    UE_LOG(LogTemp, Log, TEXT("ABiomeManager: Registered biome zone %d at (%.0f, %.0f, %.0f) R=%.0f"),
-        (int32)BiomeType, Center.X, Center.Y, Center.Z, Radius);
+    const EWorld_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    const FWorld_BiomeZone Zone  = GetBiomeZoneData(Biome);
+    // Consider "in water" if water presence > 0.5 and location is below zone center Z
+    return (Zone.WaterPresence > 0.5f && WorldLocation.Z <= Zone.CenterLocation.Z + 10.0f);
 }
 
-void ABiomeManager::ClearAllBiomeZones()
-{
-    RegisteredZones.Empty();
-    UE_LOG(LogTemp, Log, TEXT("ABiomeManager: All biome zones cleared"));
-}
-
-FEng_BiomeData ABiomeManager::GetBiomeDataForType(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeData* Found = BiomeDataTable.Find(BiomeType);
-    if (Found)
-    {
-        return *Found;
-    }
-
-    // Return default jungle data if not found
-    FEng_BiomeData Default;
-    Default.BiomeType = EEng_BiomeType::Jungle;
-    Default.BiomeName = TEXT("Jungle");
-    Default.Temperature = 30.0f;
-    Default.Humidity = 0.8f;
-    Default.VegetationDensity = 0.9f;
-    Default.DinosaurSpawnWeight = 1.2f;
-    Default.FogColor = FLinearColor(0.3f, 0.5f, 0.3f, 1.0f);
-    Default.FogDensity = 0.025f;
-    return Default;
-}
-
-int32 ABiomeManager::GetBiomeZoneCount() const
-{
-    return RegisteredZones.Num();
-}
-
-void ABiomeManager::ApplyBiomeAtmosphere(EEng_BiomeType BiomeType)
-{
-    FEng_BiomeData Data = GetBiomeDataForType(BiomeType);
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Find ExponentialHeightFog and apply biome fog settings
-    TArray<AActor*> FogActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FogActors);
-
-    for (AActor* FogActor : FogActors)
-    {
-        AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActor);
-        if (Fog)
-        {
-            UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
-            if (FogComp)
-            {
-                FogComp->SetFogDensity(Data.FogDensity);
-                FogComp->SetFogInscatteringColor(Data.FogColor);
-                UE_LOG(LogTemp, Log, TEXT("ABiomeManager: Applied atmosphere for biome %s"), *Data.BiomeName);
-            }
-            break; // Only apply to first fog actor
-        }
-    }
-}
-
-void ABiomeManager::UpdateAtmosphereForPlayerLocation(const FVector& PlayerLocation)
-{
-    FEng_BiomeData BlendedData = GetBlendedBiomeData(PlayerLocation);
-    EEng_BiomeType CurrentBiome = GetBiomeAtLocation(PlayerLocation);
-
-    // Only apply if biome changed significantly (optimization)
-    static EEng_BiomeType LastAppliedBiome = EEng_BiomeType::None;
-    if (CurrentBiome != LastAppliedBiome)
-    {
-        ApplyBiomeAtmosphere(CurrentBiome);
-        LastAppliedBiome = CurrentBiome;
-    }
-}
-
-void ABiomeManager::DebugDrawAllBiomeZones()
+// ─── DrawBiomeDebugSpheres ────────────────────────────────────────────────────
+void ABiomeManager::DrawBiomeDebugSpheres(float Duration)
 {
     UWorld* World = GetWorld();
-    if (!World)
+    if (!World) return;
+
+    for (const FWorld_BiomeZone& Zone : BiomeZones)
     {
-        return;
+        const FColor Color = Zone.DebugColor.ToFColor(true);
+        DrawDebugSphere(World, Zone.CenterLocation, Zone.Radius, 24, Color, false, Duration, 0, 50.0f);
+        DrawDebugString(World, Zone.CenterLocation + FVector(0, 0, Zone.Radius + 200.0f),
+            FString::Printf(TEXT("Biome: %d | Danger: %.1f | Veg: %.1f"),
+                (int32)Zone.BiomeType, Zone.DangerLevel, Zone.VegetationDensity),
+            nullptr, Color, Duration);
     }
-
-    static const TMap<EEng_BiomeType, FColor> BiomeColors = {
-        { EEng_BiomeType::Jungle,   FColor::Green   },
-        { EEng_BiomeType::Savanna,  FColor::Yellow  },
-        { EEng_BiomeType::Swamp,    FColor(0, 128, 64) },
-        { EEng_BiomeType::Volcanic, FColor::Red     },
-        { EEng_BiomeType::Coastal,  FColor::Cyan    },
-        { EEng_BiomeType::Forest,   FColor(0, 200, 100) },
-        { EEng_BiomeType::Desert,   FColor::Orange  },
-    };
-
-    for (const FBiomeZone& Zone : RegisteredZones)
-    {
-        const FColor* ColorPtr = BiomeColors.Find(Zone.BiomeType);
-        FColor DrawColor = ColorPtr ? *ColorPtr : FColor::White;
-
-        DrawDebugCircle(
-            World,
-            Zone.Center,
-            Zone.Radius,
-            64,
-            DrawColor,
-            false,
-            AtmosphereUpdateInterval + 0.1f,
-            0,
-            20.0f,
-            FVector(1, 0, 0),
-            FVector(0, 1, 0)
-        );
-    }
-}
-
-void ABiomeManager::InitializeBiomeDataTable()
-{
-    // Jungle
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Jungle;
-        Data.BiomeName = TEXT("Cretaceous Jungle");
-        Data.Temperature = 32.0f;
-        Data.Humidity = 0.85f;
-        Data.VegetationDensity = 0.95f;
-        Data.DinosaurSpawnWeight = 1.3f;
-        Data.FogColor = FLinearColor(0.3f, 0.55f, 0.3f, 1.0f);
-        Data.FogDensity = 0.025f;
-        BiomeDataTable.Add(EEng_BiomeType::Jungle, Data);
-    }
-
-    // Savanna
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Savanna;
-        Data.BiomeName = TEXT("Prehistoric Savanna");
-        Data.Temperature = 38.0f;
-        Data.Humidity = 0.25f;
-        Data.VegetationDensity = 0.35f;
-        Data.DinosaurSpawnWeight = 1.5f; // High dino density — open ground
-        Data.FogColor = FLinearColor(0.7f, 0.6f, 0.4f, 1.0f);
-        Data.FogDensity = 0.012f;
-        BiomeDataTable.Add(EEng_BiomeType::Savanna, Data);
-    }
-
-    // Swamp
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Swamp;
-        Data.BiomeName = TEXT("Primordial Swamp");
-        Data.Temperature = 28.0f;
-        Data.Humidity = 0.95f;
-        Data.VegetationDensity = 0.7f;
-        Data.DinosaurSpawnWeight = 0.8f;
-        Data.FogColor = FLinearColor(0.2f, 0.4f, 0.25f, 1.0f);
-        Data.FogDensity = 0.045f; // Dense swamp fog
-        BiomeDataTable.Add(EEng_BiomeType::Swamp, Data);
-    }
-
-    // Volcanic
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Volcanic;
-        Data.BiomeName = TEXT("Volcanic Badlands");
-        Data.Temperature = 55.0f;
-        Data.Humidity = 0.1f;
-        Data.VegetationDensity = 0.05f;
-        Data.DinosaurSpawnWeight = 0.5f; // Hostile — few dinos
-        Data.FogColor = FLinearColor(0.6f, 0.3f, 0.1f, 1.0f);
-        Data.FogDensity = 0.035f; // Ash/smoke fog
-        BiomeDataTable.Add(EEng_BiomeType::Volcanic, Data);
-    }
-
-    // Coastal
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Coastal;
-        Data.BiomeName = TEXT("Cretaceous Coast");
-        Data.Temperature = 26.0f;
-        Data.Humidity = 0.6f;
-        Data.VegetationDensity = 0.4f;
-        Data.DinosaurSpawnWeight = 1.0f;
-        Data.FogColor = FLinearColor(0.5f, 0.65f, 0.75f, 1.0f);
-        Data.FogDensity = 0.018f;
-        BiomeDataTable.Add(EEng_BiomeType::Coastal, Data);
-    }
-
-    // Forest
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Forest;
-        Data.BiomeName = TEXT("Ancient Forest");
-        Data.Temperature = 22.0f;
-        Data.Humidity = 0.7f;
-        Data.VegetationDensity = 0.85f;
-        Data.DinosaurSpawnWeight = 1.1f;
-        Data.FogColor = FLinearColor(0.35f, 0.5f, 0.35f, 1.0f);
-        Data.FogDensity = 0.022f;
-        BiomeDataTable.Add(EEng_BiomeType::Forest, Data);
-    }
-
-    // Desert
-    {
-        FEng_BiomeData Data;
-        Data.BiomeType = EEng_BiomeType::Desert;
-        Data.BiomeName = TEXT("Arid Flats");
-        Data.Temperature = 45.0f;
-        Data.Humidity = 0.05f;
-        Data.VegetationDensity = 0.02f;
-        Data.DinosaurSpawnWeight = 0.6f;
-        Data.FogColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
-        Data.FogDensity = 0.008f;
-        BiomeDataTable.Add(EEng_BiomeType::Desert, Data);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("ABiomeManager: Initialized %d biome types in data table"), BiomeDataTable.Num());
+    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Drew debug spheres for %d zones"), BiomeZones.Num());
 }
