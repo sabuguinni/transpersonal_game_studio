@@ -1,230 +1,301 @@
-// BiomeManager.cpp — Engine Architect #02 — PROD_CYCLE_AUTO_20260702_005
-// Biome system implementation: P1 World Generation priority
-// Manages 5 biome zones: Forest, Plains, Swamp, Volcanic, River
-
 #include "BiomeManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Components/ExponentialHeightFogComponent.h"
 
-UBiomeManager::UBiomeManager()
+// ============================================================
+// Constructor
+// ============================================================
+ABiomeManager::ABiomeManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check biome every second
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.5f; // Tick every 0.5s for performance
 
-    // Default biome definitions
+    // Initialize default biomes in constructor so CDO has valid data
     InitializeDefaultBiomes();
 }
 
-void UBiomeManager::BeginPlay()
+// ============================================================
+// BeginPlay
+// ============================================================
+void ABiomeManager::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized with %d biomes"), BiomeDefinitions.Num());
+
+    if (BiomeConfigs.Num() == 0)
+    {
+        InitializeDefaultBiomes();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Initialized with %d biome zones"), BiomeConfigs.Num());
 }
 
-void UBiomeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+// ============================================================
+// Tick
+// ============================================================
+void ABiomeManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    // Update current biome for owner actor
-    if (AActor* Owner = GetOwner())
+    TimeSinceLastUpdate += DeltaTime;
+    if (TimeSinceLastUpdate < UpdateInterval)
     {
-        FVector OwnerLocation = Owner->GetActorLocation();
-        EEng_BiomeType NewBiome = GetBiomeAtLocation(OwnerLocation);
-        if (NewBiome != CurrentBiome)
+        return;
+    }
+    TimeSinceLastUpdate = 0.0f;
+
+    // Get player location and update biome state
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC) return;
+
+    APawn* PlayerPawn = PC->GetPawn();
+    if (!PlayerPawn) return;
+
+    FVector PlayerLoc = PlayerPawn->GetActorLocation();
+    EEng_BiomeType NewBiome = GetBiomeAtLocation(PlayerLoc);
+
+    if (NewBiome != CurrentPlayerBiome)
+    {
+        CurrentPlayerBiome = NewBiome;
+        UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Player entered biome: %d"), (int32)NewBiome);
+
+        if (bEnableVisualTransitions)
         {
-            EEng_BiomeType OldBiome = CurrentBiome;
-            CurrentBiome = NewBiome;
-            OnBiomeChanged.Broadcast(OldBiome, NewBiome);
-            UE_LOG(LogTemp, Verbose, TEXT("BiomeManager: Biome changed from %d to %d at location %s"),
-                (int32)OldBiome, (int32)NewBiome, *OwnerLocation.ToString());
+            const FEng_BiomeConfig* Config = FindNearestBiome(PlayerLoc);
+            if (Config)
+            {
+                ApplyBiomeVisuals(*Config);
+            }
         }
     }
 }
 
-void UBiomeManager::InitializeDefaultBiomes()
+// ============================================================
+// InitializeDefaultBiomes — 5 prehistoric biome zones
+// ============================================================
+void ABiomeManager::InitializeDefaultBiomes()
 {
-    BiomeDefinitions.Empty();
+    BiomeConfigs.Empty();
 
-    // Forest Biome
-    FEng_BiomeDefinition Forest;
-    Forest.BiomeType = EEng_BiomeType::Forest;
-    Forest.DisplayName = FText::FromString(TEXT("Cretaceous Forest"));
-    Forest.TemperatureMin = 18.0f;
-    Forest.TemperatureMax = 28.0f;
-    Forest.HumidityMin = 0.6f;
-    Forest.HumidityMax = 0.9f;
-    Forest.FogDensity = 0.03f;
-    Forest.DangerLevel = 0.4f;
-    Forest.ResourceMultiplier = 1.5f;
-    Forest.BiomeColor = FLinearColor(0.13f, 0.55f, 0.13f, 1.0f);
-    BiomeDefinitions.Add(Forest);
+    // --- JUNGLE ---
+    FEng_BiomeConfig Jungle;
+    Jungle.BiomeType = EEng_BiomeType::Jungle;
+    Jungle.DisplayName = TEXT("Dense Jungle");
+    Jungle.Center = FVector(200000.0f, 200000.0f, 0.0f);
+    Jungle.Radius = 250000.0f;
+    Jungle.AmbientTemperature = 32.0f;
+    Jungle.WaterAvailability = 0.9f;
+    Jungle.FoodAvailability = 0.8f;
+    Jungle.DangerLevel = 0.6f;
+    Jungle.FogDensity = 0.04f;
+    Jungle.SkyTint = FLinearColor(0.3f, 0.6f, 0.2f, 1.0f);
+    BiomeConfigs.Add(Jungle);
 
-    // Plains Biome
-    FEng_BiomeDefinition Plains;
-    Plains.BiomeType = EEng_BiomeType::Plains;
-    Plains.DisplayName = FText::FromString(TEXT("Open Plains"));
-    Plains.TemperatureMin = 22.0f;
-    Plains.TemperatureMax = 38.0f;
-    Plains.HumidityMin = 0.2f;
-    Plains.HumidityMax = 0.5f;
-    Plains.FogDensity = 0.01f;
-    Plains.DangerLevel = 0.6f;
-    Plains.ResourceMultiplier = 0.8f;
-    Plains.BiomeColor = FLinearColor(0.82f, 0.71f, 0.55f, 1.0f);
-    BiomeDefinitions.Add(Plains);
+    // --- SAVANNA ---
+    FEng_BiomeConfig Savanna;
+    Savanna.BiomeType = EEng_BiomeType::Savanna;
+    Savanna.DisplayName = TEXT("Open Savanna");
+    Savanna.Center = FVector(-200000.0f, 200000.0f, 0.0f);
+    Savanna.Radius = 300000.0f;
+    Savanna.AmbientTemperature = 38.0f;
+    Savanna.WaterAvailability = 0.2f;
+    Savanna.FoodAvailability = 0.4f;
+    Savanna.DangerLevel = 0.7f; // High — open ground, T-Rex territory
+    Savanna.FogDensity = 0.01f;
+    Savanna.SkyTint = FLinearColor(0.9f, 0.7f, 0.3f, 1.0f);
+    BiomeConfigs.Add(Savanna);
 
-    // Swamp Biome
-    FEng_BiomeDefinition Swamp;
-    Swamp.BiomeType = EEng_BiomeType::Swamp;
-    Swamp.DisplayName = FText::FromString(TEXT("Primordial Swamp"));
-    Swamp.TemperatureMin = 25.0f;
-    Swamp.TemperatureMax = 35.0f;
-    Swamp.HumidityMin = 0.8f;
-    Swamp.HumidityMax = 1.0f;
-    Swamp.FogDensity = 0.06f;
-    Swamp.DangerLevel = 0.7f;
-    Swamp.ResourceMultiplier = 1.2f;
-    Swamp.BiomeColor = FLinearColor(0.33f, 0.42f, 0.18f, 1.0f);
-    BiomeDefinitions.Add(Swamp);
-
-    // Volcanic Biome
-    FEng_BiomeDefinition Volcanic;
+    // --- VOLCANIC ---
+    FEng_BiomeConfig Volcanic;
     Volcanic.BiomeType = EEng_BiomeType::Volcanic;
-    Volcanic.DisplayName = FText::FromString(TEXT("Volcanic Badlands"));
-    Volcanic.TemperatureMin = 40.0f;
-    Volcanic.TemperatureMax = 80.0f;
-    Volcanic.HumidityMin = 0.05f;
-    Volcanic.HumidityMax = 0.2f;
-    Volcanic.FogDensity = 0.08f;
-    Volcanic.DangerLevel = 0.9f;
-    Volcanic.ResourceMultiplier = 0.5f;
-    Volcanic.BiomeColor = FLinearColor(0.70f, 0.13f, 0.13f, 1.0f);
-    BiomeDefinitions.Add(Volcanic);
+    Volcanic.DisplayName = TEXT("Volcanic Highlands");
+    Volcanic.Center = FVector(200000.0f, -200000.0f, 0.0f);
+    Volcanic.Radius = 200000.0f;
+    Volcanic.AmbientTemperature = 55.0f; // Extreme heat
+    Volcanic.WaterAvailability = 0.05f;
+    Volcanic.FoodAvailability = 0.1f;
+    Volcanic.DangerLevel = 0.9f; // Extremely dangerous
+    Volcanic.FogDensity = 0.06f; // Ash/smoke
+    Volcanic.SkyTint = FLinearColor(0.8f, 0.3f, 0.1f, 1.0f);
+    BiomeConfigs.Add(Volcanic);
 
-    // River Biome
-    FEng_BiomeDefinition River;
+    // --- RIVER DELTA ---
+    FEng_BiomeConfig River;
     River.BiomeType = EEng_BiomeType::River;
-    River.DisplayName = FText::FromString(TEXT("River Delta"));
-    River.TemperatureMin = 20.0f;
-    River.TemperatureMax = 30.0f;
-    River.HumidityMin = 0.7f;
-    River.HumidityMax = 0.95f;
-    River.FogDensity = 0.04f;
-    River.DangerLevel = 0.5f;
-    River.ResourceMultiplier = 2.0f;
-    River.BiomeColor = FLinearColor(0.12f, 0.56f, 1.0f, 1.0f);
-    BiomeDefinitions.Add(River);
+    River.DisplayName = TEXT("River Delta");
+    River.Center = FVector(-200000.0f, -200000.0f, 0.0f);
+    River.Radius = 180000.0f;
+    River.AmbientTemperature = 26.0f;
+    River.WaterAvailability = 1.0f; // Maximum water
+    River.FoodAvailability = 0.7f; // Fish, plants
+    River.DangerLevel = 0.4f;
+    River.FogDensity = 0.03f;
+    River.SkyTint = FLinearColor(0.4f, 0.5f, 0.9f, 1.0f);
+    BiomeConfigs.Add(River);
 
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialized %d default biomes"), BiomeDefinitions.Num());
+    // --- OPEN PLAINS (starting area) ---
+    FEng_BiomeConfig Plains;
+    Plains.BiomeType = EEng_BiomeType::Plains;
+    Plains.DisplayName = TEXT("Open Plains");
+    Plains.Center = FVector(0.0f, 0.0f, 0.0f); // Player start area
+    Plains.Radius = 150000.0f;
+    Plains.AmbientTemperature = 24.0f;
+    Plains.WaterAvailability = 0.4f;
+    Plains.FoodAvailability = 0.5f;
+    Plains.DangerLevel = 0.3f; // Safer starting zone
+    Plains.FogDensity = 0.02f;
+    Plains.SkyTint = FLinearColor(0.6f, 0.7f, 1.0f, 1.0f);
+    BiomeConfigs.Add(Plains);
+
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Default biomes initialized: %d zones"), BiomeConfigs.Num());
 }
 
-EEng_BiomeType UBiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+// ============================================================
+// RegisterBiome
+// ============================================================
+void ABiomeManager::RegisterBiome(const FEng_BiomeConfig& Config)
 {
-    // Simple distance-based biome assignment for prototype
-    // In production: use noise maps, heightmap sampling, and PCG data
-
-    float X = WorldLocation.X;
-    float Y = WorldLocation.Y;
-
-    // River corridor: Y near 0, X negative
-    if (FMath::Abs(Y) < 200.0f && X < -200.0f)
+    // Remove existing biome of same type if present
+    BiomeConfigs.RemoveAll([&Config](const FEng_BiomeConfig& Existing)
     {
-        return EEng_BiomeType::River;
-    }
-
-    // Volcanic zone: far positive Y
-    if (Y > 400.0f)
-    {
-        return EEng_BiomeType::Volcanic;
-    }
-
-    // Swamp zone: far negative X
-    if (X < -400.0f)
-    {
-        return EEng_BiomeType::Swamp;
-    }
-
-    // Plains zone: positive X
-    if (X > 400.0f)
-    {
-        return EEng_BiomeType::Plains;
-    }
-
-    // Default: Forest (central zone)
-    return EEng_BiomeType::Forest;
+        return Existing.BiomeType == Config.BiomeType;
+    });
+    BiomeConfigs.Add(Config);
+    UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Registered biome: %s"), *Config.DisplayName);
 }
 
-const FEng_BiomeDefinition* UBiomeManager::GetBiomeDefinition(EEng_BiomeType BiomeType) const
+// ============================================================
+// GetBiomeAtLocation
+// ============================================================
+EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    for (const FEng_BiomeDefinition& Def : BiomeDefinitions)
+    const FEng_BiomeConfig* Nearest = FindNearestBiome(WorldLocation);
+    if (Nearest)
     {
-        if (Def.BiomeType == BiomeType)
+        return Nearest->BiomeType;
+    }
+    return EEng_BiomeType::Plains; // Default fallback
+}
+
+// ============================================================
+// GetBiomeConfigAtLocation
+// ============================================================
+FEng_BiomeConfig ABiomeManager::GetBiomeConfigAtLocation(const FVector& WorldLocation) const
+{
+    const FEng_BiomeConfig* Nearest = FindNearestBiome(WorldLocation);
+    if (Nearest)
+    {
+        return *Nearest;
+    }
+    // Return default Plains config
+    FEng_BiomeConfig Default;
+    Default.BiomeType = EEng_BiomeType::Plains;
+    Default.DisplayName = TEXT("Open Plains");
+    return Default;
+}
+
+// ============================================================
+// GetTemperatureAtLocation
+// ============================================================
+float ABiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    if (BiomeConfigs.Num() == 0) return 25.0f;
+
+    // Blend temperature from nearby biomes (weighted by inverse distance)
+    float TotalWeight = 0.0f;
+    float BlendedTemp = 0.0f;
+
+    for (const FEng_BiomeConfig& Config : BiomeConfigs)
+    {
+        float Dist = FVector::Dist(WorldLocation, Config.Center);
+        if (Dist < Config.Radius)
         {
-            return &Def;
+            float Weight = 1.0f - (Dist / Config.Radius);
+            Weight = Weight * Weight; // Quadratic falloff
+            BlendedTemp += Config.AmbientTemperature * Weight;
+            TotalWeight += Weight;
         }
     }
-    return nullptr;
-}
 
-float UBiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FEng_BiomeDefinition* Def = GetBiomeDefinition(Biome);
-    if (Def)
+    if (TotalWeight > 0.0f)
     {
-        // Interpolate based on altitude (Z)
-        float AltitudeFactor = FMath::Clamp(WorldLocation.Z / 5000.0f, 0.0f, 1.0f);
-        float BaseTemp = FMath::Lerp(Def->TemperatureMax, Def->TemperatureMin, AltitudeFactor);
-        return BaseTemp;
+        return BlendedTemp / TotalWeight;
     }
-    return 25.0f; // Default temperature
+
+    // Outside all biomes — return nearest biome temperature
+    const FEng_BiomeConfig* Nearest = FindNearestBiome(WorldLocation);
+    return Nearest ? Nearest->AmbientTemperature : 25.0f;
 }
 
-float UBiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
+// ============================================================
+// GetWaterAvailabilityAtLocation
+// ============================================================
+float ABiomeManager::GetWaterAvailabilityAtLocation(const FVector& WorldLocation) const
 {
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FEng_BiomeDefinition* Def = GetBiomeDefinition(Biome);
-    if (Def)
+    const FEng_BiomeConfig* Nearest = FindNearestBiome(WorldLocation);
+    return Nearest ? Nearest->WaterAvailability : 0.3f;
+}
+
+// ============================================================
+// GetDangerLevelAtLocation
+// ============================================================
+float ABiomeManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
+{
+    const FEng_BiomeConfig* Nearest = FindNearestBiome(WorldLocation);
+    return Nearest ? Nearest->DangerLevel : 0.3f;
+}
+
+// ============================================================
+// FindNearestBiome (private)
+// ============================================================
+const FEng_BiomeConfig* ABiomeManager::FindNearestBiome(const FVector& WorldLocation) const
+{
+    const FEng_BiomeConfig* Best = nullptr;
+    float BestDist = FLT_MAX;
+
+    for (const FEng_BiomeConfig& Config : BiomeConfigs)
     {
-        return Def->DangerLevel;
+        float Dist = FVector::Dist(WorldLocation, Config.Center);
+        if (Dist < BestDist)
+        {
+            BestDist = Dist;
+            Best = &Config;
+        }
     }
-    return 0.5f;
+
+    return Best;
 }
 
-float UBiomeManager::GetResourceMultiplierAtLocation(const FVector& WorldLocation) const
+// ============================================================
+// ApplyBiomeVisuals (private)
+// ============================================================
+void ABiomeManager::ApplyBiomeVisuals(const FEng_BiomeConfig& Config)
 {
-    EEng_BiomeType Biome = GetBiomeAtLocation(WorldLocation);
-    const FEng_BiomeDefinition* Def = GetBiomeDefinition(Biome);
-    if (Def)
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Find ExponentialHeightFog and update density
+    TArray<AActor*> FogActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), FogActors);
+
+    for (AActor* FogActor : FogActors)
     {
-        return Def->ResourceMultiplier;
-    }
-    return 1.0f;
-}
-
-FText UBiomeManager::GetBiomeDisplayName(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeDefinition* Def = GetBiomeDefinition(BiomeType);
-    if (Def)
-    {
-        return Def->DisplayName;
-    }
-    return FText::FromString(TEXT("Unknown Biome"));
-}
-
-EEng_BiomeType UBiomeManager::GetCurrentBiome() const
-{
-    return CurrentBiome;
-}
-
-void UBiomeManager::ForceSetBiome(EEng_BiomeType NewBiome)
-{
-    EEng_BiomeType OldBiome = CurrentBiome;
-    CurrentBiome = NewBiome;
-    if (OldBiome != NewBiome)
-    {
-        OnBiomeChanged.Broadcast(OldBiome, NewBiome);
+        AExponentialHeightFog* Fog = Cast<AExponentialHeightFog>(FogActor);
+        if (Fog)
+        {
+            UExponentialHeightFogComponent* FogComp = Fog->GetComponent();
+            if (FogComp)
+            {
+                FogComp->SetFogDensity(Config.FogDensity);
+                FogComp->SetFogInscatteringColor(Config.SkyTint);
+                UE_LOG(LogTemp, Log, TEXT("[BiomeManager] Applied visuals for biome: %s (fog=%.3f)"),
+                    *Config.DisplayName, Config.FogDensity);
+            }
+            break; // Only update first fog actor
+        }
     }
 }
