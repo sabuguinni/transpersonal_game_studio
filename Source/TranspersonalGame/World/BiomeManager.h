@@ -1,7 +1,3 @@
-// BiomeManager.h — Agent #05 Procedural World Generator — PROD_CYCLE_AUTO_20260702_002
-// Manages 5 prehistoric biome zones: Forest, Plains, Rocky, Swamp, Volcanic
-// Follows SharedTypes.h conventions — prefix World_ for all types
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -9,52 +5,57 @@
 #include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-// ─── Biome Type Enum ─────────────────────────────────────────────────────────
+// Biome type enum — prehistoric Cretaceous biomes
 UENUM(BlueprintType)
-enum class EWorld_BiomeType : uint8
+enum class EBiomeType : uint8
 {
-    Forest    UMETA(DisplayName = "Forest"),
-    Plains    UMETA(DisplayName = "Plains"),
-    Rocky     UMETA(DisplayName = "Rocky"),
-    Swamp     UMETA(DisplayName = "Swamp"),
-    Volcanic  UMETA(DisplayName = "Volcanic"),
-    Unknown   UMETA(DisplayName = "Unknown")
+    Jungle         UMETA(DisplayName = "Jungle"),
+    Savanna        UMETA(DisplayName = "Savanna"),
+    Swamp          UMETA(DisplayName = "Swamp"),
+    VolcanicPlains UMETA(DisplayName = "Volcanic Plains"),
+    RiverDelta     UMETA(DisplayName = "River Delta"),
+    ForestCanopy   UMETA(DisplayName = "Forest Canopy"),
+    CoastalFlats   UMETA(DisplayName = "Coastal Flats"),
+    Unknown        UMETA(DisplayName = "Unknown")
 };
 
-// ─── Biome Zone Data ─────────────────────────────────────────────────────────
+// Per-biome data
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
+struct FBiomeData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Unknown;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::Unknown;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    FVector CenterLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor FogColor = FLinearColor(1.0f, 0.85f, 0.6f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float Radius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    FLinearColor DebugColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 28.0f; // Celsius
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float VegetationDensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Humidity = 0.6f; // 0-1
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float WaterPresence = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float DinosaurSpawnMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biome")
-    float DangerLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 0.5f; // 0-1
 
-    FWorld_BiomeZone() {}
-    FWorld_BiomeZone(EWorld_BiomeType InType, FVector InCenter, float InRadius)
-        : BiomeType(InType), CenterLocation(InCenter), Radius(InRadius) {}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName = TEXT("Unknown Biome");
 };
 
-// ─── Biome Manager Actor ──────────────────────────────────────────────────────
-UCLASS(BlueprintType, Blueprintable, ClassGroup = "World")
+/**
+ * ABiomeManager — manages biome zones, transitions, and environmental properties
+ * for the Cretaceous prehistoric survival world.
+ * Placed once in the level at origin; queries are made by world position.
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Biome Manager"))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -66,44 +67,65 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    // ── Biome Registry ──────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biomes")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World|Biomes")
-    bool bAutoInitializeBiomes = true;
+    // --- Query API ---
 
-    // ── Query API ───────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    /** Returns the biome type at a given world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    FWorld_BiomeZone GetBiomeZoneData(EWorld_BiomeType BiomeType) const;
+    /** Returns full biome data at a given world location */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FBiomeData GetBiomeDataAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    float GetDangerLevelAtLocation(const FVector& WorldLocation) const;
+    /** Returns the blended fog color for a transition between two biomes */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FLinearColor GetBlendedFogColor(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
+    /** Returns temperature at location (affects survival stats) */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetTemperatureAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    bool IsLocationInWater(const FVector& WorldLocation) const;
+    /** Returns humidity at location (affects thirst drain rate) */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetHumidityAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    TArray<FWorld_BiomeZone> GetAllBiomeZones() const { return BiomeZones; }
+    /** Returns dinosaur spawn multiplier for the biome at location */
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetDinosaurSpawnMultiplierAtLocation(FVector WorldLocation) const;
 
-    // ── Initialization ──────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Biomes")
-    void InitializeDefaultBiomes();
+    // --- Configuration ---
 
-    UFUNCTION(BlueprintCallable, Category = "World|Biomes")
-    void RegisterBiomeZone(const FWorld_BiomeZone& Zone);
+    /** World radius used for biome zone calculations */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float WorldRadius = 10000.0f;
 
-    // ── Debug ───────────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "World|Debug")
-    void DrawBiomeDebugSpheres(float Duration = 5.0f);
+    /** Number of biome zones to generate */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    int32 NumBiomeZones = 8;
+
+    /** Blend transition width in world units */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float BiomeBlendRadius = 500.0f;
+
+    /** All registered biome data entries */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Data")
+    TArray<FBiomeData> BiomeTable;
+
+    /** Enable debug visualization of biome zones */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Debug")
+    bool bDebugDrawBiomes = false;
+
+    // --- Internal ---
 
 private:
-    // Internal lookup helper
-    int32 FindClosestBiomeIndex(const FVector& WorldLocation) const;
+    /** Initialize default biome table with Cretaceous biomes */
+    void InitializeBiomeTable();
+
+    /** Compute biome index from world XY using angular sectors */
+    int32 ComputeBiomeSectorIndex(FVector WorldLocation) const;
+
+    /** Draw debug spheres for biome zone centers */
+    void DebugDrawBiomeZones() const;
 };
