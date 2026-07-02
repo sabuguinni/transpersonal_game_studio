@@ -1,0 +1,188 @@
+{
+  "vfx_system_manifest_version": "1.0",
+  "agent": "VFX_Agent_17",
+  "cycle": "PROD_CYCLE_AUTO_20260702_008",
+  "description": "Complete VFX system manifest for prehistoric dinosaur survival game. All effects are physically plausible in a real prehistoric world.",
+
+  "niagara_systems": [
+    {
+      "id": "NS_Fire_Campfire",
+      "label": "VFX_Fire_Campfire_001",
+      "category": "ENVIRONMENT",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Fire_Campfire",
+      "anchor_actor": "VFX_Fire_Campfire_001",
+      "anchor_location": [200, 0, 80],
+      "audio_zone": "AudioZone_Campfire_001",
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 500, "particle_count": 800, "features": ["flames", "smoke", "embers", "heat_distortion"] },
+        "LOD_1_mid":   { "max_distance_uu": 1500, "particle_count": 300, "features": ["flames", "smoke"] },
+        "LOD_2_far":   { "max_distance_uu": 4000, "particle_count": 50,  "features": ["glow_sprite"] }
+      },
+      "parameters": {
+        "flame_height_cm": 80,
+        "flame_color_base": [1.0, 0.45, 0.05],
+        "smoke_rise_speed_cms": 120,
+        "ember_count_per_second": 15,
+        "heat_distortion_radius_cm": 60,
+        "flicker_frequency_hz": 8.0,
+        "flicker_amplitude": 0.25
+      },
+      "sound_assets": [803260, 784222],
+      "status": "placeholder_light_spawned"
+    },
+    {
+      "id": "NS_Dino_FootstepDust",
+      "label": "VFX_Dust_TRexFootstep",
+      "category": "DINOSAUR",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Dino_FootstepDust",
+      "trigger": "bone_socket_foot_L + foot_R on TRex skeleton",
+      "anchor_actors": ["VFX_Dust_TRexFootstep_001", "VFX_Dust_TRexFootstep_002", "VFX_Dust_TRexFootstep_003"],
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 800,  "particle_count": 400, "features": ["dust_cloud", "pebbles", "ground_crack"] },
+        "LOD_1_mid":   { "max_distance_uu": 2000, "particle_count": 120, "features": ["dust_cloud"] },
+        "LOD_2_far":   { "max_distance_uu": 5000, "particle_count": 20,  "features": ["dust_puff_sprite"] }
+      },
+      "parameters": {
+        "dust_radius_cm": 180,
+        "dust_rise_height_cm": 120,
+        "pebble_count": 12,
+        "pebble_max_velocity_cms": 400,
+        "ground_crack_decal_radius_cm": 90,
+        "impact_force_threshold_kg": 2000
+      },
+      "trigger_interval_seconds": 0.8,
+      "sync_with_audio": "dinosaur_audio_cues.TRex.footstep_heavy",
+      "status": "marker_spawned"
+    },
+    {
+      "id": "NS_Dino_BreathVapor",
+      "label": "VFX_Breath_DinoVapor_001",
+      "category": "DINOSAUR",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Dino_BreathVapor",
+      "anchor_actor": "VFX_Breath_DinoVapor_001",
+      "anchor_location": [1200, -400, 60],
+      "condition": "ambient_temperature_celsius < 10",
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 600,  "particle_count": 200, "features": ["vapor_puff", "condensation"] },
+        "LOD_1_mid":   { "max_distance_uu": 1500, "particle_count": 60,  "features": ["vapor_puff"] },
+        "LOD_2_far":   { "max_distance_uu": 3000, "particle_count": 0,   "features": [] }
+      },
+      "parameters": {
+        "vapor_color": [0.9, 0.95, 1.0],
+        "vapor_opacity": 0.6,
+        "puff_interval_seconds": 3.5,
+        "puff_volume_liters": 40,
+        "dissipation_time_seconds": 2.0
+      },
+      "status": "marker_spawned"
+    },
+    {
+      "id": "NS_Weather_Rain",
+      "label": "VFX_Weather_Rain_TriggerZone",
+      "category": "WEATHER",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Weather_Rain",
+      "anchor_actor": "VFX_Weather_Rain_TriggerZone",
+      "anchor_location": [0, 0, 200],
+      "trigger": "weather_state == RAIN or STORM",
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 1500, "particle_count": 2000, "features": ["rain_streaks", "ground_splash", "puddle_ripples"] },
+        "LOD_1_mid":   { "max_distance_uu": 4000, "particle_count": 500,  "features": ["rain_streaks"] },
+        "LOD_2_far":   { "max_distance_uu": 8000, "particle_count": 80,   "features": ["rain_sheet_sprite"] }
+      },
+      "parameters": {
+        "rain_density_drops_per_m2_per_s": 150,
+        "drop_velocity_cms": 900,
+        "drop_length_cm": 8,
+        "splash_radius_cm": 12,
+        "puddle_ripple_interval_seconds": 0.3,
+        "wind_influence": 0.4
+      },
+      "status": "trigger_zone_spawned"
+    },
+    {
+      "id": "NS_Volcano_AshDrift",
+      "label": "VFX_Volcano_AshGlow_001",
+      "category": "ENVIRONMENT_AMBIENT",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Volcano_AshDrift",
+      "anchor_actor": "VFX_Volcano_AshGlow_001",
+      "anchor_location": [5000, 3000, 100],
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 2000, "particle_count": 300, "features": ["ash_flakes", "ember_glow", "heat_shimmer"] },
+        "LOD_1_mid":   { "max_distance_uu": 8000, "particle_count": 80,  "features": ["ash_flakes"] },
+        "LOD_2_far":   { "max_distance_uu": 20000,"particle_count": 15,  "features": ["ash_haze_sprite"] }
+      },
+      "parameters": {
+        "ash_color": [0.3, 0.28, 0.25],
+        "ash_flake_size_cm": 1.5,
+        "drift_speed_cms": 40,
+        "drift_direction_degrees": 225,
+        "ember_probability": 0.05,
+        "ember_glow_color": [1.0, 0.3, 0.0]
+      },
+      "status": "glow_light_spawned"
+    },
+    {
+      "id": "NS_Combat_BloodImpact",
+      "label": "VFX_Combat_BloodImpact_001",
+      "category": "COMBAT",
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Combat_BloodImpact",
+      "anchor_actor": "VFX_Combat_BloodImpact_001",
+      "anchor_location": [500, 300, 50],
+      "trigger": "weapon_hit_event on dinosaur or player",
+      "lod_chain": {
+        "LOD_0_close": { "max_distance_uu": 600,  "particle_count": 150, "features": ["blood_droplets", "blood_spray", "wound_decal"] },
+        "LOD_1_mid":   { "max_distance_uu": 1500, "particle_count": 40,  "features": ["blood_spray"] },
+        "LOD_2_far":   { "max_distance_uu": 3000, "particle_count": 0,   "features": [] }
+      },
+      "parameters": {
+        "blood_color": [0.55, 0.02, 0.02],
+        "droplet_count": 35,
+        "spray_velocity_cms": 600,
+        "spray_cone_degrees": 45,
+        "decal_radius_cm": 25,
+        "decal_fade_seconds": 30.0
+      },
+      "status": "marker_spawned"
+    }
+  ],
+
+  "vfx_actors_in_scene": [
+    { "label": "VFX_Fire_Campfire_001",        "type": "PointLight",      "location": [200, 0, 80],      "tags": ["VFX", "Fire", "Campfire", "NiagaraReady", "LOD_3"] },
+    { "label": "VFX_Fire_Embers_001",           "type": "PointLight",      "location": [200, 0, 60],      "tags": ["VFX", "Fire", "Embers", "NiagaraReady", "LOD_3"] },
+    { "label": "VFX_Dust_TRexFootstep_001",     "type": "StaticMeshActor", "location": [2000, 800, 50],   "tags": ["VFX", "Dust", "Footstep", "TRex", "NiagaraReady", "LOD_2"] },
+    { "label": "VFX_Dust_TRexFootstep_002",     "type": "StaticMeshActor", "location": [2050, 850, 50],   "tags": ["VFX", "Dust", "Footstep", "TRex", "NiagaraReady", "LOD_2"] },
+    { "label": "VFX_Dust_TRexFootstep_003",     "type": "StaticMeshActor", "location": [2100, 800, 50],   "tags": ["VFX", "Dust", "Footstep", "TRex", "NiagaraReady", "LOD_2"] },
+    { "label": "VFX_Breath_DinoVapor_001",      "type": "StaticMeshActor", "location": [1200, -400, 60],  "tags": ["VFX", "Breath", "Vapor", "NiagaraReady", "LOD_1"] },
+    { "label": "VFX_Weather_Rain_TriggerZone",  "type": "StaticMeshActor", "location": [0, 0, 200],       "tags": ["VFX", "Weather", "Rain", "TriggerZone"] },
+    { "label": "VFX_Volcano_AshGlow_001",       "type": "PointLight",      "location": [5000, 3000, 100], "tags": ["VFX", "Volcano", "Ash", "Ambient", "LOD_1"] },
+    { "label": "VFX_Combat_BloodImpact_001",    "type": "StaticMeshActor", "location": [500, 300, 50],    "tags": ["VFX", "Combat", "Blood", "Impact", "NiagaraReady", "LOD_3"] }
+  ],
+
+  "sound_assets": {
+    "campfire_embers_stir_1": { "freesound_id": 803260, "duration_s": 32.5, "use": "campfire_ambient_loop" },
+    "campfire_embers_stir_2": { "freesound_id": 784222, "duration_s": 10.0, "use": "campfire_stir_oneshot" }
+  },
+
+  "integration_notes": {
+    "campfire_vfx_audio_sync": "VFX_Fire_Campfire_001 is co-located with AudioZone_Campfire_001 at [200,0]. Niagara NS_Fire_Campfire should be attached to same actor.",
+    "trex_footstep_sync": "VFX_Dust_TRexFootstep markers are at TRex patrol path. Niagara system triggered by AnimNotify on TRex foot bones, synced with audio footstep cues.",
+    "camera_shake_trex": "AudioZone_TRexTension_001 at [2000,800,50] is the trigger for camera shake magnitude 2.5 — VFX dust markers are at same coordinates.",
+    "rain_vfx_weather_state": "NS_Weather_Rain activates when WeatherState == RAIN or STORM from world weather system.",
+    "blood_screen_vignette": "NS_Combat_BloodImpact triggers red vignette UMG widget overlay on player damage — referenced by Audio Agent #16 player_feedback_audio.damage_taken."
+  },
+
+  "next_agent_instructions": {
+    "qa_agent_18": [
+      "Verify VFX_Fire_Campfire_001 PointLight exists at [200,0,80] with intensity ~3200",
+      "Verify VFX_Dust_TRexFootstep_001/002/003 exist at [2000-2100, 800-850, 50]",
+      "Verify VFX_Breath_DinoVapor_001 exists at [1200,-400,60]",
+      "Verify VFX_Weather_Rain_TriggerZone exists at [0,0,200]",
+      "Verify VFX_Volcano_AshGlow_001 PointLight exists at [5000,3000,100]",
+      "Verify VFX_Combat_BloodImpact_001 exists at [500,300,50]",
+      "Check that all 9 VFX actors have correct tags (VFX, NiagaraReady, LOD_N)",
+      "Verify campfire light mobility == MOVABLE for runtime flicker",
+      "Verify no duplicate ExponentialHeightFog actors",
+      "Verify sun pitch <= -30 degrees"
+    ]
+  }
+}
