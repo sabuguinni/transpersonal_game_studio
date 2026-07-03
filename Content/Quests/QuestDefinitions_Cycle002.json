@@ -1,0 +1,177 @@
+{
+  "quest_system_version": "2.0",
+  "cycle": "PROD_CYCLE_AUTO_20260703_002",
+  "agent": "Agent_14_QuestDesigner",
+  "audio_assets": {
+    "ElderNPC_QuestGiver": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783045024660_ElderNPC_QuestGiver.mp3",
+    "ScoutNPC_MigrationQuest": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783045027099_ScoutNPC_MigrationQuest.mp3"
+  },
+  "quests": [
+    {
+      "id": "QUEST_001_RAPTOR_CLAW_HUNT",
+      "title": "The Elder's Blade",
+      "type": "hunting",
+      "priority": "main",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "giver_location": [2100, 2400, 100],
+      "trigger_actor": "QuestTrigger_RaptorClawHunt_001",
+      "dialogue_audio": "ElderNPC_QuestGiver",
+      "dialogue_text": "The cave to the north holds the bones of the great hunter. Bring me three raptor claws, and I will show you how to make a blade that never breaks. But be warned — the raptors guard their dead. You will not take those claws without a fight.",
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "description": "Collect 3 Raptor Claws",
+          "type": "collect",
+          "target_count": 3,
+          "pickup_actors": [
+            "QuestObj_RaptorClaw_001",
+            "QuestObj_RaptorClaw_002",
+            "QuestObj_RaptorClaw_003"
+          ],
+          "pickup_locations": [
+            [2800, 2100, 100],
+            [2600, 2700, 100],
+            [3100, 2300, 100]
+          ]
+        },
+        {
+          "id": "OBJ_001_B",
+          "description": "Return to the Elder",
+          "type": "return",
+          "target_actor": "NPC_Elder_QuestGiver_001"
+        }
+      ],
+      "rewards": {
+        "item": "Stone_Blade_Advanced",
+        "crafting_recipe_unlock": "RECIPE_BONE_BLADE",
+        "xp": 150
+      },
+      "failure_conditions": [
+        "player_death",
+        "time_limit_exceeded_3600s"
+      ],
+      "emotional_arc": "Danger → Triumph → Mastery. Player learns raptor behavior patterns through forced close combat.",
+      "design_notes": "Raptor claws are near existing Raptor_Savana actors. Player must observe patrol patterns before engaging. Reward teaches crafting progression."
+    },
+    {
+      "id": "QUEST_002_MIGRATION_SCOUT",
+      "title": "Before the Cold Comes",
+      "type": "exploration_escort",
+      "priority": "main",
+      "giver_actor": "NPC_Scout_MigrationQuest_001",
+      "giver_location": [1800, 2800, 100],
+      "trigger_actor": "QuestTrigger_MigrationScout_001",
+      "dialogue_audio": "ScoutNPC_MigrationQuest",
+      "dialogue_text": "The herd moves south before the cold season. If we do not follow them, we starve. Scout the river crossing — make sure no predators wait in ambush. We cannot afford to lose anyone on this migration.",
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "description": "Scout Waypoint 1 — River Approach",
+          "type": "reach_location",
+          "target_actor": "QuestWaypoint_Migration_001",
+          "location": [1500, 3200, 100]
+        },
+        {
+          "id": "OBJ_002_B",
+          "description": "Scout Waypoint 2 — River Crossing",
+          "type": "reach_location",
+          "target_actor": "QuestWaypoint_Migration_002",
+          "location": [1200, 3600, 100]
+        },
+        {
+          "id": "OBJ_002_C",
+          "description": "Scout Waypoint 3 — South Bank",
+          "type": "reach_location",
+          "target_actor": "QuestWaypoint_Migration_003",
+          "location": [900, 4000, 100]
+        },
+        {
+          "id": "OBJ_002_D",
+          "description": "Report back to Scout",
+          "type": "return",
+          "target_actor": "NPC_Scout_MigrationQuest_001"
+        }
+      ],
+      "rewards": {
+        "item": "Migration_Map_Fragment",
+        "area_unlock": "Southern_Savanna_Biome",
+        "xp": 200
+      },
+      "failure_conditions": [
+        "player_death",
+        "predator_detected_at_crossing"
+      ],
+      "emotional_arc": "Urgency → Discovery → Relief. Player explores new terrain while under time pressure from seasonal change.",
+      "design_notes": "Waypoints follow river south of hub. Brachiosaurus herd visible from waypoints. T-Rex clearance zone at river crossing adds danger."
+    },
+    {
+      "id": "QUEST_003_DEFEND_THE_CAMP",
+      "title": "Night Watch",
+      "type": "defense",
+      "priority": "side",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "giver_location": [2100, 2400, 100],
+      "trigger_condition": "time_of_day_night",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "description": "Reinforce Camp Perimeter — 4 positions",
+          "type": "activate_triggers",
+          "target_actors": [
+            "QuestObj_CampDefense_001",
+            "QuestObj_CampDefense_002",
+            "QuestObj_CampDefense_003",
+            "QuestObj_CampDefense_004"
+          ]
+        },
+        {
+          "id": "OBJ_003_B",
+          "description": "Survive until dawn",
+          "type": "survive_duration",
+          "duration_seconds": 300,
+          "threat_actors": ["TRex_Savana_001", "Raptor_Savana_001", "Raptor_Savana_002"]
+        }
+      ],
+      "rewards": {
+        "item": "Campfire_Blueprint",
+        "crafting_recipe_unlock": "RECIPE_TORCH",
+        "xp": 120
+      },
+      "failure_conditions": [
+        "player_death",
+        "camp_overrun_3_npcs_killed"
+      ],
+      "emotional_arc": "Fear → Vigilance → Survival. Night transforms familiar camp into dangerous territory. Player learns predator AI patterns.",
+      "design_notes": "Uses existing TRex_Savana_001 and Raptor actors. Defense perimeter markers at camp edges. Triggers night-time predator aggression radius increase."
+    }
+  ],
+  "quest_system_actors_in_scene": {
+    "NPC_Elder_QuestGiver_001": [2100, 2400, 100],
+    "NPC_Scout_MigrationQuest_001": [1800, 2800, 100],
+    "QuestTrigger_RaptorClawHunt_001": [2100, 2400, 120],
+    "QuestTrigger_MigrationScout_001": [1800, 2800, 120],
+    "QuestObj_RaptorClaw_001": [2800, 2100, 100],
+    "QuestObj_RaptorClaw_002": [2600, 2700, 100],
+    "QuestObj_RaptorClaw_003": [3100, 2300, 100],
+    "QuestWaypoint_Migration_001": [1500, 3200, 100],
+    "QuestWaypoint_Migration_002": [1200, 3600, 100],
+    "QuestWaypoint_Migration_003": [900, 4000, 100],
+    "QuestObj_CampDefense_001": [2300, 2200, 100],
+    "QuestObj_CampDefense_002": [1900, 2200, 100],
+    "QuestObj_CampDefense_003": [2100, 2600, 100],
+    "QuestObj_CampDefense_004": [2100, 2200, 100]
+  },
+  "handoff_to_agent_15": {
+    "narrative_needs": [
+      "Expand Elder NPC backstory — who was the great hunter? What is the bone cave's history?",
+      "Migration quest lore — why does the tribe follow the herbivore herds? What happens if they don't?",
+      "Night Watch quest — what predator attacked the camp before? Build dread through NPC memory dialogue.",
+      "Raptor Claw Hunt reward dialogue — Elder teaches blade-making as cultural transmission, not just crafting."
+    ],
+    "dialogue_lines_needed": [
+      "Elder: Quest accept, quest complete, quest fail, ambient camp dialogue (4 lines each)",
+      "Scout: Quest accept, waypoint reached, quest complete (3 lines each)",
+      "Camp NPCs: Night watch fear dialogue, dawn relief dialogue (2 lines each)"
+    ]
+  }
+}
