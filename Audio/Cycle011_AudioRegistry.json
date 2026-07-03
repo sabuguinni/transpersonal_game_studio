@@ -1,0 +1,139 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_011",
+  "agent": "Audio_Agent_16",
+  "description": "ElderMara NPC voice lines (TTS-12, TTS-13) + storm/campfire SFX references + UE5 trigger volumes placed at hub clearing",
+
+  "tts_lines": [
+    {
+      "id": "TTS-12",
+      "character": "ElderMara",
+      "line_key": "StormSurvival",
+      "text": "Rain is coming. I can smell it — the soil, the wet bark, the change in the air. When the storm breaks, the big predators go still. They do not like lightning. Use that. Move when the thunder rolls. Rest when it clears. The storm is not your enemy — it is cover.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783091574406_ElderMara_StormSurvival.mp3",
+      "duration": "~18s",
+      "trigger_volume": "AudioTrigger_Storm_River_001",
+      "trigger_condition": "player_enters_open_area_during_rain",
+      "gameplay_context": "Storm weather event — player approaches river/open zone"
+    },
+    {
+      "id": "TTS-13",
+      "character": "ElderMara",
+      "line_key": "FireCamp",
+      "text": "Fire is the only thing they respect. Not the flame itself — the light. Predators that hunt at night will circle your camp, but they will not cross into the firelight. Keep it burning. Feed it before you sleep. A dead fire in the night is an open door.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783091577898_ElderMara_FireCamp.mp3",
+      "duration": "~17s",
+      "trigger_volume": "AudioTrigger_Campfire_Hub_001",
+      "trigger_condition": "player_first_campfire_interaction",
+      "gameplay_context": "Player builds or approaches first campfire at hub camp"
+    }
+  ],
+
+  "sfx_references": [
+    {
+      "id": "SFX-Storm-01",
+      "freesound_id": 607823,
+      "name": "thunder with steady rain",
+      "duration_seconds": 464.367,
+      "preview_url": "https://cdn.freesound.org/previews/607/607823_6911631-hq.mp3",
+      "tags": ["ambience", "rain", "thunder", "storm", "outdoor", "nature"],
+      "use_case": "Storm ambient loop — open areas, river zones, weather system",
+      "trigger_volume": "AudioTrigger_Storm_River_001",
+      "loop": true,
+      "volume_db": -6
+    },
+    {
+      "id": "SFX-Storm-02",
+      "freesound_id": 390398,
+      "name": "Thunder Storm Nonstop Thunder",
+      "duration_seconds": 271.489,
+      "preview_url": "https://cdn.freesound.org/previews/390/390398_387219-hq.mp3",
+      "tags": ["lightning", "storm", "rain", "nature", "outdoor"],
+      "use_case": "Intense storm event — weather system escalation, danger signal",
+      "loop": false,
+      "volume_db": -3
+    },
+    {
+      "id": "SFX-Fire-01",
+      "freesound_id": 729396,
+      "name": "Campfire 02",
+      "duration_seconds": 267.613,
+      "preview_url": "https://cdn.freesound.org/previews/729/729396_12863902-hq.mp3",
+      "tags": ["campfire", "fire", "crackling", "burning", "camp"],
+      "use_case": "Campfire ambient loop — hub camp, player-built camps",
+      "trigger_volume": "AudioTrigger_Campfire_Hub_001",
+      "loop": true,
+      "volume_db": -8,
+      "attenuation_radius": 800
+    },
+    {
+      "id": "SFX-Fire-02",
+      "freesound_id": 856943,
+      "name": "FIREBurn_Campfire Forest Birds 01",
+      "duration_seconds": 60.0,
+      "preview_url": "https://cdn.freesound.org/previews/856/856943_12846320-hq.mp3",
+      "tags": ["campfire", "forest", "birds", "nature", "ambient"],
+      "use_case": "Campfire + forest birds — dawn/dusk camp atmosphere layer",
+      "loop": true,
+      "volume_db": -10,
+      "time_of_day": ["dawn", "dusk"]
+    }
+  ],
+
+  "ue5_actors_placed": [
+    {
+      "label": "NPC_Hub_ElderMara_001",
+      "location": [2100, 2400, 100],
+      "rotation": [0, 180, 0],
+      "type": "StaticMeshActor (NPC placeholder — Cone mesh)",
+      "note": "ElderMara elder NPC position at hub clearing. Replace with MetaHuman when available."
+    },
+    {
+      "label": "AudioTrigger_Storm_River_001",
+      "location": [3500, 2800, 50],
+      "scale": [20, 20, 5],
+      "type": "TriggerBox",
+      "note": "Triggers storm ambient audio + ElderMara StormSurvival dialogue"
+    },
+    {
+      "label": "AudioTrigger_Campfire_Hub_001",
+      "location": [2000, 2300, 50],
+      "scale": [10, 10, 3],
+      "type": "TriggerBox",
+      "note": "Triggers campfire ambient audio + ElderMara FireCamp dialogue"
+    },
+    {
+      "label": "Prop_Hub_Campfire_001",
+      "location": [2050, 2350, 50],
+      "type": "StaticMeshActor (Sphere placeholder — campfire prop)",
+      "note": "Campfire visual prop at hub camp. Replace with fire particle system when VFX agent delivers."
+    }
+  ],
+
+  "cumulative_tts_log": [
+    {"id": "TTS-1",  "key": "ElderMara_Intro",           "cycle": "008"},
+    {"id": "TTS-2",  "key": "ElderMara_Hunger",          "cycle": "008"},
+    {"id": "TTS-3",  "key": "ElderMara_TRexWarning",     "cycle": "009"},
+    {"id": "TTS-4",  "key": "ElderMara_NightDanger",     "cycle": "009"},
+    {"id": "TTS-5",  "key": "ElderMara_CraftingWisdom",  "cycle": "010"},
+    {"id": "TTS-6",  "key": "ElderMara_WaterSource",     "cycle": "010"},
+    {"id": "TTS-7",  "key": "Brak_SkepticalGreeting",    "cycle": "011-prev"},
+    {"id": "TTS-8",  "key": "Brak_FearExplained",        "cycle": "011-prev"},
+    {"id": "TTS-9",  "key": "Tracker_HerdMovement",      "cycle": "011-prev"},
+    {"id": "TTS-10", "key": "ElderMara_ForestHeartbeat", "cycle": "011-prev"},
+    {"id": "TTS-11", "key": "ElderMara_StormSurvival",   "cycle": "011"},
+    {"id": "TTS-12", "key": "ElderMara_FireCamp",        "cycle": "011"}
+  ],
+
+  "next_agent_handoff": {
+    "agent": "#17 VFX Agent",
+    "priority": "Replace Prop_Hub_Campfire_001 (sphere placeholder) with Niagara fire particle system. Add footstep dust particles at NPC_Hub_ElderMara_001 position. Storm weather VFX (rain particles, lightning flash) to match AudioTrigger_Storm_River_001 zone.",
+    "audio_trigger_volumes": [
+      "AudioTrigger_Storm_River_001 at (3500, 2800, 50)",
+      "AudioTrigger_Campfire_Hub_001 at (2000, 2300, 50)"
+    ],
+    "sfx_to_wire": [
+      "SFX-Storm-01 (freesound 607823) → storm ambient loop",
+      "SFX-Fire-01 (freesound 729396) → campfire ambient loop"
+    ]
+  }
+}
