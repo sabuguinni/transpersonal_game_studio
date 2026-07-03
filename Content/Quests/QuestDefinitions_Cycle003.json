@@ -1,0 +1,189 @@
+{
+  "quest_system_version": "1.3",
+  "cycle": "PROD_CYCLE_AUTO_20260703_003",
+  "agent": "Quest_Designer_14",
+  "hub_coordinates": {"x": 2100, "y": 2400, "z": 100},
+
+  "quests": [
+    {
+      "id": "QUEST_001_CAVE_SKULL",
+      "title": "Bones of the Old Ones",
+      "type": "exploration_retrieval",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "giver_location": {"x": 2100, "y": 2400, "z": 100},
+      "description": "The elder speaks of a cave to the north where ancient bones lie. Retrieve the skull of a great beast to earn shelter for the cold season.",
+      "emotional_arc": "curiosity → danger → triumph",
+      "trigger_volume": "QuestTrigger_CaveEntrance_001",
+      "trigger_location": {"x": 2100, "y": 1200, "z": 100},
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "type": "reach_location",
+          "description": "Find the cave entrance north of the hub",
+          "marker": "QuestObjective_SkullMarker_001",
+          "location": {"x": 2100, "y": 900, "z": 150}
+        },
+        {
+          "id": "OBJ_001_B",
+          "type": "collect_item",
+          "description": "Retrieve the ancient skull",
+          "item": "AncientSkull",
+          "quantity": 1
+        },
+        {
+          "id": "OBJ_001_C",
+          "type": "return_to_npc",
+          "description": "Return to the elder with the skull",
+          "npc": "NPC_Elder_QuestGiver_001"
+        }
+      ],
+      "hazards": [
+        {"type": "raptor_patrol", "zone": "QuestTrigger_RaptorRiver_001", "count": 3},
+        {"type": "cave_darkness", "zone": "QuestTrigger_CaveEntrance_001"}
+      ],
+      "rewards": {
+        "shelter_unlocked": true,
+        "crafting_recipe": "WaterContainer",
+        "campfire_placed": "QuestReward_Campfire_Hub_001",
+        "tribe_reputation": 25
+      },
+      "voice_lines": {
+        "quest_start": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783049767495_QuestGiver_Elder.mp3",
+        "hazard_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783049796954_NPC_Scout_Warning.mp3"
+      }
+    },
+    {
+      "id": "QUEST_002_RAPTOR_CROSSING",
+      "title": "Cross the River",
+      "type": "stealth_survival",
+      "giver_npc": "NPC_Scout_Warning",
+      "description": "A pack of raptors patrols the river bend to the east. Cross safely to reach new hunting grounds — or drive them off.",
+      "emotional_arc": "tension → decision → relief or adrenaline",
+      "trigger_volume": "QuestTrigger_RaptorRiver_001",
+      "trigger_location": {"x": 3600, "y": 2400, "z": 100},
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "type": "choice",
+          "description": "Decide: sneak past the raptors OR drive them away",
+          "choices": [
+            {"id": "stealth", "description": "Move through the tall grass undetected"},
+            {"id": "combat", "description": "Use a stone spear to drive the pack back"}
+          ]
+        },
+        {
+          "id": "OBJ_002_B",
+          "type": "reach_location",
+          "description": "Reach the eastern hunting grounds",
+          "location": {"x": 4200, "y": 2400, "z": 100}
+        }
+      ],
+      "hazards": [
+        {"type": "raptor_patrol", "count": 3, "behavior": "territorial"},
+        {"type": "river_current", "stamina_drain": 15}
+      ],
+      "rewards": {
+        "eastern_territory_unlocked": true,
+        "crafting_recipe": "StoneSpear",
+        "hunting_grounds_marker": true
+      }
+    },
+    {
+      "id": "QUEST_003_CRAFTING_BASICS",
+      "title": "First Tools",
+      "type": "crafting_tutorial",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "description": "The elder shows you how to make the tools that keep a hunter alive. Gather materials and craft your first stone axe.",
+      "emotional_arc": "learning → competence → pride",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "type": "collect_item",
+          "description": "Gather 2 rocks",
+          "item": "Rock",
+          "quantity": 2,
+          "pickup_actors": ["Resource_Rock_Hub_001", "Resource_Rock_Hub_002"]
+        },
+        {
+          "id": "OBJ_003_B",
+          "type": "collect_item",
+          "description": "Gather 1 stick",
+          "item": "Stick",
+          "quantity": 1,
+          "pickup_actors": ["Resource_Stick_Hub_001"]
+        },
+        {
+          "id": "OBJ_003_C",
+          "type": "craft_item",
+          "description": "Craft a Stone Axe at the workbench",
+          "recipe": "StoneAxe",
+          "station": "CraftStation_StoneAxe_001",
+          "ingredients": {"Rock": 2, "Stick": 1}
+        }
+      ],
+      "rewards": {
+        "item_granted": "StoneAxe",
+        "crafting_system_unlocked": true,
+        "campfire_recipe_unlocked": true
+      }
+    }
+  ],
+
+  "crafting_recipes": [
+    {
+      "id": "StoneAxe",
+      "name": "Stone Axe",
+      "ingredients": {"Rock": 2, "Stick": 1},
+      "station": "CraftStation_StoneAxe_001",
+      "output": "StoneAxe",
+      "craft_time_seconds": 5,
+      "description": "A basic chopping tool. Used for gathering wood and as a melee weapon."
+    },
+    {
+      "id": "Campfire",
+      "name": "Campfire",
+      "ingredients": {"Stick": 3},
+      "station": null,
+      "output": "Campfire",
+      "craft_time_seconds": 8,
+      "description": "Provides warmth, light, and a place to cook meat. Deters small predators."
+    },
+    {
+      "id": "WaterContainer",
+      "name": "Water Container",
+      "ingredients": {"Rock": 1, "Leaf": 1},
+      "station": null,
+      "output": "WaterContainer",
+      "craft_time_seconds": 6,
+      "description": "Holds water from rivers and streams. Essential for survival in dry terrain."
+    },
+    {
+      "id": "StoneSpear",
+      "name": "Stone Spear",
+      "ingredients": {"Rock": 1, "Stick": 2},
+      "station": null,
+      "output": "StoneSpear",
+      "craft_time_seconds": 10,
+      "description": "A throwing weapon effective against medium-sized dinosaurs. Can be retrieved after use."
+    }
+  ],
+
+  "resource_actors": {
+    "rocks": ["Resource_Rock_Hub_001", "Resource_Rock_Hub_002", "Resource_Rock_Hub_003", "Resource_Rock_Cave_001", "Resource_Rock_Cave_002"],
+    "sticks": ["Resource_Stick_Hub_001", "Resource_Stick_Hub_002", "Resource_Stick_Hub_003", "Resource_Stick_Cave_001"],
+    "leaves": ["Resource_Leaf_Hub_001", "Resource_Leaf_Hub_002"]
+  },
+
+  "audio_assets": {
+    "elder_quest_start": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783049767495_QuestGiver_Elder.mp3",
+    "scout_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783049796954_NPC_Scout_Warning.mp3"
+  },
+
+  "scene_actors_placed": {
+    "npc_quest_givers": ["NPC_Elder_QuestGiver_001"],
+    "trigger_volumes": ["QuestTrigger_CaveEntrance_001", "QuestTrigger_RaptorRiver_001"],
+    "objective_markers": ["QuestObjective_SkullMarker_001", "QuestObjective_WaterContainer_001"],
+    "crafting_stations": ["CraftStation_StoneAxe_001"],
+    "reward_actors": ["QuestReward_Campfire_Hub_001"]
+  }
+}
