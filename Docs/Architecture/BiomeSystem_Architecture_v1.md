@@ -1,149 +1,169 @@
-# Biome System Architecture v1.0
-**Agent:** #02 — Engine Architect  
-**Cycle:** PROD_CYCLE_AUTO_20260702_010  
-**Date:** 2026-07-02  
-**Status:** ACTIVE — P1 Priority (World Generation)
+# Biome System Architecture — Engine Architect #02
+## PROD_CYCLE_AUTO_20260703_001
 
 ---
 
 ## Overview
 
-The Biome System defines the ecological zones of the Cretaceous world. Each biome has distinct terrain characteristics, flora density, fauna populations, and survival challenges. This document defines the architecture that all world-generation agents (#05, #06, #08) must follow.
+The Biome System defines the ecological zones of the prehistoric world. Each biome
+governs terrain generation, vegetation density, dinosaur species distribution,
+weather patterns, and ambient audio. This document is the authoritative architecture
+reference for all agents implementing biome-related systems.
 
 ---
 
-## Biome Zone Definitions
+## Biome Types (SharedTypes.h — EEng_BiomeType)
 
-| ID | Name | Center (X,Y) | Radius | Primary Flora | Primary Fauna | Survival Hazard |
-|----|------|-------------|--------|--------------|--------------|----------------|
-| 01 | Floodplain | (0, 0) | 2000m | Ferns, horsetails | Hadrosaurs, small theropods | Flooding, predators |
-| 02 | Conifer Forest | (2000, 1500) | 1500m | Conifers, cycads | Raptors, Triceratops | Low visibility, ambush |
-| 03 | Fern Prairie | (-1800, 800) | 1800m | Ferns, ground cover | Sauropods, Ankylosaurs | Open exposure, T-Rex territory |
-| 04 | Riverbank | (500, -2000) | 800m | Reeds, water plants | Spinosaurus, fish, crocs | Water hazards, Spinosaurus |
-| 05 | Volcanic Ridge | (-1000, -1500) | 1200m | Sparse, heat-resistant | Pterosaurs, small lizards | Heat, toxic gas, unstable ground |
-
----
-
-## Architecture Rules (MANDATORY for all agents)
-
-### Rule 1 — Biome Boundary Respect
-- Agent #05 (World Generator) must generate terrain height variation that matches biome types:
-  - Floodplain: flat, z=0–50
-  - Conifer Forest: rolling hills, z=50–200
-  - Fern Prairie: gentle undulation, z=30–100
-  - Riverbank: depression, z=-20–40
-  - Volcanic Ridge: steep, z=150–400
-
-### Rule 2 — Flora Density by Biome
-- Agent #06 (Environment Artist) must respect density multipliers:
-  - Floodplain: 1.0x (baseline)
-  - Conifer Forest: 1.8x (dense)
-  - Fern Prairie: 1.4x (medium-dense)
-  - Riverbank: 0.8x (sparse, water-adjacent)
-  - Volcanic Ridge: 0.2x (very sparse)
-
-### Rule 3 — Lighting Temperature by Biome
-- Agent #08 (Lighting) must apply biome-specific color grading:
-  - Floodplain: neutral warm (5800K)
-  - Conifer Forest: cool green tint (6200K, slight green)
-  - Fern Prairie: bright warm (5500K)
-  - Riverbank: cool blue-green (6500K)
-  - Volcanic Ridge: hot orange-red (4500K, orange tint)
-
-### Rule 4 — Fauna Spawn Tables (for Agent #12 Combat AI)
-Each biome has a defined spawn budget:
-```
-Floodplain:     TRex(1), Raptor(3), Parasaur(5), Hadrosaur(8)
-ConiferForest:  Raptor(6), Triceratops(3), Stegosaurus(2)
-FernPrairie:    TRex(2), Sauropod(4), Ankylosaur(3)
-Riverbank:      Spinosaurus(1), SmallCroc(4), Pterosaur(3)
-VolcanicRidge:  Pterosaur(5), SmallLizard(8)
-```
+| ID | Name | Description | Dominant Species |
+|----|------|-------------|-----------------|
+| 0 | Savana | Open grassland, sparse trees, high visibility | T-Rex, Triceratops |
+| 1 | Floresta | Dense jungle, low visibility, high humidity | Raptors, Parasaurolophus |
+| 2 | Pantano | Swamp, shallow water, fog | Spinosaurus, Baryonyx |
+| 3 | Montanha | Rocky highlands, cliffs, cold | Pterodactyl, Pachycephalosaurus |
+| 4 | Praia | Coastal, sandy, open water nearby | Mosasaurus (offshore), Dilophosaurus |
+| 5 | Vulcao | Volcanic, ash, extreme heat | Ankylosaurus, Carnotaurus |
 
 ---
 
-## C++ Class Architecture (Active in TranspersonalGame module)
+## Architecture Rules (Enforced by Engine Architect)
 
-### Existing Active Classes
-```
-TranspersonalCharacter    — Player character, survival stats (health/hunger/thirst/stamina/fear)
-TranspersonalGameState    — Global game state, 35 properties
-PCGWorldGenerator         — Procedural world generation, 14 methods
-FoliageManager            — Vegetation system, 5 methods
-CrowdSimulationManager    — Crowd AI
-ProceduralWorldManager    — World management
-BuildIntegrationManager   — Build integration
-```
+### RULE A — BiomeManager is the Single Source of Truth
+- All biome queries go through `BiomeManager_Proxy_001` actor in the level
+- No agent spawns biome-specific content without checking the active biome at that location
+- Biome boundaries are defined by a 2D noise map seeded at world gen time
 
-### Planned BiomeManager Class (P1 — Next Implementation)
+### RULE B — Naming Convention (MANDATORY)
+All actors spawned in the world MUST follow: `Type_Bioma_NNN`
+- Types: TRex, Raptor, Trike, Brachi, Spino, Ptero, Tree, Fern, Rock, Bush, River, Cave
+- Biomas: Savana, Floresta, Pantano, Montanha, Praia, Vulcao
+- NNN: zero-padded 3-digit index (001, 002, ...)
+- Examples: `TRex_Savana_001`, `Tree_Floresta_042`, `Rock_Montanha_007`
+
+### RULE C — Hero Clearing is Sacred (X=2100, Y=2400)
+- This is the primary screenshot composition point
+- Must always contain: 1 T-Rex + 2 Raptors + dense vegetation ring
+- No agent may remove actors from this clearing without Engine Architect approval
+- Biome at this location: **Floresta** (dense Cretaceous forest)
+
+### RULE D — No Spiritual Content
+Per global anti-hallucination rule: zero shamans, zero spirit guides, zero mystical mechanics.
+All biome content is ecologically grounded (National Geographic standard).
+
+---
+
+## BiomeManager C++ Interface (Target — pending compilation fix)
+
 ```cpp
-// Target: Source/TranspersonalGame/World/BiomeManager.h
-class TRANSPERSONALGAME_API ABiomeManager : public AActor {
-    // GetBiomeAtLocation(FVector) -> EBiomeType
-    // GetFloraMultiplier(EBiomeType) -> float
-    // GetFaunaSpawnTable(EBiomeType) -> TArray<FSpawnEntry>
-    // GetLightingTemperature(EBiomeType) -> float
-    // GetTerrainHeightRange(EBiomeType) -> FVector2D
+// SharedTypes.h additions (Eng_ prefix, global scope)
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Savana     UMETA(DisplayName = "Savana"),
+    Floresta   UMETA(DisplayName = "Floresta"),
+    Pantano    UMETA(DisplayName = "Pantano"),
+    Montanha   UMETA(DisplayName = "Montanha"),
+    Praia      UMETA(DisplayName = "Praia"),
+    Vulcao     UMETA(DisplayName = "Vulcao"),
+    MAX        UMETA(Hidden)
+};
+
+USTRUCT(BlueprintType)
+struct FEng_BiomeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Savana;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float DinosaurSpawnRate = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float AmbientTemperature = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float HumidityLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor FogColor = FLinearColor(0.4f, 0.6f, 1.0f, 1.0f);
 };
 ```
 
-**NOTE:** C++ compilation is disabled in headless editor mode. BiomeManager logic is implemented via UE5 Python (ue5_execute) and Blueprint until full compilation is restored.
+> NOTE: C++ compilation is blocked by 218 UHT errors in the pre-built binary.
+> All runtime changes go through UE5 Python (ue5_execute). C++ structs above
+> are documentation targets for when the compilation pipeline is restored.
 
 ---
 
-## Scene State (Cycle 010)
+## Current World State (Validated this cycle)
 
-### BiomeZone Markers (spawned this cycle)
-- `BiomeZone_Floodplain_001` @ (0, 0, 50)
-- `BiomeZone_Conifer_Forest_001` @ (2000, 1500, 80)
-- `BiomeZone_Fern_Prairie_001` @ (-1800, 800, 60)
-- `BiomeZone_Riverbank_001` @ (500, -2000, 40)
-- `BiomeZone_Volcanic_Ridge_001` @ (-1000, -1500, 200)
+### Hero Clearing Population (X=2100, Y=2400)
+| Actor Label | Type | Scale | Status |
+|-------------|------|-------|--------|
+| TRex_Savana_001 | StaticMeshActor | 4x4x4 | ✅ Spawned |
+| Raptor_Floresta_001 | StaticMeshActor | 2.5x2.5x2.5 | ✅ Spawned |
+| Raptor_Floresta_002 | StaticMeshActor | 2.5x2.5x2.5 | ✅ Spawned |
+| Trike_Savana_001 | StaticMeshActor | 3.5x3.5x3.0 | ✅ Spawned |
+| Brachi_Savana_001 | StaticMeshActor | 6x6x8 | ✅ Spawned |
+| Tree_Floresta_001..012 | StaticMeshActor | 2.5-3.5x scale | ✅ 12 trees |
+| Fern_Floresta_001..008 | StaticMeshActor | 1.5x1.5x1.2 | ✅ 8 ferns |
+| BiomeManager_Proxy_001 | Actor | — | ✅ Architecture anchor |
 
-### Flora Density (cumulative)
-- 20 Fern_Savana actors spawned this cycle
-- Previous cycles: Rock formations (5), Raptor/Parasaur actors (3)
-
-### Lighting State
-- DirectionalLight: 12 lux, RGB(255,220,150), pitch=-45°, atmosphere_sun_light=True
-- SkyLight: intensity=2.0, real_time_capture=True
-- ExponentialHeightFog: density=0.02, inscattering=blue-sky, deduplicated to 1 instance
-- r.SkyAtmosphere.FastSkyLUT=1
-
----
-
-## Dependency Chain for P1 Completion
-
-```
-#02 Engine Architect (this) 
-  → defines biome zones, terrain rules, spawn tables
-  
-#05 World Generator
-  → generates terrain height variation per biome
-  → adds rivers, ridges, depressions
-  
-#06 Environment Artist  
-  → populates flora per biome density rules
-  → adds rocks, fallen logs, water features
-  
-#08 Lighting & Atmosphere
-  → applies biome-specific color temperature
-  → day/night cycle with biome-appropriate atmosphere
-  
-#12 Combat AI
-  → uses spawn tables to populate fauna per biome
-  → respects biome boundary for territory behavior
-```
+### CAP Enforcement (Applied this cycle)
+- Sun pitch: -45° (golden hour), intensity=8.0, warm amber RGB(255,220,150)
+- Fog: 1x ExponentialHeightFog, density=0.02, blue-sky inscattering
+- SkyLight: real_time_capture=True, intensity=2.0
+- FastSkyLUT=1 via console
 
 ---
 
-## Next Steps (Cycle 011+)
+## Agent Directives for Next Cycle
 
-1. **Agent #05**: Implement terrain height variation using Landscape deformation — ridges at Volcanic Ridge, depression at Riverbank
-2. **Agent #06**: Replace cone/cube flora placeholders with actual Megascans/procedural meshes
-3. **Agent #08**: Apply per-biome color grading via post-process volumes
-4. **Agent #12**: Implement dinosaur spawn tables using biome zone data
+### Agent #3 — Core Systems Programmer
+- Implement `DinosaurBase` movement component (patrol radius, idle animation trigger)
+- Use existing `TRex_Savana_001`, `Raptor_Floresta_001/002` as test targets
+- DO NOT spawn new dino actors — modify existing ones
+
+### Agent #5 — World Generator
+- Ground the floating terrain tiles (Z=0 baseline)
+- Extend terrain to cover hero clearing with height variation (hills, not flat)
+- Biome map: hero clearing = Floresta biome
+
+### Agent #6 — Environment Artist
+- Assign real mesh assets to Tree_Floresta_001..012 (use UE5 starter content trees)
+- Assign fern meshes to Fern_Floresta_001..008
+- Dense canopy over hero clearing is the priority
+
+### Agent #8 — Lighting
+- SkyAtmosphere must be present (fix void blue sky)
+- Golden hour: sun at -45°, warm amber, volumetric god rays through tree canopy
+- Target: hero clearing looks like a living Cretaceous forest at dusk
+
+### Agent #9 — Character Artist
+- Assign dinosaur mesh assets to TRex_Savana_001, Raptor_Floresta_001/002
+- Use UE5 content browser assets or procedural mesh if real assets unavailable
+- Pose: T-Rex facing camera (yaw=180°), Raptors flanking
 
 ---
 
-*Architecture defined by Engine Architect #02 — all agents must comply with biome rules above.*
+## Architecture Decisions This Cycle
+
+1. **BiomeManager as proxy actor** — Until C++ compilation is restored, the biome
+   system is anchored by `BiomeManager_Proxy_001` at the hero clearing. All agents
+   query this actor's location as the Floresta biome center.
+
+2. **Naming convention enforced** — All 21 actors spawned this cycle follow
+   `Type_Bioma_NNN` convention. No duplicates created (label_exists check).
+
+3. **Hero clearing is the single quality bar** — Architecture decisions prioritize
+   what is visible at X=2100, Y=2400. Abstract systems are deferred.
+
+4. **No C++ writes** — Per global rule `hugo_no_cpp_h_v2`, all changes go through
+   ue5_execute Python. C++ documentation above is for future pipeline restoration.
+
+---
+
+*Engine Architect #02 — PROD_CYCLE_AUTO_20260703_001*
