@@ -1,0 +1,63 @@
+{
+  "crowd_simulation": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260703_006",
+    "agent": "#13 Crowd & Traffic Simulation",
+    "herds": [
+      {
+        "id": "trike_herd_savana",
+        "species": "Triceratops",
+        "label_prefix": "Trike_Savana_",
+        "count": 6,
+        "center": {"x": 2900, "y": 3000, "z": 40},
+        "orientation_yaw": 50.0,
+        "spacing_min": 350,
+        "spacing_max": 500,
+        "behavior": "grazing",
+        "formation": "loose_arc",
+        "ambient_light": "AmbientLight_TrikeHerd",
+        "members": [
+          {"label": "Trike_Savana_001", "pos": {"x": 2900, "y": 3000, "z": 40}, "yaw": 50.0, "role": "lead"},
+          {"label": "Trike_Savana_002", "pos": {"x": 2500, "y": 3300, "z": 40}, "yaw": 55.0, "role": "left_flank"},
+          {"label": "Trike_Savana_003", "pos": {"x": 3300, "y": 3250, "z": 40}, "yaw": 45.0, "role": "right_flank"},
+          {"label": "Trike_Savana_004", "pos": {"x": 2700, "y": 3550, "z": 40}, "yaw": 60.0, "role": "rear_left"},
+          {"label": "Trike_Savana_005", "pos": {"x": 3100, "y": 3500, "z": 40}, "yaw": 40.0, "role": "rear_right"},
+          {"label": "Trike_Savana_006", "pos": {"x": 2900, "y": 3800, "z": 40}, "yaw": 50.0, "role": "trailing"}
+        ]
+      },
+      {
+        "id": "parasaur_herd_savana",
+        "species": "Parasaurolophus",
+        "label_prefix": "Parasaur_Savana_",
+        "count": 7,
+        "center": {"x": 1200, "y": 1700, "z": 35},
+        "orientation_yaw": 315.0,
+        "spacing_min": 300,
+        "spacing_max": 450,
+        "behavior": "grazing_toward_water",
+        "formation": "tight_cluster",
+        "ambient_light": "AmbientLight_ParasaurHerd",
+        "members": [
+          {"label": "Parasaur_Savana_001", "pos": {"x": 1200, "y": 1700, "z": 35}, "yaw": 315.0, "role": "lead"},
+          {"label": "Parasaur_Savana_002", "pos": {"x": 1550, "y": 1500, "z": 35}, "yaw": 320.0, "role": "right"},
+          {"label": "Parasaur_Savana_003", "pos": {"x": 850,  "y": 1550, "z": 35}, "yaw": 310.0, "role": "left"},
+          {"label": "Parasaur_Savana_004", "pos": {"x": 1350, "y": 2100, "z": 35}, "yaw": 325.0, "role": "rear_right"},
+          {"label": "Parasaur_Savana_005", "pos": {"x": 1050, "y": 2050, "z": 35}, "yaw": 305.0, "role": "rear_left"},
+          {"label": "Parasaur_Savana_006", "pos": {"x": 1700, "y": 1800, "z": 35}, "yaw": 330.0, "role": "far_right"},
+          {"label": "Parasaur_Savana_007", "pos": {"x": 700,  "y": 1750, "z": 35}, "yaw": 300.0, "role": "far_left"}
+        ]
+      }
+    ],
+    "hub_coords": {"x": 2100, "y": 2400},
+    "max_herd_radius": 4000,
+    "crowd_rules": {
+      "min_individual_spacing": 300,
+      "max_individual_spacing": 600,
+      "herd_cohesion_radius": 1200,
+      "orientation_variance_deg": 20,
+      "no_grid_scatter": true,
+      "reuse_existing_actors": true
+    },
+    "notes": "Both herds within 3000u of hub. Trikes NE clearing (X=2900,Y=3000), Parasaurs SW clearing (X=1200,Y=1700). Warm ambient point lights added at each herd center."
+  }
+}
