@@ -1,0 +1,258 @@
+{
+  "quest_system_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260703_008",
+  "agent": "Quest_Mission_Designer_14",
+  "quests": [
+    {
+      "quest_id": "QUEST_001_HerdObservation",
+      "title": "Eyes on the Herd",
+      "type": "observation",
+      "difficulty": "novice",
+      "zone_label": "QuestZone_HerdObservation_001",
+      "zone_location": {"x": 2100, "y": 2800, "z": 100},
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075883155_Elder_QuestGiver_HerdWarning.mp3",
+      "description": "Observe the Triceratops herd for 60 seconds without being detected. Learn their formation — calves in the center, bulls facing outward.",
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "type": "reach_zone",
+          "description": "Approach the Triceratops grazing area",
+          "target_label": "QuestZone_HerdObservation_001",
+          "required": true
+        },
+        {
+          "id": "OBJ_001_B",
+          "type": "observe_undetected",
+          "description": "Watch the herd for 60 seconds without triggering alert",
+          "duration_seconds": 60,
+          "target_species": "Triceratops",
+          "required": true
+        },
+        {
+          "id": "OBJ_001_C",
+          "type": "count_individuals",
+          "description": "Count the number of calves in the herd",
+          "required": false,
+          "bonus_reward": true
+        }
+      ],
+      "rewards": {
+        "knowledge": "Triceratops herd behavior unlocked",
+        "crafting_recipe": "Camouflage_Mud_Pack",
+        "survival_tip": "Triceratops charge in formation — never stand between two bulls"
+      },
+      "failure_conditions": [
+        "Player detected by any herd member",
+        "Player attacks any herd member",
+        "Player gets within 200 units of a bull"
+      ],
+      "emotional_arc": "Awe → Respect → Knowledge. Player learns that these creatures are not mindless — they protect their young with coordinated intelligence."
+    },
+    {
+      "quest_id": "QUEST_002_RiverTracking",
+      "title": "Follow the Parasaurs",
+      "type": "tracking",
+      "difficulty": "novice",
+      "zone_label": "QuestZone_RiverTracking_001",
+      "zone_location": {"x": 1400, "y": 2400, "z": 100},
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075902442_Elder_QuestGiver_TrackingMissi.mp3",
+      "description": "Track the Parasaur herd from the forest edge to the river watering hole. Do not disturb them — we need this migration route mapped.",
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "type": "find_tracks",
+          "description": "Locate Parasaur tracks near the tree line",
+          "target_label": "QuestZone_RiverTracking_001",
+          "required": true
+        },
+        {
+          "id": "OBJ_002_B",
+          "type": "follow_herd",
+          "description": "Follow the Parasaur herd to the river without spooking them",
+          "target_species": "Parasaurolophus",
+          "max_detection_events": 0,
+          "required": true
+        },
+        {
+          "id": "OBJ_002_C",
+          "type": "mark_location",
+          "description": "Mark the watering hole on your mental map",
+          "required": true
+        }
+      ],
+      "rewards": {
+        "knowledge": "River watering hole location revealed on map",
+        "resource_cache": "Fish_Cache_River_001",
+        "survival_tip": "Parasaurs call loudly when they sense predators — their alarm cry is your early warning system"
+      },
+      "failure_conditions": [
+        "Herd scatters due to player detection",
+        "Player kills any Parasaur",
+        "Player loses track of herd for more than 120 seconds"
+      ],
+      "emotional_arc": "Curiosity → Patience → Discovery. Player learns to read the land through animal behavior rather than brute force."
+    },
+    {
+      "quest_id": "QUEST_003_PredatorMapping",
+      "title": "Know Your Enemy",
+      "type": "reconnaissance",
+      "difficulty": "intermediate",
+      "zone_label": "QuestZone_PredatorAlert_001",
+      "zone_location": {"x": 2100, "y": 1800, "z": 100},
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "description": "Infiltrate T-Rex territory and map its patrol routes. Do NOT engage. Survival depends on knowing where the apex predator walks.",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "type": "enter_danger_zone",
+          "description": "Enter the T-Rex patrol territory",
+          "target_label": "QuestZone_PredatorAlert_001",
+          "required": true
+        },
+        {
+          "id": "OBJ_003_B",
+          "type": "observe_predator",
+          "description": "Observe T-Rex patrol pattern from safe distance (400+ units)",
+          "target_species": "TRex",
+          "min_distance": 400,
+          "observation_count": 3,
+          "required": true
+        },
+        {
+          "id": "OBJ_003_C",
+          "type": "mark_patrol_points",
+          "description": "Mark 3 waypoints on the T-Rex patrol route",
+          "waypoints_required": 3,
+          "required": true
+        },
+        {
+          "id": "OBJ_003_D",
+          "type": "escape_zone",
+          "description": "Exit the danger zone without being detected",
+          "required": true
+        }
+      ],
+      "rewards": {
+        "knowledge": "T-Rex patrol routes visible on map for 24 in-game hours",
+        "crafting_recipe": "Scent_Mask_Herb_Bundle",
+        "survival_tip": "T-Rex vision is motion-based — freeze when it looks your direction"
+      },
+      "failure_conditions": [
+        "T-Rex detects player (triggers chase)",
+        "Player attacks T-Rex",
+        "Player dies in the zone"
+      ],
+      "emotional_arc": "Fear → Discipline → Mastery. Player confronts the apex predator not with weapons but with wit — and survives by becoming invisible."
+    },
+    {
+      "quest_id": "QUEST_004_CraftingBasics",
+      "title": "First Tools",
+      "type": "crafting",
+      "difficulty": "tutorial",
+      "zone_label": "Hub_Clearing",
+      "zone_location": {"x": 2100, "y": 2400, "z": 100},
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "description": "Gather materials from the clearing and craft your first stone axe. Without tools, you are prey.",
+      "objectives": [
+        {
+          "id": "OBJ_004_A",
+          "type": "collect_resource",
+          "description": "Collect 2 rocks from the clearing",
+          "resource_type": "Rock",
+          "quantity": 2,
+          "source_actors": ["Resource_Rock_Hub_001", "Resource_Rock_Hub_002", "Resource_Rock_Hub_003", "Resource_Rock_Hub_004", "Resource_Rock_Hub_005"],
+          "required": true
+        },
+        {
+          "id": "OBJ_004_B",
+          "type": "collect_resource",
+          "description": "Collect 1 stick from the forest floor",
+          "resource_type": "Stick",
+          "quantity": 1,
+          "source_actors": ["Resource_Stick_Hub_001", "Resource_Stick_Hub_002", "Resource_Stick_Hub_003", "Resource_Stick_Hub_004", "Resource_Stick_Hub_005"],
+          "required": true
+        },
+        {
+          "id": "OBJ_004_C",
+          "type": "craft_item",
+          "description": "Craft a Stone Axe (2 Rocks + 1 Stick)",
+          "recipe_id": "RECIPE_StoneAxe",
+          "required": true
+        }
+      ],
+      "rewards": {
+        "item": "Stone_Axe_001",
+        "knowledge": "Crafting system unlocked",
+        "survival_tip": "A stone axe can cut wood, skin animals, and defend against small predators"
+      },
+      "failure_conditions": [],
+      "emotional_arc": "Helplessness → Agency. The moment the player holds their first tool, they stop being prey and start being a survivor."
+    }
+  ],
+  "crafting_recipes": [
+    {
+      "recipe_id": "RECIPE_StoneAxe",
+      "name": "Stone Axe",
+      "ingredients": [
+        {"type": "Rock", "quantity": 2},
+        {"type": "Stick", "quantity": 1}
+      ],
+      "output": "Stone_Axe",
+      "craft_time_seconds": 5,
+      "description": "A basic cutting and chopping tool. Essential for survival."
+    },
+    {
+      "recipe_id": "RECIPE_Campfire",
+      "name": "Campfire",
+      "ingredients": [
+        {"type": "Stick", "quantity": 3}
+      ],
+      "output": "Campfire",
+      "craft_time_seconds": 8,
+      "description": "Provides warmth, light, and the ability to cook meat. Keeps predators at bay at night."
+    },
+    {
+      "recipe_id": "RECIPE_WaterContainer",
+      "name": "Water Container",
+      "ingredients": [
+        {"type": "Rock", "quantity": 1},
+        {"type": "Leaf", "quantity": 1}
+      ],
+      "output": "Water_Container",
+      "craft_time_seconds": 6,
+      "description": "A hollowed rock lined with leaves. Holds enough water for half a day."
+    },
+    {
+      "recipe_id": "RECIPE_Camouflage_Mud_Pack",
+      "name": "Camouflage Mud Pack",
+      "ingredients": [
+        {"type": "Leaf", "quantity": 2},
+        {"type": "Stick", "quantity": 1}
+      ],
+      "output": "Camouflage_Mud_Pack",
+      "craft_time_seconds": 4,
+      "description": "Reduces player scent signature. Herbivores are less likely to detect you. Lasts 5 in-game minutes."
+    },
+    {
+      "recipe_id": "RECIPE_Scent_Mask_Herb_Bundle",
+      "name": "Scent Mask Herb Bundle",
+      "ingredients": [
+        {"type": "Leaf", "quantity": 3}
+      ],
+      "output": "Scent_Mask_Herb_Bundle",
+      "craft_time_seconds": 3,
+      "description": "Masks human scent from predators. Critical for T-Rex territory infiltration. Lasts 3 in-game minutes."
+    }
+  ],
+  "resource_actors_in_scene": {
+    "rocks": ["Resource_Rock_Hub_001", "Resource_Rock_Hub_002", "Resource_Rock_Hub_003", "Resource_Rock_Hub_004", "Resource_Rock_Hub_005"],
+    "sticks": ["Resource_Stick_Hub_001", "Resource_Stick_Hub_002", "Resource_Stick_Hub_003", "Resource_Stick_Hub_004", "Resource_Stick_Hub_005"],
+    "leaves": ["Resource_Leaf_Hub_001", "Resource_Leaf_Hub_002", "Resource_Leaf_Hub_003", "Resource_Leaf_Hub_004"]
+  },
+  "audio_assets": {
+    "herd_warning_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075883155_Elder_QuestGiver_HerdWarning.mp3",
+    "tracking_mission_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075902442_Elder_QuestGiver_TrackingMissi.mp3"
+  }
+}
