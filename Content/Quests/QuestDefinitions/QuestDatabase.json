@@ -1,0 +1,369 @@
+{
+  "quest_database": {
+    "version": "1.0.0",
+    "game": "Transpersonal Game Studio — Prehistoric Survival",
+    "last_updated": "PROD_CYCLE_AUTO_20260703_001",
+    "agent": "Quest_Designer_14",
+    "quests": [
+      {
+        "id": "QUEST_001",
+        "name": "Bone Fragment Hunt",
+        "type": "exploration",
+        "priority": "main",
+        "giver_npc": "Elder_NPC_QuestGiver",
+        "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040096280_Elder_NPC_QuestGiver.mp3",
+        "description": "Travel east past the river bend to the cave. Collect 3 bone fragments from the ancient dead.",
+        "emotional_arc": "curiosity → danger → discovery → reward",
+        "objectives": [
+          {
+            "id": "OBJ_001_A",
+            "type": "travel",
+            "description": "Reach the cave entrance east of camp",
+            "target_actor": "Quest_BoneHunt_CaveEntrance_001",
+            "target_location": {"x": 2800, "y": 2400, "z": 120},
+            "completion_condition": "player_within_radius_200"
+          },
+          {
+            "id": "OBJ_001_B",
+            "type": "collect",
+            "description": "Collect 3 bone fragments",
+            "target_actors": [
+              "Resource_BoneFragment_Cave_001",
+              "Resource_BoneFragment_Cave_002",
+              "Resource_BoneFragment_Cave_003"
+            ],
+            "required_count": 3,
+            "completion_condition": "items_in_inventory"
+          },
+          {
+            "id": "OBJ_001_C",
+            "type": "return",
+            "description": "Return to the Elder with the bone fragments",
+            "target_npc": "Elder_NPC_QuestGiver",
+            "completion_condition": "talk_to_npc_with_items"
+          }
+        ],
+        "rewards": {
+          "knowledge": "fire_making_technique",
+          "items": ["primitive_torch_recipe"],
+          "xp": 150
+        },
+        "failure_conditions": [
+          "player_death",
+          "raptor_encounter_without_weapon"
+        ],
+        "danger_level": "medium",
+        "estimated_duration_minutes": 8
+      },
+      {
+        "id": "QUEST_002",
+        "name": "Raptor River Patrol",
+        "type": "scouting",
+        "priority": "main",
+        "giver_npc": "Elder_NPC_QuestGiver",
+        "description": "Observe the raptor pack at the river bend without being detected. Count their numbers and report back.",
+        "emotional_arc": "tension → patience → relief → knowledge",
+        "objectives": [
+          {
+            "id": "OBJ_002_A",
+            "type": "travel",
+            "description": "Reach the observation point at the river bend",
+            "target_actor": "Quest_RaptorPatrol_ObsPoint_001",
+            "target_location": {"x": 2100, "y": 3200, "z": 100},
+            "completion_condition": "player_within_radius_150"
+          },
+          {
+            "id": "OBJ_002_B",
+            "type": "observe",
+            "description": "Watch the raptors for 30 seconds without moving",
+            "target_actors": ["Raptor_Savana_001", "Raptor_Savana_002", "Raptor_Savana_003"],
+            "required_duration_seconds": 30,
+            "stealth_required": true,
+            "completion_condition": "player_stationary_observing_targets"
+          },
+          {
+            "id": "OBJ_002_C",
+            "type": "return",
+            "description": "Return to camp and report raptor count",
+            "target_npc": "Elder_NPC_QuestGiver",
+            "completion_condition": "talk_to_npc"
+          }
+        ],
+        "rewards": {
+          "knowledge": "raptor_patrol_routes",
+          "items": ["raptor_claw_recipe"],
+          "xp": 120
+        },
+        "failure_conditions": [
+          "player_detected_by_raptor",
+          "player_death"
+        ],
+        "danger_level": "high",
+        "estimated_duration_minutes": 6
+      },
+      {
+        "id": "QUEST_003",
+        "name": "First Fire",
+        "type": "crafting",
+        "priority": "tutorial",
+        "giver_npc": "Elder_NPC_QuestGiver",
+        "description": "Gather materials and craft your first campfire. Survival depends on warmth and cooked food.",
+        "emotional_arc": "learning → frustration → breakthrough → pride",
+        "objectives": [
+          {
+            "id": "OBJ_003_A",
+            "type": "collect",
+            "description": "Gather 3 sticks",
+            "target_actors": [
+              "Resource_Stick_Hub_001",
+              "Resource_Stick_Hub_002",
+              "Resource_Stick_Hub_003"
+            ],
+            "required_count": 3,
+            "completion_condition": "items_in_inventory"
+          },
+          {
+            "id": "OBJ_003_B",
+            "type": "collect",
+            "description": "Gather 2 rocks",
+            "target_actors": [
+              "Resource_Rock_Hub_001",
+              "Resource_Rock_Hub_002"
+            ],
+            "required_count": 2,
+            "completion_condition": "items_in_inventory"
+          },
+          {
+            "id": "OBJ_003_C",
+            "type": "craft",
+            "description": "Craft a campfire at the crafting zone",
+            "target_actor": "Quest_FirstFire_CraftZone_001",
+            "recipe": "campfire_basic",
+            "required_items": {"sticks": 3, "rocks": 2},
+            "completion_condition": "item_crafted_at_location"
+          }
+        ],
+        "rewards": {
+          "knowledge": "campfire_placement",
+          "items": ["campfire_blueprint"],
+          "xp": 80
+        },
+        "failure_conditions": ["player_death"],
+        "danger_level": "low",
+        "estimated_duration_minutes": 4
+      },
+      {
+        "id": "QUEST_004",
+        "name": "Rescue Kara",
+        "type": "rescue",
+        "priority": "side",
+        "giver_npc": "Survivor_NPC_RescueQuest",
+        "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040117276_Survivor_NPC_RescueQuest.mp3",
+        "description": "A survivor named Kara went missing near the river. Follow her tracks before the rain erases them.",
+        "emotional_arc": "urgency → fear → relief → gratitude",
+        "objectives": [
+          {
+            "id": "OBJ_004_A",
+            "type": "track",
+            "description": "Follow Kara's tracks to the river",
+            "waypoints": [
+              {"actor": "Quest_RaptorPatrol_ObsPoint_001", "x": 2100, "y": 3200, "z": 100}
+            ],
+            "time_limit_seconds": 120,
+            "completion_condition": "follow_track_waypoints"
+          },
+          {
+            "id": "OBJ_004_B",
+            "type": "rescue",
+            "description": "Find Kara and escort her back to camp",
+            "target_npc": "NPC_Kara_001",
+            "escort_destination": {"x": 2100, "y": 2400, "z": 80},
+            "completion_condition": "escort_npc_to_location"
+          }
+        ],
+        "rewards": {
+          "knowledge": "river_crossing_route",
+          "items": ["hide_strips_x3"],
+          "xp": 200
+        },
+        "failure_conditions": [
+          "time_limit_exceeded",
+          "kara_killed",
+          "player_death"
+        ],
+        "danger_level": "high",
+        "estimated_duration_minutes": 10
+      },
+      {
+        "id": "QUEST_005",
+        "name": "Camp Defense",
+        "type": "defense",
+        "priority": "side",
+        "giver_npc": "Elder_NPC_QuestGiver",
+        "description": "A pack of raptors is circling the camp perimeter at night. Reinforce the three guard posts before dark.",
+        "emotional_arc": "dread → preparation → combat → survival",
+        "objectives": [
+          {
+            "id": "OBJ_005_A",
+            "type": "interact",
+            "description": "Reinforce the north guard post",
+            "target_actor": "Quest_CampDefense_Post_N_001",
+            "completion_condition": "player_interact_with_actor"
+          },
+          {
+            "id": "OBJ_005_B",
+            "type": "interact",
+            "description": "Reinforce the east guard post",
+            "target_actor": "Quest_CampDefense_Post_E_001",
+            "completion_condition": "player_interact_with_actor"
+          },
+          {
+            "id": "OBJ_005_C",
+            "type": "interact",
+            "description": "Reinforce the south guard post",
+            "target_actor": "Quest_CampDefense_Post_S_001",
+            "completion_condition": "player_interact_with_actor"
+          },
+          {
+            "id": "OBJ_005_D",
+            "type": "survive",
+            "description": "Survive the raptor attack until dawn",
+            "duration_seconds": 180,
+            "enemy_waves": 2,
+            "completion_condition": "survive_duration"
+          }
+        ],
+        "rewards": {
+          "knowledge": "camp_fortification",
+          "items": ["stone_spear_recipe", "hide_armor_recipe"],
+          "xp": 300
+        ],
+        "failure_conditions": [
+          "all_posts_destroyed",
+          "player_death"
+        ],
+        "danger_level": "very_high",
+        "estimated_duration_minutes": 12
+      },
+      {
+        "id": "QUEST_006",
+        "name": "Herd Migration",
+        "type": "tracking",
+        "priority": "side",
+        "giver_npc": "Elder_NPC_QuestGiver",
+        "description": "Follow the Triceratops herd as it migrates west. Mark their path — where they go, there is water.",
+        "emotional_arc": "wonder → patience → discovery → hope",
+        "objectives": [
+          {
+            "id": "OBJ_006_A",
+            "type": "travel",
+            "description": "Reach the first migration waypoint",
+            "target_actor": "Quest_HerdMigration_WP_001",
+            "target_location": {"x": 1600, "y": 2400, "z": 90},
+            "completion_condition": "player_within_radius_200"
+          },
+          {
+            "id": "OBJ_006_B",
+            "type": "travel",
+            "description": "Follow the herd to the second waypoint",
+            "target_actor": "Quest_HerdMigration_WP_002",
+            "target_location": {"x": 1300, "y": 2100, "z": 90},
+            "completion_condition": "player_within_radius_200"
+          },
+          {
+            "id": "OBJ_006_C",
+            "type": "discover",
+            "description": "Find the water source the herd is heading toward",
+            "completion_condition": "new_area_discovered"
+          }
+        ],
+        "rewards": {
+          "knowledge": "water_source_location",
+          "items": ["water_container_recipe"],
+          "xp": 180
+        },
+        "failure_conditions": [
+          "herd_dispersed_by_predator",
+          "player_death"
+        ],
+        "danger_level": "medium",
+        "estimated_duration_minutes": 9
+      }
+    ],
+    "crafting_recipes": {
+      "stone_axe": {
+        "id": "RECIPE_001",
+        "name": "Stone Axe",
+        "required_items": {"rocks": 2, "sticks": 1},
+        "crafting_time_seconds": 5,
+        "result": "stone_axe",
+        "unlock_condition": "default"
+      },
+      "campfire_basic": {
+        "id": "RECIPE_002",
+        "name": "Basic Campfire",
+        "required_items": {"sticks": 3, "rocks": 2},
+        "crafting_time_seconds": 8,
+        "result": "campfire",
+        "unlock_condition": "default"
+      },
+      "water_container": {
+        "id": "RECIPE_003",
+        "name": "Stone Water Container",
+        "required_items": {"rocks": 1, "leaves": 1},
+        "crafting_time_seconds": 6,
+        "result": "water_container",
+        "unlock_condition": "quest_QUEST_006_complete"
+      },
+      "primitive_torch": {
+        "id": "RECIPE_004",
+        "name": "Primitive Torch",
+        "required_items": {"sticks": 1, "leaves": 2},
+        "crafting_time_seconds": 4,
+        "result": "primitive_torch",
+        "unlock_condition": "quest_QUEST_001_complete"
+      },
+      "stone_spear": {
+        "id": "RECIPE_005",
+        "name": "Stone Spear",
+        "required_items": {"rocks": 3, "sticks": 2},
+        "crafting_time_seconds": 10,
+        "result": "stone_spear",
+        "unlock_condition": "quest_QUEST_005_complete"
+      }
+    },
+    "npc_voice_lines": {
+      "Elder_NPC_QuestGiver": {
+        "quest_001_intro": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040096280_Elder_NPC_QuestGiver.mp3",
+        "line_text": "Three days east, past the river bend where the raptors hunt — there is a cave. Inside, bones of the old ones. Bring me a fragment, and I will show you how to make fire that burns through the night."
+      },
+      "Survivor_NPC_RescueQuest": {
+        "quest_004_intro": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040117276_Survivor_NPC_RescueQuest.mp3",
+        "line_text": "The raptors have taken Kara. She went to gather roots near the river and did not return. Follow the tracks before the rain washes them away — you are the only one fast enough to reach her."
+      }
+    },
+    "quest_area_actors": {
+      "hub_coords": {"x": 2100, "y": 2400, "z": 80},
+      "markers": [
+        "Quest_BoneHunt_CaveEntrance_001",
+        "Quest_RaptorPatrol_ObsPoint_001",
+        "Quest_FirstFire_CraftZone_001",
+        "Quest_HerdMigration_WP_001",
+        "Quest_HerdMigration_WP_002",
+        "Quest_CampDefense_Post_N_001",
+        "Quest_CampDefense_Post_E_001",
+        "Quest_CampDefense_Post_S_001"
+      ],
+      "resources": [
+        "Resource_Rock_Hub_001", "Resource_Rock_Hub_002", "Resource_Rock_Hub_003",
+        "Resource_Rock_Hub_004", "Resource_Rock_Hub_005",
+        "Resource_Stick_Hub_001", "Resource_Stick_Hub_002", "Resource_Stick_Hub_003",
+        "Resource_Stick_Hub_004", "Resource_Stick_Hub_005",
+        "Resource_Leaf_Hub_001", "Resource_Leaf_Hub_002", "Resource_Leaf_Hub_003",
+        "Resource_Leaf_Hub_004",
+        "Resource_BoneFragment_Cave_001", "Resource_BoneFragment_Cave_002",
+        "Resource_BoneFragment_Cave_003"
+      ]
+    }
+  }
+}
