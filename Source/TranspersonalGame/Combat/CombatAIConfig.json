@@ -1,83 +1,106 @@
 {
-  "combat_ai_version": "AUTO_20260703_004",
-  "agent": "#12 Combat & Enemy AI",
-  "cycle": "PROD_CYCLE_AUTO_20260703_004",
-
-  "encounter_hub": {
-    "world_coords": { "x": 2100, "y": 2400, "z": 0 },
-    "description": "Primary combat encounter zone — Cretaceous forest clearing"
-  },
+  "combat_ai_version": "1.0.0",
+  "agent": "Agent_12_CombatAI",
+  "cycle": "PROD_CYCLE_AUTO_20260703_005",
+  "description": "Combat AI configuration for dinosaur enemy behaviors in prehistoric survival game",
 
   "species": {
-    "velociraptor": {
-      "pack_size": 3,
-      "formation": "flanking_triangle",
-      "roles": ["alpha_distractor", "flanker_left", "flanker_right"],
-      "aggro_radius_cm": 80000,
-      "attack_damage": 35,
-      "movement_speed_cms": 900,
-      "behavior_states": ["PATROL", "STALK", "FLANKING_LEFT", "FLANKING_RIGHT", "ALPHA_DISTRACT", "ATTACK", "RETREAT"],
-      "pack_coordination": true,
-      "memory_duration_seconds": 45,
-      "audio_cues": {
-        "alert": "CombatAlert_Raptor.mp3",
-        "tactic_hint": "CombatTactic_TRex.mp3"
-      }
+    "TRex": {
+      "label_prefix": "TRex_Savana",
+      "threat_radius": 1200.0,
+      "attack_cone_angle": 45.0,
+      "charge_speed": 800.0,
+      "patrol_radius": 2000.0,
+      "detection_mode": "vibration_heat_smell",
+      "behavior_states": ["PATROL", "ALERT", "STALK", "CHARGE", "ATTACK", "RETREAT"],
+      "pack_behavior": false,
+      "territorial": true,
+      "roar_warning_distance": 600.0,
+      "attack_damage": 85,
+      "health": 1200,
+      "stamina": 400,
+      "ai_notes": "Does not hunt by sight alone. Reads ground vibrations, heat signatures, fear-scent. Roars before charging — 3 second window to react."
     },
-    "tyrannosaurus_rex": {
-      "pack_size": 1,
-      "aggro_radius_cm": 150000,
-      "charge_radius_cm": 50000,
-      "attack_damage": 120,
-      "movement_speed_cms": 700,
-      "pivot_speed_degs": 45,
-      "behavior_states": ["PATROL", "INVESTIGATE", "CHARGE", "STOMP", "ROAR", "RETREAT"],
-      "weakness": "lateral_pivot_slow",
-      "player_counter": "break_lateral",
-      "audio_cues": {
-        "tactic_hint": "CombatTactic_TRex.mp3"
+    "Raptor": {
+      "label_prefix": "Raptor_Savana",
+      "threat_radius": 600.0,
+      "attack_cone_angle": 60.0,
+      "charge_speed": 1100.0,
+      "patrol_radius": 800.0,
+      "detection_mode": "sight_sound",
+      "behavior_states": ["PATROL", "FLANK", "COORDINATE", "LEAP_ATTACK", "RETREAT"],
+      "pack_behavior": true,
+      "pack_size_min": 2,
+      "pack_size_max": 5,
+      "alpha_role": true,
+      "territorial": false,
+      "attack_damage": 35,
+      "health": 280,
+      "stamina": 600,
+      "flanking_formation": {
+        "center_holds": true,
+        "flankers_count": 2,
+        "flank_angle_deg": 120,
+        "coordination_delay_ms": 800
+      },
+      "ai_notes": "Pack coordinates attacks. Two flankers move while center holds. Alpha falls = flankers hesitate 2-3 seconds. Never run in straight line."
+    },
+    "Triceratops": {
+      "label_prefix": "Trike_Savana",
+      "threat_radius": 400.0,
+      "attack_cone_angle": 30.0,
+      "charge_speed": 650.0,
+      "patrol_radius": 1500.0,
+      "detection_mode": "sight_proximity",
+      "behavior_states": ["GRAZE", "ALERT", "WARN_DISPLAY", "CHARGE", "GORE", "RETREAT"],
+      "pack_behavior": false,
+      "territorial": true,
+      "warn_display_duration_s": 3.0,
+      "attack_damage": 60,
+      "health": 900,
+      "stamina": 350,
+      "ai_notes": "Grazes peacefully unless approached within 400 units. Displays horns for 3 seconds before charging — player has time to back away. Charges in straight line — sidestep is viable."
+    }
+  },
+
+  "combat_zones": {
+    "hub_clearing": {
+      "center": {"x": 2100, "y": 2400, "z": 100},
+      "radius": 1500,
+      "active_species": ["TRex_Savana_001", "Raptor_Savana_001", "Raptor_Savana_002", "Raptor_Savana_003", "Trike_Savana_001"],
+      "safe_zone_radius": 200,
+      "safe_zone_marker": "SafeZone_Hub_001",
+      "threat_level": "HIGH",
+      "day_night_modifier": {
+        "day": 1.0,
+        "dusk": 1.3,
+        "night": 1.6,
+        "dawn": 1.2
       }
     }
   },
 
-  "combat_system": {
-    "damage_model": "realistic_prehistoric",
-    "player_can_dodge": true,
-    "stamina_affects_combat": true,
-    "fear_stat_integration": true,
-    "death_triggers_respawn": true,
-    "respawn_location": "PlayerStart"
-  },
-
-  "ue5_actors_spawned": {
-    "TRex_Savana_001": { "type": "T-Rex placeholder", "scale": [4, 2, 3] },
-    "CombatAI_AggroRing_TRex_001": { "type": "aggro radius ring", "scale": [20, 20, 0.05] },
-    "Raptor_Savana_001": { "type": "raptor flanker left", "state": "FLANKING_LEFT" },
-    "Raptor_Savana_002": { "type": "raptor flanker right", "state": "FLANKING_RIGHT" },
-    "Raptor_Savana_003": { "type": "raptor alpha distractor", "state": "ALPHA_DISTRACT" },
-    "CombatAI_ThreatZone_RaptorPack_001": { "type": "threat zone marker" },
-    "CombatAI_EncounterLight_001": { "type": "point light", "color": "warm_amber", "intensity": 8000 },
-    "CombatZone_Tree_001-012": { "type": "vegetation ring", "count": 12 },
-    "CombatZone_Canopy_001-012": { "type": "canopy spheres", "count": 6 }
+  "player_combat_responses": {
+    "stand_still": {"trex_aggro_modifier": -0.4, "raptor_aggro_modifier": 0.0},
+    "sprint": {"trex_aggro_modifier": 0.8, "raptor_aggro_modifier": 0.6},
+    "crouch_slow": {"trex_aggro_modifier": -0.6, "raptor_aggro_modifier": -0.3},
+    "use_fire": {"all_aggro_modifier": -0.9, "fear_radius": 300},
+    "throw_rock": {"distraction_radius": 200, "duration_s": 8}
   },
 
   "audio_assets": {
-    "CombatAlert_Raptor": {
-      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783055530912_CombatAlert_Raptor.mp3",
-      "trigger": "raptor_pack_spotted",
-      "duration": "~8s"
-    },
-    "CombatTactic_TRex": {
-      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783055554950_CombatTactic_TRex.mp3",
-      "trigger": "trex_charge_initiated",
-      "duration": "~10s"
-    }
+    "tactical_alert": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783061829453_CombatAI_TacticalAlert.mp3",
+    "raptor_pack_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783061853663_CombatAI_RaptorPackWarning.mp3"
   },
 
-  "next_cycle_priorities": {
-    "agent_13_crowd": "Use Raptor_Savana_001/002/003 as crowd simulation seed actors — do NOT respawn duplicates",
-    "agent_14_quest": "Combat encounter at hub coords is the 'First Hunt' quest trigger zone",
-    "agent_16_audio": "Wire CombatAlert_Raptor.mp3 to raptor aggro state transition in MetaSounds",
-    "agent_17_vfx": "Add Niagara dust/impact VFX to TRex_Savana_001 stomp radius"
+  "design_philosophy": {
+    "core_principle": "The best combat is one where the player does not know if they will win until the last second — and believes they lost because of their own mistake, not because the game was unfair.",
+    "30_second_loop": "Each encounter has tension (detection), climax (engagement), resolution (escape or kill). Repeatable with variation.",
+    "fairness_signals": [
+      "T-Rex roars 3 seconds before charging",
+      "Raptors pause 2-3 seconds when alpha falls",
+      "Triceratops displays horns before charging",
+      "All predators have visible threat cone (red spotlight in dev mode)"
+    ]
   }
 }
