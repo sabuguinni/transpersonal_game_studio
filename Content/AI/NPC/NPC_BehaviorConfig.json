@@ -1,0 +1,140 @@
+{
+  "_comment": "NPC Behavior Configuration — Agent #11 NPC Behavior Agent — PROD_CYCLE_AUTO_20260702_013",
+  "_rule": "This is a DATA file (JSON), not C++. Per hugo_no_cpp_h_v2, all engine changes go through ue5_execute Python.",
+  
+  "npc_archetypes": {
+    "Hunter_Patrol": {
+      "description": "Primitive human hunter. Patrols a defined route, flees from apex predators (T-Rex), cautious around mid-tier (Raptors).",
+      "behavior_tree": "BT_Hunter_Patrol",
+      "blackboard": "BB_Hunter",
+      "patrol_radius": 1500,
+      "detection_range": 800,
+      "flee_range_trex": 2000,
+      "flee_range_raptor": 1200,
+      "states": ["Patrol", "Investigate", "Flee", "Hide", "Idle_Camp"],
+      "daily_routine": {
+        "dawn": "Leave_Camp",
+        "morning": "Hunt_Patrol",
+        "midday": "Rest_Shade",
+        "afternoon": "Forage",
+        "dusk": "Return_Camp",
+        "night": "Sleep_Camp"
+      },
+      "voice_lines": {
+        "flee_trigger": "RaptorWarning_NPC.mp3",
+        "idle_camp": "BrachHerd_NPC.mp3"
+      },
+      "instances": [
+        {"label": "NPC_Hunter_Savana_001", "location": [1800, 2100, 100], "patrol_route": "Route_Hub_W"},
+        {"label": "NPC_Hunter_Savana_002", "location": [2400, 2700, 100], "patrol_route": "Route_Hub_NE"}
+      ]
+    }
+  },
+
+  "dinosaur_behavior_profiles": {
+    "TRex_Hub_001": {
+      "archetype": "Apex_Territorial",
+      "behavior_tree": "/Game/AI/Dinosaurs/TRex/BT_TRex",
+      "blackboard": "/Game/AI/Dinosaurs/TRex/BB_TRex",
+      "territory_center": [2100, 2400, 100],
+      "territory_radius": 1200,
+      "patrol_speed": 150,
+      "chase_speed": 600,
+      "aggro_range": 2000,
+      "attack_range": 300,
+      "territory_markers": ["TRex_Territory_N", "TRex_Territory_S", "TRex_Territory_E", "TRex_Territory_W"],
+      "states": ["Patrol_Territory", "Alert", "Chase", "Attack", "Return_Territory", "Rest"],
+      "behavioral_notes": "T-Rex does NOT leave territory radius. Chases player/NPCs that enter. Returns to center after losing sight for 10s."
+    },
+    "Raptor_Pack": {
+      "archetype": "Pack_Hunter",
+      "behavior_tree": "/Game/AI/Dinosaurs/Raptor/BT_Raptor",
+      "blackboard": "/Game/AI/Dinosaurs/Raptor/BB_Raptor",
+      "pack_members": ["Raptor_Hub_001", "Raptor_Hub_002", "Raptor_Flank_L", "Raptor_Flank_R"],
+      "pack_center": [2100, 2400, 100],
+      "patrol_waypoints": ["WP_Raptor_001", "WP_Raptor_002", "WP_Raptor_003", "WP_Raptor_004"],
+      "patrol_speed": 200,
+      "chase_speed": 700,
+      "aggro_range": 1500,
+      "attack_range": 150,
+      "pack_hunting_formation": {
+        "flanker_left": "Raptor_Flank_L",
+        "flanker_right": "Raptor_Flank_R",
+        "distractor": "Raptor_Distract_001",
+        "description": "Distractor charges from front, flankers circle to sides. Classic ambush pattern."
+      },
+      "states": ["Pack_Patrol", "Stalk", "Flank", "Coordinated_Attack", "Scatter_Flee"],
+      "behavioral_notes": "Raptors only attack when all 3 roles are filled. If pack < 2, they flee. Communicate via proximity (no supernatural elements)."
+    },
+    "Brach_Hub_001": {
+      "archetype": "Passive_Grazer",
+      "behavior_tree": "BT_Grazer_Passive",
+      "blackboard": "BB_Grazer",
+      "grazing_area_center": [2100, 2400, 100],
+      "patrol_waypoints": ["WP_Brach_001", "WP_Brach_002", "WP_Brach_003", "WP_Brach_004"],
+      "patrol_speed": 80,
+      "flee_speed": 300,
+      "flee_range_trex": 1500,
+      "aggro_range": 0,
+      "states": ["Graze", "Walk_Patrol", "Alert_Scan", "Flee", "Herd_Cluster"],
+      "behavioral_notes": "Brachiosaurus is passive. Flees from T-Rex. Player can use herd as cover from smaller predators. Follows dawn/dusk patrol cycle.",
+      "daily_schedule": {
+        "dawn": "Begin_Patrol_WP1",
+        "morning": "Graze_WP2",
+        "midday": "Rest_WP3",
+        "afternoon": "Graze_WP4",
+        "dusk": "Return_WP1",
+        "night": "Rest_Center"
+      }
+    }
+  },
+
+  "patrol_routes": {
+    "Route_Hub_W": {
+      "waypoints": [
+        [1800, 2100, 100],
+        [1500, 2300, 100],
+        [1600, 2600, 100],
+        [1900, 2500, 100]
+      ],
+      "loop": true,
+      "speed": 120
+    },
+    "Route_Hub_NE": {
+      "waypoints": [
+        [2400, 2700, 100],
+        [2700, 2900, 100],
+        [2900, 2600, 100],
+        [2600, 2400, 100]
+      ],
+      "loop": true,
+      "speed": 120
+    }
+  },
+
+  "audio_triggers": {
+    "raptor_aggro": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783037750422_RaptorWarning_NPC.mp3",
+      "trigger_condition": "Raptor enters Stalk state within 800 units of NPC",
+      "speaker": "NPC_Hunter_Savana_001",
+      "duration_s": 11
+    },
+    "brach_herd_tip": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783037778440_BrachHerd_NPC.mp3",
+      "trigger_condition": "Player first enters hub clearing (2100,2400) within 1000 units of Brachiosaurus",
+      "speaker": "NPC_Hunter_Savana_002",
+      "duration_s": 15
+    }
+  },
+
+  "scene_inventory_cycle_013": {
+    "dinosaurs": ["TRex_Hub_001", "Raptor_Hub_001", "Raptor_Hub_002", "Brach_Hub_001"],
+    "formation_markers": ["Raptor_Flank_L", "Raptor_Flank_R", "Raptor_Distract_001"],
+    "territory_markers": ["TRex_Territory_N", "TRex_Territory_S", "TRex_Territory_E", "TRex_Territory_W"],
+    "patrol_waypoints_raptor": ["WP_Raptor_001", "WP_Raptor_002", "WP_Raptor_003", "WP_Raptor_004"],
+    "patrol_waypoints_brach": ["WP_Brach_001", "WP_Brach_002", "WP_Brach_003", "WP_Brach_004"],
+    "npc_hunters": ["NPC_Hunter_Savana_001", "NPC_Hunter_Savana_002"],
+    "hub_center": [2100, 2400, 100],
+    "map": "/Game/Maps/MinPlayableMap"
+  }
+}
