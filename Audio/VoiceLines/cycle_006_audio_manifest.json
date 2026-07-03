@@ -1,0 +1,136 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_006",
+  "agent": "#16 Audio Agent",
+  "hub_coordinates": { "x": 2100, "y": 2400, "z": 200 },
+
+  "voice_lines": [
+    {
+      "id": "TTS-7",
+      "character": "ElderMara",
+      "label": "ElderMara_GroundTremor",
+      "text": "Listen. The ground speaks before the beast arrives. Feel the tremor through your feet — that rhythm, heavy and slow, means something enormous is moving through the valley. Count the beats. One... two... three... If they grow faster, it is running. If they stop, it has caught your scent. Do not move. Do not breathe. Let the earth go quiet again.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783067116136_ElderMara_GroundTremor.mp3",
+      "duration_estimate": "~24s",
+      "trigger_event": "EVT_TRex_Proximity_Detected",
+      "trigger_actor": "AudioTrigger_TRex_Tremor_001",
+      "trigger_location": { "x": 1500, "y": 2800, "z": 200 },
+      "gameplay_mechanic": "Teaches player to use ground vibration as T-Rex proximity sensor — stop moving, feel the rhythm, assess direction"
+    },
+    {
+      "id": "TTS-8",
+      "character": "Tracker_Dak",
+      "label": "Tracker_Dak_RaptorSilence",
+      "text": "The raptors hunt in silence. You will not hear them coming — but you will hear everything else go quiet first. The insects stop. The birds lift. The wind holds its breath. That silence is the warning. When the world goes still, you run. You do not look back. You do not stop to think. You run.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783067126522_Tracker_Dak_RaptorSilence.mp3",
+      "duration_estimate": "~20s",
+      "trigger_event": "EVT_Raptor_Ambush_Proximity",
+      "trigger_actor": "AudioTrigger_ForestEdge_Raptor_001",
+      "trigger_location": { "x": 2900, "y": 3000, "z": 200 },
+      "gameplay_mechanic": "Teaches ambient silence mechanic — insect/bird audio dropout = raptor ambush incoming, player must sprint"
+    }
+  ],
+
+  "ambient_sound_assets": [
+    {
+      "freesound_id": 681366,
+      "name": "Campfire (Position 1)",
+      "url": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+      "duration": 83.6,
+      "tags": ["campfire", "crackle", "fire", "night", "ambience"],
+      "use_case": "Hub campfire ambient loop — triggers ElderMara campfire dialogue",
+      "trigger_actor": "AudioTrigger_Campfire_Hub_001",
+      "loop": true,
+      "volume_falloff": "linear",
+      "max_distance": 500
+    },
+    {
+      "freesound_id": 802195,
+      "name": "Fire-Nature Sounds",
+      "url": "https://cdn.freesound.org/previews/802/802195_17223245-hq.mp3",
+      "duration": 247.1,
+      "tags": ["campfire", "nature", "night", "ambience"],
+      "use_case": "Extended campfire + nature ambience for hub night sequence",
+      "loop": true,
+      "volume_falloff": "logarithmic",
+      "max_distance": 800
+    },
+    {
+      "freesound_id": 442478,
+      "name": "Forest river flows over rocks",
+      "url": "https://cdn.freesound.org/previews/442/442478_5902878-hq.mp3",
+      "duration": 116.0,
+      "tags": ["river", "forest", "water", "ambience", "flowing"],
+      "use_case": "River ambient loop — eastern edge of hub map near raptor territory",
+      "loop": true,
+      "volume_falloff": "logarithmic",
+      "max_distance": 1200
+    },
+    {
+      "freesound_id": 442477,
+      "name": "Forest river near waterfalls",
+      "url": "https://cdn.freesound.org/previews/442/442477_5902878-hq.mp3",
+      "duration": 70.0,
+      "tags": ["river", "waterfall", "forest", "ambience"],
+      "use_case": "Waterfall ambient — landmark audio beacon for player navigation",
+      "loop": true,
+      "volume_falloff": "logarithmic",
+      "max_distance": 2000
+    }
+  ],
+
+  "audio_trigger_zones": [
+    {
+      "label": "AudioZone_Hub_001",
+      "type": "TriggerVolume",
+      "location": { "x": 2100, "y": 2400, "z": 200 },
+      "scale": { "x": 20, "y": 20, "z": 5 },
+      "purpose": "Master ambient audio zone for hub — activates full ambient soundscape on entry"
+    },
+    {
+      "label": "AudioTrigger_Campfire_Hub_001",
+      "type": "TriggerVolume",
+      "location": { "x": 2250, "y": 2320, "z": 200 },
+      "scale": { "x": 3, "y": 3, "z": 2 },
+      "purpose": "Campfire proximity trigger — plays campfire crackle + ElderMara campfire warning dialogue"
+    },
+    {
+      "label": "AudioTrigger_ForestEdge_Raptor_001",
+      "type": "TriggerVolume",
+      "location": { "x": 2900, "y": 3000, "z": 200 },
+      "scale": { "x": 5, "y": 5, "z": 3 },
+      "purpose": "Forest edge raptor zone — triggers ambient silence mechanic + Tracker_Dak raptor warning"
+    },
+    {
+      "label": "AudioTrigger_TRex_Tremor_001",
+      "type": "TriggerVolume",
+      "location": { "x": 1500, "y": 2800, "z": 200 },
+      "scale": { "x": 8, "y": 8, "z": 4 },
+      "purpose": "T-Rex patrol proximity — triggers ground tremor mechanic + ElderMara tremor warning"
+    }
+  ],
+
+  "cumulative_tts_library": {
+    "total_lines": 8,
+    "characters": {
+      "ElderMara": [
+        "TTS-1: ElderMara_CampfireWarning — fire crackle = predator proximity indicator",
+        "TTS-5: ElderMara_WinterSurvival — follow predator kill sites for food",
+        "TTS-7: ElderMara_GroundTremor — count ground tremor beats to assess T-Rex"
+      ],
+      "Tracker_Dak": [
+        "TTS-2: Tracker_Dak_HerdWarning — sauropod herd tracks near hub",
+        "TTS-3: Tracker_Dak_ForestReading — insect silence = predator movement",
+        "TTS-4: Tracker_Dak_RiverDanger — raptor ambush at river midday",
+        "TTS-6: Tracker_Dak_ForestReading2 — bird scatter = 30 seconds warning",
+        "TTS-8: Tracker_Dak_RaptorSilence — world goes still = run immediately"
+      ]
+    }
+  },
+
+  "audio_design_philosophy": {
+    "principle": "The sound that does not exist is often more powerful than the sound that does — Walter Murch",
+    "ambient_silence_mechanic": "Insect/bird audio dropout is the primary danger warning system. Players learn to fear silence more than roars.",
+    "layered_audio_zones": "Hub has 3 concentric audio layers: (1) campfire crackle inner, (2) forest ambience mid, (3) distant predator sounds outer",
+    "voice_line_design": "All TTS lines teach survival mechanics through character voice — no UI popups, no tutorials. Audio IS the tutorial."
+  }
+}
