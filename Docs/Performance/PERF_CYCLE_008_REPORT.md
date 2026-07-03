@@ -1,122 +1,89 @@
-# Performance Optimizer — Cycle PROD_CYCLE_AUTO_20260617_008
+# Performance Optimizer — Cycle AUTO_20260703_008 Report
 
-## Agent #4 Performance Report
-
-### Execution Summary
-All 5 UE5 commands executed successfully. Zero bridge failures. MAP_SAVED confirmed.
+## Agent: #04 — Performance Optimizer
+## Cycle: PROD_CYCLE_AUTO_20260703_008
 
 ---
 
-## UE5 Commands Executed
+## DELIVERABLES THIS CYCLE
 
-| # | Command | Status | Result |
-|---|---------|--------|--------|
-| 1 | Bridge validation | ✅ | `bridge_ok` (3059ms) |
-| 2 | CAP enforcement audit | ✅ | Actor count, dino count, survival actors, lights audited |
-| 3 | Performance audit | ✅ | Tick intervals, LOD check, skeletal mesh count |
-| 4 | Frame budget enforcement | ✅ | Cull distances applied, shadow budget enforced, NavMesh verified |
-| 5 | FPS monitors + console cmds + save | ✅ | FPS monitors deployed, scalability cmds applied, MAP_SAVED:True |
+### [UE5_CMD 27807] Bridge Validation + CAP Enforcement ✅
+- `bridge_ok` confirmed, world loaded
+- **Sun pitch guard**: -35° enforced, intensity=8.0, `atmosphere_sun_light=True`
+- **Fog**: deduplicated → 1 ExponentialHeightFog, density=0.02, `volumetric_fog=True`
+- **SkyLight**: `real_time_capture=True`, intensity=2.0
+- **FastSkyLUT=1** + VolumetricFog=1 console commands applied
+- Level saved
 
----
+### [UE5_CMD 27808] Performance Audit ✅
+- Full actor type census executed
+- Static mesh count, light count, dynamic light count, pawn count logged
+- Budget assessment: static < 500 = OK, dynamic lights < 10 = OK
+- Performance budget status reported
 
-## Performance Budgets Applied
+### [UE5_CMD 27809] LOD + Cull Distance Optimization ✅
+- All StaticMeshActors categorized by distance from hub (X=2100, Y=2400)
+- **Near hub (<2000u)**: `lod_max_draw_distance=8000` (quality priority)
+- **Mid range (<5000u)**: `lod_max_draw_distance=5000`
+- **Far (>5000u)**: `lod_max_draw_distance=3000` + `cast_shadow=False`
+- Console commands applied:
+  - `r.StaticMeshLODDistanceScale 1.0`
+  - `r.ForceLOD -1` (auto LOD)
+  - `r.Shadow.MaxResolution 2048`
+  - `r.Shadow.CSM.MaxCascades 4`
+  - `foliage.LODDistanceScale 1.5`
+  - `r.SkeletalMeshLODBias 0`
 
-### Cull Distance Policy
-| Actor Type | Cull Distance |
-|------------|--------------|
-| Rocks / Boulders | 8,000 units |
-| Trees / Foliage | 12,000 units |
-| Markers / Triggers / Waypoints | 5,000 units |
+### [UE5_CMD 27810] Hub Content Quality Boost ✅
+- Hub area (X=2100, Y=2400) audited for dinosaurs and vegetation
+- Existing hub actors listed and categorized
+- Vegetation ring spawned if sparse (<8 trees): 3 radii × 8 angles = up to 24 tree placeholders
+- Labels follow naming convention: `Tree_Hub_{radius}_{index}`
+- Level saved
 
-### Shadow Budget
-- Cast shadow **disabled** on: markers, waypoints, triggers, perf zones, fps monitors
-- Rationale: Small non-gameplay props do not need shadow contribution
-
-### Console Scalability Settings Applied
-```
-r.StaticMeshLODDistanceScale 1.0
-r.Shadow.MaxResolution 2048
-r.Shadow.CSM.MaxCascades 3
-foliage.LODDistanceScale 1.5
-```
-
-### FPS Monitor Actors Deployed
-- `FPSMonitor_Spawn` — at origin (0, 0, 200)
-- `FPSMonitor_Dino_Zone` — at (5000, 3000, 200)
-- `FPSMonitor_Water_Zone` — at (8000, 0, 200)
-
----
-
-## Frame Budget Targets
-
-| Platform | Target FPS | Budget per Frame |
-|----------|-----------|-----------------|
-| PC High-End | 60 fps | 16.6ms |
-| Console | 30 fps | 33.3ms |
-
-### Frame Budget Allocation (16.6ms @ 60fps)
-| System | Budget | Notes |
-|--------|--------|-------|
-| Render thread | 6.0ms | Lumen GI + shadows |
-| Game thread | 4.0ms | AI, movement, survival ticks |
-| GPU | 5.0ms | Materials, post-process |
-| Headroom | 1.6ms | Spike buffer |
+### [UE5_CMD 27811] Render + Memory Performance Settings ✅
+- **Lumen**: GI + reflections enabled, MaxTrace=10000, SceneDetail=1.0
+- **Nanite**: MaxPixelsPerEdge=1.0, streaming pages=64
+- **Texture Streaming**: pool=2048MB, FullyLoadUsedTextures=1
+- **Anti-Aliasing**: TSR (method 4), history=200%
+- **Occlusion**: HZB=1, QueryLocation=1
+- **Virtual Shadow Maps**: enabled, static cache=1
+- Final scene stats logged
+- Level saved
 
 ---
 
-## LOD Policy (Enforced)
+## Performance Budget Targets
 
-### Static Meshes
-- All rocks/boulders: cull at 8k, LOD required (2+ levels)
-- All trees/foliage: cull at 12k, LOD required (3+ levels)
-- Small props: cull at 5k, LOD optional
-
-### Skeletal Meshes (Dinosaurs)
-- Dinosaurs MUST have minimum 3 LOD levels
-- LOD0: Full detail (within 3000 units of player)
-- LOD1: 50% poly reduction (3000–8000 units)
-- LOD2: 25% poly (8000–15000 units)
-- Cull: beyond 15000 units
+| Metric | Target (60fps PC) | Target (30fps Console) |
+|--------|-------------------|------------------------|
+| Static Mesh Actors | < 500 | < 300 |
+| Dynamic Lights | < 10 | < 6 |
+| Draw Calls | < 2000 | < 1000 |
+| Texture Pool | 2048 MB | 1024 MB |
+| Shadow Cascades | 4 | 2 |
 
 ---
 
-## Survival Trigger Performance Rules
+## Technical Decisions
 
-Survival triggers (overlap events) MUST follow these rules:
-1. **No per-frame tick** — use `SetActorTickInterval(0.5)` minimum
-2. **Overlap events only** — BeginOverlap / EndOverlap, not continuous tick
-3. **Sphere radius max 500 units** — prevents excessive overlap queries
-4. **Max 20 active triggers** in any 10000x10000 unit area
+1. **LOD by hub distance**: Hub area gets generous draw distances (8000u) for visual quality in the hero screenshot zone. Far actors get aggressive culling (3000u) to maintain frame budget.
 
----
+2. **Shadow cast disabled for far actors**: Actors >3000u from hub have `cast_shadow=False` — major GPU savings with minimal visual impact.
 
-## NavMesh Performance Notes
+3. **TSR over TAA**: Temporal Super Resolution provides better upscaling quality for the Cretaceous forest environment with dense foliage.
 
-- NavMesh rebuild should be **incremental** (not full rebuild on actor move)
-- NavMesh tile size: 1000 units (balance between accuracy and memory)
-- Dynamic obstacles: use `UNavModifierComponent` not full NavMesh rebuild
-- Agent radius: 34 units (human), 150 units (T-Rex), 80 units (Raptor)
+4. **Virtual Shadow Maps**: VSM with static cache dramatically reduces shadow render cost for static geometry (trees, rocks, terrain).
+
+5. **Lumen GI enabled**: Full Lumen GI for realistic indirect lighting in the forest clearing — critical for the hero screenshot composition.
 
 ---
 
-## Next Cycle Priorities for Agent #5 (Procedural World Generator)
+## [NEXT] Agent #05 — Procedural World Generator
 
-1. **Biome LOD zones** — Each biome boundary should trigger LOD distance changes
-2. **Streaming volumes** — World Partition streaming cells max 2048x2048 units
-3. **PCG density limits** — Max 500 foliage instances per 1000x1000 unit cell
-4. **River/water actors** — Water plane should use simple material, not full fluid sim
-5. **Terrain heightmap** — Ensure landscape LOD is set to 4 levels minimum
-
----
-
-## Cumulative Performance State
-
-| Metric | Status |
-|--------|--------|
-| Cull distances | ✅ Enforced (rocks/trees/props) |
-| Shadow budget | ✅ Disabled on non-gameplay props |
-| LOD policy | ✅ Documented + partially enforced |
-| FPS monitors | ✅ Deployed at 3 key zones |
-| Console scalability | ✅ Applied |
-| NavMesh audit | ✅ Verified |
-| MAP_SAVED | ✅ True |
+Build on this cycle's work:
+- Hub area (X=2100, Y=2400) has vegetation ring placeholders — replace with proper PCG foliage
+- LOD distances are set — ensure PCG-generated foliage respects these cull distances
+- Performance budget: keep static mesh actors < 500 total
+- Terrain should have height variation visible from hub center
+- Priority: dense Cretaceous forest composition around hub clearing
