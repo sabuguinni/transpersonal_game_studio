@@ -1,109 +1,155 @@
 {
   "combat_ai_system": {
     "version": "1.0.0",
-    "agent": "Combat & Enemy AI Agent #12",
-    "cycle": "PROD_CYCLE_AUTO_20260619_006",
-    "map": "/Game/Maps/MinPlayableMap",
+    "agent": "Combat_AI_Agent_12",
+    "cycle": "PROD_CYCLE_AUTO_20260703_001",
+    "description": "Combat AI configuration for dinosaur pack behavior in prehistoric survival game",
 
-    "species": {
-      "TRex": {
-        "detection_radius": 2500,
-        "attack_radius": 300,
-        "chase_speed_multiplier": 1.4,
-        "attack_damage": 85,
-        "attack_cooldown_seconds": 3.5,
-        "fear_triggers": ["fire", "loud_noise"],
-        "behavior_states": ["patrol", "alert", "chase", "attack", "retreat"],
-        "patrol_waypoints": ["TRex_Waypoint_001", "TRex_Waypoint_002", "TRex_Waypoint_003",
-                             "TRex_Waypoint_004", "TRex_Waypoint_005", "TRex_Waypoint_006"],
-        "anchor_zone": "BTZone_Predator_001",
-        "attack_zones": [
-          "AttackZone_TRex_Core_001",
-          "AttackZone_TRex_Flank_001",
-          "AttackZone_TRex_Rear_001",
-          "AttackZone_TRex_Ambush_001"
-        ],
-        "combat_lights": [
-          "CombatLight_TRex_Core_001",
-          "CombatLight_TRex_Flank_001"
-        ],
-        "voice_assets": {
-          "player_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853545804_SurvivorWarning.mp3"
+    "raptor_pack_ambush": {
+      "formation": "flanking_triangle",
+      "roles": {
+        "alpha": {
+          "label_prefix": "Raptor_Combat_Alpha",
+          "position_offset": {"x": 400, "y": -200, "z": 100},
+          "behavior": "direct_approach",
+          "aggro_radius": 600.0,
+          "attack_range": 150.0,
+          "damage_per_hit": 25.0,
+          "attack_cooldown_s": 1.2,
+          "speed_mps": 8.5,
+          "health": 120.0
         },
-        "notes": "T-Rex hunts by sound and vibration. Stationary player is harder to detect. Fire causes retreat behavior."
+        "flank_left": {
+          "label_prefix": "Raptor_Combat_Flank",
+          "position_offset": {"x": -300, "y": 350, "z": 100},
+          "behavior": "circle_and_strike",
+          "aggro_radius": 500.0,
+          "attack_range": 130.0,
+          "damage_per_hit": 20.0,
+          "attack_cooldown_s": 1.5,
+          "speed_mps": 9.0,
+          "health": 90.0
+        },
+        "flank_right": {
+          "label_prefix": "Raptor_Combat_Flank",
+          "position_offset": {"x": 350, "y": 400, "z": 100},
+          "behavior": "circle_and_strike",
+          "aggro_radius": 500.0,
+          "attack_range": 130.0,
+          "damage_per_hit": 20.0,
+          "attack_cooldown_s": 1.5,
+          "speed_mps": 9.0,
+          "health": 90.0
+        }
       },
-
-      "Raptor": {
-        "detection_radius": 1800,
-        "attack_radius": 200,
-        "chase_speed_multiplier": 1.8,
-        "attack_damage": 35,
-        "attack_cooldown_seconds": 1.2,
-        "pack_size_min": 2,
-        "pack_size_max": 4,
-        "fear_triggers": ["fire", "alpha_death"],
-        "behavior_states": ["patrol", "stalk", "flank", "attack", "scatter", "regroup"],
-        "patrol_waypoints": ["Raptor_Waypoint_001", "Raptor_Waypoint_002",
-                             "Raptor_Waypoint_003", "Raptor_Waypoint_004"],
-        "anchor_zone": "BTZone_Predator_002",
-        "attack_zones": [
-          "AttackZone_Raptor_Alpha_001",
-          "AttackZone_Raptor_Flank_001",
-          "AttackZone_Raptor_Flank_002",
-          "AttackZone_Raptor_Rear_001"
-        ],
-        "combat_lights": [
-          "CombatLight_Raptor_Alpha_001",
-          "CombatLight_Raptor_Flank_001"
-        ],
-        "voice_assets": {
-          "player_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853568458_RaptorWarning.mp3"
-        },
-        "pack_tactics": {
-          "alpha_leads_charge": true,
-          "flankers_circle_player": true,
-          "scatter_on_alpha_death": true,
-          "regroup_after_seconds": 45,
-          "memory_duration_seconds": 300
-        },
-        "notes": "Raptors coordinate attacks. Killing the alpha causes temporary scatter. They remember the player and return."
+      "pack_coordination": {
+        "enabled": true,
+        "signal_type": "vocalization",
+        "signal_radius": 1200.0,
+        "retreat_threshold_health_pct": 0.25,
+        "pack_scatter_on_alpha_death": true,
+        "regroup_timer_s": 30.0
       }
     },
 
-    "combat_zones": {
-      "AttackZone_TRex_Core_001":   { "position": [3500, -2000, 220], "radius": 300, "species": "TRex", "type": "core" },
-      "AttackZone_TRex_Flank_001":  { "position": [4200, -1500, 220], "radius": 300, "species": "TRex", "type": "flank" },
-      "AttackZone_TRex_Rear_001":   { "position": [2800, -2500, 220], "radius": 300, "species": "TRex", "type": "rear" },
-      "AttackZone_TRex_Ambush_001": { "position": [3500, -3000, 220], "radius": 300, "species": "TRex", "type": "ambush" },
-      "AttackZone_Raptor_Alpha_001":{ "position": [-1000, -4500, 190], "radius": 200, "species": "Raptor", "type": "alpha" },
-      "AttackZone_Raptor_Flank_001":{ "position": [-500, -4200, 190],  "radius": 200, "species": "Raptor", "type": "flank" },
-      "AttackZone_Raptor_Flank_002":{ "position": [-1500, -4200, 190], "radius": 200, "species": "Raptor", "type": "flank" },
-      "AttackZone_Raptor_Rear_001": { "position": [-1000, -5000, 190], "radius": 200, "species": "Raptor", "type": "rear" }
+    "combat_states": {
+      "idle": {
+        "description": "Patrolling territory, unaware of player",
+        "patrol_radius": 800.0,
+        "idle_animation": "patrol_walk",
+        "alert_on_sound_radius": 400.0,
+        "alert_on_sight_radius": 600.0
+      },
+      "alert": {
+        "description": "Detected potential threat, investigating",
+        "investigation_duration_s": 5.0,
+        "move_speed_multiplier": 1.3,
+        "vocalization": "alert_chirp",
+        "transition_to_aggro_on_sight": true
+      },
+      "aggro": {
+        "description": "Actively pursuing and attacking player",
+        "pursuit_speed_multiplier": 1.8,
+        "max_pursuit_distance": 2000.0,
+        "lose_target_timer_s": 8.0,
+        "vocalization": "attack_screech",
+        "pack_call_on_enter": true
+      },
+      "retreat": {
+        "description": "Fleeing after taking heavy damage",
+        "retreat_speed_multiplier": 2.0,
+        "retreat_direction": "away_from_player",
+        "heal_rate_per_s": 2.0,
+        "return_to_idle_after_s": 45.0
+      }
     },
 
     "damage_system": {
-      "player_health_max": 100,
-      "damage_on_trex_attack": 85,
-      "damage_on_raptor_attack": 35,
-      "damage_on_trex_stomp": 50,
-      "fear_stat_increase_per_second_in_combat": 8,
-      "stamina_drain_while_fleeing": 12,
-      "death_trigger": "health <= 0",
-      "respawn_location": "PlayerStart"
+      "player_base_health": 100.0,
+      "dinosaur_damage_multipliers": {
+        "velociraptor": 1.0,
+        "trex": 3.5,
+        "triceratops": 2.0,
+        "brachiosaurus": 0.5
+      },
+      "hit_locations": {
+        "head": 2.0,
+        "body": 1.0,
+        "legs": 0.7,
+        "tail": 0.5
+      },
+      "player_defense": {
+        "no_armor": 1.0,
+        "hide_armor": 0.75,
+        "bone_armor": 0.55
+      },
+      "stamina_drain_on_hit": 15.0,
+      "fear_increase_on_hit": 20.0
+    },
+
+    "aggro_trigger_volumes": [
+      {
+        "label": "AggroTrigger_Alpha_001",
+        "position": {"x": 2500, "y": 2200, "z": 150},
+        "scale": {"x": 3.0, "y": 3.0, "z": 2.0},
+        "triggers_role": "alpha"
+      },
+      {
+        "label": "AggroTrigger_Flank_001",
+        "position": {"x": 1800, "y": 2750, "z": 150},
+        "scale": {"x": 3.0, "y": 3.0, "z": 2.0},
+        "triggers_role": "flank_left"
+      },
+      {
+        "label": "AggroTrigger_Flank_002",
+        "position": {"x": 2450, "y": 2800, "z": 150},
+        "scale": {"x": 3.0, "y": 3.0, "z": 2.0},
+        "triggers_role": "flank_right"
+      }
+    ],
+
+    "navmesh": {
+      "label": "NavMesh_CombatZone_001",
+      "center": {"x": 2100, "y": 2400, "z": 200},
+      "scale": {"x": 20.0, "y": 20.0, "z": 5.0},
+      "agent_radius": 60.0,
+      "agent_height": 180.0,
+      "max_step_height": 40.0,
+      "walkable_slope_angle": 45.0
     },
 
     "audio_assets": {
-      "survivor_warning_trex": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853545804_SurvivorWarning.mp3",
-      "raptor_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853568458_RaptorWarning.mp3",
-      "tribal_elder_trex": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853421191_TribalElder.mp3",
-      "scout_raptor": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781853424849_ScoutNPC.mp3"
+      "alpha_combat_vo": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783039838465_RaptorAlpha_CombatVO.mp3",
+      "narrator_combat_vo": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783039868134_Combat_NarratorVO.mp3"
     },
 
-    "previous_cycles": {
-      "cycle_003": "Initial combat zone framework",
-      "cycle_004": "T-Rex patrol waypoints (6), Raptor waypoints (4), CombatZone triggers (8)",
-      "cycle_005": "T-Rex combat zone expansion, attack radius triggers",
-      "cycle_006": "Attack trigger volumes (8), combat light indicators (4), damage config, audio assets"
+    "hub_clearing": {
+      "center": {"x": 2100, "y": 2400},
+      "description": "Primary combat encounter zone — Cretaceous forest clearing with raptor pack ambush",
+      "ambient_danger_level": "high",
+      "recommended_player_level": 3,
+      "escape_routes": ["river_west", "dense_fern_north"],
+      "environmental_hazards": ["fallen_logs", "muddy_ground_slows_movement"]
     }
   }
 }
