@@ -1,122 +1,121 @@
-# Day/Night Cycle — Blueprint Specification
-## Agent #08 — Lighting & Atmosphere | PROD_CYCLE_AUTO_20260624_005
+# Day/Night Cycle Blueprint Specification
+## Agent #08 — Lighting & Atmosphere Agent | Cycle AUTO_20260703_001
 
 ### Overview
-
-The Cretaceous Day/Night Cycle drives all dynamic lighting in the game. It controls the DirectionalLight (sun) rotation, SkyLight recapture, fog density variation, and PostProcess color grading transitions across a full 24-hour cycle.
+This document specifies the Blueprint implementation for the full 24-hour day/night cycle
+for the Cretaceous survival game. This is a **Blueprint-only** implementation (no C++ required)
+using UE5's Timeline and DirectionalLight rotation.
 
 ---
 
 ## Blueprint: BP_DayNightCycle
 
-**Parent Class:** AActor  
-**Location:** `/Game/Blueprints/Lighting/BP_DayNightCycle`
+### Actor Class: Actor (AActor subclass via Blueprint)
+Place ONE instance in the persistent level.
 
-### Variables
+### Components
+- `TimelineComponent` — drives the 24-hour cycle
+- `DirectionalLightReference` (soft object reference) → Sun_Midday_Main
 
-| Name | Type | Default | Description |
-|---|---|---|---|
-| DayDurationSeconds | Float | 600.0 | Real-time seconds per full game day (10 min) |
-| CurrentTimeOfDay | Float | 0.45 | Normalized 0.0–1.0 (0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk) |
-| bPaused | Bool | False | Pause time progression |
-| SunActor | DirectionalLight ref | — | Reference to Sun_Cretaceous actor |
-| SkyLightActor | SkyLight ref | — | Reference to SkyLight_Cretaceous |
-| FogActor | ExponentialHeightFog ref | — | Reference to fog actor |
-| PPVActor | PostProcessVolume ref | — | Reference to PPV_Cretaceous_Global |
+### Timeline Curve: DayNightCurve
+- Duration: 1440 seconds (= 24 real-minutes for 1 game-day, configurable)
+- Float track: `SunPitch` — maps 0→1440 to sun pitch angle
 
-### Time-of-Day Phases
+| Time (s) | Sun Pitch | Phase |
+|----------|-----------|-------|
+| 0 | -90° | Midnight |
+| 180 | -90° | Pre-dawn |
+| 300 | -5° | Sunrise |
+| 360 | -20° | Early morning |
+| 480 | -45° | Mid-morning |
+| 720 | -60° | Noon |
+| 900 | -45° | Afternoon |
+| 1080 | -20° | Late afternoon |
+| 1140 | -8° | Golden hour |
+| 1200 | -3° | Sunset |
+| 1260 | -90° | Dusk |
+| 1440 | -90° | Midnight |
 
-| Phase | Time Range | Sun Pitch | Sun Intensity | Fog Density | Color Temp |
-|---|---|---|---|---|---|
-| Night | 0.0 – 0.2 | +20° (below horizon) | 0.0 | 0.08 | Cool blue |
-| Dawn | 0.2 – 0.3 | -5° to -25° | 2.0 → 8.0 | 0.06 | Orange-pink |
-| Morning | 0.3 – 0.45 | -25° to -55° | 8.0 → 12.0 | 0.04 | Warm yellow |
-| Noon | 0.45 – 0.6 | -55° to -80° | 14.0 | 0.02 | White-hot |
-| Afternoon | 0.6 – 0.75 | -80° to -35° | 12.0 → 8.0 | 0.03 | Warm amber |
-| Dusk | 0.75 – 0.85 | -35° to -5° | 8.0 → 2.0 | 0.06 | Deep orange |
-| Twilight | 0.85 – 1.0 | -5° to +20° | 2.0 → 0.0 | 0.07 | Purple-blue |
+### Intensity Curve: SunIntensityCurve
+| Time (s) | Intensity (lux) | Phase |
+|----------|-----------------|-------|
+| 0 | 0 | Night |
+| 300 | 5000 | Sunrise |
+| 480 | 30000 | Morning |
+| 720 | 75000 | Noon |
+| 1080 | 40000 | Afternoon |
+| 1140 | 15000 | Golden hour |
+| 1200 | 2000 | Sunset |
+| 1260 | 0 | Night |
 
-### Tick Logic (Pseudocode)
-
-```
-Event Tick(DeltaSeconds):
-    if bPaused: return
-    
-    TimeIncrement = DeltaSeconds / DayDurationSeconds
-    CurrentTimeOfDay = (CurrentTimeOfDay + TimeIncrement) % 1.0
-    
-    // Sun rotation: map 0-1 time to -180 to +180 yaw sweep
-    SunYaw = CurrentTimeOfDay * 360.0 - 180.0
-    SunPitch = GetPitchForTime(CurrentTimeOfDay)
-    SunActor.SetActorRotation(Rotator(SunPitch, SunYaw, 0))
-    
-    // Intensity curve
-    SunIntensity = GetIntensityForTime(CurrentTimeOfDay)
-    SunComponent.Intensity = SunIntensity
-    
-    // Fog density
-    FogComp.FogDensity = GetFogDensityForTime(CurrentTimeOfDay)
-    
-    // Color grading
-    PPVSettings = GetColorGradingForTime(CurrentTimeOfDay)
-    PPVActor.ApplySettings(PPVSettings)
-    
-    // SkyLight recapture every 2 seconds (not every tick — performance)
-    RecaptureTimer += DeltaSeconds
-    if RecaptureTimer > 2.0:
-        SkyLightComponent.RecaptureSky()
-        RecaptureTimer = 0.0
-```
-
-### Dinosaur Behavior Integration
-
-The Day/Night cycle drives dinosaur activity patterns (implemented by Agent #12):
-- **Dawn (0.2–0.3):** Herbivore feeding begins, predators returning from night hunt
-- **Noon (0.45–0.6):** Low activity — heat forces most dinosaurs to shade
-- **Dusk (0.75–0.85):** Peak predator activity — T-Rex and Raptors most active
-- **Night (0.0–0.2):** Nocturnal small species active, large predators patrol
-
-### Weather Integration (Future — Agent #05 handoff)
-
-The Day/Night cycle exposes these events for weather system:
-- `OnDawnBegin` — trigger morning fog burn-off
-- `OnNoonReached` — trigger heat haze effect
-- `OnDuskBegin` — trigger evening thunderstorm probability check
-- `OnNightBegin` — trigger bioluminescent insect particle systems
+### Color Curve: SunColorCurve (Linear Color)
+| Phase | R | G | B | Description |
+|-------|---|---|---|-------------|
+| Sunrise | 1.0 | 0.5 | 0.2 | Deep orange |
+| Morning | 1.0 | 0.85 | 0.6 | Warm yellow |
+| Noon | 1.0 | 0.97 | 0.88 | Warm white |
+| Afternoon | 1.0 | 0.9 | 0.7 | Slightly warm |
+| Golden Hour | 1.0 | 0.6 | 0.2 | Deep gold |
+| Sunset | 1.0 | 0.3 | 0.1 | Red-orange |
+| Night | 0.1 | 0.15 | 0.3 | Cold blue-black |
 
 ---
 
-## Console Commands for Testing
+## Fog Density Curve: FogDensityCurve
+| Phase | Density | Volumetric Extinction |
+|-------|---------|----------------------|
+| Night | 0.08 | 1.5 |
+| Sunrise | 0.06 | 1.2 (morning mist) |
+| Midday | 0.02 | 0.5 |
+| Golden Hour | 0.04 | 0.8 |
+| Night | 0.08 | 1.5 |
+
+---
+
+## Blueprint Event Graph Nodes
 
 ```
-// Set time of day directly (0.0 = midnight, 0.5 = noon, 0.75 = dusk)
-stat fps
-r.Lumen.GlobalIllumination.Allow 1
-r.VolumetricFog 1
+Event BeginPlay
+  → Set Timer by Function Name (FunctionName="AdvanceCycle", Time=0.1, Looping=true)
 
-// Force immediate SkyLight recapture
-// (run from Blueprint: SkyLightComponent.RecaptureSky())
+Function AdvanceCycle:
+  → Get World Delta Seconds
+  → Add to CurrentTime (clamped 0→1440, wraps)
+  → Sample DayNightCurve at CurrentTime → Set Sun Pitch
+  → Sample SunIntensityCurve at CurrentTime → Set Sun Intensity
+  → Sample SunColorCurve at CurrentTime → Set Sun Color
+  → Sample FogDensityCurve at CurrentTime → Set Fog Density
+
+Exposed Variables (EditAnywhere):
+  - DayLengthSeconds (float, default=1440)
+  - StartTimeOfDay (float, default=720 = noon)
+  - bPauseCycle (bool, default=false)
+  - TimeMultiplier (float, default=1.0)
 ```
 
 ---
 
-## Performance Notes
+## Integration Notes for Agent #09 (Character Artist)
+- Characters spawned during MIDDAY palette will be lit at 75,000 lux warm white
+- The cycle will eventually run continuously — character materials must look good at ALL phases
+- Subsurface scattering on skin should be tuned for the NOON baseline (most common gameplay time)
+- Night phase uses cold blue ambient — ensure characters are still readable (not too dark)
 
-- SkyLight recapture: max 1x per 2 seconds (not per tick)
-- Fog density updates: interpolated over 5-second window to prevent pop
-- PostProcess transitions: lerp over 10-second window at phase boundaries
-- Sun rotation: direct set per tick (cheap — just transform update)
-- Target: < 0.5ms per tick on target hardware
-
----
-
-## Integration with Agent #09 (Character Artist)
-
-MetaHuman characters will be lit by this dynamic system. Key considerations:
-- Skin subsurface scattering responds strongly to sun angle — most dramatic at dawn/dusk
-- Night phase requires characters to carry light sources (torches) for visibility
-- Character shadow length changes dramatically across day — use for gameplay (hide in long shadows at dusk)
+## Integration Notes for Agent #16 (Audio Agent)
+- Day phase transitions should trigger ambient sound layer changes:
+  - Night → Dawn: silence → bird calls begin
+  - Dawn → Morning: birds peak, insects fade
+  - Midday: insects/cicadas dominant
+  - Dusk: birds return, then night insects
+  - Night: crickets, distant predator sounds
 
 ---
 
-*Generated by Agent #08 — Lighting & Atmosphere | Transpersonal Game Studio*
+## Current Cycle Status
+- ✅ Sun configured: pitch=-60°, intensity=75,000 lux, warm white
+- ✅ SkyLight: real_time_capture=True, intensity=1.5
+- ✅ Fog: light daytime, volumetric enabled
+- ✅ Hub fill lights: 3 actors at (2100, 2400)
+- ✅ Lumen GI + Reflections enabled
+- ✅ FastSkyLUT=1 (performance)
+- 📋 Blueprint BP_DayNightCycle: SPEC READY — awaiting Blueprint creation in next cycle
