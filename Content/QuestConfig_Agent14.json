@@ -1,0 +1,195 @@
+{
+  "quest_system": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260703_006",
+    "agent": "Quest & Mission Designer #14",
+    "hub_location": {"x": 2100, "y": 2400, "z": 100}
+  },
+  "quests": [
+    {
+      "id": "Q001_TrikeObservation",
+      "title": "The Horned Giants",
+      "type": "observation",
+      "description": "The Elder Hunter sends you to observe the Triceratops herd grazing NE of camp. Learn their patterns — it may save your life.",
+      "trigger_actor": "QuestTrigger_TrikeObservation_001",
+      "trigger_location": {"x": 2700, "y": 2900, "z": 100},
+      "objectives": [
+        {
+          "id": "OBJ_01",
+          "desc": "Approach the Triceratops herd without being detected",
+          "type": "stealth_approach",
+          "target_actors": ["Trike_Savana_001","Trike_Savana_002","Trike_Savana_003","Trike_Savana_004","Trike_Savana_005","Trike_Savana_006"],
+          "detection_radius": 600,
+          "success_radius": 900
+        },
+        {
+          "id": "OBJ_02",
+          "desc": "Observe the herd for 30 seconds without moving",
+          "type": "timed_observation",
+          "duration_s": 30,
+          "max_movement_units": 50
+        },
+        {
+          "id": "OBJ_03",
+          "desc": "Collect a horn fragment from the ground near the herd",
+          "type": "item_pickup",
+          "item_label": "Resource_Rock_001",
+          "item_type": "horn_fragment"
+        }
+      ],
+      "rewards": {
+        "items": ["horn_fragment"],
+        "knowledge": "survival_knowledge",
+        "knowledge_amount": 10
+      },
+      "npc_dialogue": {
+        "start_voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783066801397_Elder_Hunter_QuestGiver.mp3",
+        "start_text": "Be still. Do not move. The horned ones graze ahead — three of them, maybe more. Watch how they move together. If you learn their patterns, you will know when it is safe to pass — and when it is not. This is your first lesson in survival.",
+        "npc_actor": "NPC_Elder_QuestGiver_001"
+      },
+      "herd_actors": ["Trike_Savana_001","Trike_Savana_002","Trike_Savana_003","Trike_Savana_004","Trike_Savana_005","Trike_Savana_006"],
+      "herd_location": {"x": 2900, "y": 3000, "z": 0}
+    },
+    {
+      "id": "Q002_ParasaurTracking",
+      "title": "Follow the Crested Ones",
+      "type": "tracking",
+      "description": "The Parasaurolophus herd moves to water before midday heat. Follow them to discover the watering hole — a vital resource for survival.",
+      "trigger_actor": "QuestTrigger_ParasaurTrack_001",
+      "trigger_location": {"x": 1500, "y": 1900, "z": 100},
+      "objectives": [
+        {
+          "id": "OBJ_01",
+          "desc": "Locate the Parasaurolophus herd SW of camp",
+          "type": "find_actor_group",
+          "target_actors": ["Parasaur_Savana_001","Parasaur_Savana_002","Parasaur_Savana_003"],
+          "search_radius": 800
+        },
+        {
+          "id": "OBJ_02",
+          "desc": "Follow the herd toward the watering hole without disturbing them",
+          "type": "stealth_follow",
+          "lead_actors": ["Parasaur_Savana_001","Parasaur_Savana_002","Parasaur_Savana_003","Parasaur_Savana_004","Parasaur_Savana_005","Parasaur_Savana_006","Parasaur_Savana_007"],
+          "max_detection_radius": 500,
+          "follow_distance_min": 300,
+          "follow_distance_max": 700
+        },
+        {
+          "id": "OBJ_03",
+          "desc": "Reach the watering hole",
+          "type": "reach_location",
+          "destination_actor": "QuestTrigger_WateringHole_001",
+          "destination_location": {"x": 800, "y": 1200, "z": 100},
+          "arrival_radius": 400
+        }
+      ],
+      "rewards": {
+        "locations_discovered": ["watering_hole"],
+        "knowledge": "survival_knowledge",
+        "knowledge_amount": 15
+      },
+      "npc_dialogue": {
+        "start_voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783066807970_Elder_Hunter_TrackingQuest.mp3",
+        "start_text": "The long-crested ones are moving. They always go to water before the heat of midday. Follow them — but keep your distance. Stay downwind. If they sense you, they will scatter and you will lose them. The watering hole is where you will find what you need.",
+        "npc_actor": "NPC_Elder_QuestGiver_001"
+      },
+      "herd_actors": ["Parasaur_Savana_001","Parasaur_Savana_002","Parasaur_Savana_003","Parasaur_Savana_004","Parasaur_Savana_005","Parasaur_Savana_006","Parasaur_Savana_007"],
+      "herd_location": {"x": 1200, "y": 1700, "z": 0}
+    },
+    {
+      "id": "Q003_FirstCampfire",
+      "title": "Fire and Stone",
+      "type": "crafting",
+      "description": "The Elder Hunter teaches you to make fire. Gather sticks and rocks from the clearing and forest edge, then craft your first campfire.",
+      "trigger_actor": "NPC_Elder_QuestGiver_001",
+      "trigger_location": {"x": 2100, "y": 2400, "z": 100},
+      "objectives": [
+        {
+          "id": "OBJ_01",
+          "desc": "Gather 3 sticks from the forest edge",
+          "type": "collect_items",
+          "item_type": "stick",
+          "item_actors": ["Resource_Stick_001","Resource_Stick_002","Resource_Stick_003"],
+          "count_required": 3
+        },
+        {
+          "id": "OBJ_02",
+          "desc": "Gather 2 rocks from the clearing",
+          "type": "collect_items",
+          "item_type": "rock",
+          "item_actors": ["Resource_Rock_001","Resource_Rock_002"],
+          "count_required": 2
+        },
+        {
+          "id": "OBJ_03",
+          "desc": "Craft a campfire at the marked site",
+          "type": "craft_item",
+          "recipe_id": "campfire",
+          "craft_location_actor": "QuestMarker_CampfireSite_001",
+          "craft_location": {"x": 2150, "y": 2350, "z": 80}
+        }
+      ],
+      "rewards": {
+        "blueprints_unlocked": ["campfire"],
+        "slots_unlocked": ["cooked_meat"]
+      },
+      "campfire_marker": "QuestMarker_CampfireSite_001",
+      "resource_actors": ["Resource_Stick_001","Resource_Stick_002","Resource_Stick_003","Resource_Rock_001","Resource_Rock_002"]
+    }
+  ],
+  "crafting_recipes": {
+    "stone_axe": {
+      "id": "stone_axe",
+      "display_name": "Stone Axe",
+      "ingredients": {"rock": 2, "stick": 1},
+      "output": "stone_axe",
+      "crafting_time_s": 5,
+      "unlock_condition": "default"
+    },
+    "campfire": {
+      "id": "campfire",
+      "display_name": "Campfire",
+      "ingredients": {"stick": 3},
+      "output": "campfire",
+      "crafting_time_s": 8,
+      "unlock_condition": "default"
+    },
+    "water_container": {
+      "id": "water_container",
+      "display_name": "Water Container",
+      "ingredients": {"rock": 1, "leaf": 1},
+      "output": "water_container",
+      "crafting_time_s": 4,
+      "unlock_condition": "default"
+    }
+  },
+  "resource_actors": {
+    "rocks": [
+      {"label": "Resource_Rock_001", "location": {"x": 2400, "y": 2600, "z": 50}},
+      {"label": "Resource_Rock_002", "location": {"x": 2600, "y": 2750, "z": 50}},
+      {"label": "Resource_Rock_003", "location": {"x": 2200, "y": 2800, "z": 50}}
+    ],
+    "sticks": [
+      {"label": "Resource_Stick_001", "location": {"x": 1900, "y": 2200, "z": 50}},
+      {"label": "Resource_Stick_002", "location": {"x": 2300, "y": 2100, "z": 50}},
+      {"label": "Resource_Stick_003", "location": {"x": 1800, "y": 2500, "z": 50}}
+    ],
+    "leaves": [
+      {"label": "Resource_Leaf_001", "location": {"x": 1600, "y": 1800, "z": 50}},
+      {"label": "Resource_Leaf_002", "location": {"x": 1400, "y": 2000, "z": 50}},
+      {"label": "Resource_Leaf_003", "location": {"x": 1700, "y": 2200, "z": 50}}
+    ]
+  },
+  "npc_audio": {
+    "Elder_Hunter_QuestGiver": {
+      "voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783066801397_Elder_Hunter_QuestGiver.mp3",
+      "duration_s": 16,
+      "quest_id": "Q001_TrikeObservation"
+    },
+    "Elder_Hunter_TrackingQuest": {
+      "voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783066807970_Elder_Hunter_TrackingQuest.mp3",
+      "duration_s": 17,
+      "quest_id": "Q002_ParasaurTracking"
+    }
+  }
+}
