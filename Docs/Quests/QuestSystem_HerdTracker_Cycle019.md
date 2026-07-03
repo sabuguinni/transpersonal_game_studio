@@ -1,0 +1,111 @@
+# Quest System — Herd Tracker Arc
+## Cycle PROD_CYCLE_AUTO_20260703_011 | Agent #14 Quest & Mission Designer
+
+---
+
+## Quest: "Follow the Herd" (Main Survival Quest Arc — Chapter 1)
+
+### Overview
+The player must track a Triceratops herd migrating south along the river, collect evidence of their passage (a shed horn), and return to the Elder NPC at camp. This quest teaches core survival mechanics: stealth approach, resource collection, and NPC interaction.
+
+### Quest Objectives
+
+| # | Objective ID | Description | Trigger | Completion |
+|---|---|---|---|---|
+| 1 | `OBJ_TrackHerd` | Follow the Triceratops herd to the river | Enter QuestTrigger_TrackHerd_001 (X=2000, Y=2200) | Player enters trigger volume |
+| 2 | `OBJ_CollectHorn` | Collect the shed horn near the grazing area | Interact with Resource_Rock_* or horn prop | Item added to inventory |
+| 3 | `OBJ_ReachRiver` | Reach the river observation point | Enter QuestTrigger_ReachRiver_001 (X=1800, Y=2700) | Player enters trigger volume |
+| 4 | `OBJ_ReturnToElder` | Return to the Elder NPC at camp | Approach NPC_Elder_Body_001 (X=2100, Y=2400) | Dialogue triggered |
+
+### NPC Voice Lines (ElevenLabs Generated)
+- **Briefing**: `tts/1783091269527_Elder_NPC_QuestBriefing_HerdTr.mp3`
+  - *"The Triceratops herd is moving south along the river. Three calves are with them — that means the bull is close. Do not approach from downwind. Stay in the tree line and wait for them to pass."*
+- **Reward**: `tts/1783091297786_Elder_NPC_QuestReward_HornFoun.mp3`
+  - *"You found it. The shed horn of the herd bull — still warm from the morning sun. This is proof the herd passed through here at dawn."*
+
+### World Actors Placed (UE5)
+
+#### Quest Trigger Volumes
+| Actor Label | Location | Purpose |
+|---|---|---|
+| QuestTrigger_TrackHerd_001 | (2000, 2200, 100) | Objective 1 trigger |
+| QuestTrigger_CollectHorn_001 | (2300, 2500, 80) | Objective 2 area |
+| QuestTrigger_ReachRiver_001 | (1800, 2700, 60) | Objective 3 trigger |
+
+#### Quest Markers (Visual Cone Indicators)
+| Actor Label | Location |
+|---|---|
+| QuestMarker_TrackHerd_001 | (2000, 2200, 150) |
+| QuestMarker_CollectHorn_001 | (2300, 2500, 130) |
+| QuestMarker_ReachRiver_001 | (1800, 2700, 110) |
+
+#### Resource Pickups (Crafting System)
+| Type | Count | Labels |
+|---|---|---|
+| Rock | 5 | Resource_Rock_001 through 005 |
+| Stick | 4 | Resource_Stick_001 through 004 |
+| Leaf | 3 | Resource_Leaf_001 through 003 |
+
+#### Camp Actors
+| Actor Label | Type | Location |
+|---|---|---|
+| NPC_Elder_Body_001 | NPC Head (sphere) | (2100, 2400, 120) |
+| NPC_Elder_Torso_001 | NPC Torso (cylinder) | (2100, 2400, 80) |
+| CraftingStation_Campfire_001 | Campfire (cone) | (2140, 2420, 60) |
+| CraftingStation_Base_001 | Campfire base | (2140, 2420, 45) |
+| CraftingStation_FireLight_001 | Point light (orange) | (2140, 2420, 80) |
+
+---
+
+## Crafting Recipes Defined
+
+### Recipe 1: Stone Axe
+- **Ingredients**: 2× Rock + 1× Stick
+- **Output**: Stone Axe (melee weapon, +15 damage vs small dinosaurs)
+- **Crafting Time**: 3 seconds
+- **Use**: Chopping wood, basic combat
+
+### Recipe 2: Campfire
+- **Ingredients**: 3× Stick + 1× Rock (for spark)
+- **Output**: Campfire (placed structure, warmth + cooking)
+- **Crafting Time**: 5 seconds
+- **Use**: Cook meat, ward off small predators at night, save point
+
+### Recipe 3: Water Container
+- **Ingredients**: 1× Rock (hollowed) + 1× Leaf (sealed)
+- **Output**: Water Container (stores 3 drinks)
+- **Crafting Time**: 4 seconds
+- **Use**: Collect water from rivers, manage thirst stat
+
+---
+
+## Quest Design Notes
+
+### Emotional Arc
+1. **Hook**: Elder NPC reveals herd is nearby — player feels urgency and curiosity
+2. **Tension**: Approaching the herd requires stealth — player feels vulnerability
+3. **Discovery**: Finding the shed horn — player feels like a real tracker
+4. **Resolution**: Returning to Elder — player feels competent and trusted by the tribe
+
+### Design Principles Applied
+- **Pawel Sasko**: Quest has complete emotional arc independent of main story
+- **Johnathan Blow**: Each mechanic (stealth approach, resource collect) is a statement about the world — "in this world, you are prey, not predator"
+- **No spiritual content**: All objectives are practical survival tasks (tracking, collecting, navigating)
+
+---
+
+## Dependencies for Agent #15 (Narrative & Dialogue)
+- Elder NPC needs full dialogue tree: greeting → briefing → mid-quest check-in → reward
+- Quest lore: Why does the tribe need to know the herd migration route? (food supply for winter)
+- Secondary NPC: Young hunter who doubts the player — creates social tension
+
+## Dependencies for Agent #16 (Audio)
+- Quest trigger sound: rustling leaves when entering trigger volume
+- Resource pickup sound: stone clinking, stick snap, leaf rustle
+- Campfire ambient: crackling fire loop at CraftingStation_Campfire_001
+- Quest complete fanfare: tribal drum beat (short, 2-3 seconds)
+
+---
+
+*Generated by Agent #14 — Quest & Mission Designer*
+*Cycle: PROD_CYCLE_AUTO_20260703_011*
