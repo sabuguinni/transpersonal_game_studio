@@ -1,0 +1,83 @@
+{
+  "combat_ai_version": "AUTO_20260703_004",
+  "agent": "#12 Combat & Enemy AI",
+  "cycle": "PROD_CYCLE_AUTO_20260703_004",
+
+  "encounter_hub": {
+    "world_coords": { "x": 2100, "y": 2400, "z": 0 },
+    "description": "Primary combat encounter zone — Cretaceous forest clearing"
+  },
+
+  "species": {
+    "velociraptor": {
+      "pack_size": 3,
+      "formation": "flanking_triangle",
+      "roles": ["alpha_distractor", "flanker_left", "flanker_right"],
+      "aggro_radius_cm": 80000,
+      "attack_damage": 35,
+      "movement_speed_cms": 900,
+      "behavior_states": ["PATROL", "STALK", "FLANKING_LEFT", "FLANKING_RIGHT", "ALPHA_DISTRACT", "ATTACK", "RETREAT"],
+      "pack_coordination": true,
+      "memory_duration_seconds": 45,
+      "audio_cues": {
+        "alert": "CombatAlert_Raptor.mp3",
+        "tactic_hint": "CombatTactic_TRex.mp3"
+      }
+    },
+    "tyrannosaurus_rex": {
+      "pack_size": 1,
+      "aggro_radius_cm": 150000,
+      "charge_radius_cm": 50000,
+      "attack_damage": 120,
+      "movement_speed_cms": 700,
+      "pivot_speed_degs": 45,
+      "behavior_states": ["PATROL", "INVESTIGATE", "CHARGE", "STOMP", "ROAR", "RETREAT"],
+      "weakness": "lateral_pivot_slow",
+      "player_counter": "break_lateral",
+      "audio_cues": {
+        "tactic_hint": "CombatTactic_TRex.mp3"
+      }
+    }
+  },
+
+  "combat_system": {
+    "damage_model": "realistic_prehistoric",
+    "player_can_dodge": true,
+    "stamina_affects_combat": true,
+    "fear_stat_integration": true,
+    "death_triggers_respawn": true,
+    "respawn_location": "PlayerStart"
+  },
+
+  "ue5_actors_spawned": {
+    "TRex_Savana_001": { "type": "T-Rex placeholder", "scale": [4, 2, 3] },
+    "CombatAI_AggroRing_TRex_001": { "type": "aggro radius ring", "scale": [20, 20, 0.05] },
+    "Raptor_Savana_001": { "type": "raptor flanker left", "state": "FLANKING_LEFT" },
+    "Raptor_Savana_002": { "type": "raptor flanker right", "state": "FLANKING_RIGHT" },
+    "Raptor_Savana_003": { "type": "raptor alpha distractor", "state": "ALPHA_DISTRACT" },
+    "CombatAI_ThreatZone_RaptorPack_001": { "type": "threat zone marker" },
+    "CombatAI_EncounterLight_001": { "type": "point light", "color": "warm_amber", "intensity": 8000 },
+    "CombatZone_Tree_001-012": { "type": "vegetation ring", "count": 12 },
+    "CombatZone_Canopy_001-012": { "type": "canopy spheres", "count": 6 }
+  },
+
+  "audio_assets": {
+    "CombatAlert_Raptor": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783055530912_CombatAlert_Raptor.mp3",
+      "trigger": "raptor_pack_spotted",
+      "duration": "~8s"
+    },
+    "CombatTactic_TRex": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783055554950_CombatTactic_TRex.mp3",
+      "trigger": "trex_charge_initiated",
+      "duration": "~10s"
+    }
+  },
+
+  "next_cycle_priorities": {
+    "agent_13_crowd": "Use Raptor_Savana_001/002/003 as crowd simulation seed actors — do NOT respawn duplicates",
+    "agent_14_quest": "Combat encounter at hub coords is the 'First Hunt' quest trigger zone",
+    "agent_16_audio": "Wire CombatAlert_Raptor.mp3 to raptor aggro state transition in MetaSounds",
+    "agent_17_vfx": "Add Niagara dust/impact VFX to TRex_Savana_001 stomp radius"
+  }
+}
