@@ -1,216 +1,105 @@
 {
-  "npc_behavior_system": {
+  "npc_behavior_config": {
     "version": "1.0",
-    "cycle": "PROD_CYCLE_AUTO_20260703_001",
-    "agent": "NPC Behavior Agent #11",
-    "description": "NPC daily routine behavior configuration for tribal prehistoric humans"
-  },
+    "cycle": "PROD_CYCLE_AUTO_20260704_005",
+    "agent": "NPC_Behavior_Agent_11",
+    "hub_center": { "x": 2100, "y": 2400, "z": 0 },
 
-  "npc_roles": {
-    "Scout": {
-      "blackboard": "/Game/AI/NPC/BB_NPC_Scout",
-      "behavior_tree": "/Game/AI/NPC/BT_NPC_Scout",
-      "patrol_radius": 800,
-      "patrol_waypoints": ["WP_Scout_001", "WP_Scout_002", "WP_Scout_003", "WP_Scout_004"],
-      "daily_routine": {
-        "dawn": "patrol_perimeter",
-        "morning": "scout_east_treeline",
-        "midday": "return_to_camp_report",
-        "afternoon": "patrol_perimeter",
-        "dusk": "alert_watch",
-        "night": "sleep_at_camp"
+    "dinosaur_behaviors": {
+      "TRex": {
+        "patrol_radius_units": 2000,
+        "patrol_waypoints": 5,
+        "aggro_range_units": 3000,
+        "attack_range_units": 300,
+        "chase_speed_multiplier": 1.4,
+        "patrol_speed_multiplier": 0.6,
+        "behavior_states": ["Patrol", "Alert", "Chase", "Attack", "Return"],
+        "trigger_zone_label": "TriggerZone_TRex_Aggro_001",
+        "waypoint_prefix": "WP_TRex_Patrol_",
+        "threat_response": "immediate_chase",
+        "pack_behavior": false,
+        "territory_center": { "x": 2100, "y": 2400, "z": 0 }
       },
-      "reactions": {
-        "player_nearby": "observe_then_approach",
-        "dinosaur_detected": "flee_and_warn_camp",
-        "predator_detected": "sprint_to_camp_alarm",
-        "resource_found": "mark_location_return"
+      "Raptor": {
+        "patrol_radius_units": 1200,
+        "patrol_waypoints": 4,
+        "aggro_range_units": 1500,
+        "attack_range_units": 150,
+        "chase_speed_multiplier": 1.8,
+        "patrol_speed_multiplier": 0.8,
+        "behavior_states": ["Patrol", "Stalk", "Flank", "Attack", "Retreat"],
+        "trigger_zone_label": "TriggerZone_Raptor_Pack_001",
+        "waypoint_prefix": "WP_Raptor_Patrol_",
+        "threat_response": "coordinated_flank",
+        "pack_behavior": true,
+        "pack_size_min": 2,
+        "pack_size_max": 4,
+        "territory_center": { "x": 2900, "y": 3000, "z": 0 }
       },
-      "memory": {
-        "last_danger_location": true,
-        "known_safe_routes": true,
-        "player_trust_level": true,
-        "dinosaur_sighting_log": true
+      "Triceratops": {
+        "patrol_radius_units": 1500,
+        "patrol_waypoints": 6,
+        "aggro_range_units": 800,
+        "attack_range_units": 400,
+        "chase_speed_multiplier": 1.2,
+        "patrol_speed_multiplier": 0.4,
+        "behavior_states": ["Graze", "Alert", "Charge", "Retreat"],
+        "threat_response": "charge_if_threatened",
+        "pack_behavior": true,
+        "pack_size_min": 3,
+        "pack_size_max": 8,
+        "protects_young": true,
+        "territory_center": { "x": 1500, "y": 2800, "z": 0 }
       },
-      "voice_line": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783039689113_NPC_Scout_Warning.mp3"
-    },
-
-    "Hunter": {
-      "blackboard": "/Game/AI/NPC/BB_NPC_Hunter",
-      "behavior_tree": "/Game/AI/NPC/BT_NPC_Hunter",
-      "patrol_radius": 600,
-      "patrol_waypoints": ["WP_Hunter_001", "WP_Hunter_002", "WP_Hunter_003"],
-      "daily_routine": {
-        "dawn": "prepare_weapons",
-        "morning": "hunt_small_game",
-        "midday": "process_kill_at_camp",
-        "afternoon": "hunt_medium_game",
-        "dusk": "return_to_camp",
-        "night": "guard_camp_perimeter"
-      },
-      "reactions": {
-        "player_nearby": "assess_threat_level",
-        "dinosaur_detected": "ambush_position",
-        "predator_detected": "defensive_formation",
-        "prey_detected": "stalk_approach"
-      },
-      "memory": {
-        "hunting_grounds": true,
-        "prey_migration_patterns": true,
-        "predator_territory": true,
-        "player_combat_skill": true
-      },
-      "combat_style": "ambush",
-      "weapons": ["spear", "stone_axe", "throwing_rocks"]
-    },
-
-    "Gatherer": {
-      "blackboard": "/Game/AI/NPC/BB_NPC_Gatherer",
-      "behavior_tree": "/Game/AI/NPC/BT_NPC_Gatherer",
-      "patrol_radius": 400,
-      "patrol_waypoints": ["WP_Gatherer_001", "WP_Gatherer_002", "WP_Gatherer_003"],
-      "daily_routine": {
-        "dawn": "collect_morning_dew_water",
-        "morning": "gather_berries_roots",
-        "midday": "process_food_at_camp",
-        "afternoon": "gather_medicinal_plants",
-        "dusk": "prepare_evening_meal",
-        "night": "sleep_at_camp"
-      },
-      "reactions": {
-        "player_nearby": "friendly_greeting",
-        "dinosaur_detected": "hide_in_vegetation",
-        "predator_detected": "freeze_then_flee",
-        "resource_found": "collect_and_store"
-      },
-      "memory": {
-        "resource_locations": true,
-        "seasonal_availability": true,
-        "safe_gathering_zones": true
-      },
-      "resources_known": ["berries", "roots", "medicinal_herbs", "fresh_water", "edible_fungi"]
-    },
-
-    "Elder": {
-      "blackboard": "/Game/AI/NPC/BB_NPC_Elder",
-      "behavior_tree": "/Game/AI/NPC/BT_NPC_Elder",
-      "patrol_radius": 150,
-      "daily_routine": {
-        "dawn": "observe_sky_weather_reading",
-        "morning": "teach_young_tribe_members",
-        "midday": "rest_at_camp_center",
-        "afternoon": "advise_hunters_gatherers",
-        "dusk": "evening_fire_storytelling",
-        "night": "sleep_at_camp"
-      },
-      "reactions": {
-        "player_nearby": "offer_wisdom_dialogue",
-        "dinosaur_detected": "direct_tribe_response",
-        "danger_alarm": "coordinate_evacuation",
-        "player_quest_trigger": "assign_task"
-      },
-      "memory": {
-        "tribe_history": true,
-        "migration_knowledge": true,
-        "weather_patterns": true,
-        "player_reputation": true,
-        "quest_state": true
-      },
-      "voice_line": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783039691309_NPC_Elder_Wisdom.mp3",
-      "dialogue_topics": [
-        "raptor_migration_south",
-        "safe_river_crossing",
-        "trex_territory_warning",
-        "seasonal_food_sources",
-        "tribe_survival_history"
-      ]
-    },
-
-    "Lookout": {
-      "blackboard": "/Game/AI/NPC/BB_NPC_Lookout",
-      "behavior_tree": "/Game/AI/NPC/BT_NPC_Lookout",
-      "patrol_radius": 300,
-      "patrol_waypoints": ["WP_Lookout_001", "WP_Lookout_002"],
-      "daily_routine": {
-        "dawn": "elevated_watch_position",
-        "morning": "scan_horizon_north",
-        "midday": "handoff_to_second_lookout",
-        "afternoon": "scan_horizon_south",
-        "dusk": "elevated_watch_position",
-        "night": "fire_watch_camp"
-      },
-      "reactions": {
-        "player_nearby": "challenge_then_allow",
-        "dinosaur_detected": "sound_alarm_call",
-        "predator_detected": "maximum_alarm",
-        "unknown_human_detected": "alert_hunter"
-      },
-      "detection_range": 2500,
-      "alarm_types": {
-        "small_threat": "single_call",
-        "medium_threat": "double_call",
-        "apex_predator": "continuous_alarm"
+      "Brachiosaurus": {
+        "patrol_radius_units": 3000,
+        "patrol_waypoints": 4,
+        "aggro_range_units": 200,
+        "attack_range_units": 600,
+        "chase_speed_multiplier": 0.8,
+        "patrol_speed_multiplier": 0.3,
+        "behavior_states": ["Graze", "Alert", "Flee"],
+        "threat_response": "flee_or_stomp",
+        "pack_behavior": true,
+        "pack_size_min": 2,
+        "pack_size_max": 5,
+        "territory_center": { "x": 2100, "y": 1200, "z": 0 }
       }
-    }
-  },
-
-  "social_dynamics": {
-    "tribe_relationships": {
-      "Elder_to_Hunter": "authority",
-      "Elder_to_Gatherer": "authority",
-      "Elder_to_Scout": "authority",
-      "Elder_to_Lookout": "authority",
-      "Hunter_to_Scout": "peer_respect",
-      "Hunter_to_Gatherer": "dependency",
-      "Scout_to_Lookout": "cooperation",
-      "Gatherer_to_all": "provider"
     },
-    "player_integration": {
-      "initial_stance": "cautious_observation",
-      "trust_building": ["bring_food", "help_in_danger", "share_information", "participate_in_hunt"],
-      "trust_levels": {
-        "0": "stranger_ignored",
-        "25": "acknowledged_outsider",
-        "50": "tolerated_ally",
-        "75": "trusted_member",
-        "100": "tribe_champion"
+
+    "npc_voice_lines": {
+      "TribeElder": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783145067461_TribeElder_NPCVoice.mp3",
+        "trigger": "player_near_herd",
+        "content": "Herd movement advice — dawn migration toward river"
+      },
+      "ScoutNPC": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783145119138_ScoutNPC_Warning.mp3",
+        "trigger": "raptor_pack_detected",
+        "content": "Raptor pack hunting strategy warning"
       }
-    }
-  },
+    },
 
-  "memory_system": {
-    "danger_memory_duration_seconds": 300,
-    "player_action_log_size": 20,
-    "location_memory_radius": 500,
-    "threat_escalation": {
-      "level_1": "single_raptor_sighting",
-      "level_2": "raptor_pack_nearby",
-      "level_3": "trex_territory_breach",
-      "level_4": "direct_attack_on_tribe"
-    }
-  },
+    "patrol_waypoints_placed": {
+      "TRex": ["WP_TRex_Patrol_01","WP_TRex_Patrol_02","WP_TRex_Patrol_03","WP_TRex_Patrol_04","WP_TRex_Patrol_05"],
+      "Raptor": ["WP_Raptor_Patrol_01","WP_Raptor_Patrol_02","WP_Raptor_Patrol_03","WP_Raptor_Patrol_04"]
+    },
 
-  "waypoints": {
-    "hub_center": {"x": 2100, "y": 2400, "z": 200},
-    "scout_patrol": [
-      {"label": "WP_Scout_001", "x": 2900, "y": 2400, "z": 200},
-      {"label": "WP_Scout_002", "x": 2500, "y": 3100, "z": 200},
-      {"label": "WP_Scout_003", "x": 1500, "y": 2900, "z": 200},
-      {"label": "WP_Scout_004", "x": 1400, "y": 2000, "z": 200}
+    "trigger_zones_placed": [
+      "TriggerZone_TRex_Aggro_001",
+      "TriggerZone_Raptor_Pack_001"
     ],
-    "hunter_patrol": [
-      {"label": "WP_Hunter_001", "x": 2600, "y": 1900, "z": 200},
-      {"label": "WP_Hunter_002", "x": 1700, "y": 1800, "z": 200},
-      {"label": "WP_Hunter_003", "x": 1500, "y": 2700, "z": 200}
-    ],
-    "gatherer_patrol": [
-      {"label": "WP_Gatherer_001", "x": 2350, "y": 2700, "z": 200},
-      {"label": "WP_Gatherer_002", "x": 1900, "y": 2800, "z": 200},
-      {"label": "WP_Gatherer_003", "x": 2200, "y": 2100, "z": 200}
-    ],
-    "lookout_positions": [
-      {"label": "WP_Lookout_001", "x": 2400, "y": 1900, "z": 350},
-      {"label": "WP_Lookout_002", "x": 1600, "y": 2200, "z": 300}
-    ]
+
+    "hub_vegetation_added": {
+      "fern_ring_count": 12,
+      "label_prefix": "Fern_Hub_",
+      "placement": "800-1400 unit radius ring around hub center"
+    },
+
+    "navigation": {
+      "navmesh_label": "NavMesh_Hub_001",
+      "navmesh_scale": [50, 50, 10],
+      "rebuild_triggered": true
+    }
   }
 }
