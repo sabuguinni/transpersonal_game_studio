@@ -1,0 +1,149 @@
+{
+  "quest_cycle": "PROD_CYCLE_AUTO_20260704_005",
+  "agent": "#14 Quest & Mission Designer",
+  "quests": [
+    {
+      "id": "QUEST_001_RaptorTrap",
+      "title": "Set the Trap",
+      "type": "defense",
+      "difficulty": "medium",
+      "location": { "x": 2100, "y": 2400, "z": 50 },
+      "trigger_actor": "QuestTrigger_RaptorTrap_001",
+      "npc_giver": "NPC_Elder_QuestGiver_001",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783146924959_Elder_NPC_RaptorTrap_Quest.mp3",
+      "briefing": "The raptors have been spotted near the eastern ridge. Three of them, moving fast. You need to set a trap before they reach the camp.",
+      "objectives": [
+        {
+          "id": "OBJ_001a",
+          "description": "Collect 3 sharpened stakes from the storage pit",
+          "type": "collect",
+          "target_actors": ["QuestObj_RaptorStake_001", "QuestObj_RaptorStake_002", "QuestObj_RaptorStake_003"],
+          "count_required": 3
+        },
+        {
+          "id": "OBJ_001b",
+          "description": "Place stakes along the narrow trail before the raptors arrive",
+          "type": "place",
+          "placement_zone": "QuestTrigger_RaptorTrap_001",
+          "time_limit_seconds": 120
+        },
+        {
+          "id": "OBJ_001c",
+          "description": "Survive the raptor attack",
+          "type": "survive",
+          "enemy_spawns": ["Raptor_Savana_001", "Raptor_Savana_002", "Raptor_Savana_003"],
+          "duration_seconds": 60
+        }
+      ],
+      "rewards": {
+        "resources": ["dried_meat_x3", "bone_knife"],
+        "xp": 150,
+        "reputation": "Tribe +10"
+      },
+      "emotional_arc": "Fear → Preparation → Relief/Pride",
+      "design_note": "Player must feel the tension of time pressure. The raptors should be heard (distant calls) before they are seen. Success should feel earned, not lucky."
+    },
+    {
+      "id": "QUEST_002_HerdTracking",
+      "title": "Follow the Old Bull",
+      "type": "tracking",
+      "difficulty": "easy",
+      "location": { "x": 2500, "y": 2600, "z": 50 },
+      "trigger_actor": "QuestTrigger_HerdTracking_001",
+      "npc_giver": "NPC_Elder_QuestGiver_001",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783146946061_Elder_NPC_HerdTracking_Quest.mp3",
+      "briefing": "The great herd moves at dawn. Follow the river north to the red clay flats. Find the old bull with the broken horn.",
+      "objectives": [
+        {
+          "id": "OBJ_002a",
+          "description": "Find the first set of herd tracks near the river",
+          "type": "discover",
+          "target_actors": ["QuestObj_HerdTrack_001"],
+          "hint": "Look for large three-toed impressions in soft ground"
+        },
+        {
+          "id": "OBJ_002b",
+          "description": "Follow the trail of tracks northward",
+          "type": "follow_trail",
+          "waypoints": ["QuestObj_HerdTrack_001", "QuestObj_HerdTrack_002", "QuestObj_HerdTrack_003"],
+          "approach_requirement": "downwind"
+        },
+        {
+          "id": "OBJ_002c",
+          "description": "Locate the old bull and observe without startling the herd",
+          "type": "observe",
+          "target_actor": "Para_Savana_001",
+          "stealth_required": true,
+          "observation_duration_seconds": 15
+        }
+      ],
+      "rewards": {
+        "resources": ["migration_map_fragment", "river_clay_x5"],
+        "xp": 100,
+        "reputation": "Tribe +5"
+      },
+      "emotional_arc": "Curiosity → Wonder → Awe",
+      "design_note": "This quest teaches tracking mechanics through discovery. The player should feel like a naturalist, not a hunter. The payoff is seeing the herd — a spectacle, not a kill."
+    },
+    {
+      "id": "QUEST_003_ResourceCache",
+      "title": "The Hidden Cache",
+      "type": "exploration",
+      "difficulty": "easy",
+      "location": { "x": 1800, "y": 2200, "z": 50 },
+      "trigger_actor": "QuestTrigger_ResourceCache_001",
+      "npc_giver": "NPC_Elder_QuestGiver_001",
+      "briefing": "Before the last storm, we hid a cache of tools and materials near the old fallen tree. The floods may have shifted things. Find what remains.",
+      "objectives": [
+        {
+          "id": "OBJ_003a",
+          "description": "Search the area near the fallen tree for hidden resources",
+          "type": "search",
+          "search_zone": "QuestTrigger_ResourceCache_001",
+          "target_actors": ["QuestObj_Rock_001", "QuestObj_Rock_002", "QuestObj_Rock_003", "QuestObj_Stick_001", "QuestObj_Stick_002"]
+        },
+        {
+          "id": "OBJ_003b",
+          "description": "Collect at least 2 rocks and 1 stick",
+          "type": "collect",
+          "requirements": { "QuestObj_Rock": 2, "QuestObj_Stick": 1 }
+        },
+        {
+          "id": "OBJ_003c",
+          "description": "Return to camp with the materials",
+          "type": "return",
+          "destination": "NPC_Elder_QuestGiver_001"
+        }
+      ],
+      "rewards": {
+        "resources": ["stone_axe_recipe", "fire_starter"],
+        "xp": 75,
+        "reputation": "Tribe +3"
+      },
+      "emotional_arc": "Uncertainty → Discovery → Satisfaction",
+      "design_note": "Tutorial-adjacent quest. Teaches resource pickup and return mechanics. The 'hidden cache' framing gives narrative reason for the player to explore a small area carefully."
+    }
+  ],
+  "npc_actors": [
+    {
+      "label": "NPC_Elder_QuestGiver_001",
+      "location": { "x": 2100, "y": 2350, "z": 100 },
+      "role": "Primary quest giver — tribal elder with survival knowledge",
+      "quests_given": ["QUEST_001_RaptorTrap", "QUEST_002_HerdTracking", "QUEST_003_ResourceCache"]
+    }
+  ],
+  "audio_assets": [
+    {
+      "quest_id": "QUEST_001_RaptorTrap",
+      "type": "npc_briefing",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783146924959_Elder_NPC_RaptorTrap_Quest.mp3",
+      "duration": "~18s"
+    },
+    {
+      "quest_id": "QUEST_002_HerdTracking",
+      "type": "npc_briefing",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783146946061_Elder_NPC_HerdTracking_Quest.mp3",
+      "duration": "~20s"
+    }
+  ]
+}
