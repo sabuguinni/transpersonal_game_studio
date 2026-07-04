@@ -1,0 +1,192 @@
+{
+  "dialogue_tree_id": "DIALOGUE_ELDER_NPC_001",
+  "npc_id": "Elder_NPC_Camp_001",
+  "npc_label": "Elder_NPC_Camp_001",
+  "world_position": {"x": 2050, "y": 2550, "z": 100},
+  "voice_lines": {
+    "greeting_first_meeting": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140727991_Elder_NPC_QuestBriefing_Migrat.mp3",
+      "text": "The great herd moves at dawn. You must reach the river crossing before the predators do. Gather your tools, mark the trail.",
+      "duration_s": 14,
+      "triggers_quest": "QUEST_MIGRATION_TRAIL_001"
+    },
+    "scout_warning": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140841103_Elder_NPC_ScoutWarning.mp3",
+      "text": "The scouts who went before you — three of them — did not return. We found only their tools, left at the river's edge. The great predator patrols that route now. It has learned our paths. You must go a different way, through the high grass where it cannot follow. But be quick. The herd will not wait.",
+      "duration_s": 20,
+      "condition": "quest_active AND player_near_river_crossing"
+    },
+    "herd_lore": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140857411_Elder_NPC_HerdLore.mp3",
+      "text": "Parasaurolophus. The crested ones. They call to each other across great distances — that hollow bone on their skull carries sound further than any drum we can make. When you hear that low, resonant call echoing through the valley, the herd is near. Follow the sound. But stay downwind. They spook easily, and a stampede in this terrain will kill you faster than any predator.",
+      "duration_s": 25,
+      "condition": "player_asks_about_herd OR first_parasaurolophus_spotted"
+    },
+    "river_crossing_update": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140747327_Elder_NPC_QuestUpdate_RiverCro.mp3",
+      "text": "You have reached the river crossing. The herd passed through here — look at the tracks in the mud, the broken reeds. They were here this morning.",
+      "duration_s": 15,
+      "condition": "player_at_Journal_Migration_003",
+      "trigger_type": "proximity_radio"
+    },
+    "quest_completion": {
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140852154_Elder_NPC_QuestCompletion.mp3",
+      "text": "You made it back. I did not dare hope. The others — we mourned them already. What you carry now is more than meat or hide. You carry proof that the trail can be walked again. Sit. Rest. Tomorrow we teach the young ones what you learned today.",
+      "duration_s": 17,
+      "condition": "quest_QUEST_MIGRATION_TRAIL_001 == COMPLETED",
+      "grants_reward": true
+    }
+  },
+  "conversation_tree": {
+    "root": {
+      "node_id": "ROOT",
+      "state_condition": "none",
+      "npc_line": "greeting_first_meeting",
+      "player_choices": [
+        {
+          "choice_id": "ACCEPT_QUEST",
+          "display_text": "[Accept] I will track the herd.",
+          "next_node": "QUEST_ACCEPTED",
+          "action": "start_quest:QUEST_MIGRATION_TRAIL_001"
+        },
+        {
+          "choice_id": "ASK_ABOUT_HERD",
+          "display_text": "[Ask] Tell me about the crested ones.",
+          "next_node": "HERD_LORE_NODE",
+          "action": null
+        },
+        {
+          "choice_id": "DECLINE",
+          "display_text": "[Decline] Not yet. I am not ready.",
+          "next_node": "DECLINE_NODE",
+          "action": null
+        }
+      ]
+    },
+    "HERD_LORE_NODE": {
+      "node_id": "HERD_LORE_NODE",
+      "npc_line": "herd_lore",
+      "player_choices": [
+        {
+          "choice_id": "ACCEPT_AFTER_LORE",
+          "display_text": "[Accept] I understand. I will go.",
+          "next_node": "QUEST_ACCEPTED",
+          "action": "start_quest:QUEST_MIGRATION_TRAIL_001"
+        },
+        {
+          "choice_id": "ASK_ABOUT_DANGER",
+          "display_text": "[Ask] What happened to the other scouts?",
+          "next_node": "SCOUT_WARNING_NODE",
+          "action": null
+        }
+      ]
+    },
+    "SCOUT_WARNING_NODE": {
+      "node_id": "SCOUT_WARNING_NODE",
+      "npc_line": "scout_warning",
+      "player_choices": [
+        {
+          "choice_id": "ACCEPT_KNOWING_RISK",
+          "display_text": "[Accept] I will be more careful than they were.",
+          "next_node": "QUEST_ACCEPTED",
+          "action": "start_quest:QUEST_MIGRATION_TRAIL_001"
+        },
+        {
+          "choice_id": "DECLINE_AFTER_WARNING",
+          "display_text": "[Decline] I need to prepare better first.",
+          "next_node": "DECLINE_NODE",
+          "action": null
+        }
+      ]
+    },
+    "QUEST_ACCEPTED": {
+      "node_id": "QUEST_ACCEPTED",
+      "npc_line": null,
+      "npc_text": "Go. The herd will not wait for the cautious.",
+      "player_choices": [],
+      "action": "close_dialogue"
+    },
+    "DECLINE_NODE": {
+      "node_id": "DECLINE_NODE",
+      "npc_line": null,
+      "npc_text": "Then come back when you are. The trail will still be there.",
+      "player_choices": [],
+      "action": "close_dialogue"
+    },
+    "COMPLETION_NODE": {
+      "node_id": "COMPLETION_NODE",
+      "state_condition": "quest_QUEST_MIGRATION_TRAIL_001 == COMPLETED",
+      "npc_line": "quest_completion",
+      "player_choices": [
+        {
+          "choice_id": "RECEIVE_REWARD",
+          "display_text": "[Accept] Thank you, Elder.",
+          "next_node": "POST_QUEST_NODE",
+          "action": "grant_reward:QUEST_MIGRATION_TRAIL_001"
+        }
+      ]
+    },
+    "POST_QUEST_NODE": {
+      "node_id": "POST_QUEST_NODE",
+      "npc_line": null,
+      "npc_text": "Rest now. Tomorrow there is more work.",
+      "player_choices": [],
+      "action": "close_dialogue"
+    }
+  },
+  "lore_journal_entries": {
+    "Journal_Migration_001": {
+      "title": "Departure Notes — Camp Edge",
+      "text": "The elder pointed south-east. Said the herd crossed three days ago, moving toward the river valley. The grass is tall enough to hide in. The predator's territory starts at the old dead tree — the one split by lightning two seasons past. I know the one.",
+      "discovery_condition": "player_within_50_units_of_Journal_Migration_001"
+    },
+    "Journal_Migration_002": {
+      "title": "High Grass Entry",
+      "text": "Tracks here. Deep impressions — three-toed, each print the length of my forearm. Not the crested ones. Something else passed through. The grass is bent in two directions. Two animals, moving fast. I will go around.",
+      "discovery_condition": "player_within_50_units_of_Journal_Migration_002"
+    },
+    "Journal_Migration_003": {
+      "title": "River Crossing — The Mud Tells Everything",
+      "text": "The river bank is churned. Hundreds of prints, overlapping. The herd crossed here — recently, the mud is still wet at the edges. I can see where the young ones struggled, the prints deeper and closer together. And there, at the water's edge: a drag mark. Something was taken. The predator was here too.",
+      "discovery_condition": "player_within_50_units_of_Journal_Migration_003"
+    },
+    "Journal_Migration_004": {
+      "title": "Hilltop Overlook — I Can See Them",
+      "text": "From here I can see the valley below. The herd is there — dozens of them, moving slowly, feeding. The crested ones make a sound I have never heard before, low and resonant, like the earth itself is speaking. The elder was right. Follow the sound. I understand now.",
+      "discovery_condition": "player_within_50_units_of_Journal_Migration_004"
+    },
+    "Journal_Migration_005": {
+      "title": "Trail End — The Destination",
+      "text": "I have marked the route. Five waypoints, three danger zones, two safe crossing points. The herd will return this way in the next dry season — the elder said they always do. We can prepare. We can be ready. The tribe will survive another year.",
+      "discovery_condition": "player_within_50_units_of_Journal_Migration_005"
+    }
+  },
+  "trex_lore": {
+    "title": "The Predator That Learned Our Paths",
+    "text": "The great predator — the one the elder calls 'the patient one' — has been hunting this valley for three seasons. It learned that scouts follow the river. It waits at the bend where the reeds are thick, where you cannot see until you are already too close. Two scouts lost. The elder changed the route. The predator adapted. We adapted again. This is the cycle.",
+    "referenced_actors": ["TRex_Savana_001"],
+    "danger_zone_radius_units": 800,
+    "danger_zone_center": {"x": 2900, "y": 2600, "z": 0}
+  },
+  "metadata": {
+    "created_cycle": "PROD_CYCLE_AUTO_20260704_004",
+    "agent": "Narrative_Agent_15",
+    "voice_lines_recorded": 5,
+    "journal_entries": 5,
+    "conversation_nodes": 7,
+    "quest_reference": "QUEST_MIGRATION_TRAIL_001",
+    "world_actors_referenced": [
+      "Elder_NPC_Camp_001",
+      "Journal_Migration_001",
+      "Journal_Migration_002",
+      "Journal_Migration_003",
+      "Journal_Migration_004",
+      "Journal_Migration_005",
+      "QuestMarker_Migration_001",
+      "QuestMarker_Migration_002",
+      "QuestMarker_Migration_003",
+      "QuestMarker_Migration_004",
+      "TRex_Savana_001"
+    ]
+  }
+}
