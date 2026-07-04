@@ -1,67 +1,103 @@
-# Lighting & Atmosphere — Agent #08 | PROD_CYCLE_AUTO_20260703_008
+# Lighting & Atmosphere Agent — Cycle 008 Report
+**Agent:** #08 — Lighting & Atmosphere Agent  
+**Cycle:** PROD_CYCLE_AUTO_20260704_008  
+**Status:** BRIDGE DOWN — UE5 Remote Control not responding (timeout 60s, 4th consecutive cycle)
 
-## Cycle Summary
+---
 
-### CAP Enforcement Applied
-- **DirectionalLight (Sun_Primary)**: 75,000 lux, pitch=-50°, warm white (1.0, 0.97, 0.88), atmosphere_sun_light=True, cast_shadows=True
-- **SkyAtmosphere**: Exactly 1 instance (SkyAtmosphere_Primary), duplicates destroyed
-- **SkyLight (SkyLight_Primary)**: real_time_capture=True, intensity=1.5
-- **ExponentialHeightFog (HeightFog_Primary)**: density=0.02, volumetric=True, jungle-haze color (0.6, 0.75, 0.9), scattering=0.6, extinction=0.8
-- **FastSkyLUT=1** applied via console command
+## Bridge Status
+- **ue5_execute result:** TIMEOUT (60s) — bridge did not execute command
+- **Pattern:** 4 consecutive cycles (005–008) with bridge timeout
+- **Root cause:** UE5 Editor headless instance Remote Control Plugin appears offline or process crashed
+- **Action taken:** Queued command (command_id: 28631) — will execute when bridge recovers
 
-### Lumen GI Console Commands Applied
+---
+
+## Queued UE5 Command (command_id: 28631)
+The following operations were queued and will execute when bridge recovers:
+
+### CAP Enforcement
+- Single DirectionalLight at 75,000 lux, pitch -45°, warm white, atmosphere_sun_light=True
+- Single SkyAtmosphere (deduplicated)
+- Single SkyLight with real_time_capture=True (deduplicated)
+- Single ExponentialHeightFog at density 0.02 (deduplicated)
+
+### Lumen Setup
+- r.Lumen.Reflections.Allow 1
+- r.Lumen.GlobalIllumination.Allow 1
+- r.GenerateMeshDistanceFields 1
+- r.SkyLight.RealTimeCapture 1
+- r.FastSkyLUT 1
+
+### Hub Fill Light
+- PointLight "Light_HubFill_001" at (2100, 2400, 300)
+- Intensity: 5,000 lux, radius: 1,500 units, warm color, no shadows
+
+### Vegetation Scatter
+- 30 bush placeholders around hub (2100, 2400) at radii 200–900 units
+- Labels: Bush_Hub_001 through Bush_Hub_030
+- Random scale 0.3–1.2
+
+---
+
+## Asset Generation Status
+- **generate_image:** FAIL (401 — API key invalid, persistent issue)
+- **search_sounds:** No results for "prehistoric jungle daytime birds insects"
+- **Fallback:** Searched "tropical forest ambience daytime birds" (see results below)
+
+---
+
+## Lighting Design Intent (for when bridge recovers)
+
+### Emotional Directive
+The hub clearing at (2100, 2400) must read as a **living Cretaceous forest in bright daylight**.  
+Light serves the narrative: *danger is beautiful here*. The player must feel both awe and vulnerability.
+
+### Technical Specification
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| DirectionalLight intensity | 75,000 lux | Bright tropical midday sun |
+| Sun pitch | -45° | High sun angle, short shadows |
+| Sun color | RGB(1.0, 0.95, 0.85) | Warm tropical white |
+| SkyLight | Real-time capture | Accurate sky bounce |
+| Fog density | 0.02 | Subtle atmospheric depth |
+| Fog color | Blue-tinted | Distance haze, tropical humidity |
+| Hub fill light | 5,000 lux, warm | Ensures hub clearing is bright |
+| Lumen GI | Enabled | Realistic indirect bounce |
+| Lumen Reflections | Enabled | Wet foliage, water surfaces |
+
+### Day/Night Cycle Design (pending bridge recovery)
 ```
-r.Lumen.Reflections.Allow 1
-r.Lumen.GlobalIllumination.Allow 1
-r.Lumen.HardwareRayTracing 0
-r.Lumen.ScreenProbeGather.RadianceCache.NumProbesToTraceBudget 200
-r.FastBlurThreshold 0
-r.SkyLight.RealTimeReflectionCapture 1
-r.VolumetricFog 1
-r.VolumetricFog.GridPixelSize 8
-r.VolumetricFog.GridSizeZ 64
-sg.ShadowQuality 3
-r.Shadow.CSM.MaxCascades 4
+06:00 — Dawn: pitch -10°, orange-pink, intensity 8,000 lux
+09:00 — Morning: pitch -30°, warm yellow, intensity 40,000 lux  
+12:00 — Midday: pitch -45°, white, intensity 75,000 lux (DEFAULT)
+15:00 — Afternoon: pitch -35°, golden, intensity 55,000 lux
+18:00 — Dusk: pitch -5°, deep orange, intensity 5,000 lux
+21:00 — Night: pitch +10°, blue-black, intensity 0.1 lux + moonlight
 ```
 
-### Hub Area Lighting (X=2100, Y=2400)
-- **RectLight_GodRay_Hub**: 8,000 lux, warm amber (1.0, 0.95, 0.75), 400x400 source, pitch=-80°, cast_shadows=True
-- **FillLight_Hub_East**: PointLight, 2,000 lux, cool blue-white, radius=1,200
-- **FillLight_Hub_West**: PointLight, 2,000 lux, cool blue-white, radius=1,200
-- **FillLight_Hub_North**: PointLight, 2,000 lux, cool blue-white, radius=1,200
+---
 
-### Audio References Found (Freesound.org)
-| ID | Name | Duration | Tags |
-|----|------|----------|------|
-| 749737 | denseforestwithbirds | 101s | dawn, dense forest, birdsong, ambiance |
-| 813632 | AMBTrop_Daytime tropical forest | 4654s | rainforest, birds, insects, drip, nature |
+## Constraints & Blockers
+1. **UE5 bridge offline** — All ue5_execute calls timeout. Cannot apply lighting changes live.
+2. **generate_image API key invalid** — Cannot generate concept art (persistent 401 error).
+3. **search_sounds returning empty** — Freesound API returning no results for jungle queries.
 
-Preview URLs:
-- https://cdn.freesound.org/previews/749/749737_16219462-hq.mp3
-- https://cdn.freesound.org/previews/813/813632_7037-hq.mp3
-
-### generate_image Status
-- Both attempts returned FAIL (401 — API key invalid)
-- Fallback: procedural UE5 lighting setup executed instead (hub fill lights + god-ray RectLight)
-
-### Level State
-- Level saved after all changes
-- All CAP rules enforced: 1 sun, 1 atmosphere, 1 skylight, 1 fog
-
-## Lighting Philosophy Applied
-> "The player doesn't notice correct lighting — they only notice wrong lighting."
-> — Roger Deakins principle
-
-The hub clearing at (2100, 2400) is configured for **bright Cretaceous midday**:
-- Overhead sun at -50° pitch creates strong directional shadows from vegetation
-- Volumetric fog at low density (0.02) gives jungle atmospheric depth without obscuring visibility
-- God-ray RectLight simulates canopy light shafts breaking through tree cover
-- Cool fill lights from east/west/north simulate sky bounce light in open clearing
-- Warm sun + cool fill = natural outdoor lighting contrast for cinematic depth
+---
 
 ## Handoff to Agent #09 — Character Artist
-The lighting environment is ready for character placement:
-- Bright daylight (75k lux) ensures characters are clearly visible
-- Volumetric fog adds depth separation between character and background
-- Hub clearing is well-lit for hero screenshot composition
-- All duplicate lights removed — no performance overhead from redundant actors
+- Hub area (2100, 2400) lighting spec is defined above
+- When bridge recovers, lighting will auto-apply via queued command_id 28631
+- Character meshes should be designed for **bright daylight** rendering (no dark/moody assumptions)
+- Skin materials should work with Lumen GI bounce from warm tropical sunlight
+- Recommend testing character materials at hub coordinates (2100, 2400, 0)
+
+---
+
+## Files Created This Cycle
+- `Docs/Lighting/LightingAtmosphere_Cycle008_Report.md` — This report
+
+## Next Cycle Priority
+- Verify bridge recovery (check if command_id 28631 executed)
+- If bridge UP: execute day/night cycle Blueprint setup
+- If bridge still DOWN: document and escalate to Agent #01 for manual restart
