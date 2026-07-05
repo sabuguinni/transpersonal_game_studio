@@ -1,0 +1,273 @@
+{
+  "vfx_system": {
+    "version": "1.0.0",
+    "agent": "VFX Agent #17",
+    "cycle": "PROD_CYCLE_AUTO_20260705_005",
+    "status": "DEGRADED_MODE — bridge DOWN, visual APIs DOWN",
+    "notes": "Bridge has been DOWN for 5 consecutive cycles. All VFX definitions documented here for when bridge comes back online."
+  },
+  "niagara_systems": [
+    {
+      "id": "NS_Fire_Campfire",
+      "category": "ENVIRONMENT",
+      "description": "Campfire flame with embers and smoke",
+      "spawn_rate": 120,
+      "lifetime_min": 0.5,
+      "lifetime_max": 1.2,
+      "velocity_z_min": 80,
+      "velocity_z_max": 200,
+      "color_gradient": ["#FF4500", "#FF8C00", "#FFD700", "#FFFFFF"],
+      "smoke_color": "#2A2A2A",
+      "ember_count": 15,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 1500, "spawn_rate_multiplier": 0.5},
+        {"distance": 4000, "spawn_rate_multiplier": 0.1}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Fire_Campfire"
+    },
+    {
+      "id": "NS_Dino_Footstep_TRex",
+      "category": "DINOSAUR",
+      "description": "T-Rex footstep dust cloud and ground impact",
+      "spawn_rate": 800,
+      "lifetime_min": 0.3,
+      "lifetime_max": 1.5,
+      "velocity_spread_radius": 120,
+      "velocity_z_min": 20,
+      "velocity_z_max": 80,
+      "color": "#8B7355",
+      "particle_size_min": 5,
+      "particle_size_max": 25,
+      "ground_crack_decal": true,
+      "screen_shake_radius": 2000,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 3000, "spawn_rate_multiplier": 0.4},
+        {"distance": 8000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Dino_Footstep_TRex"
+    },
+    {
+      "id": "NS_Dino_Footstep_Raptor",
+      "category": "DINOSAUR",
+      "description": "Raptor footstep — lighter dust puff",
+      "spawn_rate": 200,
+      "lifetime_min": 0.2,
+      "lifetime_max": 0.8,
+      "velocity_spread_radius": 40,
+      "velocity_z_min": 10,
+      "velocity_z_max": 40,
+      "color": "#A0896B",
+      "particle_size_min": 2,
+      "particle_size_max": 10,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 1500, "spawn_rate_multiplier": 0.3},
+        {"distance": 3000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Dino_Footstep_Raptor"
+    },
+    {
+      "id": "NS_Weather_Rain",
+      "category": "WEATHER",
+      "description": "Heavy rain with splashes",
+      "spawn_rate": 5000,
+      "lifetime_min": 0.4,
+      "lifetime_max": 0.8,
+      "velocity_z": -1200,
+      "velocity_x_wind": -80,
+      "color": "#B0C4DE",
+      "alpha": 0.4,
+      "splash_enabled": true,
+      "splash_radius": 8,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 2000, "spawn_rate_multiplier": 0.6},
+        {"distance": 5000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Weather_Rain"
+    },
+    {
+      "id": "NS_Weather_Fog",
+      "category": "WEATHER",
+      "description": "Ground-level volumetric fog wisps",
+      "spawn_rate": 5,
+      "lifetime_min": 8.0,
+      "lifetime_max": 20.0,
+      "velocity_x_drift": 15,
+      "velocity_z_rise": 5,
+      "color": "#C8D8E8",
+      "alpha_min": 0.05,
+      "alpha_max": 0.25,
+      "scale_min": 200,
+      "scale_max": 600,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 3000, "spawn_rate_multiplier": 0.5},
+        {"distance": 8000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Weather_Fog"
+    },
+    {
+      "id": "NS_Impact_BloodSplatter",
+      "category": "COMBAT",
+      "description": "Blood splatter on dinosaur hit",
+      "spawn_rate": 400,
+      "lifetime_min": 0.1,
+      "lifetime_max": 0.6,
+      "velocity_spread_radius": 200,
+      "color": "#8B0000",
+      "decal_enabled": true,
+      "decal_lifetime": 30.0,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 2000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Impact_BloodSplatter"
+    },
+    {
+      "id": "NS_Crafting_Sparks",
+      "category": "PLAYER",
+      "description": "Sparks when striking flint for fire-making",
+      "spawn_rate": 300,
+      "lifetime_min": 0.05,
+      "lifetime_max": 0.3,
+      "velocity_spread_radius": 60,
+      "velocity_z_min": 20,
+      "velocity_z_max": 100,
+      "color_gradient": ["#FFFFFF", "#FFD700", "#FF4500"],
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 800, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Crafting_Sparks"
+    },
+    {
+      "id": "NS_Volcano_Distant",
+      "category": "ENVIRONMENT",
+      "description": "Distant volcanic eruption — ash and ember particles",
+      "spawn_rate": 50,
+      "lifetime_min": 5.0,
+      "lifetime_max": 15.0,
+      "velocity_z_min": 200,
+      "velocity_z_max": 600,
+      "velocity_spread_radius": 300,
+      "color_gradient": ["#FF2200", "#FF6600", "#888888", "#333333"],
+      "scale_min": 30,
+      "scale_max": 100,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 15000, "spawn_rate_multiplier": 0.3},
+        {"distance": 30000, "spawn_rate_multiplier": 0.1}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Volcano_Distant"
+    },
+    {
+      "id": "NS_Water_Splash",
+      "category": "ENVIRONMENT",
+      "description": "Water splash when player or dino enters water",
+      "spawn_rate": 1200,
+      "lifetime_min": 0.3,
+      "lifetime_max": 1.0,
+      "velocity_spread_radius": 150,
+      "velocity_z_min": 50,
+      "velocity_z_max": 250,
+      "color": "#4FC3F7",
+      "alpha": 0.7,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 2000, "spawn_rate_multiplier": 0.3},
+        {"distance": 5000, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Water_Splash"
+    },
+    {
+      "id": "NS_Ambient_Insects",
+      "category": "ENVIRONMENT",
+      "description": "Ambient insect swarm particles near vegetation",
+      "spawn_rate": 20,
+      "lifetime_min": 3.0,
+      "lifetime_max": 8.0,
+      "velocity_drift_radius": 30,
+      "color": "#4A3728",
+      "scale_min": 0.5,
+      "scale_max": 1.5,
+      "lod_levels": [
+        {"distance": 0, "spawn_rate_multiplier": 1.0},
+        {"distance": 600, "spawn_rate_multiplier": 0.0}
+      ],
+      "ue5_asset_path": "/Game/VFX/Niagara/NS_Ambient_Insects"
+    }
+  ],
+  "materials": [
+    {
+      "id": "M_VFX_Fire",
+      "type": "Additive",
+      "texture": "T_Fire_Flipbook",
+      "emissive_intensity": 3.0,
+      "ue5_asset_path": "/Game/VFX/Materials/M_VFX_Fire"
+    },
+    {
+      "id": "M_VFX_Dust",
+      "type": "Translucent",
+      "texture": "T_Smoke_Wisp",
+      "opacity_multiplier": 0.6,
+      "ue5_asset_path": "/Game/VFX/Materials/M_VFX_Dust"
+    },
+    {
+      "id": "M_VFX_Blood",
+      "type": "Masked",
+      "texture": "T_Blood_Splat",
+      "ue5_asset_path": "/Game/VFX/Materials/M_VFX_Blood"
+    },
+    {
+      "id": "M_VFX_Rain",
+      "type": "Translucent",
+      "texture": "T_Raindrop_Streak",
+      "ue5_asset_path": "/Game/VFX/Materials/M_VFX_Rain"
+    }
+  ],
+  "vfx_spawn_rules": {
+    "campfire": {
+      "trigger": "player_places_campfire",
+      "effect": "NS_Fire_Campfire",
+      "attach_to": "campfire_actor",
+      "offset_z": 20
+    },
+    "trex_footstep": {
+      "trigger": "trex_foot_bone_ground_contact",
+      "effect": "NS_Dino_Footstep_TRex",
+      "attach_to": "world_at_foot_position",
+      "screen_shake": true,
+      "screen_shake_intensity": 0.8,
+      "screen_shake_falloff_distance": 2000
+    },
+    "raptor_footstep": {
+      "trigger": "raptor_foot_bone_ground_contact",
+      "effect": "NS_Dino_Footstep_Raptor",
+      "attach_to": "world_at_foot_position",
+      "screen_shake": false
+    },
+    "player_hit": {
+      "trigger": "player_receives_damage",
+      "effect": "NS_Impact_BloodSplatter",
+      "attach_to": "hit_location",
+      "min_damage_threshold": 5
+    },
+    "water_entry": {
+      "trigger": "actor_enters_water_volume",
+      "effect": "NS_Water_Splash",
+      "attach_to": "water_surface_at_entry",
+      "scale_by_actor_mass": true
+    }
+  },
+  "performance_budget": {
+    "max_active_niagara_systems": 32,
+    "max_particles_per_system": 2000,
+    "global_particle_budget": 15000,
+    "lod_bias_low_end_pc": 1.5,
+    "lod_bias_console": 2.0,
+    "cull_distance_global": 10000
+  }
+}
