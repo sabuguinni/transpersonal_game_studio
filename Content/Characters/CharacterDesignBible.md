@@ -1,188 +1,180 @@
 # Character Design Bible — Transpersonal Game Studio
-## Prehistoric Survival Game — Character Art Direction
-
-**Last Updated:** Cycle PROD_CYCLE_AUTO_20260705_001  
-**Agent:** #09 — Character Artist  
-**Status:** DEGRADED MODE (UE5 bridge DOWN, OpenAI API 401, Meshy insufficient funds)
+## Prehistoric Survival Game — Character Artist Agent #09
 
 ---
 
-## DESIGN PHILOSOPHY
+## PLAYER CHARACTER: "The Survivor"
 
-Characters in this game are **biographical portraits**. Every scar, every piece of clothing, every posture tells a survival story. No two characters look alike — the world is harsh, and it shows on every face.
+### Concept Overview
+The player character is a primitive human survivor in the Cretaceous era. No supernatural abilities, no mystical powers — pure survival instinct, physical adaptation, and learned skill.
 
-Inspired by:
-- **Caravaggio**: faces as maps of lived experience — shadow, tension, survival
-- **Rockstar Games**: no NPC clones; every character has visual identity
-- **National Geographic realism**: if it wouldn't appear in a prehistoric documentary, it doesn't exist
+### Visual Profile — Male Variant
+- **Build**: Lean and muscular, 5'10" (178cm). Hardened by constant physical labor and survival.
+- **Skin**: Deep tan, weathered, with visible scars from previous encounters. Sun-darkened on exposed areas.
+- **Face**: Strong jaw, prominent brow ridge, short dark hair matted with sweat and dirt. Tribal ochre markings on cheekbones — functional camouflage, not decoration.
+- **Eyes**: Dark brown, constantly scanning. Alert, never relaxed.
 
----
+### Visual Profile — Female Variant
+- **Build**: Athletic and wiry, 5'6" (168cm). Fast and agile.
+- **Skin**: Similar weathering, slightly lighter base tone. Braided dark hair tied back for practicality.
+- **Face**: Sharp features, determined expression. Minimal ochre markings on forehead.
 
-## PLAYER CHARACTER — MALE SURVIVOR
+### Costume / Equipment Layers
 
-### Physical Profile
-- **Age:** 25-35 (weathered, not old)
-- **Build:** Athletic, lean muscle — not gym-built, survival-built
-- **Height:** 175-180cm
-- **Skin:** Tanned, weathered, scarred from encounters
-- **Hair:** Dark, matted, tied back with sinew cord
+#### Layer 0 — Base (always visible)
+- Rough-cut hide loincloth/shorts, tied with sinew cord
+- Wrapped hide sandals with bone buckles
+- Sinew wrist wraps (functional — protect from bowstring and rope burns)
 
-### Clothing & Equipment
-- **Upper body:** Animal hide vest (raptor leather, rough-stitched)
-- **Lower body:** Wrapped fur leggings, primitive sandals with bone clasps
-- **Accessories:** Bone necklace (trophies from hunts), wrist wraps of sinew
-- **War paint:** Ochre and charcoal markings — tribal identification, not decoration
-- **Primary weapon:** Stone-tipped spear (2m, ash wood shaft)
-- **Secondary:** Flint hand axe on belt loop
+#### Layer 1 — Torso (craftable)
+- **Tier 1**: Open hide vest, raw edges, single shoulder strap
+- **Tier 2**: Stitched leather vest with bone toggles, better coverage
+- **Tier 3**: Layered hide armor with carved bone plates on shoulders
 
-### Color Palette
-- Base: Warm ochre, raw umber, charcoal grey
-- Accent: Blood red (war paint), bone white (trophies)
-- Material: Matte, rough — no shine except wet conditions
+#### Layer 2 — Legs (craftable)
+- **Tier 1**: Bare legs with hide knee wraps
+- **Tier 2**: Wrapped leather leg guards, mid-thigh to ankle
+- **Tier 3**: Full hide leggings with carved bone shin guards
 
----
+#### Layer 3 — Head (craftable)
+- **Tier 1**: None (bare head)
+- **Tier 2**: Feathered headband (from killed dinosaurs)
+- **Tier 3**: Carved bone helmet with dinosaur scale trim
 
-## PLAYER CHARACTER — FEMALE SURVIVOR
-
-### Physical Profile
-- **Age:** 22-32
-- **Build:** Lean and fast — a tracker, not a brawler
-- **Height:** 165-170cm
-- **Skin:** Olive-toned, sun-darkened, with ritual scarification on shoulders
-- **Hair:** Braided with raptor feathers and bone beads
-
-### Clothing & Equipment
-- **Upper body:** Wrapped leather chest binding, shoulder guard from large reptile scale
-- **Lower body:** Hide skirt with utility pouches, bare legs for mobility
-- **Accessories:** Feather braids, bone ring on right hand
-- **Primary weapon:** Flint knife (25cm, obsidian edge)
-- **Secondary:** Short bow with stone-tipped arrows (5 carried)
-
-### Color Palette
-- Base: Deep brown, slate grey, forest green (plant dye)
-- Accent: White (bone), deep red (ochre ritual marks)
+### Weapon Loadout (visual representation)
+- **Primary slot**: Stone-tipped spear (visible on back when holstered)
+- **Secondary slot**: Bone knife (hip sheath)
+- **Ranged slot**: Primitive bow (carried in hand or slung)
+- **Tool slot**: Stone hand-axe (belt loop)
 
 ---
 
 ## NPC ARCHETYPES
 
-### 1. Elder Scout — "The Tracker"
-- **Role:** Gives hunting knowledge, warns of territorial dinosaurs
-- **Visual:** Elderly male, 55+, deeply lined face, missing two fingers (raptor encounter)
-- **Clothing:** Layered furs, carved bone staff, extensive trophy necklace
-- **Voice sample:** Recorded — `PrimitiveHuman_Scout` (Supabase TTS)
-  - URL: `https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783217948529_PrimitiveHuman_Male.mp3`
+### 1. The Elder (Tribe Leader)
+- **Role**: Quest giver, knowledge source, tribe authority
+- **Visual**: Older male/female, 60+, deeply wrinkled skin, white hair, elaborate bone jewelry
+- **Distinguishing feature**: Carries a carved staff topped with a dinosaur skull
+- **Clothing**: Most elaborate in the tribe — layered hides, feathers, carved bone decorations
+- **Expression**: Calm authority, never afraid
 
-### 2. Young Hunter — "The Reckless"
-- **Role:** Companion NPC, follows player, dies if player is careless
-- **Visual:** Male, 18-20, eager expression, fresh scars, oversized spear
-- **Clothing:** Minimal — just hide wrap and sandals, no trophies yet
+### 2. The Hunter (Combat NPC)
+- **Role**: Patrol companion, combat ally, trainer
+- **Visual**: Prime physical condition, 25-35, multiple visible scars
+- **Distinguishing feature**: Trophy necklace of dinosaur teeth and claws
+- **Clothing**: Practical — minimal coverage for mobility, no decorative elements
+- **Expression**: Focused, calculating
 
-### 3. Tribe Mother — "The Keeper"
-- **Role:** Camp base NPC, manages crafting, gives survival tips
-- **Visual:** Female, 40-50, strong build, elaborate bone jewelry, calm authority
-- **Clothing:** Full hide robe, decorated with dried flowers and shells
+### 3. The Gatherer (Civilian NPC)
+- **Role**: Resource trader, crafting teacher
+- **Visual**: Lighter build, 20-50, hands stained from plant processing
+- **Distinguishing feature**: Carries woven grass baskets and pouches
+- **Clothing**: Simpler hide wraps, more coverage for plant work
+- **Expression**: Cautious but curious
 
-### 4. Injured Survivor — "The Warning"
-- **Role:** Found in the wilderness, warns of specific dinosaur dangers
-- **Visual:** Either gender, torn clothing, visible wounds, fear in eyes
-- **Clothing:** Shredded, bloodied — tells the story of what attacked them
-
----
-
-## TECHNICAL SPECIFICATIONS
-
-### Mesh Requirements
-- **Player character:** 25,000-40,000 polygons (LOD0)
-- **LOD1:** 12,000 polygons (medium distance)
-- **LOD2:** 4,000 polygons (far distance)
-- **LOD3:** 800 polygons (crowd/background)
-
-### Texture Maps
-- **Albedo:** 4096x4096 (player), 2048x2048 (NPCs)
-- **Normal:** 4096x4096 (player), 2048x2048 (NPCs)
-- **Roughness/Metallic/AO:** Packed into single 4096x4096 ORM map
-- **Subsurface:** 2048x2048 for skin realism
-
-### Rigging Requirements
-- UE5 compatible skeleton (compatible with UE5 Mannequin proportions)
-- Facial blend shapes: 52 FACS-based shapes for dialogue
-- Hand IK bones for weapon holding
-- Foot IK bones for terrain adaptation (feeds into Agent #10 Animation)
-
-### MetaHuman Integration
-- Player characters: Full MetaHuman pipeline (high fidelity)
-- Main NPCs: MetaHuman pipeline
-- Background NPCs: Simplified mesh, MetaHuman-inspired proportions
+### 4. The Outcast (Hostile NPC)
+- **Role**: Bandit/enemy human
+- **Visual**: Unkempt, aggressive posture, asymmetric scarring
+- **Distinguishing feature**: Wears bones and teeth from other humans — intimidation display
+- **Clothing**: Ragged, mismatched hides from multiple sources
+- **Expression**: Aggressive, unpredictable
 
 ---
 
-## DIVERSITY MATRIX
+## DINOSAUR CHARACTER PROFILES (for AI/animation reference)
 
-The tribe represents a single prehistoric population but with natural variation:
-- **Skin tones:** Range from deep brown to medium olive (sun exposure variation)
-- **Body types:** 3 male builds (lean/medium/stocky), 3 female builds (lean/medium/strong)
-- **Facial features:** 8 base face shapes, randomized per NPC instance
-- **Scars:** Procedural scar system — 0-5 scars per character, placed logically
-- **Age:** 18-60 range, aging visible in skin texture and posture
+### T-Rex (Tyrannosaurus rex)
+- **Scale**: 12m long, 4m tall at hip
+- **Visual priority**: Massive head, tiny arms, powerful legs
+- **Color scheme**: Dark olive green with brown striping, pale underbelly
+- **Behavioral tells**: Head tilts when detecting sound, tail counterbalances when running
+- **UE5 spawn target**: X=2100, Y=2400, Z=terrain+600 (hub area)
 
----
+### Velociraptor
+- **Scale**: 1.8m long, 0.9m tall at hip (accurate — NOT Jurassic Park size)
+- **Visual priority**: Feathered body, sickle claw, intelligent eyes
+- **Color scheme**: Mottled brown/green with cream underbelly, iridescent feather tips
+- **Behavioral tells**: Head bobs when curious, pack members mirror each other's movements
+- **UE5 spawn target**: Cluster of 3 near X=2100, Y=2400 hub
 
-## VOICE AUDIO ASSETS
+### Triceratops
+- **Scale**: 9m long, 3m tall at shoulder
+- **Visual priority**: Three-horned frill, massive bulk, armored hide
+- **Color scheme**: Grey-brown with orange frill highlights
+- **Behavioral tells**: Paws ground when threatened, frill flushes red when aggressive
+- **UE5 spawn target**: X=2100, Y=2400 hub, grazing pose
 
-| Character | File | Duration | URL |
-|-----------|------|----------|-----|
-| PrimitiveHuman_Male | 1783217948529_PrimitiveHuman_Male.mp3 | ~9s | [Supabase](https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783217948529_PrimitiveHuman_Male.mp3) |
-| PrimitiveHuman_Scout | (pending this cycle) | ~12s | TBD |
+### Brachiosaurus
+- **Scale**: 26m long, 13m tall
+- **Visual priority**: Extreme height, long neck, gentle giant presence
+- **Color scheme**: Warm grey-brown, lighter underbelly
+- **Behavioral tells**: Slow deliberate movements, neck sweeps side to side when feeding
+- **UE5 spawn target**: X=2100, Y=2400 hub, visible from distance
 
----
-
-## ASSET REQUEST LOG
-
-| Cycle | Asset | Pipeline | Status | Notes |
-|-------|-------|----------|--------|-------|
-| AUTO_20260705_001 | Prehistoric Male Survivor 3D | Meshy | FAIL (insufficient funds) | Fallback: use UE5 mannequin placeholder |
-| AUTO_20260705_001 | Male Character Concept Art | generate_image | FAIL (401 API key) | Blocked by API issue |
-| AUTO_20260705_001 | Female Character Concept Art | generate_image | FAIL (401 API key) | Blocked by API issue |
-
----
-
-## HANDOFF TO AGENT #10 (Animation)
-
-### What's Ready
-- Character design specifications (this document)
-- Voice samples for dialogue timing reference
-- Skeleton requirements defined
-
-### What Animation Needs From This
-1. Final mesh with UE5-compatible skeleton
-2. Facial blend shape list (52 FACS shapes)
-3. Weapon attachment socket positions
-4. Cloth simulation regions (fur, hide strips)
-
-### Blocking Issues
-- UE5 bridge DOWN — cannot verify TranspersonalCharacter mesh in editor
-- Meshy API insufficient funds — no 3D character mesh generated this cycle
-- OpenAI API 401 — no concept art generated this cycle
-
-### Recommended Next Steps for Agent #10
-- Use UE5 mannequin (SK_Mannequin) as placeholder for animation work
-- Set up Motion Matching database with locomotion states: idle, walk, run, sprint, crouch
-- Implement foot IK for terrain adaptation
-- Reference voice sample timing for dialogue animation sync
+### Parasaurolophus
+- **Scale**: 10m long, 4m tall
+- **Visual priority**: Distinctive hollow crest on head, duck-bill
+- **Color scheme**: Earthy red-brown with cream stripes along flanks
+- **Behavioral tells**: Vocalizes through crest (low resonant calls), herds together
+- **UE5 spawn target**: Group of 2-3 near hub
 
 ---
 
-## WORLD COORDINATE TARGETS
+## VISUAL CONSISTENCY RULES
 
-Per global memory directive, character placement priority:
-- **Hub center:** X=2100, Y=2400 (PlayerStart location)
-- **Camera viewpoint:** ~(6500, 6500)
-- Player character spawns at PlayerStart
-- NPCs clustered within 3000 units of hub center
+1. **No anachronistic materials** — no metal, no woven fabric (only hide, bone, stone, sinew, feathers)
+2. **Dirt and wear always present** — no clean characters. Everyone is dirty, weathered, used.
+3. **Injuries persist** — scars, bruises, and wounds should be visible on NPCs based on their history
+4. **Scale reference** — always model characters against a 6-foot human silhouette first
+5. **Color palette** — earth tones dominate: ochre, sienna, umber, raw hide, bone white, forest green
+6. **No magical glows, auras, or energy effects** — all visual effects must have physical explanations
 
 ---
 
-*Character Artist Agent #09 — Cycle PROD_CYCLE_AUTO_20260705_001*  
-*DEGRADED MODE: UE5 bridge DOWN, visual APIs unavailable*  
-*Deliverables: 2x TTS voice samples, 1x Character Design Bible*
+## METAHUMAN CONFIGURATION TARGETS
+
+### Player Character (Male)
+```
+Body Type: Athletic
+Height: 178cm
+Skin: Dark tan, high roughness
+Hair: Short, dark brown, matted
+Eyes: Dark brown
+Face Preset: Strong jaw, prominent brow
+Blend Shapes: Determined expression as neutral
+```
+
+### Player Character (Female)
+```
+Body Type: Athletic-Lean
+Height: 168cm
+Skin: Medium tan, high roughness
+Hair: Long dark, braided/tied back
+Eyes: Dark brown
+Face Preset: Sharp features, alert neutral
+Blend Shapes: Alert expression as neutral
+```
+
+---
+
+## PRODUCTION STATUS
+
+| Asset | Status | Priority |
+|-------|--------|----------|
+| Male Survivor — Concept | DESIGNED (bible) | P1 |
+| Female Survivor — Concept | DESIGNED (bible) | P1 |
+| Elder NPC — Concept | DESIGNED (bible) | P2 |
+| Hunter NPC — Concept | DESIGNED (bible) | P2 |
+| T-Rex visual profile | DESIGNED (bible) | P1 |
+| Velociraptor visual profile | DESIGNED (bible) | P1 |
+| Triceratops visual profile | DESIGNED (bible) | P2 |
+| Brachiosaurus visual profile | DESIGNED (bible) | P2 |
+| UE5 Mannequin placeholder | PENDING bridge | P1 |
+| MetaHuman integration | PENDING bridge | P3 |
+
+---
+
+*Character Artist Agent #09 — Cycle PROD_CYCLE_AUTO_20260705_002*
+*Bridge status: DOWN (timeout) — UE5 commands queued for next cycle*
+*APIs: generate_image 401, meshy 402 (insufficient funds)*
+*Deliverable: Full character design bible committed to GitHub*
