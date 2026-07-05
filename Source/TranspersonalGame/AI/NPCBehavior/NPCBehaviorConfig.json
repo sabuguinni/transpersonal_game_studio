@@ -1,0 +1,261 @@
+{
+  "npc_behavior_system": {
+    "version": "1.0.0",
+    "agent": "NPC_Behavior_Agent_11",
+    "cycle": "PROD_CYCLE_AUTO_20260705_001",
+    "description": "NPC Behavior configuration for prehistoric survival game — defines dinosaur and human NPC behavioral parameters"
+  },
+
+  "dinosaur_behaviors": {
+    "TRex": {
+      "label_prefix": "TRex_Savana",
+      "patrol_radius": 5000,
+      "detection_range": 3000,
+      "attack_range": 300,
+      "chase_speed": 1200,
+      "patrol_speed": 400,
+      "states": ["Idle", "Patrol", "Alert", "Chase", "Attack", "Retreat", "Feed"],
+      "behavior_tree": "BT_TRex_Predator",
+      "blackboard": "BB_TRex",
+      "sensory": {
+        "sight_range": 3000,
+        "sight_angle": 120,
+        "hearing_range": 1500,
+        "smell_range": 800,
+        "movement_detection_multiplier": 2.5
+      },
+      "daily_routine": {
+        "dawn": "Patrol",
+        "morning": "Hunt",
+        "midday": "Rest",
+        "afternoon": "Hunt",
+        "dusk": "Feed",
+        "night": "Rest"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 300,
+        "last_known_player_position": true,
+        "territory_anchor_point": true
+      },
+      "voice_lines": {
+        "idle": "tts/TRex_idle_roar.mp3",
+        "alert": "tts/TRex_alert_growl.mp3",
+        "attack": "tts/TRex_attack_roar.mp3"
+      }
+    },
+
+    "Raptor": {
+      "label_prefix": "Raptor_Floresta",
+      "patrol_radius": 2000,
+      "detection_range": 1800,
+      "attack_range": 150,
+      "chase_speed": 1800,
+      "patrol_speed": 600,
+      "pack_size_min": 2,
+      "pack_size_max": 5,
+      "pack_leader_role": true,
+      "states": ["Idle", "Patrol", "Alert", "FlankLeft", "FlankRight", "Attack", "CallPack", "Retreat"],
+      "behavior_tree": "BT_Raptor_PackHunter",
+      "blackboard": "BB_Raptor",
+      "sensory": {
+        "sight_range": 1800,
+        "sight_angle": 160,
+        "hearing_range": 2000,
+        "smell_range": 1200,
+        "movement_detection_multiplier": 3.0
+      },
+      "pack_coordination": {
+        "enabled": true,
+        "flanking_angle": 45,
+        "leader_signal_range": 3000,
+        "pack_scatter_on_leader_death": true,
+        "regroup_timer_seconds": 30
+      },
+      "daily_routine": {
+        "dawn": "Hunt",
+        "morning": "Hunt",
+        "midday": "Rest",
+        "afternoon": "Patrol",
+        "dusk": "Hunt",
+        "night": "Rest"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 180,
+        "last_known_player_position": true,
+        "pack_member_positions": true
+      }
+    },
+
+    "Triceratops": {
+      "label_prefix": "Trike_Planicie",
+      "patrol_radius": 3000,
+      "detection_range": 1200,
+      "attack_range": 250,
+      "charge_speed": 900,
+      "patrol_speed": 300,
+      "herd_size_min": 4,
+      "herd_size_max": 12,
+      "states": ["Graze", "Patrol", "Alert", "Charge", "Protect_Young", "Flee"],
+      "behavior_tree": "BT_Triceratops_Herd",
+      "blackboard": "BB_Triceratops",
+      "sensory": {
+        "sight_range": 1200,
+        "sight_angle": 200,
+        "hearing_range": 1000,
+        "smell_range": 600,
+        "movement_detection_multiplier": 1.5
+      },
+      "herd_behavior": {
+        "enabled": true,
+        "matriarch_leads": true,
+        "young_protected_in_center": true,
+        "alarm_call_radius": 2000,
+        "stampede_trigger_threat_count": 2
+      },
+      "daily_routine": {
+        "dawn": "Graze",
+        "morning": "Patrol",
+        "midday": "Graze",
+        "afternoon": "Graze",
+        "dusk": "Patrol",
+        "night": "Rest"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 600,
+        "territory_anchor_point": true
+      }
+    },
+
+    "Brachiosaurus": {
+      "label_prefix": "Brachi_Floresta",
+      "patrol_radius": 8000,
+      "detection_range": 800,
+      "attack_range": 500,
+      "patrol_speed": 250,
+      "states": ["Graze", "Migrate", "Alert", "Stomp"],
+      "behavior_tree": "BT_Brachiosaurus_Gentle",
+      "blackboard": "BB_Brachiosaurus",
+      "sensory": {
+        "sight_range": 800,
+        "sight_angle": 180,
+        "hearing_range": 500,
+        "smell_range": 300,
+        "movement_detection_multiplier": 0.8
+      },
+      "daily_routine": {
+        "dawn": "Migrate",
+        "morning": "Graze",
+        "midday": "Graze",
+        "afternoon": "Migrate",
+        "dusk": "Graze",
+        "night": "Rest"
+      },
+      "memory": {
+        "threat_memory_duration_seconds": 60,
+        "migration_waypoints": true
+      }
+    }
+  },
+
+  "human_npc_behaviors": {
+    "TribeMember": {
+      "label_prefix": "Tribe_Camp",
+      "states": ["Idle", "Work", "Gather", "Rest", "Flee", "Fight", "Trade"],
+      "behavior_tree": "BT_TribeMember_Daily",
+      "blackboard": "BB_TribeMember",
+      "daily_routine": {
+        "dawn": "Wake_Prepare",
+        "morning": "Gather_Resources",
+        "midday": "Work_Camp",
+        "afternoon": "Craft_Tools",
+        "dusk": "Return_Camp",
+        "night": "Rest_Guard"
+      },
+      "social": {
+        "fear_of_large_predators": true,
+        "flee_trigger_distance_trex": 4000,
+        "flee_trigger_distance_raptor": 2500,
+        "alert_other_npcs_on_threat": true,
+        "alert_radius": 3000
+      },
+      "memory": {
+        "known_safe_zones": true,
+        "known_danger_zones": true,
+        "player_reputation_tracking": true,
+        "threat_memory_duration_seconds": 900
+      },
+      "voice_lines": {
+        "greeting": "tts/TribeElder_greeting.mp3",
+        "warning": "tts/TribeElder_warning.mp3",
+        "flee": "tts/TribeElder_flee.mp3"
+      }
+    }
+  },
+
+  "behavior_tree_templates": {
+    "BT_TRex_Predator": {
+      "root": "Selector",
+      "children": [
+        {
+          "node": "Sequence_Attack",
+          "condition": "PlayerInAttackRange",
+          "tasks": ["FaceTarget", "PlayAttackAnim", "DealDamage"]
+        },
+        {
+          "node": "Sequence_Chase",
+          "condition": "PlayerInDetectionRange",
+          "tasks": ["MoveToPlayer", "PlayChaseAnim", "Roar"]
+        },
+        {
+          "node": "Sequence_Patrol",
+          "condition": "Default",
+          "tasks": ["MoveToNextWaypoint", "Wait_2s", "LookAround"]
+        }
+      ]
+    },
+    "BT_Raptor_PackHunter": {
+      "root": "Selector",
+      "children": [
+        {
+          "node": "Sequence_PackAttack",
+          "condition": "IsPackLeader AND PlayerVisible",
+          "tasks": ["SignalPack", "AssignFlankPositions", "CoordinatedAttack"]
+        },
+        {
+          "node": "Sequence_Flank",
+          "condition": "IsPackMember AND LeaderSignaled",
+          "tasks": ["MoveToFlankPosition", "WaitForSignal", "Attack"]
+        },
+        {
+          "node": "Sequence_Chase",
+          "condition": "PlayerInDetectionRange",
+          "tasks": ["CallPackLeader", "MoveToPlayer"]
+        },
+        {
+          "node": "Sequence_Patrol",
+          "condition": "Default",
+          "tasks": ["MoveToNextWaypoint", "Wait_1s"]
+        }
+      ]
+    }
+  },
+
+  "audio_assets": {
+    "SurvivalNarrator_TRex_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783218215033_SurvivalNarrator.mp3",
+    "TribeElder_raptor_tactics": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783218220339_TribeElder.mp3"
+  },
+
+  "integration_notes": {
+    "depends_on": ["Animation_Agent_10", "SharedTypes_h"],
+    "delivers_to": ["Combat_Enemy_AI_Agent_12"],
+    "ue5_classes_referenced": [
+      "ABehaviorTreeComponent",
+      "UBlackboardComponent",
+      "AAIController",
+      "UBrainComponent",
+      "UAIPerceptionComponent"
+    ],
+    "bridge_status": "DOWN — UE5 headless, ue5_execute unavailable this cycle",
+    "fallback": "Config-driven behavior definitions stored in JSON for Blueprint consumption"
+  }
+}
