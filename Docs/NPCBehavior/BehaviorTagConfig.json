@@ -1,0 +1,53 @@
+{
+  "_comment": "NPC Behavior Agent #11 - Cycle PROD_CYCLE_AUTO_20260709_009. Data-driven behavior tag config live on MinPlayableMap actors. Consumed by Combat & Enemy AI Agent #12 for Behavior Tree wiring.",
+  "species": {
+    "TRex": {
+      "behaviorTag": "AI_Behavior_TRex",
+      "type": "solitary_apex_predator",
+      "patrolRadius": 5000,
+      "chaseRadius": 3000,
+      "attackRadius": 300,
+      "chaseExitRadius": 3500,
+      "states": ["Patrol", "Chase", "Attack"],
+      "defaultState": "Patrol",
+      "transitions": [
+        { "from": "Patrol", "to": "Chase", "condition": "player_within_chaseRadius" },
+        { "from": "Chase", "to": "Attack", "condition": "player_within_attackRadius" },
+        { "from": "Attack", "to": "Chase", "condition": "player_beyond_attackRadius_plus_100" },
+        { "from": "Chase", "to": "Patrol", "condition": "player_beyond_chaseExitRadius" }
+      ],
+      "voiceCue": "TRex_Territorial_Roar"
+    },
+    "Raptor": {
+      "behaviorTag": "AI_Behavior_RaptorPack",
+      "type": "pack_predator",
+      "packId": 1,
+      "packRadius": 1500,
+      "roles": ["Alpha", "Member"],
+      "states": ["Patrol", "Converge", "Flank", "Attack"],
+      "defaultState": "Patrol",
+      "packRule": "Members converge toward Alpha target when Alpha transitions to Attack",
+      "voiceCue": "Raptor_Pack_Coordination_Call"
+    },
+    "Brachiosaurus": {
+      "behaviorTag": "AI_Behavior_Herbivore",
+      "type": "herbivore_flee",
+      "fleeRadius": 2000,
+      "states": ["Graze", "Flee"],
+      "defaultState": "Graze"
+    },
+    "Triceratops": {
+      "behaviorTag": "AI_Behavior_Herbivore",
+      "type": "herbivore_flee",
+      "fleeRadius": 2000,
+      "states": ["Graze", "Flee"],
+      "defaultState": "Graze"
+    }
+  },
+  "sharedLocomotionStates": ["Idle", "Walk", "Run", "Jump"],
+  "sharedLocomotionStatesSource": "Docs/Animation/LocomotionStateConfig.json (Animation Agent #10)",
+  "blockedDependency": "Skeletal mesh not yet imported - real movement/animation wiring pending, FSM logic is tag-based and state-only until then",
+  "appliedThisCycle": true,
+  "levelSaved": true,
+  "targetMap": "/Game/Maps/MinPlayableMap"
+}
