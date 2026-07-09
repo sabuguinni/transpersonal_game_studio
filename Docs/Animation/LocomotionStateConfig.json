@@ -1,0 +1,26 @@
+{
+  "_comment": "Animation Agent #10 — Cycle 009. Data-driven locomotion state config for TranspersonalCharacter. Consumed by NPC Behavior Agent (#11) for shared movement-state naming and by future AnimBlueprint once a skeletal mesh is imported. NOT a .cpp/.h file — config data only, safe under headless-editor rule.",
+  "character_class": "/Script/TranspersonalGame.TranspersonalCharacter",
+  "status": "BLOCKED_NO_SKELETAL_MESH",
+  "locomotion_states": [
+    { "state": "Idle",       "speed_min": 0.0,   "speed_max": 10.0,  "loop": true  },
+    { "state": "Walk",       "speed_min": 10.0,  "speed_max": 250.0, "loop": true  },
+    { "state": "Run",        "speed_min": 250.0, "speed_max": 600.0, "loop": true  },
+    { "state": "JumpStart",  "trigger": "OnJumpPressed",   "loop": false },
+    { "state": "JumpLoop",   "trigger": "IsFalling",       "loop": true  },
+    { "state": "JumpLand",   "trigger": "OnLanded",        "loop": false }
+  ],
+  "foot_ik": {
+    "enabled_once_rig_exists": true,
+    "trace_channel": "Visibility",
+    "trace_distance_cm": 50,
+    "reason": "MinPlayableMap terrain has hill height variation — feet will clip/float without IK once a skeletal mesh exists"
+  },
+  "hub_dinosaur_static_poses_applied_cycle_009": [
+    { "actor_pattern": "TRex_*",     "pitch": -6.0, "yaw_offset": 0.0,  "pose_intent": "alert stance" },
+    { "actor_pattern": "Raptor_*",   "pitch": 4.0,  "yaw_offset": 12.0, "pose_intent": "mid-stride lean" },
+    { "actor_pattern": "Brachio_*",  "pitch": 10.0, "yaw_offset": 0.0,  "pose_intent": "grazing head-down" },
+    { "actor_pattern": "Trike_*",    "pitch": -3.0, "yaw_offset": -8.0, "pose_intent": "alert turn" }
+  ],
+  "unblock_recommendation": "Import UE5 Third Person Template SKM_Manny/SKM_Quinn skeletal mesh + default AnimBlueprint into /Game/Characters/Mannequins/ to unblock Motion Matching, Blend Spaces, and Foot IK."
+}
