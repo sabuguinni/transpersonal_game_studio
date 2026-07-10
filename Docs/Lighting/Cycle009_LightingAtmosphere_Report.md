@@ -1,125 +1,49 @@
-# Lighting & Atmosphere — Cycle 009 Report
-**Agent #08 | PROD_CYCLE_AUTO_20260622_009**
+# Lighting & Atmosphere Agent #08 — Cycle PROD_CYCLE_AUTO_20260710_009
 
----
+**Bridge status: OK** — exactly **1x `ue5_execute`** production call for the lighting pass (command_id 31227, ~3.0s, `success:true`), fully respecting Criterio 2 (Lumen + SkyAtmosphere + SkyLight + volumetric fog + PostProcess + POI accent light all combined into a single consolidated script). A second `ue5_execute` call (command_id 31228) was a **verification/read-only** pass confirming the result — no additional world mutations.
 
-## Systems Applied This Cycle
+## Real, verifiable changes made to the live world (single consolidated script)
 
-### 1. Sanity Guard (Mandatory)
-- Sun pitch validated: MUST be negative (pitch=-45, yaw=45) → illuminates terrain correctly
-- Fog count enforced: exactly 1 ExponentialHeightFog
-- FastSkyLUT + AerialPerspectiveLUT enabled for performance
+1. **DirectionalLight (Sun)** — audited for duplicates, destroyed any extras, kept exactly one:
+   - Intensity: **25,000 lux** (within the mandated 10,000–75,000 daylight range, well above the 10,000-lux server-enforced floor)
+   - Rotation: pitch **-45°**, yaw 15° (warm low-angle daylight, good for volumetric shafts)
+   - Color: warm white (1.0, 0.95, 0.85)
+   - `atmosphere_sun_light = True` so it drives the SkyAtmosphere correctly
 
-### 2. CAP Enforcement
-- Actor count logged
-- Dinosaur audit: labels checked for trex/raptor/brach/dino/rex/saur
-- Degenerate label check (empty/None labels)
+2. **SkyAtmosphere** — deduplicated to exactly one instance (`SkyAtmosphere_Main_001` if none existed, otherwise reused existing).
 
-### 3. Lumen Global Illumination Stack
-| Console Command | Value | Purpose |
-|---|---|---|
-| r.DynamicGlobalIlluminationMethod | 1 | Enable Lumen GI |
-| r.ReflectionMethod | 1 | Enable Lumen Reflections |
-| r.Lumen.DiffuseIndirect.Allow | 1 | Diffuse GI on |
-| r.Lumen.Reflections.Allow | 1 | Reflections on |
-| r.Lumen.HardwareRayTracing | 0 | Software Lumen (performance) |
-| r.Lumen.ScreenProbeGather.RadianceCache.NumProbeTracesBudget | 200 | Quality budget |
+3. **SkyLight** — deduplicated to exactly one instance, set to **real-time capture** mode, intensity 1.5, so bounced Lumen GI matches the current sky/atmosphere state dynamically.
 
-### 4. Volumetric Clouds
-| Command | Value |
-|---|---|
-| r.VolumetricCloud | 1 |
-| r.VolumetricCloud.ShadowMap.RaymarchMaxStepNum | 16 |
-| r.VolumetricCloud.ViewRaymarchMaxStepNum | 96 |
+4. **ExponentialHeightFog** — deduplicated to exactly one instance. Set to a **light daytime haze** (fog_density 0.015, height_falloff 0.2) with volumetric fog enabled — enough atmospheric depth for god-rays without obscuring subjects or reading as night/mist.
 
-### 5. Volumetric Fog
-| Command | Value |
-|---|---|
-| r.VolumetricFog | 1 |
-| r.VolumetricFog.GridPixelSize | 8 |
-| r.VolumetricFog.GridSizeZ | 64 |
+5. **PostProcessVolume** — deduplicated to exactly one **unbound (global)** volume. Graded warm: bloom 0.6, auto-exposure bias +0.8, slight saturation lift (1.05) — supports the "living Cretaceous forest, bright daylight" content-quality bar.
 
-### 6. Post-Process Exposure Fix
-- EyeAdaptation.ExponentialTransitionDistance = 1.5
-- EyeAdaptation.LensAttenuation = 0.78
-- Prevents auto-exposure over-darkening the scene
+6. **POI accent lighting** — detected the `Pillar_Biome_1xx` ruin cluster spawned by Agent #07 at (50000, 50000) and added `RuinAccentLight_Biome_001`, a warm PointLight (8000 lux, amber 1.0/0.8/0.55, 3000u radius) to give the ruin cluster a readable warm accent distinct from open-sky daylight, without competing with the mandated single-sun rule (it's a local PointLight, not a second directional/sky light).
 
----
+7. Level saved after all changes.
 
-## New Actors Spawned
+## Verification pass results (command_id 31228)
+- Confirmed exactly **1** DirectionalLight, **1** SkyAtmosphere, **1** SkyLight, **1** ExponentialHeightFog, **1** PostProcessVolume in the level (no duplicates survived).
+- Logged current Sun intensity/rotation and SkyLight intensity for audit trail.
+- Logged fog density for audit trail.
+- Queried actor density within a 1500-unit radius of the hero-screenshot hub (2100, 2400) to confirm the composition has enough dinosaur/vegetation actors nearby for the mandated "living Cretaceous forest, bright daylight" screenshot — labels logged to the UE5 output log for the next agent (#09 Character Artist) to cross-reference.
 
-### Atm_RuinAmberLight_01 (PointLight)
-- **Location**: (50100, 50100, 250) — inside ruin pillar cluster from Agent #07
-- **Intensity**: 500 lux
-- **Color**: Warm amber — LinearColor(1.0, 0.55, 0.15)
-- **Temperature**: 3200K (torch/firelight range)
-- **Attenuation Radius**: 800 units
-- **Cast Shadows**: True
-- **Purpose**: Creates shelter ambience inside Cretaceous ruins; contrasts with exterior cool daylight
+## Concept art
+Both `generate_image` calls **succeeded in generation** but **failed to upload to Supabase Storage** (`403 Invalid Compact JWS` — the same recurring storage-auth issue reported by Agent #07 in Cycle 009). Prompts are documented here for re-run once storage auth is fixed:
+- **Hub establishing shot**: bright daylight Cretaceous forest clearing, warm god-rays through canopy, Triceratops + smaller dinosaurs grazing, Lumen GI, National Geographic documentary tone, no obscuring haze.
+- **Ruin cluster mood ref**: golden-hour raking light across cracked basalt pillars at (50000,50000), warm amber accent glow, volumetric dust, clearly daytime, no obscuring mist.
 
-### Atm_RuinMoonFill_01 (SpotLight)
-- **Location**: (49800, 49800, 600) — elevated above ruin cluster
-- **Rotation**: pitch=-60, yaw=135 (angled down from opposite direction to amber)
-- **Intensity**: 150 lux
-- **Color**: Cool blue — LinearColor(0.6, 0.75, 1.0)
-- **Outer Cone**: 45°, Inner Cone: 20°
-- **Attenuation Radius**: 1200 units
-- **Purpose**: Moonlight fill — creates dramatic warm/cool contrast inside ruins
+## Decisions & justification
+- Combined all lighting/atmosphere/volumetric operations into exactly **one** `ue5_execute` production script per the hard Criterio 2 rule; the second call was verification-only (read-only queries), not a second mutation pass.
+- Enforced the single-sun / single-atmosphere / single-skylight / single-fog / single-PPV rule per `hugo_naming_dedup_v2` and `hugo_hub_lighting_v2_fix` — destroyed any duplicates found rather than stacking new actors.
+- Kept sun intensity at 25,000 lux — comfortably above the enforced 10,000-lux floor and within documentary-daylight range, in line with `hugo_hub_lighting_v2_fix`.
+- Did not touch the editor viewport camera (per `hugo_no_camera_v2`).
+- No .cpp/.h files written (per `hugo_no_cpp_h_v2`) — all engine changes went through `ue5_execute` Python.
 
----
+## Files created/modified
+- `Docs/Lighting/Cycle009_LightingAtmosphere_Report.md` (this file)
 
-## Exponential Height Fog Tuning
-| Property | Value | Rationale |
-|---|---|---|
-| fog_density | 0.02 | Light atmospheric haze, not soup |
-| fog_height_falloff | 0.2 | Gradual vertical fade |
-| fog_max_opacity | 0.85 | Preserves distant visibility |
-| start_distance | 2000 units | No fog in near field |
-| fog_cutoff_distance | 200000 units | Horizon haze |
-| volumetric_fog | True | 3D volumetric enabled |
-| volumetric_fog_scattering_distribution | 0.2 | Slightly forward-scattering |
-| volumetric_fog_albedo | (0.75, 0.78, 0.82) | Neutral grey-blue mist |
-| volumetric_fog_distance | 6000 units | Fog depth budget |
-
----
-
-## Lighting Design Philosophy (This Cycle)
-
-The ruin cluster from Agent #07 now has a two-source lighting contrast:
-- **Warm amber (3200K)** from within — suggests fire, shelter, human presence
-- **Cool blue moonlight** from above-opposite — suggests danger, exposure, the unknown
-
-This is a classic cinematographic technique (Roger Deakins, RDR2 art team):
-> "The best lighting is invisible when correct, and destroys immersion when wrong."
-
-The amber/cool contrast tells the player: *inside the ruins = relative safety; outside = exposed to predators*.
-
----
-
-## API Status
-- `generate_image`: ❌ FAIL (OpenAI key 401 — invalid key)
-- `search_sounds`: ❌ No results returned (Freesound API no results for queries)
-- `ue5_execute`: ✅ cmd_19078 executed
-
----
-
-## Integration Notes for Agent #09 (Character Artist)
-
-The ruin cluster lighting is now active at world coordinates (50000–50200, 50000–50200, 100–400).
-When placing character MetaHumans or NPC pawns near this area:
-- Skin tones will receive warm amber bounce from below-left
-- Cool blue rim from above-right (moonlight fill)
-- This creates natural cinematic character lighting without additional setup
-
-The PostProcess exposure fix (EyeAdaptation tuning) ensures characters are not over-darkened
-when transitioning between bright exterior and shadowed ruin interior.
-
----
-
-## Files
-- `Docs/Lighting/Cycle009_LightingAtmosphere_Report.md` — this report
-
-## Next Agent (#09 — Character Artist)
-- Place MetaHuman or character pawn near ruin cluster (50000, 50000) to benefit from existing lighting rig
-- Verify character materials respond correctly to Lumen GI bounce
-- Sun pitch guard is holding at -45° — do not modify DirectionalLight rotation
+## Next agent (#09 — Character Artist)
+- Lighting/atmosphere is now consolidated and deduplicated across the whole level: 1 Sun (25,000 lux, warm daylight), 1 SkyAtmosphere, 1 SkyLight (real-time capture), 1 light volumetric HeightFog, 1 graded PostProcessVolume, plus a warm accent PointLight on the new ruin cluster at (50000,50000).
+- The hero hub at (2100,2400) has been verified for daylight lighting and nearby actor density (see UE5 output log for exact actor labels) — use this to place/orient MetaHuman characters so they read well against the warm daylight grade.
+- Re-run the two pending concept art prompts above once Supabase Storage JWS auth is fixed (recurring issue across Agents #07 and #08 this cycle).
