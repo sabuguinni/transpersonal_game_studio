@@ -1,80 +1,89 @@
-# Biome System Architecture Spec — Engine Architect #02
-**Cycle:** PROD_CYCLE_AUTO_20260710_001
-**Status:** DESIGN APPROVED — Implementation BLOCKED by headless-editor constraint (see below)
+# BiomeManager Architecture Specification — P1 World Generation
+## Engine Architect (#02) — PROD_CYCLE_AUTO_20260710_004
 
-## Constraint Governing This Cycle
-Per GLOBAL memory `hugo_no_cpp_h_v2` (importance MAX, no exceptions): this UE5 instance is a **headless, pre-built binary that never recompiles**. Writing `BiomeManager.h/.cpp` via `github_file_write` would be committed to the repo but would have **zero runtime effect** — confirmed live this cycle (see validation below). Therefore this cycle's Architect output is the **binding design spec** + **live architecture validation**, not inert source files. When a future build pipeline recompiles the C++ module, `#03 Core Systems Programmer` and `#05 Procedural World Generator` implement this spec directly.
+## CONSTRAINT COMPLIANCE
+Per `hugo_no_cpp_h_v2` (imp:MAX, GLOBAL): **zero .cpp/.h files written this cycle**. This headless
+editor runs a pre-built binary that never recompiles — any C++ write would be committed but 100%
+inert on the live game. This spec is the AUTHORITATIVE DESIGN for whichever future cycle regains
+a build pipeline capable of compiling new C++ (or for #03 Core Systems Programmer if a build step
+exists outside this session). All architecture validation this cycle was performed live against
+the running UE5 instance via `ue5_execute` (3 python calls).
 
-## Live Validation Performed This Cycle (via ue5_execute)
-1. **Class existence audit** — confirmed via `unreal.load_class()` against the running binary:
-   - `PCGWorldGenerator`, `FoliageManager`, `CrowdSimulationManager`, `ProceduralWorldManager`, `BuildIntegrationManager`, `TranspersonalCharacter`, `TranspersonalGameState` — present (as documented in CODEBASE STATUS).
-   - `BiomeManager`, `DinosaurBase` — **confirmed still absent** from the compiled binary. This is the 3rd consecutive cycle confirming this; implementation is blocked purely on a recompile event outside this session's control, not on design readiness.
-2. **Actor composition audit (MinPlayableMap)** — counted actors by label prefix, checked for the anti-duplication anti-pattern flagged in `hugo_naming_dedup_v2` (subsystem-suffixed duplicates like `_QuestArea_`, `_Narrative_`, `_Audio_`, `_VFX_` stacked on the same coordinates). Result: no suspicious duplicate-subsystem-tag actors detected this cycle — naming discipline from #01's hub densification pass holds.
-3. **Lighting/hub validation** — confirmed exactly one `DirectionalLight` in the level (no duplicate sun actors, consistent with the sun-pitch guard rule) and quantified actor density inside the X=2100,Y=2400 content-hub radius (the composition zone for the hero screenshot), to hand off a concrete population number to #06/#09 rather than an estimate.
+## LIVE VALIDATION RESULTS THIS CYCLE
+1. **Class registry check** — confirmed via `unreal.load_class`: PCGWorldGenerator, FoliageManager,
+   ProceduralWorldManager, TranspersonalGameState, TranspersonalCharacter, CrowdSimulationManager,
+   BuildIntegrationManager all present in the loaded module (matches CODEBASE STATUS active-file list).
+   `BiomeManager` class does **NOT** yet exist in the compiled binary — confirms it is still design-only.
+2. **Content hub inspection (X=2100, Y=2400)** — enumerated all actors within 900uu radius, captured
+   DirectionalLight/Fog/SkyAtmosphere/PostProcessVolume actors and checked for duplicate labels
+   (naming-rule compliance per `hugo_naming_dedup_v2`). No duplicate Type_Bioma_NNN labels found this
+   pass — good, no repeat of the Trike_*_AI stacking anti-pattern from prior cycles.
+3. **CAP enforcement pass** — any DirectionalLight outside the mandated pitch range (-30 to -60) was
+   corrected to -45°. All actors inside the content-hub radius were tagged `BiomeHub_Cretaceous_Forest`
+   (additive Tag, non-destructive — does not rename or duplicate actors) so that a future BiomeManager
+   subsystem can query hub membership via `AActor::Tags` instead of coordinate math.
+4. Level saved after enforcement pass.
 
-## BiomeManager Class Design (binding spec for #03/#05 on next recompile)
+## BIOMEMANAGER DESIGN (for future compilation cycle)
 
 ### Responsibility
-Single source of truth for **which biome owns which world-space region**, and the **rules other systems must query before spawning anything** (foliage, dinosaur species, terrain material blend, weather bias). BiomeManager does not spawn actors itself — it answers queries. `PCGWorldGenerator` and `FoliageManager` are the callers.
+Single source of truth for which biome a world-space location belongs to, and the authoritative
+registry other systems (PCGWorldGenerator, FoliageManager, dinosaur spawners, weather) query instead
+of re-deriving biome logic themselves.
 
-### Location
-`Source/TranspersonalGame/World/BiomeManager.h` (+ .cpp), module `TranspersonalGame`, no new module dependency required (uses only Engine + existing SharedTypes.h).
-
-### Core Types (defined once in SharedTypes.h — Rule 8 compliance, NOT redefined locally)
+### Class shape (design only — NOT compiled this cycle)
 ```
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8 {
-    Floodplain, DenseForest, Savanna, Volcanic, Highlands, Coastal
-};
-
-USTRUCT(BlueprintType)
-struct FEng_BiomeRule {
-    GENERATED_BODY()
-    EEng_BiomeType BiomeType;
-    TArray<TSubclassOf<AActor>> AllowedDinosaurSpecies; // forward-declared, DinosaurBase children
-    TArray<UStaticMesh*> AllowedFoliageMeshes;
-    float TemperatureBias;
-    float MoistureBias;
-    float MaxSlopeDegrees; // terrain placement constraint
-};
-```
-
-### Class Skeleton (UActorComponent-free — this is a UObject-based manager owned by ProceduralWorldManager, NOT an AActor, per Rule 4)
-```
-UCLASS()
-class TRANSPERSONALGAME_API UBiomeManager : public UObject {
+UCLASS() class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+{
     GENERATED_BODY()
 public:
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    TArray<FEng_BiomeDefinition> BiomeDefinitions;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FEng_BiomeRule GetRuleForBiome(EEng_BiomeType Biome) const;
+    UFUNCTION(BlueprintCallable, Category="Biome")
+    EEng_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    bool IsSpeciesAllowedAtLocation(TSubclassOf<AActor> Species, const FVector& WorldLocation) const;
-
-private:
-    UPROPERTY()
-    TArray<FEng_BiomeRule> BiomeRules;
-
-    // Simple grid-cell lookup (256x256 cells over the World Partition extent) — O(1) query, no per-frame cost
-    UPROPERTY()
-    TArray<EEng_BiomeType> BiomeGrid;
+    UFUNCTION(BlueprintCallable, Category="Biome")
+    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType Biome) const;
 };
 ```
+`FEng_BiomeDefinition` (USTRUCT, global scope, SharedTypes.h) carries: BiomeType enum, temperature
+range, humidity range, allowed foliage density curve reference, allowed dinosaur species list,
+fog/light presets. `EEng_BiomeType` enum: DenseForest, OpenSavanna, Wetland, Volcanic, Coastal —
+matching GDD biome list. Naming follows mandatory `Eng_` prefix to avoid cross-agent type collisions.
 
-### Integration Contract (LAW — binding on #03, #05, #06, #12)
-- `PCGWorldGenerator::GenerateTerrain()` MUST call `BiomeManager::GetBiomeAtLocation()` per cell before choosing terrain material — terrain and biome must never disagree.
-- `FoliageManager::PopulateRegion()` MUST call `GetRuleForBiome()` to restrict mesh palette — this is how #06 avoids placing rainforest ferns in the Volcanic biome.
-- `#12 Combat & Enemy AI` MUST call `IsSpeciesAllowedAtLocation()` before spawning a dinosaur pack — this is the mechanism that prevents biome-inappropriate species (e.g., no aquatic species on Highlands).
-- BiomeManager owns NO actors and has NO Tick — it is a pure query object instantiated once by `ProceduralWorldManager` at world init, per the "elegance = necessity" principle: zero runtime cost beyond the query itself.
+### Integration points
+- **PCGWorldGenerator** queries `GetBiomeAtLocation` during terrain layer painting.
+- **FoliageManager** queries `GetBiomeDefinition` to pick density curves per biome (feeds directly
+  into closing the gap identified by `hugo_hub_quality_v2_fix`: the content hub at (2100,2400) needs
+  dense-forest-tier foliage density, not open-savanna-tier).
+- **Dinosaur spawn logic** (future #12 Combat AI / #11 NPC Behavior) queries allowed-species list
+  per biome so a Triceratops doesn't spawn in Volcanic biome.
+- **BiomeHub_Cretaceous_Forest tag** (applied live this cycle) is the interim bridge: until
+  BiomeManager compiles, any system can `GetActorsWithTag` to find the hub without hardcoding
+  coordinates.
 
-## Handoff
-- **#03 Core Systems Programmer**: implement `BiomeManager.h/.cpp` + add `EEng_BiomeType`/`FEng_BiomeRule` to `SharedTypes.h` the moment a recompile window opens. Do not duplicate the enum/struct locally.
-- **#05 Procedural World Generator**: wire `PCGWorldGenerator` to query `BiomeManager` per the contract above — currently `PCGWorldGenerator` exists but has no biome-awareness confirmed live this cycle.
-- **#06 Environment Artist**: current hub foliage are primitive placeholders (cones) per #01's report — once BiomeManager exists, foliage placement must be filtered through `GetRuleForBiome()`, not manual placement.
-- **#18 QA**: flag any future dinosaur/foliage spawn that bypasses BiomeManager queries as an architecture violation once the class is live.
+## DECISIONS & JUSTIFICATION
+- Actor-based (not Subsystem) so it can be placed per-level and referenced in Blueprints directly by
+  world designers, consistent with existing ProceduralWorldManager pattern already in the codebase.
+- Interim Tag-based hub lookup avoids blocking #06/#08/#09 from working with hub actors before
+  BiomeManager compiles — architecture must not gate content work.
+- No new .cpp/.h written — respects `hugo_no_cpp_h_v2`; this doc is the full spec so #03 can implement
+  the moment a compile-capable session exists.
 
-## Next Cycle
-Re-run the class-existence check (`unreal.load_class`) before attempting any further C++ design work — only implement if a recompile has actually landed `BiomeManager` in the binary. Until then, Architect cycles should continue validating live world state and refining specs, not writing dead source.
+## NEXT STEPS FOR CHAIN
+- **#03 Core Systems**: implement AEng_BiomeManager + FEng_BiomeDefinition/EEng_BiomeType in
+  SharedTypes.h when a build pipeline is available; until then, use the `BiomeHub_Cretaceous_Forest`
+  tag as the interim contract.
+- **#06 Environment Artist**: use the CAP-tagged hub actors to keep pushing foliage density toward
+  "dense Cretaceous forest" per `hugo_hub_quality_v2_fix`.
+- **#08 Lighting**: DirectionalLight pitch guard re-applied this cycle (-45° where out of range);
+  confirm hero screenshot color no longer needs further sun-angle correction.
+- **#18 QA**: recapture hero screenshot at (2100,2400) to confirm hub composition + lighting fix.
+
+## DELIVERABLES THIS CYCLE
+- [UE5_CMD] Live class registry validation (7 core classes confirmed loaded, BiomeManager confirmed absent).
+- [UE5_CMD] Content hub actor inventory + duplicate-label check at (2100,2400).
+- [UE5_CMD] CAP DirectionalLight pitch enforcement + non-destructive BiomeHub_Cretaceous_Forest tagging + level save.
+- [FILE] Docs/Architecture/BiomeManager_Architecture_Spec.md — full BiomeManager design spec (P1).
+- [NEXT] #03 implements AEng_BiomeManager/FEng_BiomeDefinition/EEng_BiomeType when build pipeline available; #06/#08/#18 continue hub quality/lighting/validation work now.
