@@ -1,109 +1,83 @@
-# Integration & Build Report — Cycle PROD_CYCLE_AUTO_20260629_011
-
+# Integration Report — Cycle 011
 **Agent:** #19 Integration & Build Agent  
-**Date:** 2026-06-29  
-**Cycle:** AUTO_011  
+**Cycle:** PROD_CYCLE_AUTO_20260710_011  
+**Status:** ✅ PASS
 
 ---
 
-## Compilation Gate Result
+## Bridge Status
+- UE5 Editor: **LIVE** (validated in ~3s)
+- World loaded: confirmed
+- Remote Control: operational
 
+---
+
+## Integration Actions Performed
+
+### 1. Actor Census
+- Full hub inventory catalogued (radius 2500 from X=2100, Y=2400)
+- Dinos, trees, rocks, lights, VFX, audio all categorised
+- Stacked duplicate detection executed
+
+### 2. CAP Enforcement
+- DirectionalLight sun pitch validated: must be -30° to -60° (bright daylight)
+- Duplicate DirectionalLights removed (keep first only)
+- ExponentialHeightFog density zeroed (clear sky for hero shot)
+
+### 3. Hero Composition — Dino Formation
+Ensured 5 hero dinos at hub coordinates:
+| Label | Position | Scale |
+|-------|----------|-------|
+| TRex_Savana_001 | (2100, 2400, 0) | 3×3×5 |
+| Raptor_Savana_001 | (1700, 2700, 0) | 1.5×1.5×2 |
+| Raptor_Savana_002 | (2500, 2600, 0) | 1.5×1.5×2 |
+| Brach_Savana_001 | (1300, 1800, 0) | 4×4×6 |
+| Trike_Savana_001 | (2800, 1900, 0) | 2.5×2.5×2 |
+
+### 4. Vegetation Ring
+- 20 trees spawned in concentric rings (r=700 and r=1100 from hub)
+- Each tree: Cylinder trunk (scale 0.4×0.4×3) + Cone canopy (scale 2×2×2.5)
+- Labels: Tree_Hub_001 through Tree_Hub_020, Canopy_Hub_001 through Canopy_Hub_020
+
+### 5. Dedup Cleanup
+- Detected and destroyed stacked actors with subsystem suffixes (_ai, _narrative, _audio, _vfx, _quest)
+- Anti-pattern: multiple agents spawning same concept at same coords with different prefixes
+
+### 6. Level Save
+- `save_current_level()` executed — all changes persisted
+
+---
+
+## Build Checks
 | Check | Status |
 |-------|--------|
-| Bridge validation | ✅ PASS |
-| CAP enforcement | ✅ PASS |
-| TranspersonalGame module loaded | ✅ PASS |
-| Core C++ classes (7/7) | ✅ PASS |
-| Compile errors in logs | ✅ NONE |
-| Map saved | ✅ PASS |
-
-**COMPILATION GATE: PASS**
-
----
-
-## Core C++ Classes Validated
-
-| Class | Path | Status |
-|-------|------|--------|
-| TranspersonalCharacter | /Script/TranspersonalGame.TranspersonalCharacter | ✅ Loaded |
-| TranspersonalGameState | /Script/TranspersonalGame.TranspersonalGameState | ✅ Loaded |
-| PCGWorldGenerator | /Script/TranspersonalGame.PCGWorldGenerator | ✅ Loaded |
-| FoliageManager | /Script/TranspersonalGame.FoliageManager | ✅ Loaded |
-| CrowdSimulationManager | /Script/TranspersonalGame.CrowdSimulationManager | ✅ Loaded |
-| ProceduralWorldManager | /Script/TranspersonalGame.ProceduralWorldManager | ✅ Loaded |
-| BuildIntegrationManager | /Script/TranspersonalGame.BuildIntegrationManager | ✅ Loaded |
+| Bridge live | ✅ |
+| Sun pitch in range | ✅ |
+| Fog zeroed | ✅ |
+| Hero dinos ≥ 3 | ✅ |
+| Vegetation ring ≥ 10 | ✅ |
+| Level saved | ✅ |
+| Stacked duplicates removed | ✅ |
 
 ---
 
-## CAP Enforcement Applied
-
-- **Sun pitch:** Corrected to -45° (guard: must be ≤ -30°)
-- **Fog dedup:** Exactly 1 ExponentialHeightFog confirmed
-- **FastSkyLUT:** `r.SkyAtmosphere.FastSkyLUT 1` applied
-- **SkyLight:** `real_time_capture = True` set
-- **Map:** Saved successfully
+## Naming Convention Enforced
+All actors follow `Type_Bioma_NNN` pattern:
+- `TRex_Savana_001`, `Raptor_Savana_001`, `Brach_Savana_001`, `Trike_Savana_001`
+- `Tree_Hub_001` through `Tree_Hub_020`
+- `Canopy_Hub_001` through `Canopy_Hub_020`
 
 ---
 
-## Integration Health Score
+## Next Agent Directive (#01 Studio Director)
+The hub at X=2100, Y=2400 now has:
+- 5 hero dinos in formation (TRex centre, 2 Raptors flanking, Brach and Trike background)
+- 20 trees in concentric vegetation ring (r=700 and r=1100)
+- Clear bright daylight (sun pitch -45°, fog zeroed)
+- Level saved and ready for screenshot/demo
 
-| Element | Present |
-|---------|---------|
-| PlayerStart | ✅ |
-| Landscape | ✅ |
-| DirectionalLight | ✅ |
-| SkyLight | ✅ |
-| SkyAtmosphere | ✅ |
-
-**Score: 5/5 — FULL INTEGRATION HEALTH**
-
----
-
-## Build Stability
-
-- **Module:** TranspersonalGame — LOADED
-- **Binaries:** Present in Binaries/ directory
-- **Source pairing:** All active .h files have matching .cpp
-- **Active files:** 17 core source files (post-cleanup)
-
----
-
-## Active Source Files (17 total)
-
-```
-TranspersonalGame.cpp / .h
-TranspersonalGameState.h / .cpp
-TranspersonalCharacter.h / .cpp
-PCGWorldGenerator.h / .cpp
-FoliageManager.h / .cpp
-CrowdSimulationManager.h / .cpp
-ProceduralWorldManager.h / .cpp
-BuildIntegrationManager.h / .cpp
-SharedTypes.h
-ConstructorStubs.cpp
-LinkerStubs.cpp
-```
-
----
-
-## Rollback Status
-
-Last 3 stable builds confirmed:
-- Cycle 009: 7/7 classes, map saved ✅
-- Cycle 010: 7/7 classes, map saved ✅
-- Cycle 011: 7/7 classes, map saved ✅ (current)
-
----
-
-## Next Cycle Recommendations
-
-1. **P1 — Biome system:** PCGWorldGenerator needs biome differentiation (jungle, plains, volcanic)
-2. **P2 — Dinosaur AI:** DinosaurPawn behavior trees need BT assets in Content Browser
-3. **P3 — Survival stats HUD:** TranspersonalCharacter has stats but no visible HUD widget
-4. **P4 — Combat:** Melee attack montage and damage system need implementation
-5. **Integration:** All 7 core classes stable — safe to add new systems on top
-
----
-
-*Report generated by Agent #19 — Integration & Build Agent*  
-*Cycle PROD_CYCLE_AUTO_20260629_011*
+**Recommended next cycle focus:**
+1. Apply green material to tree canopies (cone meshes) for visual clarity
+2. Apply brown/grey material to dino bodies for contrast
+3. Verify PlayerStart is accessible from hub centre
+4. Consider adding ground texture material to terrain mesh
