@@ -1,80 +1,101 @@
-# Biome System Architecture — Engine Architect Spec (P1 World Generation)
+# Biome System Architecture — P1 World Generation
 
-## Status Note (Critical Constraint)
-Per accumulated studio memory (imp:20, hugo_no_cpp_h_v2): this headless UE5 instance runs a
-**pre-built binary that never recompiles**. Writing new .cpp/.h files to the repo has ZERO
-effect on the live editor — there is no UBT recompile step in this environment. All 218
-prior UHT compile errors on record confirm this. Therefore this cycle's BiomeManager work is
-delivered as an **architecture specification** (this document) rather than dead C++ source,
-to avoid wasting execution budget on inert files. When a real engine rebuild pipeline exists,
-this spec becomes the direct implementation guide for Core Systems Programmer (#03).
+**Author:** Engine Architect (#02)
+**Cycle:** PROD_CYCLE_AUTO_20260710_006
+**Status:** DESIGN SPEC — NOT YET COMPILED INTO BINARY
 
-## Purpose
-Defines how EBiomeType (already declared in SharedTypes.h) drives terrain generation,
-foliage density, dinosaur spawn tables, weather probability, and temperature ranges across
-the game world. This is the missing link between PCGWorldGenerator (terrain shape) and
-FoliageManager/CrowdSimulationManager (population).
+## Critical Constraint (read first)
 
-## Class: UBiomeManager (UObject, World Subsystem)
-Location (future): Source/TranspersonalGame/World/BiomeManager.h/.cpp
-Base: UWorldSubsystem (persists per-world, accessible via GetWorld()->GetSubsystem<UBiomeManager>())
+This project's UE5 Editor runs a **pre-built, non-recompiling binary**. Live validation this
+cycle confirms `unreal.load_class(None, '/Script/TranspersonalGame.BiomeManager')` still returns
+**NULL** — there is no `BiomeManager` class in the running binary, and per the absolute studio
+rule `hugo_no_cpp_h_v2` I do NOT write `.h`/`.cpp` files, since they would be committed but never
+compiled or executed. This document is therefore the **architecture contract**: it defines the
+class shape, ownership, and integration points that whichever pipeline eventually rebuilds the
+binary (or a future non-headless build) must implement in `Source/TranspersonalGame/World/`.
 
-### Responsibilities
-1. Own a TMap<EBiomeType, FEng_BiomeProfile> registry (one profile per biome).
-2. Given a world-space FVector2D, return the dominant EBiomeType (blended via noise mask
-   supplied by PCGWorldGenerator — this class does NOT generate noise itself, it consumes it).
-3. Expose BlueprintCallable queries: GetBiomeAtLocation(FVector), GetBiomeProfile(EBiomeType),
-   GetDinosaurSpawnTableForBiome(EBiomeType), GetFoliageDensityForBiome(EBiomeType).
-4. Broadcast a multicast delegate OnBiomeTransition(EBiomeType Old, EBiomeType New) so the
-   Lighting Agent (#08) and Audio Agent (#16) can react (fog color, ambient loop swap).
+Confirmed LOADED in the current binary (validated via `unreal.load_class` this cycle):
+`TranspersonalGameState`, `TranspersonalCharacter`, `PCGWorldGenerator`, `FoliageManager`,
+`CrowdSimulationManager`, `ProceduralWorldManager`, `BuildIntegrationManager`.
+Confirmed **NULL** (not in binary): `BiomeManager`.
 
-### Struct: FEng_BiomeProfile (USTRUCT, global scope, BiomeManager.h)
-- EBiomeType BiomeType
-- float FoliageDensityMultiplier (0.0–2.0)
-- float TemperatureRangeMinC, TemperatureRangeMaxC
-- TArray<EDinosaurSpecies> AllowedSpecies
-- TArray<EWeatherType> PossibleWeather (weighted via parallel TArray<float> Weights)
-- FLinearColor FogTint (feeds ExponentialHeightFog::InscatteringColor per-biome)
-- float HeightVariationScale (feeds PCGWorldGenerator amplitude for this biome's cells)
+## Architectural Placement
 
-### Integration Contract (enforced rule for #03/#05/#06/#08)
-- PCGWorldGenerator MUST call BiomeManager::GetBiomeProfile() to fetch
-  HeightVariationScale BEFORE sculpting terrain per-cell — no biome-specific magic numbers
-  hardcoded in the generator.
-- FoliageManager MUST multiply base foliage density by BiomeManager's
-  FoliageDensityMultiplier for the biome at each spawn point.
-- CrowdSimulationManager / dinosaur spawners MUST filter spawn candidates through
-  AllowedSpecies for the biome at the target location — no TRex spawns in Swampland-only
-  zones, no Ankylosaurus in Desert, etc. (ecological realism per anti-hallucination rule).
-- Lighting Agent (#08) subscribes to OnBiomeTransition to blend directional light color
-  temperature and fog tint smoothly across biome boundaries (no hard cuts).
+`ABiomeManager` is a **World Subsystem-adjacent singleton actor** (not a UWorldSubsystem, to stay
+consistent with the existing pattern used by `PCGWorldGenerator`/`ProceduralWorldManager`, which
+are actors placed once per level and referenced by raw pointer per Dashboard Rule #2). It lives in
+`Source/TranspersonalGame/World/BiomeManager.h/.cpp` and is owned by `ProceduralWorldManager`.
 
-### Default Biome Table (7 biomes, matches EBiomeType exactly — no new enum values needed)
-| Biome        | Foliage Density | Temp Range (°C) | Species (subset)                          |
-|--------------|-----------------|------------------|--------------------------------------------|
-| Swampland    | 1.6x            | 22–32            | Ankylosaurus, Parasaurolophus, Compsognathus|
-| Forest       | 1.8x            | 15–28            | Velociraptor, Triceratops, Stegosaurus      |
-| Savanna      | 0.6x            | 20–38            | TyrannosaurusRex, Triceratops, Brachiosaurus|
-| Desert       | 0.15x           | 10–45            | Compsognathus, Pteranodon                   |
-| Mountains    | 0.4x            | -5–18            | Pteranodon, Allosaurus                      |
-| RiverValley  | 1.4x            | 18–30            | Brachiosaurus, Parasaurolophus              |
-| Coastline    | 0.8x            | 16–26            | Pteranodon, Compsognathus                   |
+```
+ProceduralWorldManager (existing, LOADED)
+   └── BiomeManager (new, spec only)
+          ├── reads: PCGWorldGenerator height/moisture/temperature maps
+          ├── writes: per-tile FEng_BiomeSample results
+          └── feeds: FoliageManager (existing, LOADED) density multipliers
+```
 
-## Validation Performed This Cycle (Live Engine, Remote Control)
-1. Confirmed editor world is loaded and reachable (MinPlayableMap active).
-2. Confirmed core compiled classes remain discoverable via unreal.load_class:
-   TranspersonalGameState, TranspersonalCharacter, PCGWorldGenerator, FoliageManager,
-   CrowdSimulationManager, ProceduralWorldManager, BuildIntegrationManager.
-3. Confirmed BiomeManager class is NOT yet in the compiled binary (expected — this is a
-   spec-only cycle since no recompile path exists).
-4. Confirmed PostProcessVolume settings in the hub area reflect the neutral color-grade fix
-   applied by the previous agent (no regression detected this cycle).
-5. Traced terrain height at the hub coordinate (X=2100, Y=2400) to confirm real height
-   variation exists under the PlayerStart clearing (not a flat plane).
+## Data Contract (SharedTypes.h — to be added, not written this cycle)
 
-## Handoff to #03 (Core Systems Programmer)
-When a real compile pipeline is available, implement UBiomeManager exactly per this spec.
-Until then, #05/#06/#08 should treat the Default Biome Table above as the source of truth
-for manually tuning per-region PCG parameters, foliage spawn density, and fog/light color
-via Python/Remote Control against the existing compiled subsystems — no blocked waiting on
-this class.
+```cpp
+// Would live in SharedTypes.h under "Eng_" prefix per project convention
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Floodplain,
+    Woodland,
+    Savanna,
+    Highland,
+    Riverine,
+    Volcanic,
+    Coastal
+};
+
+USTRUCT(BlueprintType)
+struct FEng_BiomeSample
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Woodland;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    float Temperature = 20.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    float Moisture = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    float Elevation = 0.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
+    float FoliageDensityMultiplier = 1.f;
+};
+```
+
+## Rules Enforced On Downstream Agents
+
+1. Biome classification MUST derive purely from height/moisture/temperature (Whittaker-style
+   diagram) — no scripted "zones", so world regen stays procedural and seed-driven.
+2. `FoliageManager` (existing, LOADED) must query `BiomeManager::GetBiomeSample(WorldPos)` before
+   placing vegetation — density and species tables vary per biome, never hardcoded per-tile.
+3. Dinosaur species spawn tables (owned by #12 Combat/#11 NPC agents) must be biome-gated through
+   this same sample struct — e.g., Brachiosaurus favors Floodplain/Riverine, Raptors favor
+   Woodland/Savanna edge zones — to keep ecology plausible (National-Geographic test).
+4. No biome may be purely decorative fog/mysticism — every biome must affect gameplay stats
+   (temperature affects TranspersonalCharacter thirst/temperature stat, per existing 38-property
+   character class).
+
+## Content Hub Validation (hugo_hub_quality_v2_fix)
+
+Live actor-location audit this cycle scanned all level actors within 1500uu of the mandated hero
+composition coordinate (X=2100, Y=2400). This is the single-PlayerStart clearing that must read as
+a living Cretaceous forest (dense vegetation + posed dinosaurs, bright daylight) for the hero
+screenshot. Result data was written to `/tmp/ue5_result_enginearchitect.txt` and echoed to the UE5
+log this cycle for the Reflection Agent / QA to cross-check actor density and labeling compliance
+with `Type_Bioma_NNN` naming (per `hugo_naming_dedup_v2`). No new actors were spawned this cycle —
+this was a read-only architecture audit, per my role as Engine Architect (I do not populate biomes;
+that is #05 Procedural World Generator / #06 Environment Artist's mandate, gated on this spec).
+
+## Handoff
+
+- **#03 Core Systems Programmer**: needs the `FEng_BiomeSample` struct in SharedTypes.h before any
+  new gameplay code that reads temperature/moisture.
+- **#05 Procedural World Generator**: implements `ABiomeManager::GetBiomeSample()` sampling logic
+  against `PCGWorldGenerator`'s existing height/moisture maps.
+- **#06 Environment Artist**: consumes `FoliageDensityMultiplier` per biome for the hub clearing
+  vegetation density fix.
