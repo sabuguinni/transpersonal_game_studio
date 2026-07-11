@@ -1,43 +1,72 @@
-# T-Rex Behavior Design (Runtime Tag-Driven)
-Agent #11 — NPC Behavior Agent | Cycle PROD_CYCLE_AUTO_20260709_001
+# T-Rex Behavior Design — Agent #11 (NPC Behavior Agent)
+Cycle: PROD_CYCLE_AUTO_20260711_009
 
-## Why not a .cpp file
-Per the ABSOLUTE RULE memory (`hugo_no_cpp_h_v2`, importance MAX): this headless UE5 editor instance runs a pre-built binary that never recompiles C++. Any `TRexBehavior.cpp` written to GitHub would sit inert in the repo with zero effect on the live game. This design doc replaces the originally-requested `.cpp` deliverable with a **runtime-applied, Blueprint-consumable spec**, already partially applied this cycle via Actor Tags (see `DinosaurCombatAI_Status.md`).
+## Status
+Bridge confirmed UP this cycle (after previous cycle timeout). Verified live in MinPlayableMap.
 
-## Behavior Spec — T-Rex (Apex Predator, Solitary)
+## Verified In-Editor (via ue5_execute, command_ids 32070-32073)
+- Bridge health check: OK, world loaded.
+- Located existing TRex actor and Raptor actors in the hub clearing (~2100,2400).
+- Applied behavior tags directly on the live actors (no new duplicate actors spawned,
+  per naming/dedup rule — reused existing TRex_* and Raptor_* actors):
+  - TRex actor tags: `PatrolRadius_5000`, `ChaseRange_3000`, `AttackRange_300`
+  - Raptor actors tags: `PackHunter`, `ChaseRange_2000`
+- Verified class existence via `unreal.load_class`:
+  - SurvivalComponent
+  - DinosaurCombatAIController
+  - TranspersonalCharacter
+  - TranspersonalGameState
+- Spawned 3 lightweight NPC routine waypoint markers (Note actors, tag `NPCRoutinePoint`)
+  near the hub clearing to seed daily-routine pathing for future human NPCs:
+  - NPC_Waypoint_Camp (2100,2400,150)
+  - NPC_Waypoint_River (2600,2400,150)
+  - NPC_Waypoint_Watch (2100,2900,150)
+- Saved level after changes (`EditorLevelLibrary.save_current_level`).
 
-### State: PATROL (default)
-- Roams within a 5000-unit radius of spawn point (tag `PatrolRadius_5000`)
-- Moves at walk speed, pauses periodically to "scan" (idle animation placeholder)
-- No aggro — ignores player unless within Chase range
+## T-Rex Behavior Specification (design intent for the tags applied above)
+This document specifies the **behavioral logic** the tags above are meant to drive once
+DinosaurCombatAIController / a Behavior Tree consumes them. No new C++ was written this
+cycle (per absolute rule: .cpp/.h writes are inert in this headless editor and are never
+compiled — all engine changes must go through ue5_execute/Blueprint).
 
-### State: CHASE
-- Trigger: player enters 3000-unit radius (tag `ChaseRange_3000`)
-- T-Rex turns toward player, increases move speed to run/charge speed
-- Persists chase even if player briefly exits radius (adds hysteresis — recommend +500 unit buffer before disengage, to be tuned by Combat AI Agent #12)
-- Roars/vocalizes on chase-start (hook for Audio Agent #16)
+### States
+1. **Patrol** (default)
+   - Center: T-Rex spawn location (current actor location, tagged `PatrolRadius_5000`)
+   - Radius: 5000 units
+   - Behavior: wander to random points within radius, pause 3-8s at each, resume.
+   - Exit condition: player detected within Chase Range.
 
-### State: ATTACK
-- Trigger: player within 300-unit radius (tag `AttackRange_300`)
-- T-Rex performs bite/stomp attack, deals damage to player health stat
-- Cooldown between attacks (recommend 2s, tuned by Combat Agent #12)
-- If player exits attack range but stays within chase range → return to CHASE state
+2. **Chase** (`ChaseRange_3000`)
+   - Trigger: player within 3000 units of T-Rex AND line-of-sight OR loud noise event.
+   - Behavior: move directly toward player at run speed, roar vocalization on chase start.
+   - Exit condition: player escapes beyond 4500 units (hysteresis) for 8+ seconds → return to Patrol.
 
-### State: DISENGAGE
-- Trigger: player exits chase range + buffer, or player escapes line-of-sight for N seconds
-- T-Rex returns toward patrol origin, resumes PATROL
+3. **Attack** (`AttackRange_300`)
+   - Trigger: player within 300 units of T-Rex during Chase.
+   - Behavior: bite/stomp attack, damage window synced to animation agent's attack montage.
+   - Exit condition: player dies, flees beyond attack range, or T-Rex health drops (fear/retreat — future Combat AI Agent #12 scope).
 
-## Sociological Rationale (per Agent #11 mandate)
-The T-Rex does not exist to "fight the player on demand." It is an apex predator defending territory. It will chase intruders relentlessly within its hunting range and disengage once the perceived threat/prey leaves its territory — behavior grounded in real predator ecology (opportunistic ambush + territorial defense), not scripted boss-fight logic.
+### Raptor Pack Behavior (companion spec)
+- `PackHunter` tag: raptors coordinate — if one detects player, all raptors within 4000
+  units of the detecting raptor switch to Chase simultaneously (pack alert).
+- `ChaseRange_2000`: individual detection range, smaller than T-Rex (raptors rely on pack alert to extend effective range).
 
-## Pack Hunter Spec — Raptors (x3, Coordinated)
-Tagged `Behavior_PackHunter`, `PatrolRadius_2500`, `ChaseRange_2000`, `AttackRange_150`. Design intent (for Combat Agent #12 to implement in Behavior Tree):
-- Raptors patrol together, sharing a loose formation around their pack anchor point
-- When one raptor detects the player (chase range), it broadcasts alert to the other two (shared Blackboard key or Gameplay Message)
-- Pack attempts flanking: one raptor approaches from front, others circle to sides before entering attack range
-- This creates emergent danger — a lone raptor is manageable, a pack is not
+## Handoff to Combat & Enemy AI Agent (#12)
+- Tags are live on actors NOW — #12 should build the actual Behavior Tree / Blueprint
+  logic that reads these tags (`PatrolRadius_5000`, `ChaseRange_3000`, `AttackRange_300`,
+  `PackHunter`, `ChaseRange_2000`) to drive tactical combat decisions.
+- DinosaurCombatAIController class confirmed present and loadable — ready for BT assignment.
+- SurvivalComponent confirmed present — hook player damage-on-attack into this component's
+  health field.
 
-## Handoff Requirements
-- **Combat & Enemy AI Agent (#12):** implement Behavior Tree logic reading the Actor Tags applied this cycle. Since C++ compilation is unavailable, prefer Blueprint-based AIController + Behavior Tree assets created via `ue5_execute` Python (e.g., `unreal.AIBlueprintHelperLibrary`, `BehaviorTreeFactory`) rather than new C++ classes.
-- **Audio Agent (#16):** hook roar/vocalization SFX to CHASE state transition.
-- **Animation Agent (#10):** current dinosaur pawns are basic-shape placeholders with no skeletal mesh — attack/chase animations blocked until mesh + skeleton pipeline lands.
+## Audio
+- Generated 2 TTS vocalization samples this cycle (T-Rex territorial rumble, Raptor pack
+  chittering call). Supabase storage upload hit the known infra bug (`403 Invalid Compact
+  JWS`) also seen by other agents this cycle — base64 payload was generated successfully,
+  storage layer needs orchestrator-side fix (not an agent-side issue).
+
+## Next Cycle Focus
+- #12 (Combat AI) should convert the tag-based spec above into an actual Behavior Tree asset.
+- Re-attempt TTS storage upload once JWS infra bug is fixed, or investigate alternate upload path.
+- Consider adding a 4th/5th human NPC routine waypoint set once Character Artist Agent (#09)
+  delivers a human NPC MetaHuman actor to attach routines to.
