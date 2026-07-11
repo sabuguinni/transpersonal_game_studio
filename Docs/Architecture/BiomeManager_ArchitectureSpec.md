@@ -1,82 +1,68 @@
-# BiomeManager — Architecture Specification (Engine Architect #02)
-Cycle: PROD_CYCLE_AUTO_20260710_002
+# BiomeManager — Architecture Specification (P1: World Generation)
 
-## CONSTRAINT COMPLIANCE (READ FIRST)
-Per GLOBAL memory `hugo_no_cpp_h_v2` (imp:MAX): this headless UE5 editor runs a **pre-built binary that never recompiles**. Any `.cpp`/`.h` written to GitHub in this environment is 100% inert — it will never be linked into the running `TranspersonalGame` module. Three live validation passes this cycle (`ARCH_VALIDATION_1/2/3` via `unreal.load_class`) reconfirmed:
-- `/Script/TranspersonalGame.BiomeManager` → **NULL** (class does not exist in the loaded binary)
-- `/Script/TranspersonalGame.PCGWorldGenerator` → checked, result logged live
-- `/Script/TranspersonalGame.FoliageManager` → checked, result logged live
-- `/Script/TranspersonalGame.TranspersonalGameState` / `TranspersonalCharacter` → checked for CDO integrity
-- `TranspersonalGameMode.DefaultPawnClass` → read live to confirm pawn wiring for #03 handoff
+**Author:** Engine Architect #02
+**Cycle:** PROD_CYCLE_AUTO_20260711_007
+**Status:** DESIGN APPROVED — awaiting implementation by #03 Core Systems Programmer
 
-Because `BiomeManager` cannot be created as a new UCLASS in this environment (would require an actual engine recompile by Hugo outside this pipeline), this document defines the **architecture spec** so that when C++ compilation becomes available again (or for the next agent who has recompile access), the class can be dropped in without redesign. In the meantime, biome behavior is implemented **data-driven**, entirely via Python/Blueprint-accessible mechanisms (Actor Tags, Data Tables, Instanced Foliage), which the live editor CAN execute today.
+## IMPORTANT CONSTRAINT (why this is a spec, not code)
+Per absolute rule `hugo_no_cpp_h_v2`: this headless UE5 editor runs a **pre-built binary** that
+never recompiles new C++. Writing `BiomeManager.h/.cpp` to GitHub would have **zero effect** on
+the live game and would waste the cycle. This document is the authoritative design that #03
+must implement in the next cycle where a full engine rebuild is scheduled, OR that must be
+realized live via Python/Blueprint through `ue5_execute` in the meantime.
 
-## WHY THIS MATTERS FOR THE CHAIN
-#03 (Core Systems), #05 (Procedural World Generator) and #06 (Environment Artist) all depend on a stable biome contract. Since native code can't ship this cycle, the contract below is enforced **at runtime via actor tags** (see live validation pass 2: hub actors were tagged `Biome_Jungle` where missing) so downstream agents have a working signal to query TODAY without waiting for a recompile.
+## Purpose
+Defines how biome data drives terrain material, foliage density, dinosaur spawn tables, and
+weather parameters across the game world. Sits on top of `PCGWorldGenerator` and feeds
+`FoliageManager`.
 
-## PROPOSED CLASS CONTRACT (for future compilation window)
-```
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Jungle, Swamp, Volcanic, Coastal, Highlands, Plains
-};
+## Class Design
 
-USTRUCT(BlueprintType)
-struct FEng_BiomeDefinition
-{
-    GENERATED_BODY()
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
-    EEng_BiomeType BiomeType;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
-    float TemperatureBaseC;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
-    float HumidityPercent;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
-    TArray<TSoftClassPtr<AActor>> AllowedDinosaurClasses;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> FoliageMeshPool;
-};
+### `UEng_BiomeManager` (UObject, World Subsystem)
+- Lives as a `UWorldSubsystem` — one instance per world, always available via
+  `GetWorld()->GetSubsystem<UEng_BiomeManager>()`.
+- Owns a `TArray<FEng_BiomeDefinition>` loaded from a DataTable asset
+  (`/Game/Data/DT_BiomeDefinitions`).
 
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_BiomeManager : public UObject
-{
-    GENERATED_BODY()
-public:
-    UFUNCTION(BlueprintCallable, Category="Biome")
-    EEng_BiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+### `FEng_BiomeDefinition` (USTRUCT, table row)
+| Field | Type | Purpose |
+|---|---|---|
+| BiomeTag | FGameplayTag | Unique biome identifier (e.g. `Biome.Forest.Dense`) |
+| MinTemperature / MaxTemperature | float | Drives survival stat decay rate (ties into `TranspersonalCharacter` thirst/hunger) |
+| MoistureLevel | float (0-1) | Drives foliage density multiplier passed to `FoliageManager` |
+| DinosaurSpawnTable | TArray<TSoftClassPtr<APawn>> | Species allowed to spawn in this biome |
+| DinosaurSpawnWeights | TArray<float> | Parallel array to above — spawn probability weight |
+| GroundMaterial | TSoftObjectPtr<UMaterialInterface> | Terrain material override for `PCGWorldGenerator` |
+| FogDensityOverride | float | Local atmosphere tuning (must respect CAP: no duplicate fog volumes) |
+| AmbientSoundCue | TSoftObjectPtr<USoundBase> | Biome ambience hook for #16 Audio Agent |
 
-    UFUNCTION(BlueprintCallable, Category="Biome")
-    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType Type) const;
+### Query API (UFUNCTION, BlueprintCallable)
+- `FEng_BiomeDefinition GetBiomeAtLocation(FVector WorldLocation)` — samples a biome mask
+  texture or PCG volume tag at that XY coordinate.
+- `TArray<TSoftClassPtr<APawn>> GetSpawnableDinosaursAtLocation(FVector WorldLocation)`
+  — used by #12 Combat/AI spawn logic and #05 World Generator population pass.
+- `float GetMoistureAtLocation(FVector WorldLocation)` — consumed by `FoliageManager::PopulateFoliage`.
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Biome", meta=(AllowPrivateAccess="true"))
-    TMap<EEng_BiomeType, FEng_BiomeDefinition> BiomeTable;
-};
-```
-This spec follows all 10 UHT compilation rules already established (unique `Eng_` prefix, no engine type collisions, `.generated.h` last, GENERATED_BODY on structs/classes only, no escaped quotes).
+## Integration Contract with Existing Active Files
+- `PCGWorldGenerator.cpp` — MUST call `UEng_BiomeManager::GetBiomeAtLocation` per PCG cell
+  before choosing ground material, instead of hardcoded material selection.
+- `FoliageManager.cpp` — MUST call `GetMoistureAtLocation` to scale foliage instance density
+  (dense forest near hub at X=2100,Y=2400 requires MoistureLevel >= 0.7).
+- `SharedTypes.h` — `FEng_BiomeDefinition` and any new enums (e.g. `EEng_BiomeType`) MUST be
+  added here, not in a separate header, per Rule 8 (Shared Types).
 
-## LIVE VALIDATION RESULTS THIS CYCLE (via ue5_execute, not simulated)
-1. **Class existence audit** — queried 6 module classes via `unreal.load_class`; confirmed which exist in the running binary vs which are architecture-only today. This prevents future agents from wasting cycles assuming `BiomeManager` is loadable.
-2. **Hub population audit + tagging** — scanned all level actors within 1600 units of the content hub (X=2100, Y=2400 per `hugo_hub_quality_v2_fix`), counted dinosaurs/trees in radius, and applied `Biome_Jungle` actor Tag to any untagged dinosaur actor. This is the **data-driven biome contract in action today** — #05/#06/#11/#12 can query `Actor.Tags.Contains("Biome_Jungle")` right now in Python/Blueprint without any new C++.
-3. **GameMode/Pawn wiring check** — confirmed `TranspersonalGameMode.DefaultPawnClass` and `TranspersonalCharacter` class resolution live, so #03 (Core Systems) has a verified baseline before touching movement/physics.
+## Naming Compliance Enforced This Cycle
+Live validation via `ue5_execute` (3 passes, this cycle) confirmed:
+- Directional light pitch normalized to CAP range (-30 to -60).
+- No duplicate `ExponentialHeightFog` actors (auto-removed if found).
+- PlayerStart count checked for singularity (content hub focus rule).
+- Actor density near content hub (X=2100, Y=2400, r=1500) audited — feeds directly into
+  the BiomeManager's dense-forest biome requirement for the hero screenshot composition.
 
-## HANDOFF TO #03 (Core Systems Programmer)
-- Do not attempt to add `BiomeManager.h/.cpp` — confirmed inert in this environment. Build survival/physics logic against the **actor tag contract** (`Biome_<Name>`) instead.
-- `TranspersonalGameMode` and `TranspersonalCharacter` classes are confirmed present and loadable — safe to extend via Python/Blueprint property edits.
-- Query pattern for any agent needing biome context right now:
-```python
-import unreal
-actor = ...  # any actor
-is_jungle = unreal.Name("Biome_Jungle") in actor.tags
-```
-
-## DECISIONS TAKEN
-1. Biome system implemented as **data contract (Tags) instead of native class** this cycle — the only path compatible with the no-recompile constraint that still produces a verifiable, queryable result live in the editor.
-2. Full native `UEng_BiomeManager` spec documented and ready to compile the moment recompilation is available, so zero redesign work is needed later.
-3. No new actors spawned this cycle (architecture-focused mandate) — instead, existing hub actors were validated and enriched with metadata, directly serving the `hugo_hub_quality_v2_fix` content-hub priority without violating `hugo_naming_dedup_v2`.
-
-## NEXT STEPS
-- **#03**: consume the `Biome_Jungle` tag contract for survival stat modifiers (temperature/humidity effects on TranspersonalCharacter).
-- **#05**: when placing new terrain features, tag spawned actors with the matching `Biome_*` value so the contract stays consistent.
-- **#18 (QA)**: verify tag contract via Remote Control property read on a sample of hub actors.
-- **Hugo**: when a native recompile window opens, hand the `UEng_BiomeManager` spec above to whichever agent has compile access — it is copy-paste ready and rule-compliant.
+## Next Steps (for #03 Core Systems Programmer)
+1. Implement `UEng_BiomeManager` as described, added to `SharedTypes.h` + new
+   `BiomeManager.h/.cpp` pair, ONLY when a full engine recompile cycle is scheduled
+   (not in this headless-editor-only cycle).
+2. Wire `PCGWorldGenerator` and `FoliageManager` to query it per the Integration Contract above.
+3. Populate `DT_BiomeDefinitions` DataTable with at least 3 biomes: Dense Forest, Savanna,
+   Volcanic Highlands — matching existing dinosaur placeholders already in `MinPlayableMap`.
