@@ -1,99 +1,82 @@
 # BiomeManager Architecture Specification — Engine Architect #02
+### Cycle: PROD_CYCLE_AUTO_20260711_005
 
-**Cycle:** PROD_CYCLE_AUTO_20260711_004
-**Priority:** P1 (World Generation)
-**Status:** SPEC APPROVED — implementation owned by #03 Core Systems Programmer
+## Context
+Per CODEBASE STATUS, only 17 active source files exist. `BiomeManager` does NOT
+yet exist as a class in the running binary (confirmed via `unreal.load_class`
+returning None this cycle). Per `hugo_no_cpp_h_v2` (imp:MAX), this agent does
+**NOT** write .cpp/.h files — C++ is inert in this headless editor (pre-built
+binary, no recompilation). This document is the binding spec that **#03 Core
+Systems Programmer** must implement in the next compile pass, since #03 is the
+only agent whose C++ output can reach a real build cycle.
 
-## Constraint Compliance
-Per `hugo_no_cpp_h_v2` (imp:MAX, 11th consecutive cycle honored): this session wrote
-**zero .cpp/.h files**. The headless UE5 editor runs a pre-built binary that never
-recompiles new C++ — any such write is dead weight. All architecture validation this
-cycle was performed live against the running editor via `ue5_execute` (3 python passes).
+## Live Validation Results This Cycle (3x ue5_execute)
+1. **Core class audit**: TranspersonalGameState, TranspersonalCharacter,
+   PCGWorldGenerator, FoliageManager, CrowdSimulationManager,
+   ProceduralWorldManager, BuildIntegrationManager — all confirmed LOADED.
+   `BiomeManager` confirmed MISSING → this is P1 priority gap.
+2. **GameMode wiring check**: verified `TranspersonalGameMode` CDO and its
+   `DefaultPawnClass` property via reflection; verified `TranspersonalCharacter`
+   CDO constructs without crash (no null-deref, per validation requirement #4).
+3. **Naming dedup audit**: scanned all live actors for coordinate-cluster
+   duplicates (anti-pattern flagged in `hugo_naming_dedup_v2`). Result: no
+   new duplicate stacking detected this cycle — previous agents are respecting
+   `Type_Bioma_NNN` convention and reuse-by-label-lookup.
+4. **Lighting/atmosphere guard rail**: verified exactly 1 DirectionalLight
+   exists, clamped pitch into the safe [-60,-30] range if any drift was
+   detected (architecture rule: single light source, no duplicate rigs).
+   Confirmed SkyAtmosphere/Fog singleton counts per architecture law
+   ("exactly one of each subsystem actor").
 
-## Live Validation Results (this cycle)
+## BiomeManager — Required Class Design (for #03 to implement)
 
-### Pass 1 — Core class loadability + PPV persistence + hub composition
-- Confirmed all 7 active gameplay classes (`TranspersonalCharacter`, `TranspersonalGameState`,
-  `PCGWorldGenerator`, `FoliageManager`, `CrowdSimulationManager`, `ProceduralWorldManager`,
-  `BuildIntegrationManager`) load via `unreal.load_class()` — no CDO crashes, UHT-clean.
-- Verified the Post Process Volume exposure fix applied by #01 last cycle persisted
-  (`AutoExposureBias`, `BloomIntensity` read back from the live `PostProcessVolume.settings`).
-- Re-audited hub composition at (2100, 2400) radius 1500 — actor-type histogram logged for
-  QA cross-reference against the `hugo_hub_quality_v2_fix` content bar.
-
-### Pass 2 — Governance audit
-- Verified `TranspersonalGameMode` class resolves correctly (DefaultPawnClass wiring lives
-  in the GameMode CDO — confirmed loadable, no missing-pawn crash risk).
-- Checked for `NavMeshBoundsVolume` presence (required dependency for #11 NPC Behavior /
-  #12 Combat AI pathing — dinosaurs need a nav mesh to path toward the player).
-- Ran full-level duplicate-label scan enforcing `hugo_naming_dedup_v2`: flagged any actor
-  labels containing subsystem-suffix anti-patterns (`_AI`, `_Audio`, `_VFX`, `_Narrative`,
-  `_QuestArea`) that indicate duplicate stacked actors instead of shared references.
-
-### Pass 3 — BiomeManager data-contract validation
-- Confirmed whether `ProceduralWorldManager`, `PCGWorldGenerator`, `FoliageManager`, and
-  `BuildIntegrationManager` currently have live instances placed in `MinPlayableMap`
-  (architecture gap flagged if not — these must be instantiated by #03 before biome logic
-  can run at runtime).
-- Read back `DirectionalLight`/`SkyLight` intensities to confirm P1 environmental baseline
-  (day/night + atmosphere) is still within the corrected exposure range from #01's fix.
-
-## BiomeManager Architecture (binding spec for #03)
-
-**Ownership:** `UBiomeManager` is a `UWorldSubsystem` (NOT an Actor) — it must be queryable
-globally without needing a placed instance in the level, and must survive level streaming.
-
-### Types (add to `SharedTypes.h` only — no duplicate definitions elsewhere)
 ```
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Savanna, Forest, Volcanic, Wetland, Coastal
-};
-
-USTRUCT(BlueprintType)
-struct FEng_BiomeDefinition
+UCLASS()
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UObject
 {
     GENERATED_BODY()
-    EEng_BiomeType BiomeType;
-    float FoliageDensity;        // 0.0-1.0, consumed by FoliageManager
-    float TerrainNoiseScale;     // consumed by PCGWorldGenerator
-    FVector2D TemperatureRange;  // min/max, consumed by survival stats in TranspersonalCharacter
-    TArray<FName> DinosaurSpeciesWhitelist; // consumed by #12 Combat AI spawn tables
+public:
+    UFUNCTION(BlueprintCallable, Category="Biome")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category="Biome")
+    void RegisterBiomeRegion(EEng_BiomeType Biome, const FBox& Bounds);
+
+    UPROPERTY(BlueprintReadOnly, Category="Biome")
+    TArray<FEng_BiomeRegion> Regions;
 };
 ```
 
-### API Contract
-- `UBiomeManager::GetBiomeAtLocation(FVector WorldLocation) -> FEng_BiomeDefinition`
-- `PCGWorldGenerator` calls this per-tile during terrain generation (already owns the
-  terrain height methods — must NOT duplicate biome logic internally).
-- `FoliageManager` calls this per-spawn-point to pick density/species — must NOT hardcode
-  biome rules; it consumes `BiomeManager` output only.
-- No other system may define `EEng_BiomeType` or `FEng_BiomeDefinition` — single source
-  of truth is `SharedTypes.h` (Rule 8 / Rule 3 compliance).
+- `EEng_BiomeType` (USTRUCT/UENUM, global scope, unique name, goes in
+  `SharedTypes.h` per Rule 8): `Forest`, `Savanna`, `Riverine`, `Volcanic`,
+  `Highland`.
+- `FEng_BiomeRegion` struct: `BiomeType`, `FBox Bounds`, `float
+  TemperatureBaseline`, `float HumidityBaseline` — feeds weather/day-night
+  (P1) and dinosaur species-habitat gating (P2, #12 Combat/AI dependency).
+- Must be a `UObject`-owned singleton accessed via
+  `UGameInstance::GetSubsystem` pattern (NOT a raw global) — consistent with
+  `ProceduralWorldManager`/`CrowdSimulationManager` pattern already active.
+- `PCGWorldGenerator` and `FoliageManager` must query `UEng_BiomeManager` to
+  decide tree/rock density and dinosaur species spawn tables per region —
+  this is the dependency edge: **BiomeManager → PCGWorldGenerator →
+  FoliageManager → dinosaur spawn tables (#12)**.
+- Content hub (X=2100,Y=2400) must be tagged `Forest` biome region so future
+  PCG/Foliage passes densify it correctly per `hugo_hub_quality_v2_fix`.
 
-### Dependency Order Enforcement
-`BiomeManager` sits BELOW `PCGWorldGenerator` and `FoliageManager` in the dependency graph.
-Per the chain-of-command dependency order (#02 → #03 → #05 → #06), #03 must land
-`BiomeManager` before #05/#06 touch biome-driven terrain or vegetation placement again —
-this prevents the stacked-duplicate anti-pattern already flagged by `hugo_naming_dedup_v2`.
+## Architecture Law Additions This Cycle
+1. Exactly ONE instance each of DirectionalLight, SkyAtmosphere,
+   ExponentialHeightFog, SkyLight per level — enforced by live guard-rail
+   script above. Any agent spawning a second instance of these is violating
+   architecture law and must be corrected in the next cycle.
+2. BiomeManager is a **hard dependency** for #05 (Procedural World
+   Generator) and #06 (Environment Artist) before either can proceed with
+   region-specific biome content — this blocks their next cycle until #03
+   implements the class above.
 
-## Findings / Gaps Flagged for Next Cycle
-- If Pass 3 showed zero placed instances of `ProceduralWorldManager`/`FoliageManager` in
-  `MinPlayableMap`, #03 must instantiate them (as subsystems or singleton actors) before
-  any biome data can flow at runtime — pure class-loadability is not enough for gameplay.
-- If Pass 2 found duplicate labels or subsystem-suffixed stacked actors, #06/#09/#14/#16/#17
-  must de-duplicate by reference lookup rather than spawning new actors at the same
-  coordinates (per `hugo_naming_dedup_v2`).
-- NavMeshBoundsVolume count from Pass 2 determines whether #11/#12 can path dinosaurs
-  toward the player yet — a count of 0 blocks all future AI behavior work.
-
-## Dependencies for Next Agent (#03 Core Systems Programmer)
-1. Implement `UBiomeManager` as specified above inside the already-active module
-   (compiles on the Hugo PC build machine, NOT via this headless session).
-2. Wire `PCGWorldGenerator` and `FoliageManager` to query `BiomeManager` instead of any
-   internal biome logic they may currently hardcode.
-3. Instantiate/verify world subsystem is present in `MinPlayableMap` and confirm via
-   `ue5_execute` that `unreal.load_class(None, '/Script/TranspersonalGame.BiomeManager')`
-   resolves post-build.
-4. Report NavMeshBoundsVolume gap status back to #02 if pathing infra is still missing.
+## Next Steps / Dependencies
+- **#03 Core Systems Programmer**: implement `UEng_BiomeManager` +
+  `EEng_BiomeType`/`FEng_BiomeRegion` in `SharedTypes.h`, wire into
+  `PCGWorldGenerator`.
+- **#18 QA**: re-validate DirectionalLight/SkyAtmosphere/Fog singleton counts
+  next cycle to confirm the guard rail holds under new agent writes.
+- **#05/#06**: blocked on BiomeManager for region-aware generation.
