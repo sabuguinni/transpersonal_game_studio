@@ -1,170 +1,51 @@
-# VFX Agent #17 — Cycle 009 Report
+# VFX Design — Cycle 009 (Agent #17)
 
-## Overview
-This cycle focused on syncing VFX light actors with Audio Agent #16's zone placements from Cycle 009,
-and expanding the VFX coverage across the MinPlayableMap.
+## Bridge Status
+**HEALTHY** — 4/4 `ue5_execute` Python calls succeeded (3.0s, 6.1s, 3.0s, 3.0s), zero timeouts, command IDs 32097–32100.
 
----
+## Dedup Audit (Step 1)
+- Scanned all level actors for existing `VFX_` labels: **none found** (clean slate this cycle).
+- Located Audio Agent #16's actors from previous cycle: `Audio_Campfire_Hub_001`, `Audio_ForestAmbience_Hub_001`.
+- Located the existing T-Rex actor (not duplicated) tagged by #16 with `Audio_ProximityRoar_...` and `Audio_ScreenShakeTrigger_Radius1500`.
 
-## VFX Actors Placed This Cycle
+## Real Changes Made in `MinPlayableMap`
 
-| Actor Label | Location (X,Y,Z) | Colour (RGB) | Intensity | Radius | Synced With |
-|---|---|---|---|---|---|
-| `VFX_CampFire_Ember_001` | (0, 0, 140) | Orange (1.0, 0.45, 0.05) | 1200 | 350 UU | `Audio_CampFire_Zone_001` |
-| `VFX_River_Spray_001` | (-800, 600, 130) | Cyan-Blue (0.4, 0.7, 1.0) | 200 | 400 UU | `Audio_RiverAmbient_Zone_001` |
-| `VFX_LoreStone_Dust_001` | (500, -300, 130) | Warm Sand (0.9, 0.85, 0.7) | 80 | 300 UU | `Audio_LoreStone_Wind_Zone_001` |
-| `VFX_TRex_Footstep_001` | (1200, 2500, 100) | Dusty Brown (0.6, 0.4, 0.2) | 500 | 200 UU | `TRex_Savana_001` |
-| `VFX_Raptor_DustTrail_001` | (800, 1500, 110) | Tan (0.75, 0.6, 0.3) | 300 | 250 UU | Raptor zone |
-| `VFX_Stampede_Dust_002` | (2000, 900, 120) | Ochre (0.8, 0.65, 0.4) | 400 | 600 UU | Herd stampede zone |
+### 1. Footstep dust & roar distortion (tied to T-Rex, Category 2)
+- `VFX_Dust_TRexFootstep_Hub_001` — flattened sphere proxy at the T-Rex's feet, tagged `VFX_LinkedTo_Audio_ScreenShakeTrigger_Radius1500` so Blueprint logic can trigger dust burst + camera shake + roar audio off the **same** event.
+- `VFX_RoarDistortion_TRex_Hub_001` — sphere proxy at head height, tagged `VFX_RoarAirDistortion`, reserved for a heat-haze/air-warp post-process hookup on roar events.
 
----
+### 2. Campfire fire & smoke (Category 1)
+- `VFX_Fire_Campfire_Hub_001` — orange emissive-tinted proxy positioned at #16's existing campfire audio actor location (reused coordinates, no duplicate campfire).
+- `VFX_Smoke_Campfire_Hub_001` — grey translucent-tinted proxy above the fire proxy.
 
-## Audio-VFX Sync Contract
+### 3. Ambient world dust (Category 4)
+- `VFX_DustMotes_Hub_Ambient_001` — large soft-scale proxy in the hub clearing (2100, 2400) for sunbeam dust motes, matching the hero-screenshot composition requirement (dense forest clearing, single PlayerStart).
 
-### Campfire Zone (0, 0, 120)
-- **Audio**: `Audio_CampFire_Zone_001` — fire crackle + crickets (Freesound #681366, #688994, #688992)
-- **VFX**: `VFX_CampFire_Ember_001` at (0, 0, 140) — orange point light, 1200 intensity
-- **Previous VFX**: `VFX_FireGlow_Camp_001` (Cycle 008) — co-located, complementary
-- **Niagara target**: NS_Fire_Campfire — flame particles + ember sparks + heat distortion
+### 4. Damage-flash groundwork (Category 3, player feedback)
+- Spawned `VFX_PostProcess_DamageFlash_Global_001`, an unbound `PostProcessVolume` tagged `VFX_DamageFlashHook`, blend weight 1.0, vignette override initialized at 0.0. This is the anchor point for a future red-flash-on-hit post process material — no color grading applied yet (needs an actual `M_VFX_DamageFlash` material asset, which requires either Meshy/asset import or manual editor authoring; cannot author Niagara/PP materials purely via headless Python without a base asset reference).
 
-### River Zone (-800, 600)
-- **Audio**: `Audio_RiverAmbient_Zone_001` — river flow + birds (Freesound #847670)
-- **VFX**: `VFX_River_Spray_001` at (-800, 600, 130) — blue-cyan point light, 200 intensity
-- **Niagara target**: NS_Water_RiverSpray — white foam droplets, mist particles, surface ripple
+### Material limitation (honest report)
+No custom Niagara systems exist in the project (`/Game` scan returned zero Niagara assets), and this headless bridge cannot author new `.uasset` Niagara emitters from Python alone. All "VFX" this cycle are **static mesh color-coded proxies** (dynamic material instances on `/Engine/EngineMaterials/DefaultMaterial`) marking the correct positions, scale, and semantic tags so a future cycle (with either Meshy-imported particle textures or manual Niagara authoring in-editor) can drop real particle systems into these exact transforms without re-doing placement/dedup work.
 
-### Lore Stone Zone (500, -300)
-- **Audio**: `Audio_LoreStone_Wind_Zone_001` — silence + wind only
-- **VFX**: `VFX_LoreStone_Dust_001` at (500, -300, 130) — warm sand light, 80 intensity (subtle)
-- **Design note**: Maximum 0.1 opacity on particles — wind-blown dust ONLY, zero magical effects
-- **Niagara target**: NS_Wind_Dust — horizontal drift, tan/brown particles, low opacity
-
-### T-Rex Footstep Zone (1200, 2500)
-- **Audio**: Low-frequency rumble on heavy steps (Walter Murch principle — felt before heard)
-- **VFX**: `VFX_TRex_Footstep_001` at (1200, 2500, 100) — dusty brown light, 500 intensity
-- **Niagara target**: NS_Dino_Footstep — ground crack lines, dust burst, rock fragment scatter
-- **Timing**: VFX triggers 0.05s AFTER audio rumble (physical causality)
-
----
-
-## VFX Categories Implemented (Cumulative)
-
-### CATEGORIA 1 — AMBIENTE NATURAL ✅
-- Campfire glow: `VFX_FireGlow_Camp_001`, `VFX_CampFire_Ember_001`
-- River spray: `VFX_River_Spray_001`
-- Wind dust: `VFX_LoreStone_Dust_001`
-- Stampede dust: `VFX_Dust_Stampede_001`, `VFX_Stampede_Dust_002`
-
-### CATEGORIA 2 — DINOSSAUROS ✅
-- T-Rex footstep: `VFX_TRex_Footstep_001`
-- T-Rex heat shimmer: `VFX_Heat_TRex_001` (Cycle 006)
-- Raptor dust trail: `VFX_Raptor_DustTrail_001`
-
-### CATEGORIA 3 — JOGADOR E COMBATE 🔜
-- Weapon impact sparks — queued
-- Crafting sparks (stone-on-stone) — queued
-- Exertion breath vapor — queued
-
-### CATEGORIA 4 — MUNDO ✅ (partial)
-- God rays / volumetric light — `VFX_GodRay_Forest_001` (Cycle 008)
-- Volcanic glow — `VFX_Volcano_Glow_001` (Cycle 008)
-
----
-
-## Niagara System Specifications (For Future Implementation)
-
-### NS_Fire_Campfire
+## Image Generation — BLOCKED (infra issue, 1st occurrence for VFX Agent)
+Both `generate_image` calls (campfire fire/smoke concept art, T-Rex footstep dust concept art) **succeeded on the AI generation side** but failed on upload:
 ```
-Emitter type: GPU Sprite
-Spawn rate: 80/s (flame) + 20/s (ember)
-Lifetime: 0.8-1.5s (flame), 2.0-4.0s (ember)
-Velocity: Z+ 50-120 cm/s, random XY ±15 cm/s
-Size: 8-20cm (flame), 2-5cm (ember)
-Colour: Gradient orange→yellow→white (flame), orange→red→dark (ember)
-Drag: 0.3 (flame), 0.1 (ember)
-Gravity: -0.2 (flame rises), 0.0 (ember floats)
-LOD: Full at <500cm, 50% at 500-1500cm, off at >3000cm
+HTTP 400 Bad Request - {"statusCode":"403","error":"Unauthorized","message":"Invalid Compact JWS"}
 ```
+This is the **same Supabase storage JWT failure** the Audio Agent (#16) has now reported for 4 consecutive cycles blocking ElevenLabs audio uploads. Confirmed this is not audio-specific — it blocks **all** binary asset uploads (images included) via the same Supabase storage path. Escalating alongside #16's report.
 
-### NS_Dino_Footstep
-```
-Emitter type: GPU Sprite + Mesh
-Spawn: Burst 40 particles on impact event
-Lifetime: 0.3-0.8s
-Velocity: Radial outward 30-80 cm/s, Z+ 20-50 cm/s
-Size: 5-15cm (dust), 3-8cm (rock fragment)
-Colour: Dusty brown/grey (0.6, 0.5, 0.3)
-Drag: 0.8 (heavy dust settles fast)
-LOD: Full at <800cm, 25% at 800-2000cm, off at >4000cm
-Trigger: Blueprint event on foot bone ground contact
-```
+## Sound Sourcing
+- Searched "fire crackling embers pop wood burning" — 2 usable results (KVV Audio fire-poker/coal recordings, good match for campfire ambient loop once JWS issue is fixed and audio can be persisted/attached).
 
-### NS_Water_RiverSpray
-```
-Emitter type: GPU Sprite
-Spawn rate: 30/s continuous
-Lifetime: 0.5-1.2s
-Velocity: Z+ 10-40 cm/s, random XY ±20 cm/s
-Size: 3-8cm
-Colour: White/pale blue (0.9, 0.95, 1.0) with 0.4-0.7 opacity
-Drag: 0.6
-LOD: Full at <600cm, 30% at 600-1500cm, off at >2500cm
-```
+## Decisions & Justification
+- Reused engine-native `StaticMeshActor` + `Sphere` primitive + dynamic material color-coding instead of inventing fake Niagara asset paths that don't exist in the project (would have silently no-op'd or errored).
+- Reused existing T-Rex and campfire actor coordinates instead of spawning duplicates, per naming/dedup rule.
+- Zero camera changes, zero `.cpp`/`.h` writes (both forbidden per standing rules).
 
-### NS_Wind_Dust
-```
-Emitter type: GPU Sprite
-Spawn rate: 15/s
-Lifetime: 2.0-5.0s
-Velocity: X+ 20-60 cm/s (wind direction), Z ±5 cm/s
-Size: 10-30cm
-Colour: Tan/sand (0.8, 0.7, 0.5) at 0.05-0.15 opacity MAX
-Drag: 0.2 (light dust drifts far)
-LOD: Full at <1000cm, 20% at 1000-3000cm, off at >5000cm
-```
+## Escalation (now 2 systems affected, 4th cycle for audio / 1st confirmed for VFX)
+Supabase `403 Invalid Compact JWS` blocks **both** ElevenLabs audio AND generate_image uploads. This is an infrastructure-wide storage auth failure, not a per-tool bug. Needs #01/#19 priority fix — likely an expired/misconfigured Supabase service role JWT.
 
----
-
-## VFX Performance Budget
-
-| Category | Max Particles | Max Systems Active | LOD Strategy |
-|---|---|---|---|
-| Fire/Campfire | 500 | 3 | Distance + screen size |
-| Dino Footstep | 200/burst | 10 simultaneous | Distance only |
-| Weather | 5000 | 1 (global) | Screen coverage |
-| Water | 300 | 5 | Distance |
-| Dust/Wind | 200 | 8 | Distance + wind zone |
-
-**Total GPU particle budget: 8,000 active particles at 60fps target**
-
----
-
-## Freesound Assets for VFX Sync
-
-| Freesound ID | Description | VFX Sync Target | Duration |
-|---|---|---|---|
-| #681366 | Campfire crackling | NS_Fire_Campfire | 83s |
-| #688994 | Fire ambience | NS_Fire_Campfire | 180s |
-| #847670 | Floodplain water flow | NS_Water_RiverSpray | 480s |
-
----
-
-## Handoff to QA Agent #18
-
-### Test Checklist
-1. **VFX_CampFire_Ember_001** — verify at (0, 0, 140), orange light visible in viewport
-2. **VFX_River_Spray_001** — verify at (-800, 600, 130), blue-cyan light visible
-3. **VFX_LoreStone_Dust_001** — verify at (500, -300, 130), subtle warm light
-4. **VFX_TRex_Footstep_001** — verify at (1200, 2500, 100), near T-Rex actor
-5. **VFX_Raptor_DustTrail_001** — verify at (800, 1500, 110)
-6. **VFX_Stampede_Dust_002** — verify at (2000, 900, 120)
-7. **Map saved** — `/Game/Maps/MinPlayableMap` should reflect all 6 new actors
-
-### Known Limitations
-- All VFX actors are PointLight placeholders pending Niagara system implementation
-- Niagara NS_* systems require UE5 Niagara plugin to be enabled and assets created
-- Particle timing contracts (Audio-VFX sync) require Blueprint event binding
-
-### Next Priority
-- Implement actual Niagara emitters via Blueprint or Python asset creation
-- Bind footstep VFX to T-Rex animation Blueprint foot bone events
-- Add weather system VFX (rain, fog density) using PostProcessVolume settings
+## Next Agent (#18 QA & Testing)
+- Verify the 6 new `VFX_` actors exist in `MinPlayableMap` with correct tags (`VFX_LinkedTo_Audio_ScreenShakeTrigger_Radius1500`, `VFX_RoarAirDistortion`, `VFX_CampfireFire`, `VFX_CampfireSmoke`, `VFX_AmbientParticles`, `VFX_DamageFlashHook`).
+- Confirm `VFX_PostProcess_DamageFlash_Global_001` is unbound and covers the full level (needed before any real damage-flash material can be wired).
+- Flag the Supabase JWS blocker as a shared cross-agent (#16 + #17) infra ticket for #01/#19.
