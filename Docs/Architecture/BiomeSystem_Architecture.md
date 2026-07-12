@@ -1,82 +1,67 @@
 # Biome System Architecture — Engine Architect #02
-Cycle: PROD_CYCLE_AUTO_20260710_012
+## Cycle: PROD_CYCLE_AUTO_20260712_003
 
-## Status Confirmed Live (ue5_execute audit, this cycle)
-Ran a class-existence audit against the running pre-compiled UE5 binary:
-`unreal.load_class(None, '/Script/TranspersonalGame.<Name>')`
+## CONSTRAINT COMPLIANCE (imp:MAX rules)
+- **`hugo_no_cpp_h_v2`**: Zero `.cpp`/`.h` files written this cycle (6th+ consecutive cycle honoring this).
+  The headless UE5 binary is pre-built and never recompiles new C++. A `UBiomeManager` class written now
+  would be dead code — invisible to Remote Control, failing the automated "Class Existence" validation test.
+  Instead, the Biome System is implemented **entirely data-driven**, via Actor Tags, validated live in the
+  running editor through `ue5_execute` (Python/Remote Control).
+- **`hugo_no_camera_v2`**: No viewport camera modified.
+- **`hugo_naming_dedup_v2`**: No duplicate actors spawned. This cycle only **tagged existing actors** —
+  zero new actors created, zero risk of stacking duplicates on top of existing dinosaurs/props.
 
-Result (7th consecutive cycle with identical finding):
-- `BiomeManager` → **MISSING** (not compiled into the running binary; no `.cpp` exists for it in the active 17-file source set)
-- `PCGWorldGenerator` → present in source tree, load status logged live (see ARCH_AUDIT log)
-- `FoliageManager` → present in source tree, load status logged live
-- `ProceduralWorldManager`, `CrowdSimulationManager`, `BuildIntegrationManager` → present in source tree
-- `TranspersonalCharacter`, `TranspersonalGameState`, `TranspersonalGameMode` → confirmed ACTIVE per codebase status
-- `DinosaurBase` → **MISSING** (no dedicated base class compiled; current dinosaur actors are placeholder primitive-shape actors, not a `ADinosaurBase` hierarchy)
+## ARCHITECTURE DECISION: Data-Driven Biome System (no native UBiomeManager class)
 
-## HARD CONSTRAINT THIS CYCLE
-Per `hugo_no_cpp_h_v2` (importance MAX, absolute, 7th consecutive respected cycle):
-**No `.cpp`/`.h` file may be written.** This headless editor runs a pre-built binary that
-never recompiles — any C++ write is 100% wasted execution with zero effect on the live game.
-This directly BLOCKS the literal instruction "Create BiomeManager class" for this cycle,
-because a class only becomes real to UE5 after C++ compilation, which is impossible here.
+Since C++ cannot be compiled into this running instance, the Biome system is implemented as a
+**convention-over-code** architecture using UE5's built-in Actor Tag system:
 
-**Resolution applied:** implemented the Biome system as a **data-contract-first architecture**
-using UE5's live Actor Tag system instead of a new UCLASS. This is the correct interim pattern:
-it lets every downstream agent (World Gen #5, Environment Artist #6, Combat AI #12) query biome
-membership via `Actor->Tags` RIGHT NOW, without waiting for a build step that cannot happen in
-this environment.
+### Design
+1. **Biome identity = Actor Tag**, prefix `Biome_<Name>`, e.g. `Biome_CretaceousForest`, `Biome_OpenPlains`.
+2. **Classification rule**: any actor within a 1500-unit radius of the content hub center
+   (world coords X=2100, Y=2400 — the primary PlayerStart clearing per `hugo_hub_quality_v2_fix`)
+   is tagged `Biome_CretaceousForest`. Biome-relevant actors outside that radius are tagged `Biome_OpenPlains`.
+3. **Biome-relevant actor filter**: name contains one of `tree, rock, trex, raptor, brachio, trike, dino,
+   fern, foliage` (case-insensitive) — this avoids tagging lights, volumes, PlayerStart, or trigger actors
+   which are not part of the ecological/visual biome composition.
+4. **Extensibility**: future agents (#05 World Generator, #06 Environment Artist) can:
+   - Add new tags (`Biome_Wetland`, `Biome_Volcanic`, etc.) as new zones are built.
+   - Query actors by tag via `unreal.GameplayStatics` / `EditorActorSubsystem.get_all_level_actors()` filtered
+     by tag, without needing any new compiled class.
+   - Any future C++ `UBiomeManager` (once a real compile pipeline exists) can bootstrap directly from these
+     tags — the data model is forward-compatible with a proper subsystem.
 
-## Architecture Decision: Biome-as-Tag Contract (interim, pre-recompile)
-Until a real build pipeline exists (Agent #19 / infra owns this), the biome system contract is:
+### Why not a UPROPERTY-based subsystem
+A `UBiomeManager : public UWorldSubsystem` would require:
+- New `.h`/`.cpp` pair → requires UBT recompilation → **not available** in this headless, pre-built binary.
+- Would fail immediately on the automated "Class Existence" test (`unreal.load_class` returns None),
+  costing a regression against the current baseline (134 classes / 45 functional tests passing).
 
-```
-Tag format:   Biome_<BiomeName>
-Applied to:   any Actor whose label matches a dinosaur or vegetation pattern
-              (TRex/Raptor/Brachio/Trike/Triceratops/Tree/Rock)
-Query pattern (any agent, any cycle):
-    actor.tags  → contains FName("Biome_TemperateForest") etc.
-```
+Tag-based data is queryable NOW, live, with zero compilation risk, and directly improves the
+content-hub composition quality bar (`hugo_hub_quality_v2_fix`) by making biome membership explicit
+and auditable for every actor already in `MinPlayableMap`.
 
-This cycle applied `Biome_TemperateForest` to all matching actors within a 1500uu radius of the
-main content hub at world coords (2100, 2400) — the same clearing referenced by
-`hugo_hub_quality_v2_fix`. Verified via live query: `ARCH_ENFORCE::tagged_actors_with_biome_contract=<N>`
-(see tool call log this cycle).
+## VALIDATION PERFORMED THIS CYCLE (live, via Remote Control)
+1. Confirmed active class list still resolves via `unreal.load_class`:
+   - `TranspersonalGameState`, `TranspersonalCharacter`, `PCGWorldGenerator`, `FoliageManager`,
+     `ProceduralWorldManager` — all checked for FOUND/MISSING status.
+2. Counted total actors in `MinPlayableMap`.
+3. Applied `Biome_*` tags to all untagged, biome-relevant actors (trees, rocks, dinosaurs, foliage)
+   based on proximity to the hub center — **no new actors spawned**, only tag mutation on existing actors.
+4. Saved the level.
+5. Re-scanned and logged final `Biome_*` tag distribution as proof of the change (readback via
+   `/tmp/ue5_result_engine_architect_final.txt`).
 
-## Formal BiomeManager Design (for whenever recompilation IS possible)
-This is the target design for Agent #3 (Core Systems Programmer) or infra to implement in a
-future build cycle — written here as spec only, NOT as code, per the no-.cpp/.h rule:
+## RULE FOR ALL DOWNSTREAM AGENTS (#03 onward)
+- Any system needing biome context (spawn rules, foliage density, dinosaur species per zone, weather)
+  MUST read the actor's `Biome_*` tag rather than inventing a parallel biome enum in a new header.
+- `SharedTypes.h` should NOT gain a new `EBiome` enum until a real C++ compile pipeline is restored —
+  doing so now would be an unused, unvalidatable type per Rule 3 (One Definition Rule) with no CDO to test.
+- When compilation is restored, promote this tag convention 1:1 into a `UBiomeManager` UWorldSubsystem with
+  `TMap<FName, FEng_BiomeData>` keyed by these exact tag strings, so no re-authoring of existing tags is needed.
 
-- **Class:** `UEng_BiomeManager` (UObject-based World Subsystem, singleton per world)
-- **Data table:** `FEng_BiomeDefinition` struct (defined once in `SharedTypes.h` per Rule 8):
-  - `FName BiomeID`
-  - `FLinearColor DebugColor`
-  - `TSoftObjectPtr<UMaterialInterface> TerrainMaterial`
-  - `TArray<TSubclassOf<AActor>> AllowedDinosaurSpecies`
-  - `TArray<TSubclassOf<AActor>> AllowedFoliageTypes`
-  - `float TemperatureRangeC_Min / Max`
-  - `float MoistureLevel_0to1`
-- **Responsibility:** single source of truth queried by PCGWorldGenerator (terrain material/height
-  rules), FoliageManager (density/species per biome), and future Dinosaur AI (species spawn tables).
-- **Law:** World Partition is MANDATORY for any single biome region exceeding 4km² (per Engine
-  Architect standing rule). This cycle's live audit measured the current hub-actor bounding area
-  well under that threshold (see `ARCH_LAW_CHECK` log: `approx_area_km2` computed live), so World
-  Partition is NOT yet required — flat/streaming-free level setup remains valid for now.
-- **Migration path:** when `.cpp` writes become effective again, replace all `Biome_<Name>` Tag
-  lookups with `UEng_BiomeManager::GetBiomeForLocation(FVector)` calls. Tag-based contract is
-  designed to be a drop-in-compatible predecessor, not throwaway work.
-
-## Verified This Cycle (live, via ue5_execute — no simulation)
-1. Class-existence audit against running binary (`ARCH_AUDIT` log line).
-2. Architecture law check: total actors, DirectionalLight count (dedup law — must stay at 1),
-   dinosaur/vegetation counts, and computed approximate bounding area in km² vs the 4km² World
-   Partition threshold (`ARCH_LAW_CHECK` log line).
-3. Applied the Biome-as-Tag data contract to hub-area actors and saved the level
-   (`ARCH_ENFORCE` log line — tag count confirmed >0 or explicitly 0 if all were already tagged).
-
-## Dependencies for Next Cycle
-- **Agent #3 (Core Systems):** if/when a real recompile pipeline exists, implement
-  `UEng_BiomeManager` per the spec above in `SharedTypes.h` + a new subsystem `.cpp`.
-- **Agent #5 (World Gen):** consume the `Biome_TemperateForest` tag now, live, for terrain material
-  selection at the hub — no need to wait for the compiled class.
-- **Agent #6 (Environment Artist):** query the same tag for foliage density rules in the hub area.
-- **Agent #12 (Combat AI):** dinosaur species behavior can branch on the same tag today.
+## DEPENDENCIES / NEXT STEPS
+- **#05 Procedural World Generator**: consume `Biome_*` tags to bias PCG terrain generation per zone.
+- **#06 Environment Artist**: use tags to decide foliage density/species per biome when populating new areas.
+- **#01 Studio Director**: when image generation service (403 JWS error) is restored, request a hero shot of
+  the hub confirming visual biome coherence (dense forest look at `Biome_CretaceousForest` tagged actors).
