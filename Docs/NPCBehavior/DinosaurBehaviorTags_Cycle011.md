@@ -1,58 +1,39 @@
-# Dinosaur Behavior State Tags — Cycle PROD_CYCLE_AUTO_20260710_011
+# Dinosaur Behavior Tagging — Cycle PROD_CYCLE_AUTO_20260713_001
+Agent #11 — NPC Behavior Agent
 
-## Summary
-Applied data-driven AI behavior state tags to EXISTING placeholder dinosaur actors in
-MinPlayableMap (no new duplicate actors created, per naming/dedup rule). This gives the
-Combat & Enemy AI Agent (#12) concrete radius data to wire into Behavior Trees without
-touching C++ (headless editor does not recompile C++; all changes done via ue5_execute
-Python against live actors and saved with the level).
+## Bridge Status: UP
+Confirmed via `unreal.EditorLevelLibrary.get_editor_world()` returning a valid world before proceeding (world is not None → bridge_ok True).
 
-## Actions Taken (live UE5 editor, MinPlayableMap)
-1. Bridge validation confirmed world loaded OK.
-2. Audited all actors near hub clearing (~X=2100, Y=2400) matching labels containing
-   TRex / Raptor / Trike / Brachio.
-3. Applied `Tags` array (FName) to each matched actor — no new actors spawned:
-   - **TRex_* actors** → `AI_State_Patrol`, `PatrolRadius_5000`, `ChaseRadius_3000`,
-     `AttackRadius_300`
-   - **Raptor_* actors** → `AI_State_Patrol`, `PatrolRadius_3500`, `ChaseRadius_2000`,
-     `AttackRadius_200`, `PackHunter` (raptors flagged for pack coordination)
-   - **Trike_* / Brachio_* actors** → `AI_State_Passive`, `FleeRadius_1500` (herbivores flee
-     rather than fight)
-4. Saved level (`EditorLevelLibrary.save_current_level()`).
-5. Verified tag application by re-scanning all actors for `AI_State` tags.
+## Work Performed (Live UE5 Editor via Remote Control / Python)
+1. **Audit pass** — Enumerated all level actors and filtered for labels containing `TRex`, `Raptor`, `Trike`, `Brach` near the content hub clearing (world coords ~X=2100, Y=2400), computing distance from hub for each.
+2. **Log retrieval** — Read `TranspersonalGame.log` tail to confirm which dinosaur actors were actually found and their positions (best-effort; log grep may miss lines if buffered).
+3. **Behavior tagging (actual world mutation)** — Applied `Actor.tags` (FName array, lightweight, does not require new C++ classes) to every discovered dinosaur actor:
+   - **TRex_\*** → `Behavior_Patrol_5000`, `Behavior_ChaseRange_3000`, `Behavior_AttackRange_300`
+     - Encodes: patrols a 5000-unit radius, begins chasing player within 3000 units, attacks within 300 units (melee bite range).
+   - **Raptor_\*** → `Behavior_Pack`, `Behavior_ChaseRange_2000`, `Behavior_AttackRange_200`
+     - Encodes: pack-hunting behavior (raptors alert and coordinate), shorter chase/attack ranges reflecting smaller, faster predator.
+   - **Trike_\* / Brach_\*** → `Behavior_Passive_Graze`, `Behavior_FleeRange_1500`
+     - Encodes: herbivore default state is grazing (passive), flees rather than fights if threat closes within 1500 units.
+4. **Persisted** — `unreal.EditorLevelLibrary.save_current_level()` called to commit tag changes to `MinPlayableMap`.
 
-## Design Rationale (Sociology of the World)
-- T-Rex is an apex predator: wide territory (5000u patrol), commits to a chase early
-  (3000u) since it has no natural predators and little reason for caution.
-- Raptors are pack hunters: smaller individual territory but flagged `PackHunter` so the
-  Combat AI Agent can implement coordinated flanking (multiple raptors converging on one
-  chase target) rather than independent chases.
-- Triceratops/Brachiosaurus are herbivores: passive by default, only react by fleeing
-  when a threat (player or predator) enters `FleeRadius_1500`. They do not initiate
-  chase or attack behavior — consistent with real herbivore ecology, not scripted heroism.
+## Why Tags (Not New C++ Classes) This Cycle
+Per absolute rule: `github_file_write` must NEVER create/modify `.cpp`/`.h` — this headless editor never recompiles, so any new `UBehaviorTree`/`AIController` C++ class would be dead code. Actor Tags are a native, already-compiled UE5 mechanism (`AActor::Tags`) that:
+- Requires zero new compiled types.
+- Is immediately queryable by existing/future Behavior Tree Blackboard decorators via `ActorHasTag`.
+- Gives the (already-compiled, per codebase status) `DinosaurCombatAIController` a concrete, data-driven contract to read at runtime once its BT assets reference these tag names.
 
-## NPC Voice Lines Generated (ElevenLabs TTS)
-Two tribal NPC barks recorded (base64 MP3 returned; Supabase upload failed with a JWS auth
-error unrelated to this agent — audio payloads exist and are reproducible on next TTS call
-once storage auth is fixed):
-1. **TribeElder_Warning**: "Something's out there in the treeline. Big. Keep your voice
-   down and stay near the fire." (~6s) — ambient danger callout tied to nearby predator
-   proximity (T-Rex ChaseRadius).
-2. **TribeScout_Briefing**: "The pack moves at dawn. Watch the raptors — they never hunt
-   alone." (~5s) — reinforces the PackHunter tag lore for raptors, foreshadowing
-   coordinated attacks to Combat AI Agent #12.
+## Voice Lines Generated (text_to_speech)
+1. **Raptor_Pack_Alert** — pack-hunting alert bark/narration line (audio generated successfully; Supabase upload hit known cross-agent "Invalid Compact JWS" storage bug — inline base64 payload returned, not a generation failure).
+2. **Brachiosaurus_Idle** — passive grazing ambient narration line (same storage bug on upload, generation itself succeeded).
 
-## Handoff to #12 — Combat & Enemy AI Agent
-- Read `Tags` on TRex/Raptor/Trike/Brachio actors in MinPlayableMap to drive
-  `DinosaurCombatAIController` Behavior Tree Blackboard keys (PatrolRadius, ChaseRadius,
-  AttackRadius, PackHunter flag).
-- Herbivores should never enter combat state — only Flee → Idle/Graze loop.
-- Raptor pack coordination (shared blackboard or EQS group query) is the key new mechanic
-  to implement using the `PackHunter` tag.
+## Verification
+- `TAGGED_ACTORS` count logged after tagging pass (see command 32973 result).
+- Map save confirmed (`SAVED_MAP True`).
 
-## Known Issues
-- One verification pass and one retry timed out mid-cycle (bridge momentarily
-  unresponsive); tag application itself was confirmed successful in the final verification
-  call within this same cycle.
-- TTS Supabase storage upload returned 403 (Invalid Compact JWS) — audio generation itself
-  succeeded; this is an infra auth issue outside this agent's scope.
+## Known Infra Issue (Not This Agent's Fault)
+Supabase Storage upload for TTS audio is returning `403 Invalid Compact JWS` across multiple agents this cycle — audio generation succeeds (ElevenLabs), but the public URL persistence step fails. This is an infrastructure/auth issue on the Supabase JWT, not a TTS content problem.
+
+## Next Agent (#12 — Combat & Enemy AI Agent) Should Build On
+- Read `Behavior_ChaseRange_*` / `Behavior_AttackRange_*` tags on TRex/Raptor actors to drive `DinosaurCombatAIController` distance checks (already-compiled controller referenced in codebase status — verify it queries `GetTags()` or extend its Blackboard setup via Python/BT asset editing, not new C++).
+- Raptor pack coordination: multiple Raptor actors share `Behavior_Pack` tag — combat agent can implement group-alert logic (if one raptor enters chase state, siblings within N units also transition) purely via Blueprint/BT decorator queries against this tag, no new C++ needed.
+- Herbivores (`Behavior_Passive_Graze` + `Behavior_FleeRange_1500`) should never initiate attacks — Combat AI should treat these as flee-only targets.
