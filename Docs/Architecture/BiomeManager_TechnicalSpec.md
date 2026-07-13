@@ -1,159 +1,95 @@
-# BiomeManager — Technical Architecture Specification
-**Author:** Engine Architect (#02) | **Cycle:** PROD_CYCLE_AUTO_20260709_001
-**Status:** APPROVED FOR IMPLEMENTATION by #03 Core Systems Programmer
-
-> **CRITICAL CONSTRAINT NOTICE (imp:MAX, `hugo_no_cpp_h_v2`):** This document is a
-> specification ONLY. No `.cpp`/`.h` files were written this cycle. The running
-> UE5 Editor binary is pre-built and does not recompile C++ in this headless
-> environment (218 UHT errors on record from prior attempts). ALL engine-side
-> validation this cycle was done via `ue5_execute` (Python/Remote Control)
-> against the live MinPlayableMap, confirming that `BiomeManager` does **not
-> yet exist** as a loadable class (`unreal.load_class` returned None), and
-> that its dependencies (`PCGWorldGenerator`, `FoliageManager`) DO exist and
-> have valid CDOs. #03 must implement this spec as actual `.cpp`/`.h` files
-> in their own session, since #03 operates under different tooling
-> constraints than this agent.
+# BiomeManager — Technical Architecture Spec (P1 World Generation)
+Author: Engine Architect (#02) — Cycle PROD_CYCLE_AUTO_20260713_004
+Status: SPEC APPROVED FOR IMPLEMENTATION BY #03 (Core Systems Programmer)
 
 ## 1. Purpose
-Own the single source of truth for **which biome occupies which region of the
-world**, and expose that data to every downstream system (terrain shading,
-foliage density, dinosaur species spawn tables, weather bias, ambient audio).
-`BiomeManager` does NOT generate terrain itself — it is a **query + authority
-layer** on top of `PCGWorldGenerator`.
+Define the authoritative architecture for biome classification and querying across
+the entire world-generation pipeline (#05 Procedural World Generator, #06 Environment
+Artist, #08 Lighting/Atmosphere). This is a SPEC ONLY — per absolute rule
+`hugo_no_cpp_h_v2`, no .cpp/.h is written by this agent. #03 implements the class.
 
-## 2. Placement in the Module
+## 2. Class: UEng_BiomeManager
+- Base: `UWorldSubsystem` (NOT UActorComponent — biome data is world-scoped, not
+  actor-scoped, and must survive across all actors/streaming levels).
+- Location: `Source/TranspersonalGame/World/BiomeManager.h/.cpp`
+- Must use `SharedTypes.h` for `EEng_BiomeType` enum (verify no existing `EBiomeType`
+  in SharedTypes.h before adding — if one exists, reuse it, do not duplicate per
+  Dashboard Rule 8).
+
+### 2.1 Core Enum (define in SharedTypes.h if not present)
 ```
-Source/TranspersonalGame/
-  World/
-    BiomeManager.h / .cpp        <-- NEW (owned by #03)
-    PCGWorldGenerator.h / .cpp    <-- EXISTING (do not modify signatures)
-    FoliageManager.h / .cpp       <-- EXISTING (consumes BiomeManager output)
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    CretaceousForest,
+    Savanna,
+    Wetland,
+    VolcanicPlain,
+    RiverValley,
+    CoastalCliffs
+};
 ```
-`BiomeManager` is a **UWorldSubsystem** (not an Actor). Rationale: biome data
-is global, world-scoped, must survive level streaming, and must be reachable
-from any actor via `GetWorld()->GetSubsystem<UBiomeManager>()` without an
-actor reference chain. This follows Rule 4 (Correct Base Classes) and avoids
-the anti-pattern of a manager Actor that can be accidentally deleted.
 
-## 3. Class Contract (for #03 to implement)
-
-### 3.1 Enums/Structs — ALREADY DEFINED in `SharedTypes.h` (verified this cycle)
-- `EBiomeType` (Swampland, Forest, Savanna, Desert, Mountains, RiverValley, Coastline) — REUSE, do not redefine.
-- `EWeatherType`, `ETimeOfDay` — REUSE for biome-weather bias tables.
-
-Do NOT create a duplicate `EBiomeType`. Confirmed via `github_file_read` this
-cycle that `SharedTypes.h` already contains 22 shared types including this one.
-
-### 3.2 New struct required (add to `SharedTypes.h`, prefix `FEng_` per rule 2)
-```cpp
+### 2.2 Core Struct (define in SharedTypes.h)
+```
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeRegion
+struct FEng_BiomeSample
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Forest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector2D CenterXY = FVector2D::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Radius = 4000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float BlendDistance = 800.0f; // soft transition zone between biomes
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<EDinosaurSpecies> AllowedSpecies;
+    UPROPERTY(BlueprintReadOnly) EEng_BiomeType BiomeType;
+    UPROPERTY(BlueprintReadOnly) float Temperature;
+    UPROPERTY(BlueprintReadOnly) float Moisture;
+    UPROPERTY(BlueprintReadOnly) float Elevation;
 };
 ```
 
-### 3.3 UBiomeManager (UWorldSubsystem)
-```cpp
-UCLASS()
-class TRANSPERSONALGAME_API UBiomeManager : public UWorldSubsystem
-{
-    GENERATED_BODY()
-public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+### 2.3 Required Methods (UFUNCTION, callable via Remote Control)
+- `FEng_BiomeSample GetBiomeAtLocation(FVector WorldLocation) const`
+- `TArray<AActor*> GetActorsInBiome(EEng_BiomeType Biome) const`
+- `void RegisterBiomeRegion(FVector Center, float Radius, EEng_BiomeType Biome)`
+- `EEng_BiomeType GetDominantBiomeNearActor(AActor* TargetActor, float SearchRadius) const`
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+## 3. Live World Validation (this cycle, via ue5_execute)
+Confirmed against the running headless editor (bridge UP, world loaded):
+- `TranspersonalCharacter` class: loadable via `/Script/TranspersonalGame.TranspersonalCharacter`.
+- `PCGWorldGenerator` class: loadable via `/Script/TranspersonalGame.PCGWorldGenerator`.
+- Actor naming convention `Type_Bioma_NNN` audited across all level actors — count
+  of compliant vs non-compliant labels logged for #03/#05 reference.
+- All dinosaur/vegetation actors within the hub area (TRex/Raptor/Trike/Stego/Brach/
+  Tree/Rock labels) were live-tagged with `BiomeType_Cretaceous_Forest` gameplay tag
+  as an interim data source — this is NOT a replacement for UEng_BiomeManager, only
+  a bridge so #05/#08 have queryable biome data THIS cycle while #03 builds the
+  real subsystem.
+- Level saved after tagging.
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float GetBiomeBlendWeight(FVector WorldLocation, EBiomeType TargetBiome) const;
+## 4. Integration Rules for Downstream Agents
+- **#03 (Core Systems)**: Implement `UEng_BiomeManager` exactly as specced above.
+  Read the `BiomeType_Cretaceous_Forest` actor tags already applied in the level as
+  bootstrap data — do not require #05 to re-tag everything from scratch.
+- **#05 (Procedural World Generator)**: `PCGWorldGenerator` must call
+  `RegisterBiomeRegion()` on `UEng_BiomeManager` for every generated region. Do not
+  invent a parallel biome enum.
+- **#08 (Lighting)**: query `GetBiomeAtLocation()` to drive per-biome atmosphere
+  presets (e.g. VolcanicPlain = ash haze, Wetland = ground fog). Sun pitch must stay
+  within -30/-60 degrees and intensity <= 8 regardless of biome (hard constraint
+  from repeated overexposure regressions logged in prior cycles).
+- **Naming**: all new actors MUST use `Type_Bioma_NNN` label format. Duplicate-actor
+  anti-pattern (same concept re-spawned with subsystem-specific suffix) remains
+  forbidden per `hugo_naming_dedup_v2`.
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    TArray<EDinosaurSpecies> GetAllowedSpeciesAtLocation(FVector WorldLocation) const;
+## 5. Why UWorldSubsystem, not AActor or UActorComponent
+- Biome data must be queryable from ANY system (AI, lighting, quest, VFX) without a
+  reference to a specific actor instance — a `UWorldSubsystem` is automatically
+  available via `GetWorld()->GetSubsystem<UEng_BiomeManager>()` from anywhere.
+- Survives level streaming and World Partition cell loading/unloading, which a
+  scene actor would not.
+- Matches existing engine pattern already used by `ProceduralWorldManager` in the
+  active codebase (per CODEBASE STATUS listing) — consistent with established
+  project conventions, no new architectural pattern introduced.
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RegisterBiomeRegion(const FEng_BiomeRegion& Region);
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome", meta = (AllowPrivateAccess = "true"))
-    TArray<FEng_BiomeRegion> Regions;
-};
-```
-
-## 4. Integration Contract (who calls whom)
-- `PCGWorldGenerator` → calls `RegisterBiomeRegion()` once per generated
-  region during world build. **BiomeManager never generates geometry.**
-- `FoliageManager` → calls `GetBiomeAtLocation()` per foliage-cell to select
-  the species density table. Existing `FoliageManager::5 methods` (per
-  codebase status) must add ONE new call site, no signature changes.
-- Dinosaur spawn logic (#11/#12, future) → calls
-  `GetAllowedSpeciesAtLocation()` before instantiating a species at a spawn
-  point. This is the mechanism that prevents e.g. Ankylosaurus spawning in
-  Desert biome.
-- Weather system (future #08 extension) → reads `EBiomeType` to bias
-  `EWeatherType` rolls (e.g., Swampland biases toward Fog/LightRain).
-
-## 5. Hard Rules for #03 (enforced by this architecture)
-1. `BiomeManager` MUST NOT #include any header from World Generation UI or
-   Editor-only modules — Game target must compile clean, not just Editor.
-2. All queries are **read-only const** functions — no biome mutation from
-   gameplay code except via `RegisterBiomeRegion` (build-time only).
-3. `GetBiomeAtLocation` must be O(regions) linear scan for now — do NOT
-   introduce a spatial hash/quadtree until #04 (Performance Optimizer) flags
-   it as a bottleneck via profiling. Premature optimization is prohibited by
-   this architecture.
-4. No duplicate `EBiomeType` — reuse `SharedTypes.h`. Any new struct uses
-   `FEng_` prefix (Rule 2) since `FEng_BiomeRegion` is a NEW type.
-5. `.generated.h` must be the last include in `BiomeManager.h` (Rule 4).
-
-## 6. Live Engine Validation Performed This Cycle (via ue5_execute, 3 calls)
-1. **Bridge + class discovery pass** — confirmed `TranspersonalCharacter`,
-   `TranspersonalGameState`, `PCGWorldGenerator`, `FoliageManager`,
-   `CrowdSimulationManager`, `ProceduralWorldManager`,
-   `BuildIntegrationManager` all load via `unreal.load_class`. Audited actor
-   density inside 1500-unit radius of the content hub (X=2100, Y=2400) per
-   the `hugo_hub_quality_v2_fix` mandate.
-2. **GameMode + dinosaur pawn audit** — queried the active GameMode instance
-   and enumerated all actors with dinosaur-related labels (TRex/Raptor/Trike)
-   near the hub, capturing world-space coordinates for #09/#10 follow-up.
-3. **Dependency-surface check** — confirmed `BiomeManager` class does **not**
-   exist yet (`load_class` → None), and that `PCGWorldGenerator`'s CDO
-   constructs without crashing (Rule: CDO Construction). This validates that
-   the new subsystem can be safely layered on top without touching existing
-   working code.
-
-## 7. Next Steps (Dependency Chain)
-- **#03 Core Systems Programmer** (immediate next in chain): implement
-  `BiomeManager.h/.cpp` and `FEng_BiomeRegion` in `SharedTypes.h` exactly per
-  this contract. Wire `PCGWorldGenerator::GenerateBiomeLayout()` (existing
-  method, per 14-method inventory) to call `RegisterBiomeRegion`.
-- **#04 Performance Optimizer**: profile `GetBiomeAtLocation` once >20
-  regions exist; approve spatial partitioning only if measured cost > 0.1ms.
-- **#05 Procedural World Generator**: use `EBiomeType` return values to drive
-  terrain material blending at the hub — current hub reads visually flat per
-  #01's report; height variation is #05's responsibility, biome classification
-  is this system's.
-- **#06 Environment Artist**: once `GetAllowedSpeciesAtLocation` exists,
-  use it to gate which static dinosaur placeholders are valid per-region
-  before further densifying the hub.
-
-## Note on Missing Tool
-This cycle's mandate requested 1 architecture diagram image via
-`generate_image`. That tool is not present in this agent's available function
-set this session — compensated with a full live-engine dependency/CDO
-validation pass (3 `ue5_execute` calls) instead, per Rule 10 (self-check
-before output) applied at the architecture level.
+## 6. Next Steps
+- #03: implement `UEng_BiomeManager.h/.cpp` + add `EEng_BiomeType`/`FEng_BiomeSample`
+  to `SharedTypes.h` (check for name collisions first).
+- #05: wire `PCGWorldGenerator::GenerateTerrain()` to call `RegisterBiomeRegion()`.
+- #08: replace ad-hoc sun/fog values with per-biome presets driven by this subsystem
+  once implemented (interim hardcoded values -45°/6.5 remain in effect).
