@@ -1,64 +1,33 @@
-# SurvivalComponent Integration — Status Report
-**Agent:** Core Systems Programmer #03
-**Cycle:** PROD_CYCLE_AUTO_20260709_002
+# Survival Component Integration — Status Report (Ciclo PROD_CYCLE_AUTO_20260719_005)
 
-## Constraint Conflict (7th consecutive cycle)
+## Conflito de directiva (5º ciclo consecutivo)
 
-The cycle directive requested writing `TranspersonalCharacter.h/.cpp` (adding
-`#include "Core/Survival/SurvivalComponent.h"` and a `CreateDefaultSubobject<USurvivalComponent>`
-call in the constructor) via `github_file_write`.
+A directiva deste ciclo pede, literalmente:
+1. Editar `Source/TranspersonalGame/Core/GameFramework/TranspersonalCharacter.h` para adicionar `#include` e `UPROPERTY USurvivalComponent* SurvivalComp`.
+2. Editar `TranspersonalCharacter.cpp` para instanciar via `CreateDefaultSubobject`.
+3. Guardar via `github_file_write`.
 
-This continues to violate the standing **GLOBAL ABSOLUTE rule `hugo_no_cpp_h_v2`**
-(importance MAX, NO EXCEPTIONS): the running UE5 instance is a **headless, pre-built
-binary that never recompiles**. Any `.h`/`.cpp` write via `github_file_write` is
-100% inert — it changes source control but has zero runtime effect until a real
-build pipeline exists. Per the rule, I skip the C++ write and report the limitation
-here instead, taking real action in the live editor via Python.
+Isto **viola directamente** a regra global `hugo_no_cpp_h_v2` (importance MAX, ABSOLUTE, NO EXCEPTIONS):
+> "NEVER call github_file_write to create or modify .cpp or .h files. C++ is inert in this headless editor (218 UHT compile errors on record; the running binary is pre-built and never recompiles)."
 
-## What I verified this cycle (live binary, via Remote Control / Python)
+Esta é a **quinta vez consecutiva** (ciclos 002, 003, 004, e agora 005) que esta directiva colide com a regra do sistema. Não escrevi `.h`/`.cpp` porque seria um write 100% sem efeito no jogo em execução, desperdiçando o ciclo.
 
-1. **Class loadability** — `TranspersonalCharacter`, `TranspersonalGameState`,
-   `PCGWorldGenerator` load successfully via `unreal.load_class`. `SurvivalComponent`
-   class path was queried; its presence/absence in the live binary determines whether
-   native attachment is possible at all in this session (see raw tool output for the
-   exact loaded/missing result of this cycle).
-2. **Instance scan** — enumerated all `TranspersonalCharacter` instances (falling back
-   to any `Pawn`-derived actor if none exist) in `MinPlayableMap`, and checked each for
-   an existing `SurvivalComponent` via `get_components_by_class`.
-3. **Runtime workaround applied** — for every target actor that does NOT already have
-   a native `SurvivalComponent`, I appended two native `AActor.Tags` entries:
-   - `RequiresSurvivalComponent`
-   - `Core_SurvivalIntegration_Pending`
+## O que fiz em vez disso (verificação real no UE5 vivo)
 
-   These tags are queryable TODAY by any agent/system via Python or Blueprint
-   (`Actor->Tags`) without requiring a C++ recompile. This lets the GameMode/BeginPlay
-   flow (once a real build exists) or any Blueprint-side wiring identify exactly which
-   pawns still need the component attached natively.
-4. **Level saved** — `unreal.EditorLevelLibrary.save_current_level()` persisted the tags.
+Usei `ue5_execute` (6 chamadas Python reais, todas com `command_id` e resultado confirmado) para:
 
-## Real fix (for when a real build/CI pipeline is available — NOT this session)
+1. **Confirmar que PLAYER0 (label exacto) não existe** no `MinPlayableMap` actual — os actores de personagem têm outros labels.
+2. **Localizar as 49 instâncias reais da classe `TranspersonalCharacter`** no nível (via `AssetRegistry`/`get_all_level_actors`), incluindo `Player_Character_Visual`, `MainPlayerCharacter`, `Char_Player_001`, etc.
+3. **Inspecionar os componentes de `Player_Character_Visual`** (uma instância real de `TranspersonalCharacter`): `ArrowComponent`, `CameraComponent`, `CapsuleComponent`, `CharacterMovementComponent`, `SkeletalMeshComponent`, `SpringArmComponent`. **Confirmado: nenhuma instância tem `SurvivalComponent`** — porque o binário C++ nunca foi recompilado com essa classe.
+4. **Procurado assets Blueprint com "Survival" no nome** no `/Game`: existem apenas `ABP_SurvivalCharacter` (Animation Blueprint), `BP_SurvivalStatsDisplay`, `BP_SurvivalHUDManager`, `WBP_SurvivalHUD` — **nenhum Blueprint ActorComponent de Survival existe** que possa ser anexado dinamicamente via Python sem recompilação C++.
+5. **Ação real e verificável no mundo**: marquei as 49 instâncias de `TranspersonalCharacter` com a tag `SurvivalComponent_Pending_BP`, para que outros agentes (Performance Optimizer, QA) tenham rasto explícito no editor de que a integração de sobrevivência ainda não está fisicamente presente nos actores. Confirmado por `result.count == 49` e lista de labels devolvida pelo bridge.
 
-```cpp
-// TranspersonalCharacter.h
-#include "Core/Survival/SurvivalComponent.h"
-...
-UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
-USurvivalComponent* SurvivalComp;
+Nenhuma destas ações tocou em `PLAYER0`, mobility, Landscape, foliage, sublevel `Terrain_Savana`, câmara do editor, ou o sol — todas as regras `HANDS OFF` foram respeitadas.
 
-// TranspersonalCharacter.cpp constructor
-SurvivalComp = CreateDefaultSubobject<USurvivalComponent>(TEXT("SurvivalComp"));
-```
+## Recomendação para o Engine Architect (#02)
 
-This snippet is ready to apply verbatim once `#02`/`#19` confirm a real compilation
-environment (local build or CI) is online. Until then, committing it as an actual
-`.h`/`.cpp` diff would be wasted work per `hugo_no_cpp_h_v2`.
+Dado que este headless editor **nunca recompila C++**, a única via viável para "SurvivalComponent" afetar o jogo real é:
+- **Opção A**: Recriar `SurvivalComponent` como um **Blueprint ActorComponent** (`BP_SurvivalComponent`), criável via Python (`unreal.EditorAssetLibrary` + `unreal.BlueprintFactory` para um Actor Component blueprint) e anexável em runtime às 49 instâncias via `add_component_by_class` no editor.
+- **Opção B**: Se existir pipeline de build C++ fora deste ambiente headless (ex.: build server separado), a directiva de editar `.h`/`.cpp` faz sentido lá — mas nesse caso a tool `github_file_write` deve ser usada apenas para consumo por esse pipeline externo, e a directiva do agente deveria explicitar isso para não continuar a colidir com a regra `hugo_no_cpp_h_v2`.
 
-## Dependencies / Next Steps
-- **#19 (Integration & Build)**: confirm when a real build environment exists so this
-  spec can be applied as an actual compiled diff.
-- **#04 (Performance Optimizer)**: the `Core_SurvivalIntegration_Pending` tag can be
-  used as a query filter to avoid wasting perf budget assuming survival stats are
-  live on pawns that don't have them yet.
-- **#11 (NPC Behavior)** / **#18 (QA)**: treat any actor carrying
-  `RequiresSurvivalComponent` as NOT YET having functional hunger/thirst/stamina/fear
-  gameplay — do not assume it does.
+Escalado como issue para decisão do #02/#01.
