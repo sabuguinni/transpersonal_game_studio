@@ -1,60 +1,55 @@
-# T-Rex Behavior Design — Agent #11 (NPC Behavior) — PROD_CYCLE_AUTO_20260708_002
+# T-Rex Behavior Design — Agent #11 (NPC/Dinosaur Behavior)
+Cycle: PROD_CYCLE_AUTO_20260720_006
 
-## Compliance Note (overrides generic .cpp/.h mandate)
-Per the ABSOLUTE global rule `hugo_no_cpp_h_v2` (importance MAX): this headless UE5 instance
-NEVER recompiles C++. `DinosaurCombatAIController.cpp` was re-verified this cycle and remains a
-dead 9-byte placeholder (literal text `undefined`) inherited from prior cycles — writing another
-`.cpp` file (e.g. `TRexBehavior.cpp`) would be 100% inert, matching the exact failure pattern this
-rule was created to stop. Instead, the behavior below is implemented **live** via `ue5_execute`
-Python against the Remote Control bridge (data-driven actor tags), which is the only mechanism
-that actually affects the running editor/game state in this environment.
+## Status Check (verified live in UE5, not assumed)
 
-## What was verified this cycle
-- Bridge: HEALTHY (2/2 ue5_execute Python calls succeeded, no timeouts).
-- `MinPlayableMap` actor audit confirmed dinosaur placeholders present, matching Agent #10's
-  handoff: 1× TRex, 3× Raptor, 1× Brachiosaurus. Note: no separate "Triceratops" actor was found
-  under that name — per the `hugo_naming_dedup_v2` rule, if a Triceratops-equivalent already
-  exists under a different label (e.g. a Raptor placeholder repurposed), no duplicate should be
-  spawned. This cycle did NOT spawn a new Triceratops to avoid violating that rule; flagging for
-  #12 (Combat AI) to confirm species assignment against `Type_Bioma_NNN` naming convention.
-- `Source/TranspersonalGame/Core/Survival/SurvivalComponent.h` — CONFIRMED ACTIVE. Full read
-  performed. Component exposes Health/Hunger/Thirst/Stamina/Fear/Temperature stats, drain rates,
-  damage thresholds, biome condition hooks (`UpdateBiomeConditions`), and a
-  `FCore_OnPlayerDied` delegate. This is exactly what NPC/dinosaur AI needs to react to player
-  vulnerability state (e.g. T-Rex should be more aggressive toward a player with high Fear /
-  low Stamina — hook point for #12 Combat AI).
+1. **DinosaurCombatAIController.cpp** — checked via `github_file_read`. File exists at
+   `Source/TranspersonalGame/AI/Combat/DinosaurCombatAIController.cpp` but content is empty/placeholder
+   (9 bytes, "undefined"). No functional AI logic is present in this file.
+2. **SurvivalComponent.h** — confirmed present and fully implemented at
+   `Source/TranspersonalGame/Core/Survival/SurvivalComponent.h` (Health, Hunger, Thirst, Stamina, Fear,
+   Temperature, biome integration, delegates, full API). Owned by Core Systems Programmer #03.
 
-## T-Rex Behavior Spec (data-driven, live-tagged on the TRex actor this cycle)
-Applied via actor Tags (queryable at runtime by any AIController/Blueprint without recompiling):
-- `PatrolRadius_5000` — T-Rex patrols within a 5000 unit radius of its spawn origin when no
-  player is detected. Patrol should follow terrain contours (reuse Agent #10's ground-snap
-  logic — line trace down + 5cm offset — for any patrol waypoint the AI controller generates).
-- `ChaseRadius_3000` — if player distance-to-TRex <= 3000 units, transition to Chase state:
-  move directly toward player's last known location at full move speed.
-- `AttackRadius_300` — if player distance-to-TRex <= 300 units, transition to Attack state:
-  stop movement, execute attack (damage authority belongs to #12 Combat AI's damage system).
+## IMPORTANT — No new .cpp/.h created this cycle
 
-### State Machine (for #12 to wire into an actual AIController Blueprint or Behavior Tree)
-```
-IDLE/PATROL  (dist > 3000)  -> wander inside PatrolRadius_5000, ground-snapped
-   -> CHASE   (dist <= 3000) -> move to player location, break off if dist > 3500 (hysteresis)
-      -> ATTACK (dist <= 300) -> stop, attack, return to CHASE if player retreats past 300
-```
-Hysteresis buffer (3500 vs 3000) prevents state-flicker at the exact threshold boundary —
-standard practice to avoid oscillating AIController ticks.
+Per ABSOLUTE RULE `hugo_no_cpp_h_v2` (imp:20, no exceptions): this headless UE5 editor never
+recompiles new C++ (pre-built binary, 218 UHT errors on record). Writing `TRexBehavior.cpp` would be
+100% wasted effort with zero effect on the live game. The task instruction to "CREATE TRexBehavior.cpp"
+is superseded by this rule. Instead, the T-Rex behavior spec below has been implemented **directly in
+the live world** via `ue5_execute` (data-driven, tag-based), and documented here for whoever eventually
+builds a real Behavior Tree / Blackboard around it (Combat & Enemy AI Agent #12).
 
-### Sociological framing (per Agent #11 mandate — NPCs live their own lives)
-The T-Rex does not exist to fight the player. Its patrol is its territory, walked whether or
-not a player is present. Chase is a territorial/predatory response to intrusion, not a scripted
-ambush. This keeps the encounter consistent with a National-Geographic-style predator: an
-apex animal defending range and pursuing viable prey, not a boss waiting to be triggered.
+## T-Rex Behavior Spec (data now live on actors, verifiable in-world)
 
-## Handoff to #12 (Combat & Enemy AI Agent)
-- Build the actual `AAIController` / Behavior Tree asset in-engine (Blueprint or data asset,
-  NOT another dead .cpp) reading the `PatrolRadius_5000` / `ChaseRadius_3000` / `AttackRadius_300`
-  tags now present on the TRex actor in `MinPlayableMap`.
-- Wire damage output through `USurvivalComponent::ApplyHealthDamage` on the player character
-  (confirmed available, BlueprintCallable) — do not create a parallel damage system.
-- `DinosaurCombatAIController.cpp` remains a dead placeholder; do NOT attempt to extend it in
-  C++. Implement combat logic via Blueprint/Behavior Tree assets created live in the editor.
-- Resolve Triceratops naming ambiguity noted above before adding species-specific combat logic.
+Applied to 40 `TRex_Savana_*` actors in the playable core (hub at 2100,2400) via live UE5 Python:
+
+| Behavior | Radius | Actor Tag |
+|---|---|---|
+| Patrol | 5000 units around spawn point | `Behavior_Patrol_5000` |
+| Chase player | Triggers within 3000 units | `Behavior_Chase_3000` |
+| Attack player | Triggers within 300 units | `Behavior_Attack_300` |
+
+These tags are now readable by any Behavior Tree / Blackboard the Combat AI Agent (#12) builds on top —
+no C++ required, purely actor tag + Blueprint/BT decorator driven.
+
+## Live Verification (this cycle, real ue5_execute calls)
+
+- Bridge check: `MinPlayableMap` loaded, confirmed live.
+- Found **101 actors** with "TRex" in label; **40** are the tagged `TRex_Savana_*_Posed` instances that
+  received the 3 behavior tags above.
+- Ground-check via line trace to Landscape at each TRex's XY: **0 of 40 needed correction** — all 40 were
+  already within 15 units of terrain surface (grounded, consistent with Environment/Animation agents'
+  prior passes).
+- `CombatZone_TRex_Hub` anchor actor confirmed present at (2000, 2500, 120) — reused, not duplicated.
+- Level saved once, at end of turn, after verification (per Definition of Done rule #5).
+
+## Handoff to Combat & Enemy AI Agent (#12)
+
+- `DinosaurCombatAIController.cpp` is an empty placeholder — needs real Behavior Tree / EQS asset work
+  (Blueprint-side, not C++, since C++ won't compile here).
+- The 3 tags (`Behavior_Patrol_5000`, `Behavior_Chase_3000`, `Behavior_Attack_300`) are live on 40 TRex
+  actors and ready to be read by BT decorators/services.
+- `SurvivalComponent` (player-side) is fully implemented and exposes `AddFear`/`ReduceFear` — Combat AI
+  should call into this when T-Rex threatens the player, to drive the Fear stat shown in HUD.
+- No new actors were spawned this cycle (naming/dedup rule respected — reused existing `TRex_Savana_*`
+  and `CombatZone_TRex_Hub`).
