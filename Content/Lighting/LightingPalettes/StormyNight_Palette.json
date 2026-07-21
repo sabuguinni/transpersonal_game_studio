@@ -1,0 +1,109 @@
+{
+  "palette_name": "StormyNight",
+  "cycle_id": "PROD_CYCLE_AUTO_20260702_011",
+  "agent": "Agent_08_Lighting_Atmosphere",
+  "description": "Violent Cretaceous thunderstorm at night — heavy volumetric fog, electric blue lightning, dark storm sky. Maximum tension and danger atmosphere for dinosaur encounters.",
+  "emotional_intent": "Primal fear. The player feels exposed and hunted. Visibility is reduced. Every shadow could hide a predator.",
+  "cinematography_reference": "Roger Deakins — No Country for Old Men night scenes. RDR2 thunderstorm lighting.",
+
+  "sun": {
+    "pitch_degrees": -5.0,
+    "yaw_degrees": 45.0,
+    "intensity": 0.3,
+    "color_rgb": [160, 180, 220],
+    "color_description": "cold blue-grey overcast storm light",
+    "atmosphere_sun_light": true,
+    "cast_volumetric_shadow": true
+  },
+
+  "sky_light": {
+    "intensity": 0.4,
+    "color_rgb": [100, 120, 160],
+    "color_description": "dark storm blue ambient bounce",
+    "real_time_capture": true
+  },
+
+  "exponential_height_fog": {
+    "fog_density": 0.08,
+    "inscattering_color_linear": [0.05, 0.06, 0.12],
+    "height_falloff": 0.15,
+    "start_distance": 200.0,
+    "cutoff_distance": 15000.0,
+    "volumetric_fog": true,
+    "volumetric_fog_scattering_distribution": 0.7,
+    "volumetric_fog_albedo": [0.6, 0.65, 0.75],
+    "volumetric_fog_extinction_scale": 2.5,
+    "description": "Heavy storm fog — reduces visibility to ~150m, creates oppressive atmosphere"
+  },
+
+  "spawned_lights": [
+    {
+      "label": "Light_Storm_Lightning_001",
+      "type": "PointLight",
+      "location": [500.0, 300.0, 800.0],
+      "intensity_lumens": 8000.0,
+      "color_rgb": [180, 210, 255],
+      "color_description": "electric blue lightning fill",
+      "attenuation_radius": 3000.0,
+      "cast_shadows": true,
+      "purpose": "Simulates ambient lightning glow between strikes — keeps scene readable without full darkness"
+    },
+    {
+      "label": "Light_Storm_RainFill_001",
+      "type": "SpotLight",
+      "location": [-200.0, 400.0, 1200.0],
+      "rotation_pitch": -85.0,
+      "intensity_lumens": 2000.0,
+      "color_rgb": [120, 150, 200],
+      "color_description": "blue-green rain ambient downlight",
+      "attenuation_radius": 2500.0,
+      "inner_cone_angle": 30.0,
+      "outer_cone_angle": 60.0,
+      "cast_volumetric_shadow": true,
+      "purpose": "Simulates diffuse light through rain — creates wet surface sheen and volumetric rain shafts"
+    }
+  ],
+
+  "lumen_settings": {
+    "r.Lumen.Reflections.Allow": 1,
+    "r.Lumen.GlobalIllumination.Allow": 1,
+    "r.VolumetricFog": 1,
+    "r.SkyAtmosphere.FastSkyLUT": 1,
+    "notes": "Lumen reflections critical for wet ground puddle reflections during storm"
+  },
+
+  "audio_references": {
+    "freesound_ids": [410078, 700375, 268148, 765477],
+    "recommended_primary": {
+      "id": 410078,
+      "name": "Thunder and rain during the night in the Amazonian Rainforest",
+      "duration_seconds": 3600,
+      "url": "https://cdn.freesound.org/previews/410/410078_1661766-hq.mp3",
+      "notes": "1-hour loop — perfect for sustained storm ambience. Amazonian rainforest = closest real-world analog to Cretaceous jungle."
+    },
+    "recommended_accent": {
+      "id": 268148,
+      "name": "Thunder.wav",
+      "duration_seconds": 15,
+      "url": "https://cdn.freesound.org/previews/268/268148_2340013-hq.mp3",
+      "notes": "Short dramatic thunder crack — use as MetaSound trigger for lightning flash sync"
+    }
+  },
+
+  "gameplay_implications": {
+    "visibility_range_meters": 150,
+    "dinosaur_behavior_modifier": "predators more active in storm (reduced player visibility = hunting advantage)",
+    "player_survival_effects": ["temperature_drop", "wet_status", "reduced_hearing"],
+    "recommended_music_intensity": "high_tension",
+    "transition_from": "DuskPalette",
+    "transition_to": "ClearDawnPalette"
+  },
+
+  "palette_sequence": {
+    "cycle_008": "DuskPalette — orange-amber sun, warm volumetric fog",
+    "cycle_009": "DawnPalette — rose-gold sun, light shafts through ruins",
+    "cycle_010": "MiddayPalette — white-hot sun, heat haze, harsh shadows",
+    "cycle_011": "StormyNightPalette — cold blue-grey, heavy fog, lightning (THIS CYCLE)",
+    "cycle_012_target": "ClearNightPalette — moonlight silver, star glow, bioluminescent plants"
+  }
+}

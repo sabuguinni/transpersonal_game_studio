@@ -1,304 +1,329 @@
+// AudioSystemCore.cpp — Audio Agent #16
+// PROD_CYCLE_AUTO_20260630_011
+// Adaptive music, ambient layers, voice line registry, Freesound SFX catalog
+
 #include "AudioSystemCore.h"
 #include "Components/AudioComponent.h"
-#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "MetasoundParameterPack.h"
-#include "TimerManager.h"
 
-// Parameter name constants
-const FName UAudioSystemCore::PARAM_EMOTIONAL_STATE = "EmotionalState";
-const FName UAudioSystemCore::PARAM_THREAT_LEVEL = "ThreatLevel";
-const FName UAudioSystemCore::PARAM_TIME_OF_DAY = "TimeOfDay";
-const FName UAudioSystemCore::PARAM_ENVIRONMENT_TYPE = "EnvironmentType";
-const FName UAudioSystemCore::PARAM_STEALTH_LEVEL = "StealthLevel";
-const FName UAudioSystemCore::PARAM_DINOSAUR_PROXIMITY = "DinosaurProximity";
+// ============================================================
+// Constructor
+// ============================================================
 
-void UAudioSystemCore::Initialize(FSubsystemCollectionBase& Collection)
+AAudioSystemCore::AAudioSystemCore()
 {
-    Super::Initialize(Collection);
-    
-    // Initialize default audio state
-    CurrentAudioState.EmotionalState = EEmotionalState::Calm;
-    CurrentAudioState.EnvironmentType = EEnvironmentType::DenseForest;
-    CurrentAudioState.TimeOfDay = ETimeOfDay::Morning;
-    CurrentAudioState.ThreatLevel = 0.0f;
-    CurrentAudioState.PlayerStealthLevel = 1.0f;
-    CurrentAudioState.bIsInPlayerBase = false;
-    CurrentAudioState.NearbyDinosaurCount = 0;
-    CurrentAudioState.DistanceToNearestPredator = 1000.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // 10Hz — audio state polling
 
-    TargetAudioState = CurrentAudioState;
+    // Root
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("AudioRoot"));
 
-    UE_LOG(LogAudio, Log, TEXT("Audio System Core initialized"));
+    // Audio components
+    MusicComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicComponent"));
+    MusicComponent->SetupAttachment(RootComponent);
+    MusicComponent->bAutoActivate = false;
+
+    AmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientComponent"));
+    AmbientComponent->SetupAttachment(RootComponent);
+    AmbientComponent->bAutoActivate = false;
+
+    VoiceComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VoiceComponent"));
+    VoiceComponent->SetupAttachment(RootComponent);
+    VoiceComponent->bAutoActivate = false;
 }
 
-void UAudioSystemCore::Deinitialize()
+// ============================================================
+// BeginPlay
+// ============================================================
+
+void AAudioSystemCore::BeginPlay()
 {
-    if (MusicComponent && IsValid(MusicComponent))
-    {
-        MusicComponent->Stop();
-    }
+    Super::BeginPlay();
 
-    if (AmbientComponent && IsValid(AmbientComponent))
-    {
-        AmbientComponent->Stop();
-    }
+    // Populate registries on start
+    PopulateVoiceLineRegistry();
+    PopulateFreesoundCatalog();
 
-    for (auto* Component : LayeredAmbientComponents)
-    {
-        if (Component && IsValid(Component))
-        {
-            Component->Stop();
-        }
-    }
+    // Set initial music state
+    CurrentMusicState.TimeOfDay = EAudio_TimeOfDay::Day;
+    CurrentMusicState.ThreatLevel = EAudio_ThreatLevel::None;
+    CurrentMusicState.CurrentBiome = EAudio_BiomeType::OpenPlains;
+    CurrentMusicState.PlayerHealthNormalized = 1.0f;
+    CurrentMusicState.bPlayerInCombat = false;
+    CurrentMusicState.bNearCampfire = false;
 
-    Super::Deinitialize();
+    ThreatIntensityTarget = 0.0f;
+    ThreatMusicIntensity = 0.0f;
 }
 
-void UAudioSystemCore::InitializeAudioComponents()
+// ============================================================
+// Tick
+// ============================================================
+
+void AAudioSystemCore::Tick(float DeltaTime)
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    Super::Tick(DeltaTime);
+    TickAdaptiveMusic(DeltaTime);
+}
 
-    // Create main music component
-    if (!MusicComponent)
-    {
-        MusicComponent = UGameplayStatics::CreateSound2D(World, nullptr, 1.0f, 1.0f, 0.0f, nullptr, true, false);
-        if (MusicComponent)
-        {
-            MusicComponent->bAutoDestroy = false;
-        }
-    }
+// ============================================================
+// Adaptive Music
+// ============================================================
 
-    // Create ambient component
-    if (!AmbientComponent)
-    {
-        AmbientComponent = UGameplayStatics::CreateSound2D(World, nullptr, 1.0f, 1.0f, 0.0f, nullptr, true, false);
-        if (AmbientComponent)
-        {
-            AmbientComponent->bAutoDestroy = false;
-        }
-    }
+void AAudioSystemCore::TickAdaptiveMusic(float DeltaTime)
+{
+    // Smoothly interpolate threat intensity toward target
+    float InterpSpeed = MusicTransitionSpeed * DeltaTime;
+    ThreatMusicIntensity = FMath::FInterpTo(
+        ThreatMusicIntensity,
+        ThreatIntensityTarget,
+        DeltaTime,
+        MusicTransitionSpeed
+    );
 
-    // Create layered ambient components (for different environment layers)
-    LayeredAmbientComponents.Empty();
-    for (int32 i = 0; i < 4; i++) // Wind, Animals, Vegetation, Geological
+    // Apply transitions when intensity changes significantly
+    TickAccumulator += DeltaTime;
+    if (TickAccumulator >= 1.0f)
     {
-        UAudioComponent* LayerComponent = UGameplayStatics::CreateSound2D(World, nullptr, 1.0f, 1.0f, 0.0f, nullptr, true, false);
-        if (LayerComponent)
-        {
-            LayerComponent->bAutoDestroy = false;
-            LayeredAmbientComponents.Add(LayerComponent);
-        }
+        TickAccumulator = 0.0f;
+        ApplyMusicTransition();
     }
 }
 
-void UAudioSystemCore::UpdateAudioState(const FAudioStateParameters& NewState)
+void AAudioSystemCore::ApplyMusicTransition()
 {
-    TargetAudioState = NewState;
-    
-    // Start smooth transition
-    TransitionProgress = 0.0f;
-    TransitionDuration = 2.0f;
-
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        World->GetTimerManager().SetTimer(StateTransitionTimer, 
-            FTimerDelegate::CreateUObject(this, &UAudioSystemCore::HandleStateTransition, World->GetDeltaSeconds()),
-            0.016f, true); // 60fps updates
-    }
-}
-
-void UAudioSystemCore::TransitionToEmotionalState(EEmotionalState NewState, float TransitionTime)
-{
-    TargetAudioState.EmotionalState = NewState;
-    TransitionDuration = TransitionTime;
-    TransitionProgress = 0.0f;
-
-    // Log emotional state changes for debugging
-    UE_LOG(LogAudio, Log, TEXT("Transitioning to emotional state: %d over %.2f seconds"), 
-           (int32)NewState, TransitionTime);
-
-    UpdateMetaSoundParameters();
-}
-
-void UAudioSystemCore::SetEnvironmentType(EEnvironmentType NewEnvironment, float TransitionTime)
-{
-    TargetAudioState.EnvironmentType = NewEnvironment;
-    TransitionDuration = TransitionTime;
-    TransitionProgress = 0.0f;
-
-    UE_LOG(LogAudio, Log, TEXT("Transitioning to environment: %d over %.2f seconds"), 
-           (int32)NewEnvironment, TransitionTime);
-
-    UpdateAmbientLayers();
-}
-
-void UAudioSystemCore::StartAdaptiveMusic()
-{
-    if (!MusicComponent)
-    {
-        InitializeAudioComponents();
-    }
-
-    if (MusicComponent && AdaptiveMusicMetaSound)
-    {
-        MusicComponent->SetSound(AdaptiveMusicMetaSound);
-        MusicComponent->Play();
-        
-        UpdateMetaSoundParameters();
-        
-        UE_LOG(LogAudio, Log, TEXT("Started adaptive music system"));
-    }
-}
-
-void UAudioSystemCore::StopAdaptiveMusic(float FadeOutTime)
-{
+    // Music volume driven by threat intensity
     if (MusicComponent && MusicComponent->IsPlaying())
     {
-        MusicComponent->FadeOut(FadeOutTime, 0.0f);
-        UE_LOG(LogAudio, Log, TEXT("Stopping adaptive music with %.2f second fade"), FadeOutTime);
+        float TargetVolume = FMath::Lerp(0.3f, 1.0f, ThreatMusicIntensity);
+        MusicComponent->SetVolumeMultiplier(TargetVolume);
     }
 }
 
-void UAudioSystemCore::UpdateAmbientLayers()
+// ============================================================
+// State setters
+// ============================================================
+
+void AAudioSystemCore::UpdateMusicState(const FAudio_MusicState& NewState)
 {
-    if (LayeredAmbientComponents.Num() == 0)
+    CurrentMusicState = NewState;
+
+    // Recalculate threat intensity target
+    switch (NewState.ThreatLevel)
     {
-        InitializeAudioComponents();
+        case EAudio_ThreatLevel::None:        ThreatIntensityTarget = 0.0f; break;
+        case EAudio_ThreatLevel::Distant:     ThreatIntensityTarget = 0.2f; break;
+        case EAudio_ThreatLevel::Approaching: ThreatIntensityTarget = 0.5f; break;
+        case EAudio_ThreatLevel::Immediate:   ThreatIntensityTarget = 0.8f; break;
+        case EAudio_ThreatLevel::Combat:      ThreatIntensityTarget = 1.0f; break;
+        default:                              ThreatIntensityTarget = 0.0f; break;
     }
 
-    // Update each ambient layer based on current environment and state
-    if (AmbientLayersMetaSound && LayeredAmbientComponents.Num() > 0)
+    // Low health amplifies threat music
+    if (NewState.PlayerHealthNormalized < 0.25f)
     {
-        for (int32 i = 0; i < LayeredAmbientComponents.Num(); i++)
+        ThreatIntensityTarget = FMath::Min(ThreatIntensityTarget + 0.3f, 1.0f);
+    }
+}
+
+void AAudioSystemCore::SetThreatLevel(EAudio_ThreatLevel NewThreat)
+{
+    CurrentMusicState.ThreatLevel = NewThreat;
+    FAudio_MusicState Updated = CurrentMusicState;
+    Updated.ThreatLevel = NewThreat;
+    UpdateMusicState(Updated);
+}
+
+void AAudioSystemCore::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+{
+    CurrentMusicState.TimeOfDay = NewTime;
+}
+
+void AAudioSystemCore::SetBiome(EAudio_BiomeType NewBiome)
+{
+    CurrentMusicState.CurrentBiome = NewBiome;
+}
+
+// ============================================================
+// Voice Lines
+// ============================================================
+
+void AAudioSystemCore::PlayVoiceLine(EAudio_VoiceLineID LineID)
+{
+    for (FAudio_VoiceLine& Line : VoiceLineRegistry)
+    {
+        if (Line.LineID == LineID && !Line.bHasBeenPlayed)
         {
-            if (LayeredAmbientComponents[i])
-            {
-                LayeredAmbientComponents[i]->SetSound(AmbientLayersMetaSound);
-                if (!LayeredAmbientComponents[i]->IsPlaying())
-                {
-                    LayeredAmbientComponents[i]->Play();
-                }
-            }
-        }
-        
-        UpdateMetaSoundParameters();
-    }
-}
-
-void UAudioSystemCore::TriggerDinosaurEncounter(class ADinosaur* Dinosaur, float Distance)
-{
-    if (!Dinosaur) return;
-
-    // Increase threat level based on dinosaur type and distance
-    float ThreatIncrease = FMath::Clamp(1.0f - (Distance / 1000.0f), 0.1f, 1.0f);
-    
-    TargetAudioState.ThreatLevel = FMath::Clamp(CurrentAudioState.ThreatLevel + ThreatIncrease, 0.0f, 1.0f);
-    TargetAudioState.DistanceToNearestPredator = Distance;
-    TargetAudioState.NearbyDinosaurCount++;
-
-    // Trigger immediate emotional state change for close encounters
-    if (Distance < 200.0f)
-    {
-        TransitionToEmotionalState(EEmotionalState::Danger, 0.5f);
-    }
-    else if (Distance < 500.0f)
-    {
-        TransitionToEmotionalState(EEmotionalState::Tension, 1.0f);
-    }
-
-    UE_LOG(LogAudio, Log, TEXT("Dinosaur encounter triggered - Distance: %.2f, Threat Level: %.2f"), 
-           Distance, TargetAudioState.ThreatLevel);
-}
-
-void UAudioSystemCore::TriggerDomesticationMoment(class ADinosaur* Dinosaur, bool bSuccessful)
-{
-    if (bSuccessful)
-    {
-        TransitionToEmotionalState(EEmotionalState::Relief, 2.0f);
-        // Reduce threat level as player gains an ally
-        TargetAudioState.ThreatLevel = FMath::Max(0.0f, CurrentAudioState.ThreatLevel - 0.3f);
-    }
-    else
-    {
-        TransitionToEmotionalState(EEmotionalState::Tension, 1.0f);
-    }
-
-    UE_LOG(LogAudio, Log, TEXT("Domestication moment - Success: %s"), bSuccessful ? TEXT("true") : TEXT("false"));
-}
-
-void UAudioSystemCore::TriggerDiscoveryMoment(const FString& DiscoveryType)
-{
-    TransitionToEmotionalState(EEmotionalState::Discovery, 1.5f);
-    
-    // Temporarily reduce threat as player focuses on discovery
-    TargetAudioState.ThreatLevel = FMath::Max(0.0f, CurrentAudioState.ThreatLevel - 0.2f);
-
-    UE_LOG(LogAudio, Log, TEXT("Discovery moment triggered: %s"), *DiscoveryType);
-}
-
-void UAudioSystemCore::UpdateMetaSoundParameters()
-{
-    // Update music component parameters
-    if (MusicComponent && MusicComponent->IsPlaying())
-    {
-        MusicComponent->SetFloatParameter(PARAM_EMOTIONAL_STATE, (float)CurrentAudioState.EmotionalState);
-        MusicComponent->SetFloatParameter(PARAM_THREAT_LEVEL, CurrentAudioState.ThreatLevel);
-        MusicComponent->SetFloatParameter(PARAM_TIME_OF_DAY, (float)CurrentAudioState.TimeOfDay);
-        MusicComponent->SetFloatParameter(PARAM_ENVIRONMENT_TYPE, (float)CurrentAudioState.EnvironmentType);
-        MusicComponent->SetFloatParameter(PARAM_STEALTH_LEVEL, CurrentAudioState.PlayerStealthLevel);
-        MusicComponent->SetFloatParameter(PARAM_DINOSAUR_PROXIMITY, 
-            FMath::Clamp(1000.0f / FMath::Max(CurrentAudioState.DistanceToNearestPredator, 50.0f), 0.0f, 1.0f));
-    }
-
-    // Update ambient component parameters
-    for (UAudioComponent* Component : LayeredAmbientComponents)
-    {
-        if (Component && Component->IsPlaying())
-        {
-            Component->SetFloatParameter(PARAM_EMOTIONAL_STATE, (float)CurrentAudioState.EmotionalState);
-            Component->SetFloatParameter(PARAM_THREAT_LEVEL, CurrentAudioState.ThreatLevel);
-            Component->SetFloatParameter(PARAM_TIME_OF_DAY, (float)CurrentAudioState.TimeOfDay);
-            Component->SetFloatParameter(PARAM_ENVIRONMENT_TYPE, (float)CurrentAudioState.EnvironmentType);
-            Component->SetFloatParameter(PARAM_STEALTH_LEVEL, CurrentAudioState.PlayerStealthLevel);
+            // Mark as played
+            Line.bHasBeenPlayed = true;
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemCore: Playing voice line [%s] — URL: %s"),
+                *Line.TranscriptText.Left(40), *Line.AudioURL);
+            // In production: load audio from URL and play via VoiceComponent
+            return;
         }
     }
 }
 
-void UAudioSystemCore::HandleStateTransition(float DeltaTime)
+void AAudioSystemCore::RegisterVoiceLine(const FAudio_VoiceLine& VoiceLine)
 {
-    if (TransitionProgress >= 1.0f)
+    // Remove existing entry with same ID
+    VoiceLineRegistry.RemoveAll([&](const FAudio_VoiceLine& L) {
+        return L.LineID == VoiceLine.LineID;
+    });
+    VoiceLineRegistry.Add(VoiceLine);
+}
+
+// ============================================================
+// Freesound SFX
+// ============================================================
+
+void AAudioSystemCore::RegisterFreesoundRef(const FAudio_FreesoundRef& SFXRef)
+{
+    FreesoundCatalog.RemoveAll([&](const FAudio_FreesoundRef& R) {
+        return R.FreesoundID == SFXRef.FreesoundID;
+    });
+    FreesoundCatalog.Add(SFXRef);
+}
+
+// ============================================================
+// Query
+// ============================================================
+
+float AAudioSystemCore::GetCurrentThreatIntensity() const
+{
+    return ThreatMusicIntensity;
+}
+
+FString AAudioSystemCore::GetCurrentAudioStateDebugString() const
+{
+    FString TimeStr;
+    switch (CurrentMusicState.TimeOfDay)
     {
-        CurrentAudioState = TargetAudioState;
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            World->GetTimerManager().ClearTimer(StateTransitionTimer);
-        }
-        return;
+        case EAudio_TimeOfDay::Dawn:  TimeStr = TEXT("Dawn");  break;
+        case EAudio_TimeOfDay::Day:   TimeStr = TEXT("Day");   break;
+        case EAudio_TimeOfDay::Dusk:  TimeStr = TEXT("Dusk");  break;
+        case EAudio_TimeOfDay::Night: TimeStr = TEXT("Night"); break;
+        default:                      TimeStr = TEXT("Unknown"); break;
     }
 
-    TransitionProgress += DeltaTime / TransitionDuration;
-    TransitionProgress = FMath::Clamp(TransitionProgress, 0.0f, 1.0f);
-
-    // Smooth interpolation between current and target states
-    float Alpha = FMath::SmoothStep(0.0f, 1.0f, TransitionProgress);
-
-    CurrentAudioState.ThreatLevel = FMath::Lerp(CurrentAudioState.ThreatLevel, TargetAudioState.ThreatLevel, Alpha);
-    CurrentAudioState.PlayerStealthLevel = FMath::Lerp(CurrentAudioState.PlayerStealthLevel, TargetAudioState.PlayerStealthLevel, Alpha);
-    CurrentAudioState.DistanceToNearestPredator = FMath::Lerp(CurrentAudioState.DistanceToNearestPredator, TargetAudioState.DistanceToNearestPredator, Alpha);
-
-    // Update discrete states when transition is more than halfway
-    if (Alpha > 0.5f)
+    FString ThreatStr;
+    switch (CurrentMusicState.ThreatLevel)
     {
-        CurrentAudioState.EmotionalState = TargetAudioState.EmotionalState;
-        CurrentAudioState.EnvironmentType = TargetAudioState.EnvironmentType;
-        CurrentAudioState.TimeOfDay = TargetAudioState.TimeOfDay;
-        CurrentAudioState.bIsInPlayerBase = TargetAudioState.bIsInPlayerBase;
-        CurrentAudioState.NearbyDinosaurCount = TargetAudioState.NearbyDinosaurCount;
+        case EAudio_ThreatLevel::None:        ThreatStr = TEXT("None");        break;
+        case EAudio_ThreatLevel::Distant:     ThreatStr = TEXT("Distant");     break;
+        case EAudio_ThreatLevel::Approaching: ThreatStr = TEXT("Approaching"); break;
+        case EAudio_ThreatLevel::Immediate:   ThreatStr = TEXT("Immediate");   break;
+        case EAudio_ThreatLevel::Combat:      ThreatStr = TEXT("Combat");      break;
+        default:                              ThreatStr = TEXT("Unknown");     break;
     }
 
-    UpdateMetaSoundParameters();
+    return FString::Printf(
+        TEXT("AudioState[Time=%s | Threat=%s | Intensity=%.2f | Health=%.0f%% | Combat=%s | Campfire=%s | VoiceLines=%d | SFXRefs=%d]"),
+        *TimeStr,
+        *ThreatStr,
+        ThreatMusicIntensity,
+        CurrentMusicState.PlayerHealthNormalized * 100.0f,
+        CurrentMusicState.bPlayerInCombat ? TEXT("YES") : TEXT("NO"),
+        CurrentMusicState.bNearCampfire ? TEXT("YES") : TEXT("NO"),
+        VoiceLineRegistry.Num(),
+        FreesoundCatalog.Num()
+    );
+}
+
+// ============================================================
+// Registry population — ElevenLabs TTS URLs from this cycle
+// ============================================================
+
+void AAudioSystemCore::PopulateVoiceLineRegistry()
+{
+    VoiceLineRegistry.Empty();
+
+    // --- TRex Warning (PROD_CYCLE_AUTO_20260630_011) ---
+    {
+        FAudio_VoiceLine Line;
+        Line.LineID = EAudio_VoiceLineID::TRexWarning;
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782830155647_SurvivalNarrator_TRexWarning.mp3");
+        Line.TranscriptText = TEXT("The T-Rex is close. You can hear it before you see it — the ground trembles, the birds go silent, and then there is that sound. Low. Deep. Like thunder that does not stop. Run. Do not look back. Run.");
+        Line.DurationSeconds = 14.0f;
+        Line.bHasBeenPlayed = false;
+        VoiceLineRegistry.Add(Line);
+    }
+
+    // --- Dawn Ambience (PROD_CYCLE_AUTO_20260630_011) ---
+    {
+        FAudio_VoiceLine Line;
+        Line.LineID = EAudio_VoiceLineID::DawnAmbience;
+        Line.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782830174723_SurvivalNarrator_DawnAmbience.mp3");
+        Line.TranscriptText = TEXT("Dawn. The jungle wakes in layers. First the insects stop. Then the birds start — one species at a time, each one a signal. By the time the sun clears the treeline, you know if last night was safe or not. Today it was not.");
+        Line.DurationSeconds = 15.0f;
+        Line.bHasBeenPlayed = false;
+        VoiceLineRegistry.Add(Line);
+    }
+
+    // --- Previous cycle voice lines (PROD_CYCLE_AUTO_20260630_010) ---
+    {
+        FAudio_VoiceLine Line;
+        Line.LineID = EAudio_VoiceLineID::HerdTracker;
+        Line.TranscriptText = TEXT("Night is falling. The jungle goes quiet first — that is how you know something large is moving.");
+        Line.DurationSeconds = 8.0f;
+        Line.bHasBeenPlayed = false;
+        VoiceLineRegistry.Add(Line);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemCore: Populated %d voice lines"), VoiceLineRegistry.Num());
+}
+
+// ============================================================
+// Freesound catalog — campfire SFX from this cycle search
+// ============================================================
+
+void AAudioSystemCore::PopulateFreesoundCatalog()
+{
+    FreesoundCatalog.Empty();
+
+    // Campfire (Position 1) — ID 681366
+    {
+        FAudio_FreesoundRef Ref;
+        Ref.FreesoundID = 681366;
+        Ref.SoundName = TEXT("Campfire (Position 1)");
+        Ref.PreviewURL = TEXT("https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3");
+        Ref.DurationSeconds = 83.6f;
+        Ref.UsageContext = TEXT("Campfire ambient loop — player shelter at night");
+        FreesoundCatalog.Add(Ref);
+    }
+
+    // Campfire (Position 2) — ID 681367
+    {
+        FAudio_FreesoundRef Ref;
+        Ref.FreesoundID = 681367;
+        Ref.SoundName = TEXT("Campfire (Position 2)");
+        Ref.PreviewURL = TEXT("https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3");
+        Ref.DurationSeconds = 22.1f;
+        Ref.UsageContext = TEXT("Campfire short loop — crafting station");
+        FreesoundCatalog.Add(Ref);
+    }
+
+    // Camp Fire Ambience — ID 708328
+    {
+        FAudio_FreesoundRef Ref;
+        Ref.FreesoundID = 708328;
+        Ref.SoundName = TEXT("Camp Fire Ambience");
+        Ref.PreviewURL = TEXT("https://cdn.freesound.org/previews/708/708328_14714459-hq.mp3");
+        Ref.DurationSeconds = 166.1f;
+        Ref.UsageContext = TEXT("Extended campfire with wind and bird — open camp scene");
+        FreesoundCatalog.Add(Ref);
+    }
+
+    // Spring Forest Campfire — ID 819666
+    {
+        FAudio_FreesoundRef Ref;
+        Ref.FreesoundID = 819666;
+        Ref.SoundName = TEXT("Spring Forest Campfire");
+        Ref.PreviewURL = TEXT("https://cdn.freesound.org/previews/819/819666_12625353-hq.mp3");
+        Ref.DurationSeconds = 213.0f;
+        Ref.UsageContext = TEXT("Forest campfire with birdsong — dawn/dusk transition");
+        FreesoundCatalog.Add(Ref);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemCore: Populated %d Freesound SFX references"), FreesoundCatalog.Num());
 }

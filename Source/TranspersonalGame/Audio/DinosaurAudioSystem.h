@@ -4,79 +4,79 @@
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
 #include "DinosaurAudioSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+enum class EAudio_DinosaurState : uint8
 {
-    TRex            UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Idle        UMETA(DisplayName = "Idle"),
+    Alert       UMETA(DisplayName = "Alert"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Feeding     UMETA(DisplayName = "Feeding")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DinosaurSpecies : uint8
+{
+    TRex            UMETA(DisplayName = "T-Rex"),
+    Raptor          UMETA(DisplayName = "Raptor"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
     Triceratops     UMETA(DisplayName = "Triceratops"),
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Brontosaurus    UMETA(DisplayName = "Brontosaurus"),
-    Stegosaurus     UMETA(DisplayName = "Stegosaurus"),
-    Pteranodon      UMETA(DisplayName = "Pteranodon"),
-    Compsognathus   UMETA(DisplayName = "Compsognathus")
-};
-
-UENUM(BlueprintType)
-enum class EDinosaurSoundType : uint8
-{
-    Idle            UMETA(DisplayName = "Idle Breathing"),
-    Walking         UMETA(DisplayName = "Footsteps"),
-    Running         UMETA(DisplayName = "Running"),
-    Eating          UMETA(DisplayName = "Eating"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Calling         UMETA(DisplayName = "Calling"),
-    Warning         UMETA(DisplayName = "Warning Call"),
-    Aggressive      UMETA(DisplayName = "Aggressive Roar"),
-    Pain            UMETA(DisplayName = "Pain Cry"),
-    Death           UMETA(DisplayName = "Death Sound")
-};
-
-UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
-{
-    Calm            UMETA(DisplayName = "Calm"),
-    Alert           UMETA(DisplayName = "Alert"),
-    Feeding         UMETA(DisplayName = "Feeding"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    Territorial     UMETA(DisplayName = "Territorial"),
-    Mating          UMETA(DisplayName = "Mating"),
-    Sleeping        UMETA(DisplayName = "Sleeping")
+    Pterodactyl     UMETA(DisplayName = "Pterodactyl")
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurAudioProfile
+struct FAudio_DinosaurSoundProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    EDinosaurSpecies Species;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    EAudio_DinosaurSpecies Species = EAudio_DinosaurSpecies::TRex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float Size = 1.0f; // 0.1 = tiny, 1.0 = normal, 5.0 = massive
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float FootstepVolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float VoicePitch = 1.0f; // Individual voice variation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float RoarRadius = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float Aggressiveness = 0.5f; // How aggressive this individual is
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float FootstepRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float VocalFrequency = 0.5f; // How often they make sounds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    float GroundShakeThreshold = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    bool bIsPredator = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    bool bIsPackAnimal = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float HearingRange = 2000.0f; // How far they can hear
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Dinosaur")
+    bool bCausesGroundShake = false;
 };
 
+USTRUCT(BlueprintType)
+struct FAudio_EnvironmentZone
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Environment")
+    FString ZoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Environment")
+    float AmbientVolume = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Environment")
+    float MusicIntensity = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Environment")
+    bool bIsNightZone = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Environment")
+    float DangerLevel = 0.0f;
+};
+
+/**
+ * ADinosaurAudioSystem
+ * Manages spatial audio for all dinosaur species in the world.
+ * Handles footstep rumble, roars, ambient calls, and ground shake feedback.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurAudioSystem : public AActor
 {
@@ -85,81 +85,96 @@ class TRANSPERSONALGAME_API ADinosaurAudioSystem : public AActor
 public:
     ADinosaurAudioSystem();
 
-protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void InitializeDinosaurAudio(const FDinosaurAudioProfile& Profile);
+    // --- Core Audio Control ---
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void UpdateBehaviorState(EDinosaurBehaviorState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void PlayDinosaurRoar(EAudio_DinosaurSpecies Species, FVector Location, float VolumeScale = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlaySound(EDinosaurSoundType SoundType, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void PlayDinosaurFootstep(EAudio_DinosaurSpecies Species, FVector Location, float FootMass = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void SetDistanceToPlayer(float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void TriggerGroundShake(FVector EpicenterLocation, float Intensity, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void SetPlayerVisibility(bool bCanSeePlayer);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    void SetDinosaurState(EAudio_DinosaurSpecies Species, EAudio_DinosaurState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void ReactToSound(FVector SoundLocation, float SoundIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Dinosaur")
+    EAudio_DinosaurState GetDinosaurState(EAudio_DinosaurSpecies Species) const;
+
+    // --- Environment Audio ---
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void SetEnvironmentZone(const FAudio_EnvironmentZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void FadeAmbientToNight(float FadeDuration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void FadeAmbientToDay(float FadeDuration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void SetDangerMusicIntensity(float Intensity);
+
+    // --- Player Feedback ---
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayPlayerDamageSound(float DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayPlayerFootstep(FString SurfaceType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayCraftingSound(FString ItemCrafted);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayFireCrackle(FVector FireLocation, float Intensity = 1.0f);
+
+    // --- Diagnostic ---
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Audio|Debug")
+    void LogAudioSystemStatus();
+
+    UFUNCTION(BlueprintPure, Category = "Audio|Dinosaur")
+    float GetDistanceToNearestPredator(FVector PlayerLocation) const;
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* VoiceComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    TArray<FAudio_DinosaurSoundProfile> DinosaurProfiles;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* MovementComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float GlobalVolumeScale = 1.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* BreathingComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float MusicFadeSpeed = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
-    UMetaSoundSource* DinosaurVoiceMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    bool bEnableGroundShake = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
-    UMetaSoundSource* DinosaurMovementMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio|Config")
+    float GroundShakeDecayRate = 0.95f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
-    UMetaSoundSource* DinosaurBreathingMetaSound;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State",
+        meta = (AllowPrivateAccess = "true"))
+    float CurrentDangerIntensity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Profile")
-    FDinosaurAudioProfile AudioProfile;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State",
+        meta = (AllowPrivateAccess = "true"))
+    float CurrentMusicIntensity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
-    EDinosaurBehaviorState CurrentBehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
-    float DistanceToPlayer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
-    bool bCanSeePlayer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
-    float CurrentStress; // 0.0 = calm, 1.0 = maximum stress
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
-    float LastSoundTime;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio|State",
+        meta = (AllowPrivateAccess = "true"))
+    bool bIsNightTime = false;
 
 private:
-    void UpdateBreathing();
-    void UpdateMovementSounds();
-    void UpdateVocalBehavior();
-    
-    float CalculateVocalProbability();
-    EDinosaurSoundType SelectAppropriateSound();
-    
-    void ApplySpeciesCharacteristics();
-    void ApplyIndividualVariations();
-    
-    FTimerHandle VocalBehaviorTimer;
-    FTimerHandle BreathingUpdateTimer;
-    
-    float NextVocalTime;
-    float BreathingRate;
+    TMap<EAudio_DinosaurSpecies, EAudio_DinosaurState> DinosaurStateMap;
+    TMap<EAudio_DinosaurSpecies, FVector> DinosaurPositionCache;
+
+    void InitializeDinosaurProfiles();
+    void UpdateMusicIntensity(float DeltaTime);
+    float CalculateDangerFromState(EAudio_DinosaurState State) const;
+    FAudio_DinosaurSoundProfile* FindProfile(EAudio_DinosaurSpecies Species);
 };

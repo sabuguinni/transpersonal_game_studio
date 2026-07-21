@@ -1,0 +1,238 @@
+{
+  "adaptive_music_config_version": "1.0",
+  "agent": "Audio_Agent_16",
+  "cycle": "PROD_CYCLE_AUTO_20260702_008",
+  "description": "Adaptive music system configuration — MetaSounds-ready state machine for prehistoric survival game",
+  "philosophy": "Music the player never notices consciously but that changes what they feel — RDR2 audio team principle",
+
+  "state_machine": {
+    "initial_state": "SAFE_DAY",
+    "transition_rules": [
+      {
+        "from": "SAFE_DAY",
+        "to": "EXPLORE_DAY",
+        "condition": "player_distance_from_camp > 500 AND time_of_day == DAY",
+        "transition_type": "crossfade",
+        "crossfade_seconds": 4.0
+      },
+      {
+        "from": "EXPLORE_DAY",
+        "to": "PREDATOR_NEARBY",
+        "condition": "nearest_predator_distance < 2000 AND player_not_spotted",
+        "transition_type": "music_parameter_shift",
+        "crossfade_seconds": 6.0
+      },
+      {
+        "from": "PREDATOR_NEARBY",
+        "to": "COMBAT_ACTIVE",
+        "condition": "player_spotted == true OR player_health_delta < -10",
+        "transition_type": "stinger_then_crossfade",
+        "stinger_asset": "Stinger_CombatStart",
+        "crossfade_seconds": 0.5
+      },
+      {
+        "from": "COMBAT_ACTIVE",
+        "to": "EXPLORE_DAY",
+        "condition": "no_predators_within_3000 AND 30_seconds_elapsed",
+        "transition_type": "fade_out_then_fade_in",
+        "crossfade_seconds": 8.0
+      },
+      {
+        "from": "EXPLORE_DAY",
+        "to": "NIGHT_CAMP",
+        "condition": "time_of_day == NIGHT AND player_near_campfire",
+        "transition_type": "crossfade",
+        "crossfade_seconds": 10.0
+      },
+      {
+        "from": "NIGHT_CAMP",
+        "to": "SAFE_DAY",
+        "condition": "time_of_day == DAY AND player_rested",
+        "transition_type": "crossfade",
+        "crossfade_seconds": 8.0
+      }
+    ]
+  },
+
+  "music_layers": {
+    "SAFE_DAY": {
+      "base_layer": "Music_SafeDay_Base",
+      "optional_layers": ["Music_SafeDay_BirdCall", "Music_SafeDay_WindPercussion"],
+      "volume": 0.4,
+      "pitch_variation": 0.02,
+      "loop": true
+    },
+    "EXPLORE_DAY": {
+      "base_layer": "Music_ExploreDay_Base",
+      "optional_layers": ["Music_ExploreDay_Rhythm", "Music_ExploreDay_Tension_Low"],
+      "volume": 0.55,
+      "pitch_variation": 0.01,
+      "loop": true
+    },
+    "PREDATOR_NEARBY": {
+      "base_layer": "Music_Tension_Drone",
+      "optional_layers": ["Music_Tension_Heartbeat", "Music_Tension_SparsePercussion"],
+      "volume": 0.65,
+      "pitch_variation": 0.0,
+      "loop": true,
+      "low_pass_filter_hz": 800,
+      "reverb_wet_mix": 0.3
+    },
+    "COMBAT_ACTIVE": {
+      "base_layer": "Music_Combat_Drums",
+      "optional_layers": ["Music_Combat_BoneRattle", "Music_Combat_PrimalChant"],
+      "volume": 0.85,
+      "pitch_variation": 0.0,
+      "loop": true,
+      "compression_ratio": 4.0
+    },
+    "NIGHT_CAMP": {
+      "base_layer": "Music_NightCamp_Ambient",
+      "optional_layers": ["Music_NightCamp_InsectRhythm", "Music_NightCamp_DistantDrum"],
+      "volume": 0.35,
+      "pitch_variation": 0.03,
+      "loop": true,
+      "reverb_wet_mix": 0.5
+    }
+  },
+
+  "environmental_audio_parameters": {
+    "time_of_day_influence": {
+      "dawn_06_00": {"insect_volume": 0.3, "bird_volume": 0.8, "wind_volume": 0.2},
+      "midday_12_00": {"insect_volume": 0.6, "bird_volume": 0.5, "wind_volume": 0.4},
+      "dusk_18_00": {"insect_volume": 0.7, "bird_volume": 0.6, "wind_volume": 0.3},
+      "midnight_00_00": {"insect_volume": 0.9, "bird_volume": 0.1, "wind_volume": 0.2}
+    },
+    "weather_influence": {
+      "clear": {"reverb_size": 0.2, "high_freq_rolloff": 1.0},
+      "overcast": {"reverb_size": 0.4, "high_freq_rolloff": 0.85},
+      "rain": {"reverb_size": 0.7, "high_freq_rolloff": 0.6, "rain_layer_volume": 0.8},
+      "storm": {"reverb_size": 0.9, "high_freq_rolloff": 0.4, "rain_layer_volume": 1.0, "thunder_enabled": true}
+    },
+    "biome_influence": {
+      "forest": {"reverb_preset": "Forest_Dense", "echo_delay_ms": 120},
+      "open_plain": {"reverb_preset": "Open_Outdoor", "echo_delay_ms": 0},
+      "cave": {"reverb_preset": "Cave_Large", "echo_delay_ms": 400},
+      "river_bank": {"water_layer_volume": 0.7, "reverb_preset": "Open_Outdoor"}
+    }
+  },
+
+  "dinosaur_audio_cues": [
+    {
+      "species": "TRex",
+      "roar_distance_trigger_ue_units": 5000,
+      "footstep_camera_shake_distance": 1500,
+      "footstep_camera_shake_magnitude": 2.5,
+      "music_state_override": "PREDATOR_NEARBY",
+      "breathing_audible_distance": 800,
+      "sfx_assets": {
+        "roar": "SFX_TRex_Roar_01",
+        "footstep": "SFX_TRex_Footstep_Heavy",
+        "breathing": "SFX_TRex_Breathing_Close",
+        "attack": "SFX_TRex_Attack_Bite"
+      }
+    },
+    {
+      "species": "Raptor",
+      "roar_distance_trigger_ue_units": 2000,
+      "footstep_camera_shake_distance": 0,
+      "music_state_override": "PREDATOR_NEARBY",
+      "breathing_audible_distance": 300,
+      "sfx_assets": {
+        "roar": "SFX_Raptor_Screech_01",
+        "footstep": "SFX_Raptor_Footstep_Light",
+        "breathing": "SFX_Raptor_Breathing_Close",
+        "attack": "SFX_Raptor_Attack_Claw",
+        "pack_communication": "SFX_Raptor_Chirp_Alert"
+      }
+    },
+    {
+      "species": "Brachiosaurus",
+      "roar_distance_trigger_ue_units": 8000,
+      "footstep_camera_shake_distance": 2500,
+      "footstep_camera_shake_magnitude": 1.5,
+      "music_state_override": null,
+      "breathing_audible_distance": 1200,
+      "sfx_assets": {
+        "roar": "SFX_Brachio_LowMoan_01",
+        "footstep": "SFX_Brachio_Footstep_Massive",
+        "breathing": "SFX_Brachio_Breathing_Deep",
+        "eating": "SFX_Brachio_Eating_Leaves"
+      }
+    },
+    {
+      "species": "Triceratops",
+      "roar_distance_trigger_ue_units": 3000,
+      "footstep_camera_shake_distance": 1000,
+      "footstep_camera_shake_magnitude": 1.8,
+      "music_state_override": "PREDATOR_NEARBY",
+      "breathing_audible_distance": 500,
+      "sfx_assets": {
+        "roar": "SFX_Trike_Bellow_01",
+        "footstep": "SFX_Trike_Footstep_Heavy",
+        "charge": "SFX_Trike_Charge_Rumble",
+        "attack": "SFX_Trike_Horn_Impact"
+      }
+    }
+  ],
+
+  "player_feedback_audio": {
+    "damage_taken": {
+      "sfx": "SFX_Player_PainGrunt",
+      "music_duck_db": -12,
+      "music_duck_duration_ms": 500,
+      "screen_effect": "red_vignette_flash"
+    },
+    "near_death": {
+      "sfx": "SFX_Player_LabouringBreath",
+      "music_state_force": "PREDATOR_NEARBY",
+      "heartbeat_layer_volume": 0.8,
+      "low_pass_filter_hz": 600
+    },
+    "crafting_stone": {
+      "sfx": "SFX_Craft_StoneOnStone",
+      "volume": 0.6,
+      "pitch_variation": 0.1
+    },
+    "fire_lit": {
+      "sfx": "SFX_Fire_Ignite",
+      "music_transition": "NIGHT_CAMP",
+      "volume": 0.8
+    },
+    "eating": {
+      "sfx": "SFX_Player_Eating",
+      "volume": 0.5
+    },
+    "drinking": {
+      "sfx": "SFX_Player_Drinking",
+      "volume": 0.5
+    }
+  },
+
+  "freesound_assets_confirmed": [
+    {
+      "id": 669357,
+      "name": "Amazon Rainforest Night Ambience",
+      "preview": "https://cdn.freesound.org/previews/669/669357_53551-hq.mp3",
+      "use": "AudioZone_JungleNight_001 ambient loop"
+    },
+    {
+      "id": 681366,
+      "name": "Campfire Position 1",
+      "preview": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+      "use": "AudioZone_Campfire_001 primary loop"
+    },
+    {
+      "id": 681367,
+      "name": "Campfire Position 2",
+      "preview": "https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3",
+      "use": "AudioZone_Campfire_001 variation"
+    },
+    {
+      "id": 802195,
+      "name": "Fire-Nature Sounds (4 min)",
+      "preview": "https://cdn.freesound.org/previews/802/802195_17223245-hq.mp3",
+      "use": "Extended night camp ambient layer"
+    }
+  ]
+}

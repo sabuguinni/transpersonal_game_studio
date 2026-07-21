@@ -1,0 +1,82 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260618_012",
+  "agent": "Narrative & Dialogue Agent #15",
+  "dialogue_lines": [
+    {
+      "id": "DLG_001",
+      "character": "TribalLeader",
+      "trigger_zone": "NarrZone_RiverCrossing_001",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828450235_TribalLeader.mp3",
+      "text": "The river crossing is dangerous at this hour. The big ones come to drink at dusk — I have seen three of them, each larger than a boulder. We move at dawn, when the mist gives us cover. Stay low, stay quiet, and do not run unless I say so.",
+      "context": "Player approaches river crossing at dusk. Triggers warning about large herbivores/predators at water source.",
+      "gameplay_effect": "Suggests waiting mechanic — player can rest until dawn to reduce danger",
+      "duration_estimate": "~16s"
+    },
+    {
+      "id": "DLG_002",
+      "character": "Scout",
+      "trigger_zone": "NarrZone_KillSite_001",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828465366_Scout.mp3",
+      "text": "I found this near the old kill site — bone fragments, claw marks on the rock face. Whatever did this was not hunting for food. It was marking territory. We are inside its range now. Every step we take from here is a risk.",
+      "context": "Player discovers predator kill site. Scout NPC delivers environmental lore about territorial behavior.",
+      "gameplay_effect": "Warns player they are in active predator territory — increases tension, suggests stealth approach",
+      "duration_estimate": "~15s"
+    },
+    {
+      "id": "DLG_003",
+      "character": "Survivor",
+      "trigger_zone": "NarrZone_ValleyEntrance_001",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828480679_Survivor.mp3",
+      "text": "Three days without water and the valley ahead is open ground. No cover, no shade. If the pack finds us out there we cannot fight and we cannot run. We need a different path. Go back to the ridge and look for the dry riverbed — it runs north, it will give us shelter.",
+      "context": "Player approaches open valley — exposed terrain with raptor pack threat. Survivor redirects player to safer route.",
+      "gameplay_effect": "Introduces route choice — direct dangerous path vs longer safe path through dry riverbed",
+      "duration_estimate": "~18s"
+    },
+    {
+      "id": "DLG_004",
+      "character": "TribalLeader",
+      "trigger_zone": "NarrZone_RidgeOverlook_001",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828480679_TribalLeader_Canyon.mp3",
+      "text": "This is where we make our stand. The canyon walls are too steep for them to flank us. One entrance, one exit. We block the south passage with stones and we wait. When they come — and they will come — we hold the line here. Together.",
+      "context": "Player reaches defensive position at ridge overlook. TribalLeader delivers pre-combat rally speech.",
+      "gameplay_effect": "Triggers defensive stand mechanic — player must fortify position before predator wave attack",
+      "duration_estimate": "~16s"
+    }
+  ],
+  "narrative_zones": [
+    {
+      "label": "NarrZone_RiverCrossing_001",
+      "location": {"x": -2000, "y": 500, "z": 100},
+      "scale": {"x": 5, "y": 5, "z": 3},
+      "linked_dialogue": "DLG_001"
+    },
+    {
+      "label": "NarrZone_KillSite_001",
+      "location": {"x": 3000, "y": -1500, "z": 120},
+      "scale": {"x": 5, "y": 5, "z": 3},
+      "linked_dialogue": "DLG_002"
+    },
+    {
+      "label": "NarrZone_ValleyEntrance_001",
+      "location": {"x": 0, "y": 4000, "z": 100},
+      "scale": {"x": 5, "y": 5, "z": 3},
+      "linked_dialogue": "DLG_003"
+    },
+    {
+      "label": "NarrZone_RidgeOverlook_001",
+      "location": {"x": -3500, "y": -2000, "z": 300},
+      "scale": {"x": 5, "y": 5, "z": 3},
+      "linked_dialogue": "DLG_004"
+    }
+  ],
+  "audio_assets": {
+    "TribalLeader_RiverCrossing": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828450235_TribalLeader.mp3",
+    "Scout_KillSite": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828465366_Scout.mp3",
+    "Survivor_ValleyEntrance": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828480679_Survivor.mp3"
+  },
+  "notes_for_audio_agent_16": {
+    "ambient_music": "Tension-building low percussion for kill site zone. River crossing needs water ambience + distant heavy footsteps. Valley entrance needs open wind + distant raptor calls.",
+    "voice_mixing": "All dialogue lines recorded at ElevenLabs default settings. Apply light reverb for outdoor cave/canyon zones. No reverb for open terrain zones.",
+    "trigger_behavior": "Dialogue fires ONCE per zone per session. No repeat on re-entry. Audio fades in over 0.5s, no abrupt start."
+  }
+}

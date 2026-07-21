@@ -1,0 +1,184 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "Audio Agent #16",
+  "timestamp": "2026-06-19",
+
+  "voice_assets": {
+    "produced_this_cycle": [
+      {
+        "id": "VA_Guard_Sighted_001",
+        "character": "Guard_10",
+        "trigger": "Q004_enemy_sighted",
+        "text": "They are coming from the north. Three of them — fast movers. Get behind the rocks and do not make a sound. Move now.",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849479158_Guard_Sighted.mp3",
+        "duration_est": "~10s",
+        "urgency": "HIGH",
+        "subtitles": true
+      },
+      {
+        "id": "VA_Guard_Clear_001",
+        "character": "Guard_10",
+        "trigger": "Q004_threat_passed",
+        "text": "They passed. We are clear. Stay low for another moment, then we move back to camp. Good thinking out there.",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849503437_Guard_Clear.mp3",
+        "duration_est": "~9s",
+        "urgency": "LOW",
+        "subtitles": true
+      }
+    ],
+    "cumulative_voice_assets": {
+      "cycles_003_to_005": [
+        "VA_Elder_QuestAccept_001",
+        "VA_Elder_QuestComplete_001",
+        "VA_Elder_QuestFail_001",
+        "VA_Hunter_FlankingOrder_001",
+        "VA_Hunter_DinoSpotted_001",
+        "VA_Guard_PreAttackWarning_001",
+        "VA_Gatherer_ResourceWarning_001",
+        "VA_Guard_Sighted_001",
+        "VA_Guard_Clear_001"
+      ],
+      "total_voice_assets": 9
+    }
+  },
+
+  "ambient_sound_library": {
+    "campfire": {
+      "freesound_id": 620324,
+      "name": "Campfire crackling - Loop",
+      "duration_s": 30,
+      "preview_url": "https://cdn.freesound.org/previews/620/620324_13732472-hq.mp3",
+      "tags": ["campfire", "crackle", "loop", "ambience"],
+      "usage": "AudioZone_Campfire_001 — 12m radius, proximity fade-in",
+      "loop": true
+    },
+    "campfire_alt": {
+      "freesound_id": 636709,
+      "name": "FIREBurn_Burning Campfire.Crackling.Squawking.Flame Roar 1",
+      "duration_s": 24,
+      "preview_url": "https://cdn.freesound.org/previews/636/636709_5828667-hq.mp3",
+      "tags": ["campfire", "crackle", "calm", "loop"],
+      "usage": "Alternate campfire layer — lower intensity version",
+      "loop": true
+    },
+    "river_placeholder": {
+      "freesound_id": null,
+      "name": "River flow ambient — PENDING (Freesound 503)",
+      "usage": "AudioZone_River_001 — 20m radius, directional fade",
+      "loop": true,
+      "status": "search_failed_503 — retry next cycle"
+    },
+    "distant_dino_placeholder": {
+      "freesound_id": null,
+      "name": "Distant dinosaur calls — PENDING (Freesound 503)",
+      "usage": "AudioZone_Forest_001 — random interval 30-90s, 3D positional",
+      "loop": false,
+      "status": "search_failed_503 — retry next cycle"
+    }
+  },
+
+  "audio_zones_in_map": {
+    "description": "Invisible PointLight proxy actors placed in MinPlayableMap as MetaSounds trigger anchors",
+    "zones": [
+      {
+        "label": "AudioZone_Campfire_001",
+        "position": [310, 155, 80],
+        "sound_id": "campfire",
+        "radius_m": 12,
+        "fade_curve": "linear"
+      },
+      {
+        "label": "AudioZone_River_001",
+        "position": [-600, 400, 80],
+        "sound_id": "river_placeholder",
+        "radius_m": 20,
+        "fade_curve": "logarithmic"
+      },
+      {
+        "label": "AudioZone_Forest_001",
+        "position": [-200, -500, 80],
+        "sound_id": "distant_dino_placeholder",
+        "radius_m": 50,
+        "fade_curve": "linear"
+      },
+      {
+        "label": "AudioZone_Camp_001",
+        "position": [0, 0, 80],
+        "sound_id": "campfire_alt",
+        "radius_m": 30,
+        "fade_curve": "linear"
+      }
+    ],
+    "map_saved": true
+  },
+
+  "metasounds_integration_spec": {
+    "description": "MetaSounds graph design for ambient audio system",
+    "nodes": [
+      {
+        "node": "ProximityTrigger",
+        "input": "PlayerDistance",
+        "output": "TriggerPlay / TriggerStop",
+        "threshold_m": 20
+      },
+      {
+        "node": "AudioFader",
+        "input": "Distance",
+        "output": "Volume 0.0-1.0",
+        "curve": "InverseSquare"
+      },
+      {
+        "node": "RandomInterval",
+        "min_s": 30,
+        "max_s": 90,
+        "output": "TriggerOneShot",
+        "usage": "Distant dino calls — non-looping stochastic"
+      },
+      {
+        "node": "LayeredAmbience",
+        "layers": ["campfire_base", "campfire_crackle", "wind_low"],
+        "blend_mode": "additive"
+      }
+    ],
+    "implementation_status": "SPEC_COMPLETE — Blueprint wiring pending VFX Agent #17 confirmation"
+  },
+
+  "pending_tts_lines": {
+    "source": "DialogueLines_Cycle005.json handoff_to_audio_agent_16",
+    "count": 13,
+    "priority_lines": [
+      {
+        "id": "VA_Hunter_01_TrackingCall",
+        "character": "Hunter_01",
+        "text": "The tracks go east. Fresh — no more than an hour old. Stay quiet and follow my lead.",
+        "urgency": "MEDIUM",
+        "status": "PENDING_NEXT_CYCLE"
+      },
+      {
+        "id": "VA_Hunter_01_CombatReady",
+        "character": "Hunter_01",
+        "text": "Spears ready. Wait for my signal. We strike together or not at all.",
+        "urgency": "HIGH",
+        "status": "PENDING_NEXT_CYCLE"
+      },
+      {
+        "id": "VA_Elder_Wisdom_001",
+        "character": "Elder_Kael",
+        "text": "The land remembers everything. Every hunt, every fire, every death. We are just passing through.",
+        "urgency": "LOW",
+        "status": "PENDING_NEXT_CYCLE"
+      }
+    ]
+  },
+
+  "handoff_to_vfx_agent_17": {
+    "audio_zone_positions": [
+      {"label": "AudioZone_Campfire_001", "pos": [310, 155, 80], "vfx_needed": "fire_particle_emitter"},
+      {"label": "AudioZone_River_001",    "pos": [-600, 400, 80], "vfx_needed": "water_flow_particles"},
+      {"label": "AudioZone_Forest_001",   "pos": [-200, -500, 80], "vfx_needed": "ambient_dust_motes"},
+      {"label": "AudioZone_Camp_001",     "pos": [0, 0, 80],       "vfx_needed": "smoke_wisps"}
+    ],
+    "sync_requirement": "VFX emitters should be co-located with AudioZone actors for audio-visual coherence",
+    "priority": "AudioZone_Campfire_001 — highest visibility, player spends most time near camp"
+  }
+}

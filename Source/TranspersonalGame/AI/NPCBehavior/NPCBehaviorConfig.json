@@ -1,0 +1,264 @@
+{
+  "npc_behavior_system": {
+    "version": "1.0.0",
+    "agent": "NPC Behavior Agent #11",
+    "cycle": "PROD_CYCLE_AUTO_20260705_002",
+    "description": "NPC behavior configuration for prehistoric survival game — defines AI routines, threat responses, and social dynamics for all non-player characters",
+
+    "behavior_trees": {
+      "TRex_BT": {
+        "description": "Apex predator — solitary hunter with large territory",
+        "patrol_radius_units": 5000,
+        "detection_range_units": 3000,
+        "attack_range_units": 300,
+        "states": {
+          "PATROL": {
+            "description": "Moves slowly through territory, sniffing for prey",
+            "speed_multiplier": 0.4,
+            "head_sway": true,
+            "vocalization_interval_seconds": 45,
+            "transition_to": "ALERT"
+          },
+          "ALERT": {
+            "description": "Has detected movement or scent — scanning environment",
+            "speed_multiplier": 0.0,
+            "head_tracking": true,
+            "duration_seconds": 3.5,
+            "transition_to_chase": "CHASE",
+            "transition_to_patrol": "PATROL"
+          },
+          "CHASE": {
+            "description": "Actively pursuing detected prey",
+            "speed_multiplier": 1.0,
+            "max_chase_distance_units": 6000,
+            "give_up_after_seconds": 20,
+            "transition_to": "PATROL"
+          },
+          "ATTACK": {
+            "description": "Within strike range — lunging bite attack",
+            "speed_multiplier": 1.2,
+            "attack_cooldown_seconds": 2.5,
+            "damage_per_hit": 85
+          },
+          "FEEDING": {
+            "description": "Consuming a kill — highly aggressive if disturbed",
+            "duration_seconds": 120,
+            "disturbance_aggression_radius_units": 800
+          }
+        },
+        "sensory_profile": {
+          "vision_angle_degrees": 45,
+          "vision_range_units": 3000,
+          "hearing_range_units": 2000,
+          "smell_range_units": 4000,
+          "note": "T-Rex has poor frontal vision but excellent smell and hearing"
+        },
+        "memory": {
+          "threat_memory_duration_seconds": 300,
+          "territory_memory": true,
+          "remembers_player_location": true
+        }
+      },
+
+      "Raptor_BT": {
+        "description": "Pack hunter — coordinates with pack members, uses flanking tactics",
+        "pack_size_min": 2,
+        "pack_size_max": 6,
+        "patrol_radius_units": 3000,
+        "detection_range_units": 2000,
+        "attack_range_units": 150,
+        "states": {
+          "PATROL": {
+            "description": "Pack moves together in loose formation, scanning for prey",
+            "speed_multiplier": 0.5,
+            "formation": "LOOSE_V",
+            "vocalization_interval_seconds": 20
+          },
+          "STALK": {
+            "description": "Pack has spotted prey — moving to encircle before attacking",
+            "speed_multiplier": 0.3,
+            "crouching": true,
+            "flank_angle_degrees": 120,
+            "transition_trigger": "all_members_in_position"
+          },
+          "COORDINATED_ATTACK": {
+            "description": "Alpha signals — all members attack simultaneously from different angles",
+            "alpha_signals_attack": true,
+            "simultaneous_charge": true,
+            "attack_cooldown_seconds": 1.2,
+            "damage_per_hit": 35
+          },
+          "SCATTER": {
+            "description": "Pack member killed — temporary scatter before regrouping",
+            "scatter_radius_units": 500,
+            "regroup_after_seconds": 8
+          }
+        },
+        "pack_dynamics": {
+          "alpha_role": "ATTACK_SIGNAL",
+          "beta_role": "FLANK_LEFT",
+          "gamma_role": "FLANK_RIGHT",
+          "omega_role": "DECOY_FRONTAL",
+          "alpha_selection": "LARGEST_MEMBER",
+          "communication": "VOCALIZATION_AND_VISUAL"
+        },
+        "sensory_profile": {
+          "vision_angle_degrees": 120,
+          "vision_range_units": 2000,
+          "hearing_range_units": 1500,
+          "smell_range_units": 1000
+        }
+      },
+
+      "Triceratops_BT": {
+        "description": "Herd animal — defensive, territorial around young, charges when threatened",
+        "herd_size_min": 3,
+        "herd_size_max": 12,
+        "patrol_radius_units": 2000,
+        "detection_range_units": 1500,
+        "attack_range_units": 400,
+        "states": {
+          "GRAZE": {
+            "description": "Herd grazes peacefully — young in center, adults on perimeter",
+            "speed_multiplier": 0.2,
+            "formation": "PROTECTIVE_CIRCLE",
+            "alert_threshold_seconds": 2.0
+          },
+          "ALERT": {
+            "description": "Threat detected — herd stops, adults face threat",
+            "speed_multiplier": 0.0,
+            "duration_seconds": 4.0,
+            "warning_vocalization": true
+          },
+          "DEFENSIVE_FORMATION": {
+            "description": "Adults form wall between threat and young",
+            "formation": "LINE_FACING_THREAT",
+            "charge_trigger": "threat_within_600_units"
+          },
+          "CHARGE": {
+            "description": "Full speed charge at threat",
+            "speed_multiplier": 1.3,
+            "damage_per_hit": 120,
+            "knockback_force": 2500,
+            "charge_distance_units": 800
+          },
+          "RETREAT": {
+            "description": "Herd moves young to safety after repelling threat",
+            "speed_multiplier": 0.7,
+            "direction": "AWAY_FROM_THREAT"
+          }
+        },
+        "memory": {
+          "threat_memory_duration_seconds": 600,
+          "remembers_player_as_threat": true,
+          "threat_threshold_approach_distance_units": 300
+        }
+      },
+
+      "Brachiosaurus_BT": {
+        "description": "Gentle giant — passive unless cornered or young threatened",
+        "patrol_radius_units": 8000,
+        "detection_range_units": 2000,
+        "attack_range_units": 600,
+        "states": {
+          "BROWSE": {
+            "description": "Feeding on treetops — slow movement, long neck sweeping",
+            "speed_multiplier": 0.15,
+            "neck_animation": "SWEEP_HIGH",
+            "duration_at_location_seconds": 180
+          },
+          "MIGRATE": {
+            "description": "Moving between feeding grounds — follows established routes",
+            "speed_multiplier": 0.4,
+            "route_type": "SEASONAL_PATH"
+          },
+          "STARTLED": {
+            "description": "Sudden noise or approach — rears up, stomps ground",
+            "rearing_animation": true,
+            "stomp_damage_radius_units": 400,
+            "stomp_damage": 60,
+            "duration_seconds": 5.0
+          },
+          "FLEE": {
+            "description": "Persistent threat — moves away at speed",
+            "speed_multiplier": 0.8,
+            "flee_distance_units": 3000
+          }
+        }
+      }
+    },
+
+    "daily_routines": {
+      "description": "Time-of-day behavior modifiers for all dinosaur species",
+      "dawn_06_to_09": {
+        "predators": "ACTIVE_HUNTING",
+        "herbivores": "EARLY_GRAZING",
+        "ambient_activity": "HIGH"
+      },
+      "midday_10_to_14": {
+        "predators": "RESTING_IN_SHADE",
+        "herbivores": "GRAZING_NEAR_WATER",
+        "ambient_activity": "LOW"
+      },
+      "afternoon_15_to_18": {
+        "predators": "PATROL_TERRITORY",
+        "herbivores": "ACTIVE_GRAZING",
+        "ambient_activity": "MEDIUM"
+      },
+      "dusk_19_to_21": {
+        "predators": "PEAK_HUNTING",
+        "herbivores": "MOVING_TO_SAFETY",
+        "ambient_activity": "HIGH"
+      },
+      "night_22_to_05": {
+        "predators": "NOCTURNAL_HUNT_REDUCED",
+        "herbivores": "SLEEPING_GROUPED",
+        "ambient_activity": "VERY_LOW"
+      }
+    },
+
+    "npc_memory_system": {
+      "description": "Persistent memory that shapes NPC behavior based on past interactions",
+      "threat_memory": {
+        "player_attack": "Increases aggression radius by 50% for 10 minutes",
+        "player_proximity": "Logged if within 200 units — increases alertness on next encounter",
+        "player_killed_packmate": "Pack permanently hostile to player in this zone"
+      },
+      "territory_memory": {
+        "kill_locations": "Predators revisit successful hunt locations",
+        "water_sources": "All species remember water source locations",
+        "shelter_locations": "Used during storms and extreme heat"
+      },
+      "social_memory": {
+        "pack_bonds": "Raptors remember pack hierarchy — alpha death causes temporary chaos",
+        "herd_recognition": "Triceratops recognize individual herd members",
+        "maternal_bond": "Mothers remember nest location and offspring for full season"
+      }
+    },
+
+    "voice_lines": {
+      "survival_narrator": {
+        "raptor_flanking": {
+          "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783223319663_SurvivalNarrator.mp3",
+          "text": "The raptors circle before they strike. One draws your attention from the front while the others move to your flanks. Do not watch the decoy. Watch the shadows at the edge of your vision. That is where the real threat comes from.",
+          "trigger": "RAPTOR_PACK_DETECTED_FLANKING",
+          "duration_seconds": 16
+        },
+        "maternal_aggression": {
+          "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783223326576_SurvivalNarrator.mp3",
+          "text": "A lone predator is dangerous. A hungry predator is desperate. But a mother protecting her nest — that is something else entirely. You have wandered too close. Leave. Now. Do not run. Back away slowly and do not break eye contact.",
+          "trigger": "PLAYER_NEAR_NEST",
+          "duration_seconds": 16
+        }
+      }
+    },
+
+    "integration_notes": {
+      "for_agent_12_combat_ai": "Behavior tree states map directly to combat phases. ATTACK state triggers combat AI takeover. SCATTER state is recovery phase after combat loss.",
+      "for_agent_10_animation": "Each state has a corresponding animation set. STALK uses crouch blend space. CHARGE uses root motion animation.",
+      "for_agent_16_audio": "Vocalization intervals defined per state. Each state transition should trigger appropriate sound cue.",
+      "for_agent_13_crowd": "Pack and herd behaviors use Mass AI formation system. Pack size ranges defined above.",
+      "ue5_implementation": "Behavior Trees implemented via UE5 BehaviorTree asset system. Each BT node maps to a C++ BTTask or BTDecorator class in /Script/TranspersonalGame"
+    }
+  }
+}

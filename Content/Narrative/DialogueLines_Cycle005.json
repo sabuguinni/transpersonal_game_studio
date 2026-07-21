@@ -1,0 +1,218 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_005",
+  "agent": "Narrative_Dialogue_Agent_15",
+  "description": "Complete dialogue lines for Q003, Q004, Q005 — 15 lines across Elder_Kael, Hunter_01, Gatherer_04, Guard NPCs",
+
+  "voice_assets": {
+    "Elder_Kael_QuestComplete": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849346113_Elder_Kael_QuestComplete.mp3",
+    "Guard_PreAttackWarning":   "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849348846_Guard_PreAttackWarning.mp3",
+    "Elder_Kael_QuestFail":     "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849359350_Elder_Kael_QuestFail.mp3",
+    "Gatherer_ResourceWarning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849363387_Gatherer_ResourceWarning.mp3"
+  },
+
+  "dialogue_lines": {
+
+    "NPC_Elder_Kael_07": {
+      "character_id": "Elder_Kael_07",
+      "role": "Tribal Elder — quest giver, authority figure",
+      "tone": "Measured, pragmatic, never warm — survival-focused",
+
+      "Q003_ProveYourWorth": {
+        "briefing": {
+          "id": "DL_Elder_Q003_Brief",
+          "text": "The herd grazes near the river bend at dusk. Three animals — the smallest one, not the mother. Bring back enough meat for two days. Do not come back with excuses.",
+          "trigger": "QuestObj1_TalkElder — on player approach",
+          "audio": null,
+          "subtitles": true
+        },
+        "success_accept": {
+          "id": "DL_Elder_Q003_Success",
+          "text": "You return with meat. Good. The tribe will eat tonight. But do not mistake one hunt for skill. The great lizards remember faces. They will come for you again — and next time, they will not be alone. Rest. Tomorrow we move camp before the rains flood the valley.",
+          "trigger": "QuestReward_ProveWorth — on quest completion",
+          "audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849346113_Elder_Kael_QuestComplete.mp3",
+          "subtitles": true
+        },
+        "failure_reject": {
+          "id": "DL_Elder_Q003_Fail",
+          "text": "You came back empty-handed. The tribe cannot eat your excuses. Go out again — but this time watch where the prey drinks. At dusk, near the river bend. That is where they are vulnerable. Do not return until you have something to show.",
+          "trigger": "QuestObj3_ReturnCamp — on fail state",
+          "audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849359350_Elder_Kael_QuestFail.mp3",
+          "subtitles": true
+        },
+        "ambient_01": {
+          "id": "DL_Elder_Ambient_01",
+          "text": "The dry season shortens the grass. The big lizards range further when they cannot smell water. Keep that in mind.",
+          "trigger": "Random ambient — 15% chance on player proximity",
+          "audio": null,
+          "subtitles": true
+        },
+        "ambient_02": {
+          "id": "DL_Elder_Ambient_02",
+          "text": "I have seen three winters where the herd did not return. We ate bark and roots. Do not let that happen again.",
+          "trigger": "Random ambient — 10% chance on player proximity",
+          "audio": null,
+          "subtitles": true
+        }
+      }
+    },
+
+    "NPC_Hunter_01": {
+      "character_id": "Hunter_01",
+      "role": "Experienced hunter — tactical advisor, cautious",
+      "tone": "Direct, low voice, never panics — reads terrain instinctively",
+
+      "Q003_HuntAdvice": {
+        "approach_tip": {
+          "id": "DL_Hunter_Q003_Approach",
+          "text": "Stay downwind. Always. If you can smell them, they can smell you ten times stronger. Circle wide to the east before you close in.",
+          "trigger": "QuestObj2_HuntZone_Savanna — on player enter",
+          "audio": null,
+          "subtitles": true
+        },
+        "kill_confirm": {
+          "id": "DL_Hunter_Q003_Kill",
+          "text": "Clean kill. Good. Now move fast — the blood smell carries far. We have maybe ten minutes before something larger investigates.",
+          "trigger": "QuestTarget_PreyAnimal — on kill event",
+          "audio": null,
+          "subtitles": true
+        }
+      },
+
+      "Q004_DefendCamp": {
+        "flanking_advice": {
+          "id": "DL_Hunter_Q004_Flank",
+          "text": "Do not run straight. The big ones track movement — they are faster than you think. Cut left, use the rocks. Make it work to reach you.",
+          "trigger": "QuestObj3_DistractTRex_Zone — on player enter",
+          "audio": null,
+          "subtitles": true
+        },
+        "escort_confirm": {
+          "id": "DL_Hunter_Q004_Escort",
+          "text": "The children are at the treeline. I count twelve. Two are missing — the twins from the eastern shelter. Someone needs to go back.",
+          "trigger": "QuestObj2_LeadToTreeline — on player arrive",
+          "audio": null,
+          "subtitles": true
+        }
+      }
+    },
+
+    "NPC_Guard_10": {
+      "character_id": "Guard_10",
+      "role": "Camp perimeter guard — first to detect threats",
+      "tone": "Tense, urgent — speaks in short bursts under pressure",
+
+      "Q004_PreAttackWarning": {
+        "birds_stopped": {
+          "id": "DL_Guard_Q004_Warning",
+          "text": "Something is wrong. The birds stopped singing. All of them — at once. That only happens when something big is moving through the brush. Get the children to the treeline. Now. Do not wait for the others.",
+          "trigger": "QuestObj1_AlertTribe — pre-attack trigger (30s before T-Rex spawn)",
+          "audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849348846_Guard_PreAttackWarning.mp3",
+          "subtitles": true
+        },
+        "trex_sighted": {
+          "id": "DL_Guard_Q004_Sighted",
+          "text": "There — past the ridge. It is already inside the perimeter. Move!",
+          "trigger": "T-Rex spawn event — immediate",
+          "audio": null,
+          "subtitles": true
+        },
+        "all_clear": {
+          "id": "DL_Guard_Q004_Clear",
+          "text": "It moved off. Following the river south. We have time — but not much. The camp needs to move before nightfall.",
+          "trigger": "QuestSafeZone_Treeline — on T-Rex despawn",
+          "audio": null,
+          "subtitles": true
+        }
+      }
+    },
+
+    "NPC_Gatherer_04": {
+      "character_id": "Gatherer_04",
+      "role": "Resource specialist — knows terrain, plant cycles, water sources",
+      "tone": "Observant, detail-oriented, speaks about environment with precision",
+
+      "Q005_TheGathering": {
+        "resource_briefing": {
+          "id": "DL_Gatherer_Q005_Brief",
+          "text": "We need berries, flint, and water before the dry season locks in. The berry bushes are near the eastern rocks — heavy this season. Flint is at the riverbed, half a day east. Water from the spring, not the river — the river has been cloudy since the herd crossed upstream.",
+          "trigger": "QuestManager_Gathering — on quest start",
+          "audio": null,
+          "subtitles": true
+        },
+        "resource_warning": {
+          "id": "DL_Gatherer_Q005_Warning",
+          "text": "The berry bushes near the eastern rocks are heavy this season. But watch your step — the ground there is soft. Sinkholes open without warning after the rains. And stay away from the tall grass past the ridge. Something has been sleeping there. I saw the flattened ground this morning.",
+          "trigger": "QuestObj_GatherBerries — on player approach",
+          "audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781849363387_Gatherer_ResourceWarning.mp3",
+          "subtitles": true
+        },
+        "flint_tip": {
+          "id": "DL_Gatherer_Q005_Flint",
+          "text": "The good flint is darker — almost black. The grey pieces crack wrong when you strike them. Look for the dark seams in the riverbed stone.",
+          "trigger": "QuestObj_GatherFlint — on player approach",
+          "audio": null,
+          "subtitles": true
+        },
+        "water_tip": {
+          "id": "DL_Gatherer_Q005_Water",
+          "text": "Taste it before you fill the skins. If it is bitter, move upstream. Bitter water means something died in the source. We cannot afford sick hunters right now.",
+          "trigger": "QuestObj_GatherWater — on player approach",
+          "audio": null,
+          "subtitles": true
+        },
+        "delivery_complete": {
+          "id": "DL_Gatherer_Q005_Complete",
+          "text": "This will last us eight days if we are careful. Ten if the Elder agrees to reduce the evening fire — less cooking means less waste. I will speak to her.",
+          "trigger": "QuestDelivery_Gathering — on all resources delivered",
+          "audio": null,
+          "subtitles": true
+        }
+      }
+    }
+  },
+
+  "dialogue_system_spec": {
+    "trigger_radius": 200,
+    "cooldown_seconds": 120,
+    "priority_order": ["quest_critical", "quest_ambient", "ambient_random"],
+    "subtitle_display_duration_ms": 4000,
+    "audio_fallback": "subtitles_only_if_no_audio_url",
+    "language": "English",
+    "voice_style": "realistic_prehistoric_no_mysticism"
+  },
+
+  "narrative_markers_in_map": [
+    {"label": "Dialogue_Elder_QuestSuccess", "location": [310, 155, 80], "line_id": "DL_Elder_Q003_Success"},
+    {"label": "Dialogue_Elder_QuestFail",    "location": [310, 145, 80], "line_id": "DL_Elder_Q003_Fail"},
+    {"label": "Dialogue_Guard_PreAttack",    "location": [0,   0,   80], "line_id": "DL_Guard_Q004_Warning"},
+    {"label": "Dialogue_Gatherer_Resource",  "location": [-400, 300, 80], "line_id": "DL_Gatherer_Q005_Warning"},
+    {"label": "Dialogue_Hunter_Flanking",    "location": [800, -200, 80], "line_id": "DL_Hunter_Q004_Flank"}
+  ],
+
+  "handoff_to_audio_agent_16": {
+    "voice_lines_needing_tts": [
+      "DL_Elder_Q003_Brief",
+      "DL_Hunter_Q003_Approach",
+      "DL_Hunter_Q003_Kill",
+      "DL_Hunter_Q004_Flank",
+      "DL_Hunter_Q004_Escort",
+      "DL_Guard_Q004_Sighted",
+      "DL_Guard_Q004_Clear",
+      "DL_Gatherer_Q005_Brief",
+      "DL_Gatherer_Q005_Flint",
+      "DL_Gatherer_Q005_Water",
+      "DL_Gatherer_Q005_Complete",
+      "DL_Elder_Ambient_01",
+      "DL_Elder_Ambient_02"
+    ],
+    "completed_voice_assets": 4,
+    "pending_voice_assets": 13,
+    "ambient_sound_needs": [
+      "camp_fire_crackle_loop",
+      "distant_dinosaur_call_ambient",
+      "wind_through_grass_loop",
+      "river_water_flow_loop"
+    ],
+    "priority": "DL_Guard_Q004_Warning already recorded — match this urgency register for Guard_Sighted and Guard_Clear"
+  }
+}

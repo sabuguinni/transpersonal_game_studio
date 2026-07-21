@@ -1,0 +1,253 @@
+{
+  "quest_pack": "Prehistoric_Survival_Core_v3",
+  "cycle": "PROD_CYCLE_AUTO_20260704_003",
+  "agent": "Quest_Mission_Designer_14",
+  "hub_coords": {"x": 2100, "y": 2400, "z": 100},
+  "quests": [
+    {
+      "id": "QST_001_ObserveHerd",
+      "title": "Observe the Herd",
+      "type": "observation",
+      "difficulty": "easy",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "zone_actor": "QuestZone_ObserveHerd_001",
+      "beacon_actor": "QuestBeacon_ObserveHerd_001",
+      "beacon_color": [1.0, 0.8, 0.0],
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783135965098_Elder_NPC_QuestBriefing_TrackH.mp3",
+      "briefing": "The herd moves at dawn. Watch them — learn their patterns. A hunter who knows the herd survives.",
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "type": "observe",
+          "target": "Trike_Savana_001",
+          "description": "Observe the lead Triceratops for 30 seconds without being detected",
+          "required_distance_max": 800,
+          "required_time_seconds": 30,
+          "detection_radius": 250
+        },
+        {
+          "id": "OBJ_001_B",
+          "type": "observe",
+          "target": "Trike_Savana_002",
+          "description": "Count the herd members (observe 4 Triceratops)",
+          "required_count": 4
+        },
+        {
+          "id": "OBJ_001_C",
+          "type": "reach",
+          "target": "QuestZone_ObserveHerd_001",
+          "description": "Return to the Elder with your observations",
+          "completion_trigger": "return_to_npc"
+        }
+      ],
+      "rewards": {
+        "xp": 150,
+        "items": ["Flint_Knife", "Dried_Meat_x2"],
+        "unlocks": ["QST_002_TrackGiants", "QST_003_HuntRaptor"]
+      },
+      "failure_conditions": [
+        {"type": "detected_by_herd", "penalty": "quest_reset"},
+        {"type": "player_death", "penalty": "quest_reset"}
+      ]
+    },
+    {
+      "id": "QST_002_TrackGiants",
+      "title": "Track the Giants",
+      "type": "tracking",
+      "difficulty": "medium",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "zone_actor": "QuestZone_TrackGiants_001",
+      "beacon_actor": "QuestBeacon_TrackGiants_001",
+      "beacon_color": [0.0, 0.6, 1.0],
+      "prerequisite": "QST_001_ObserveHerd",
+      "briefing": "The Brachiosaurus move between the river and the high forest. Find their migration path — we need to know where they drink.",
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "type": "find_tracks",
+          "description": "Find Brachiosaurus footprints near the river",
+          "target_zone": "QuestZone_TrackGiants_001",
+          "track_actors": ["Brach_Savana_001", "Brach_Savana_002"]
+        },
+        {
+          "id": "OBJ_002_B",
+          "type": "follow",
+          "description": "Follow the herd to their watering hole without disturbing them",
+          "target_actors": ["Brach_Savana_001", "Brach_Savana_002", "Brach_Savana_003"],
+          "required_follow_distance": 600,
+          "required_duration_seconds": 60
+        },
+        {
+          "id": "OBJ_002_C",
+          "type": "mark_location",
+          "description": "Mark the watering hole location on your mental map",
+          "completion_trigger": "reach_waypoint_WaterHole_001"
+        }
+      ],
+      "rewards": {
+        "xp": 300,
+        "items": ["Water_Skin", "Bone_Spear"],
+        "unlocks": ["QST_004_DefendCamp"]
+      }
+    },
+    {
+      "id": "QST_003_HuntRaptor",
+      "title": "Hunt the Pack",
+      "type": "combat_hunt",
+      "difficulty": "hard",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "zone_actor": "QuestZone_HuntRaptor_001",
+      "beacon_actor": "QuestBeacon_HuntRaptor_001",
+      "beacon_color": [1.0, 0.2, 0.0],
+      "prerequisite": "QST_001_ObserveHerd",
+      "voice_line_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783135989607_Elder_NPC_QuestBriefing_HuntRa.mp3",
+      "briefing": "Three raptors hunt near the eastern ridge. They move fast and they move together. Bring back proof of the kill.",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "type": "locate",
+          "description": "Find the raptor pack at the eastern ridge",
+          "target_zone": "QuestZone_HuntRaptor_001",
+          "target_actors": ["Raptor_Savana_001", "Raptor_Savana_002", "Raptor_Savana_003"]
+        },
+        {
+          "id": "OBJ_003_B",
+          "type": "kill",
+          "description": "Kill at least 2 of the 3 raptors",
+          "required_kills": 2,
+          "target_class": "Raptor",
+          "allowed_weapons": ["Stone_Spear", "Flint_Knife", "Thrown_Rock"]
+        },
+        {
+          "id": "OBJ_003_C",
+          "type": "collect",
+          "description": "Collect raptor claw as proof of the kill",
+          "item": "Raptor_Claw",
+          "quantity": 1,
+          "drop_source": "Raptor_Savana_001"
+        },
+        {
+          "id": "OBJ_003_D",
+          "type": "return",
+          "description": "Return to the Elder with the raptor claw",
+          "target_npc": "NPC_Elder_QuestGiver_001"
+        }
+      ],
+      "rewards": {
+        "xp": 500,
+        "items": ["Raptor_Claw_Necklace", "Dried_Meat_x5", "Bone_Knife"],
+        "unlocks": ["QST_005_TRexTerritory"],
+        "tribe_reputation": 25
+      },
+      "failure_conditions": [
+        {"type": "player_death", "penalty": "quest_reset"},
+        {"type": "all_raptors_escape", "penalty": "partial_fail"}
+      ]
+    },
+    {
+      "id": "QST_004_DefendCamp",
+      "title": "Defend the Camp",
+      "type": "defense",
+      "difficulty": "medium",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "prerequisite": "QST_002_TrackGiants",
+      "briefing": "The herd migration brings predators. Tonight they will test our camp. Build the fire wall and hold position until dawn.",
+      "objectives": [
+        {
+          "id": "OBJ_004_A",
+          "type": "craft",
+          "description": "Build 3 campfires around the camp perimeter",
+          "item": "Campfire",
+          "quantity": 3,
+          "placement_zone": "Camp_Perimeter"
+        },
+        {
+          "id": "OBJ_004_B",
+          "type": "survive",
+          "description": "Survive 3 waves of predator attacks",
+          "wave_count": 3,
+          "wave_enemies": [
+            {"wave": 1, "enemies": ["Raptor_Savana_004", "Raptor_Savana_005"]},
+            {"wave": 2, "enemies": ["Raptor_Savana_006", "Raptor_Savana_007", "Raptor_Savana_008"]},
+            {"wave": 3, "enemies": ["TRex_Savana_001"]}
+          ],
+          "time_limit_seconds": 300
+        }
+      ],
+      "rewards": {
+        "xp": 400,
+        "items": ["Stone_Axe", "Leather_Wrap"],
+        "unlocks": ["QST_005_TRexTerritory"]
+      }
+    },
+    {
+      "id": "QST_005_TRexTerritory",
+      "title": "Into T-Rex Territory",
+      "type": "exploration_stealth",
+      "difficulty": "very_hard",
+      "giver_npc": "NPC_Elder_QuestGiver_001",
+      "prerequisite": ["QST_003_HuntRaptor", "QST_004_DefendCamp"],
+      "briefing": "The great predator controls the northern valley. We cannot expand until we understand its territory. Map its patrol range — but do not become its prey.",
+      "objectives": [
+        {
+          "id": "OBJ_005_A",
+          "type": "reach_undetected",
+          "description": "Enter the T-Rex territory zone without triggering its detection",
+          "target_zone": "TRex_Territory_North",
+          "detection_actor": "TRex_Savana_001",
+          "detection_radius": 1200
+        },
+        {
+          "id": "OBJ_005_B",
+          "type": "observe_patrol",
+          "description": "Observe the T-Rex patrol route from a safe distance",
+          "target_actor": "TRex_Savana_001",
+          "safe_distance": 800,
+          "observation_time_seconds": 45
+        },
+        {
+          "id": "OBJ_005_C",
+          "type": "escape",
+          "description": "Escape the territory zone alive",
+          "exit_zone": "TRex_Territory_Exit",
+          "time_limit_seconds": 120
+        }
+      ],
+      "rewards": {
+        "xp": 750,
+        "items": ["TRex_Scale_Trophy", "Bone_Armor_Fragment"],
+        "unlocks": ["QST_006_MigrationLeader"],
+        "tribe_reputation": 50
+      }
+    }
+  ],
+  "npc_actors": {
+    "NPC_Elder_QuestGiver_001": {
+      "label": "NPC_Elder_QuestGiver_001",
+      "location": {"x": 2050, "y": 2480, "z": 150},
+      "beacon_color": [1.0, 0.6, 0.1],
+      "voice_lines": [
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783135965098_Elder_NPC_QuestBriefing_TrackH.mp3",
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783135989607_Elder_NPC_QuestBriefing_HuntRa.mp3"
+      ]
+    }
+  },
+  "herd_formations": {
+    "triceratops_herd": {
+      "actors": ["Trike_Savana_001","Trike_Savana_002","Trike_Savana_003","Trike_Savana_004","Trike_Savana_005","Trike_Savana_006"],
+      "formation": "grazing_cluster",
+      "center": {"x": 2350, "y": 2150, "z": 100},
+      "behavior": "passive_graze",
+      "detection_radius": 400,
+      "flee_threshold": 0.3
+    },
+    "brachiosaurus_group": {
+      "actors": ["Brach_Savana_001","Brach_Savana_002","Brach_Savana_003","Brach_Savana_004"],
+      "formation": "loose_browse",
+      "center": {"x": 1600, "y": 2700, "z": 100},
+      "behavior": "passive_browse",
+      "detection_radius": 600,
+      "flee_threshold": 0.5
+    }
+  }
+}

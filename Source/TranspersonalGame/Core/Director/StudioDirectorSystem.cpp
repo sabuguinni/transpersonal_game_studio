@@ -1,534 +1,340 @@
 #include "StudioDirectorSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
 
-UStudioDirectorSystem::UStudioDirectorSystem()
+AStudioDirectorSystem::AStudioDirectorSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Update every second
+    PrimaryActorTick.bCanEverTick = true;
     
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
     // Initialize default values
-    CurrentPhase = EDir_ProductionPhase::PreProduction;
-    CurrentActiveAgent = 1; // Start with Studio Director (self)
-    bVisionIntegrityMaintained = true;
-    bQAApprovalRequired = false;
-    FailedQualityChecks = 0;
+    CurrentCycleID = 0;
+    MetricsUpdateInterval = 5.0f;
     LastMetricsUpdate = 0.0f;
-    bPipelineInitialized = false;
-    
-    // Set core creative pillars
-    CorePillars.Add(TEXT("Immersive Prehistoric World"));
-    CorePillars.Add(TEXT("Meaningful Character Progression"));
-    CorePillars.Add(TEXT("Dynamic Ecosystem Simulation"));
-    CorePillars.Add(TEXT("Emergent Storytelling"));
-    CorePillars.Add(TEXT("Transpersonal Connection"));
-    
-    // Set quality gates criteria
-    QualityGatesCriteria.Add(TEXT("60 FPS on PC"));
-    QualityGatesCriteria.Add(TEXT("30 FPS on Console"));
-    QualityGatesCriteria.Add(TEXT("No Critical Bugs"));
-    QualityGatesCriteria.Add(TEXT("Creative Vision Compliance"));
-    QualityGatesCriteria.Add(TEXT("Performance Targets Met"));
+    bAgentChainActive = false;
+    CurrentActiveAgent = 1;
+    AgentTimeoutThreshold = 300.0f;
+    LastAgentStartTime = 0.0f;
+    bEmergencyMode = false;
+
+    // Initialize production metrics
+    CurrentMetrics = FDir_ProductionMetrics();
 }
 
-void UStudioDirectorSystem::BeginPlay()
+void AStudioDirectorSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director System: Initializing Production Pipeline"));
-    InitializeProductionPipeline();
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System initialized - Ready for agent coordination"));
     
-    // Set creative vision from Miguel's direction
-    SetCreativeVision(TEXT("Create a prehistoric survival game that connects players to their primal nature while exploring themes of consciousness, community, and the relationship between humanity and nature."));
+    // Start initial metrics update
+    UpdateProductionMetrics();
+    
+    // Log startup status
+    LogCurrentStatus();
 }
 
-void UStudioDirectorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AStudioDirectorSystem::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Update metrics every 5 seconds
-    LastMetricsUpdate += DeltaTime;
-    if (LastMetricsUpdate >= 5.0f)
+    // Update metrics periodically
+    if (GetWorld()->GetTimeSeconds() - LastMetricsUpdate > MetricsUpdateInterval)
     {
         UpdateProductionMetrics();
-        CheckForBottlenecks();
-        LastMetricsUpdate = 0.0f;
+        LastMetricsUpdate = GetWorld()->GetTimeSeconds();
     }
+    
+    // Check agent timeouts if chain is active
+    if (bAgentChainActive)
+    {
+        UpdateAgentTimeouts();
+    }
+    
+    // Validate production limits
+    CheckProductionLimits();
 }
 
-void UStudioDirectorSystem::InitializeProductionPipeline()
+void AStudioDirectorSystem::AssignTaskToAgent(int32 AgentID, const FString& TaskDescription, const FString& Priority, float EstimatedHours)
 {
-    if (bPipelineInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Studio Director: Pipeline already initialized"));
-        return;
-    }
+    FDir_AgentTaskData NewTask;
+    NewTask.AgentID = AgentID;
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    NewTask.EstimatedHours = EstimatedHours;
+    NewTask.bCompleted = false;
     
-    // Initialize the 19-agent chain
-    AgentChain.Empty();
+    ActiveTasks.Add(NewTask);
     
-    // Agent #01 - Studio Director (self)
-    FDir_AgentInfo StudioDirector;
-    StudioDirector.AgentName = TEXT("Studio Director");
-    StudioDirector.AgentID = 1;
-    StudioDirector.Status = EDir_AgentStatus::Working;
-    StudioDirector.CurrentTask = TEXT("Production Pipeline Oversight");
-    StudioDirector.CompletionPercentage = 25.0f;
-    AgentChain.Add(StudioDirector);
-    
-    // Agent #02 - Engine Architect
-    FDir_AgentInfo EngineArchitect;
-    EngineArchitect.AgentName = TEXT("Engine Architect");
-    EngineArchitect.AgentID = 2;
-    EngineArchitect.Status = EDir_AgentStatus::Idle;
-    EngineArchitect.CurrentTask = TEXT("Awaiting Technical Architecture Definition");
-    EngineArchitect.Dependencies.Add(TEXT("Studio Director Vision"));
-    AgentChain.Add(EngineArchitect);
-    
-    // Agent #03 - Core Systems Programmer
-    FDir_AgentInfo CoreSystems;
-    CoreSystems.AgentName = TEXT("Core Systems Programmer");
-    CoreSystems.AgentID = 3;
-    CoreSystems.Status = EDir_AgentStatus::Idle;
-    CoreSystems.CurrentTask = TEXT("Awaiting Engine Architecture");
-    CoreSystems.Dependencies.Add(TEXT("Engine Architect"));
-    AgentChain.Add(CoreSystems);
-    
-    // Continue with remaining agents...
-    TArray<FString> AgentNames = {
-        TEXT("Performance Optimizer"),
-        TEXT("Procedural World Generator"),
-        TEXT("Environment Artist"),
-        TEXT("Architecture & Interior Agent"),
-        TEXT("Lighting & Atmosphere Agent"),
-        TEXT("Character Artist Agent"),
-        TEXT("Animation Agent"),
-        TEXT("NPC Behavior Agent"),
-        TEXT("Combat & Enemy AI Agent"),
-        TEXT("Crowd & Traffic Simulation"),
-        TEXT("Quest & Mission Designer"),
-        TEXT("Narrative & Dialogue Agent"),
-        TEXT("Audio Agent"),
-        TEXT("VFX Agent"),
-        TEXT("QA & Testing Agent"),
-        TEXT("Integration & Build Agent")
-    };
-    
-    for (int32 i = 0; i < AgentNames.Num(); i++)
-    {
-        FDir_AgentInfo Agent;
-        Agent.AgentName = AgentNames[i];
-        Agent.AgentID = i + 4; // Starting from ID 4
-        Agent.Status = EDir_AgentStatus::Idle;
-        Agent.CurrentTask = TEXT("Awaiting Dependencies");
-        
-        // Set dependencies based on agent order
-        if (i == 0) // Performance Optimizer
-        {
-            Agent.Dependencies.Add(TEXT("Core Systems Programmer"));
-        }
-        else if (i < 10) // Technical agents
-        {
-            Agent.Dependencies.Add(AgentNames[i - 1]);
-        }
-        else if (i == 14) // Narrative Agent
-        {
-            Agent.Dependencies.Add(TEXT("Quest & Mission Designer"));
-        }
-        else
-        {
-            Agent.Dependencies.Add(AgentNames[i - 1]);
-        }
-        
-        AgentChain.Add(Agent);
-    }
-    
-    bPipelineInitialized = true;
-    UpdateProductionMetrics();
-    
-    LogProductionEvent(TEXT("Production pipeline initialized with 19 agents"));
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Production pipeline initialized successfully"));
+    UE_LOG(LogTemp, Warning, TEXT("Task assigned to Agent #%d: %s"), AgentID, *TaskDescription);
 }
 
-void UStudioDirectorSystem::AdvanceToNextAgent()
+void AStudioDirectorSystem::CompleteAgentTask(int32 AgentID, const FString& TaskDescription)
 {
-    if (CurrentActiveAgent >= AgentChain.Num())
+    for (int32 i = ActiveTasks.Num() - 1; i >= 0; i--)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Studio Director: All agents completed - cycle complete"));
-        LogProductionEvent(TEXT("Production cycle completed"));
-        return;
-    }
-    
-    // Mark current agent as complete
-    if (CurrentActiveAgent > 0 && CurrentActiveAgent <= AgentChain.Num())
-    {
-        AgentChain[CurrentActiveAgent - 1].Status = EDir_AgentStatus::Complete;
-        AgentChain[CurrentActiveAgent - 1].CompletionPercentage = 100.0f;
-    }
-    
-    // Advance to next agent
-    CurrentActiveAgent++;
-    
-    if (CurrentActiveAgent <= AgentChain.Num())
-    {
-        // Check if next agent's dependencies are met
-        if (IsAgentReadyToWork(CurrentActiveAgent))
+        if (ActiveTasks[i].AgentID == AgentID && ActiveTasks[i].TaskDescription == TaskDescription)
         {
-            AgentChain[CurrentActiveAgent - 1].Status = EDir_AgentStatus::Working;
-            LogProductionEvent(FString::Printf(TEXT("Advanced to Agent #%d: %s"), 
-                CurrentActiveAgent, *AgentChain[CurrentActiveAgent - 1].AgentName));
-        }
-        else
-        {
-            AgentChain[CurrentActiveAgent - 1].Status = EDir_AgentStatus::Blocked;
-            LogProductionEvent(FString::Printf(TEXT("Agent #%d blocked - dependencies not met"), CurrentActiveAgent));
-        }
-    }
-    
-    UpdateProductionMetrics();
-}
-
-void UStudioDirectorSystem::BlockAgent(int32 AgentID, const FString& Reason)
-{
-    if (AgentID > 0 && AgentID <= AgentChain.Num())
-    {
-        AgentChain[AgentID - 1].Status = EDir_AgentStatus::Blocked;
-        LogProductionEvent(FString::Printf(TEXT("Agent #%d (%s) blocked: %s"), 
-            AgentID, *AgentChain[AgentID - 1].AgentName, *Reason));
-        
-        // If QA blocks, stop everything
-        if (AgentID == 18) // QA Agent
-        {
-            bQAApprovalRequired = true;
-            UE_LOG(LogTemp, Error, TEXT("Studio Director: QA BLOCK - All production halted"));
-        }
-    }
-}
-
-void UStudioDirectorSystem::UnblockAgent(int32 AgentID)
-{
-    if (AgentID > 0 && AgentID <= AgentChain.Num())
-    {
-        if (IsAgentReadyToWork(AgentID))
-        {
-            AgentChain[AgentID - 1].Status = EDir_AgentStatus::Working;
-            LogProductionEvent(FString::Printf(TEXT("Agent #%d (%s) unblocked"), 
-                AgentID, *AgentChain[AgentID - 1].AgentName));
-        }
-    }
-}
-
-FDir_ProductionMetrics UStudioDirectorSystem::GetProductionMetrics() const
-{
-    return ProductionMetrics;
-}
-
-void UStudioDirectorSystem::SetCreativeVision(const FString& Vision)
-{
-    CreativeDirectorVision = Vision;
-    LogProductionEvent(TEXT("Creative vision updated by Miguel"));
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Creative vision set - %s"), *Vision);
-}
-
-bool UStudioDirectorSystem::ValidateAgentOutput(int32 AgentID, const FString& Output)
-{
-    // Check if output aligns with creative vision and core pillars
-    bool bVisionCompliant = true;
-    
-    // Simple keyword validation against core pillars
-    for (const FString& Pillar : CorePillars)
-    {
-        // This is a simplified check - in practice would be more sophisticated
-        if (!Output.Contains(TEXT("prehistoric")) && Pillar.Contains(TEXT("Prehistoric")))
-        {
-            bVisionCompliant = false;
+            ActiveTasks[i].bCompleted = true;
+            CompletedTasks.Add(ActiveTasks[i]);
+            ActiveTasks.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Task completed by Agent #%d: %s"), AgentID, *TaskDescription);
             break;
         }
     }
-    
-    if (!bVisionCompliant)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Studio Director: Agent #%d output failed vision compliance"), AgentID);
-        LogProductionEvent(FString::Printf(TEXT("Agent #%d output rejected - vision non-compliance"), AgentID));
-    }
-    
-    return bVisionCompliant;
 }
 
-void UStudioDirectorSystem::EnforceVisionCompliance()
+TArray<FDir_AgentTaskData> AStudioDirectorSystem::GetTasksForAgent(int32 AgentID)
 {
-    // Review all agent outputs for vision compliance
-    for (int32 i = 0; i < AgentChain.Num(); i++)
+    TArray<FDir_AgentTaskData> AgentTasks;
+    
+    for (const FDir_AgentTaskData& Task : ActiveTasks)
     {
-        if (AgentChain[i].Status == EDir_AgentStatus::Complete)
+        if (Task.AgentID == AgentID)
         {
-            // In practice, this would check actual outputs
-            // For now, we assume compliance unless explicitly flagged
-            continue;
+            AgentTasks.Add(Task);
         }
     }
     
-    LogProductionEvent(TEXT("Vision compliance check completed"));
+    return AgentTasks;
 }
 
-bool UStudioDirectorSystem::RunQualityGate()
+int32 AStudioDirectorSystem::GetTotalActiveTasks()
 {
-    bool bPassedQualityGate = true;
-    
-    // Check each quality criteria
-    for (const FString& Criteria : QualityGatesCriteria)
+    return ActiveTasks.Num();
+}
+
+void AStudioDirectorSystem::UpdateProductionMetrics()
+{
+    if (!GetWorld())
     {
-        // Simplified quality check - in practice would run actual tests
-        if (Criteria.Contains(TEXT("FPS")))
-        {
-            // Would check actual performance metrics
-            continue;
-        }
-        
-        if (Criteria.Contains(TEXT("Bugs")))
-        {
-            // Would check bug database
-            continue;
-        }
-        
-        if (Criteria.Contains(TEXT("Vision")))
-        {
-            if (!bVisionIntegrityMaintained)
-            {
-                bPassedQualityGate = false;
-                break;
-            }
-        }
+        return;
     }
     
-    if (!bPassedQualityGate)
+    // Count all actors in the world
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    CurrentMetrics.TotalActorsInMap = AllActors.Num();
+    
+    // Count dinosaur actors
+    int32 DinoCount = 0;
+    for (AActor* Actor : AllActors)
     {
-        FailedQualityChecks++;
-        LogProductionEvent(TEXT("Quality gate FAILED"));
+        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")) || 
+            Actor->GetName().Contains(TEXT("TRex")) ||
+            Actor->GetName().Contains(TEXT("Veloci")) ||
+            Actor->GetName().Contains(TEXT("Tricera")) ||
+            Actor->GetName().Contains(TEXT("Brachi")))
+        {
+            DinoCount++;
+        }
+    }
+    CurrentMetrics.DinosaurCount = DinoCount;
+    
+    // Count environment props
+    int32 PropsCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && (Actor->GetName().Contains(TEXT("Tree")) || 
+                     Actor->GetName().Contains(TEXT("Rock")) ||
+                     Actor->GetName().Contains(TEXT("Bush")) ||
+                     Actor->GetName().Contains(TEXT("Grass"))))
+        {
+            PropsCount++;
+        }
+    }
+    CurrentMetrics.EnvironmentPropsCount = PropsCount;
+    
+    // Get frame rate (simplified)
+    CurrentMetrics.FrameRate = 1.0f / GetWorld()->GetDeltaSeconds();
+    
+    // Memory usage (placeholder - would need platform-specific implementation)
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.TotalActorsInMap * 0.1f; // Rough estimate
+    
+    UE_LOG(LogTemp, Log, TEXT("Production Metrics Updated - Actors: %d, Dinos: %d, Props: %d, FPS: %.1f"), 
+           CurrentMetrics.TotalActorsInMap, CurrentMetrics.DinosaurCount, 
+           CurrentMetrics.EnvironmentPropsCount, CurrentMetrics.FrameRate);
+}
+
+FDir_ProductionMetrics AStudioDirectorSystem::GetCurrentMetrics()
+{
+    return CurrentMetrics;
+}
+
+bool AStudioDirectorSystem::IsProductionOnTrack()
+{
+    // Check production limits from brain memories
+    bool bActorLimitOK = CurrentMetrics.TotalActorsInMap <= 8000;
+    bool bDinoLimitOK = CurrentMetrics.DinosaurCount <= 150;
+    bool bFrameRateOK = CurrentMetrics.FrameRate >= 30.0f;
+    
+    return bActorLimitOK && bDinoLimitOK && bFrameRateOK;
+}
+
+void AStudioDirectorSystem::StartAgentChain()
+{
+    bAgentChainActive = true;
+    CurrentActiveAgent = 2; // Start with Engine Architect
+    LastAgentStartTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Started - Current Agent: #%d"), CurrentActiveAgent);
+    
+    // Assign initial task to Engine Architect
+    AssignTaskToAgent(2, "Define technical architecture and establish coding standards", "Critical", 2.0f);
+}
+
+void AStudioDirectorSystem::AdvanceToNextAgent()
+{
+    if (!bAgentChainActive)
+    {
+        return;
+    }
+    
+    CurrentActiveAgent++;
+    LastAgentStartTime = GetWorld()->GetTimeSeconds();
+    
+    if (CurrentActiveAgent > 19)
+    {
+        // Chain complete
+        bAgentChainActive = false;
+        CurrentActiveAgent = 1;
+        UE_LOG(LogTemp, Warning, TEXT("Agent Chain Complete - All agents have executed"));
     }
     else
     {
-        LogProductionEvent(TEXT("Quality gate PASSED"));
-    }
-    
-    return bPassedQualityGate;
-}
-
-void UStudioDirectorSystem::TriggerQAReview()
-{
-    // Signal QA agent to begin review
-    if (AgentChain.Num() >= 18)
-    {
-        AgentChain[17].Status = EDir_AgentStatus::Working; // QA is agent #18 (index 17)
-        AgentChain[17].CurrentTask = TEXT("Quality Assurance Review");
-        LogProductionEvent(TEXT("QA review triggered"));
+        UE_LOG(LogTemp, Warning, TEXT("Advanced to Agent #%d"), CurrentActiveAgent);
     }
 }
 
-void UStudioDirectorSystem::HandleQABlock(const FString& BlockReason)
+void AStudioDirectorSystem::ReportAgentCompletion(int32 AgentID, bool bSuccess)
 {
-    bQAApprovalRequired = true;
-    LogProductionEvent(FString::Printf(TEXT("QA BLOCK: %s"), *BlockReason));
-    
-    // Halt all production until QA block is resolved
-    for (int32 i = 0; i < AgentChain.Num(); i++)
+    if (AgentID == CurrentActiveAgent)
     {
-        if (AgentChain[i].Status == EDir_AgentStatus::Working)
+        if (bSuccess)
         {
-            AgentChain[i].Status = EDir_AgentStatus::Blocked;
+            UE_LOG(LogTemp, Warning, TEXT("Agent #%d completed successfully"), AgentID);
+            AdvanceToNextAgent();
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Agent #%d failed - Emergency intervention required"), AgentID);
+            bEmergencyMode = true;
         }
     }
-    
-    UE_LOG(LogTemp, Error, TEXT("Studio Director: QA BLOCK - %s"), *BlockReason);
 }
 
-void UStudioDirectorSystem::SendTaskToAgent(int32 AgentID, const FString& TaskDescription)
+bool AStudioDirectorSystem::IsAgentChainComplete()
 {
-    if (AgentID > 0 && AgentID <= AgentChain.Num())
-    {
-        AgentChain[AgentID - 1].CurrentTask = TaskDescription;
-        LogProductionEvent(FString::Printf(TEXT("Task sent to Agent #%d: %s"), AgentID, *TaskDescription));
-    }
+    return !bAgentChainActive && CurrentActiveAgent == 1;
 }
 
-void UStudioDirectorSystem::ReceiveAgentReport(int32 AgentID, const FString& Report)
+void AStudioDirectorSystem::EmergencyStopAllAgents()
 {
-    LogProductionEvent(FString::Printf(TEXT("Report from Agent #%d: %s"), AgentID, *Report));
-    
-    // Validate report against creative vision
-    if (!ValidateAgentOutput(AgentID, Report))
-    {
-        BlockAgent(AgentID, TEXT("Output does not align with creative vision"));
-    }
-}
-
-void UStudioDirectorSystem::BroadcastToAllAgents(const FString& Message)
-{
-    LogProductionEvent(FString::Printf(TEXT("BROADCAST: %s"), *Message));
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Broadcast: %s"), *Message);
-}
-
-void UStudioDirectorSystem::DebugPrintPipelineStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION PIPELINE STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current Phase: %d"), (int32)CurrentPhase);
-    UE_LOG(LogTemp, Warning, TEXT("Active Agent: %d"), CurrentActiveAgent);
-    UE_LOG(LogTemp, Warning, TEXT("QA Approval Required: %s"), bQAApprovalRequired ? TEXT("YES") : TEXT("NO"));
-    
-    for (int32 i = 0; i < AgentChain.Num(); i++)
-    {
-        const FDir_AgentInfo& Agent = AgentChain[i];
-        UE_LOG(LogTemp, Warning, TEXT("Agent #%d (%s): %d - %s (%.1f%%)"), 
-            Agent.AgentID, *Agent.AgentName, (int32)Agent.Status, *Agent.CurrentTask, Agent.CompletionPercentage);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END PIPELINE STATUS ==="));
-}
-
-void UStudioDirectorSystem::SimulateAgentWork(int32 AgentID, float ProgressAmount)
-{
-    if (AgentID > 0 && AgentID <= AgentChain.Num())
-    {
-        FDir_AgentInfo& Agent = AgentChain[AgentID - 1];
-        Agent.CompletionPercentage = FMath::Clamp(Agent.CompletionPercentage + ProgressAmount, 0.0f, 100.0f);
-        
-        if (Agent.CompletionPercentage >= 100.0f)
-        {
-            Agent.Status = EDir_AgentStatus::Complete;
-        }
-        
-        UpdateProductionMetrics();
-    }
-}
-
-void UStudioDirectorSystem::ResetProductionPipeline()
-{
-    bPipelineInitialized = false;
+    bAgentChainActive = false;
+    bEmergencyMode = true;
     CurrentActiveAgent = 1;
-    bQAApprovalRequired = false;
-    FailedQualityChecks = 0;
-    AgentChain.Empty();
-    ProductionLog.Empty();
     
-    InitializeProductionPipeline();
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Production pipeline reset"));
+    UE_LOG(LogTemp, Error, TEXT("EMERGENCY STOP - All agent operations halted"));
 }
 
-void UStudioDirectorSystem::UpdateProductionMetrics()
+void AStudioDirectorSystem::RestartAgentChain()
 {
-    ProductionMetrics.TotalAgents = AgentChain.Num();
-    ProductionMetrics.ActiveAgents = 0;
-    ProductionMetrics.BlockedAgents = 0;
+    bEmergencyMode = false;
+    ActiveTasks.Empty();
+    StartAgentChain();
     
-    float TotalProgress = 0.0f;
-    
-    for (const FDir_AgentInfo& Agent : AgentChain)
-    {
-        switch (Agent.Status)
-        {
-            case EDir_AgentStatus::Working:
-                ProductionMetrics.ActiveAgents++;
-                break;
-            case EDir_AgentStatus::Blocked:
-                ProductionMetrics.BlockedAgents++;
-                break;
-            default:
-                break;
-        }
-        
-        TotalProgress += Agent.CompletionPercentage;
-    }
-    
-    ProductionMetrics.OverallProgress = AgentChain.Num() > 0 ? TotalProgress / AgentChain.Num() : 0.0f;
-    
-    // Identify bottlenecks
-    if (ProductionMetrics.BlockedAgents > 0)
-    {
-        ProductionMetrics.CurrentBottleneck = TEXT("Blocked Agents");
-    }
-    else if (bQAApprovalRequired)
-    {
-        ProductionMetrics.CurrentBottleneck = TEXT("QA Review");
-    }
-    else
-    {
-        ProductionMetrics.CurrentBottleneck = TEXT("None");
-    }
-    
-    // Estimate completion time (simplified calculation)
-    float RemainingWork = 100.0f - ProductionMetrics.OverallProgress;
-    ProductionMetrics.EstimatedCompletionHours = RemainingWork / 10.0f; // Assume 10% per hour
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Restarted after emergency"));
 }
 
-void UStudioDirectorSystem::CheckForBottlenecks()
+void AStudioDirectorSystem::ForceAgentTimeout(int32 AgentID)
 {
-    // Check for agents waiting too long
-    for (int32 i = 0; i < AgentChain.Num(); i++)
-    {
-        const FDir_AgentInfo& Agent = AgentChain[i];
-        
-        if (Agent.Status == EDir_AgentStatus::Blocked)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Studio Director: Bottleneck detected at Agent #%d (%s)"), 
-                Agent.AgentID, *Agent.AgentName);
-        }
-    }
+    UE_LOG(LogTemp, Error, TEXT("Agent #%d timed out - Forcing advancement"), AgentID);
+    AdvanceToNextAgent();
 }
 
-void UStudioDirectorSystem::ValidateAgentDependencies()
+void AStudioDirectorSystem::LogCurrentStatus()
 {
-    for (int32 i = 0; i < AgentChain.Num(); i++)
-    {
-        if (!IsAgentReadyToWork(i + 1))
-        {
-            AgentChain[i].Status = EDir_AgentStatus::Blocked;
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Cycle ID: %d"), CurrentCycleID);
+    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), ActiveTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Agent Chain Active: %s"), bAgentChainActive ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Current Active Agent: #%d"), CurrentActiveAgent);
+    UE_LOG(LogTemp, Warning, TEXT("Emergency Mode: %s"), bEmergencyMode ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), CurrentMetrics.TotalActorsInMap);
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Count: %d"), CurrentMetrics.DinosaurCount);
+    UE_LOG(LogTemp, Warning, TEXT("Production On Track: %s"), IsProductionOnTrack() ? TEXT("Yes") : TEXT("No"));
 }
 
-bool UStudioDirectorSystem::IsAgentReadyToWork(int32 AgentID) const
+void AStudioDirectorSystem::ValidateAgentChainIntegrity()
 {
-    if (AgentID <= 0 || AgentID > AgentChain.Num())
+    // Check for stuck agents
+    if (bAgentChainActive)
     {
-        return false;
-    }
-    
-    const FDir_AgentInfo& Agent = AgentChain[AgentID - 1];
-    
-    // Check if all dependencies are complete
-    for (const FString& Dependency : Agent.Dependencies)
-    {
-        // Find dependency agent and check if complete
-        for (const FDir_AgentInfo& OtherAgent : AgentChain)
+        float TimeSinceLastAgent = GetWorld()->GetTimeSeconds() - LastAgentStartTime;
+        if (TimeSinceLastAgent > AgentTimeoutThreshold)
         {
-            if (OtherAgent.AgentName == Dependency)
-            {
-                if (OtherAgent.Status != EDir_AgentStatus::Complete)
-                {
-                    return false;
-                }
-                break;
-            }
+            UE_LOG(LogTemp, Error, TEXT("Agent #%d exceeded timeout threshold"), CurrentActiveAgent);
+            ForceAgentTimeout(CurrentActiveAgent);
         }
     }
     
-    return true;
+    // Validate production limits
+    if (!IsProductionOnTrack())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Production metrics indicate potential issues"));
+    }
 }
 
-void UStudioDirectorSystem::LogProductionEvent(const FString& Event)
+void AStudioDirectorSystem::UpdateAgentTimeouts()
 {
-    FString TimeStamp = FDateTime::Now().ToString();
-    FString LogEntry = FString::Printf(TEXT("[%s] %s"), *TimeStamp, *Event);
-    
-    ProductionLog.Add(LogEntry);
-    
-    // Keep only last 100 entries
-    if (ProductionLog.Num() > 100)
+    if (!bAgentChainActive)
     {
-        ProductionLog.RemoveAt(0);
+        return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Studio Director Log: %s"), *LogEntry);
+    float TimeSinceLastAgent = GetWorld()->GetTimeSeconds() - LastAgentStartTime;
+    
+    if (TimeSinceLastAgent > AgentTimeoutThreshold)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Agent #%d timeout detected - Auto-advancing"), CurrentActiveAgent);
+        ForceAgentTimeout(CurrentActiveAgent);
+    }
+}
+
+void AStudioDirectorSystem::CheckProductionLimits()
+{
+    // Check actor limits from brain memories
+    if (CurrentMetrics.TotalActorsInMap > 8000)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Actor count (%d) exceeds limit (8000)"), CurrentMetrics.TotalActorsInMap);
+        bEmergencyMode = true;
+    }
+    
+    if (CurrentMetrics.DinosaurCount > 150)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL: Dinosaur count (%d) exceeds limit (150)"), CurrentMetrics.DinosaurCount);
+        bEmergencyMode = true;
+    }
+}
+
+void AStudioDirectorSystem::ValidateMapState()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Verify MinPlayableMap is loaded
+    FString CurrentLevelName = GetWorld()->GetName();
+    if (!CurrentLevelName.Contains(TEXT("MinPlayableMap")))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Warning: Not in MinPlayableMap - Current level: %s"), *CurrentLevelName);
+    }
 }

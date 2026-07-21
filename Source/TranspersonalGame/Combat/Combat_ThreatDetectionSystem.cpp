@@ -1,129 +1,223 @@
 #include "Combat_ThreatDetectionSystem.h"
+#include "TranspersonalCharacter.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/SphereComponent.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 
 UCombat_ThreatDetectionSystem::UCombat_ThreatDetectionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.5f; // Check every 0.5 seconds
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    ThreatDetectionRange = 5000.0f; // 50 meters
-    CombatRange = 2000.0f; // 20 meters
-    AlertRange = 3500.0f; // 35 meters
-    
-    CurrentThreatLevel = ECombat_ThreatLevel::None;
-    bIsInCombat = false;
-    bDebugMode = false;
+    ScanRadius = 5000.0f;
+    ScanInterval = 0.5f;
+    CurrentThreatLevel = EThreatLevel::None;
+    LastScanTime = 0.0f;
+    PlayerCharacter = nullptr;
+
+    // Initialize threat database with default dinosaur threats
+    FCombat_ThreatLevel TRexThreat;
+    TRexThreat.ThreatName = TEXT("T-Rex");
+    TRexThreat.Level = EThreatLevel::Extreme;
+    TRexThreat.ThreatRadius = 2000.0f;
+    TRexThreat.DamagePerSecond = 100.0f;
+    ThreatDatabase.Add(TRexThreat);
+
+    FCombat_ThreatLevel RaptorThreat;
+    RaptorThreat.ThreatName = TEXT("Velociraptor");
+    RaptorThreat.Level = EThreatLevel::High;
+    RaptorThreat.ThreatRadius = 800.0f;
+    RaptorThreat.DamagePerSecond = 30.0f;
+    ThreatDatabase.Add(RaptorThreat);
+
+    FCombat_ThreatLevel TriceratopsThreat;
+    TriceratopsThreat.ThreatName = TEXT("Triceratops");
+    TriceratopsThreat.Level = EThreatLevel::Medium;
+    TriceratopsThreat.ThreatRadius = 1200.0f;
+    TriceratopsThreat.DamagePerSecond = 50.0f;
+    ThreatDatabase.Add(TriceratopsThreat);
 }
 
 void UCombat_ThreatDetectionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    OwnerPawn = Cast<APawn>(GetOwner());
-    if (!OwnerPawn)
+    // Find player character
+    PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    if (!PlayerCharacter)
     {
-        UE_LOG(LogTemp, Error, TEXT("ThreatDetectionSystem: Owner is not a Pawn!"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Combat_ThreatDetectionSystem: Player character not found"));
     }
     
-    // Initialize threat detection
-    DetectedThreats.Empty();
-    LastThreatScanTime = 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("ThreatDetectionSystem initialized for %s"), *OwnerPawn->GetName());
+    // Start initial scan
+    ScanForThreats();
 }
 
 void UCombat_ThreatDetectionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!OwnerPawn)
-        return;
-    
-    // Perform threat detection scan
-    ScanForThreats();
-    
-    // Update threat level based on detected threats
-    UpdateThreatLevel();
-    
-    // Handle combat state changes
-    HandleCombatStateChanges();
-    
-    // Debug visualization
-    if (bDebugMode)
+    if (!PlayerCharacter)
     {
-        DrawDebugInfo();
+        return;
+    }
+    
+    // Periodic threat scanning
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastScanTime >= ScanInterval)
+    {
+        ScanForThreats();
+        LastScanTime = CurrentTime;
+    }
+    
+    // Update threat distances and remove lost threats
+    for (int32 i = ActiveThreats.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(ActiveThreats[i].ThreatActor))
+        {
+            OnThreatLost(ActiveThreats[i].ThreatActor);
+            ActiveThreats.RemoveAt(i);
+            continue;
+        }
+        
+        FVector PlayerLocation = PlayerCharacter->GetActorLocation();
+        FVector ThreatLocation = ActiveThreats[i].ThreatActor->GetActorLocation();
+        float Distance = FVector::Dist(PlayerLocation, ThreatLocation);
+        
+        ActiveThreats[i].Distance = Distance;
+        ActiveThreats[i].Direction = (ThreatLocation - PlayerLocation).GetSafeNormal();
+        
+        // Remove threats that moved too far away
+        FCombat_ThreatLevel ThreatLevel = GetThreatLevel(ActiveThreats[i].ThreatActor);
+        if (Distance > ThreatLevel.ThreatRadius * 1.5f)
+        {
+            OnThreatLost(ActiveThreats[i].ThreatActor);
+            ActiveThreats.RemoveAt(i);
+        }
+    }
+    
+    // Update current threat level
+    EThreatLevel NewThreatLevel = EThreatLevel::None;
+    for (const FCombat_DetectionData& Threat : ActiveThreats)
+    {
+        FCombat_ThreatLevel ThreatLevel = GetThreatLevel(Threat.ThreatActor);
+        if (ThreatLevel.Level > NewThreatLevel)
+        {
+            NewThreatLevel = ThreatLevel.Level;
+        }
+    }
+    
+    if (NewThreatLevel != CurrentThreatLevel)
+    {
+        CurrentThreatLevel = NewThreatLevel;
+        OnThreatLevelChanged(CurrentThreatLevel);
     }
 }
 
 void UCombat_ThreatDetectionSystem::ScanForThreats()
 {
-    if (!OwnerPawn || !GetWorld())
-        return;
-    
-    FVector OwnerLocation = OwnerPawn->GetActorLocation();
-    DetectedThreats.Empty();
-    
-    // Get all pawns in the world
-    TArray<AActor*> AllPawns;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), AllPawns);
-    
-    for (AActor* Actor : AllPawns)
+    if (!PlayerCharacter)
     {
-        APawn* OtherPawn = Cast<APawn>(Actor);
-        if (!OtherPawn || OtherPawn == OwnerPawn)
-            continue;
-        
-        // Check if this pawn is a potential threat
-        if (IsActorAThreat(OtherPawn))
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerCharacter->GetActorLocation();
+    TArray<AActor*> FoundActors;
+    
+    // Get all actors within scan radius
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        PlayerLocation,
+        ScanRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        nullptr,
+        TArray<AActor*>{PlayerCharacter},
+        FoundActors
+    );
+    
+    for (AActor* Actor : FoundActors)
+    {
+        if (!IsValid(Actor) || !IsActorThreat(Actor))
         {
-            float Distance = FVector::Dist(OwnerLocation, OtherPawn->GetActorLocation());
-            
-            if (Distance <= ThreatDetectionRange)
+            continue;
+        }
+        
+        // Check if already detected
+        bool bAlreadyDetected = false;
+        for (const FCombat_DetectionData& ExistingThreat : ActiveThreats)
+        {
+            if (ExistingThreat.ThreatActor == Actor)
             {
-                FCombat_ThreatInfo ThreatInfo;
-                ThreatInfo.ThreatActor = OtherPawn;
-                ThreatInfo.Distance = Distance;
-                ThreatInfo.LastSeenLocation = OtherPawn->GetActorLocation();
-                ThreatInfo.ThreatType = DetermineThreatType(OtherPawn);
-                ThreatInfo.LastDetectionTime = GetWorld()->GetTimeSeconds();
-                
-                DetectedThreats.Add(ThreatInfo);
-                
-                if (bDebugMode)
-                {
-                    UE_LOG(LogTemp, Log, TEXT("Threat detected: %s at distance %.1f"), 
-                           *OtherPawn->GetName(), Distance);
-                }
+                bAlreadyDetected = true;
+                break;
             }
+        }
+        
+        if (!bAlreadyDetected)
+        {
+            // New threat detected
+            FCombat_DetectionData NewThreat;
+            NewThreat.ThreatActor = Actor;
+            NewThreat.Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            NewThreat.Direction = (Actor->GetActorLocation() - PlayerLocation).GetSafeNormal();
+            NewThreat.DetectionTime = GetWorld()->GetTimeSeconds();
+            
+            ActiveThreats.Add(NewThreat);
+            OnThreatDetected(NewThreat);
+            
+            UE_LOG(LogTemp, Log, TEXT("Combat_ThreatDetectionSystem: New threat detected - %s at distance %.2f"), 
+                *Actor->GetName(), NewThreat.Distance);
+        }
+    }
+}
+
+FCombat_ThreatLevel UCombat_ThreatDetectionSystem::GetThreatLevel(AActor* Actor) const
+{
+    if (!IsValid(Actor))
+    {
+        return FCombat_ThreatLevel();
+    }
+    
+    FString ActorName = Actor->GetName();
+    
+    // Match actor name to threat database
+    for (const FCombat_ThreatLevel& Threat : ThreatDatabase)
+    {
+        if (ActorName.Contains(Threat.ThreatName))
+        {
+            return Threat;
         }
     }
     
-    // Sort threats by distance (closest first)
-    DetectedThreats.Sort([](const FCombat_ThreatInfo& A, const FCombat_ThreatInfo& B)
-    {
-        return A.Distance < B.Distance;
-    });
+    // Default threat level for unknown actors
+    FCombat_ThreatLevel DefaultThreat;
+    DefaultThreat.ThreatName = ActorName;
+    DefaultThreat.Level = EThreatLevel::Low;
+    DefaultThreat.ThreatRadius = 500.0f;
+    DefaultThreat.DamagePerSecond = 5.0f;
     
-    LastThreatScanTime = GetWorld()->GetTimeSeconds();
+    return DefaultThreat;
 }
 
-bool UCombat_ThreatDetectionSystem::IsActorAThreat(AActor* Actor) const
+bool UCombat_ThreatDetectionSystem::IsActorThreat(AActor* Actor) const
 {
-    if (!Actor)
+    if (!IsValid(Actor))
+    {
         return false;
+    }
     
-    // Check if actor has "dinosaur", "enemy", or other threat keywords in name
-    FString ActorName = Actor->GetName().ToLower();
+    FString ActorName = Actor->GetName();
     
+    // Check if actor name contains known threat keywords
     TArray<FString> ThreatKeywords = {
-        TEXT("dinosaur"), TEXT("trex"), TEXT("raptor"), TEXT("brachio"),
-        TEXT("enemy"), TEXT("hostile"), TEXT("predator"), TEXT("carnivore")
+        TEXT("TRex"), TEXT("T-Rex"), TEXT("Tyrannosaurus"),
+        TEXT("Raptor"), TEXT("Velociraptor"),
+        TEXT("Triceratops"), TEXT("Ankylosaurus"),
+        TEXT("Brachiosaurus"), TEXT("Parasaurolophus"),
+        TEXT("Pachycephalo"), TEXT("Protoceratops"),
+        TEXT("Tsintaosaurus"), TEXT("Combat")
     };
     
     for (const FString& Keyword : ThreatKeywords)
@@ -134,185 +228,67 @@ bool UCombat_ThreatDetectionSystem::IsActorAThreat(AActor* Actor) const
         }
     }
     
-    // Check if actor has specific threat components or tags
-    if (Actor->Tags.Contains(TEXT("Threat")) || Actor->Tags.Contains(TEXT("Enemy")))
-    {
-        return true;
-    }
-    
     return false;
 }
 
-ECombat_ThreatType UCombat_ThreatDetectionSystem::DetermineThreatType(AActor* ThreatActor) const
+FVector UCombat_ThreatDetectionSystem::GetNearestThreatDirection() const
 {
-    if (!ThreatActor)
-        return ECombat_ThreatType::Unknown;
-    
-    FString ActorName = ThreatActor->GetName().ToLower();
-    
-    if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("tyrannosaurus")))
+    if (ActiveThreats.Num() == 0)
     {
-        return ECombat_ThreatType::LargePredator;
-    }
-    else if (ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("velociraptor")))
-    {
-        return ECombat_ThreatType::PackHunter;
-    }
-    else if (ActorName.Contains(TEXT("brachio")) || ActorName.Contains(TEXT("herbivore")))
-    {
-        return ECombat_ThreatType::LargeHerbivore;
-    }
-    else if (ActorName.Contains(TEXT("small")) || ActorName.Contains(TEXT("compy")))
-    {
-        return ECombat_ThreatType::SmallThreat;
+        return FVector::ZeroVector;
     }
     
-    return ECombat_ThreatType::Unknown;
+    float NearestDistance = FLT_MAX;
+    FVector NearestDirection = FVector::ZeroVector;
+    
+    for (const FCombat_DetectionData& Threat : ActiveThreats)
+    {
+        if (Threat.Distance < NearestDistance)
+        {
+            NearestDistance = Threat.Distance;
+            NearestDirection = Threat.Direction;
+        }
+    }
+    
+    return NearestDirection;
 }
 
-void UCombat_ThreatDetectionSystem::UpdateThreatLevel()
+float UCombat_ThreatDetectionSystem::GetNearestThreatDistance() const
 {
-    ECombat_ThreatLevel NewThreatLevel = ECombat_ThreatLevel::None;
-    
-    if (DetectedThreats.Num() == 0)
+    if (ActiveThreats.Num() == 0)
     {
-        NewThreatLevel = ECombat_ThreatLevel::None;
+        return -1.0f;
     }
-    else
+    
+    float NearestDistance = FLT_MAX;
+    
+    for (const FCombat_DetectionData& Threat : ActiveThreats)
     {
-        // Get closest threat
-        const FCombat_ThreatInfo& ClosestThreat = DetectedThreats[0];
-        
-        if (ClosestThreat.Distance <= CombatRange)
+        if (Threat.Distance < NearestDistance)
         {
-            NewThreatLevel = ECombat_ThreatLevel::Critical;
-        }
-        else if (ClosestThreat.Distance <= AlertRange)
-        {
-            NewThreatLevel = ECombat_ThreatLevel::High;
-        }
-        else
-        {
-            NewThreatLevel = ECombat_ThreatLevel::Medium;
-        }
-        
-        // Escalate threat level based on number and type of threats
-        if (DetectedThreats.Num() >= 3)
-        {
-            NewThreatLevel = ECombat_ThreatLevel::Critical;
-        }
-        else if (DetectedThreats.Num() >= 2 && NewThreatLevel == ECombat_ThreatLevel::High)
-        {
-            NewThreatLevel = ECombat_ThreatLevel::Critical;
+            NearestDistance = Threat.Distance;
         }
     }
     
-    // Update threat level if changed
-    if (NewThreatLevel != CurrentThreatLevel)
-    {
-        ECombat_ThreatLevel OldThreatLevel = CurrentThreatLevel;
-        CurrentThreatLevel = NewThreatLevel;
-        
-        OnThreatLevelChanged.Broadcast(OldThreatLevel, CurrentThreatLevel);
-        
-        if (bDebugMode)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Threat level changed from %d to %d"), 
-                   (int32)OldThreatLevel, (int32)CurrentThreatLevel);
-        }
-    }
+    return NearestDistance;
 }
 
-void UCombat_ThreatDetectionSystem::HandleCombatStateChanges()
+void UCombat_ThreatDetectionSystem::AddThreatType(const FCombat_ThreatLevel& NewThreat)
 {
-    bool bShouldBeInCombat = (CurrentThreatLevel == ECombat_ThreatLevel::Critical);
-    
-    if (bShouldBeInCombat != bIsInCombat)
-    {
-        bIsInCombat = bShouldBeInCombat;
-        
-        if (bIsInCombat)
-        {
-            OnCombatStarted.Broadcast();
-            UE_LOG(LogTemp, Warning, TEXT("COMBAT STARTED for %s"), *OwnerPawn->GetName());
-        }
-        else
-        {
-            OnCombatEnded.Broadcast();
-            UE_LOG(LogTemp, Log, TEXT("Combat ended for %s"), *OwnerPawn->GetName());
-        }
-    }
+    ThreatDatabase.Add(NewThreat);
+    UE_LOG(LogTemp, Log, TEXT("Combat_ThreatDetectionSystem: Added new threat type - %s"), *NewThreat.ThreatName);
 }
 
-FCombat_ThreatInfo UCombat_ThreatDetectionSystem::GetClosestThreat() const
+void UCombat_ThreatDetectionSystem::ClearThreats()
 {
-    if (DetectedThreats.Num() > 0)
+    for (const FCombat_DetectionData& Threat : ActiveThreats)
     {
-        return DetectedThreats[0];
+        OnThreatLost(Threat.ThreatActor);
     }
     
-    return FCombat_ThreatInfo();
-}
-
-TArray<FCombat_ThreatInfo> UCombat_ThreatDetectionSystem::GetThreatsInRange(float Range) const
-{
-    TArray<FCombat_ThreatInfo> ThreatsInRange;
+    ActiveThreats.Empty();
+    CurrentThreatLevel = EThreatLevel::None;
+    OnThreatLevelChanged(CurrentThreatLevel);
     
-    for (const FCombat_ThreatInfo& Threat : DetectedThreats)
-    {
-        if (Threat.Distance <= Range)
-        {
-            ThreatsInRange.Add(Threat);
-        }
-    }
-    
-    return ThreatsInRange;
-}
-
-void UCombat_ThreatDetectionSystem::SetThreatDetectionRange(float NewRange)
-{
-    ThreatDetectionRange = FMath::Clamp(NewRange, 100.0f, 10000.0f);
-}
-
-void UCombat_ThreatDetectionSystem::DrawDebugInfo()
-{
-    if (!OwnerPawn || !GetWorld())
-        return;
-    
-    FVector OwnerLocation = OwnerPawn->GetActorLocation();
-    
-    // Draw detection range
-    DrawDebugSphere(GetWorld(), OwnerLocation, ThreatDetectionRange, 32, FColor::Yellow, false, 0.6f, 0, 2.0f);
-    
-    // Draw alert range
-    DrawDebugSphere(GetWorld(), OwnerLocation, AlertRange, 32, FColor::Orange, false, 0.6f, 0, 2.0f);
-    
-    // Draw combat range
-    DrawDebugSphere(GetWorld(), OwnerLocation, CombatRange, 32, FColor::Red, false, 0.6f, 0, 3.0f);
-    
-    // Draw lines to detected threats
-    for (const FCombat_ThreatInfo& Threat : DetectedThreats)
-    {
-        if (IsValid(Threat.ThreatActor))
-        {
-            FColor LineColor = FColor::Green;
-            
-            if (Threat.Distance <= CombatRange)
-                LineColor = FColor::Red;
-            else if (Threat.Distance <= AlertRange)
-                LineColor = FColor::Orange;
-            
-            DrawDebugLine(GetWorld(), OwnerLocation, Threat.ThreatActor->GetActorLocation(), 
-                         LineColor, false, 0.6f, 0, 2.0f);
-            
-            // Draw threat info
-            FString ThreatText = FString::Printf(TEXT("%s\nDist: %.1f\nType: %d"), 
-                                               *Threat.ThreatActor->GetName(), 
-                                               Threat.Distance,
-                                               (int32)Threat.ThreatType);
-            
-            DrawDebugString(GetWorld(), Threat.ThreatActor->GetActorLocation() + FVector(0, 0, 100), 
-                           ThreatText, nullptr, LineColor, 0.6f);
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Combat_ThreatDetectionSystem: All threats cleared"));
 }

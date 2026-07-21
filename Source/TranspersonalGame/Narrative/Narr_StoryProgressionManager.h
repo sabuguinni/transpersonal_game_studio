@@ -1,193 +1,192 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
 #include "Narr_StoryProgressionManager.generated.h"
 
-// Story progression stages for survival narrative
 UENUM(BlueprintType)
-enum class ENarr_StoryStage : uint8
+enum class ENarr_StoryPhase : uint8
 {
-    Arrival         UMETA(DisplayName = "Arrival"),
-    FirstSurvival   UMETA(DisplayName = "First Survival"),
-    Exploration     UMETA(DisplayName = "Exploration"),
-    Adaptation      UMETA(DisplayName = "Adaptation"),
-    Mastery         UMETA(DisplayName = "Mastery"),
-    Leadership      UMETA(DisplayName = "Leadership")
+    Awakening,      // Player starts alone, learns basic survival
+    Discovery,      // First encounters with other survivors
+    Tribal,         // Joining or forming a tribe
+    Expansion,      // Territory growth and resource conflicts
+    Mastery,        // Advanced tools, large settlements
+    Legacy          // Endgame - leaving mark on the world
 };
 
-// Narrative events that can trigger story progression
 UENUM(BlueprintType)
-enum class ENarr_NarrativeEvent : uint8
+enum class ENarr_EventType : uint8
 {
-    PlayerSpawned       UMETA(DisplayName = "Player Spawned"),
-    FirstDinosaurSeen   UMETA(DisplayName = "First Dinosaur Seen"),
-    FirstCraft          UMETA(DisplayName = "First Craft"),
-    FirstShelter        UMETA(DisplayName = "First Shelter"),
-    BiomeDiscovered     UMETA(DisplayName = "Biome Discovered"),
-    NPCMet              UMETA(DisplayName = "NPC Met"),
-    QuestCompleted      UMETA(DisplayName = "Quest Completed"),
-    DinosaurKilled      UMETA(DisplayName = "Dinosaur Killed"),
-    PlayerDied          UMETA(DisplayName = "Player Died")
+    Discovery,      // Finding new locations, resources, creatures
+    Survival,       // Overcoming environmental challenges
+    Social,         // Interactions with NPCs, tribe dynamics
+    Combat,         // Encounters with hostile creatures/tribes
+    Achievement,    // Crafting milestones, skill progression
+    Narrative       // Story beats, character development
 };
 
-// Story data for each narrative event
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
+struct FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_NarrativeEvent EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    FText EventTitle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString NarrativeText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    FText EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString AudioFilePath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    ENarr_EventType EventType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bTriggered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    ENarr_StoryPhase RequiredPhase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float TriggerDelay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    TArray<FString> Prerequisites;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    TArray<FString> UnlockedEvents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    int32 StoryPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    bool bIsRepeatable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    FDateTime CompletionTime;
 
     FNarr_StoryEvent()
     {
-        EventType = ENarr_NarrativeEvent::PlayerSpawned;
-        EventDescription = "Default Event";
-        NarrativeText = "Default narrative text";
-        AudioFilePath = "";
-        bTriggered = false;
-        TriggerDelay = 0.0f;
+        EventID = TEXT("DefaultEvent");
+        EventTitle = FText::FromString(TEXT("Unknown Event"));
+        EventDescription = FText::FromString(TEXT("An event occurred."));
+        EventType = ENarr_EventType::Discovery;
+        RequiredPhase = ENarr_StoryPhase::Awakening;
+        StoryPoints = 10;
+        bIsRepeatable = false;
+        CompletionTime = FDateTime::MinValue();
     }
 };
 
-// Biome-specific narrative content
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_BiomeNarrative
+struct FNarr_PlayerProgress
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    EEng_BiomeType BiomeType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    ENarr_StoryPhase CurrentPhase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    FString BiomeIntroText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 TotalStoryPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    FString BiomeDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TArray<FString> CompletedEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    TArray<FString> EnvironmentalNarrative;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TArray<FString> AvailableEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    TArray<FString> DangerWarnings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    TMap<FString, int32> EventCompletionCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Narrative")
-    bool bDiscovered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    float SurvivalDays;
 
-    FNarr_BiomeNarrative()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    int32 TribeSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+    FDateTime GameStartTime;
+
+    FNarr_PlayerProgress()
     {
-        BiomeType = EEng_BiomeType::Forest;
-        BiomeIntroText = "You enter an unknown biome";
-        BiomeDescription = "A mysterious environment";
-        bDiscovered = false;
+        CurrentPhase = ENarr_StoryPhase::Awakening;
+        TotalStoryPoints = 0;
+        SurvivalDays = 0.0f;
+        TribeSize = 1;
+        GameStartTime = FDateTime::Now();
     }
 };
 
-/**
- * Story Progression Manager - Controls narrative flow and story events
- * Manages the player's journey from arrival to mastery of the prehistoric world
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_StoryProgressionManager : public UWorldSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UNarr_StoryProgressionManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarr_StoryProgressionManager();
-
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Story progression methods
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FString& Context = "");
-
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void AdvanceStoryStage();
-
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    void DiscoverBiome(EEng_BiomeType BiomeType, const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    FString GetCurrentNarrativeText() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    ENarr_StoryStage GetCurrentStoryStage() const { return CurrentStoryStage; }
-
-    UFUNCTION(BlueprintCallable, Category = "Story Progression")
-    bool HasEventTriggered(ENarr_NarrativeEvent EventType) const;
-
-    // Biome narrative methods
-    UFUNCTION(BlueprintCallable, Category = "Biome Narrative")
-    FString GetBiomeIntroText(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Narrative")
-    TArray<FString> GetBiomeDangerWarnings(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Narrative")
-    bool IsBiomeDiscovered(EEng_BiomeType BiomeType) const;
-
-    // Audio narrative methods
-    UFUNCTION(BlueprintCallable, Category = "Audio Narrative")
-    void PlayNarrativeAudio(const FString& AudioPath);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Narrative")
-    void QueueNarrativeText(const FString& NarrativeText, float DelaySeconds = 0.0f);
-
 protected:
-    // Current story state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story State")
-    ENarr_StoryStage CurrentStoryStage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    class UDataTable* StoryEventsDataTable;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story State")
-    TArray<FNarr_StoryEvent> StoryEvents;
+    UPROPERTY(BlueprintReadOnly, Category = "Progress")
+    FNarr_PlayerProgress PlayerProgress;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story State")
-    TArray<FNarr_BiomeNarrative> BiomeNarratives;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    TMap<ENarr_StoryPhase, int32> PhaseRequiredPoints;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story State")
-    FString CurrentNarrativeText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story System")
+    TMap<FString, FNarr_StoryEvent> LoadedStoryEvents;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Story State")
-    float LastEventTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Story System")
+    bool bStorySystemInitialized;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    float MinTimeBetweenEvents;
+public:
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool CompleteStoryEvent(const FString& EventID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    bool bAutoAdvanceStory;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool IsEventAvailable(const FString& EventID);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Config")
-    bool bPlayAudioNarration;
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    bool IsEventCompleted(const FString& EventID);
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    TArray<FString> GetAvailableEvents();
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    TArray<FString> GetCompletedEvents();
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    ENarr_StoryPhase GetCurrentStoryPhase();
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    int32 GetStoryPoints();
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    float GetProgressToNextPhase();
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void UpdateSurvivalStats(float DaysElapsed, int32 CurrentTribeSize);
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    FNarr_StoryEvent GetStoryEvent(const FString& EventID);
+
+    UFUNCTION(BlueprintCallable, Category = "Story Progression")
+    void RegisterCustomEvent(const FNarr_StoryEvent& CustomEvent);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Story Events")
+    void OnStoryEventCompleted(const FNarr_StoryEvent& CompletedEvent);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Story Events")
+    void OnStoryPhaseChanged(ENarr_StoryPhase NewPhase, ENarr_StoryPhase PreviousPhase);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Story Events")
+    void OnNewEventUnlocked(const FString& EventID);
 
 private:
-    // Internal methods
-    void InitializeStoryEvents();
-    void InitializeBiomeNarratives();
-    void ProcessQueuedNarrative();
-    FNarr_BiomeNarrative* GetBiomeNarrativeData(EEng_BiomeType BiomeType);
-    
-    // Timer for queued narrative
-    FTimerHandle NarrativeQueueTimer;
-    TArray<FString> QueuedNarrativeTexts;
+    void InitializeDefaultStoryEvents();
+    void CheckPhaseProgression();
+    void UnlockEventsByCompletion(const FString& CompletedEventID);
+    bool CheckEventPrerequisites(const FString& EventID);
+    void SaveProgressToFile();
+    void LoadProgressFromFile();
 };

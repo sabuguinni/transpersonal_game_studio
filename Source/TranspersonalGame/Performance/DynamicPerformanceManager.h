@@ -1,188 +1,66 @@
+// DynamicPerformanceManager.h
+// Performance Optimizer — Agent #04
+// PROD_CYCLE_AUTO_20260620_005
+// World subsystem for dynamic runtime performance scaling.
+// Monitors FPS every 2s and adjusts quality CVars to maintain target framerate.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "PerformanceTargets.h"
-#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "HAL/IConsoleManager.h"
 #include "DynamicPerformanceManager.generated.h"
 
-class UMassEntitySubsystem;
-class ALandscape;
-
+// Quality tiers — maps to CVar presets applied at runtime
 UENUM(BlueprintType)
-enum class EPerformanceLevel : uint8
+enum class EPerf_QualityTier : uint8
 {
-    Ultra = 0,      // All features enabled, maximum quality
-    High,           // Minor reductions, still high quality
-    Medium,         // Balanced quality/performance
-    Low,            // Aggressive optimizations
-    Potato          // Minimum viable quality for performance
+    Low     = 0  UMETA(DisplayName = "Low"),
+    Medium  = 1  UMETA(DisplayName = "Medium"),
+    High    = 2  UMETA(DisplayName = "High"),
+    Ultra   = 3  UMETA(DisplayName = "Ultra"),
 };
 
-UENUM(BlueprintType)
-enum class EPerformanceBottleneck : uint8
-{
-    None = 0,
-    GameThread,
-    RenderThread,
-    GPU,
-    Memory,
-    Streaming,
-    MassAI,
-    Physics
-};
-
+// Frame budget breakdown in milliseconds
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct FPerf_FrameBudget
 {
     GENERATED_BODY()
 
-    // Frame timing
-    UPROPERTY(BlueprintReadOnly, Category = "Timing")
-    float FrameTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TotalBudgetMs = 16.67f;   // 60fps default
 
-    UPROPERTY(BlueprintReadOnly, Category = "Timing")
-    float GameThreadTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float RenderThreadMs = 9.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Timing")
-    float RenderThreadTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GameThreadMs = 5.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Timing")
-    float GPUTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUMs = 10.8f;
 
-    // System-specific timing
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    float MassAITime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AIBudgetMs = 1.67f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    float PhysicsTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Systems")
-    float RenderingTime = 0.0f;
-
-    // Memory usage (MB)
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float UsedMemory = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float TextureMemory = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    float MeshMemory = 0.0f;
-
-    // Rendering stats
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
-    int32 DrawCalls = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
-    int32 Triangles = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
-    int32 VisiblePrimitives = 0;
-
-    // Mass AI stats
-    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
-    int32 ActiveAgents = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
-    int32 ProcessedAgents = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
-    int32 CulledAgents = 0;
-
-    FPerformanceMetrics()
-    {
-        // Initialize to safe defaults
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PhysicsBudgetMs = 1.33f;
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceSettings
-{
-    GENERATED_BODY()
-
-    // Rendering settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    float ScreenPercentage = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 ViewDistanceScale = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 ShadowQuality = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 TextureQuality = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 EffectsQuality = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 PostProcessQuality = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bNaniteEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bLumenEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bVirtualShadowMapsEnabled = true;
-
-    // Mass AI settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
-    int32 MaxActiveAgents = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
-    float AITickRate = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
-    float DinosaurCullDistance = 25000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
-    int32 MaxBehaviorTreesActive = 1000;
-
-    // Physics settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float PhysicsTickRate = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    int32 MaxPhysicsBodies = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bDestructionEnabled = true;
-
-    // Streaming settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    int32 MaxStreamingCells = 25;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float TextureStreamingPoolSize = 4096.0f;
-
-    FPerformanceSettings()
-    {
-        // Default to high quality settings
-    }
-
-    static FPerformanceSettings GetSettingsForLevel(EPerformanceLevel Level);
-};
+// Delegate broadcast when quality tier changes
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPerf_OnQualityTierChanged, EPerf_QualityTier, NewTier);
 
 /**
- * Dynamic Performance Manager
- * 
- * Monitors performance in real-time and automatically adjusts quality settings
- * to maintain target framerates. Specifically designed for the Jurassic survival
- * game with massive dinosaur ecosystems.
- * 
- * Key responsibilities:
- * - Monitor frame timing and identify bottlenecks
- * - Dynamically adjust Mass AI simulation complexity
- * - Scale rendering quality based on performance
- * - Manage memory usage and streaming
- * - Provide performance telemetry
+ * UDynamicPerformanceManager
+ * World subsystem that monitors runtime FPS and dynamically adjusts
+ * rendering CVars to maintain target framerate (60fps PC / 30fps console).
+ *
+ * Usage:
+ *   auto* Mgr = GetWorld()->GetSubsystem<UDynamicPerformanceManager>();
+ *   Mgr->RecordFrameTime(DeltaSeconds);  // call from GameMode Tick
+ *   FPerf_FrameBudget Budget = Mgr->GetFrameBudget();
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UDynamicPerformanceManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, meta = (DisplayName = "Dynamic Performance Manager"))
+class TRANSPERSONALGAME_API UDynamicPerformanceManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
@@ -193,119 +71,61 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core performance management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(EPerformanceTarget Target);
+    // --- Public API ---
 
+    /** Record a frame delta for FPS averaging. Call from GameMode or Character Tick. */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceLevel(EPerformanceLevel Level);
+    void RecordFrameTime(float DeltaSeconds);
 
+    /** Force a specific quality tier immediately (bypasses FPS evaluation). */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceQualityTier(EPerf_QualityTier Tier);
+
+    /** Returns current smoothed FPS. */
     UFUNCTION(BlueprintPure, Category = "Performance")
-    EPerformanceLevel GetCurrentPerformanceLevel() const { return CurrentPerformanceLevel; }
+    float GetCurrentFPS() const;
 
+    /** Returns active quality tier. */
     UFUNCTION(BlueprintPure, Category = "Performance")
-    FPerformanceMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+    EPerf_QualityTier GetCurrentQualityTier() const;
 
+    /** Returns frame budget breakdown for current target platform. */
     UFUNCTION(BlueprintPure, Category = "Performance")
-    EPerformanceBottleneck GetCurrentBottleneck() const { return CurrentBottleneck; }
+    FPerf_FrameBudget GetFrameBudget() const;
 
-    // Dynamic adjustment controls
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableDynamicAdjustment(bool bEnable) { bDynamicAdjustmentEnabled = bEnable; }
+    /** Returns target FPS for current platform (60 PC / 30 console). */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetTargetFPS() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetAdjustmentSensitivity(float Sensitivity) { AdjustmentSensitivity = FMath::Clamp(Sensitivity, 0.1f, 2.0f); }
-
-    // Manual overrides
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OverrideMassAISettings(int32 MaxAgents, float TickRate, float CullDistance);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OverrideRenderingSettings(float ScreenPercentage, int32 ViewDistance, int32 ShadowQuality);
-
-    // Telemetry and debugging
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceCapture(const FString& SessionName);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceCapture();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void DumpPerformanceReport();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceLevelChanged, EPerformanceLevel, NewLevel);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBottleneckDetected, EPerformanceBottleneck, Bottleneck);
-
+    /** Fired whenever quality tier changes. Bind in Blueprint or C++ to react. */
     UPROPERTY(BlueprintAssignable, Category = "Performance")
-    FOnPerformanceLevelChanged OnPerformanceLevelChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Performance")
-    FOnBottleneckDetected OnBottleneckDetected;
-
-protected:
-    // Core monitoring
-    void UpdatePerformanceMetrics();
-    void AnalyzeBottlenecks();
-    void ApplyDynamicAdjustments();
-
-    // Specific system adjustments
-    void AdjustMassAIPerformance(float TargetTime, float CurrentTime);
-    void AdjustRenderingPerformance(float TargetTime, float CurrentTime);
-    void AdjustPhysicsPerformance(float TargetTime, float CurrentTime);
-    void AdjustStreamingPerformance();
-
-    // Settings management
-    void ApplyPerformanceSettings(const FPerformanceSettings& Settings);
-    void ValidateSettings(FPerformanceSettings& Settings);
-
-    // Telemetry
-    void CapturePerformanceData();
-    void WritePerformanceLog();
+    FPerf_OnQualityTierChanged OnQualityTierChanged;
 
 private:
-    // Current state
-    UPROPERTY()
-    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_HighEnd;
+    void EvaluatePerformance();
+    void ApplyQualityTier(EPerf_QualityTier NewTier);
+    void ApplyCVar(IConsoleManager& CM, const TCHAR* Name, const TCHAR* Value);
 
     UPROPERTY()
-    EPerformanceLevel CurrentPerformanceLevel = EPerformanceLevel::High;
+    float TargetFPS_PC;
 
     UPROPERTY()
-    EPerformanceBottleneck CurrentBottleneck = EPerformanceBottleneck::None;
+    float TargetFPS_Console;
 
     UPROPERTY()
-    FPerformanceBudget CurrentBudget;
+    float CurrentFPS;
 
     UPROPERTY()
-    FPerformanceMetrics CurrentMetrics;
+    bool bScalingActive;
 
     UPROPERTY()
-    FPerformanceSettings CurrentSettings;
-
-    // Dynamic adjustment settings
-    UPROPERTY()
-    bool bDynamicAdjustmentEnabled = true;
+    float ScaleCheckInterval;
 
     UPROPERTY()
-    float AdjustmentSensitivity = 1.0f;
+    EPerf_QualityTier CurrentQualityTier;
 
-    UPROPERTY()
-    float PerformanceHistoryWindow = 3.0f;  // Seconds
+    float FrameTimeAccumulator;
+    int32 FrameSampleCount;
 
-    // Performance history for smoothing
-    TArray<float> FrameTimeHistory;
-    TArray<float> GameThreadHistory;
-    TArray<float> RenderThreadHistory;
-    TArray<float> GPUTimeHistory;
-
-    // Timers and tracking
-    FTimerHandle MetricsUpdateTimer;
-    float LastAdjustmentTime = 0.0f;
-    float AdjustmentCooldown = 2.0f;  // Seconds between adjustments
-
-    // Telemetry
-    bool bCapturingPerformance = false;
-    FString CurrentSessionName;
-    TArray<FString> PerformanceLog;
+    FTimerHandle ScaleCheckHandle;
 };

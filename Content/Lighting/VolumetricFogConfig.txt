@@ -1,0 +1,82 @@
+# ADVANCED VOLUMETRIC FOG SYSTEM - PREHISTORIC ATMOSPHERE
+# Agent #8 - Lighting & Atmosphere Agent
+# Cycle: PROD_CYCLE_AUTO_20260617_001
+
+## EXPONENTIAL HEIGHT FOG CONFIGURATION
+
+### Core Atmospheric Properties
+- **Fog Inscattering Color**: RGB(0.95, 0.88, 0.72) - Warm prehistoric amber/golden tint
+- **Directional Inscattering Color**: RGB(1.0, 0.92, 0.75) - Enhanced sun scattering
+- **Fog Density**: 0.028 - Moderate atmospheric haze
+- **Fog Height Falloff**: 0.15 - Gradual density decrease with altitude
+- **Fog Max Opacity**: 0.85 - Allows distant visibility
+- **Start Distance**: 800.0 units - Fog begins at middle distance
+
+### Volumetric Fog Properties (Lumen Compatible)
+- **Volumetric Fog Scattering Distribution**: 0.6 - Forward scattering bias for god rays
+- **Volumetric Fog Albedo**: RGB(0.98, 0.95, 0.88) - Near-white with warm tint
+- **Volumetric Fog Extinction Scale**: 1.2 - Enhanced light absorption
+- **Volumetric Fog Distance**: 25000.0 units - Extended volumetric range
+
+### Directional Inscattering (Sun Interaction)
+- **Directional Inscattering Exponent**: 6.5 - Strong sun shaft effect
+- **Directional Inscattering Start Distance**: 1200.0 units - God rays begin at distance
+
+## LAYERED FOG ZONES
+
+### Valley Low Fog Zone
+- **Location**: (5000, 3000, 50)
+- **Density Multiplier**: 1.8x
+- **Purpose**: Dense morning mist in valley bottoms
+
+### Forest Mist Zone
+- **Location**: (-4000, 6000, 100)
+- **Density Multiplier**: 1.4x
+- **Purpose**: Atmospheric haze through forest canopy
+
+### River Fog Bank
+- **Location**: (2000, -5000, 30)
+- **Density Multiplier**: 2.2x
+- **Purpose**: Heavy fog over water bodies
+
+## INTEGRATION WITH LIGHTING SYSTEM
+
+### Golden Hour Enhancement
+- Fog scattering amplifies warm directional light
+- God rays visible through volumetric fog
+- Enhanced atmospheric depth during sunrise/sunset
+
+### Lumen Global Illumination
+- Volumetric fog receives indirect lighting from Lumen
+- Fog albedo optimized for realistic light bounce
+- Performance-optimized extinction scale
+
+### Performance Considerations
+- Volumetric fog distance limited to 25km for 60fps target
+- Fog zones use zero-intensity point lights as markers (minimal overhead)
+- Scattering distribution balanced for quality/performance
+
+## ARTISTIC INTENT
+
+The volumetric fog system creates a prehistoric atmosphere that:
+1. **Enhances depth perception** - Layered atmospheric haze adds scale
+2. **Supports cinematic lighting** - God rays and sun shafts through mist
+3. **Varies by location** - Denser fog in valleys/rivers, lighter in highlands
+4. **Realistic time-of-day** - Fog density and color shift with sun angle
+5. **Immersive environment** - Warm, primordial atmosphere distinct from modern landscapes
+
+## TECHNICAL NOTES
+
+- All fog properties set via Python Remote Control API
+- Compatible with UE5.5 Lumen rendering pipeline
+- Fog zones implemented as scaled point light actors (label-based system)
+- Map auto-saved after fog configuration
+- No C++ compilation required - runtime configuration only
+
+## NEXT AGENT INTEGRATION
+
+**Character Artist Agent (#9)** should consider:
+- Character silhouettes visible through fog at 500-1500 units
+- Skin shader subsurface scattering enhanced by volumetric fog
+- Character lighting receives atmospheric fog color tint
+- MetaHuman hair shaders interact with volumetric lighting

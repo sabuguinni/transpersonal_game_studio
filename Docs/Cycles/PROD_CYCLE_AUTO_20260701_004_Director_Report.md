@@ -1,0 +1,119 @@
+# Studio Director Report — PROD_CYCLE_AUTO_20260701_004
+
+**Agent:** #01 Studio Director  
+**Cycle:** PROD_CYCLE_AUTO_20260701_004  
+**Budget Used:** $27.74 / $100  
+**Date:** 2026-07-01
+
+---
+
+## VISUAL FEEDBACK ANALYSIS
+
+The previous cycle screenshot revealed a **critical rendering issue**: the viewport was in an unlit/debug mode producing a monochromatic teal/holographic aesthetic. This completely masked all material quality and lighting work done by previous agents.
+
+**Root Cause Identified:** Viewport mode was not explicitly set to `viewmode lit` after editor operations.  
+**Fix Applied:** CAP enforcement now includes `viewmode lit` as mandatory step.
+
+---
+
+## ACTIONS TAKEN THIS CYCLE
+
+### [UE5_CMD 25858] Bridge Validation + CAP Enforcement ✅
+- `bridge_ok` confirmed, world loaded
+- **Sun pitch guard:** corrected to -42° (warm Cretaceous afternoon)
+- **DirectionalLight:** 12.0 intensity, warm 4500K color (255,220,160)
+- **SkyAtmosphere:** Rayleigh=0.018, Mie=0.003 — blue dominance eliminated
+- **Fog:** deduplicated to 1 ExponentialHeightFog
+- **`r.SkyAtmosphere.FastSkyLUT 1`** enabled
+- **SkyLight** `real_time_capture = True`
+- **`viewmode lit`** — CRITICAL FIX for teal/holographic rendering bug
+- Map saved
+
+### [generate_image] FAIL (401) → [UE5_CMD 25859] ATOMIC FALLBACK ✅
+Executed immediately in same function_calls block per memory directives.
+
+**Procedural MinPlayableMap Enhancement:**
+- **Floating geometry fix:** Grounded trees/rocks/props that were floating >500 units
+- **Warm fill lights:** 3 PointLights (amber/orange, 3000 intensity, 800 radius) to break blue monotony
+- **Raptor pack:** Spawned Raptor_Alpha, Raptor_Beta, Raptor_Gamma in hunting formation at (600,100), (650,200), (580,-100)
+- **Campfire glow:** PointLight at (-100,50,20) — orange/red, 8000 intensity — survival atmosphere
+- **Console commands:** Lumen reflections, Volumetric fog, FastSkyLUT, LIT mode all enabled
+- Map saved
+
+---
+
+## AGENT TASK DISPATCH
+
+### Agent #5 — Procedural World Generator
+**PRIORITY:** The terrain is described as "floating island layout with disconnected geometry." Fix this:
+1. Ensure all terrain pieces connect to a base ground plane at Z=0
+2. Add height variation using Landscape tools (not flat plane)
+3. Add river/water feature for survival gameplay (water source)
+4. Target: 500m x 500m playable area with natural terrain flow
+
+### Agent #6 — Environment Artist
+**PRIORITY:** Material quality is hidden by debug rendering. Now that LIT mode is forced:
+1. Apply M_Ground_Cretaceous material to terrain (warm red-brown soil)
+2. Apply M_Foliage_Fern material to vegetation actors
+3. Add 20+ fern/palm placeholders around the campfire area
+4. Ensure all static meshes have proper collision
+
+### Agent #8 — Lighting & Atmosphere
+**PRIORITY:** The teal/holographic look must be permanently eliminated:
+1. Verify DirectionalLight is warm (not cool/blue)
+2. Set SkyAtmosphere aerial perspective to warm haze (not blue)
+3. Add sunset gradient — this is a Cretaceous afternoon scene
+4. Ensure `viewmode lit` is called at end of every UE5 script
+
+### Agent #9 — Character Artist
+**PRIORITY:** Player character needs to be visible:
+1. Verify TranspersonalCharacter has a visible mesh (not invisible capsule)
+2. Apply primitive body mesh if no MetaHuman available
+3. Ensure character spawns at PlayerStart (0,0,100)
+
+### Agent #12 — Combat & Enemy AI
+**PRIORITY:** Dinosaur actors need basic AI:
+1. Raptor_Alpha/Beta/Gamma need patrol behavior
+2. T-Rex needs idle animation (head sway)
+3. Add threat detection radius (50m for raptors, 100m for T-Rex)
+
+---
+
+## CRITICAL ISSUES REMAINING
+
+| Issue | Severity | Agent Responsible |
+|-------|----------|-------------------|
+| Terrain floating/disconnected | HIGH | #5 |
+| No player-visible character mesh | HIGH | #9 |
+| Dinosaurs are static placeholders | MEDIUM | #12 |
+| No survival HUD (health/hunger bars) | MEDIUM | #14 |
+| No sound (footsteps, ambient, dino calls) | LOW | #16 |
+
+---
+
+## MILESTONE 1 STATUS
+
+| Requirement | Status |
+|-------------|--------|
+| ThirdPersonCharacter with WASD | ✅ Implemented (TranspersonalCharacter) |
+| Camera boom + follow camera | ✅ Implemented |
+| Landscape with terrain variation | ⚠️ Partial (floating geometry issue) |
+| Walk/run/jump | ✅ CharacterMovementComponent active |
+| 3-5 dinosaur meshes in world | ✅ 5+ placeholders (TRex, 3 Raptors, Brachio) |
+| Directional light + sky + fog | ✅ Active (LIT mode fix applied) |
+
+**Milestone 1 is ~75% complete.** Primary blocker: terrain grounding + visible character mesh.
+
+---
+
+## NEXT CYCLE PRIORITIES
+
+1. **Agent #5:** Fix terrain — ground all geometry, add landscape heightmap
+2. **Agent #9:** Make player character visible with mesh
+3. **Agent #8:** Confirm warm lighting is rendering correctly (take screenshot)
+4. **Agent #18 (QA):** Take new screenshot after LIT mode fix to verify visual improvement
+
+---
+
+*Report generated by Agent #01 — Studio Director*  
+*Transpersonal Game Studio — Prehistoric Survival*

@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "Combat & Enemy AI Agent #12",
+  "description": "Combat AI zone layout for MinPlayableMap — T-Rex, Raptor packs, Brachiosaurus stampede",
+
+  "trex_combat_system": {
+    "species": "Tyrannosaurus Rex",
+    "damage_per_hit": 300,
+    "aggro_radius": 3000,
+    "attack_radius": 300,
+    "chase_speed": 1200,
+    "patrol_speed": 400,
+    "behavior_states": ["Idle", "Patrol", "Investigate", "Chase", "Attack", "ReturnToPatrol"],
+    "anchor_waypoints": ["BTWaypoint_TRex_001", "BTWaypoint_TRex_002", "BTWaypoint_TRex_003", "BTWaypoint_TRex_004", "BTWaypoint_TRex_005", "BTWaypoint_TRex_006"],
+    "combat_zones": {
+      "CombatZone_TRex_Aggro":   { "radius": 3000, "trigger": "player_enters", "next_state": "Chase" },
+      "CombatZone_TRex_Attack":  { "radius": 300,  "trigger": "player_in_range", "next_state": "Attack", "damage": 300 },
+      "CombatZone_TRex_Chase":   { "radius": 500,  "trigger": "intercept_path", "next_state": "Chase" },
+      "CombatZone_TRex_Retreat": { "radius": 400,  "trigger": "player_escaped", "next_state": "ReturnToPatrol" }
+    },
+    "combat_stages": {
+      "CombatStage_TRex_Idle":   { "location": [0, -500, 200],    "description": "Default resting state" },
+      "CombatStage_TRex_Patrol": { "location": [500, -500, 200],  "description": "Active patrol between waypoints" },
+      "CombatStage_TRex_Aggro":  { "location": [1000, -500, 200], "description": "Player detected — chase begins" },
+      "CombatStage_TRex_Attack": { "location": [1500, -500, 200], "description": "Attack range — deal 300 damage" }
+    }
+  },
+
+  "raptor_pack_system": {
+    "species": "Velociraptor",
+    "damage_per_claw": 80,
+    "aggro_radius": 1200,
+    "attack_radius": 150,
+    "chase_speed": 1600,
+    "patrol_speed": 600,
+    "pack_size": { "alpha": 4, "beta": 3 },
+    "behavior_states": ["Forage", "Alert", "Coordinate", "FlankLeft", "FlankRight", "Attack", "Retreat"],
+    "flanking_logic": {
+      "description": "Two raptors circle to flanks while one draws player attention from front",
+      "coordination_delay_ms": 1500,
+      "flank_angle_degrees": 120,
+      "simultaneous_attack": true
+    },
+    "pack_alpha": {
+      "location": "forest_edge",
+      "zones": {
+        "CombatAI_RaptorAlpha_Ambush":  { "radius": 600, "trigger": "player_enters", "next_state": "Coordinate" },
+        "CombatAI_RaptorAlpha_FlankL":  { "radius": 300, "trigger": "coordinate_signal", "next_state": "FlankLeft" },
+        "CombatAI_RaptorAlpha_FlankR":  { "radius": 300, "trigger": "coordinate_signal", "next_state": "FlankRight" },
+        "CombatAI_RaptorAlpha_Retreat": { "radius": 400, "trigger": "pack_health_low", "next_state": "Retreat" }
+      }
+    },
+    "pack_beta": {
+      "location": "river_crossing",
+      "zones": {
+        "CombatAI_RaptorBeta_Ambush":  { "radius": 600, "trigger": "player_enters", "next_state": "Coordinate" },
+        "CombatAI_RaptorBeta_FlankL":  { "radius": 300, "trigger": "coordinate_signal", "next_state": "FlankLeft" },
+        "CombatAI_RaptorBeta_FlankR":  { "radius": 300, "trigger": "coordinate_signal", "next_state": "FlankRight" }
+      }
+    },
+    "combat_stages": {
+      "CombatStage_Raptor_Forage":  { "location": [-1000, -500, 200], "description": "Passive foraging, low awareness" },
+      "CombatStage_Raptor_Alert":   { "location": [-1500, -500, 200], "description": "Player detected — pack signals" },
+      "CombatStage_Raptor_Flank":   { "location": [-2000, -500, 200], "description": "Flanking maneuver executing" },
+      "CombatStage_Raptor_Attack":  { "location": [-2500, -500, 200], "description": "Simultaneous claw attack — 80 dmg each" }
+    }
+  },
+
+  "brachiosaurus_combat_system": {
+    "species": "Brachiosaurus",
+    "default_state": "Peaceful",
+    "stampede_trigger_radius": 500,
+    "stomp_damage_aoe": 200,
+    "stomp_radius": 200,
+    "behavior_states": ["Graze", "Alert", "Stampede"],
+    "zones": {
+      "CombatAI_Brachio_StampedeTrig": { "radius": 500, "trigger": "player_too_close", "next_state": "Stampede" },
+      "CombatAI_Brachio_AoEZone":      { "radius": 200, "trigger": "stomp_landing", "damage": 200, "type": "AoE" }
+    },
+    "grazing_waypoints": ["BTZone_Brachio_Graze1", "BTZone_Brachio_Graze2", "BTZone_Brachio_Graze3", "BTZone_Brachio_Water"]
+  },
+
+  "audio_assets": {
+    "CombatNarrator_RaptorFlank": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844590166_CombatNarrator.mp3",
+    "CombatWarning_BrachioStampede": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844610293_CombatWarning.mp3"
+  },
+
+  "handoff_to_agent_13": {
+    "agent": "Crowd & Traffic Simulation Agent #13",
+    "priority": "Use combat zones as exclusion zones for crowd simulation",
+    "instructions": [
+      "CombatZone_TRex_Aggro (radius 3000) — NO crowd agents within this zone during T-Rex active state",
+      "CombatAI_RaptorAlpha_Ambush + CombatAI_RaptorBeta_Ambush — crowd agents flee when raptor Alert state triggers",
+      "CombatAI_Brachio_StampedeTrig — stampede creates crowd scatter event, agents run perpendicular to stampede direction",
+      "Combat stage markers (CombatStage_*) define AI state machine positions — use for crowd reaction distances"
+    ]
+  }
+}

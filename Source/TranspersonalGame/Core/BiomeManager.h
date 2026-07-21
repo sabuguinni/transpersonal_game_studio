@@ -2,17 +2,48 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "BiomeManager.generated.h"
 
-/**
- * Central biome system management for the 5 prehistoric biomes
- * Coordinates spawning, environmental conditions, and biome transitions
- * Based on coordinates from brain memories: 157,000 x 153,000 UU map
- */
-UCLASS(BlueprintType, Blueprintable)
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Jungle         UMETA(DisplayName = "Jungle"),
+    Savanna        UMETA(DisplayName = "Savanna"),
+    Swamp          UMETA(DisplayName = "Swamp"),
+    Volcanic       UMETA(DisplayName = "Volcanic"),
+    CoastalPlain   UMETA(DisplayName = "CoastalPlain"),
+    RiverDelta     UMETA(DisplayName = "RiverDelta"),
+};
+
+USTRUCT(BlueprintType)
+struct FEng_BiomeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Jungle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector WorldCenter = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Humidity = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float VegetationDensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<FName> DinosaurSpecies;
+};
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ABiomeManager : public AActor
 {
     GENERATED_BODY()
@@ -20,102 +51,36 @@ class TRANSPERSONALGAME_API ABiomeManager : public AActor
 public:
     ABiomeManager();
 
-protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // === BIOME COORDINATE SYSTEM ===
-    
-    /** Get biome type at specific world coordinates */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
-    
-    /** Get safe spawn location within specified biome */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetRandomSpawnLocationInBiome(EEng_BiomeType BiomeType) const;
-    
-    /** Check if location is within biome boundaries */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsLocationInBiome(const FVector& WorldLocation, EEng_BiomeType BiomeType) const;
-    
-    /** Get biome center coordinates */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FVector GetBiomeCenterLocation(EEng_BiomeType BiomeType) const;
-    
-    /** Get biome environmental conditions */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeConditions GetBiomeConditions(EEng_BiomeType BiomeType) const;
 
-    // === SPAWN DISTRIBUTION ===
-    
-    /** Distribute actors across all biomes using proper coordinates */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
-    void DistributeActorsAcrossBiomes();
-    
-    /** Clean up actors spawned at origin (0,0,0) and redistribute */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System") 
-    void FixOriginSpawnsAndRedistribute();
-    
-    /** Spawn biome-specific environmental actors */
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SpawnBiomeEnvironment(EEng_BiomeType BiomeType, int32 ActorCount);
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeData GetBiomeData(EEng_BiomeType BiomeType) const;
 
-    // === VALIDATION ===
-    
-    /** Validate all spawned actors are in correct biomes */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
-    void ValidateActorBiomePlacement();
-    
-    /** Generate biome distribution report */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
-    void GenerateBiomeReport();
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    TArray<FName> GetDinosaurSpeciesForBiome(EEng_BiomeType BiomeType) const;
 
-protected:
-    // === BIOME DEFINITIONS ===
-    
-    /** Biome boundary definitions based on brain memory coordinates */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Configuration")
-    TMap<EEng_BiomeType, FEng_BiomeBounds> BiomeBoundaries;
-    
-    /** Environmental conditions per biome */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Configuration")
-    TMap<EEng_BiomeType, FEng_BiomeConditions> BiomeConditions;
-    
-    /** Actor types allowed per biome */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Configuration")
-    TMap<EEng_BiomeType, TArray<TSubclassOf<AActor>>> BiomeActorTypes;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    // === RUNTIME STATE ===
-    
-    /** Current biome actor distribution */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime State")
-    TMap<EEng_BiomeType, int32> CurrentActorCounts;
-    
-    /** Actors that need redistribution */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime State")
-    TArray<AActor*> MisplacedActors;
-    
-    /** Last validation timestamp */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime State")
-    float LastValidationTime;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(CallInEditor, Category = "Biome|Debug")
+    void DebugPrintAllBiomes();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    TArray<FEng_BiomeData> BiomeDefinitions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    bool bEnableBiomeTransitions = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Config")
+    float TransitionBlendRadius = 500.0f;
 
 private:
-    // === INTERNAL METHODS ===
-    
-    /** Initialize biome boundaries from brain memory coordinates */
-    void InitializeBiomeBoundaries();
-    
-    /** Initialize biome environmental conditions */
-    void InitializeBiomeConditions();
-    
-    /** Get random location within biome bounds with height sampling */
-    FVector GetRandomLocationInBounds(const FEng_BiomeBounds& Bounds) const;
-    
-    /** Sample terrain height at location */
-    float SampleTerrainHeight(const FVector& Location) const;
-    
-    /** Check if actor type is appropriate for biome */
-    bool IsActorTypeValidForBiome(AActor* Actor, EEng_BiomeType BiomeType) const;
+    void InitializeDefaultBiomes();
 };

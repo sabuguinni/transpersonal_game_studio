@@ -1,25 +1,34 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "Engine/TriggerVolume.h"
-#include "TimerManager.h"
 #include "Quest_SurvivalTutorialSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EQuest_TutorialStep : uint8
+enum class EQuest_TutorialPhase : uint8
 {
-    None,
-    Movement,
+    NotStarted,
+    BasicMovement,
     ResourceGathering,
-    CraftingBasics,
+    CraftingIntroduction,
     ShelterBuilding,
+    WaterLocation,
     DinosaurAwareness,
+    SafetyProtocols,
     Completed
+};
+
+UENUM(BlueprintType)
+enum class EQuest_ResourceType : uint8
+{
+    Stone,
+    Wood,
+    Plant,
+    Water,
+    Meat,
+    Hide
 };
 
 USTRUCT(BlueprintType)
@@ -31,110 +40,153 @@ struct FQuest_TutorialObjective
     FString ObjectiveText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    FString HintText;
+    EQuest_TutorialPhase Phase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    bool bIsCompleted;
+    bool bCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    float TimeLimit;
+    FVector MarkerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    float CompletionRadius;
 
     FQuest_TutorialObjective()
     {
         ObjectiveText = TEXT("");
-        HintText = TEXT("");
-        bIsCompleted = false;
-        TimeLimit = 0.0f;
+        Phase = EQuest_TutorialPhase::NotStarted;
+        bCompleted = false;
+        MarkerLocation = FVector::ZeroVector;
+        CompletionRadius = 200.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FQuest_ResourceRequirement
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources")
+    EQuest_ResourceType ResourceType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources")
+    int32 RequiredAmount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources")
+    int32 CurrentAmount;
+
+    FQuest_ResourceRequirement()
+    {
+        ResourceType = EQuest_ResourceType::Stone;
+        RequiredAmount = 1;
+        CurrentAmount = 0;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQuest_SurvivalTutorialSystem : public AActor
+class TRANSPERSONALGAME_API UQuest_SurvivalTutorialSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AQuest_SurvivalTutorialSystem();
+    UQuest_SurvivalTutorialSystem();
+
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void StartTutorial();
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void AdvanceToNextPhase();
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void CompleteCurrentObjective();
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    bool CheckObjectiveCompletion(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void AddResource(EQuest_ResourceType ResourceType, int32 Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    bool HasRequiredResources() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    FString GetCurrentObjectiveText() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    EQuest_TutorialPhase GetCurrentPhase() const { return CurrentPhase; }
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    float GetTutorialProgress() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void ShowHint(const FString& HintText);
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void TriggerDangerWarning(const FString& DangerType);
 
 protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Tutorial progression
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    EQuest_TutorialStep CurrentStep;
+    EQuest_TutorialPhase CurrentPhase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    TMap<EQuest_TutorialStep, FQuest_TutorialObjective> TutorialObjectives;
+    TArray<FQuest_TutorialObjective> TutorialObjectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    TArray<FQuest_ResourceRequirement> ResourceRequirements;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
     bool bTutorialActive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
-    float TutorialTimer;
+    float TutorialStartTime;
 
-    // Tutorial functions
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void StartTutorial();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void CompleteCurrentStep();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void AdvanceToNextStep();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void ShowTutorialHint(const FString& HintText);
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    bool CheckMovementObjective();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    bool CheckResourceGatheringObjective();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    bool CheckCraftingObjective();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void OnPlayerMovement();
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void OnResourceCollected(const FString& ResourceType);
-
-    UFUNCTION(BlueprintCallable, Category = "Tutorial")
-    void OnItemCrafted(const FString& ItemName);
-
-    // Tutorial UI
-    UFUNCTION(BlueprintImplementableEvent, Category = "Tutorial")
-    void DisplayTutorialMessage(const FString& Message);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Tutorial")
-    void UpdateTutorialProgress(float Progress);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Tutorial")
-    void ShowTutorialComplete();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    int32 CurrentObjectiveIndex;
 
 private:
     void InitializeTutorialObjectives();
-    void UpdateTutorialProgress();
-    void CheckTutorialCompletion();
+    void SetupResourceRequirements();
+    void UpdateObjectiveMarkers();
+    void PlayTutorialAudio(const FString& AudioCue);
+    void LogTutorialProgress();
+};
 
-    // Movement tracking
-    FVector LastPlayerPosition;
-    float MovementDistance;
-    bool bPlayerHasMoved;
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_TutorialMarker : public AActor
+{
+    GENERATED_BODY()
 
-    // Resource tracking
-    TArray<FString> CollectedResources;
-    int32 RequiredResourceCount;
+public:
+    AQuest_TutorialMarker();
 
-    // Crafting tracking
-    TArray<FString> CraftedItems;
-    bool bFirstItemCrafted;
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void SetMarkerActive(bool bActive);
 
-    // Timer handles
-    FTimerHandle TutorialTimerHandle;
-    FTimerHandle HintTimerHandle;
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void SetMarkerType(EQuest_TutorialPhase Phase);
+
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void OnPlayerEnterMarker();
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* MarkerMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USphereComponent* TriggerSphere;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    EQuest_TutorialPhase AssociatedPhase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    bool bIsActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial")
+    FString MarkerDescription;
+
+private:
+    UFUNCTION()
+    void OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 };

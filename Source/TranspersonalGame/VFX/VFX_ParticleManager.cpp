@@ -1,264 +1,294 @@
 #include "VFX_ParticleManager.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 
-AVFX_ParticleManager::AVFX_ParticleManager()
+UVFX_ParticleManager::UVFX_ParticleManager()
 {
-	PrimaryActorTick.bCanEverTick = true;
-	
-	// Configurar root component
-	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("VFXRoot"));
-	
-	// Inicializar propriedades
-	MaxPoolSize = 50;
-	CurrentEffectIntensity = 1.0f;
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    // Initialize default particle settings
+    ConfigureParticleSettings();
 }
 
-void AVFX_ParticleManager::BeginPlay()
+void UVFX_ParticleManager::BeginPlay()
 {
-	Super::BeginPlay();
-	
-	UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Sistema iniciado"));
-	
-	// Pré-carregar sistemas Niagara (paths de exemplo - devem ser configurados no Blueprint)
-	if (!FootstepDustSystem)
-	{
-		FootstepDustSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Engine/VFX/Niagara/Systems/NS_GPUSprites"));
-	}
-	
-	// Inicializar pool de partículas
-	ParticlePool.Reserve(MaxPoolSize);
-	for (int32 i = 0; i < MaxPoolSize; i++)
-	{
-		UNiagaraComponent* PooledParticle = CreateDefaultSubobject<UNiagaraComponent>(*FString::Printf(TEXT("PooledParticle_%d"), i));
-		if (PooledParticle)
-		{
-			PooledParticle->SetupAttachment(RootComponent);
-			PooledParticle->SetAutoDestroy(false);
-			PooledParticle->SetVisibility(false);
-			ParticlePool.Add(PooledParticle);
-		}
-	}
-	
-	UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Pool de %d partículas criado"), ParticlePool.Num());
+    Super::BeginPlay();
+    
+    InitializeParticleSystems();
+    
+    // Start cleanup timer
+    GetWorld()->GetTimerManager().SetTimer(
+        CleanupTimer,
+        this,
+        &UVFX_ParticleManager::CleanupExpiredParticles,
+        5.0f,
+        true
+    );
 }
 
-void AVFX_ParticleManager::Tick(float DeltaTime)
+void UVFX_ParticleManager::InitializeParticleSystems()
 {
-	Super::Tick(DeltaTime);
-	
-	// Lógica de update para efeitos contínuos (se necessário)
+    // Load particle systems from content browser
+    // These would be created as Niagara assets in the editor
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Initializing particle systems"));
+    
+    // Initialize particle settings for each type
+    for (auto& Setting : ParticleSettings)
+    {
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Configured settings for particle type %d"), 
+               (int32)Setting.Key);
+    }
 }
 
-void AVFX_ParticleManager::SpawnFootstepEffect(FVector Location, float DinosaurSize)
+void UVFX_ParticleManager::ConfigureParticleSettings()
 {
-	if (!FootstepDustSystem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: FootstepDustSystem não configurado"));
-		return;
-	}
-	
-	// Usar pool ou spawnar diretamente
-	UNiagaraComponent* Effect = GetPooledParticle();
-	if (Effect)
-	{
-		Effect->SetAsset(FootstepDustSystem);
-		Effect->SetWorldLocation(Location);
-		Effect->SetVisibility(true);
-		
-		// Configurar parâmetros baseados no tamanho do dinossauro
-		Effect->SetFloatParameter(TEXT("Size"), DinosaurSize * CurrentEffectIntensity);
-		Effect->SetFloatParameter(TEXT("Intensity"), CurrentEffectIntensity);
-		
-		Effect->Activate();
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Pegada spawned em %s (tamanho: %.2f)"), 
-			*Location.ToString(), DinosaurSize);
-		
-		// Auto-retornar ao pool após 3 segundos
-		FTimerHandle TimerHandle;
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, Effect]()
-		{
-			ReturnParticleToPool(Effect);
-		}, 3.0f, false);
-	}
-	else
-	{
-		// Fallback: spawnar diretamente no mundo
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-			GetWorld(),
-			FootstepDustSystem,
-			Location,
-			FRotator::ZeroRotator,
-			FVector(DinosaurSize * CurrentEffectIntensity)
-		);
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Pegada spawned diretamente (pool cheio)"));
-	}
+    // Footstep dust settings
+    FVFX_ParticleSettings FootstepSettings;
+    FootstepSettings.Intensity = 1.5f;
+    FootstepSettings.Duration = 3.0f;
+    FootstepSettings.Scale = FVector(1.0f, 1.0f, 0.8f);
+    FootstepSettings.TintColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f); // Brown dust
+    ParticleSettings.Add(EVFX_ParticleType::FootstepDust, FootstepSettings);
+
+    // Blood splatter settings
+    FVFX_ParticleSettings BloodSettings;
+    BloodSettings.Intensity = 2.0f;
+    BloodSettings.Duration = 5.0f;
+    BloodSettings.Scale = FVector(0.8f, 0.8f, 1.2f);
+    BloodSettings.TintColor = FLinearColor(0.8f, 0.1f, 0.1f, 1.0f); // Dark red
+    ParticleSettings.Add(EVFX_ParticleType::BloodSplatter, BloodSettings);
+
+    // Ambient pollen settings
+    FVFX_ParticleSettings PollenSettings;
+    PollenSettings.Intensity = 0.5f;
+    PollenSettings.Duration = -1.0f; // Continuous
+    PollenSettings.Scale = FVector(1.0f, 1.0f, 1.0f);
+    PollenSettings.TintColor = FLinearColor(1.0f, 0.9f, 0.6f, 0.3f); // Golden pollen
+    PollenSettings.bAutoDestroy = false;
+    ParticleSettings.Add(EVFX_ParticleType::AmbientPollen, PollenSettings);
+
+    // Campfire sparks settings
+    FVFX_ParticleSettings SparksSettings;
+    SparksSettings.Intensity = 1.8f;
+    SparksSettings.Duration = 4.0f;
+    SparksSettings.Scale = FVector(1.2f, 1.2f, 1.5f);
+    SparksSettings.TintColor = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f); // Orange fire
+    ParticleSettings.Add(EVFX_ParticleType::CampfireSparks, SparksSettings);
 }
 
-void AVFX_ParticleManager::SpawnCampfireEffect(FVector Location)
+void UVFX_ParticleManager::SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation)
 {
-	if (!CampfireSystem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: CampfireSystem não configurado"));
-		return;
-	}
-	
-	UNiagaraComponent* Effect = GetPooledParticle();
-	if (Effect)
-	{
-		Effect->SetAsset(CampfireSystem);
-		Effect->SetWorldLocation(Location);
-		Effect->SetVisibility(true);
-		Effect->SetFloatParameter(TEXT("Intensity"), CurrentEffectIntensity);
-		Effect->Activate();
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Fogueira spawned em %s"), *Location.ToString());
-	}
+    if (!ParticleSystems.Contains(ParticleType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: No particle system found for type %d"), (int32)ParticleType);
+        return;
+    }
+
+    UNiagaraSystem* System = ParticleSystems[ParticleType].LoadSynchronous();
+    if (!System)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Failed to load particle system for type %d"), (int32)ParticleType);
+        return;
+    }
+
+    UNiagaraComponent* ParticleComponent = CreateParticleComponent(System, Location, Rotation);
+    if (ParticleComponent)
+    {
+        // Apply settings
+        if (ParticleSettings.Contains(ParticleType))
+        {
+            const FVFX_ParticleSettings& Settings = ParticleSettings[ParticleType];
+            
+            // Set component parameters
+            ParticleComponent->SetFloatParameter(TEXT("Intensity"), Settings.Intensity);
+            ParticleComponent->SetVectorParameter(TEXT("Scale"), Settings.Scale);
+            ParticleComponent->SetColorParameter(TEXT("TintColor"), Settings.TintColor);
+            
+            // Auto-destroy after duration
+            if (Settings.bAutoDestroy && Settings.Duration > 0.0f)
+            {
+                FTimerHandle DestroyTimer;
+                GetWorld()->GetTimerManager().SetTimer(
+                    DestroyTimer,
+                    [ParticleComponent]()
+                    {
+                        if (IsValid(ParticleComponent))
+                        {
+                            ParticleComponent->DestroyComponent();
+                        }
+                    },
+                    Settings.Duration,
+                    false
+                );
+            }
+        }
+
+        ActiveParticles.Add(ParticleComponent);
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned particle effect type %d at location %s"), 
+               (int32)ParticleType, *Location.ToString());
+    }
 }
 
-void AVFX_ParticleManager::SpawnBloodImpact(FVector Location, FVector ImpactDirection)
+void UVFX_ParticleManager::SpawnFootstepDust(FVector FootLocation, float DinosaurSize)
 {
-	if (!BloodImpactSystem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: BloodImpactSystem não configurado"));
-		return;
-	}
-	
-	UNiagaraComponent* Effect = GetPooledParticle();
-	if (Effect)
-	{
-		Effect->SetAsset(BloodImpactSystem);
-		Effect->SetWorldLocation(Location);
-		Effect->SetWorldRotation(ImpactDirection.Rotation());
-		Effect->SetVisibility(true);
-		Effect->SetFloatParameter(TEXT("Intensity"), CurrentEffectIntensity);
-		Effect->Activate();
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Impacto de sangue spawned em %s"), *Location.ToString());
-		
-		// Auto-retornar ao pool após 2 segundos
-		FTimerHandle TimerHandle;
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, Effect]()
-		{
-			ReturnParticleToPool(Effect);
-		}, 2.0f, false);
-	}
+    // Adjust particle settings based on dinosaur size
+    FVFX_ParticleSettings Settings = ParticleSettings[EVFX_ParticleType::FootstepDust];
+    Settings.Intensity *= DinosaurSize;
+    Settings.Scale *= DinosaurSize;
+    
+    // Temporarily override settings
+    ParticleSettings[EVFX_ParticleType::FootstepDust] = Settings;
+    
+    SpawnParticleEffect(EVFX_ParticleType::FootstepDust, FootLocation);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned footstep dust for dinosaur size %.2f"), DinosaurSize);
 }
 
-void AVFX_ParticleManager::SpawnWeatherEffect(EBiomeType BiomeType, FVector Location)
+void UVFX_ParticleManager::SpawnBloodSplatter(FVector ImpactLocation, EDamageType DamageType, float DamageAmount)
 {
-	if (!WeatherRainSystem)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: WeatherRainSystem não configurado"));
-		return;
-	}
-	
-	UNiagaraComponent* Effect = GetPooledParticle();
-	if (Effect)
-	{
-		Effect->SetAsset(WeatherRainSystem);
-		Effect->SetWorldLocation(Location);
-		Effect->SetVisibility(true);
-		
-		// Configurar efeito baseado no bioma
-		ConfigureEffectForBiome(Effect, BiomeType);
-		
-		Effect->Activate();
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Efeito climático spawned para bioma %d em %s"), 
-			(int32)BiomeType, *Location.ToString());
-	}
+    // Adjust blood intensity based on damage
+    FVFX_ParticleSettings Settings = ParticleSettings[EVFX_ParticleType::BloodSplatter];
+    
+    switch (DamageType)
+    {
+        case EDamageType::Light:
+            Settings.Intensity *= 0.5f;
+            Settings.Scale *= 0.7f;
+            break;
+        case EDamageType::Medium:
+            Settings.Intensity *= 1.0f;
+            break;
+        case EDamageType::Heavy:
+            Settings.Intensity *= 1.5f;
+            Settings.Scale *= 1.3f;
+            break;
+        case EDamageType::Critical:
+            Settings.Intensity *= 2.0f;
+            Settings.Scale *= 1.8f;
+            Settings.Duration *= 1.5f;
+            break;
+    }
+    
+    // Scale by damage amount
+    Settings.Intensity *= FMath::Clamp(DamageAmount / 100.0f, 0.1f, 3.0f);
+    
+    ParticleSettings[EVFX_ParticleType::BloodSplatter] = Settings;
+    SpawnParticleEffect(EVFX_ParticleType::BloodSplatter, ImpactLocation);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned blood splatter for damage %.2f"), DamageAmount);
 }
 
-void AVFX_ParticleManager::StopAllEffects()
+void UVFX_ParticleManager::SpawnAmbientParticles(FVector CenterLocation, float Radius)
 {
-	for (UNiagaraComponent* Particle : ParticlePool)
-	{
-		if (Particle && Particle->IsActive())
-		{
-			Particle->Deactivate();
-			Particle->SetVisibility(false);
-		}
-	}
-	
-	UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Todos os efeitos parados"));
+    // Create multiple ambient particle spawns in a radius
+    int32 NumSpawns = FMath::RandRange(3, 8);
+    
+    for (int32 i = 0; i < NumSpawns; i++)
+    {
+        FVector RandomOffset = FVector(
+            FMath::RandRange(-Radius, Radius),
+            FMath::RandRange(-Radius, Radius),
+            FMath::RandRange(0.0f, Radius * 0.5f)
+        );
+        
+        FVector SpawnLocation = CenterLocation + RandomOffset;
+        SpawnParticleEffect(EVFX_ParticleType::AmbientPollen, SpawnLocation);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Spawned %d ambient particle systems"), NumSpawns);
 }
 
-void AVFX_ParticleManager::SetEffectIntensity(float Intensity)
+void UVFX_ParticleManager::UpdateDayNightParticles(float TimeOfDay)
 {
-	CurrentEffectIntensity = FMath::Clamp(Intensity, 0.1f, 3.0f);
-	UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Intensidade definida para %.2f"), CurrentEffectIntensity);
+    // Adjust ambient particle intensity based on time of day
+    // More particles during dawn/dusk, fewer at night
+    float NewIntensity = 1.0f;
+    
+    if (TimeOfDay < 0.25f || TimeOfDay > 0.75f) // Night
+    {
+        NewIntensity = 0.3f;
+    }
+    else if (TimeOfDay < 0.4f || TimeOfDay > 0.6f) // Dawn/Dusk
+    {
+        NewIntensity = 1.5f;
+    }
+    else // Day
+    {
+        NewIntensity = 1.0f;
+    }
+    
+    AmbientParticleIntensity = NewIntensity;
+    
+    // Update existing ambient particles
+    for (UNiagaraComponent* Particle : ActiveParticles)
+    {
+        if (IsValid(Particle))
+        {
+            Particle->SetFloatParameter(TEXT("Intensity"), AmbientParticleIntensity);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Updated day/night particles intensity to %.2f"), NewIntensity);
 }
 
-UNiagaraComponent* AVFX_ParticleManager::GetPooledParticle()
+void UVFX_ParticleManager::CleanupExpiredParticles()
 {
-	for (UNiagaraComponent* Particle : ParticlePool)
-	{
-		if (Particle && !Particle->IsActive() && !Particle->IsVisible())
-		{
-			return Particle;
-		}
-	}
-	
-	// Pool cheio
-	return nullptr;
+    int32 CleanedCount = 0;
+    
+    for (int32 i = ActiveParticles.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(ActiveParticles[i]) || !ActiveParticles[i]->IsActive())
+        {
+            ActiveParticles.RemoveAt(i);
+            CleanedCount++;
+        }
+    }
+    
+    if (CleanedCount > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Cleaned up %d expired particles"), CleanedCount);
+    }
 }
 
-void AVFX_ParticleManager::ReturnParticleToPool(UNiagaraComponent* Particle)
+UNiagaraComponent* UVFX_ParticleManager::CreateParticleComponent(UNiagaraSystem* System, FVector Location, FRotator Rotation)
 {
-	if (Particle)
-	{
-		Particle->Deactivate();
-		Particle->SetVisibility(false);
-		Particle->SetAsset(nullptr);
-		
-		UE_LOG(LogTemp, Log, TEXT("VFX_ParticleManager: Partícula retornada ao pool"));
-	}
+    if (!System || !GetWorld())
+    {
+        return nullptr;
+    }
+
+    UNiagaraComponent* Component = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        System,
+        Location,
+        Rotation,
+        FVector(1.0f),
+        true,
+        true,
+        ENCPoolMethod::None,
+        true
+    );
+
+    return Component;
 }
 
-void AVFX_ParticleManager::ConfigureEffectForBiome(UNiagaraComponent* Effect, EBiomeType BiomeType)
+void UVFX_ParticleManager::TestAllParticleTypes()
 {
-	if (!Effect) return;
-	
-	switch (BiomeType)
-	{
-		case EBiomeType::Swamp:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.9f);
-			Effect->SetFloatParameter(TEXT("Temperature"), 25.0f);
-			break;
-			
-		case EBiomeType::Forest:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.7f);
-			Effect->SetFloatParameter(TEXT("Temperature"), 20.0f);
-			break;
-			
-		case EBiomeType::Savanna:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.3f);
-			Effect->SetFloatParameter(TEXT("Temperature"), 30.0f);
-			break;
-			
-		case EBiomeType::Desert:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.1f);
-			Effect->SetFloatParameter(TEXT("Temperature"), 40.0f);
-			break;
-			
-		case EBiomeType::SnowyMountain:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.8f);
-			Effect->SetFloatParameter(TEXT("Temperature"), -5.0f);
-			break;
-			
-		default:
-			Effect->SetFloatParameter(TEXT("Humidity"), 0.5f);
-			Effect->SetFloatParameter(TEXT("Temperature"), 20.0f);
-			break;
-	}
-	
-	Effect->SetFloatParameter(TEXT("Intensity"), CurrentEffectIntensity);
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    FVector TestLocation = GetOwner()->GetActorLocation();
+    
+    // Test each particle type
+    SpawnParticleEffect(EVFX_ParticleType::FootstepDust, TestLocation + FVector(100, 0, 0));
+    SpawnParticleEffect(EVFX_ParticleType::BloodSplatter, TestLocation + FVector(200, 0, 0));
+    SpawnParticleEffect(EVFX_ParticleType::AmbientPollen, TestLocation + FVector(300, 0, 0));
+    SpawnParticleEffect(EVFX_ParticleType::CampfireSparks, TestLocation + FVector(400, 0, 0));
+    
+    UE_LOG(LogTemp, Warning, TEXT("VFX_ParticleManager: Testing all particle types at location %s"), *TestLocation.ToString());
 }

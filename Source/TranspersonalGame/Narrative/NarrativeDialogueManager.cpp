@@ -1,326 +1,429 @@
 #include "NarrativeDialogueManager.h"
-#include "TranspersonalCharacter.h"
+#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundWave.h"
+
+// ============================================================
+// Constructor
+// ============================================================
 
 ANarrativeDialogueManager::ANarrativeDialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = true;
 
-    // Criar componente raiz
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+	TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+	TriggerSphere->SetSphereRadius(500.0f);
+	TriggerSphere->SetCollisionProfileName(TEXT("Trigger"));
+	RootComponent = TriggerSphere;
 
-    // Criar componente de áudio para diálogos
-    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
-    DialogueAudioComponent->SetupAttachment(RootComponent);
-    DialogueAudioComponent->bAutoActivate = false;
+	DialogueAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudio"));
+	DialogueAudio->SetupAttachment(RootComponent);
+	DialogueAudio->bAutoActivate = false;
 
-    // Criar componente de texto para legendas
-    SubtitleText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("SubtitleText"));
-    SubtitleText->SetupAttachment(RootComponent);
-    SubtitleText->SetRelativeLocation(FVector(0, 0, 100));
-    SubtitleText->SetText(FText::FromString(TEXT("")));
-    SubtitleText->SetTextRenderColor(FColor::White);
-    SubtitleText->SetHorizontalAlignment(EHTA_Center);
-    SubtitleText->SetWorldSize(24.0f);
-    SubtitleText->SetVisibility(false);
-
-    // Configurações padrão
-    bIsPlayingDialogue = false;
-    DialogueVolume = 1.0f;
-    SubtitleDisplayTime = 3.0f;
-    DialogueStartTime = 0.0f;
-    PlayerCharacter = nullptr;
+	ProximityRadius = 500.0f;
+	AssignedSpeaker = ENarr_SpeakerRole::Narrator;
+	CurrentState = ENarr_DialogueState::Idle;
+	ActiveLineID = TEXT("");
+	ActiveTreeID = TEXT("");
+	LineTimer = 0.0f;
+	CooldownTimer = 0.0f;
+	bOnCooldown = false;
 }
+
+// ============================================================
+// BeginPlay
+// ============================================================
 
 void ANarrativeDialogueManager::BeginPlay()
 {
-    Super::BeginPlay();
-    
-    // Inicializar base de dados de diálogos
-    InitializeDialogueDatabase();
-    
-    // Encontrar referência ao personagem do jogador
-    PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
-    if (!PlayerCharacter)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Player character not found"));
-    }
+	Super::BeginPlay();
+
+	TriggerSphere->SetSphereRadius(ProximityRadius);
+
+	TriggerSphere->OnComponentBeginOverlap.AddDynamic(
+		this, &ANarrativeDialogueManager::OnProximityOverlap);
+
+	BuildDefaultDialogueTrees();
 }
+
+// ============================================================
+// Tick
+// ============================================================
 
 void ANarrativeDialogueManager::Tick(float DeltaTime)
 {
-    Super::Tick(DeltaTime);
-    
-    // Actualizar display de legendas se necessário
-    if (bIsPlayingDialogue)
-    {
-        UpdateSubtitleDisplay();
-    }
+	Super::Tick(DeltaTime);
+
+	// Cooldown countdown
+	if (bOnCooldown)
+	{
+		CooldownTimer -= DeltaTime;
+		if (CooldownTimer <= 0.0f)
+		{
+			bOnCooldown = false;
+			CooldownTimer = 0.0f;
+			CurrentState = ENarr_DialogueState::Idle;
+		}
+		return;
+	}
+
+	// Auto-advance playing line
+	if (CurrentState == ENarr_DialogueState::Playing)
+	{
+		LineTimer -= DeltaTime;
+		if (LineTimer <= 0.0f)
+		{
+			AdvanceDialogue();
+		}
+	}
 }
 
-void ANarrativeDialogueManager::InitializeDialogueDatabase()
+// ============================================================
+// Proximity Overlap
+// ============================================================
+
+void ANarrativeDialogueManager::OnProximityOverlap(
+	UPrimitiveComponent* OverlappedComp,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComp,
+	int32 OtherBodyIndex,
+	bool bFromSweep,
+	const FHitResult& SweepResult)
 {
-    DialogueDatabase.Empty();
-    CreateDefaultDialogueEntries();
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue database initialized with %d entries"), DialogueDatabase.Num());
+	if (!OtherActor) return;
+	if (CurrentState != ENarr_DialogueState::Idle) return;
+	if (bOnCooldown) return;
+
+	// Find a tree with ProximityEnter trigger
+	for (const FNarr_DialogueTree& Tree : DialogueTrees)
+	{
+		if (Tree.TriggerType == ENarr_DialogueTriggerType::ProximityEnter)
+		{
+			TriggerDialogueTree(Tree.TreeID);
+			return;
+		}
+	}
 }
 
-void ANarrativeDialogueManager::CreateDefaultDialogueEntries()
+// ============================================================
+// TriggerDialogueTree
+// ============================================================
+
+void ANarrativeDialogueManager::TriggerDialogueTree(const FString& TreeID)
 {
-    // Entrada 1: Aviso táctico sobre T-Rex
-    FNarr_DialogueEntry TacticalWarning;
-    TacticalWarning.DialogueID = TEXT("tactical_trex_warning");
-    TacticalWarning.DialogueType = ENarr_DialogueType::TacticalWarning;
-    TacticalWarning.TriggerType = ENarr_DialogueTrigger::DinosaurSighting;
-    TacticalWarning.DialogueText = TEXT("Attention, survivor. You've entered a critical zone. The large predator ahead is a T-Rex - apex hunter of this territory. Stay low, move slowly, and avoid direct eye contact.");
-    TacticalWarning.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777811654649_TacticalNarrator.mp3");
-    TacticalWarning.CharacterName = TEXT("Tactical Narrator");
-    TacticalWarning.Duration = 15.0f;
-    TacticalWarning.Priority = 10;
-    TacticalWarning.bIsRepeatable = true;
-    DialogueDatabase.Add(TacticalWarning);
+	const FNarr_DialogueTree* Tree = FindTree(TreeID);
+	if (!Tree) return;
 
-    // Entrada 2: Log de investigação de campo
-    FNarr_DialogueEntry FieldResearch;
-    FieldResearch.DialogueID = TEXT("field_research_raptors");
-    FieldResearch.DialogueType = ENarr_DialogueType::FieldResearch;
-    FieldResearch.TriggerType = ENarr_DialogueTrigger::PlayerProximity;
-    FieldResearch.DialogueText = TEXT("Field research log, day 127. The pack dynamics I'm observing are extraordinary. These raptors communicate through complex vocalizations and coordinated hunting patterns.");
-    FieldResearch.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777811657324_FieldResearcher.mp3");
-    FieldResearch.CharacterName = TEXT("Field Researcher");
-    FieldResearch.Duration = 16.0f;
-    FieldResearch.Priority = 5;
-    FieldResearch.bIsRepeatable = false;
-    DialogueDatabase.Add(FieldResearch);
+	ActiveTreeID = TreeID;
+	ActiveLineID = Tree->StartLineID;
+	CurrentState = ENarr_DialogueState::Playing;
 
-    // Entrada 3: Alerta de segurança sobre herbívoros
-    FNarr_DialogueEntry SafetyAlert;
-    SafetyAlert.DialogueID = TEXT("safety_herbivore_migration");
-    SafetyAlert.DialogueType = ENarr_DialogueType::SafetyAlert;
-    SafetyAlert.TriggerType = ENarr_DialogueTrigger::EnvironmentalChange;
-    SafetyAlert.DialogueText = TEXT("Warning: Environmental hazard detected. Massive herbivore migration in progress. Triceratops herd moving through the valley - maintain safe distance.");
-    SafetyAlert.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777811660004_SafetyNarrator.mp3");
-    SafetyAlert.CharacterName = TEXT("Safety Narrator");
-    SafetyAlert.Duration = 16.0f;
-    SafetyAlert.Priority = 8;
-    SafetyAlert.bIsRepeatable = true;
-    DialogueDatabase.Add(SafetyAlert);
-
-    // Entrada 4: Sabedoria tribal
-    FNarr_DialogueEntry TribalWisdom;
-    TribalWisdom.DialogueID = TEXT("tribal_survival_wisdom");
-    TribalWisdom.DialogueType = ENarr_DialogueType::TribalWisdom;
-    TribalWisdom.TriggerType = ENarr_DialogueTrigger::QuestProgress;
-    TribalWisdom.DialogueText = TEXT("Listen carefully, newcomer. This land has rules written in blood and bone. The raptors hunt in packs at dawn and dusk. The T-Rex claims the eastern ridge as his domain.");
-    TribalWisdom.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777811662404_TribalElder.mp3");
-    TribalWisdom.CharacterName = TEXT("Tribal Elder");
-    TribalWisdom.Duration = 15.0f;
-    TribalWisdom.Priority = 7;
-    TribalWisdom.bIsRepeatable = false;
-    DialogueDatabase.Add(TribalWisdom);
+	FNarr_DialogueLine* Line = FindLine(ActiveLineID);
+	if (Line)
+	{
+		PlayLine(*Line);
+	}
 }
 
-void ANarrativeDialogueManager::PlayDialogue(const FString& DialogueID)
+// ============================================================
+// AdvanceDialogue
+// ============================================================
+
+void ANarrativeDialogueManager::AdvanceDialogue()
 {
-    // Procurar diálogo na base de dados
-    FNarr_DialogueEntry* FoundDialogue = DialogueDatabase.FindByPredicate([DialogueID](const FNarr_DialogueEntry& Entry)
-    {
-        return Entry.DialogueID == DialogueID;
-    });
+	FNarr_DialogueLine* CurrentLine = FindLine(ActiveLineID);
+	if (!CurrentLine)
+	{
+		EndDialogue();
+		return;
+	}
 
-    if (FoundDialogue)
-    {
-        // Parar diálogo actual se estiver a tocar
-        if (bIsPlayingDialogue)
-        {
-            StopCurrentDialogue();
-        }
+	// Check for choices on current line
+	const FNarr_DialogueTree* Tree = FindTree(ActiveTreeID);
+	if (Tree && Tree->Choices.Num() > 0 && CurrentLine->NextLineID.IsEmpty())
+	{
+		CurrentState = ENarr_DialogueState::WaitingForChoice;
+		return;
+	}
 
-        CurrentDialogue = *FoundDialogue;
-        bIsPlayingDialogue = true;
-        DialogueStartTime = GetWorld()->GetTimeSeconds();
-
-        // Mostrar legendas
-        SubtitleText->SetText(FText::FromString(CurrentDialogue.DialogueText));
-        SubtitleText->SetVisibility(true);
-
-        // Configurar timer para esconder legendas
-        GetWorld()->GetTimerManager().SetTimer(SubtitleTimer, this, &ANarrativeDialogueManager::OnDialogueFinished, CurrentDialogue.Duration, false);
-
-        // Marcar como reproduzido se não for repetível
-        if (!FoundDialogue->bIsRepeatable)
-        {
-            FoundDialogue->bHasBeenPlayed = true;
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Playing dialogue '%s' by %s"), *CurrentDialogue.DialogueID, *CurrentDialogue.CharacterName);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeDialogueManager: Dialogue ID '%s' not found"), *DialogueID);
-    }
+	// Auto-advance to next line
+	if (!CurrentLine->NextLineID.IsEmpty())
+	{
+		ActiveLineID = CurrentLine->NextLineID;
+		FNarr_DialogueLine* NextLine = FindLine(ActiveLineID);
+		if (NextLine)
+		{
+			PlayLine(*NextLine);
+		}
+		else
+		{
+			EndDialogue();
+		}
+	}
+	else
+	{
+		EndDialogue();
+	}
 }
 
-void ANarrativeDialogueManager::PlayDialogueByType(ENarr_DialogueType DialogueType)
+// ============================================================
+// EndDialogue
+// ============================================================
+
+void ANarrativeDialogueManager::EndDialogue()
 {
-    // Encontrar diálogos do tipo especificado
-    TArray<FNarr_DialogueEntry> MatchingDialogues = GetDialoguesByType(DialogueType);
-    
-    if (MatchingDialogues.Num() > 0)
-    {
-        // Escolher o de maior prioridade que ainda não foi reproduzido (se aplicável)
-        FNarr_DialogueEntry* BestDialogue = nullptr;
-        int32 HighestPriority = 0;
+	const FNarr_DialogueTree* Tree = FindTree(ActiveTreeID);
+	float Cooldown = Tree ? Tree->CooldownSeconds : 60.0f;
 
-        for (FNarr_DialogueEntry& Dialogue : MatchingDialogues)
-        {
-            if (Dialogue.bIsRepeatable || !Dialogue.bHasBeenPlayed)
-            {
-                if (Dialogue.Priority > HighestPriority)
-                {
-                    BestDialogue = &Dialogue;
-                    HighestPriority = Dialogue.Priority;
-                }
-            }
-        }
-
-        if (BestDialogue)
-        {
-            PlayDialogue(BestDialogue->DialogueID);
-        }
-    }
+	CurrentState = ENarr_DialogueState::Cooldown;
+	bOnCooldown = true;
+	CooldownTimer = Cooldown;
+	ActiveLineID = TEXT("");
 }
 
-void ANarrativeDialogueManager::StopCurrentDialogue()
-{
-    if (bIsPlayingDialogue)
-    {
-        bIsPlayingDialogue = false;
-        
-        // Parar áudio se estiver a tocar
-        if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
-        {
-            DialogueAudioComponent->Stop();
-        }
-
-        // Esconder legendas
-        SubtitleText->SetVisibility(false);
-
-        // Limpar timers
-        GetWorld()->GetTimerManager().ClearTimer(SubtitleTimer);
-        GetWorld()->GetTimerManager().ClearTimer(DialogueTimer);
-
-        UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue stopped"));
-    }
-}
-
-bool ANarrativeDialogueManager::TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FVector& TriggerLocation)
-{
-    if (bIsPlayingDialogue)
-    {
-        return false; // Já está a reproduzir um diálogo
-    }
-
-    FNarr_DialogueEntry BestDialogue = GetHighestPriorityDialogue(TriggerType);
-    
-    if (!BestDialogue.DialogueID.IsEmpty())
-    {
-        PlayDialogue(BestDialogue.DialogueID);
-        return true;
-    }
-
-    return false;
-}
-
-void ANarrativeDialogueManager::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
-{
-    DialogueDatabase.Add(NewEntry);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Added new dialogue entry '%s'"), *NewEntry.DialogueID);
-}
-
-TArray<FNarr_DialogueEntry> ANarrativeDialogueManager::GetDialoguesByType(ENarr_DialogueType DialogueType)
-{
-    TArray<FNarr_DialogueEntry> MatchingDialogues;
-    
-    for (const FNarr_DialogueEntry& Dialogue : DialogueDatabase)
-    {
-        if (Dialogue.DialogueType == DialogueType)
-        {
-            MatchingDialogues.Add(Dialogue);
-        }
-    }
-
-    return MatchingDialogues;
-}
-
-FNarr_DialogueEntry ANarrativeDialogueManager::GetHighestPriorityDialogue(ENarr_DialogueTrigger TriggerType)
-{
-    FNarr_DialogueEntry BestDialogue;
-    int32 HighestPriority = 0;
-
-    for (const FNarr_DialogueEntry& Dialogue : DialogueDatabase)
-    {
-        if (Dialogue.TriggerType == TriggerType)
-        {
-            if (Dialogue.bIsRepeatable || !Dialogue.bHasBeenPlayed)
-            {
-                if (Dialogue.Priority > HighestPriority)
-                {
-                    BestDialogue = Dialogue;
-                    HighestPriority = Dialogue.Priority;
-                }
-            }
-        }
-    }
-
-    return BestDialogue;
-}
-
-void ANarrativeDialogueManager::SetSubtitleVisibility(bool bVisible)
-{
-    SubtitleText->SetVisibility(bVisible);
-}
+// ============================================================
+// IsDialoguePlaying
+// ============================================================
 
 bool ANarrativeDialogueManager::IsDialoguePlaying() const
 {
-    return bIsPlayingDialogue;
+	return CurrentState == ENarr_DialogueState::Playing
+		|| CurrentState == ENarr_DialogueState::WaitingForChoice;
 }
 
-void ANarrativeDialogueManager::OnDialogueFinished()
+// ============================================================
+// GetCurrentLine
+// ============================================================
+
+FNarr_DialogueLine ANarrativeDialogueManager::GetCurrentLine() const
 {
-    StopCurrentDialogue();
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Dialogue finished"));
+	for (const FNarr_DialogueTree& Tree : DialogueTrees)
+	{
+		for (const FNarr_DialogueLine& Line : Tree.Lines)
+		{
+			if (Line.LineID == ActiveLineID)
+			{
+				return Line;
+			}
+		}
+	}
+	return FNarr_DialogueLine();
 }
 
-void ANarrativeDialogueManager::UpdateSubtitleDisplay()
-{
-    if (bIsPlayingDialogue && PlayerCharacter)
-    {
-        // Posicionar legendas acima do jogador
-        FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-        FVector SubtitleLocation = PlayerLocation + FVector(0, 0, 200);
-        SubtitleText->SetWorldLocation(SubtitleLocation);
+// ============================================================
+// GetCurrentChoices
+// ============================================================
 
-        // Rodar legendas para ficarem viradas para a câmara
-        if (PlayerCharacter->GetController())
-        {
-            FRotator CameraRotation = PlayerCharacter->GetController()->GetControlRotation();
-            FRotator SubtitleRotation = FRotator(0, CameraRotation.Yaw, 0);
-            SubtitleText->SetWorldRotation(SubtitleRotation);
-        }
-    }
+TArray<FNarr_DialogueChoice> ANarrativeDialogueManager::GetCurrentChoices() const
+{
+	const FNarr_DialogueTree* Tree = FindTree(ActiveTreeID);
+	if (Tree)
+	{
+		return Tree->Choices;
+	}
+	return TArray<FNarr_DialogueChoice>();
 }
 
-void ANarrativeDialogueManager::LoadAudioFromURL(const FString& AudioURL)
+// ============================================================
+// SelectChoice
+// ============================================================
+
+void ANarrativeDialogueManager::SelectChoice(int32 ChoiceIndex)
 {
-    // Implementação futura para carregar áudio de URL
-    // Por agora, usar sistema de áudio local do UE5
-    UE_LOG(LogTemp, Log, TEXT("NarrativeDialogueManager: Audio URL registered: %s"), *AudioURL);
+	if (CurrentState != ENarr_DialogueState::WaitingForChoice) return;
+
+	const FNarr_DialogueTree* Tree = FindTree(ActiveTreeID);
+	if (!Tree) return;
+	if (!Tree->Choices.IsValidIndex(ChoiceIndex)) return;
+
+	const FNarr_DialogueChoice& Choice = Tree->Choices[ChoiceIndex];
+
+	if (Choice.bEndsDialogue || Choice.NextLineID.IsEmpty())
+	{
+		EndDialogue();
+		return;
+	}
+
+	ActiveLineID = Choice.NextLineID;
+	FNarr_DialogueLine* NextLine = FindLine(ActiveLineID);
+	if (NextLine)
+	{
+		CurrentState = ENarr_DialogueState::Playing;
+		PlayLine(*NextLine);
+	}
+	else
+	{
+		EndDialogue();
+	}
+}
+
+// ============================================================
+// RegisterDialogueTree
+// ============================================================
+
+void ANarrativeDialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& NewTree)
+{
+	// Replace existing tree with same ID or add new
+	for (int32 i = 0; i < DialogueTrees.Num(); ++i)
+	{
+		if (DialogueTrees[i].TreeID == NewTree.TreeID)
+		{
+			DialogueTrees[i] = NewTree;
+			return;
+		}
+	}
+	DialogueTrees.Add(NewTree);
+}
+
+// ============================================================
+// BuildDefaultDialogueTrees — Tribal Elder + Herd Tracker trees
+// ============================================================
+
+void ANarrativeDialogueManager::BuildDefaultDialogueTrees()
+{
+	// ---- Tribal Elder: Raptor Warning ----
+	{
+		FNarr_DialogueTree ElderTree;
+		ElderTree.TreeID = TEXT("ELDER_RAPTOR_WARNING");
+		ElderTree.TriggerType = ENarr_DialogueTriggerType::ProximityEnter;
+		ElderTree.CooldownSeconds = 120.0f;
+		ElderTree.StartLineID = TEXT("ELDER_01");
+
+		FNarr_DialogueLine Line1;
+		Line1.LineID = TEXT("ELDER_01");
+		Line1.Speaker = ENarr_SpeakerRole::TribalElder;
+		Line1.LineText = TEXT("Listen carefully. The raptors hunt in threes. One drives the prey, two flank from the sides.");
+		Line1.Duration = 5.0f;
+		Line1.NextLineID = TEXT("ELDER_02");
+
+		FNarr_DialogueLine Line2;
+		Line2.LineID = TEXT("ELDER_02");
+		Line2.Speaker = ENarr_SpeakerRole::TribalElder;
+		Line2.LineText = TEXT("If you hear clicking from the left, run right. Never in a straight line. The tribe that forgets this does not survive the season.");
+		Line2.Duration = 6.0f;
+		Line2.NextLineID = TEXT("");
+
+		ElderTree.Lines.Add(Line1);
+		ElderTree.Lines.Add(Line2);
+
+		FNarr_DialogueChoice Choice1;
+		Choice1.ChoiceText = TEXT("I understand. I will be careful.");
+		Choice1.bEndsDialogue = true;
+
+		FNarr_DialogueChoice Choice2;
+		Choice2.ChoiceText = TEXT("What if there are more than three?");
+		Choice2.NextLineID = TEXT("ELDER_03");
+		Choice2.bEndsDialogue = false;
+
+		FNarr_DialogueLine Line3;
+		Line3.LineID = TEXT("ELDER_03");
+		Line3.Speaker = ENarr_SpeakerRole::TribalElder;
+		Line3.LineText = TEXT("Then you climb. They cannot follow you into the trees. Remember that.");
+		Line3.Duration = 4.0f;
+		Line3.NextLineID = TEXT("");
+
+		ElderTree.Lines.Add(Line3);
+		ElderTree.Choices.Add(Choice1);
+		ElderTree.Choices.Add(Choice2);
+
+		RegisterDialogueTree(ElderTree);
+	}
+
+	// ---- Herd Tracker: Brachiosaurus Observation ----
+	{
+		FNarr_DialogueTree TrackerTree;
+		TrackerTree.TreeID = TEXT("TRACKER_HERD_OBSERVATION");
+		TrackerTree.TriggerType = ENarr_DialogueTriggerType::DinosaurSighted;
+		TrackerTree.CooldownSeconds = 90.0f;
+		TrackerTree.StartLineID = TEXT("TRACKER_01");
+
+		FNarr_DialogueLine T1;
+		T1.LineID = TEXT("TRACKER_01");
+		T1.Speaker = ENarr_SpeakerRole::HerdTracker;
+		T1.LineText = TEXT("We have tracked the herd for three days. The big ones — the long-necks — they move slow but they remember.");
+		T1.Duration = 5.5f;
+		T1.NextLineID = TEXT("TRACKER_02");
+
+		FNarr_DialogueLine T2;
+		T2.LineID = TEXT("TRACKER_02");
+		T2.Speaker = ENarr_SpeakerRole::HerdTracker;
+		T2.LineText = TEXT("Scare them once and they will not return to this valley for a full moon cycle. Do not hunt them. Watch them.");
+		T2.Duration = 5.0f;
+		T2.NextLineID = TEXT("");
+
+		TrackerTree.Lines.Add(T1);
+		TrackerTree.Lines.Add(T2);
+
+		RegisterDialogueTree(TrackerTree);
+	}
+
+	// ---- Scout: Flood Warning ----
+	{
+		FNarr_DialogueTree ScoutTree;
+		ScoutTree.TreeID = TEXT("SCOUT_FLOOD_WARNING");
+		ScoutTree.TriggerType = ENarr_DialogueTriggerType::TimeOfDay;
+		ScoutTree.CooldownSeconds = 300.0f;
+		ScoutTree.StartLineID = TEXT("SCOUT_01");
+
+		FNarr_DialogueLine S1;
+		S1.LineID = TEXT("SCOUT_01");
+		S1.Speaker = ENarr_SpeakerRole::Scout;
+		S1.LineText = TEXT("The cave paintings do not lie. This valley has flooded seven times. The signs are here again.");
+		S1.Duration = 5.0f;
+		S1.NextLineID = TEXT("SCOUT_02");
+
+		FNarr_DialogueLine S2;
+		S2.LineID = TEXT("SCOUT_02");
+		S2.Speaker = ENarr_SpeakerRole::Scout;
+		S2.LineText = TEXT("The river bends, the birds fly south early, the ground lizards burrow deep. We have maybe four days. Move the camp now.");
+		S2.Duration = 5.5f;
+		S2.NextLineID = TEXT("");
+
+		ScoutTree.Lines.Add(S1);
+		ScoutTree.Lines.Add(S2);
+
+		RegisterDialogueTree(ScoutTree);
+	}
+}
+
+// ============================================================
+// Private helpers
+// ============================================================
+
+FNarr_DialogueLine* ANarrativeDialogueManager::FindLine(const FString& LineID)
+{
+	for (FNarr_DialogueTree& Tree : DialogueTrees)
+	{
+		for (FNarr_DialogueLine& Line : Tree.Lines)
+		{
+			if (Line.LineID == LineID)
+			{
+				return &Line;
+			}
+		}
+	}
+	return nullptr;
+}
+
+const FNarr_DialogueTree* ANarrativeDialogueManager::FindTree(const FString& TreeID) const
+{
+	for (const FNarr_DialogueTree& Tree : DialogueTrees)
+	{
+		if (Tree.TreeID == TreeID)
+		{
+			return &Tree;
+		}
+	}
+	return nullptr;
+}
+
+void ANarrativeDialogueManager::PlayLine(const FNarr_DialogueLine& Line)
+{
+	LineTimer = Line.Duration;
+	UE_LOG(LogTemp, Log, TEXT("[Narrative] Playing line [%s] — %s: %s"),
+		*Line.LineID,
+		*UEnum::GetValueAsString(Line.Speaker),
+		*Line.LineText);
 }

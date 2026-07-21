@@ -1,0 +1,107 @@
+{
+  "npc_behavior_config_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_006",
+  "agent": "NPC Behavior Agent #11",
+
+  "species": {
+    "raptor_pack": {
+      "detection_range_units": 3000,
+      "chase_speed_cms": 800,
+      "patrol_speed_cms": 300,
+      "attack_range_units": 200,
+      "pack_size": 3,
+      "flanking_enabled": true,
+      "flanking_angle_degrees": 45,
+      "communication_type": "click_growl",
+      "silence_ambush_threshold_seconds": 2.0,
+      "behavior_states": ["Patrol", "Alert", "Flank", "Chase", "Attack", "Retreat"],
+      "patrol_waypoints": [
+        "Waypoint_Raptor_E01",
+        "Waypoint_Raptor_E02",
+        "Waypoint_Raptor_E03",
+        "Waypoint_Raptor_E04"
+      ],
+      "behavior_zones": [
+        "BehaviorZone_Raptor_Flank_L",
+        "BehaviorZone_Raptor_Flank_R",
+        "BehaviorZone_Raptor_Ambush"
+      ],
+      "tts_narrator_audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771007614_DinoNarrator_Raptor.mp3",
+      "notes": "Raptors hunt in coordinated packs. Two flank while one drives prey. Silence = ambush trigger. Player must back against terrain to break flanking geometry."
+    },
+
+    "brachiosaurus_herd": {
+      "detection_range_units": 1500,
+      "migration_speed_cms": 200,
+      "alert_proximity_units": 300,
+      "panic_proximity_units": 150,
+      "herd_follow_delay_seconds": 2.0,
+      "elder_leads_migration": true,
+      "juvenile_panic_multiplier": 1.5,
+      "behavior_states": ["Graze", "Migrate", "Alert", "Panic", "Flee"],
+      "migration_waypoints": [
+        "Waypoint_Herd_N01",
+        "Waypoint_Herd_N02",
+        "Waypoint_Herd_N03"
+      ],
+      "tts_narrator_audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771012266_DinoNarrator_Herd.mp3",
+      "notes": "Elder Brachio leads migration north. Player can follow herd at 300m+ to use them as cover from predators. Juveniles panic if player gets within 150 units — this alerts the whole herd."
+    },
+
+    "trex": {
+      "detection_range_units": 5000,
+      "patrol_radius_units": 5000,
+      "chase_speed_cms": 600,
+      "attack_range_units": 350,
+      "roar_trigger_distance_units": 2000,
+      "territory_aggression": "high",
+      "behavior_states": ["Patrol", "Investigate", "Roar", "Chase", "Attack", "Eat", "Rest"],
+      "notes": "T-Rex patrols a 5000-unit radius territory. Roars at 2000 units to intimidate. Chase begins at 3000 units. Attack at 350 units. Player must use terrain, fire, or herd stampedes to escape."
+    }
+  },
+
+  "global_behavior_rules": {
+    "player_footstep_detection": {
+      "enabled": true,
+      "dry_ground_multiplier": 1.5,
+      "crouch_reduction": 0.3,
+      "description": "Footsteps on dry ground increase detection radius by 50%. Crouching reduces noise signature by 70%."
+    },
+    "fire_deterrent": {
+      "enabled": true,
+      "deterrent_radius_units": 800,
+      "description": "Active fire sources deter all predators within 800 units. Raptors will not enter fire radius."
+    },
+    "herd_stampede_trigger": {
+      "enabled": true,
+      "trigger_conditions": ["loud_noise", "predator_proximity", "player_panic_action"],
+      "stampede_damage_radius_units": 500,
+      "description": "Brachiosaurus herd stampede can be triggered to scatter predators. Dangerous to player if too close."
+    },
+    "day_night_behavior_shift": {
+      "enabled": true,
+      "raptor_night_aggression_multiplier": 1.8,
+      "trex_night_patrol_speed_multiplier": 0.7,
+      "brachio_night_behavior": "sleep_cluster",
+      "description": "Raptors are more aggressive at night. T-Rex patrols slower. Brachiosaurus herds cluster to sleep."
+    }
+  },
+
+  "map_behavior_zones": {
+    "eastern_savanna": {
+      "dominant_species": "raptor_pack",
+      "danger_level": "high",
+      "player_strategy": "avoid_open_ground_use_rocks_for_cover"
+    },
+    "northern_valley": {
+      "dominant_species": "brachiosaurus_herd",
+      "danger_level": "medium",
+      "player_strategy": "follow_herd_migration_use_as_cover"
+    },
+    "central_territory": {
+      "dominant_species": "trex",
+      "danger_level": "extreme",
+      "player_strategy": "avoid_entirely_unless_equipped_with_fire"
+    }
+  }
+}

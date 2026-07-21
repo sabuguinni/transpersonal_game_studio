@@ -4,75 +4,45 @@
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Audio_SpatialAudioManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_SpatialSoundData
+struct TRANSPERSONALGAME_API FAudio_DinosaurSoundProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    TSoftObjectPtr<USoundCue> SoundCue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    FString DinosaurType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    FVector WorldLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    USoundCue* IdleSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    float MaxAudibleDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    USoundCue* MovementSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    USoundCue* AttackSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    float MaxHearingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
     float VolumeMultiplier;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    bool bIsLooping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    bool bIs3D;
-
-    FAudio_SpatialSoundData()
+    FAudio_DinosaurSoundProfile()
     {
-        WorldLocation = FVector::ZeroVector;
-        MaxAudibleDistance = 2000.0f;
+        DinosaurType = TEXT("Unknown");
+        IdleSound = nullptr;
+        MovementSound = nullptr;
+        AttackSound = nullptr;
+        MaxHearingDistance = 5000.0f;
         VolumeMultiplier = 1.0f;
-        bIsLooping = false;
-        bIs3D = true;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TSoftObjectPtr<USoundCue> AmbientLoop;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TSoftObjectPtr<USoundCue> MusicTrack;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TArray<TSoftObjectPtr<USoundCue>> RandomSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float AmbientVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float MusicVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float RandomSoundFrequency;
-
-    FAudio_BiomeAudioSettings()
-    {
-        AmbientVolume = 0.7f;
-        MusicVolume = 0.5f;
-        RandomSoundFrequency = 15.0f;
-    }
-};
-
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AAudio_SpatialAudioManager : public AActor
 {
     GENERATED_BODY()
@@ -82,73 +52,69 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // Componente de áudio principal
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* MasterAudioComponent;
-
-    // Componentes de áudio para diferentes canais
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* AmbientAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* MusicAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* EffectsAudioComponent;
-
-    // Configurações de áudio por bioma
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TMap<FString, FAudio_BiomeAudioSettings> BiomeAudioSettings;
-
-    // Sons espaciais activos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
-    TArray<FAudio_SpatialSoundData> ActiveSpatialSounds;
-
-    // Referência ao jogador
-    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
-    APawn* PlayerPawn;
-
-    // Estado actual do sistema
-    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
-    FString CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
-    float CurrentThreatLevel;
-
-    // Timers para sons aleatórios
-    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
-    float RandomSoundTimer;
 
 public:
-    // Métodos principais
+    virtual void Tick(float DeltaTime) override;
+
+    // Core spatial audio functions
     UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void PlaySpatialSound(const FAudio_SpatialSoundData& SoundData);
+    void PlaySoundAtLocation(USoundCue* Sound, FVector Location, float VolumeMultiplier = 1.0f, float PitchMultiplier = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void StopSpatialSound(FVector Location, float Tolerance = 100.0f);
+    void PlayDinosaurSound(const FString& DinosaurType, const FString& SoundType, FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
-    void SetCurrentBiome(const FString& BiomeName);
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void RegisterDinosaurSoundProfile(const FAudio_DinosaurSoundProfile& Profile);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
-    void SetThreatLevel(float ThreatLevel);
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void SetMasterSpatialVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UpdatePlayerReference();
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    float CalculateDistanceAttenuation(FVector SoundLocation, FVector ListenerLocation, float MaxDistance);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeBiomeAudioSettings();
+    // Screen shake integration
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void TriggerFootstepShake(FVector FootstepLocation, float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    FString DetectCurrentBiome(FVector PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Audio Effects")
+    void PlayFootstepWithShake(FVector Location, const FString& DinosaurType);
 
 protected:
-    // Métodos internos
-    void UpdateSpatialAudio();
-    void UpdateBiomeAudio();
-    void ProcessRandomSounds(float DeltaTime);
-    void CleanupFinishedSounds();
-    float CalculateVolumeFromDistance(FVector SoundLocation, FVector ListenerLocation, float MaxDistance);
+    // Audio components for spatial sound management
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* SpatialAudioComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* EnvironmentalAudioComponent;
+
+    // Dinosaur sound profiles
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    TArray<FAudio_DinosaurSoundProfile> DinosaurSoundProfiles;
+
+    // Master volume controls
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float MasterSpatialVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+    float MaxAudioDistance;
+
+    // Screen shake settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float FootstepShakeIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Effects", meta = (ClampMin = "0.0", ClampMax = "5000.0"))
+    float FootstepShakeRadius;
+
+private:
+    // Internal audio management
+    void InitializeDinosaurSoundProfiles();
+    void UpdateSpatialAudio(float DeltaTime);
+    FAudio_DinosaurSoundProfile* FindDinosaurProfile(const FString& DinosaurType);
+    
+    // Player reference for distance calculations
+    APawn* PlayerPawn;
+    
+    // Audio timing management
+    float LastAudioUpdateTime;
+    float AudioUpdateInterval;
 };

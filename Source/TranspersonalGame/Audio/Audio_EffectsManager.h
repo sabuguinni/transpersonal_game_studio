@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
 #include "Camera/CameraShakeBase.h"
@@ -10,61 +10,53 @@
 #include "Audio_EffectsManager.generated.h"
 
 USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_ScreenEffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
+    float Duration = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
+    float Intensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
+    FLinearColor Color = FLinearColor::Red;
+
+    FAudio_ScreenEffectData()
+    {
+        Duration = 1.0f;
+        Intensity = 0.5f;
+        Color = FLinearColor::Red;
+    }
+};
+
+USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FAudio_FootstepData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    USoundCue* FootstepSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    USoundCue* FootstepSound = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float VolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    float VolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    float PitchVariation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    float ShakeRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
-    bool bCreateDustEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    float ShakeIntensity = 1.0f;
 
     FAudio_FootstepData()
     {
         FootstepSound = nullptr;
         VolumeMultiplier = 1.0f;
-        PitchVariation = 0.1f;
-        bCreateDustEffect = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ImpactData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
-    USoundCue* ImpactSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
-    TSubclassOf<UCameraShakeBase> CameraShakeClass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
-    float ShakeIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact")
-    float ShakeRadius;
-
-    FAudio_ImpactData()
-    {
-        ImpactSound = nullptr;
-        CameraShakeClass = nullptr;
+        ShakeRadius = 500.0f;
         ShakeIntensity = 1.0f;
-        ShakeRadius = 1000.0f;
     }
 };
 
-/**
- * Gestor de efeitos audiovisuais para feedback de gameplay
- * Gere footsteps, screen shake, damage effects e feedback táctil
- */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAudio_EffectsManager : public UActorComponent
 {
@@ -76,104 +68,62 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
+    FAudio_ScreenEffectData DamageFlashData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
+    TMap<ESurvivalCreatureType, FAudio_FootstepData> FootstepDataMap;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Shake")
+    TSubclassOf<UCameraShakeBase> TRexFootstepShake;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Shake")
+    TSubclassOf<UCameraShakeBase> PlayerFootstepShake;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Components")
+    UAudioComponent* AmbientAudioComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    float DayNightCycleDuration = 1200.0f; // 20 minutes
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Day Night Cycle")
+    float CurrentTimeOfDay = 0.5f; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
+
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // === FOOTSTEP SYSTEM ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
-    TMap<EGroundType, FAudio_FootstepData> FootstepDataMap;
+    UFUNCTION(BlueprintCallable, Category = "Screen Effects")
+    void TriggerDamageFlash(float Duration = 0.5f, float Intensity = 0.8f, FLinearColor Color = FLinearColor::Red);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
-    float FootstepVolumeMultiplier;
+    UFUNCTION(BlueprintCallable, Category = "Footsteps")
+    void PlayFootstepEffect(ESurvivalCreatureType CreatureType, FVector Location, float VolumeOverride = 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footsteps")
-    float MinFootstepInterval;
+    UFUNCTION(BlueprintCallable, Category = "Camera Shake")
+    void TriggerCameraShake(TSubclassOf<UCameraShakeBase> ShakeClass, float Intensity = 1.0f, float Radius = 1000.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void PlayFootstep(EGroundType GroundType, FVector Location, float VelocityMultiplier = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    void UpdateDayNightCycle(float DeltaTime);
 
-    // === SCREEN SHAKE SYSTEM ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    TMap<EDinosaurSpecies, FAudio_ImpactData> DinosaurImpactMap;
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    float GetTimeOfDay() const { return CurrentTimeOfDay; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    float MaxShakeDistance;
+    UFUNCTION(BlueprintCallable, Category = "Day Night Cycle")
+    bool IsNightTime() const { return CurrentTimeOfDay < 0.25f || CurrentTimeOfDay > 0.75f; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Shake")
-    bool bEnableScreenShake;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetAmbientVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerDinosaurFootstep(EDinosaurSpecies Species, FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerScreenShake(TSubclassOf<UCameraShakeBase> ShakeClass, FVector Location, float Intensity = 1.0f);
-
-    // === DAMAGE EFFECTS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Effects")
-    float DamageFlashDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Effects")
-    FLinearColor DamageFlashColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Effects")
-    USoundCue* DamageSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage Effects")
-    TSubclassOf<UCameraShakeBase> DamageCameraShake;
-
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TriggerDamageEffect(float DamageAmount, FVector HitLocation);
-
-    // === ENVIRONMENTAL EFFECTS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    TMap<EBiomeType, USoundCue*> BiomeAmbientSounds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float BiomeTransitionTime;
-
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void TransitionToBiome(EBiomeType NewBiome, float TransitionDuration = 2.0f);
-
-    // === PROXIMITY EFFECTS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    float ProximityCheckRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    float HeartbeatIntensityMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
-    USoundCue* HeartbeatSound;
-
-    UFUNCTION(BlueprintCallable, Category = "Effects")
-    void UpdateProximityEffects(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlaySoundAtLocation(USoundCue* Sound, FVector Location, float Volume = 1.0f, float Pitch = 1.0f);
 
 private:
-    // === INTERNAL STATE ===
+    void InitializeFootstepData();
+    void UpdateDirectionalLightRotation();
     
     UPROPERTY()
-    UAudioComponent* AmbientAudioComponent;
+    class ADirectionalLight* SunLight;
 
-    UPROPERTY()
-    UAudioComponent* EffectsAudioComponent;
-
-    UPROPERTY()
-    UAudioComponent* HeartbeatAudioComponent;
-
-    float LastFootstepTime;
-    EBiomeType CurrentBiome;
-    float DamageFlashTimer;
-    bool bIsDamageFlashActive;
-
-    // === HELPER METHODS ===
-    
-    void InitializeAudioComponents();
-    void UpdateDamageFlash(float DeltaTime);
-    float CalculateDistanceAttenuation(FVector SourceLocation, float MaxDistance);
-    EGroundType DetectGroundType(FVector Location);
-    void CreateDustParticle(FVector Location, EGroundType GroundType);
+    float ScreenFlashTimer = 0.0f;
+    FAudio_ScreenEffectData ActiveFlashData;
+    bool bIsFlashing = false;
 };

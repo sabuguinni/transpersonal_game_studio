@@ -1,206 +1,160 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
-#include "Sound/SoundCue.h"
-#include "Components/AudioComponent.h"
-#include "../SharedTypes.h"
+#include "GameFramework/Actor.h"
 #include "DialogueSystem.generated.h"
 
-// Dialogue trigger types for survival narrative
+// ============================================================
+// ENarr_DialogueCondition — conditions that gate dialogue lines
+// ============================================================
 UENUM(BlueprintType)
-enum class ENarr_DialogueTrigger : uint8
+enum class ENarr_DialogueCondition : uint8
 {
-    ProximityToDinosaur     UMETA(DisplayName = "Proximity to Dinosaur"),
-    BiomeEntry              UMETA(DisplayName = "Biome Entry"),
-    DangerDetection         UMETA(DisplayName = "Danger Detection"),
-    ResourceDiscovery       UMETA(DisplayName = "Resource Discovery"),
-    WeatherChange           UMETA(DisplayName = "Weather Change"),
-    TimeOfDay               UMETA(DisplayName = "Time of Day"),
-    HealthCritical          UMETA(DisplayName = "Health Critical"),
-    FirstEncounter          UMETA(DisplayName = "First Encounter")
+    None            UMETA(DisplayName = "None"),
+    HasCampfire     UMETA(DisplayName = "Has Crafted Campfire"),
+    HasSpear        UMETA(DisplayName = "Has Crafted Spear"),
+    HasStoneAxe     UMETA(DisplayName = "Has Stone Axe"),
+    HasLeatherWrap  UMETA(DisplayName = "Has Leather Wrap"),
+    HerdStampeding  UMETA(DisplayName = "Herd Is Stampeding"),
+    NearRaptorNest  UMETA(DisplayName = "Near Raptor Nest"),
+    NearCampfire    UMETA(DisplayName = "Near Campfire Site"),
+    FirstVisit      UMETA(DisplayName = "First Time Visiting NPC"),
+    PlayerHealthLow UMETA(DisplayName = "Player Health Below 30pct"),
+    NightTime       UMETA(DisplayName = "Is Night Time")
 };
 
-// Narrative voice types for different contexts
+// ============================================================
+// ENarr_NPCRole — what kind of NPC is speaking
+// ============================================================
 UENUM(BlueprintType)
-enum class ENarr_VoiceType : uint8
+enum class ENarr_NPCRole : uint8
 {
-    TacticalNarrator        UMETA(DisplayName = "Tactical Narrator"),
-    FieldResearcher         UMETA(DisplayName = "Field Researcher"),
-    SafetyGuide             UMETA(DisplayName = "Safety Guide"),
-    BehaviorAnalyst         UMETA(DisplayName = "Behavior Analyst"),
-    SurvivalInstructor      UMETA(DisplayName = "Survival Instructor")
+    TribalElder   UMETA(DisplayName = "Tribal Elder"),
+    ChiefHunter   UMETA(DisplayName = "Chief Hunter"),
+    ScoutRunner   UMETA(DisplayName = "Scout Runner"),
+    CampBuilder   UMETA(DisplayName = "Camp Builder"),
+    Tracker       UMETA(DisplayName = "Tracker")
 };
 
-// Dialogue line data structure
+// ============================================================
+// FNarr_DialogueLine — a single spoken line with condition
+// ============================================================
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine
+struct FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString LineText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_VoiceType VoiceType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString AudioURL;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueTrigger TriggerType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_DialogueCondition RequiredCondition = ENarr_DialogueCondition::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEng_BiomeType TargetBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    bool bIsFirstVisitOnly = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEng_DinosaurSpecies TargetDinosaur;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float TriggerDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bPlayOnce;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bHasBeenPlayed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    USoundBase* AudioClip;
-
-    FNarr_DialogueLine()
-    {
-        DialogueText = "Default dialogue line";
-        VoiceType = ENarr_VoiceType::TacticalNarrator;
-        TriggerType = ENarr_DialogueTrigger::ProximityToDinosaur;
-        TargetBiome = EEng_BiomeType::Savanna;
-        TargetDinosaur = EEng_DinosaurSpecies::TRex;
-        TriggerDistance = 1000.0f;
-        bPlayOnce = true;
-        bHasBeenPlayed = false;
-        AudioClip = nullptr;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float DisplayDurationSeconds = 5.0f;
 };
 
-// Dynamic narrative context tracking
+// ============================================================
+// FNarr_NPCDialogueTree — full dialogue set for one NPC
+// ============================================================
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeContext
+struct FNarr_NPCDialogueTree
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_BiomeType CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_ThreatLevel CurrentThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole Role = ENarr_NPCRole::TribalElder;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<EEng_DinosaurSpecies> NearbyDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_DialogueLine> Lines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    float ClosestDinosaurDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_TimeOfDay CurrentTimeOfDay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_WeatherType CurrentWeather;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    FEng_SurvivalStats PlayerStats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<FString> TriggeredDialogueIDs;
-
-    FNarr_NarrativeContext()
-    {
-        CurrentBiome = EEng_BiomeType::Savanna;
-        CurrentThreatLevel = EEng_ThreatLevel::Safe;
-        ClosestDinosaurDistance = 10000.0f;
-        CurrentTimeOfDay = EEng_TimeOfDay::Morning;
-        CurrentWeather = EEng_WeatherType::Clear;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString DefaultLine;
 };
 
-/**
- * Dynamic Dialogue System for Prehistoric Survival Game
- * Provides contextual narrative based on player situation, location, and threats
- * NO SPIRITUAL CONTENT - Focus on survival, danger, and scientific observation
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
+// ============================================================
+// UNarr_DialogueComponent — attach to any NPC actor
+// ============================================================
+UCLASS(ClassGroup = (Narrative), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueSystem();
+    UNarr_DialogueComponent();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FNarr_NPCDialogueTree DialogueTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    float InteractionRadius = 300.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    bool bHasBeenVisited = false;
+
+    // Returns the best matching line given current game state flags
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetBestLine(
+        bool bPlayerHasCampfire,
+        bool bPlayerHasSpear,
+        bool bPlayerHasStoneAxe,
+        bool bPlayerHasLeatherWrap,
+        bool bHerdStampeding,
+        bool bNearRaptorNest,
+        bool bIsNight,
+        float PlayerHealthPct
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void MarkVisited();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsPlayerInRange(FVector PlayerLocation) const;
 
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Dialogue database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Database")
-    TArray<FNarr_DialogueLine> DialogueLines;
-
-    // Current narrative context
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative Context")
-    FNarr_NarrativeContext CurrentContext;
-
-    // Audio playback component
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* DialogueAudioComponent;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float ContextUpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float DinosaurDetectionRange;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bEnableDebugLogging;
-
-    // Core dialogue functions
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void UpdateNarrativeContext();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void CheckDialogueTriggers();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopCurrentDialogue();
-
-    // Context detection functions
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    EEng_BiomeType DetectCurrentBiome(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    TArray<AActor*> FindNearbyDinosaurs(float SearchRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    EEng_ThreatLevel CalculateThreatLevel();
-
-    // Dialogue management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue Management")
-    void AddDialogueLine(const FNarr_DialogueLine& NewDialogue);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue Management")
-    void InitializeDefaultDialogues();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue Management")
-    FNarr_DialogueLine* FindBestDialogueForContext();
-
 private:
-    float LastContextUpdate;
-    bool bIsPlayingDialogue;
-    FString CurrentDialogueID;
+    bool ConditionMet(ENarr_DialogueCondition Cond,
+        bool bHasCampfire, bool bHasSpear, bool bHasAxe, bool bHasWrap,
+        bool bHerdStamping, bool bNearNest, bool bIsNight, float HealthPct) const;
+};
 
-    // Helper functions
-    bool ShouldTriggerDialogue(const FNarr_DialogueLine& DialogueLine);
-    float CalculateDialoguePriority(const FNarr_DialogueLine& DialogueLine);
-    void LogNarrativeEvent(const FString& Event);
+// ============================================================
+// ANarr_DialogueNPC — world NPC actor with dialogue
+// ============================================================
+UCLASS()
+class TRANSPERSONALGAME_API ANarr_DialogueNPC : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ANarr_DialogueNPC();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative",
+        meta = (AllowPrivateAccess = "true"))
+    UNarr_DialogueComponent* DialogueComp;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative",
+        meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* MeshComp;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    ENarr_NPCRole NPCRole = ENarr_NPCRole::TribalElder;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void InitialiseDialogueTree();
+
+protected:
+    virtual void BeginPlay() override;
 };

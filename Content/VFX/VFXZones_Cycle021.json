@@ -1,0 +1,202 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260702_010",
+  "agent": "VFX_Agent_17",
+  "description": "VFX zone definitions for MinPlayableMap — 6 particle effect anchor points placed as point lights",
+  "vfx_zones": [
+    {
+      "id": "VFX_Campfire_ElderCamp_001",
+      "type": "fire_campfire",
+      "location": {"x": 800, "y": 200, "z": 120},
+      "niagara_system": "NS_Fire_Campfire",
+      "color_rgb": [1.0, 0.35, 0.02],
+      "light_intensity": 2500,
+      "light_radius": 600,
+      "audio_zone_ref": "AudioZone_ElderCamp_001",
+      "npc_ref": "TribalElder",
+      "particle_params": {
+        "spawn_rate": 80,
+        "lifetime": 1.2,
+        "velocity_z": 120,
+        "size_min": 8,
+        "size_max": 24,
+        "color_start": [1.0, 0.6, 0.1],
+        "color_end": [0.2, 0.05, 0.0],
+        "smoke_enabled": true,
+        "ember_count": 15
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 800,
+        "lod2_distance": 2000,
+        "cull_distance": 4000
+      }
+    },
+    {
+      "id": "VFX_Dust_RaptorCanyon_001",
+      "type": "dust_cloud",
+      "location": {"x": -600, "y": 1200, "z": 150},
+      "niagara_system": "NS_Dino_FootstepDust",
+      "color_rgb": [0.9, 0.5, 0.1],
+      "light_intensity": 1500,
+      "light_radius": 600,
+      "audio_zone_ref": "AudioZone_RaptorCanyon_001",
+      "npc_ref": "ChiefHunter_Kael",
+      "particle_params": {
+        "spawn_rate": 30,
+        "lifetime": 2.5,
+        "velocity_z": 40,
+        "velocity_spread": 80,
+        "size_min": 20,
+        "size_max": 60,
+        "color_start": [0.6, 0.4, 0.2, 0.8],
+        "color_end": [0.4, 0.3, 0.15, 0.0],
+        "gravity_scale": 0.1,
+        "turbulence": 0.3
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 1200,
+        "lod2_distance": 3000,
+        "cull_distance": 5000
+      }
+    },
+    {
+      "id": "VFX_Mist_RiverCrossing_001",
+      "type": "water_mist",
+      "location": {"x": 1500, "y": -400, "z": 100},
+      "niagara_system": "NS_Water_RiverMist",
+      "color_rgb": [0.1, 0.5, 1.0],
+      "light_intensity": 1200,
+      "light_radius": 800,
+      "audio_zone_ref": "AudioZone_RiverCrossing_001",
+      "npc_ref": "ScoutRunner",
+      "particle_params": {
+        "spawn_rate": 120,
+        "lifetime": 4.0,
+        "velocity_z": 20,
+        "velocity_spread": 150,
+        "size_min": 30,
+        "size_max": 80,
+        "color_start": [0.8, 0.9, 1.0, 0.4],
+        "color_end": [0.6, 0.8, 1.0, 0.0],
+        "gravity_scale": -0.05,
+        "surface_height": 80
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 1500,
+        "lod2_distance": 4000,
+        "cull_distance": 6000
+      }
+    },
+    {
+      "id": "VFX_Tremor_TRexTerritory_001",
+      "type": "ground_tremor",
+      "location": {"x": -2000, "y": -1500, "z": 180},
+      "niagara_system": "NS_Dino_GroundTremor",
+      "color_rgb": [1.0, 0.02, 0.02],
+      "light_intensity": 5000,
+      "light_radius": 1200,
+      "audio_zone_ref": "AudioZone_TRexTerritory_001",
+      "npc_ref": null,
+      "particle_params": {
+        "spawn_rate": 5,
+        "lifetime": 3.0,
+        "ring_radius_start": 0,
+        "ring_radius_end": 400,
+        "velocity_z": 15,
+        "size_min": 40,
+        "size_max": 120,
+        "color_start": [0.5, 0.3, 0.1, 0.9],
+        "color_end": [0.3, 0.2, 0.08, 0.0],
+        "trigger": "TRex_Footstep_Event",
+        "screen_shake_intensity": 0.8,
+        "screen_shake_radius": 2000
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 2000,
+        "lod2_distance": 5000,
+        "cull_distance": 8000
+      }
+    },
+    {
+      "id": "VFX_Footstep_TRex_001",
+      "type": "footstep_dust",
+      "location": {"x": -1800, "y": -1200, "z": 60},
+      "niagara_system": "NS_Dino_FootstepDust",
+      "color_rgb": [0.7, 0.4, 0.1],
+      "light_intensity": 0,
+      "light_radius": 0,
+      "audio_zone_ref": "AudioZone_TRexTerritory_001",
+      "npc_ref": null,
+      "particle_params": {
+        "spawn_rate": 1,
+        "lifetime": 1.8,
+        "velocity_z": 60,
+        "velocity_spread": 120,
+        "size_min": 25,
+        "size_max": 70,
+        "trigger": "TRex_FootL_Socket OR TRex_FootR_Socket",
+        "bone_attach": ["foot_l", "foot_r"]
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 1000,
+        "lod2_distance": 2500,
+        "cull_distance": 4000
+      }
+    },
+    {
+      "id": "VFX_Footstep_Raptor_001",
+      "type": "footstep_dust",
+      "location": {"x": -500, "y": 1000, "z": 60},
+      "niagara_system": "NS_Dino_FootstepDust",
+      "color_rgb": [0.8, 0.6, 0.2],
+      "light_intensity": 0,
+      "light_radius": 0,
+      "audio_zone_ref": "AudioZone_RaptorCanyon_001",
+      "npc_ref": null,
+      "particle_params": {
+        "spawn_rate": 1,
+        "lifetime": 1.2,
+        "velocity_z": 35,
+        "velocity_spread": 80,
+        "size_min": 10,
+        "size_max": 30,
+        "trigger": "Raptor_FootL_Socket OR Raptor_FootR_Socket",
+        "bone_attach": ["foot_l", "foot_r"]
+      },
+      "lod": {
+        "lod0_distance": 0,
+        "lod1_distance": 600,
+        "lod2_distance": 1500,
+        "cull_distance": 3000
+      }
+    }
+  ],
+  "niagara_systems_required": [
+    "NS_Fire_Campfire",
+    "NS_Dino_FootstepDust",
+    "NS_Water_RiverMist",
+    "NS_Dino_GroundTremor",
+    "NS_Weather_Rain",
+    "NS_Weather_Fog",
+    "NS_Combat_BloodSplatter",
+    "NS_Combat_RockImpact"
+  ],
+  "implementation_notes": {
+    "lod_chain": "3-level LOD: LOD0=full particles, LOD1=reduced spawn rate 50%, LOD2=billboard only",
+    "performance_budget": "Max 2000 particles active simultaneously at 60fps",
+    "gpu_sim": true,
+    "collision": "Collision only on LOD0 within 800u of player",
+    "audio_sync": "VFX events fire GameplayEvents that Audio Agent #16 MetaSound nodes listen to",
+    "blueprint_integration": "Each Niagara system exposed as BP callable via VFX_Manager actor"
+  },
+  "vfx_manager_actor": {
+    "label": "VFX_Manager_001",
+    "location": {"x": 0, "y": 0, "z": 200},
+    "class": "UVFX_WeatherController",
+    "status": "placeholder_pending_niagara_implementation"
+  }
+}

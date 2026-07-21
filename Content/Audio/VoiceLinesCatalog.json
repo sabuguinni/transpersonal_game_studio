@@ -1,0 +1,73 @@
+{
+  "version": "1.0.0",
+  "generated_date": "2026-06-17",
+  "agent": "Audio_Agent_16",
+  "voice_lines": [
+    {
+      "id": "trex_warning_001",
+      "character": "TRex_Warning_System",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781689559616_TRex_Warning_System.mp3",
+      "duration_seconds": 9,
+      "text": "Warning. Heavy footsteps detected. Massive carnivore approaching from the western ridge. All survivors take cover immediately.",
+      "trigger_type": "proximity",
+      "trigger_distance": 500,
+      "priority": "critical",
+      "cooldown_seconds": 60
+    },
+    {
+      "id": "survival_guide_raptor_001",
+      "character": "Survival_Guide_Narrator",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781689565167_Survival_Guide_Narrator.mp3",
+      "duration_seconds": 10,
+      "text": "The raptor pack hunts in coordinated strikes. Listen for their calls. Three short chirps means they have surrounded prey. Stay silent and move low.",
+      "trigger_type": "first_encounter",
+      "trigger_entity": "raptor_pack",
+      "priority": "tutorial",
+      "cooldown_seconds": 0
+    }
+  ],
+  "ambient_zones": [
+    {
+      "zone_id": "Forest_Ambience_001",
+      "location": {"x": 5000, "y": 3000, "z": 150},
+      "biome_type": "forest",
+      "sound_layers": ["birds", "insects", "wind_through_trees", "distant_roars"],
+      "radius": 2000,
+      "falloff_type": "linear"
+    },
+    {
+      "zone_id": "River_Ambience_001",
+      "location": {"x": -2000, "y": 4000, "z": 50},
+      "biome_type": "water",
+      "sound_layers": ["flowing_water", "splashing", "frogs", "insects"],
+      "radius": 1500,
+      "falloff_type": "exponential"
+    },
+    {
+      "zone_id": "Plains_Ambience_001",
+      "location": {"x": 8000, "y": -3000, "z": 200},
+      "biome_type": "plains",
+      "sound_layers": ["wind_grass", "distant_thunder", "herbivore_calls"],
+      "radius": 3000,
+      "falloff_type": "linear"
+    },
+    {
+      "zone_id": "Cave_Ambience_001",
+      "location": {"x": -5000, "y": -2000, "z": 100},
+      "biome_type": "cave",
+      "sound_layers": ["dripping_water", "echo", "bat_wings", "distant_growls"],
+      "radius": 1000,
+      "falloff_type": "constant"
+    }
+  ],
+  "danger_triggers": [
+    {
+      "trigger_type": "TriggerBox",
+      "naming_pattern": "AudioWarning_[DinosaurName]",
+      "scale": {"x": 3, "y": 3, "z": 2},
+      "offset_from_dinosaur": 500,
+      "audio_event": "trex_warning_001",
+      "count": 5
+    }
+  ]
+}

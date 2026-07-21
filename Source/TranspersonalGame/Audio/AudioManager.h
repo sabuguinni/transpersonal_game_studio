@@ -2,170 +2,136 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 #include "Engine/World.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "AudioManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
-{
-    Pantano     UMETA(DisplayName = "Pantano"),
-    Floresta    UMETA(DisplayName = "Floresta"), 
-    Savana      UMETA(DisplayName = "Savana"),
-    Deserto     UMETA(DisplayName = "Deserto"),
-    Montanha    UMETA(DisplayName = "Montanha Nevada")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
-{
-    Safe        UMETA(DisplayName = "Safe"),
-    Caution     UMETA(DisplayName = "Caution"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeConfig
+struct TRANSPERSONALGAME_API FAudio_SoundZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    USoundBase* AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BaseVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ReverbIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    TSoftObjectPtr<USoundCue> AmbientSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float WindIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    float Volume;
 
-    FAudio_BiomeConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
+    bool bIsActive;
+
+    FAudio_SoundZone()
     {
-        AmbientSound = nullptr;
-        BaseVolume = 0.5f;
-        ReverbIntensity = 0.3f;
-        WindIntensity = 0.2f;
+        Location = FVector::ZeroVector;
+        Radius = 1000.0f;
+        Volume = 1.0f;
+        bIsActive = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ThreatConfig
+struct TRANSPERSONALGAME_API FAudio_DinosaurSounds
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    USoundBase* ThreatSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    TSoftObjectPtr<USoundCue> RoarSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float VolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    TSoftObjectPtr<USoundCue> FootstepSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float PitchMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    TSoftObjectPtr<USoundCue> BreathingSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bShouldLoop;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    float RoarVolume;
 
-    FAudio_ThreatConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    float FootstepVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    float MaxHearingDistance;
+
+    FAudio_DinosaurSounds()
     {
-        ThreatSound = nullptr;
-        VolumeMultiplier = 1.0f;
-        PitchMultiplier = 1.0f;
-        bShouldLoop = false;
+        RoarVolume = 1.0f;
+        FootstepVolume = 0.8f;
+        MaxHearingDistance = 2000.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AudioManager : public AActor
+class TRANSPERSONALGAME_API AAudioManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AAudio_AudioManager();
+    AAudioManager();
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Audio Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* AmbientAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* MasterAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* ThreatAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zones")
+    TArray<FAudio_SoundZone> AmbientZones;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    UAudioComponent* MusicAudioComponent;
-
-    // Biome Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TMap<EAudio_BiomeType, FAudio_BiomeConfig> BiomeConfigs;
-
-    // Threat Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    TMap<EAudio_ThreatLevel, FAudio_ThreatConfig> ThreatConfigs;
-
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_BiomeType CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_ThreatLevel CurrentThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    TMap<EDinosaurSpecies, FAudio_DinosaurSounds> DinosaurSoundMap;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
     float MasterVolume;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float FadeTime;
+    float AmbientVolume;
 
-    // Public Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetBiome(EAudio_BiomeType NewBiome);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float SFXVolume;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float VoiceVolume;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayThreatSound(EAudio_ThreatLevel ThreatLevel);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    bool bUseMetaSounds;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopThreatSound();
+public:
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void PlayDinosaurSound(EDinosaurSpecies Species, const FString& SoundType, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateAudioBasedOnLocation(FVector PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void UpdateAmbientZone(const FVector& PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_BiomeType DetectBiomeFromLocation(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
     void SetMasterVolume(float NewVolume);
 
-protected:
-    // Internal Functions
-    void InitializeBiomeConfigs();
-    void InitializeThreatConfigs();
-    void UpdateAmbientAudio();
-    void FadeToNewAmbient(USoundBase* NewSound, float TargetVolume);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void PlaySurvivalNarration(const FString& NarrationKey);
 
-    // Timers
-    FTimerHandle BiomeUpdateTimer;
-    void CheckBiomeUpdate();
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void StopAllAmbientSounds();
 
-    // Distance-based threat detection
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    float CalculateThreatDistance();
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void InitializeAudioZones();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float ThreatDetectionRadius;
+private:
+    void SetupDinosaurSounds();
+    void CreateAmbientZones();
+    FAudio_SoundZone* GetClosestAmbientZone(const FVector& Location);
+    
+    UPROPERTY()
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    TArray<AActor*> ThreatActors;
+    float LastZoneUpdateTime;
+    FAudio_SoundZone* CurrentActiveZone;
 };

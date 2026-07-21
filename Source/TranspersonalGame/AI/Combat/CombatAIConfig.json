@@ -1,0 +1,148 @@
+{
+  "version": "1.0",
+  "agent": "Combat_AI_Agent_12",
+  "cycle": "PROD_CYCLE_AUTO_20260703_002",
+  "description": "Combat AI configuration for dinosaur enemies and tribal NPC combat behaviors",
+
+  "raptor_pack": {
+    "species": "Velociraptor",
+    "pack_size": 3,
+    "formation": "flanking_triangle",
+    "hub_distance_u": 1200,
+    "world_positions": {
+      "Raptor_Savana_001": { "x": 3300, "y": 2400, "z": 100, "role": "east_flank_lead" },
+      "Raptor_Savana_002": { "x": 1500, "y": 3400, "z": 100, "role": "northwest_flank" },
+      "Raptor_Savana_003": { "x": 1500, "y": 1400, "z": 100, "role": "southwest_flank" }
+    },
+    "combat_behaviors": {
+      "idle": {
+        "action": "patrol_treeline",
+        "radius_u": 800,
+        "speed_cm_s": 150
+      },
+      "alert": {
+        "trigger": "player_within_2500u",
+        "action": "coordinate_flanking",
+        "pack_communication": true,
+        "coordination_delay_s": 1.5
+      },
+      "attack": {
+        "charge_speed_cm_s": 900,
+        "bite_damage": 35,
+        "bite_range_u": 120,
+        "attack_cooldown_s": 1.2,
+        "pack_attack_stagger": true,
+        "stagger_interval_s": 0.8
+      },
+      "retreat": {
+        "hp_threshold_pct": 20,
+        "flee_speed_cm_s": 1100,
+        "flee_direction": "away_from_player"
+      }
+    },
+    "perception": {
+      "sight_range_u": 2500,
+      "sight_angle_deg": 120,
+      "hearing_range_u": 1500,
+      "smell_range_u": 800,
+      "night_sight_multiplier": 0.6
+    },
+    "tags": ["DinosaurAI", "RaptorPack", "CombatAI", "AmbushFormation"]
+  },
+
+  "trex_patrol": {
+    "species": "Tyrannosaurus_Rex",
+    "patrol_type": "perimeter_loop",
+    "hub_safe_distance_u": 4000,
+    "patrol_waypoints": {
+      "WP_TRex_Patrol_001": { "x": 6600, "y": 2400, "z": 100 },
+      "WP_TRex_Patrol_002": { "x": 6100, "y": 4400, "z": 100 },
+      "WP_TRex_Patrol_003": { "x": 7100, "y": 400,  "z": 100 },
+      "WP_TRex_Patrol_004": { "x": 5600, "y": 900,  "z": 100 }
+    },
+    "combat_behaviors": {
+      "idle": {
+        "action": "patrol_loop",
+        "speed_cm_s": 300,
+        "patrol_wait_s": 5.0
+      },
+      "alert": {
+        "trigger": "player_within_4000u",
+        "action": "investigate",
+        "roar_on_detect": true,
+        "roar_radius_u": 3000
+      },
+      "attack": {
+        "charge_speed_cm_s": 700,
+        "bite_damage": 120,
+        "stomp_damage": 60,
+        "stomp_radius_u": 300,
+        "bite_range_u": 350,
+        "attack_cooldown_s": 2.5
+      },
+      "retreat": {
+        "hp_threshold_pct": 10,
+        "flee_speed_cm_s": 500,
+        "note": "T-Rex rarely retreats — only at critical HP"
+      }
+    },
+    "perception": {
+      "sight_range_u": 4000,
+      "sight_angle_deg": 90,
+      "hearing_range_u": 3000,
+      "vibration_range_u": 1500,
+      "note": "T-Rex has poor peripheral vision — flanking is viable strategy"
+    },
+    "tags": ["DinosaurAI", "TRex", "CombatAI", "TRexPatrol"]
+  },
+
+  "scout_alert_system": {
+    "description": "Tribal Scout detects dinosaurs and broadcasts threat alert to all TribalNPC within range",
+    "trigger_volumes": {
+      "Trigger_ScoutAlert_East":  { "x": 2800, "y": 2400, "z": 100, "scale": [4.0, 4.0, 2.0] },
+      "Trigger_ScoutAlert_North": { "x": 2100, "y": 3100, "z": 100, "scale": [4.0, 4.0, 2.0] },
+      "Trigger_ScoutAlert_South": { "x": 2100, "y": 1700, "z": 100, "scale": [4.0, 4.0, 2.0] }
+    },
+    "alert_propagation": {
+      "alert_radius_u": 3000,
+      "target_tag": "TribalNPC",
+      "alert_type": "flee_to_camp",
+      "alert_audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783044729208_TribalScout_Alert.mp3"
+    }
+  },
+
+  "hunter_combat_system": {
+    "description": "Tribal Hunter NPCs engage small dinosaurs (raptors) when alerted — spear melee combat",
+    "combat_posts": {
+      "CombatPost_Hunter_E": { "x": 2500, "y": 2400, "z": 100, "role": "east_defense" },
+      "CombatPost_Hunter_N": { "x": 2100, "y": 2800, "z": 100, "role": "north_defense" },
+      "CombatPost_Hunter_S": { "x": 2100, "y": 2000, "z": 100, "role": "south_defense" }
+    },
+    "hunter_combat_params": {
+      "engage_tag": "RaptorPack",
+      "engage_range_u": 300,
+      "spear_damage": 25,
+      "spear_cooldown_s": 1.8,
+      "retreat_hp_pct": 25,
+      "retreat_destination": "hub_campfire",
+      "can_throw_spear": true,
+      "throw_range_u": 800,
+      "throw_damage": 18
+    }
+  },
+
+  "combat_lights_visual": {
+    "description": "Red point lights marking active combat zones — visible threat indicators in viewport",
+    "lights": {
+      "CombatLight_Raptor_E":  { "x": 3300, "y": 2400, "z": 200, "color": [1.0, 0.05, 0.0], "intensity": 2000, "radius": 600 },
+      "CombatLight_Raptor_NW": { "x": 1500, "y": 3400, "z": 200, "color": [1.0, 0.05, 0.0], "intensity": 2000, "radius": 600 },
+      "CombatLight_Raptor_SW": { "x": 1500, "y": 1400, "z": 200, "color": [1.0, 0.05, 0.0], "intensity": 2000, "radius": 600 },
+      "CombatLight_TRex_Zone": { "x": 6600, "y": 2400, "z": 300, "color": [0.8, 0.0, 0.0],  "intensity": 5000, "radius": 2000 }
+    }
+  },
+
+  "audio_assets": {
+    "TribalScout_Alert": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783044729208_TribalScout_Alert.mp3",
+    "TRex_Encounter_Narration": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783044773189_TRex_Encounter_Narration.mp3"
+  }
+}

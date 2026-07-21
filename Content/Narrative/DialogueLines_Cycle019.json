@@ -1,0 +1,80 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260702_010",
+  "agent": "#15 Narrative & Dialogue Agent",
+  "dialogue_lines": [
+    {
+      "id": "DL_001",
+      "npc": "ChiefHunter_Kael",
+      "role": "ChiefHunter",
+      "actor_label": "ChiefHunter_Savana_001",
+      "context": "Player approaches eastern canyon for first time",
+      "condition": "FirstVisit",
+      "text": "The eastern canyon is a killing ground. I have seen three hunters go in and none come back. The raptors use the narrow walls to cut off escape. If you must cross, go at midday — that is when they sleep in the shade.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008233273_ChiefHunter_Kael.mp3",
+      "duration_s": 15,
+      "triggers_quest": "QST_RaptorNest_Recon"
+    },
+    {
+      "id": "DL_002",
+      "npc": "ScoutRunner_Mira",
+      "role": "ScoutRunner",
+      "actor_label": "ScoutRunner_Savana_001",
+      "context": "Player needs to cross river — herd migration active",
+      "condition": "HerdStampeding",
+      "text": "We move at first light. The Brachiosaurus herd crosses the river every three days — we follow them. Their size scares off the predators. Stay close, stay quiet, and do not run unless I say run.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008235491_ScoutRunner_Mira.mp3",
+      "duration_s": 13,
+      "triggers_quest": "QST_HerdCrossing_Escort"
+    },
+    {
+      "id": "DL_003",
+      "npc": "TribalElder_Voss",
+      "role": "TribalElder",
+      "actor_label": "TribalElder_Savana_001",
+      "context": "Player has no campfire — survival tutorial moment",
+      "condition": "NearCampfire",
+      "text": "Fire is life. Without it, the cold kills you before the predators do. Learn to make fire from dry bark and hard stone. Learn it now, before you need it in the dark.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008249125_TribalElder_Voss.mp3",
+      "duration_s": 11,
+      "triggers_quest": "QST_FirstCampfire_Craft"
+    },
+    {
+      "id": "DL_004",
+      "npc": "TribalElder_Voss",
+      "role": "TribalElder",
+      "actor_label": "TribalElder_Savana_001",
+      "context": "Player asks about hunting the T-Rex — high-stakes quest gate",
+      "condition": "HasSpear",
+      "text": "You want to hunt the T-Rex? Then you had better be faster than it, smarter than it, and willing to lose people you care about. That is the cost. Are you ready to pay it?",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008267604_TribalElder_Voss_Quest.mp3",
+      "duration_s": 12,
+      "triggers_quest": "QST_TRex_Hunt_Endgame"
+    }
+  ],
+  "npcs_spawned_in_map": [
+    {
+      "label": "TribalElder_Savana_001",
+      "location": [800.0, 200.0, 100.0],
+      "role": "TribalElder",
+      "dialogue_ids": ["DL_003", "DL_004"]
+    },
+    {
+      "label": "ChiefHunter_Savana_001",
+      "location": [-600.0, 1200.0, 100.0],
+      "role": "ChiefHunter",
+      "dialogue_ids": ["DL_001"]
+    },
+    {
+      "label": "ScoutRunner_Savana_001",
+      "location": [1500.0, -400.0, 100.0],
+      "role": "ScoutRunner",
+      "dialogue_ids": ["DL_002"]
+    }
+  ],
+  "audio_assets": [
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008233273_ChiefHunter_Kael.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008235491_ScoutRunner_Mira.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008249125_TribalElder_Voss.mp3",
+    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008267604_TribalElder_Voss_Quest.mp3"
+  ]
+}

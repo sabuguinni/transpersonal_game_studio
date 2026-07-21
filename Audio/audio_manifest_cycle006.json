@@ -1,0 +1,110 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_006",
+  "agent": "#16 Audio Agent",
+  "timestamp": "2026-06-19",
+
+  "voice_lines": [
+    {
+      "id": "survivor_warning_001",
+      "character": "Survivor_Warning",
+      "text": "Listen. The valley goes quiet before a predator moves. The insects stop. The birds lift. When you hear nothing — run.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781854080129_Survivor_Warning.mp3",
+      "duration": "~8s",
+      "trigger": "proximity_predator_alert",
+      "context": "NPC warns player when large predator is within 300m"
+    },
+    {
+      "id": "survivor_guidance_001",
+      "character": "Survivor_Guidance",
+      "text": "Water. Always find water first. A river means fish, means animals coming to drink, means you are not alone — but it also means predators know where you are.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781854103271_Survivor_Guidance.mp3",
+      "duration": "~11s",
+      "trigger": "tutorial_water_discovery",
+      "context": "First time player approaches river zone — survival tip"
+    }
+  ],
+
+  "sound_references": [
+    {
+      "id": "heavy_footstep_loop",
+      "freesound_id": 232382,
+      "name": "Heavy Footsteps",
+      "url": "https://cdn.freesound.org/previews/232/232382_3450800-hq.mp3",
+      "duration": "7.3s",
+      "use": "T-Rex and large dinosaur footstep loop — low frequency ground impact",
+      "tags": ["footsteps", "impact", "loop", "loopable"]
+    },
+    {
+      "id": "jungle_night_ambience",
+      "freesound_id": 479553,
+      "name": "R15-77-Jungle Night",
+      "url": "https://cdn.freesound.org/previews/479/479553_2524442-hq.mp3",
+      "duration": "19.8s",
+      "use": "Forest biome night ambient loop — insects, apes, frogs",
+      "tags": ["Ambience", "Jungle", "night"]
+    },
+    {
+      "id": "tropical_night_ambience",
+      "freesound_id": 516157,
+      "name": "Tropical Ambience Night Ecuador",
+      "url": "https://cdn.freesound.org/previews/516/516157_7840942-hq.mp3",
+      "duration": "76.9s",
+      "use": "River zone night ambient — crickets, frogs, water nearby",
+      "tags": ["crickets", "frogs", "insects", "nature", "night", "tropical"]
+    }
+  ],
+
+  "audio_zones": [
+    {
+      "label": "AudioZone_River_001",
+      "location": {"x": 800, "y": 1200, "z": 50},
+      "ambient_sound": "tropical_night_ambience",
+      "radius": 400,
+      "description": "River ambient — water flow + frogs + crickets"
+    },
+    {
+      "label": "AudioZone_Forest_001",
+      "location": {"x": -600, "y": 800, "z": 80},
+      "ambient_sound": "jungle_night_ambience",
+      "radius": 500,
+      "description": "Dense forest — insects + wind through canopy"
+    },
+    {
+      "label": "AudioZone_Savanna_001",
+      "location": {"x": 1500, "y": -400, "z": 40},
+      "ambient_sound": "wind_open_plains",
+      "radius": 600,
+      "description": "Open savanna — wind + distant animal calls"
+    },
+    {
+      "label": "AudioZone_Cave_001",
+      "location": {"x": -1200, "y": -900, "z": 20},
+      "ambient_sound": "cave_drips_echo",
+      "radius": 200,
+      "description": "Cave entrance — drips + reverb echo"
+    }
+  ],
+
+  "audio_design_notes": {
+    "adaptive_music_states": [
+      "CALM — player alone, no threats detected — sparse percussion, wind, nature",
+      "ALERT — predator within 300m — tension build, low drone, faster heartbeat",
+      "COMBAT — active predator engagement — full percussion, urgent rhythm",
+      "DANGER — health critical — distorted heartbeat, minimal music, raw survival",
+      "NIGHT — darkness, reduced visibility — dense insect chorus, distant roars",
+      "DISCOVERY — new area or resource found — brief melodic resolution"
+    ],
+    "silence_as_design": "Silence is the most powerful sound cue. When ambient insects stop, player knows danger is near. This is the Walter Murch principle — what is NOT there tells the story.",
+    "footstep_system": "Footstep sounds vary by surface (dirt, rock, water, grass) and creature weight. T-Rex footsteps cause low-frequency rumble felt before heard.",
+    "voice_line_philosophy": "NPCs speak in short, practical sentences. No exposition dumps. Every line contains actionable survival information or environmental context."
+  },
+
+  "cumulative_voice_lines": {
+    "cycle_001": ["Elder_Storyteller — valley history, great lizards", "Survivor_Urgency — abandoned camp warning"],
+    "cycle_002": ["Lookout_Alert — raptor migration warning", "Mentor_Greeting — newcomer survival intro"],
+    "cycle_003": ["NPC_Dialogue lines for Quest system"],
+    "cycle_004": ["Guard_Sighted — threat detection"],
+    "cycle_005": ["Raptor_Territory warning", "Abandoned_Camp discovery"],
+    "cycle_006": ["Survivor_Warning — predator silence cue", "Survivor_Guidance — water survival tip"]
+  }
+}

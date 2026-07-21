@@ -1,90 +1,82 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISenseConfig_Damage.h"
-#include "GameplayTags.h"
-#include "Engine/World.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "CombatAIController.generated.h"
 
-class UBehaviorTreeComponent;
-class UBlackboardComponent;
-class UBehaviorTree;
-class UCombatTacticsComponent;
-class UThreatAssessmentComponent;
-
 UENUM(BlueprintType)
-enum class ECombatState : uint8
+enum class ECombat_ThreatLevel : uint8
 {
-    Idle,
-    Hunting,
-    Stalking,
-    Engaging,
-    Retreating,
-    Coordinating,
-    Ambushing
+    None        UMETA(DisplayName = "None"),
+    Aware       UMETA(DisplayName = "Aware"),
+    Hunting     UMETA(DisplayName = "Hunting"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Fleeing     UMETA(DisplayName = "Fleeing")
 };
 
 UENUM(BlueprintType)
-enum class EThreatLevel : uint8
+enum class ECombat_DinoSpecies : uint8
 {
-    None,
-    Low,
-    Medium,
-    High,
-    Critical
+    TRex            UMETA(DisplayName = "T-Rex"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
+    Carnotaurus     UMETA(DisplayName = "Carnotaurus"),
+    Triceratops     UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
+    Pterodactyl     UMETA(DisplayName = "Pterodactyl")
 };
 
 USTRUCT(BlueprintType)
-struct FCombatTarget
+struct FCombat_ThreatEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* TargetActor = nullptr;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    AActor* ThreatActor = nullptr;
 
-    UPROPERTY(BlueprintReadWrite)
-    EThreatLevel ThreatLevel = EThreatLevel::None;
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float ThreatScore = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite)
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
     float LastSeenTime = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite)
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
     FVector LastKnownLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite)
-    float DistanceToTarget = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite)
-    bool bIsVisible = false;
-
-    UPROPERTY(BlueprintReadWrite)
-    bool bIsInAttackRange = false;
-
-    FCombatTarget()
-    {
-        TargetActor = nullptr;
-        ThreatLevel = EThreatLevel::None;
-        LastSeenTime = 0.0f;
-        LastKnownLocation = FVector::ZeroVector;
-        DistanceToTarget = 0.0f;
-        bIsVisible = false;
-        bIsInAttackRange = false;
-    }
 };
 
-/**
- * Advanced Combat AI Controller for dinosaur predators and enemies
- * Implements tactical combat behaviors, threat assessment, and coordination
- */
-UCLASS(BlueprintType, Blueprintable)
+USTRUCT(BlueprintType)
+struct FCombat_DinoStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float AttackRange = 200.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float DetectionRadius = 1500.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float AttackDamage = 40.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float AttackCooldown = 2.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float ChaseSpeed = 600.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    float PatrolSpeed = 200.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    bool bIsPackHunter = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    int32 PackSize = 1;
+};
+
+UCLASS(ClassGroup = (TranspersonalGame), meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 {
     GENERATED_BODY()
@@ -92,136 +84,95 @@ class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 public:
     ACombatAIController();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    UCombatTacticsComponent* CombatTacticsComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    UThreatAssessmentComponent* ThreatAssessmentComponent;
-
-    // Behavior Tree
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    UBehaviorTree* CombatBehaviorTree;
-
-    // Combat State
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    ECombatState CurrentCombatState = ECombatState::Idle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    FCombatTarget PrimaryTarget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    TArray<FCombatTarget> SecondaryTargets;
-
-    // Combat Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float SightRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float HearingRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float AggressionLevel = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Parameters")
-    float FearThreshold = 0.3f;
-
-    // Coordination
-    UPROPERTY(BlueprintReadOnly, Category = "Combat Coordination")
-    TArray<ACombatAIController*> AlliedControllers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Coordination")
-    float CoordinationRadius = 2000.0f;
-
-public:
-    // Combat State Management
+    // ── Perception ──────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetCombatState(ECombatState NewState);
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    ECombatState GetCombatState() const { return CurrentCombatState; }
-
-    // Target Management
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
     void SetPrimaryTarget(AActor* NewTarget);
 
     UFUNCTION(BlueprintPure, Category = "Combat AI")
-    AActor* GetPrimaryTarget() const { return PrimaryTarget.TargetActor; }
+    AActor* GetPrimaryTarget() const { return PrimaryTarget; }
+
+    // ── State ────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetThreatLevel(ECombat_ThreatLevel NewLevel);
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    ECombat_ThreatLevel GetThreatLevel() const { return CurrentThreatLevel; }
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void AddSecondaryTarget(AActor* Target);
+    void InitDinoStats(ECombat_DinoSpecies Species);
+
+    // ── Combat Actions ───────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool CanAttack() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RemoveTarget(AActor* Target);
-
-    // Combat Actions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool CanAttackTarget(AActor* Target) const;
+    void ExecuteAttack();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool IsTargetInSight(AActor* Target) const;
+    void StartPatrol();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    float GetDistanceToTarget(AActor* Target) const;
-
-    // Coordination
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RegisterAlliedController(ACombatAIController* AllyController);
+    void ChaseTarget(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UnregisterAlliedController(ACombatAIController* AllyController);
+    void FleeFromThreat(AActor* Threat);
+
+    // ── Pack Coordination ────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AlertPackMembers(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void BroadcastThreatToAllies(AActor* ThreatActor, EThreatLevel Level);
+    void AssignFlankRole(int32 RoleIndex);
 
-    // Blackboard Keys
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName TargetActorKey = TEXT("TargetActor");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName CombatStateKey = TEXT("CombatState");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName ThreatLevelKey = TEXT("ThreatLevel");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName LastKnownLocationKey = TEXT("LastKnownLocation");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName AttackRangeKey = TEXT("AttackRange");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
-    FName AggressionKey = TEXT("Aggression");
+    // ── Blackboard Keys ─────────────────────────────────────────
+    static const FName BB_TargetActor;
+    static const FName BB_ThreatLevel;
+    static const FName BB_PatrolOrigin;
+    static const FName BB_LastKnownPos;
+    static const FName BB_CanAttack;
 
 protected:
-    // Perception Events
-    UFUNCTION()
-    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    UAIPerceptionComponent* PerceptionComponent;
 
-    UFUNCTION()
-    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    UBehaviorTree* BehaviorTree;
 
-    // Internal Functions
-    void UpdateCombatState();
-    void UpdateTargets();
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    ECombat_ThreatLevel CurrentThreatLevel;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    ECombat_DinoSpecies DinoSpecies;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    FCombat_DinoStats DinoStats;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    TArray<FCombat_ThreatEntry> ThreatList;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    AActor* PrimaryTarget;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    float LastAttackTime;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    int32 FlankRoleIndex;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float PackAlertRadius;
+
+private:
+    void UpdateThreatList(float DeltaTime);
+    void SelectBestTarget();
     void UpdateBlackboard();
-    void FindNearbyAllies();
-    EThreatLevel CalculateThreatLevel(AActor* Target) const;
-    bool ShouldEngageTarget(AActor* Target) const;
-    bool ShouldRetreat() const;
-
-    // Timers
-    FTimerHandle CombatUpdateTimer;
-    FTimerHandle CoordinationTimer;
-
-    void OnCombatUpdate();
-    void OnCoordinationUpdate();
+    FCombat_DinoStats GetStatsForSpecies(ECombat_DinoSpecies Species) const;
 };

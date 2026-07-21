@@ -2,81 +2,114 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
+#include "Components/SceneComponent.h"
+#include "../SharedTypes.h"
 #include "ArchitecturalManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EArchitecturalStyle : uint8
+enum class EArch_StructureType : uint8
 {
-    PrehistoricCave      UMETA(DisplayName = "Prehistoric Cave"),
-    PrimitiveHut         UMETA(DisplayName = "Primitive Hut"),
-    StoneCircle          UMETA(DisplayName = "Stone Circle"),
-    AncientRuins         UMETA(DisplayName = "Ancient Ruins"),
-    TribalShelter        UMETA(DisplayName = "Tribal Shelter"),
-    SacredGrove          UMETA(DisplayName = "Sacred Grove"),
-    BurialMound          UMETA(DisplayName = "Burial Mound")
+    Foundation,
+    Wall,
+    Roof,
+    Door,
+    Window,
+    Firepit,
+    StoragePit,
+    WaterBasin,
+    ToolCache,
+    ResourceZone
 };
 
 UENUM(BlueprintType)
-enum class EBuildingPurpose : uint8
+enum class EArch_MaterialType : uint8
 {
-    Shelter              UMETA(DisplayName = "Shelter"),
-    Storage              UMETA(DisplayName = "Storage"),
-    Ritual               UMETA(DisplayName = "Ritual"),
-    Defense              UMETA(DisplayName = "Defense"),
-    Crafting             UMETA(DisplayName = "Crafting"),
-    Burial               UMETA(DisplayName = "Burial"),
-    Gathering            UMETA(DisplayName = "Gathering")
+    Limestone,
+    Sandstone,
+    Clay,
+    Wood,
+    Bone,
+    Hide,
+    Stone,
+    Mud
+};
+
+UENUM(BlueprintType)
+enum class EArch_ConstructionTechnique : uint8
+{
+    DryStone,
+    MudMortar,
+    WoodFrame,
+    EarthWork,
+    BoneReinforced,
+    WattleAndDaub
 };
 
 USTRUCT(BlueprintType)
-struct FArchitecturalSpec
+struct FArch_StructuralElement
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArchitecturalStyle Style;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EBuildingPurpose Purpose;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_MaterialType PrimaryMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_ConstructionTechnique Technique;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     FVector Dimensions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DeteriorationLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructuralIntegrity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bHasInterior;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float WeatherResistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> InteriorStoryElements;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     int32 AgeInYears;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsAbandoned;
-
-    FArchitecturalSpec()
+    FArch_StructuralElement()
     {
-        Style = EArchitecturalStyle::PrimitiveHut;
-        Purpose = EBuildingPurpose::Shelter;
-        Dimensions = FVector(500.0f, 500.0f, 300.0f);
-        DeteriorationLevel = 0.3f;
-        bHasInterior = true;
-        AgeInYears = 100;
-        bIsAbandoned = false;
+        StructureType = EArch_StructureType::Foundation;
+        PrimaryMaterial = EArch_MaterialType::Stone;
+        Technique = EArch_ConstructionTechnique::DryStone;
+        Dimensions = FVector(100, 100, 50);
+        StructuralIntegrity = 100.0f;
+        WeatherResistance = 75.0f;
+        AgeInYears = 0;
     }
 };
 
-/**
- * Architectural Manager - Creates and manages all built structures in the prehistoric world
- * Each building tells a story through its design, deterioration, and interior details
- */
+USTRUCT(BlueprintType)
+struct FArch_EnvironmentalStory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString StoryElement;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    FString ArchaeologicalEvidence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    TArray<FString> AssociatedArtifacts;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    float PreservationLevel;
+
+    FArch_EnvironmentalStory()
+    {
+        StoryElement = TEXT("Unknown Settlement");
+        ArchaeologicalEvidence = TEXT("Structural remains");
+        PreservationLevel = 50.0f;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AArchitecturalManager : public AActor
 {
@@ -88,55 +121,72 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    class UPCGComponent* PCGComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    class UPCGGraphInterface* BuildingGenerationGraph;
+    TArray<FArch_StructuralElement> StructuralElements;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArchitecturalSpec> BuildingSpecs;
+    TArray<FArch_EnvironmentalStory> EnvironmentalStories;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<EArchitecturalStyle, class UStaticMesh*> StyleMeshes;
+    TArray<AActor*> FoundationActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<EBuildingPurpose, class UMaterialInterface*> PurposeMaterials;
+    TArray<AActor*> StorytellingActors;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MinDistanceBetweenBuildings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float MaxBuildingsPerSquareKm;
+    TArray<AActor*> ResourceZoneActors;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateBuildingsInArea(const FVector& Center, float Radius);
+    void InitializeArchitecturalFramework();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    AActor* CreateBuilding(const FArchitecturalSpec& Spec, const FVector& Location, const FRotator& Rotation);
+    void CreateStructuralElement(EArch_StructureType Type, FVector Location, EArch_MaterialType Material);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyDeteriorationToBuilding(AActor* Building, float DeteriorationLevel);
+    void PlaceEnvironmentalStoryElement(const FString& StoryName, FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void PopulateInterior(AActor* Building, const FArchitecturalSpec& Spec);
+    void UpdateStructuralIntegrity(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FVector> FindSuitableBuildingLocations(const FVector& Center, float Radius, int32 MaxBuildings);
+    void ApplyWeatherDamage(float WeatherIntensity);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsLocationSuitableForBuilding(const FVector& Location, EArchitecturalStyle Style);
+    TArray<FArch_StructuralElement> GetNearbyStructures(FVector Location, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateEnvironmentalStorytelling(AActor* Building, const FArchitecturalSpec& Spec);
+    FArch_EnvironmentalStory AnalyzeArchaeologicalSite(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CanBuildAtLocation(FVector Location, EArch_StructureType StructureType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterFoundationActor(AActor* FoundationActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterStorytellingActor(AActor* StoryActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterResourceZoneActor(AActor* ResourceActor);
+
+protected:
+    UFUNCTION()
+    void OnStructuralElementDestroyed();
+
+    UFUNCTION()
+    void ValidateArchitecturalIntegrity();
+
+    UFUNCTION()
+    void UpdateEnvironmentalStorytelling();
 
 private:
-    void InitializeBuildingAssets();
-    void SetupPCGGeneration();
-    FArchitecturalSpec GenerateRandomBuildingSpec();
-    void ApplyWeatheringEffects(AActor* Building, float Age, float Deterioration);
-    void AddInteriorDetails(AActor* Building, const TArray<FString>& StoryElements);
+    float ArchitecturalUpdateInterval;
+    float LastArchitecturalUpdate;
+    bool bIsInitialized;
 };

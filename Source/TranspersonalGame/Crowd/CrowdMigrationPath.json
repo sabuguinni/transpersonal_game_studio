@@ -1,0 +1,86 @@
+{
+  "crowd_migration_system": {
+    "version": "1.1.0",
+    "agent": "Crowd_Simulation_Agent_13",
+    "cycle": "PROD_CYCLE_AUTO_20260702_010",
+    "description": "Seasonal migration corridors and pathfinding data for prehistoric herd animals",
+
+    "migration_corridors": {
+      "Savana_Main_Corridor": {
+        "waypoints": [
+          {"label": "MigrationWP_Savana_001", "x": 500, "y": 1500, "z": 150, "biome": "Savana"},
+          {"label": "MigrationWP_Savana_002", "x": 1500, "y": 2500, "z": 150, "biome": "Savana"},
+          {"label": "MigrationWP_Savana_003", "x": 2500, "y": 2000, "z": 150, "biome": "Savana"},
+          {"label": "MigrationWP_Savana_004", "x": 3500, "y": 1000, "z": 150, "biome": "Savana"}
+        ],
+        "species": ["Triceratops", "Parasaurolophus"],
+        "season": "dry",
+        "direction": "north_to_south",
+        "duration_game_days": 3,
+        "herd_density": "high",
+        "player_danger_level": "medium",
+        "description": "Main savanna migration route — herds move south during dry season seeking water"
+      },
+      "Floresta_River_Corridor": {
+        "waypoints": [
+          {"label": "MigrationWP_Rio_001", "x": -500, "y": 3000, "z": 80, "biome": "Floresta"},
+          {"label": "MigrationWP_Rio_002", "x": 500, "y": 4000, "z": 80, "biome": "Floresta"},
+          {"label": "MigrationWP_Rio_003", "x": 1500, "y": 4500, "z": 80, "biome": "Floresta"}
+        ],
+        "species": ["Gallimimus", "Parasaurolophus"],
+        "season": "wet",
+        "direction": "south_to_north",
+        "duration_game_days": 5,
+        "herd_density": "very_high",
+        "player_danger_level": "high",
+        "description": "River valley corridor — massive Gallimimus herds during wet season"
+      }
+    },
+
+    "pathfinding_config": {
+      "navmesh_agent_radius_cm": 150,
+      "navmesh_agent_height_cm": 300,
+      "max_slope_degrees": 35,
+      "step_height_cm": 50,
+      "path_smoothing": true,
+      "obstacle_avoidance": "RVO2",
+      "crowd_avoidance_quality": "medium",
+      "max_agents_per_navmesh_tile": 32
+    },
+
+    "mass_ai_config": {
+      "processor_priority": 100,
+      "entity_template": "HerdAnimal_Template",
+      "traits": [
+        "MassMovementTrait",
+        "MassObstacleAvoidanceTrait",
+        "MassLODTrait",
+        "MassStateTreeTrait"
+      ],
+      "lod_distances": [2000, 5000, 10000],
+      "max_entities": 500,
+      "description": "UE5 Mass AI configuration for herd simulation at scale"
+    },
+
+    "social_dynamics": {
+      "alpha_leader": {
+        "selection_criteria": "largest_oldest",
+        "influence_radius_cm": 2000,
+        "decision_weight": 3.0,
+        "description": "Alpha leads direction changes, feeding stops, and flight decisions"
+      },
+      "alarm_propagation": {
+        "initial_alarm_radius_cm": 500,
+        "propagation_rate_cm_per_s": 800,
+        "max_propagation_radius_cm": 5000,
+        "description": "Panic spreads through herd like a wave from the trigger point"
+      },
+      "juvenile_behavior": {
+        "stay_near_adult_radius_cm": 400,
+        "speed_multiplier": 0.85,
+        "panic_threshold_multiplier": 0.5,
+        "description": "Juveniles panic more easily and stay close to adults"
+      }
+    }
+  }
+}

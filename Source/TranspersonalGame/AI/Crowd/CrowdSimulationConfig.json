@@ -1,0 +1,137 @@
+{
+  "crowd_simulation_system": {
+    "version": "1.3.0",
+    "agent": "#13 — Crowd & Traffic Simulation",
+    "cycle": "PROD_CYCLE_AUTO_20260703_001",
+    "hub_coords": { "x": 2100, "y": 2400, "z": 0 },
+    "herd_radius_max_units": 3000,
+
+    "herds": [
+      {
+        "id": "herd_trike_savana",
+        "species": "Triceratops",
+        "formation": "crescent",
+        "center": { "x": 1200, "y": 1800, "z": 10 },
+        "shared_yaw_degrees": 48,
+        "yaw_variance_degrees": 7,
+        "individual_spacing_min": 300,
+        "individual_spacing_max": 500,
+        "members": [
+          { "label": "Trike_Savana_001", "offset": [0, 0],       "yaw": 48.0, "scale": 1.0  },
+          { "label": "Trike_Savana_002", "offset": [380, -180],  "yaw": 52.0, "scale": 0.95 },
+          { "label": "Trike_Savana_003", "offset": [-350, -220], "yaw": 44.0, "scale": 1.05 },
+          { "label": "Trike_Savana_004", "offset": [180, 420],   "yaw": 55.0, "scale": 0.9  },
+          { "label": "Trike_Savana_005", "offset": [-200, 460],  "yaw": 41.0, "scale": 1.0  }
+        ],
+        "behavior": {
+          "state": "grazing",
+          "alert_radius_units": 800,
+          "flee_trigger": "predator_within_600",
+          "flee_direction": "away_from_threat",
+          "grazing_idle_anim": "Trike_Graze_Loop",
+          "alert_anim": "Trike_HeadUp_Scan",
+          "stampede_speed_cms": 1200
+        }
+      },
+      {
+        "id": "herd_para_savana",
+        "species": "Parasaurolophus",
+        "formation": "V-formation",
+        "center": { "x": 3200, "y": 3300, "z": 10 },
+        "shared_yaw_degrees": 218,
+        "yaw_variance_degrees": 7,
+        "individual_spacing_min": 350,
+        "individual_spacing_max": 550,
+        "members": [
+          { "label": "Para_Savana_001", "offset": [0, 0],       "yaw": 218.0, "scale": 1.0  },
+          { "label": "Para_Savana_002", "offset": [420, -300],  "yaw": 222.0, "scale": 0.92 },
+          { "label": "Para_Savana_003", "offset": [-400, -280], "yaw": 215.0, "scale": 1.08 },
+          { "label": "Para_Savana_004", "offset": [200, 500],   "yaw": 225.0, "scale": 0.95 },
+          { "label": "Para_Savana_005", "offset": [-220, 480],  "yaw": 212.0, "scale": 1.0  }
+        ],
+        "behavior": {
+          "state": "grazing",
+          "alert_radius_units": 1000,
+          "flee_trigger": "predator_within_800",
+          "flee_direction": "away_from_threat",
+          "vocalization": "Para_CallAlert_01",
+          "herd_alert_propagation_ms": 400,
+          "stampede_speed_cms": 1400
+        }
+      }
+    ],
+
+    "sentinels": [
+      {
+        "label": "Brach_Savana_001",
+        "species": "Brachiosaurus",
+        "role": "visual_anchor",
+        "position": { "x": 500, "y": 2200, "z": 10 },
+        "yaw": 30.0,
+        "scale": { "x": 3.0, "y": 3.0, "z": 7.0 }
+      },
+      {
+        "label": "Brach_Savana_002",
+        "species": "Brachiosaurus",
+        "role": "visual_anchor",
+        "position": { "x": 2900, "y": 1200, "z": 10 },
+        "yaw": 160.0,
+        "scale": { "x": 2.8, "y": 2.8, "z": 6.5 }
+      },
+      {
+        "label": "Brach_Savana_003",
+        "species": "Brachiosaurus",
+        "role": "visual_anchor",
+        "position": { "x": 3900, "y": 3800, "z": 10 },
+        "yaw": 270.0,
+        "scale": { "x": 3.2, "y": 3.2, "z": 7.5 }
+      }
+    ],
+
+    "crowd_routing": {
+      "danger_zones": [
+        {
+          "label": "RaptorCombatZone",
+          "center": { "x": 2100, "y": 2400 },
+          "avoidance_radius_units": 1500,
+          "source": "CombatAIConfig.json"
+        }
+      ],
+      "herbivore_safe_distance_from_predators": 1200,
+      "navmesh_reference": "NavMesh_CombatZone_001",
+      "pathfinding_mode": "MassAI_Avoidance",
+      "max_simultaneous_agents": 50000,
+      "lod_distances": {
+        "full_simulation": 3000,
+        "simplified_movement": 8000,
+        "static_billboard": 20000
+      }
+    },
+
+    "vegetation_clusters": {
+      "count": 8,
+      "label_pattern": "Tree_HerdEdge_NNN",
+      "purpose": "natural forest-edge framing for Trike herd",
+      "placement": "manual, around Trike herd perimeter"
+    },
+
+    "mass_ai_config": {
+      "entity_template": "HerbivoreHerdAgent",
+      "processor_chain": [
+        "MassMovementProcessor",
+        "MassAvoidanceProcessor",
+        "MassLODProcessor",
+        "MassStateTreeProcessor"
+      ],
+      "state_tree": "ST_HerbivoreHerd",
+      "states": ["Grazing", "Alert", "Fleeing", "Stampede", "Resting"],
+      "transitions": {
+        "Grazing -> Alert": "predator_detected_radius > 0",
+        "Alert -> Fleeing": "predator_within_flee_radius",
+        "Fleeing -> Stampede": "pack_alert_propagated AND speed > 800",
+        "Stampede -> Grazing": "predator_distance > 3000 AND time_elapsed > 30s",
+        "Grazing -> Resting": "time_of_day == night"
+      }
+    }
+  }
+}

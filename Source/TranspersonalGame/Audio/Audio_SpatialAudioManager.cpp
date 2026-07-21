@@ -1,332 +1,168 @@
 #include "Audio_SpatialAudioManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#include "Components/SceneComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "Camera/CameraShakeBase.h"
+#include "Engine/Engine.h"
 
 AAudio_SpatialAudioManager::AAudio_SpatialAudioManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Criar componente raiz
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Create audio components
+    SpatialAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SpatialAudioComponent"));
+    RootComponent = SpatialAudioComponent;
+    
+    EnvironmentalAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EnvironmentalAudioComponent"));
+    EnvironmentalAudioComponent->SetupAttachment(RootComponent);
 
-    // Criar componentes de áudio
-    MasterAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MasterAudioComponent"));
-    MasterAudioComponent->SetupAttachment(RootComponent);
-    MasterAudioComponent->bAutoActivate = false;
-
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
-
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
-    MusicAudioComponent->SetupAttachment(RootComponent);
-    MusicAudioComponent->bAutoActivate = false;
-
-    EffectsAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EffectsAudioComponent"));
-    EffectsAudioComponent->SetupAttachment(RootComponent);
-    EffectsAudioComponent->bAutoActivate = false;
-
-    // Inicializar variáveis
+    // Initialize default values
+    MasterSpatialVolume = 1.0f;
+    MaxAudioDistance = 8000.0f;
+    FootstepShakeIntensity = 1.5f;
+    FootstepShakeRadius = 2000.0f;
+    
     PlayerPawn = nullptr;
-    CurrentBiome = TEXT("Savana");
-    CurrentThreatLevel = 0.0f;
-    RandomSoundTimer = 0.0f;
+    LastAudioUpdateTime = 0.0f;
+    AudioUpdateInterval = 0.1f; // Update 10 times per second
 }
 
 void AAudio_SpatialAudioManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Encontrar referência do jogador
-    UpdatePlayerReference();
-
-    // Inicializar configurações de áudio dos biomas
-    InitializeBiomeAudioSettings();
-
-    // Configurar componentes de áudio
-    if (AmbientAudioComponent)
-    {
-        AmbientAudioComponent->SetVolumeMultiplier(0.7f);
-        AmbientAudioComponent->bAutoActivate = true;
-    }
-
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(0.5f);
-        MusicAudioComponent->bAutoActivate = true;
-    }
-
-    if (EffectsAudioComponent)
-    {
-        EffectsAudioComponent->SetVolumeMultiplier(1.0f);
-        EffectsAudioComponent->bAutoActivate = true;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Sistema de áudio espacial inicializado"));
-}
-
-void AAudio_SpatialAudioManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (PlayerPawn)
-    {
-        // Actualizar áudio espacial baseado na posição do jogador
-        UpdateSpatialAudio();
-
-        // Actualizar áudio do bioma
-        UpdateBiomeAudio();
-
-        // Processar sons aleatórios
-        ProcessRandomSounds(DeltaTime);
-
-        // Limpar sons terminados
-        CleanupFinishedSounds();
-    }
-}
-
-void AAudio_SpatialAudioManager::PlaySpatialSound(const FAudio_SpatialSoundData& SoundData)
-{
-    if (!SoundData.SoundCue.IsNull())
-    {
-        // Adicionar à lista de sons espaciais activos
-        ActiveSpatialSounds.Add(SoundData);
-
-        // Calcular volume baseado na distância
-        if (PlayerPawn)
-        {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            float Distance = FVector::Dist(PlayerLocation, SoundData.WorldLocation);
-            float Volume = CalculateVolumeFromDistance(SoundData.WorldLocation, PlayerLocation, SoundData.MaxAudibleDistance);
-
-            if (Volume > 0.01f)
-            {
-                // Tocar o som com volume calculado
-                if (EffectsAudioComponent && !EffectsAudioComponent->IsPlaying())
-                {
-                    USoundCue* LoadedSound = SoundData.SoundCue.LoadSynchronous();
-                    if (LoadedSound)
-                    {
-                        EffectsAudioComponent->SetSound(LoadedSound);
-                        EffectsAudioComponent->SetVolumeMultiplier(Volume * SoundData.VolumeMultiplier);
-                        EffectsAudioComponent->SetWorldLocation(SoundData.WorldLocation);
-                        EffectsAudioComponent->Play();
-
-                        UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Som espacial reproduzido em %s com volume %f"), 
-                               *SoundData.WorldLocation.ToString(), Volume);
-                    }
-                }
-            }
-        }
-    }
-}
-
-void AAudio_SpatialAudioManager::StopSpatialSound(FVector Location, float Tolerance)
-{
-    for (int32 i = ActiveSpatialSounds.Num() - 1; i >= 0; i--)
-    {
-        if (FVector::Dist(ActiveSpatialSounds[i].WorldLocation, Location) <= Tolerance)
-        {
-            ActiveSpatialSounds.RemoveAt(i);
-            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Som espacial removido em %s"), *Location.ToString());
-        }
-    }
-}
-
-void AAudio_SpatialAudioManager::SetCurrentBiome(const FString& BiomeName)
-{
-    if (CurrentBiome != BiomeName)
-    {
-        CurrentBiome = BiomeName;
-        UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Bioma alterado para %s"), *BiomeName);
-
-        // Actualizar áudio do bioma imediatamente
-        UpdateBiomeAudio();
-    }
-}
-
-void AAudio_SpatialAudioManager::SetThreatLevel(float ThreatLevel)
-{
-    CurrentThreatLevel = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
     
-    // Ajustar volumes baseado no nível de ameaça
-    if (AmbientAudioComponent)
-    {
-        float AmbientVolume = FMath::Lerp(0.7f, 0.3f, CurrentThreatLevel);
-        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
-    }
-
-    if (MusicAudioComponent)
-    {
-        float MusicVolume = FMath::Lerp(0.5f, 0.8f, CurrentThreatLevel);
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Nível de ameaça definido para %f"), CurrentThreatLevel);
-}
-
-void AAudio_SpatialAudioManager::UpdatePlayerReference()
-{
+    // Get player pawn reference
     if (UWorld* World = GetWorld())
     {
         if (APlayerController* PC = World->GetFirstPlayerController())
         {
             PlayerPawn = PC->GetPawn();
-            if (PlayerPawn)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Referência do jogador actualizada"));
-            }
         }
     }
+    
+    // Initialize dinosaur sound profiles
+    InitializeDinosaurSoundProfiles();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: BeginPlay completed"));
 }
 
-void AAudio_SpatialAudioManager::InitializeBiomeAudioSettings()
+void AAudio_SpatialAudioManager::Tick(float DeltaTime)
 {
-    // Configurações para Savana
-    FAudio_BiomeAudioSettings SavanaSettings;
-    SavanaSettings.AmbientVolume = 0.6f;
-    SavanaSettings.MusicVolume = 0.4f;
-    SavanaSettings.RandomSoundFrequency = 20.0f;
-    BiomeAudioSettings.Add(TEXT("Savana"), SavanaSettings);
-
-    // Configurações para Floresta
-    FAudio_BiomeAudioSettings FlorestaSettings;
-    FlorestaSettings.AmbientVolume = 0.8f;
-    FlorestaSettings.MusicVolume = 0.3f;
-    FlorestaSettings.RandomSoundFrequency = 12.0f;
-    BiomeAudioSettings.Add(TEXT("Floresta"), FlorestaSettings);
-
-    // Configurações para Pântano
-    FAudio_BiomeAudioSettings PantanoSettings;
-    PantanoSettings.AmbientVolume = 0.7f;
-    PantanoSettings.MusicVolume = 0.6f;
-    PantanoSettings.RandomSoundFrequency = 25.0f;
-    BiomeAudioSettings.Add(TEXT("Pantano"), PantanoSettings);
-
-    // Configurações para Deserto
-    FAudio_BiomeAudioSettings DesertoSettings;
-    DesertoSettings.AmbientVolume = 0.4f;
-    DesertoSettings.MusicVolume = 0.5f;
-    DesertoSettings.RandomSoundFrequency = 30.0f;
-    BiomeAudioSettings.Add(TEXT("Deserto"), DesertoSettings);
-
-    // Configurações para Montanha Nevada
-    FAudio_BiomeAudioSettings MontanhaSettings;
-    MontanhaSettings.AmbientVolume = 0.5f;
-    MontanhaSettings.MusicVolume = 0.4f;
-    MontanhaSettings.RandomSoundFrequency = 35.0f;
-    BiomeAudioSettings.Add(TEXT("Montanha"), MontanhaSettings);
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Configurações de áudio dos biomas inicializadas"));
+    Super::Tick(DeltaTime);
+    
+    LastAudioUpdateTime += DeltaTime;
+    if (LastAudioUpdateTime >= AudioUpdateInterval)
+    {
+        UpdateSpatialAudio(DeltaTime);
+        LastAudioUpdateTime = 0.0f;
+    }
 }
 
-FString AAudio_SpatialAudioManager::DetectCurrentBiome(FVector PlayerLocation)
+void AAudio_SpatialAudioManager::PlaySoundAtLocation(USoundCue* Sound, FVector Location, float VolumeMultiplier, float PitchMultiplier)
 {
-    // Coordenadas dos biomas baseadas na memória do Hugo
-    float X = PlayerLocation.X;
-    float Y = PlayerLocation.Y;
-
-    // Pântano (sudoeste): X(-77500 a -25000), Y(-76500 a -15000)
-    if (X >= -77500 && X <= -25000 && Y >= -76500 && Y <= -15000)
+    if (!Sound)
     {
-        return TEXT("Pantano");
+        UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: PlaySoundAtLocation - Sound is null"));
+        return;
     }
-    // Floresta (noroeste): X(-77500 a -15000), Y(15000 a 76500)
-    else if (X >= -77500 && X <= -15000 && Y >= 15000 && Y <= 76500)
+    
+    if (!PlayerPawn)
     {
-        return TEXT("Floresta");
+        UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: PlaySoundAtLocation - PlayerPawn is null"));
+        return;
     }
-    // Savana (centro): X(-20000 a 20000), Y(-20000 a 20000)
-    else if (X >= -20000 && X <= 20000 && Y >= -20000 && Y <= 20000)
-    {
-        return TEXT("Savana");
-    }
-    // Deserto (leste): X(25000 a 79500), Y(-30000 a 30000)
-    else if (X >= 25000 && X <= 79500 && Y >= -30000 && Y <= 30000)
-    {
-        return TEXT("Deserto");
-    }
-    // Montanha Nevada (nordeste): X(15000 a 79500), Y(20000 a 76500)
-    else if (X >= 15000 && X <= 79500 && Y >= 20000 && Y <= 76500)
-    {
-        return TEXT("Montanha");
-    }
-
-    // Default para Savana se não detectar bioma específico
-    return TEXT("Savana");
-}
-
-void AAudio_SpatialAudioManager::UpdateSpatialAudio()
-{
-    if (!PlayerPawn) return;
-
+    
+    // Calculate distance attenuation
     FVector PlayerLocation = PlayerPawn->GetActorLocation();
-
-    // Detectar bioma actual
-    FString DetectedBiome = DetectCurrentBiome(PlayerLocation);
-    if (DetectedBiome != CurrentBiome)
+    float Distance = FVector::Dist(Location, PlayerLocation);
+    float Attenuation = CalculateDistanceAttenuation(Location, PlayerLocation, MaxAudioDistance);
+    
+    if (Attenuation > 0.01f) // Only play if audible
     {
-        SetCurrentBiome(DetectedBiome);
-    }
-
-    // Actualizar volume dos sons espaciais baseado na distância
-    for (FAudio_SpatialSoundData& SpatialSound : ActiveSpatialSounds)
-    {
-        float Volume = CalculateVolumeFromDistance(SpatialSound.WorldLocation, PlayerLocation, SpatialSound.MaxAudibleDistance);
-        SpatialSound.VolumeMultiplier = Volume;
+        float FinalVolume = MasterSpatialVolume * VolumeMultiplier * Attenuation;
+        
+        UGameplayStatics::PlaySoundAtLocation(
+            this,
+            Sound,
+            Location,
+            FinalVolume,
+            PitchMultiplier,
+            0.0f, // Start time
+            nullptr, // Attenuation override
+            nullptr, // Concurrency settings
+            nullptr  // Owner
+        );
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Played sound at location (%f,%f,%f) with volume %f"), 
+               Location.X, Location.Y, Location.Z, FinalVolume);
     }
 }
 
-void AAudio_SpatialAudioManager::UpdateBiomeAudio()
+void AAudio_SpatialAudioManager::PlayDinosaurSound(const FString& DinosaurType, const FString& SoundType, FVector Location)
 {
-    if (BiomeAudioSettings.Contains(CurrentBiome))
+    FAudio_DinosaurSoundProfile* Profile = FindDinosaurProfile(DinosaurType);
+    if (!Profile)
     {
-        const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
-
-        // Actualizar volumes dos componentes de áudio
-        if (AmbientAudioComponent)
+        UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: No sound profile found for dinosaur type: %s"), *DinosaurType);
+        return;
+    }
+    
+    USoundCue* SoundToPlay = nullptr;
+    
+    if (SoundType == TEXT("Idle"))
+    {
+        SoundToPlay = Profile->IdleSound;
+    }
+    else if (SoundType == TEXT("Movement"))
+    {
+        SoundToPlay = Profile->MovementSound;
+    }
+    else if (SoundType == TEXT("Attack"))
+    {
+        SoundToPlay = Profile->AttackSound;
+    }
+    
+    if (SoundToPlay)
+    {
+        PlaySoundAtLocation(SoundToPlay, Location, Profile->VolumeMultiplier);
+        
+        // Trigger screen shake for large dinosaur footsteps
+        if (SoundType == TEXT("Movement") && (DinosaurType == TEXT("TRex") || DinosaurType == TEXT("Brachiosaurus")))
         {
-            AmbientAudioComponent->SetVolumeMultiplier(Settings.AmbientVolume * (1.0f - CurrentThreatLevel * 0.5f));
-        }
-
-        if (MusicAudioComponent)
-        {
-            MusicAudioComponent->SetVolumeMultiplier(Settings.MusicVolume * (1.0f + CurrentThreatLevel * 0.5f));
+            TriggerFootstepShake(Location, FootstepShakeIntensity);
         }
     }
 }
 
-void AAudio_SpatialAudioManager::ProcessRandomSounds(float DeltaTime)
+void AAudio_SpatialAudioManager::RegisterDinosaurSoundProfile(const FAudio_DinosaurSoundProfile& Profile)
 {
-    RandomSoundTimer += DeltaTime;
-
-    if (BiomeAudioSettings.Contains(CurrentBiome))
+    // Check if profile already exists
+    for (int32 i = 0; i < DinosaurSoundProfiles.Num(); i++)
     {
-        const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
-
-        if (RandomSoundTimer >= Settings.RandomSoundFrequency)
+        if (DinosaurSoundProfiles[i].DinosaurType == Profile.DinosaurType)
         {
-            RandomSoundTimer = 0.0f;
-
-            // Reproduzir som aleatório do bioma (implementação futura com assets)
-            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Tempo para som aleatório do bioma %s"), *CurrentBiome);
+            DinosaurSoundProfiles[i] = Profile; // Update existing
+            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Updated sound profile for %s"), *Profile.DinosaurType);
+            return;
         }
     }
+    
+    // Add new profile
+    DinosaurSoundProfiles.Add(Profile);
+    UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Added new sound profile for %s"), *Profile.DinosaurType);
 }
 
-void AAudio_SpatialAudioManager::CleanupFinishedSounds()
+void AAudio_SpatialAudioManager::SetMasterSpatialVolume(float Volume)
 {
-    // Remover sons espaciais que já terminaram (implementação futura)
-    for (int32 i = ActiveSpatialSounds.Num() - 1; i >= 0; i--)
-    {
-        // Lógica para verificar se o som terminou
-        // Por agora, manter todos os sons activos
-    }
+    MasterSpatialVolume = FMath::Clamp(Volume, 0.0f, 2.0f);
+    UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Master spatial volume set to %f"), MasterSpatialVolume);
 }
 
-float AAudio_SpatialAudioManager::CalculateVolumeFromDistance(FVector SoundLocation, FVector ListenerLocation, float MaxDistance)
+float AAudio_SpatialAudioManager::CalculateDistanceAttenuation(FVector SoundLocation, FVector ListenerLocation, float MaxDistance)
 {
     float Distance = FVector::Dist(SoundLocation, ListenerLocation);
     
@@ -334,10 +170,108 @@ float AAudio_SpatialAudioManager::CalculateVolumeFromDistance(FVector SoundLocat
     {
         return 0.0f;
     }
-
-    // Curva de atenuação logarítmica
-    float DistanceRatio = Distance / MaxDistance;
-    float Volume = 1.0f - (DistanceRatio * DistanceRatio);
     
-    return FMath::Clamp(Volume, 0.0f, 1.0f);
+    // Linear attenuation with slight curve
+    float NormalizedDistance = Distance / MaxDistance;
+    float Attenuation = 1.0f - (NormalizedDistance * NormalizedDistance);
+    
+    return FMath::Clamp(Attenuation, 0.0f, 1.0f);
+}
+
+void AAudio_SpatialAudioManager::TriggerFootstepShake(FVector FootstepLocation, float Intensity)
+{
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float Distance = FVector::Dist(FootstepLocation, PlayerLocation);
+    
+    if (Distance <= FootstepShakeRadius)
+    {
+        float ShakeAttenuation = 1.0f - (Distance / FootstepShakeRadius);
+        float FinalIntensity = Intensity * ShakeAttenuation;
+        
+        if (APlayerController* PC = Cast<APlayerController>(PlayerPawn->GetController()))
+        {
+            // Create a simple camera shake effect
+            // Note: In a full implementation, you would create a UCameraShakeBase subclass
+            PC->ClientStartCameraShake(nullptr, FinalIntensity);
+            
+            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Triggered footstep shake with intensity %f at distance %f"), 
+                   FinalIntensity, Distance);
+        }
+    }
+}
+
+void AAudio_SpatialAudioManager::PlayFootstepWithShake(FVector Location, const FString& DinosaurType)
+{
+    PlayDinosaurSound(DinosaurType, TEXT("Movement"), Location);
+    
+    // Additional shake for very large dinosaurs
+    if (DinosaurType == TEXT("TRex") || DinosaurType == TEXT("Brachiosaurus"))
+    {
+        TriggerFootstepShake(Location, FootstepShakeIntensity * 1.5f);
+    }
+}
+
+void AAudio_SpatialAudioManager::InitializeDinosaurSoundProfiles()
+{
+    // T-Rex profile
+    FAudio_DinosaurSoundProfile TRexProfile;
+    TRexProfile.DinosaurType = TEXT("TRex");
+    TRexProfile.MaxHearingDistance = 8000.0f;
+    TRexProfile.VolumeMultiplier = 1.5f;
+    DinosaurSoundProfiles.Add(TRexProfile);
+    
+    // Velociraptor profile
+    FAudio_DinosaurSoundProfile VelociraptorProfile;
+    VelociraptorProfile.DinosaurType = TEXT("Velociraptor");
+    VelociraptorProfile.MaxHearingDistance = 3000.0f;
+    VelociraptorProfile.VolumeMultiplier = 0.8f;
+    DinosaurSoundProfiles.Add(VelociraptorProfile);
+    
+    // Brachiosaurus profile
+    FAudio_DinosaurSoundProfile BrachiosaurusProfile;
+    BrachiosaurusProfile.DinosaurType = TEXT("Brachiosaurus");
+    BrachiosaurusProfile.MaxHearingDistance = 10000.0f;
+    BrachiosaurusProfile.VolumeMultiplier = 2.0f;
+    DinosaurSoundProfiles.Add(BrachiosaurusProfile);
+    
+    // Triceratops profile
+    FAudio_DinosaurSoundProfile TriceratopsProfile;
+    TriceratopsProfile.DinosaurType = TEXT("Triceratops");
+    TriceratopsProfile.MaxHearingDistance = 5000.0f;
+    TriceratopsProfile.VolumeMultiplier = 1.2f;
+    DinosaurSoundProfiles.Add(TriceratopsProfile);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Initialized %d dinosaur sound profiles"), DinosaurSoundProfiles.Num());
+}
+
+void AAudio_SpatialAudioManager::UpdateSpatialAudio(float DeltaTime)
+{
+    // Update player pawn reference if needed
+    if (!PlayerPawn && GetWorld())
+    {
+        if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+        {
+            PlayerPawn = PC->GetPawn();
+        }
+    }
+    
+    // Additional spatial audio updates can be added here
+    // For example: updating environmental audio based on player location
+}
+
+FAudio_DinosaurSoundProfile* AAudio_SpatialAudioManager::FindDinosaurProfile(const FString& DinosaurType)
+{
+    for (FAudio_DinosaurSoundProfile& Profile : DinosaurSoundProfiles)
+    {
+        if (Profile.DinosaurType == DinosaurType)
+        {
+            return &Profile;
+        }
+    }
+    return nullptr;
 }

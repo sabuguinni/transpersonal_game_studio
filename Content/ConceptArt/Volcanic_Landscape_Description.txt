@@ -1,0 +1,42 @@
+VOLCANIC BIOME - CONCEPT ART DESCRIPTION
+========================================
+
+ENVIRONMENT: Prehistoric Volcanic Landscape
+LOCATION: Southwest region of MinPlayableMap (-6000, -5000, 300)
+
+VISUAL ELEMENTS:
+- Active volcanic cone (12x12x15 scale) as central landmark
+- 4 lava pools with glowing red-orange material (scales 3-6)
+- 30 scattered volcanic rocks (dark basalt, sharp edges, 1.5-5 scale)
+- 15 charred dead trees (blackened trunks, no foliage, 3-6m tall)
+- Ash-covered terrain with cracks showing red glow beneath
+- Smoke/steam rising from fissures and lava pools
+
+LIGHTING:
+- Dramatic red-orange ambient from lava pools
+- High contrast between bright lava and dark rocks
+- Volumetric fog/smoke for atmospheric depth
+- Rim lighting on rocks from lava glow
+
+ATMOSPHERE:
+- Desolate and dangerous
+- Heat haze distortion over lava
+- Ash particles floating in air
+- Oppressive, hostile environment
+
+GAMEPLAY IMPLICATIONS:
+- High-risk exploration area
+- Heat damage zones near lava
+- Unique volcanic resources (obsidian, sulfur)
+- Potential dinosaur nesting grounds (heat-loving species)
+- Natural barrier/landmark for navigation
+
+TECHNICAL NOTES:
+- Lava pools use emissive materials (red-orange, high intensity)
+- Volcanic rocks use dark basalt PBR materials
+- Charred trees use blackened wood materials
+- Particle systems for smoke/ash/heat distortion
+- Post-process volume for color grading (warm tones)
+
+IMPLEMENTED IN: PROD_CYCLE_AUTO_20260617_001
+ACTORS SPAWNED: 50 total (1 cone + 4 lava pools + 30 rocks + 15 trees)

@@ -1,172 +1,170 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
-#include "../SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "World_BiomeSystem.h"
+#include "SharedTypes.h"
 #include "World_TerrainGenerator.generated.h"
 
-UENUM(BlueprintType)
-enum class EWorld_TerrainType : uint8
-{
-    Plains      UMETA(DisplayName = "Plains"),
-    Forest      UMETA(DisplayName = "Forest"),
-    Mountain    UMETA(DisplayName = "Mountain"),
-    River       UMETA(DisplayName = "River"),
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Desert      UMETA(DisplayName = "Desert")
-};
-
 USTRUCT(BlueprintType)
-struct FWorld_TerrainChunk
+struct TRANSPERSONALGAME_API FWorld_TerrainChunk
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    FVector ChunkLocation;
+    FVector ChunkLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    EWorld_TerrainType TerrainType;
+    FVector ChunkSize = FVector(1000.0f, 1000.0f, 500.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float HeightVariation;
+    EWorld_BiomeType DominantBiome = EWorld_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 VegetationDensity;
+    float HeightVariation = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    TArray<AActor*> SpawnedActors;
+    bool bHasWater = false;
 
-    FWorld_TerrainChunk()
-    {
-        ChunkLocation = FVector::ZeroVector;
-        TerrainType = EWorld_TerrainType::Plains;
-        HeightVariation = 100.0f;
-        VegetationDensity = 5;
-        SpawnedActors.Empty();
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    bool bIsGenerated = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    TArray<FVector> RockFormations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    TArray<FVector> WaterBodies;
 };
 
-USTRUCT(BlueprintType)
-struct FWorld_BiomeSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_TerrainType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeColor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float MinHeight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float MaxHeight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    int32 VegetationCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float SpawnRadius;
-
-    FWorld_BiomeSettings()
-    {
-        BiomeType = EWorld_TerrainType::Plains;
-        BiomeColor = FLinearColor::Green;
-        MinHeight = 0.0f;
-        MaxHeight = 200.0f;
-        VegetationCount = 10;
-        SpawnRadius = 1000.0f;
-    }
-};
-
-/**
- * Terrain Generator Component for procedural world creation
- * Handles biome generation, height variation, and environmental placement
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorld_TerrainGenerator : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AWorld_TerrainGenerator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorld_TerrainGenerator();
+    AWorld_TerrainGenerator();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Terrain Generation Methods
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 ChunkGridSize = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float ChunkSize = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float MaxTerrainHeight = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float NoiseScale = 0.001f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 NoiseOctaves = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float NoisePersistence = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    bool bAutoGenerateOnStart = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    bool bGenerateWaterBodies = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    bool bGenerateRockFormations = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* GrassMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* RockMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* WaterMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    UStaticMesh* TerrainChunkMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    UStaticMesh* RockMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
+    UStaticMesh* WaterPlaneMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    TArray<FWorld_TerrainChunk> TerrainChunks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Integration")
+    UWorld_BiomeSystem* BiomeSystemRef;
+
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void GenerateTerrainChunk(const FVector& ChunkCenter, EWorld_TerrainType TerrainType);
+    void GenerateFullTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void CreateBiomeArea(const FVector& Center, const FWorld_BiomeSettings& BiomeSettings);
+    void GenerateTerrainChunk(int32 ChunkX, int32 ChunkY);
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void SpawnVegetationCluster(const FVector& Center, int32 Count, float Radius);
+    void ClearAllTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void CreateWaterBody(const FVector& Start, const FVector& End, float Width);
+    float GetHeightAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void GenerateRockFormations(const FVector& Center, int32 Count, float HeightVariation);
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation", CallInEditor)
-    void RegenerateAllTerrain();
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Generation", CallInEditor)
-    void ClearGeneratedTerrain();
-
-    // Utility Methods
-    UFUNCTION(BlueprintPure, Category = "Terrain Generation")
-    float GetHeightAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintPure, Category = "Terrain Generation")
-    EWorld_TerrainType GetTerrainTypeAtLocation(const FVector& Location) const;
+    FWorld_TerrainChunk GetChunkAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
-    void SetBiomeSettings(EWorld_TerrainType BiomeType, const FWorld_BiomeSettings& Settings);
+    void AddWaterBody(const FVector& Location, float Radius = 500.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    void AddRockFormation(const FVector& Location, float Scale = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    TArray<FVector> GetAllWaterLocations() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain Generation")
+    TArray<FVector> GetAllRockLocations() const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Terrain Generation")
+    void RegenerateTerrainEditor();
 
 protected:
-    // Configuration Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    TMap<EWorld_TerrainType, FWorld_BiomeSettings> BiomeSettingsMap;
+    UFUNCTION()
+    void InitializeBiomeSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    float ChunkSize;
+    UFUNCTION()
+    float GeneratePerlinNoise(float X, float Y) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    int32 MaxChunks;
+    UFUNCTION()
+    void CreateTerrainMesh(const FWorld_TerrainChunk& Chunk);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    float NoiseScale;
+    UFUNCTION()
+    void SpawnWaterBodies(const FWorld_TerrainChunk& Chunk);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    float HeightMultiplier;
+    UFUNCTION()
+    void SpawnRockFormations(const FWorld_TerrainChunk& Chunk);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Settings")
-    bool bAutoGenerate;
+    UPROPERTY()
+    TArray<UStaticMeshComponent*> SpawnedTerrainMeshes;
 
-    // Runtime Data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain State")
-    TArray<FWorld_TerrainChunk> GeneratedChunks;
+    UPROPERTY()
+    TArray<UStaticMeshComponent*> SpawnedWaterMeshes;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain State")
-    TArray<AActor*> SpawnedTerrainActors;
+    UPROPERTY()
+    TArray<UStaticMeshComponent*> SpawnedRockMeshes;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Terrain State")
-    int32 CurrentChunkCount;
+    UPROPERTY()
+    bool bIsInitialized = false;
 
-private:
-    // Internal Methods
-    void InitializeBiomeSettings();
-    FVector CalculateNoiseOffset(const FVector& Location) const;
-    AActor* SpawnTerrainActor(UClass* ActorClass, const FVector& Location, const FRotator& Rotation);
-    void CleanupTerrainActors();
+    UPROPERTY()
+    int32 RandomSeed = 12345;
 };

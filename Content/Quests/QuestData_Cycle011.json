@@ -1,0 +1,179 @@
+{
+  "version": "1.0",
+  "agent": "Quest_Mission_Designer_014",
+  "cycle": "PROD_CYCLE_AUTO_20260617_011",
+  "quests": [
+    {
+      "id": "QUEST_SURVIVE_STAMPEDE",
+      "name": "Survive the Stampede",
+      "type": "emergency_survival",
+      "trigger": {
+        "actor": "Quest_Stampede_TriggerZone_001",
+        "condition": "player_enters_fear_tier_3_radius",
+        "fear_threshold": 80,
+        "linked_crowd_system": "FearRing_Tier3_*"
+      },
+      "description": "The herd has panicked. Thousands of tonnes of terrified dinosaur are moving — and you are in the way. Reach high ground before the stampede crushes everything in its path.",
+      "objectives": [
+        {
+          "id": "OBJ_REACH_REFUGE",
+          "text": "Reach a safe refuge before the herd arrives",
+          "type": "reach_location_any",
+          "targets": [
+            { "actor": "Quest_Stampede_Refuge_North_001", "linked_scatter": "Crowd_HerdScatter_North_001" },
+            { "actor": "Quest_Stampede_Refuge_East_001",  "linked_scatter": "Crowd_HerdScatter_East_001" },
+            { "actor": "Quest_Stampede_Refuge_West_001",  "linked_scatter": "Crowd_HerdScatter_West_001" }
+          ],
+          "time_limit_seconds": 90,
+          "failure_condition": "player_caught_by_stampede"
+        }
+      ],
+      "completion_actor": "Quest_Stampede_Complete_001",
+      "rewards": {
+        "xp": 150,
+        "items": ["Bone_Fragment", "Dino_Hide_Scrap"],
+        "unlock": "Stampede_Survivor_Perk"
+      },
+      "emotional_arc": "Helplessness → desperate sprint → relief at safety",
+      "design_notes": "Player must read the terrain quickly. Three valid refuges = player agency. No single correct path. Failure is dramatic, not punishing — respawn at camp with partial credit."
+    },
+    {
+      "id": "QUEST_RAPTOR_AMBUSH",
+      "name": "Raptor Ambush",
+      "type": "combat_tactical",
+      "trigger": {
+        "actor": "Quest_RaptorAmbush_Trigger_001",
+        "condition": "player_approaches_river_crossing",
+        "linked_crowd_system": "Crowd_RaptorPack_AssemblyAlpha_001"
+      },
+      "description": "The river crossing is the only way north. Three raptors have cut it off — they know the herd must pass here. Drive them off or find a way to slip past.",
+      "objectives": [
+        {
+          "id": "OBJ_CLEAR_ALPHA",
+          "text": "Drive off or eliminate the alpha raptor",
+          "type": "interact_target",
+          "target_actor": "Quest_RaptorAmbush_AlphaTarget_001",
+          "linked_crowd_actor": "Crowd_RaptorPack_AssemblyAlpha_001",
+          "approach": "combat_or_distraction"
+        },
+        {
+          "id": "OBJ_SECURE_FLANKS",
+          "text": "Clear the flanking raptors",
+          "type": "clear_targets",
+          "targets": [
+            { "actor": "Quest_RaptorAmbush_FlankL_001", "linked_crowd": "Crowd_RaptorPack_FlankLeft_001" },
+            { "actor": "Quest_RaptorAmbush_FlankR_001", "linked_crowd": "Crowd_RaptorPack_FlankRight_001" }
+          ],
+          "optional": true,
+          "note": "Flankers retreat if alpha is driven off — optional for bonus XP"
+        },
+        {
+          "id": "OBJ_CROSS_RIVER",
+          "text": "Cross the river",
+          "type": "reach_location",
+          "target_actor": "Quest_RaptorAmbush_Complete_001"
+        }
+      ],
+      "rewards": {
+        "xp": 200,
+        "items": ["Raptor_Claw", "Raptor_Hide"],
+        "unlock": "Raptor_Behaviour_Knowledge"
+      },
+      "emotional_arc": "Tension → tactical decision → earned passage",
+      "design_notes": "Player can fight, distract with meat, or use fire. Multiple solutions. Flankers retreating if alpha falls = emergent behaviour reward for smart play."
+    },
+    {
+      "id": "QUEST_FOLLOW_PTERANODONS",
+      "name": "Follow the Pteranodons",
+      "type": "exploration_discovery",
+      "trigger": {
+        "actor": "Quest_Pteranodon_Start_001",
+        "condition": "player_spots_pteranodon_circling",
+        "linked_crowd_system": "Pteranodon_Scavenger_Agents"
+      },
+      "description": "Where Pteranodons circle, something died. Follow them — whatever killed it may have left enough behind to feed the camp for days. Or it may still be there.",
+      "objectives": [
+        {
+          "id": "OBJ_SPOT_PTERANODONS",
+          "text": "Observe the Pteranodons circling overhead",
+          "type": "proximity_trigger",
+          "target_actor": "Quest_Pteranodon_Start_001"
+        },
+        {
+          "id": "OBJ_FOLLOW_WP1",
+          "text": "Follow the Pteranodons east",
+          "type": "reach_location",
+          "target_actor": "Quest_Pteranodon_WP1_001"
+        },
+        {
+          "id": "OBJ_FOLLOW_WP2",
+          "text": "The Pteranodons are descending — the kill site is close",
+          "type": "reach_location",
+          "target_actor": "Quest_Pteranodon_WP2_001"
+        },
+        {
+          "id": "OBJ_INVESTIGATE_KILL",
+          "text": "Investigate the kill site",
+          "type": "interact_zone",
+          "target_actor": "Quest_Pteranodon_KillSite_001",
+          "hazard": "predator_may_return",
+          "loot": ["Dino_Bone_Large", "Raw_Meat_x3", "Dino_Hide_Large", "Teeth_Fragments"]
+        }
+      ],
+      "rewards": {
+        "xp": 120,
+        "items": ["Dino_Bone_Large", "Raw_Meat_x3", "Dino_Hide_Large"],
+        "unlock": "Scavenger_Route_Revealed"
+      },
+      "emotional_arc": "Curiosity → cautious tracking → discovery (with lingering danger)",
+      "design_notes": "No combat required. Pure exploration. Teaches player to read animal behaviour as navigation cues. Kill site may have a predator returning — optional danger, not scripted."
+    }
+  ],
+  "voice_lines": {
+    "CampElder_line_001": {
+      "text": "The herd moves north. If you want to eat tonight, you follow them. But the raptors know this too.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781722324077_CampElder.mp3",
+      "triggers_quest": "QUEST_SURVIVE_STAMPEDE",
+      "character": "CampElder"
+    },
+    "CampElder_line_002": {
+      "text": "Three raptors, circling from the east. They cut off the river crossing. You need to find another way — or drive them off before the herd panics.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781722343811_CampElder.mp3",
+      "triggers_quest": "QUEST_RAPTOR_AMBUSH",
+      "character": "CampElder"
+    }
+  },
+  "map_actors_placed": [
+    "Quest_Stampede_TriggerZone_001",
+    "Quest_Stampede_Refuge_North_001",
+    "Quest_Stampede_Refuge_East_001",
+    "Quest_Stampede_Refuge_West_001",
+    "Quest_Stampede_Complete_001",
+    "Quest_RaptorAmbush_Trigger_001",
+    "Quest_RaptorAmbush_AlphaTarget_001",
+    "Quest_RaptorAmbush_FlankL_001",
+    "Quest_RaptorAmbush_FlankR_001",
+    "Quest_RaptorAmbush_Complete_001",
+    "Quest_Pteranodon_Start_001",
+    "Quest_Pteranodon_WP1_001",
+    "Quest_Pteranodon_WP2_001",
+    "Quest_Pteranodon_KillSite_001"
+  ],
+  "crowd_system_links": {
+    "Crowd_HerdScatter_North_001": "Quest_Stampede_Refuge_North_001",
+    "Crowd_HerdScatter_East_001": "Quest_Stampede_Refuge_East_001",
+    "Crowd_HerdScatter_West_001": "Quest_Stampede_Refuge_West_001",
+    "Crowd_RaptorPack_AssemblyAlpha_001": "Quest_RaptorAmbush_AlphaTarget_001",
+    "Crowd_RaptorPack_FlankLeft_001": "Quest_RaptorAmbush_FlankL_001",
+    "Crowd_RaptorPack_FlankRight_001": "Quest_RaptorAmbush_FlankR_001"
+  },
+  "handoff_to_agent_15": {
+    "narrative_needs": [
+      "Camp Elder dialogue tree for all 3 quests (intro + hint + completion lines)",
+      "Kill site environmental storytelling — what creature died, how long ago, what killed it",
+      "Raptor ambush lore — why this pack is coordinating at this crossing (territory? hunger?)",
+      "Stampede aftermath description — what the camp elder says when player returns safely"
+    ],
+    "tone": "Practical, grounded, no mysticism. Humans surviving by reading the world around them."
+  }
+}

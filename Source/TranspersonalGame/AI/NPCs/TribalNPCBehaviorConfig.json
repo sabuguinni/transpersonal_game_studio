@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "agent": "NPC_Behavior_Agent_11",
+  "cycle": "PROD_CYCLE_AUTO_20260703_002",
+  "description": "Tribal NPC behavior configuration — daily routines, patrol waypoints, dialog triggers",
+
+  "npc_archetypes": {
+    "TribalElder": {
+      "label_pattern": "NPC_Tribal_Elder_NNN",
+      "blackboard": "/Game/AI/NPCs/Tribal/Blackboards/BB_TribalElder",
+      "behavior_tree": "/Game/AI/NPCs/Tribal/BehaviorTrees/BT_TribalElder",
+      "tags": ["TribalNPC", "Elder", "HasDailyRoutine", "HasDialogue"],
+      "daily_routine": [
+        { "time_start": 0.0,  "time_end": 6.0,  "state": "Sleeping",  "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 6.0,  "time_end": 8.0,  "state": "Waking",    "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 8.0,  "time_end": 12.0, "state": "Crafting",  "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 12.0, "time_end": 15.0, "state": "Patrolling","anchor_waypoint": "WP_Elder_Lookout_001" },
+        { "time_start": 15.0, "time_end": 18.0, "state": "Teaching",  "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 18.0, "time_end": 21.0, "state": "Eating",    "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 21.0, "time_end": 24.0, "state": "Sleeping",  "anchor_waypoint": "WP_Elder_Campfire_001" }
+      ],
+      "threat_response": {
+        "dinosaur_nearby_radius": 2000.0,
+        "state_on_threat": "Flee",
+        "flee_target": "WP_Elder_Campfire_001",
+        "alert_others": true,
+        "alert_radius": 1500.0
+      },
+      "dialogue_lines": [
+        { "trigger": "PlayerApproach", "audio": "tts/TribalElder_NPC_approach.mp3", "text": "Move carefully. The old ones say a pack of raptors nests beyond the ridge." },
+        { "trigger": "PlayerIdle",     "audio": "tts/TribalElder_NPC_idle.mp3",     "text": "The forest remembers those who respect it." }
+      ]
+    },
+
+    "TribalHunter": {
+      "label_pattern": "NPC_Tribal_Hunter_NNN",
+      "blackboard": "/Game/AI/NPCs/Tribal/Blackboards/BB_TribalHunter",
+      "behavior_tree": "/Game/AI/NPCs/Tribal/BehaviorTrees/BT_TribalHunter",
+      "tags": ["TribalNPC", "Hunter", "HasDailyRoutine", "HasDialogue", "CanCombat"],
+      "daily_routine": [
+        { "time_start": 0.0,  "time_end": 5.0,  "state": "Sleeping",  "anchor_waypoint": "WP_Hunter_Patrol_N_001" },
+        { "time_start": 5.0,  "time_end": 7.0,  "state": "Preparing", "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 7.0,  "time_end": 12.0, "state": "Hunting",   "patrol_route": ["WP_Hunter_Patrol_N_001","WP_Hunter_Patrol_E_001","WP_Hunter_Patrol_S_001","WP_Hunter_Patrol_W_001"] },
+        { "time_start": 12.0, "time_end": 14.0, "state": "Resting",   "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 14.0, "time_end": 19.0, "state": "Hunting",   "patrol_route": ["WP_Hunter_Patrol_W_001","WP_Hunter_Patrol_S_001","WP_Hunter_Patrol_E_001","WP_Hunter_Patrol_N_001"] },
+        { "time_start": 19.0, "time_end": 22.0, "state": "Eating",    "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 22.0, "time_end": 24.0, "state": "Sleeping",  "anchor_waypoint": "WP_Hunter_Patrol_N_001" }
+      ],
+      "threat_response": {
+        "dinosaur_nearby_radius": 1500.0,
+        "state_on_threat": "Combat",
+        "combat_weapon": "Spear",
+        "flee_health_threshold": 0.25,
+        "alert_others": true,
+        "alert_radius": 2000.0
+      },
+      "dialogue_lines": [
+        { "trigger": "PlayerApproach", "audio": "tts/TribalHunter_NPC_approach.mp3", "text": "I tracked the herd for two days north of the river." },
+        { "trigger": "ThreatAlert",    "audio": "tts/TribalHunter_NPC_alert.mp3",    "text": "Danger! Run!" }
+      ]
+    },
+
+    "TribalScout": {
+      "label_pattern": "NPC_Tribal_Scout_NNN",
+      "blackboard": "/Game/AI/NPCs/Tribal/Blackboards/BB_TribalScout",
+      "behavior_tree": "/Game/AI/NPCs/Tribal/BehaviorTrees/BT_TribalScout",
+      "tags": ["TribalNPC", "Scout", "HasDailyRoutine", "FastMover"],
+      "daily_routine": [
+        { "time_start": 0.0,  "time_end": 4.0,  "state": "Sleeping",  "anchor_waypoint": "WP_Scout_Treeline_001" },
+        { "time_start": 4.0,  "time_end": 6.0,  "state": "Scouting",  "patrol_route": ["WP_Scout_River_001","WP_Scout_River_002"] },
+        { "time_start": 6.0,  "time_end": 18.0, "state": "Scouting",  "patrol_route": ["WP_Scout_River_001","WP_Scout_Treeline_001","WP_Scout_River_002","WP_Elder_Campfire_001"] },
+        { "time_start": 18.0, "time_end": 20.0, "state": "Reporting", "anchor_waypoint": "WP_Elder_Campfire_001" },
+        { "time_start": 20.0, "time_end": 24.0, "state": "Sleeping",  "anchor_waypoint": "WP_Scout_Treeline_001" }
+      ],
+      "threat_response": {
+        "dinosaur_nearby_radius": 2500.0,
+        "state_on_threat": "Flee",
+        "flee_speed_multiplier": 1.5,
+        "alert_others": true,
+        "alert_radius": 3000.0
+      }
+    }
+  },
+
+  "waypoints": {
+    "WP_Elder_Campfire_001":   { "location": [2100, 2400, 200], "type": "Campfire",  "role": "Elder" },
+    "WP_Elder_Lookout_001":    { "location": [2100, 1600, 250], "type": "Lookout",   "role": "Elder" },
+    "WP_Hunter_Patrol_N_001":  { "location": [2100, 1200, 200], "type": "Patrol",    "role": "Hunter" },
+    "WP_Hunter_Patrol_E_001":  { "location": [3300, 2400, 200], "type": "Patrol",    "role": "Hunter" },
+    "WP_Hunter_Patrol_S_001":  { "location": [2100, 3600, 200], "type": "Patrol",    "role": "Hunter" },
+    "WP_Hunter_Patrol_W_001":  { "location": [900,  2400, 200], "type": "Patrol",    "role": "Hunter" },
+    "WP_Scout_River_001":      { "location": [2900, 1800, 200], "type": "River",     "role": "Scout" },
+    "WP_Scout_River_002":      { "location": [1300, 1800, 200], "type": "River",     "role": "Scout" },
+    "WP_Scout_Treeline_001":   { "location": [2700, 3200, 200], "type": "Treeline",  "role": "Scout" }
+  },
+
+  "campfire": {
+    "label": "Prop_Campfire_Hub_001",
+    "location": [2100, 2400, 250],
+    "light_color": [1.0, 0.4, 0.05],
+    "intensity": 3000.0,
+    "attenuation_radius": 800.0,
+    "is_social_anchor": true,
+    "social_radius": 600.0
+  },
+
+  "audio_assets": {
+    "TribalElder_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783044596452_TribalElder_NPC.mp3",
+    "TribalHunter_report": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783044614772_TribalHunter_NPC.mp3"
+  }
+}

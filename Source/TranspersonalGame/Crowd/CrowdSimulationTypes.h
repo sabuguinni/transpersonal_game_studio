@@ -1,148 +1,146 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
 #include "CrowdSimulationTypes.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_AgentState : uint8
-{
-    Idle UMETA(DisplayName = "Idle"),
-    Walking UMETA(DisplayName = "Walking"),
-    Running UMETA(DisplayName = "Running"),
-    Fleeing UMETA(DisplayName = "Fleeing"),
-    Gathering UMETA(DisplayName = "Gathering"),
-    Following UMETA(DisplayName = "Following")
-};
+// ============================================================
+// Crowd Simulation Types — Agent #13
+// Prehistoric survival game — herd/crowd behavior types
+// ============================================================
 
 UENUM(BlueprintType)
-enum class ECrowd_LODLevel : uint8
+enum class ECrowd_HerdState : uint8
 {
-    High UMETA(DisplayName = "High Detail"),
-    Medium UMETA(DisplayName = "Medium Detail"),
-    Low UMETA(DisplayName = "Low Detail"),
-    Culled UMETA(DisplayName = "Culled")
+    Grazing       UMETA(DisplayName = "Grazing"),
+    Wandering     UMETA(DisplayName = "Wandering"),
+    Alerted       UMETA(DisplayName = "Alerted"),
+    Stampeding    UMETA(DisplayName = "Stampeding"),
+    Fleeing       UMETA(DisplayName = "Fleeing"),
+    Resting       UMETA(DisplayName = "Resting")
 };
 
 UENUM(BlueprintType)
-enum class ECrowd_BehaviorType : uint8
+enum class ECrowd_HerbivoreSpecies : uint8
 {
-    Wandering UMETA(DisplayName = "Wandering"),
-    Patrolling UMETA(DisplayName = "Patrolling"),
-    Gathering UMETA(DisplayName = "Gathering"),
-    Fleeing UMETA(DisplayName = "Fleeing"),
-    Following UMETA(DisplayName = "Following")
+    Triceratops       UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus     UMETA(DisplayName = "Brachiosaurus"),
+    Parasaurolophus   UMETA(DisplayName = "Parasaurolophus"),
+    Stegosaurus       UMETA(DisplayName = "Stegosaurus"),
+    Ankylosaurus      UMETA(DisplayName = "Ankylosaurus")
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_AgentRole : uint8
+{
+    AlphaLeader   UMETA(DisplayName = "Alpha Leader"),
+    Scout         UMETA(DisplayName = "Scout"),
+    Follower      UMETA(DisplayName = "Follower"),
+    Juvenile      UMETA(DisplayName = "Juvenile"),
+    Sentry        UMETA(DisplayName = "Sentry")
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_ThreatLevel : uint8
+{
+    None      UMETA(DisplayName = "None"),
+    Low       UMETA(DisplayName = "Low"),
+    Medium    UMETA(DisplayName = "Medium"),
+    High      UMETA(DisplayName = "High"),
+    Critical  UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_AgentData
+struct FCrowd_HerdMember
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Position;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FRotator Rotation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float Health = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    ECrowd_AgentState State;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    bool bIsAlpha = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    ECrowd_LODLevel LODLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_HerbivoreSpecies Species = ECrowd_HerbivoreSpecies::Triceratops;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float Speed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_AgentRole Role = ECrowd_AgentRole::Follower;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float Health;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 AgentID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FVector TargetLocation;
-
-    FCrowd_AgentData()
-    {
-        Position = FVector::ZeroVector;
-        Velocity = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        State = ECrowd_AgentState::Idle;
-        LODLevel = ECrowd_LODLevel::High;
-        Speed = 200.0f;
-        Health = 100.0f;
-        AgentID = -1;
-        TargetLocation = FVector::ZeroVector;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 AgentID = -1;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_PathfindingData
+struct FCrowd_StampedeData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<FVector> Waypoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector StampedeTriggerLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    int32 CurrentWaypointIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    FVector StampedeDirection = FVector(1.0f, 0.0f, 0.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathfindingRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float StampedeSpeed = 1200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    bool bIsPathValid;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float StampedeDuration = 15.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float AcceptanceRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float TriggerRadius = 800.0f;
 
-    FCrowd_PathfindingData()
-    {
-        CurrentWaypointIndex = 0;
-        PathfindingRadius = 100.0f;
-        bIsPathValid = false;
-        AcceptanceRadius = 50.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_ThreatLevel ThreatLevel = ECrowd_ThreatLevel::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    bool bIsActive = false;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_LODSettings
+struct FCrowd_HerdConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float HighDetailDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    ECrowd_HerbivoreSpecies Species = ECrowd_HerbivoreSpecies::Triceratops;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MediumDetailDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    int32 HerdSize = 20;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LowDetailDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float WanderRadius = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float CullDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float AlertRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxHighDetailAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float FleeSpeed = 900.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxMediumDetailAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float GrazeSpeed = 150.0f;
 
-    FCrowd_LODSettings()
-    {
-        HighDetailDistance = 500.0f;
-        MediumDetailDistance = 1000.0f;
-        LowDetailDistance = 2000.0f;
-        CullDistance = 3000.0f;
-        MaxHighDetailAgents = 50;
-        MaxMediumDetailAgents = 200;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float WalkSpeed = 350.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float SeparationDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float CohesionWeight = 0.4f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float SeparationWeight = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    float AlignmentWeight = 0.5f;
 };
-
-#include "CrowdSimulationTypes.generated.h"

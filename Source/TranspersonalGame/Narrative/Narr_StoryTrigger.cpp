@@ -1,83 +1,62 @@
 #include "Narr_StoryTrigger.h"
 #include "Components/BoxComponent.h"
-#include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
 
 ANarr_StoryTrigger::ANarr_StoryTrigger()
 {
     PrimaryActorTick.bCanEverTick = false;
 
-    // Initialize trigger properties
-    TriggerType = ENarr_TriggerType::FirstDinosaur;
-    bIsActive = true;
+    // Create dialogue component
+    DialogueComponent = CreateDefaultSubobject<UNarr_DialogueSystem>(TEXT("DialogueComponent"));
+
+    // Set default values
+    TriggerEventType = ENarr_TriggerEvent::FirstEncounter;
+    TriggerName = TEXT("Story Trigger");
+    bOneTimeUse = true;
     bHasBeenTriggered = false;
-    ThreatLevel = 0.5f;
-    bIncreaseFearOnTrigger = false;
-    FearIncreaseAmount = 10.0f;
+    DelayBeforeDialogue = 1.0f;
 
-    // Create audio component
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
-    AudioComponent->SetupAttachment(RootComponent);
-    AudioComponent->bAutoActivate = false;
-
-    // Set default trigger box size
-    UBoxComponent* BoxComp = GetCollisionComponent();
-    if (BoxComp)
-    {
-        BoxComp->SetBoxExtent(FVector(200.0f, 200.0f, 100.0f));
-    }
-
-    // Initialize default story event
-    StoryEvent.EventID = TEXT("DefaultEvent");
-    StoryEvent.NarrativeText = FText::FromString(TEXT("Something important happened here..."));
-    StoryEvent.VoiceOverCue = nullptr;
-    StoryEvent.DisplayDuration = 5.0f;
-    StoryEvent.bRequiresPlayerInput = false;
-    StoryEvent.bOnlyTriggerOnce = true;
+    // Bind overlap events
+    OnActorBeginOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnOverlapBegin);
+    OnActorEndOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnOverlapEnd);
 }
 
 void ANarr_StoryTrigger::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    OnActorBeginOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnTriggerEnter);
-    OnActorEndOverlap.AddDynamic(this, &ANarr_StoryTrigger::OnTriggerExit);
-
-    UE_LOG(LogTemp, Log, TEXT("Narr_StoryTrigger initialized: %s"), *StoryEvent.EventID);
+    
+    // Setup dialogue based on trigger type
+    SetupDialogueForEvent(TriggerEventType);
+    
+    UE_LOG(LogTemp, Log, TEXT("Story Trigger '%s' initialized with event type %d"), 
+        *TriggerName, (int32)TriggerEventType);
 }
 
-void ANarr_StoryTrigger::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                                       UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex,
-                                       bool bFromSweep, const FHitResult& SweepResult)
+void ANarr_StoryTrigger::OnOverlapBegin(AActor* OverlappedActor, AActor* OtherActor)
 {
-    // Check if it's the player character
+    // Check if the overlapping actor is the player character
     ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
-    if (!PlayerCharacter || !bIsActive)
+    if (!PlayerCharacter)
     {
         return;
     }
 
-    // Check if this trigger should only fire once
-    if (StoryEvent.bOnlyTriggerOnce && bHasBeenTriggered)
+    // Check if this is a one-time trigger that has already been used
+    if (bOneTimeUse && bHasBeenTriggered)
     {
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Player entered story trigger: %s"), *StoryEvent.EventID);
-
-    // Trigger the story event
-    TriggerStoryEvent();
-
-    // Call Blueprint implementable event
-    OnPlayerEnterTrigger();
+    UE_LOG(LogTemp, Log, TEXT("Player entered story trigger: %s"), *TriggerName);
+    
+    // Trigger the story event with a delay
+    FTimerHandle DelayTimer;
+    GetWorld()->GetTimerManager().SetTimer(DelayTimer, this, &ANarr_StoryTrigger::TriggerStoryEvent, DelayBeforeDialogue, false);
 }
 
-void ANarr_StoryTrigger::OnTriggerExit(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-                                      UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
+void ANarr_StoryTrigger::OnOverlapEnd(AActor* OverlappedActor, AActor* OtherActor)
 {
     ACharacter* PlayerCharacter = Cast<ACharacter>(OtherActor);
     if (!PlayerCharacter)
@@ -85,96 +64,120 @@ void ANarr_StoryTrigger::OnTriggerExit(UPrimitiveComponent* OverlappedComponent,
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Player exited story trigger: %s"), *StoryEvent.EventID);
-
-    // Call Blueprint implementable event
-    OnPlayerExitTrigger();
+    UE_LOG(LogTemp, Log, TEXT("Player left story trigger: %s"), *TriggerName);
 }
 
 void ANarr_StoryTrigger::TriggerStoryEvent()
 {
-    if (!bIsActive)
+    if (bOneTimeUse && bHasBeenTriggered)
     {
         return;
     }
 
-    // Mark as triggered
     bHasBeenTriggered = true;
 
-    // Play voice-over if available
-    PlayVoiceOver();
-
-    // Update player fear if configured
-    if (bIncreaseFearOnTrigger)
+    if (DialogueComponent)
     {
-        UpdatePlayerFear();
-    }
-
-    // Display narrative text (this would typically be handled by UI system)
-    if (GEngine)
-    {
-        FString DisplayText = FString::Printf(TEXT("[NARRATIVE] %s"), 
-                                            *StoryEvent.NarrativeText.ToString());
-        GEngine->AddOnScreenDebugMessage(-1, StoryEvent.DisplayDuration, FColor::Yellow, DisplayText);
+        DialogueComponent->StartDialogue();
     }
 
     // Log the event
-    UE_LOG(LogTemp, Warning, TEXT("Story Event Triggered: %s - %s"), 
-           *StoryEvent.EventID, *StoryEvent.NarrativeText.ToString());
+    FString EventName = TEXT("Unknown");
+    switch (TriggerEventType)
+    {
+        case ENarr_TriggerEvent::FirstEncounter:
+            EventName = TEXT("First Encounter");
+            break;
+        case ENarr_TriggerEvent::DangerWarning:
+            EventName = TEXT("Danger Warning");
+            break;
+        case ENarr_TriggerEvent::ResourceDiscovery:
+            EventName = TEXT("Resource Discovery");
+            break;
+        case ENarr_TriggerEvent::TerritoryEntry:
+            EventName = TEXT("Territory Entry");
+            break;
+        case ENarr_TriggerEvent::CombatStart:
+            EventName = TEXT("Combat Start");
+            break;
+    }
 
-    // Call Blueprint implementable event
-    OnStoryEventTriggered(StoryEvent);
+    if (GEngine)
+    {
+        FString Message = FString::Printf(TEXT("Story Event Triggered: %s - %s"), *TriggerName, *EventName);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, Message);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Story Event Triggered: %s - %s"), *TriggerName, *EventName);
+}
+
+void ANarr_StoryTrigger::SetupDialogueForEvent(ENarr_TriggerEvent EventType)
+{
+    if (!DialogueComponent)
+    {
+        return;
+    }
+
+    // Clear existing dialogue
+    DialogueComponent->DialogueEntries.Empty();
+
+    switch (EventType)
+    {
+        case ENarr_TriggerEvent::FirstEncounter:
+        {
+            FNarr_DialogueEntry Entry;
+            Entry.SpeakerName = TEXT("Ancient Voice");
+            Entry.DialogueText = FText::FromString(TEXT("You have entered the primordial lands. Here, only the strong survive."));
+            Entry.DialogueType = ENarr_DialogueType::Information;
+            Entry.DisplayDuration = 4.0f;
+            DialogueComponent->AddDialogueEntry(Entry);
+            break;
+        }
+        case ENarr_TriggerEvent::DangerWarning:
+        {
+            FNarr_DialogueEntry Entry;
+            Entry.SpeakerName = TEXT("Tribal Scout");
+            Entry.DialogueText = FText::FromString(TEXT("Danger stalks these paths! The great hunters are near!"));
+            Entry.DialogueType = ENarr_DialogueType::Warning;
+            Entry.DisplayDuration = 3.0f;
+            DialogueComponent->AddDialogueEntry(Entry);
+            break;
+        }
+        case ENarr_TriggerEvent::ResourceDiscovery:
+        {
+            FNarr_DialogueEntry Entry;
+            Entry.SpeakerName = TEXT("Elder Gatherer");
+            Entry.DialogueText = FText::FromString(TEXT("Rich resources lie hidden here. Gather what you can before the predators return."));
+            Entry.DialogueType = ENarr_DialogueType::Survival;
+            Entry.DisplayDuration = 4.5f;
+            DialogueComponent->AddDialogueEntry(Entry);
+            break;
+        }
+        case ENarr_TriggerEvent::TerritoryEntry:
+        {
+            FNarr_DialogueEntry Entry;
+            Entry.SpeakerName = TEXT("Territory Guardian");
+            Entry.DialogueText = FText::FromString(TEXT("You trespass on sacred hunting grounds. Prove your worth or face the consequences."));
+            Entry.DialogueType = ENarr_DialogueType::Quest;
+            Entry.DisplayDuration = 5.0f;
+            DialogueComponent->AddDialogueEntry(Entry);
+            break;
+        }
+        case ENarr_TriggerEvent::CombatStart:
+        {
+            FNarr_DialogueEntry Entry;
+            Entry.SpeakerName = TEXT("Battle Cry");
+            Entry.DialogueText = FText::FromString(TEXT("The hunt begins! Strike fast and true, or become prey yourself!"));
+            Entry.DialogueType = ENarr_DialogueType::Combat;
+            Entry.DisplayDuration = 2.5f;
+            DialogueComponent->AddDialogueEntry(Entry);
+            break;
+        }
+    }
 }
 
 void ANarr_StoryTrigger::ResetTrigger()
 {
     bHasBeenTriggered = false;
-    bIsActive = true;
-    
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Story trigger reset: %s"), *StoryEvent.EventID);
-}
-
-void ANarr_StoryTrigger::SetTriggerActive(bool bActive)
-{
-    bIsActive = bActive;
-    
-    if (!bActive && AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Story trigger %s set to: %s"), 
-           *StoryEvent.EventID, bActive ? TEXT("Active") : TEXT("Inactive"));
-}
-
-void ANarr_StoryTrigger::PlayVoiceOver()
-{
-    if (StoryEvent.VoiceOverCue && AudioComponent)
-    {
-        AudioComponent->SetSound(StoryEvent.VoiceOverCue);
-        AudioComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing voice-over for story event: %s"), *StoryEvent.EventID);
-    }
-}
-
-void ANarr_StoryTrigger::UpdatePlayerFear()
-{
-    // Find the player character and update fear
-    ACharacter* PlayerCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (PlayerCharacter)
-    {
-        // This would typically interface with the player's survival stats system
-        // For now, we'll just log the fear increase
-        UE_LOG(LogTemp, Warning, TEXT("Player fear increased by %.1f due to story trigger: %s"), 
-               FearIncreaseAmount, *StoryEvent.EventID);
-        
-        // In a real implementation, this would call something like:
-        // PlayerCharacter->GetSurvivalComponent()->IncreaseFear(FearIncreaseAmount);
-    }
+    UE_LOG(LogTemp, Log, TEXT("Story Trigger '%s' has been reset"), *TriggerName);
 }

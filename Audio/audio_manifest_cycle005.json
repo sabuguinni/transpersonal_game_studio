@@ -1,0 +1,110 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260704_005",
+  "agent": "#16 Audio Agent",
+  "timestamp": "2026-07-04",
+  "voice_lines": [
+    {
+      "id": "TTS-17",
+      "character": "ElderMara_ChaseAlert",
+      "line": "Move. Now. Do not look back — just run. The ground shakes because something massive is behind you. Your legs know what your mind has not yet accepted. Run.",
+      "duration": "~11s",
+      "trigger": "T-Rex or large predator enters chase state toward player",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783147197411_ElderMara_ChaseAlert.mp3",
+      "tags": ["chase", "danger", "predator", "urgency"]
+    },
+    {
+      "id": "TTS-18",
+      "character": "ElderMara_HerdMigration",
+      "line": "The herd moves at dusk. Forty, maybe fifty animals — all heading north toward the river delta. When they pass, you do not move. You do not breathe. You become part of the ground beneath them.",
+      "duration": "~13s",
+      "trigger": "Player first observes large herbivore herd migration event",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783147207989_ElderMara_HerdMigration.mp3",
+      "tags": ["herd", "migration", "observation", "stealth"]
+    }
+  ],
+  "sound_assets": {
+    "campfire": [
+      {
+        "freesound_id": 157187,
+        "name": "Campfire Crackle 3",
+        "duration": 2.0,
+        "preview_url": "https://cdn.freesound.org/previews/157/157187_2840005-hq.mp3",
+        "usage": "AmbientSound_Campfire_Hub_001 — looping campfire at player base camp",
+        "tags": ["burning", "campfire", "crackling", "fire", "wood"]
+      },
+      {
+        "freesound_id": 394952,
+        "name": "crackling campfire.wav",
+        "duration": 1805.63,
+        "preview_url": "https://cdn.freesound.org/previews/394/394952_7037-hq.mp3",
+        "usage": "Long-form campfire ambient — base camp night atmosphere",
+        "tags": ["campfire", "crackling", "field-recording", "fire", "flames"]
+      }
+    ],
+    "river": [
+      {
+        "freesound_id": 442478,
+        "name": "Forest river flows over rocks.wav",
+        "duration": 116.027,
+        "preview_url": "https://cdn.freesound.org/previews/442/442478_5902878-hq.mp3",
+        "usage": "AmbientSound_River_Hub_001 — river zone near hub X=2600 Y=2800",
+        "tags": ["ambience", "creek", "flowing", "forest", "river", "rocks"]
+      },
+      {
+        "freesound_id": 579427,
+        "name": "rocky-stream calm",
+        "duration": 281.185,
+        "preview_url": "https://cdn.freesound.org/previews/579/579427_1648170-hq.mp3",
+        "usage": "Secondary river ambient — shallow crossing points",
+        "tags": ["ambience", "brook", "creek", "field-recording", "stream"]
+      }
+    ]
+  },
+  "ue5_audio_zones": [
+    {
+      "label": "AudioZone_Campfire_Hub_001",
+      "location": {"x": 2100, "y": 2400, "z": 50},
+      "scale": {"x": 5.0, "y": 5.0, "z": 2.0},
+      "sound_ref": "freesound_157187",
+      "type": "TriggerBox",
+      "description": "Campfire crackle zone at player hub — triggers warm ambience"
+    },
+    {
+      "label": "AudioZone_River_Hub_001",
+      "location": {"x": 2600, "y": 2800, "z": 50},
+      "scale": {"x": 5.0, "y": 5.0, "z": 2.0},
+      "sound_ref": "freesound_442478",
+      "type": "TriggerBox",
+      "description": "River flow zone east of hub — triggers water ambience"
+    },
+    {
+      "label": "AudioZone_Forest_Hub_001",
+      "location": {"x": 1700, "y": 2100, "z": 50},
+      "scale": {"x": 5.0, "y": 5.0, "z": 2.0},
+      "sound_ref": "forest_insects_night",
+      "type": "TriggerBox",
+      "description": "Dense forest zone west of hub — triggers insect/bird ambience"
+    }
+  ],
+  "ambient_sound_actors": [
+    {"label": "AmbientSound_Campfire_Hub_001", "location": {"x": 2100, "y": 2400, "z": 80}},
+    {"label": "AmbientSound_River_Hub_001",    "location": {"x": 2600, "y": 2800, "z": 80}},
+    {"label": "AmbientSound_Forest_Hub_001",   "location": {"x": 1700, "y": 2100, "z": 80}},
+    {"label": "AmbientSound_Wind_Hub_001",     "location": {"x": 2100, "y": 2400, "z": 300}}
+  ],
+  "cumulative_voice_lines": {
+    "total": 18,
+    "cycles": {
+      "cycle_002": ["TTS-01 to TTS-04"],
+      "cycle_003": ["TTS-05 to TTS-08 (ElderMara_TRexEncounter, ElderMara_NightSurvival, etc.)"],
+      "cycle_004": ["TTS-09 to TTS-16 (ElderMara_RiverZone, ElderMara_HerdAlert, etc.)"],
+      "cycle_005": ["TTS-17 ElderMara_ChaseAlert", "TTS-18 ElderMara_HerdMigration"]
+    }
+  },
+  "next_agent_handoff": {
+    "agent": "#17 VFX Agent",
+    "audio_zones_ready": ["AudioZone_Campfire_Hub_001", "AudioZone_River_Hub_001", "AudioZone_Forest_Hub_001"],
+    "ambient_actors_ready": ["AmbientSound_Campfire_Hub_001", "AmbientSound_River_Hub_001", "AmbientSound_Forest_Hub_001", "AmbientSound_Wind_Hub_001"],
+    "vfx_sync_request": "Attach Niagara fire particle system to AmbientSound_Campfire_Hub_001 location (X=2100, Y=2400, Z=80). Attach water splash/mist Niagara to AmbientSound_River_Hub_001 (X=2600, Y=2800, Z=80). Audio zones are TriggerBox actors — VFX can use same zones for particle activation triggers."
+  }
+}

@@ -1,203 +1,149 @@
 #include "Narr_DialogueComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
 
 UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     
-    // Default settings
-    TriggerDistance = 500.0f;
-    bRequireLineOfSight = true;
+    NPCName = TEXT("Unknown");
+    InteractionRange = 300.0f;
+    CurrentState = ENarr_DialogueState::Idle;
     CurrentLineIndex = 0;
-    bIsPlayingDialogue = false;
-    DialogueTimer = 0.0f;
-    CachedPlayerActor = nullptr;
+    CurrentLineTimer = 0.0f;
+    PlayerPawn = nullptr;
 }
 
 void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Cache player actor reference
-    CachedPlayerActor = FindPlayerActor();
+    // Get player reference
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent initialized on %s"), *GetOwner()->GetName());
+    // Initialize default dialogue if empty
+    if (DialogueLines.Num() == 0)
+    {
+        FNarr_DialogueLine DefaultLine;
+        DefaultLine.SpeakerName = NPCName;
+        DefaultLine.DialogueText = TEXT("The winds carry strange scents today. Danger lurks beyond the ridge.");
+        DefaultLine.Duration = 4.0f;
+        DefaultLine.bIsPlayerChoice = false;
+        DialogueLines.Add(DefaultLine);
+    }
 }
 
 void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (bIsPlayingDialogue)
+    if (CurrentState == ENarr_DialogueState::Speaking)
     {
         UpdateDialogueTimer(DeltaTime);
     }
-    else
-    {
-        CheckPlayerProximity();
-    }
 }
 
-bool UNarr_DialogueComponent::StartDialogueSequence(const FString& SequenceID)
+void UNarr_DialogueComponent::StartDialogue()
 {
-    // Find the sequence by ID
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
+    if (!IsPlayerInRange() || DialogueLines.Num() == 0)
     {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            CurrentSequence = Sequence;
-            CurrentLineIndex = 0;
-            bIsPlayingDialogue = true;
-            DialogueTimer = 0.0f;
-            
-            // Broadcast start event
-            OnDialogueStarted.Broadcast(SequenceID);
-            
-            // Start first line
-            if (CurrentSequence.DialogueLines.Num() > 0)
-            {
-                OnDialogueLineChanged.Broadcast(CurrentSequence.DialogueLines[0]);
-                UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
-                return true;
-            }
-        }
+        return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-    return false;
-}
-
-void UNarr_DialogueComponent::StopDialogue()
-{
-    bIsPlayingDialogue = false;
+    CurrentState = ENarr_DialogueState::Speaking;
     CurrentLineIndex = 0;
-    DialogueTimer = 0.0f;
+    CurrentLineTimer = 0.0f;
     
-    OnDialogueEnded.Broadcast();
-    UE_LOG(LogTemp, Log, TEXT("Dialogue stopped"));
+    DisplayCurrentLine();
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue started with %s"), *NPCName);
+}
+
+void UNarr_DialogueComponent::EndDialogue()
+{
+    CurrentState = ENarr_DialogueState::Idle;
+    CurrentLineIndex = 0;
+    CurrentLineTimer = 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended with %s"), *NPCName);
 }
 
 void UNarr_DialogueComponent::NextDialogueLine()
 {
-    if (!bIsPlayingDialogue || CurrentSequence.DialogueLines.Num() == 0)
+    if (CurrentState != ENarr_DialogueState::Speaking)
     {
         return;
     }
     
     CurrentLineIndex++;
     
-    if (CurrentLineIndex >= CurrentSequence.DialogueLines.Num())
+    if (CurrentLineIndex >= DialogueLines.Num())
     {
-        // End of sequence
-        StopDialogue();
+        EndDialogue();
+        return;
     }
-    else
-    {
-        // Move to next line
-        DialogueTimer = 0.0f;
-        OnDialogueLineChanged.Broadcast(CurrentSequence.DialogueLines[CurrentLineIndex]);
-    }
+    
+    CurrentLineTimer = 0.0f;
+    DisplayCurrentLine();
 }
 
-bool UNarr_DialogueComponent::CanTriggerDialogue(AActor* PlayerActor)
+bool UNarr_DialogueComponent::IsDialogueActive() const
 {
-    if (!PlayerActor || DialogueSequences.Num() == 0)
-    {
-        return false;
-    }
-    
-    // Check distance
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
-    if (Distance > TriggerDistance)
-    {
-        return false;
-    }
-    
-    // Check line of sight if required
-    if (bRequireLineOfSight)
-    {
-        FHitResult HitResult;
-        FVector Start = GetOwner()->GetActorLocation();
-        FVector End = PlayerActor->GetActorLocation();
-        
-        bool bHit = GetWorld()->LineTraceSingleByChannel(
-            HitResult,
-            Start,
-            End,
-            ECC_Visibility
-        );
-        
-        if (bHit && HitResult.GetActor() != PlayerActor)
-        {
-            return false; // Something is blocking line of sight
-        }
-    }
-    
-    return true;
-}
-
-FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentDialogueLine()
-{
-    if (bIsPlayingDialogue && 
-        CurrentLineIndex >= 0 && 
-        CurrentLineIndex < CurrentSequence.DialogueLines.Num())
-    {
-        return CurrentSequence.DialogueLines[CurrentLineIndex];
-    }
-    
-    return FNarr_DialogueLine(); // Return default empty line
+    return CurrentState != ENarr_DialogueState::Idle;
 }
 
 void UNarr_DialogueComponent::UpdateDialogueTimer(float DeltaTime)
 {
-    DialogueTimer += DeltaTime;
-    
-    if (CurrentLineIndex >= 0 && CurrentLineIndex < CurrentSequence.DialogueLines.Num())
+    if (CurrentLineIndex >= DialogueLines.Num())
     {
-        const FNarr_DialogueLine& CurrentLine = CurrentSequence.DialogueLines[CurrentLineIndex];
-        
-        if (DialogueTimer >= CurrentLine.Duration)
+        return;
+    }
+    
+    CurrentLineTimer += DeltaTime;
+    
+    const FNarr_DialogueLine& CurrentLine = DialogueLines[CurrentLineIndex];
+    
+    if (CurrentLineTimer >= CurrentLine.Duration)
+    {
+        if (CurrentLine.bIsPlayerChoice)
+        {
+            CurrentState = ENarr_DialogueState::WaitingForResponse;
+        }
+        else
         {
             NextDialogueLine();
         }
     }
 }
 
-void UNarr_DialogueComponent::CheckPlayerProximity()
+bool UNarr_DialogueComponent::IsPlayerInRange() const
 {
-    if (!CachedPlayerActor)
+    if (!PlayerPawn || !GetOwner())
     {
-        CachedPlayerActor = FindPlayerActor();
+        return false;
+    }
+    
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+    return Distance <= InteractionRange;
+}
+
+void UNarr_DialogueComponent::DisplayCurrentLine()
+{
+    if (CurrentLineIndex >= DialogueLines.Num())
+    {
         return;
     }
     
-    if (CanTriggerDialogue(CachedPlayerActor) && !bIsPlayingDialogue)
+    const FNarr_DialogueLine& CurrentLine = DialogueLines[CurrentLineIndex];
+    
+    // Display dialogue on screen
+    if (GEngine)
     {
-        // Find first available sequence based on trigger condition
-        for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
-        {
-            if (Sequence.TriggerCondition == ENarr_TriggerCondition::PlayerProximity)
-            {
-                StartDialogueSequence(Sequence.SequenceID);
-                break;
-            }
-        }
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, CurrentLine.Duration, FColor::Yellow, DisplayText);
     }
-}
-
-AActor* UNarr_DialogueComponent::FindPlayerActor()
-{
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            return PC->GetPawn();
-        }
-    }
-    return nullptr;
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue: %s - %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
 }

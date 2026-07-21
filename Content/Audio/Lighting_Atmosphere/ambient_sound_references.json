@@ -1,0 +1,81 @@
+{
+  "agent": "Lighting & Atmosphere Agent #08",
+  "cycle": "PROD_CYCLE_AUTO_20260704_011",
+  "category": "Ambient Audio References for Cretaceous Hub Area",
+  "description": "Curated Freesound references for prehistoric jungle daytime atmosphere. These complement the Lumen-lit hub clearing at world coords X=2100, Y=2400.",
+  "sounds": [
+    {
+      "id": 332727,
+      "name": "Birds and bugs in the woods of Costa Rica",
+      "description": "Dense tropical bird and insect ambience — closest analog to Cretaceous jungle soundscape. Daytime field recording from Osa Peninsula.",
+      "duration_seconds": 78.88,
+      "preview_url": "https://cdn.freesound.org/previews/332/332727_4101863-hq.mp3",
+      "tags": ["ambiance", "birds", "insects", "forest", "tropical"],
+      "usage": "Primary hub clearing loop — layer under all other sounds at the (2100, 2400) clearing",
+      "ue5_attenuation": {
+        "inner_radius": 3000,
+        "falloff_distance": 8000,
+        "volume_multiplier": 0.8
+      }
+    },
+    {
+      "id": 653743,
+      "name": "Peruvian Amazon birds frogs daytime",
+      "description": "Upland forest recording with exotic birds and frogs — excellent for dense prehistoric jungle feel.",
+      "duration_seconds": 58.06,
+      "preview_url": "https://cdn.freesound.org/previews/653/653743_8323061-hq.mp3",
+      "tags": ["amazon", "birds", "jungle", "exotic", "ambient"],
+      "usage": "Secondary layer for deep forest areas away from hub clearing",
+      "ue5_attenuation": {
+        "inner_radius": 1500,
+        "falloff_distance": 5000,
+        "volume_multiplier": 0.6
+      }
+    },
+    {
+      "id": 523437,
+      "name": "Forest Insects Day High Frequency",
+      "description": "Clean high-frequency insect calls — cicadas and similar. Adds heat and density to midday atmosphere.",
+      "duration_seconds": 116.97,
+      "preview_url": "https://cdn.freesound.org/previews/523/523437_11502151-hq.mp3",
+      "tags": ["insects", "crickets", "forest", "high-frequency", "jungle"],
+      "usage": "Midday intensity layer — volume peaks at 12:00 in day/night cycle, fades at dawn/dusk",
+      "ue5_attenuation": {
+        "inner_radius": 2000,
+        "falloff_distance": 6000,
+        "volume_multiplier": 0.7
+      }
+    },
+    {
+      "id": 346225,
+      "name": "Forest Ambience Madagascar Rainforest",
+      "description": "Tropical rainforest daytime ambience from Madagascar — rich biodiversity soundscape.",
+      "duration_seconds": 125.6,
+      "preview_url": "https://cdn.freesound.org/previews/346/346225_3808723-hq.mp3",
+      "tags": ["forest", "birds", "jungle", "rainforest", "tropical"],
+      "usage": "Fallback ambient loop for areas without specific sound placement",
+      "ue5_attenuation": {
+        "inner_radius": 5000,
+        "falloff_distance": 15000,
+        "volume_multiplier": 0.5
+      }
+    }
+  ],
+  "lighting_context": {
+    "hub_coords": {"x": 2100, "y": 2400, "z": 0},
+    "sun_intensity_lux": 75000,
+    "sun_pitch_degrees": -45,
+    "time_of_day": "bright_midday",
+    "atmosphere": "SkyAtmosphere + SkyLight real_time_capture + subtle ExponentialHeightFog",
+    "gi_method": "Lumen",
+    "reflection_method": "Lumen",
+    "fill_light": "PointLight at (2100, 2400, 300) — 5000 intensity, warm white, no shadows"
+  },
+  "ue5_implementation_notes": {
+    "audio_component": "UAudioComponent with attenuation settings per sound",
+    "metasound_integration": "Agent #16 (Audio Agent) should import these as MetaSound sources",
+    "day_night_modulation": "Insect sounds peak at noon, bird calls peak at dawn/dusk, all fade at night",
+    "reverb_preset": "Jungle — high early reflections, long tail for dense canopy",
+    "bridge_status": "BRIDGE_DOWN — UE5 commands queued but not executed (timeout). Audio placement deferred to next bridge-up cycle."
+  }
+}

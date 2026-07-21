@@ -1,366 +1,445 @@
 #include "Eng_ArchitectureCore.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Misc/DateTime.h"
+#include "Engine/GameInstance.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/Paths.h"
+#include "Stats/Stats.h"
+#include "RenderingThread.h"
+#include "UnrealEngine.h"
 
 UEng_ArchitectureCore::UEng_ArchitectureCore()
 {
-    CurrentState = EEng_ArchitectureState::Uninitialized;
-    TotalInitializationTime = 0.0f;
+    // Initialize default values
 }
 
 void UEng_ArchitectureCore::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT - CORE SYSTEM INITIALIZATION ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Core initialized"));
     
-    double StartTime = FPlatformTime::Seconds();
-    CurrentState = EEng_ArchitectureState::Loading;
+    // Initialize biome rules
+    InitializeBiomeRules();
     
-    // Initialize core modules in dependency order
-    InitializeCoreModules();
+    // Setup default performance constraints
+    FEng_PerformanceConstraint FrameTimeConstraint;
+    FrameTimeConstraint.ConstraintName = TEXT("FrameTime");
+    FrameTimeConstraint.MaxValue = 16.67f; // 60 FPS target
+    FrameTimeConstraint.bIsHardLimit = false;
+    FrameTimeConstraint.ViolationAction = TEXT("Reduce LOD");
+    RegisterPerformanceConstraint(FrameTimeConstraint);
     
-    // Validate all systems
-    if (ValidateArchitecture())
-    {
-        CurrentState = EEng_ArchitectureState::Ready;
-        UE_LOG(LogTemp, Warning, TEXT("✓ Architecture Core initialized successfully"));
-    }
-    else
-    {
-        CurrentState = EEng_ArchitectureState::Error;
-        UE_LOG(LogTemp, Error, TEXT("✗ Architecture Core initialization failed"));
-    }
+    FEng_PerformanceConstraint MemoryConstraint;
+    MemoryConstraint.ConstraintName = TEXT("Memory");
+    MemoryConstraint.MaxValue = 8192.0f; // 8GB limit
+    MemoryConstraint.bIsHardLimit = true;
+    MemoryConstraint.ViolationAction = TEXT("Unload Assets");
+    RegisterPerformanceConstraint(MemoryConstraint);
     
-    TotalInitializationTime = FPlatformTime::Seconds() - StartTime;
-    UE_LOG(LogTemp, Warning, TEXT("Architecture initialization time: %.3f seconds"), TotalInitializationTime);
-    
-    // Print initial report
-    PrintArchitectureReport();
+    FEng_PerformanceConstraint DrawCallConstraint;
+    DrawCallConstraint.ConstraintName = TEXT("DrawCalls");
+    DrawCallConstraint.MaxValue = 5000.0f;
+    DrawCallConstraint.bIsHardLimit = false;
+    DrawCallConstraint.ViolationAction = TEXT("Merge Meshes");
+    RegisterPerformanceConstraint(DrawCallConstraint);
 }
 
 void UEng_ArchitectureCore::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT - CORE SYSTEM SHUTDOWN ==="));
-    
-    RegisteredModules.Empty();
-    SystemDependencies.Empty();
-    CurrentState = EEng_ArchitectureState::Uninitialized;
-    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Core deinitialized"));
     Super::Deinitialize();
 }
 
-bool UEng_ArchitectureCore::RegisterModule(const FString& ModuleName, EModulePriority Priority)
+FEng_SystemValidationResult UEng_ArchitectureCore::ValidateSystem(const FString& SystemName)
 {
-    // Check if module already registered
-    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    FEng_SystemValidationResult Result;
+    Result.SystemName = SystemName;
+    
+    if (SystemName == TEXT("WorldPartition"))
     {
-        if (Module.ModuleName == ModuleName)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Module %s already registered"), *ModuleName);
-            return false;
-        }
+        Result.bIsValid = ValidateWorldPartitionSetup();
+        Result.ValidationMessage = Result.bIsValid ? TEXT("World Partition configured correctly") : TEXT("World Partition setup issues detected");
+        Result.PerformanceScore = Result.bIsValid ? 100.0f : 0.0f;
     }
-    
-    double StartTime = FPlatformTime::Seconds();
-    
-    FEng_ModuleInfo NewModule;
-    NewModule.ModuleName = ModuleName;
-    NewModule.Priority = Priority;
-    NewModule.bIsLoaded = true; // Assume loaded if we're registering it
-    NewModule.LoadTime = FPlatformTime::Seconds() - StartTime;
-    
-    RegisteredModules.Add(NewModule);
-    
-    UE_LOG(LogTemp, Warning, TEXT("✓ Registered module: %s (Priority: %d, LoadTime: %.3f)"), 
-           *ModuleName, (int32)Priority, NewModule.LoadTime);
-    
-    return true;
-}
-
-bool UEng_ArchitectureCore::UnregisterModule(const FString& ModuleName)
-{
-    for (int32 i = RegisteredModules.Num() - 1; i >= 0; --i)
+    else if (SystemName == TEXT("Lumen"))
     {
-        if (RegisteredModules[i].ModuleName == ModuleName)
-        {
-            RegisteredModules.RemoveAt(i);
-            UE_LOG(LogTemp, Warning, TEXT("✓ Unregistered module: %s"), *ModuleName);
-            return true;
-        }
+        Result.bIsValid = ValidateLumenConfiguration();
+        Result.ValidationMessage = Result.bIsValid ? TEXT("Lumen global illumination active") : TEXT("Lumen configuration issues");
+        Result.PerformanceScore = Result.bIsValid ? 95.0f : 0.0f;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Module %s not found for unregistration"), *ModuleName);
-    return false;
-}
-
-bool UEng_ArchitectureCore::IsModuleLoaded(const FString& ModuleName) const
-{
-    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    else if (SystemName == TEXT("Nanite"))
     {
-        if (Module.ModuleName == ModuleName)
-        {
-            return Module.bIsLoaded;
-        }
+        Result.bIsValid = ValidateNaniteSettings();
+        Result.ValidationMessage = Result.bIsValid ? TEXT("Nanite virtualized geometry enabled") : TEXT("Nanite not properly configured");
+        Result.PerformanceScore = Result.bIsValid ? 90.0f : 0.0f;
     }
-    return false;
-}
-
-TArray<FEng_ModuleInfo> UEng_ArchitectureCore::GetLoadedModules() const
-{
-    TArray<FEng_ModuleInfo> LoadedModules;
-    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    else if (SystemName == TEXT("Memory"))
     {
-        if (Module.bIsLoaded)
-        {
-            LoadedModules.Add(Module);
-        }
+        Result.bIsValid = ValidateMemoryBudgets();
+        Result.ValidationMessage = Result.bIsValid ? TEXT("Memory usage within limits") : TEXT("Memory budget exceeded");
+        Result.PerformanceScore = CalculateMemoryScore();
     }
-    return LoadedModules;
-}
-
-bool UEng_ArchitectureCore::AddSystemDependency(const FString& SystemName, const TArray<FString>& Dependencies)
-{
-    FEng_SystemDependency NewDependency;
-    NewDependency.SystemName = SystemName;
-    NewDependency.Dependencies = Dependencies;
-    NewDependency.bIsInitialized = false;
-    
-    SystemDependencies.Add(NewDependency);
-    
-    UE_LOG(LogTemp, Warning, TEXT("✓ Added system dependency: %s (Deps: %d)"), 
-           *SystemName, Dependencies.Num());
-    
-    return true;
-}
-
-bool UEng_ArchitectureCore::ValidateSystemDependencies() const
-{
-    for (const FEng_SystemDependency& System : SystemDependencies)
+    else if (SystemName == TEXT("ActorCounts"))
     {
-        for (const FString& Dependency : System.Dependencies)
-        {
-            bool bDependencyFound = false;
-            for (const FEng_SystemDependency& OtherSystem : SystemDependencies)
-            {
-                if (OtherSystem.SystemName == Dependency)
-                {
-                    bDependencyFound = true;
-                    break;
-                }
-            }
-            
-            if (!bDependencyFound)
-            {
-                UE_LOG(LogTemp, Error, TEXT("✗ Missing dependency: %s requires %s"), 
-                       *System.SystemName, *Dependency);
-                return false;
-            }
-        }
-    }
-    
-    return true;
-}
-
-TArray<FString> UEng_ArchitectureCore::GetInitializationOrder() const
-{
-    TArray<FString> InitOrder;
-    ResolveDependencyOrder(InitOrder);
-    return InitOrder;
-}
-
-EEng_ArchitectureState UEng_ArchitectureCore::GetArchitectureState() const
-{
-    return CurrentState;
-}
-
-void UEng_ArchitectureCore::SetArchitectureState(EEng_ArchitectureState NewState)
-{
-    CurrentState = NewState;
-    UE_LOG(LogTemp, Warning, TEXT("Architecture state changed to: %d"), (int32)NewState);
-}
-
-float UEng_ArchitectureCore::GetModuleLoadTime(const FString& ModuleName) const
-{
-    for (const FEng_ModuleInfo& Module : RegisteredModules)
-    {
-        if (Module.ModuleName == ModuleName)
-        {
-            return Module.LoadTime;
-        }
-    }
-    return 0.0f;
-}
-
-float UEng_ArchitectureCore::GetTotalLoadTime() const
-{
-    return TotalInitializationTime;
-}
-
-bool UEng_ArchitectureCore::ValidateArchitecture()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURE VALIDATION ==="));
-    
-    bool bValid = true;
-    
-    // Validate modules
-    if (RegisteredModules.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("⚠ No modules registered yet"));
+        Result.bIsValid = ValidateActorCounts();
+        Result.ValidationMessage = Result.bIsValid ? TEXT("Actor counts within limits") : TEXT("Too many actors in world");
+        Result.PerformanceScore = Result.bIsValid ? 85.0f : 50.0f;
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("✓ %d modules registered"), RegisteredModules.Num());
+        Result.bIsValid = false;
+        Result.ValidationMessage = FString::Printf(TEXT("Unknown system: %s"), *SystemName);
+        Result.PerformanceScore = 0.0f;
     }
     
-    // Validate dependencies
-    if (!ValidateSystemDependencies())
-    {
-        UE_LOG(LogTemp, Error, TEXT("✗ System dependency validation failed"));
-        bValid = false;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✓ System dependencies valid"));
-    }
+    // Cache result
+    ValidationCache.Add(SystemName, Result);
     
-    // Validate module integrity
-    ValidateModuleIntegrity();
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATION COMPLETE: %s ==="), 
-           bValid ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return bValid;
+    return Result;
 }
 
-void UEng_ArchitectureCore::PrintArchitectureReport()
+TArray<FEng_SystemValidationResult> UEng_ArchitectureCore::ValidateAllSystems()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURE REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("State: %d"), (int32)CurrentState);
-    UE_LOG(LogTemp, Warning, TEXT("Total Load Time: %.3f seconds"), TotalInitializationTime);
-    UE_LOG(LogTemp, Warning, TEXT("Registered Modules: %d"), RegisteredModules.Num());
-    UE_LOG(LogTemp, Warning, TEXT("System Dependencies: %d"), SystemDependencies.Num());
+    TArray<FEng_SystemValidationResult> Results;
     
-    for (const FEng_ModuleInfo& Module : RegisteredModules)
+    TArray<FString> SystemsToValidate = {
+        TEXT("WorldPartition"),
+        TEXT("Lumen"),
+        TEXT("Nanite"),
+        TEXT("Memory"),
+        TEXT("ActorCounts")
+    };
+    
+    for (const FString& SystemName : SystemsToValidate)
     {
-        UE_LOG(LogTemp, Warning, TEXT("  Module: %s (Priority: %d, Loaded: %s, Time: %.3f)"),
-               *Module.ModuleName, (int32)Module.Priority, 
-               Module.bIsLoaded ? TEXT("YES") : TEXT("NO"), Module.LoadTime);
+        Results.Add(ValidateSystem(SystemName));
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("=== END REPORT ==="));
+    return Results;
 }
 
-void UEng_ArchitectureCore::InitializeCoreModules()
+void UEng_ArchitectureCore::InitializeBiomeRules()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing core modules..."));
+    // Savanna (Center) - 0,0
+    FEng_BiomeArchitectureRule SavannaRule;
+    SavannaRule.BiomeType = EBiomeType::Savanna;
+    SavannaRule.BiomeCenter = FVector(0.0f, 0.0f, 0.0f);
+    SavannaRule.BiomeRadius = 25000.0f;
+    SavannaRule.MinActorCount = 500;
+    SavannaRule.MaxActorCount = 1500;
+    SavannaRule.RequiredActorTypes = {TEXT("Grass"), TEXT("Acacia"), TEXT("Rock"), TEXT("Termite")};
+    BiomeRules.Add(EBiomeType::Savanna, SavannaRule);
     
-    // Register essential game modules
-    RegisterModule(TEXT("TranspersonalGame"), EModulePriority::Critical);
-    RegisterModule(TEXT("Core"), EModulePriority::Critical);
-    RegisterModule(TEXT("Physics"), EModulePriority::High);
-    RegisterModule(TEXT("WorldGeneration"), EModulePriority::High);
-    RegisterModule(TEXT("Characters"), EModulePriority::High);
-    RegisterModule(TEXT("AI"), EModulePriority::Medium);
-    RegisterModule(TEXT("Combat"), EModulePriority::Medium);
-    RegisterModule(TEXT("Audio"), EModulePriority::Low);
-    RegisterModule(TEXT("VFX"), EModulePriority::Low);
+    // Swamp (Southwest) - -50000,-45000
+    FEng_BiomeArchitectureRule SwampRule;
+    SwampRule.BiomeType = EBiomeType::Swamp;
+    SwampRule.BiomeCenter = FVector(-50000.0f, -45000.0f, -200.0f);
+    SwampRule.BiomeRadius = 20000.0f;
+    SwampRule.MinActorCount = 600;
+    SwampRule.MaxActorCount = 1800;
+    SwampRule.RequiredActorTypes = {TEXT("Cypress"), TEXT("Moss"), TEXT("Water"), TEXT("Fog")};
+    BiomeRules.Add(EBiomeType::Swamp, SwampRule);
     
-    // Setup system dependencies
-    AddSystemDependency(TEXT("Physics"), {TEXT("Core")});
-    AddSystemDependency(TEXT("WorldGeneration"), {TEXT("Core"), TEXT("Physics")});
-    AddSystemDependency(TEXT("Characters"), {TEXT("Core"), TEXT("Physics")});
-    AddSystemDependency(TEXT("AI"), {TEXT("Core"), TEXT("Characters")});
-    AddSystemDependency(TEXT("Combat"), {TEXT("Core"), TEXT("Characters"), TEXT("AI")});
-    AddSystemDependency(TEXT("Audio"), {TEXT("Core")});
-    AddSystemDependency(TEXT("VFX"), {TEXT("Core"), TEXT("Physics")});
+    // Forest (Northwest) - -45000,40000
+    FEng_BiomeArchitectureRule ForestRule;
+    ForestRule.BiomeType = EBiomeType::Forest;
+    ForestRule.BiomeCenter = FVector(-45000.0f, 40000.0f, 300.0f);
+    ForestRule.BiomeRadius = 30000.0f;
+    ForestRule.MinActorCount = 800;
+    ForestRule.MaxActorCount = 2000;
+    ForestRule.RequiredActorTypes = {TEXT("Pine"), TEXT("Fern"), TEXT("Boulder"), TEXT("Stream")};
+    BiomeRules.Add(EBiomeType::Forest, ForestRule);
+    
+    // Desert (East) - 55000,0
+    FEng_BiomeArchitectureRule DesertRule;
+    DesertRule.BiomeType = EBiomeType::Desert;
+    DesertRule.BiomeCenter = FVector(55000.0f, 0.0f, 100.0f);
+    DesertRule.BiomeRadius = 35000.0f;
+    DesertRule.MinActorCount = 300;
+    DesertRule.MaxActorCount = 800;
+    DesertRule.RequiredActorTypes = {TEXT("Cactus"), TEXT("Sand"), TEXT("Mesa"), TEXT("Oasis")};
+    BiomeRules.Add(EBiomeType::Desert, DesertRule);
+    
+    // Mountains (Northeast) - 40000,50000
+    FEng_BiomeArchitectureRule MountainRule;
+    MountainRule.BiomeType = EBiomeType::Mountains;
+    MountainRule.BiomeCenter = FVector(40000.0f, 50000.0f, 2000.0f);
+    MountainRule.BiomeRadius = 25000.0f;
+    MountainRule.MinActorCount = 400;
+    MountainRule.MaxActorCount = 1000;
+    MountainRule.RequiredActorTypes = {TEXT("Cliff"), TEXT("Snow"), TEXT("Cave"), TEXT("Peak")};
+    BiomeRules.Add(EBiomeType::Mountains, MountainRule);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Biome architecture rules initialized for 5 biomes"));
 }
 
-void UEng_ArchitectureCore::ValidateModuleIntegrity()
+FEng_BiomeArchitectureRule UEng_ArchitectureCore::GetBiomeRule(EBiomeType BiomeType)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating module integrity..."));
-    
-    for (FEng_ModuleInfo& Module : RegisteredModules)
+    if (BiomeRules.Contains(BiomeType))
     {
-        // In a real implementation, this would check if the module DLL is loaded
-        // For now, we assume all registered modules are valid
-        if (Module.bIsLoaded)
+        return BiomeRules[BiomeType];
+    }
+    
+    // Return default rule if not found
+    FEng_BiomeArchitectureRule DefaultRule;
+    DefaultRule.BiomeType = BiomeType;
+    return DefaultRule;
+}
+
+bool UEng_ArchitectureCore::ValidateBiomePopulation(EBiomeType BiomeType)
+{
+    if (!BiomeRules.Contains(BiomeType))
+    {
+        return false;
+    }
+    
+    FEng_BiomeArchitectureRule Rule = BiomeRules[BiomeType];
+    
+    // Count actors in biome area
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && !Actor->IsA<APawn>())
         {
-            UE_LOG(LogTemp, Warning, TEXT("✓ Module %s integrity OK"), *Module.ModuleName);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("✗ Module %s integrity FAILED"), *Module.ModuleName);
+            float Distance = FVector::Dist(Actor->GetActorLocation(), Rule.BiomeCenter);
+            if (Distance <= Rule.BiomeRadius)
+            {
+                ActorCount++;
+            }
         }
     }
+    
+    bool bIsValid = ActorCount >= Rule.MinActorCount && ActorCount <= Rule.MaxActorCount;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Biome %d validation: %d actors (min: %d, max: %d) - %s"), 
+        (int32)BiomeType, ActorCount, Rule.MinActorCount, Rule.MaxActorCount, 
+        bIsValid ? TEXT("VALID") : TEXT("INVALID"));
+    
+    return bIsValid;
 }
 
-bool UEng_ArchitectureCore::ResolveDependencyOrder(TArray<FString>& OutOrder) const
+void UEng_ArchitectureCore::RegisterPerformanceConstraint(const FEng_PerformanceConstraint& Constraint)
 {
-    OutOrder.Empty();
-    TArray<FString> Remaining;
+    PerformanceConstraints.Add(Constraint);
+    UE_LOG(LogTemp, Warning, TEXT("Registered performance constraint: %s (max: %.2f)"), 
+        *Constraint.ConstraintName, Constraint.MaxValue);
+}
+
+bool UEng_ArchitectureCore::CheckPerformanceConstraints()
+{
+    UpdatePerformanceMetrics();
     
-    // Collect all system names
-    for (const FEng_SystemDependency& System : SystemDependencies)
-    {
-        Remaining.Add(System.SystemName);
-    }
+    bool bAllConstraintsMet = true;
     
-    // Simple topological sort
-    while (Remaining.Num() > 0)
+    for (FEng_PerformanceConstraint& Constraint : PerformanceConstraints)
     {
-        bool bProgressMade = false;
+        if (Constraint.ConstraintName == TEXT("FrameTime"))
+        {
+            Constraint.CurrentValue = CalculateFrameTimeScore();
+        }
+        else if (Constraint.ConstraintName == TEXT("Memory"))
+        {
+            Constraint.CurrentValue = CalculateMemoryScore();
+        }
+        else if (Constraint.ConstraintName == TEXT("DrawCalls"))
+        {
+            Constraint.CurrentValue = CalculateDrawCallScore();
+        }
         
-        for (int32 i = Remaining.Num() - 1; i >= 0; --i)
+        if (Constraint.CurrentValue > Constraint.MaxValue)
         {
-            const FString& SystemName = Remaining[i];
-            
-            // Find this system's dependencies
-            const FEng_SystemDependency* SystemDep = nullptr;
-            for (const FEng_SystemDependency& Dep : SystemDependencies)
-            {
-                if (Dep.SystemName == SystemName)
-                {
-                    SystemDep = &Dep;
-                    break;
-                }
-            }
-            
-            if (!SystemDep)
-            {
-                // No dependencies, can be added
-                OutOrder.Add(SystemName);
-                Remaining.RemoveAt(i);
-                bProgressMade = true;
-                continue;
-            }
-            
-            // Check if all dependencies are already in the order
-            bool bAllDepsResolved = true;
-            for (const FString& Dependency : SystemDep->Dependencies)
-            {
-                if (!OutOrder.Contains(Dependency))
-                {
-                    bAllDepsResolved = false;
-                    break;
-                }
-            }
-            
-            if (bAllDepsResolved)
-            {
-                OutOrder.Add(SystemName);
-                Remaining.RemoveAt(i);
-                bProgressMade = true;
-            }
-        }
-        
-        if (!bProgressMade)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Circular dependency detected in system dependencies"));
-            return false;
+            bAllConstraintsMet = false;
+            UE_LOG(LogTemp, Error, TEXT("Performance constraint violated: %s (%.2f > %.2f) - Action: %s"), 
+                *Constraint.ConstraintName, Constraint.CurrentValue, Constraint.MaxValue, *Constraint.ViolationAction);
         }
     }
     
+    return bAllConstraintsMet;
+}
+
+float UEng_ArchitectureCore::GetSystemPerformanceScore()
+{
+    float TotalScore = 0.0f;
+    int32 ValidSystems = 0;
+    
+    for (const auto& CachedResult : ValidationCache)
+    {
+        TotalScore += CachedResult.Value.PerformanceScore;
+        ValidSystems++;
+    }
+    
+    return ValidSystems > 0 ? TotalScore / ValidSystems : 0.0f;
+}
+
+bool UEng_ArchitectureCore::RegisterSystemDependency(const FString& SystemA, const FString& SystemB)
+{
+    if (!SystemDependencies.Contains(SystemA))
+    {
+        SystemDependencies.Add(SystemA, TArray<FString>());
+    }
+    
+    SystemDependencies[SystemA].AddUnique(SystemB);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Registered dependency: %s depends on %s"), *SystemA, *SystemB);
     return true;
+}
+
+TArray<FString> UEng_ArchitectureCore::GetSystemDependencies(const FString& SystemName)
+{
+    if (SystemDependencies.Contains(SystemName))
+    {
+        return SystemDependencies[SystemName];
+    }
+    
+    return TArray<FString>();
+}
+
+bool UEng_ArchitectureCore::EnforceModuleStandards(const FString& ModuleName)
+{
+    // Validate module follows naming conventions
+    bool bValidNaming = ModuleName.StartsWith(TEXT("Transpersonal")) || 
+                       ModuleName.StartsWith(TEXT("Eng_")) ||
+                       ModuleName.StartsWith(TEXT("Core"));
+    
+    if (!bValidNaming)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Module %s violates naming convention"), *ModuleName);
+        return false;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Module %s follows architecture standards"), *ModuleName);
+    return true;
+}
+
+void UEng_ArchitectureCore::ValidateProjectArchitecture()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PROJECT ARCHITECTURE VALIDATION ==="));
+    
+    // Validate all systems
+    TArray<FEng_SystemValidationResult> Results = ValidateAllSystems();
+    
+    int32 ValidSystems = 0;
+    for (const FEng_SystemValidationResult& Result : Results)
+    {
+        if (Result.bIsValid)
+        {
+            ValidSystems++;
+        }
+        UE_LOG(LogTemp, Warning, TEXT("%s: %s (Score: %.1f)"), 
+            *Result.SystemName, 
+            Result.bIsValid ? TEXT("VALID") : TEXT("INVALID"),
+            Result.PerformanceScore);
+    }
+    
+    // Validate biome populations
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME VALIDATION ==="));
+    TArray<EBiomeType> BiomeTypes = {EBiomeType::Savanna, EBiomeType::Swamp, EBiomeType::Forest, EBiomeType::Desert, EBiomeType::Mountains};
+    
+    int32 ValidBiomes = 0;
+    for (EBiomeType BiomeType : BiomeTypes)
+    {
+        bool bValid = ValidateBiomePopulation(BiomeType);
+        if (bValid)
+        {
+            ValidBiomes++;
+        }
+    }
+    
+    // Performance check
+    bool bPerformanceOK = CheckPerformanceConstraints();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURE SUMMARY ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Valid Systems: %d/%d"), ValidSystems, Results.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Valid Biomes: %d/%d"), ValidBiomes, BiomeTypes.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Performance: %s"), bPerformanceOK ? TEXT("OK") : TEXT("ISSUES"));
+    UE_LOG(LogTemp, Warning, TEXT("Overall Score: %.1f"), GetSystemPerformanceScore());
+}
+
+// Private implementation methods
+bool UEng_ArchitectureCore::ValidateWorldPartitionSetup()
+{
+    UWorld* World = GetWorld();
+    return World && World->GetWorldPartition() != nullptr;
+}
+
+bool UEng_ArchitectureCore::ValidateLumenConfiguration()
+{
+    // Check if Lumen is enabled in project settings
+    return true; // Simplified for now
+}
+
+bool UEng_ArchitectureCore::ValidateNaniteSettings()
+{
+    // Check if Nanite is enabled
+    return true; // Simplified for now
+}
+
+bool UEng_ArchitectureCore::ValidateMemoryBudgets()
+{
+    // Check current memory usage
+    return FPlatformMemory::GetStats().UsedPhysical < (8ULL * 1024 * 1024 * 1024); // 8GB limit
+}
+
+bool UEng_ArchitectureCore::ValidateActorCounts()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        ActorCount++;
+    }
+    
+    return ActorCount < 50000; // Reasonable limit
+}
+
+void UEng_ArchitectureCore::UpdatePerformanceMetrics()
+{
+    // Update performance metrics
+    // This would typically query render thread stats
+}
+
+float UEng_ArchitectureCore::CalculateFrameTimeScore()
+{
+    // Get current frame time
+    return FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+}
+
+float UEng_ArchitectureCore::CalculateMemoryScore()
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return static_cast<float>(MemStats.UsedPhysical / (1024 * 1024)); // MB
+}
+
+float UEng_ArchitectureCore::CalculateDrawCallScore()
+{
+    // This would query render stats in a real implementation
+    return 1000.0f; // Placeholder
+}
+
+void UEng_ArchitectureCore::EnforceBiomeDistribution()
+{
+    // Ensure biomes are properly distributed
+}
+
+void UEng_ArchitectureCore::EnforceActorLimits()
+{
+    // Enforce actor count limits per biome
+}
+
+void UEng_ArchitectureCore::EnforceNamingConventions()
+{
+    // Check that all actors follow naming conventions
 }

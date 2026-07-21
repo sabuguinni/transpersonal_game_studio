@@ -1,0 +1,222 @@
+{
+  "audio_system_version": "1.0",
+  "cycle_id": "PROD_CYCLE_AUTO_20260623_008",
+  "agent": "AudioAgent_16",
+
+  "ambient_zones": [
+    {
+      "actor_label": "AudioAmbient_RaptorHunt",
+      "location": [1800, 1200, 100],
+      "linked_narrative_zone": "NarrDialogue_RaptorHunt",
+      "linked_quest": "QUEST_RAPTOR_HUNT_01",
+      "sound_layers": [
+        {
+          "id": "AMB_RAPTOR_CLICKS",
+          "description": "Distant raptor vocalisations — short clicks and chirps from treeline",
+          "volume_base": 0.3,
+          "attenuation_radius": 2500,
+          "loop": true,
+          "trigger": "always_in_zone"
+        },
+        {
+          "id": "AMB_JUNGLE_WIND",
+          "description": "Low wind through dense prehistoric fern canopy",
+          "volume_base": 0.5,
+          "attenuation_radius": 3000,
+          "loop": true,
+          "trigger": "always_in_zone"
+        },
+        {
+          "id": "AMB_RAPTOR_ALERT",
+          "description": "Sharp raptor bark — plays when player enters raptor aggro radius",
+          "volume_base": 0.8,
+          "attenuation_radius": 1500,
+          "loop": false,
+          "trigger": "on_raptor_aggro",
+          "cooldown_seconds": 8.0
+        }
+      ],
+      "music_layer": {
+        "id": "MUS_RAPTOR_TENSION",
+        "description": "Low percussion — bone drums and hollow wood, irregular rhythm building tension",
+        "instruments": ["bone_drum", "hollow_wood_knock", "low_drone_breath"],
+        "bpm": 72,
+        "intensity_curve": "ramp_up_on_proximity",
+        "fade_in_seconds": 4.0,
+        "fade_out_seconds": 6.0
+      }
+    },
+    {
+      "actor_label": "AudioAmbient_HerdMigration",
+      "location": [-2000, 800, 100],
+      "linked_narrative_zone": "NarrDialogue_HerdMigration",
+      "linked_quest": "QUEST_HERD_MIGRATION_01",
+      "sound_layers": [
+        {
+          "id": "AMB_HERD_RUMBLE",
+          "description": "Deep low-frequency ground rumble from distant herd movement",
+          "volume_base": 0.4,
+          "attenuation_radius": 4000,
+          "loop": true,
+          "trigger": "always_in_zone"
+        },
+        {
+          "id": "AMB_HERD_CALLS",
+          "description": "Sauropod low-frequency contact calls — slow, resonant, spaced 10-20s apart",
+          "volume_base": 0.35,
+          "attenuation_radius": 5000,
+          "loop": false,
+          "trigger": "random_interval",
+          "interval_min_seconds": 10.0,
+          "interval_max_seconds": 25.0
+        },
+        {
+          "id": "AMB_OPEN_PLAIN_WIND",
+          "description": "Open grassland wind — stronger than jungle, with grass rustle",
+          "volume_base": 0.6,
+          "attenuation_radius": 6000,
+          "loop": true,
+          "trigger": "always_in_zone"
+        }
+      ],
+      "music_layer": {
+        "id": "MUS_HERD_WONDER",
+        "description": "Sparse, wide-interval melodic theme — awe and scale. Long sustained tones.",
+        "instruments": ["bone_flute_low", "resonant_stone_tap", "breath_drone"],
+        "bpm": 48,
+        "intensity_curve": "constant_low",
+        "fade_in_seconds": 8.0,
+        "fade_out_seconds": 10.0
+      }
+    },
+    {
+      "actor_label": "AudioAmbient_Stampede",
+      "location": [500, -1500, 100],
+      "linked_narrative_zone": "NarrDialogue_StampedeSurvival",
+      "linked_quest": "QUEST_STAMPEDE_SURVIVAL_01",
+      "sound_layers": [
+        {
+          "id": "AMB_STAMPEDE_RUMBLE",
+          "description": "Massive ground tremor — hundreds of tonnes of herbivore in motion",
+          "volume_base": 0.9,
+          "attenuation_radius": 8000,
+          "loop": true,
+          "trigger": "on_quest_active"
+        },
+        {
+          "id": "AMB_STAMPEDE_IMPACTS",
+          "description": "Individual heavy footfall impacts layered over rumble",
+          "volume_base": 0.7,
+          "attenuation_radius": 3000,
+          "loop": true,
+          "trigger": "on_quest_active"
+        },
+        {
+          "id": "AMB_PANIC_CALLS",
+          "description": "Distressed herbivore vocalisations — fear response, high urgency",
+          "volume_base": 0.6,
+          "attenuation_radius": 4000,
+          "loop": false,
+          "trigger": "random_interval",
+          "interval_min_seconds": 2.0,
+          "interval_max_seconds": 5.0
+        }
+      ],
+      "music_layer": {
+        "id": "MUS_STAMPEDE_CHAOS",
+        "description": "Driving percussion — maximum urgency, no melody, pure rhythm escalation",
+        "instruments": ["bone_drum_fast", "stone_impact", "breath_gasp"],
+        "bpm": 140,
+        "intensity_curve": "constant_max",
+        "fade_in_seconds": 0.5,
+        "fade_out_seconds": 3.0
+      }
+    }
+  ],
+
+  "quest_stingers": [
+    {
+      "actor_label": "AudioStinger_QuestStart",
+      "id": "STING_QUEST_START",
+      "description": "Short 2-bar motif — low bone drum hit + rising flute fragment. Signals new objective.",
+      "duration_seconds": 2.5,
+      "trigger_event": "OnQuestAccepted",
+      "volume": 0.85,
+      "instruments": ["bone_drum_single", "bone_flute_rise"]
+    },
+    {
+      "actor_label": "AudioStinger_ObjComplete",
+      "id": "STING_OBJ_COMPLETE",
+      "description": "Single resonant stone tap + short breath exhale. Subtle satisfaction cue.",
+      "duration_seconds": 1.2,
+      "trigger_event": "OnObjectiveComplete",
+      "volume": 0.7,
+      "instruments": ["resonant_stone_tap", "breath_exhale"]
+    },
+    {
+      "actor_label": "AudioStinger_QuestComplete",
+      "id": "STING_QUEST_COMPLETE",
+      "description": "3-bar resolution phrase — bone drum + flute + stone harmony. Earned, not celebratory.",
+      "duration_seconds": 4.0,
+      "trigger_event": "OnQuestComplete",
+      "volume": 0.9,
+      "instruments": ["bone_drum_resolve", "bone_flute_resolve", "resonant_stone_chord"]
+    },
+    {
+      "actor_label": "AudioStinger_QuestFail",
+      "id": "STING_QUEST_FAIL",
+      "description": "Low descending drone — single note fall into silence. Gravity, not melodrama.",
+      "duration_seconds": 3.0,
+      "trigger_event": "OnQuestFailed",
+      "volume": 0.8,
+      "instruments": ["low_drone_fall", "silence"]
+    }
+  ],
+
+  "voice_lines_pending_tts": [
+    {
+      "id": "RH_INTRO_01",
+      "speaker": "TribalElder_Kara",
+      "text": "Stay low. The great lizard hunts at dusk. I have seen it take down a mammoth in three steps. We move only when the wind is right.",
+      "voice_profile": "elder_female_raspy_authoritative",
+      "priority": 1,
+      "quest": "QUEST_RAPTOR_HUNT_01"
+    },
+    {
+      "id": "RH_INTRO_02",
+      "speaker": "TribalElder_Kara",
+      "text": "Three raptors. Moving fast. They circle before they strike — always from the flanks. Get to the rocks before they close the gap.",
+      "voice_profile": "elder_female_raspy_authoritative",
+      "priority": 1,
+      "quest": "QUEST_RAPTOR_HUNT_01"
+    },
+    {
+      "id": "HM_INTRO_01",
+      "speaker": "Scout_Davan",
+      "text": "Look at them. Hundreds. Moving south like they do every dry season. If we track them right, we eat for a month.",
+      "voice_profile": "young_male_eager_observational",
+      "priority": 2,
+      "quest": "QUEST_HERD_MIGRATION_01"
+    },
+    {
+      "id": "HM_WAYPOINT_A",
+      "speaker": "Scout_Davan",
+      "text": "They crossed the river here. See the tracks? Fresh — maybe two hours. Keep moving.",
+      "voice_profile": "young_male_eager_observational",
+      "priority": 2,
+      "quest": "QUEST_HERD_MIGRATION_01"
+    }
+  ],
+
+  "metasound_integration_notes": {
+    "engine": "UE5 MetaSounds",
+    "implementation_priority": "P7",
+    "notes": [
+      "All ambient zones use AmbientSound actors as spatial anchors — replace with MetaSound Sources when assets available",
+      "Quest stingers should be implemented as non-spatialized 2D MetaSound Sources triggered via Blueprint event dispatchers",
+      "Music layers use adaptive intensity curves — implement via MetaSound parameter modulation driven by player proximity and quest state",
+      "Voice lines pending ElevenLabs TTS quota reset — IDs defined, ready for import when audio files available",
+      "Instrument palette: bone_drum, bone_flute, hollow_wood_knock, resonant_stone_tap, breath_drone — all procedural or foley-sourced, no orchestral instruments"
+    ]
+  }
+}

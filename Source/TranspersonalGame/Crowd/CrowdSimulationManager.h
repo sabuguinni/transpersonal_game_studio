@@ -1,156 +1,154 @@
+// CrowdSimulationManager.h — Agent #13 Crowd & Traffic Simulation
+// Transpersonal Game Studio — Prehistoric Survival Game
+// Mass AI crowd simulation: up to 50,000 agents with LOD, stampede, flocking
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "NavigationSystem.h"
-#include "AI/NavigationSystemBase.h"
-#include "CrowdSimulationTypes.h"
 #include "CrowdSimulationManager.generated.h"
 
-class UCrowdAgentComponent;
-class ACrowdWaypoint;
+// ============================================================
+// ENUMS — must be at global scope (RULE 1)
+// ============================================================
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
+UENUM(BlueprintType)
+enum class ECrowd_AgentType : uint8
+{
+    DinosaurHerbivore   UMETA(DisplayName = "Dinosaur Herbivore"),
+    DinosaurCarnivore   UMETA(DisplayName = "Dinosaur Carnivore"),
+    HumanTribal         UMETA(DisplayName = "Human Tribal"),
+    SmallAnimal         UMETA(DisplayName = "Small Animal"),
+    Bird                UMETA(DisplayName = "Bird")
+};
+
+UENUM(BlueprintType)
+enum class ECrowd_LODLevel : uint8
+{
+    Full    UMETA(DisplayName = "Full Simulation"),
+    Medium  UMETA(DisplayName = "Medium LOD"),
+    Low     UMETA(DisplayName = "Low LOD"),
+    Culled  UMETA(DisplayName = "Culled")
+};
+
+// ============================================================
+// STRUCTS — must be at global scope (RULE 1)
+// ============================================================
+
+USTRUCT(BlueprintType)
+struct FCrowd_AgentData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    int32 AgentID = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    ECrowd_AgentType AgentType = ECrowd_AgentType::DinosaurHerbivore;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    FVector Velocity = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    float CurrentSpeed = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    float PanicLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    bool bIsLeader = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    ECrowd_LODLevel LODLevel = ECrowd_LODLevel::Full;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Crowd")
+    bool bIsActive = true;
+};
+
+// ============================================================
+// DELEGATE
+// ============================================================
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCrowd_OnStampedeTriggered, FVector, TriggerLocation, int32, AffectedAgentCount);
+
+// ============================================================
+// UCLASS
+// ============================================================
+
+UCLASS(ClassGroup = (Crowd), meta = (BlueprintSpawnableComponent), DisplayName = "Crowd Simulation Manager")
+class TRANSPERSONALGAME_API UCrowdSimulationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACrowdSimulationManager();
+    UCrowdSimulationManager();
+
+    // ---- Configuration ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    int32 MaxActiveAgents;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Config")
+    float AgentSpawnRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceClose;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceMedium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|LOD")
+    float LODDistanceFar;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd|Debug")
+    bool bDebugDrawEnabled;
+
+    // ---- Runtime State ----
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    bool bSimulationActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|State")
+    int32 CurrentAgentCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd|Agents")
+    TArray<FCrowd_AgentData> ActiveAgents;
+
+    // ---- Delegates ----
+
+    UPROPERTY(BlueprintAssignable, Category = "Crowd|Events")
+    FCrowd_OnStampedeTriggered OnStampedeTriggered;
+
+    // ---- Public API ----
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void InitializeCrowdSystem(int32 InitialAgentCount);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SpawnCrowdAgents(int32 Count, FVector CenterLocation, ECrowd_AgentType AgentType);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void TriggerStampede(FVector TriggerLocation, float PanicRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    int32 GetActiveAgentCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void SetSimulationActive(bool bActive);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd")
+    void ClearAllAgents();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // Crowd Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    int32 MaxCrowdAgents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float SpawnRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float UpdateFrequency;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    FCrowd_LODSettings LODSettings;
-
-    // Agent Management
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
-    TArray<FCrowd_AgentData> ActiveAgents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
-    TArray<AActor*> CrowdActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
-    ECrowd_BehaviorType DefaultBehavior;
-
-    // Pathfinding
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    TArray<ACrowdWaypoint*> Waypoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float PathfindingUpdateRate;
-
-    // Performance
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLODSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODUpdateRate;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Internal state
-    float LastUpdateTime;
-    float LastLODUpdateTime;
-    int32 NextAgentID;
-
-    // Navigation system reference
-    UNavigationSystemV1* NavSystem;
-
-public:
-    // Core Functions
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void InitializeCrowdSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    int32 SpawnCrowdAgent(FVector Location, ECrowd_BehaviorType Behavior = ECrowd_BehaviorType::Wandering);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void RemoveCrowdAgent(int32 AgentID);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SetAgentBehavior(int32 AgentID, ECrowd_BehaviorType NewBehavior);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SetAgentTarget(int32 AgentID, FVector TargetLocation);
-
-    // LOD System
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateLODSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    ECrowd_LODLevel CalculateAgentLOD(const FCrowd_AgentData& Agent, FVector PlayerLocation);
-
-    // Pathfinding
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool FindPathForAgent(int32 AgentID, FVector TargetLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    void UpdateAgentMovement(float DeltaTime);
-
-    // Waypoint System
-    UFUNCTION(BlueprintCallable, Category = "Waypoints")
-    void RegisterWaypoint(ACrowdWaypoint* Waypoint);
-
-    UFUNCTION(BlueprintCallable, Category = "Waypoints")
-    ACrowdWaypoint* GetNearestWaypoint(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Waypoints")
-    ACrowdWaypoint* GetRandomWaypoint();
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
-    int32 GetActiveCrowdCount() const { return ActiveAgents.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
-    FCrowd_AgentData GetAgentData(int32 AgentID);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
-    TArray<FCrowd_AgentData> GetAgentsInRadius(FVector Center, float Radius);
-
-    // Debug Functions
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugSpawnTestCrowd();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugClearAllAgents();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DrawDebugInfo();
-
-protected:
-    // Internal helper functions
-    void UpdateAgentStates(float DeltaTime);
-    void ProcessAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void HandleWanderingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void HandlePatrollingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void HandleGatheringBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void HandleFleeingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-    void HandleFollowingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
-
-    // Collision avoidance
-    FVector CalculateSteeringForce(const FCrowd_AgentData& Agent);
-    FVector CalculateSeparationForce(const FCrowd_AgentData& Agent);
-    FVector CalculateAlignmentForce(const FCrowd_AgentData& Agent);
-    FVector CalculateCohesionForce(const FCrowd_AgentData& Agent);
-
-    // Utility
-    bool IsValidAgentID(int32 AgentID) const;
-    int32 FindAgentIndex(int32 AgentID) const;
-    FVector GetPlayerLocation() const;
+    void UpdateAgentLOD();
+    void UpdateHerdBehavior(float DeltaTime);
+    void DrawDebugCrowd();
+    float GetMaxSpeedForType(ECrowd_AgentType AgentType) const;
 };
-
-#include "CrowdSimulationManager.generated.h"

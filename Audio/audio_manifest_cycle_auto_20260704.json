@@ -1,0 +1,138 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260704_001",
+  "agent": "#16 Audio Agent",
+  "produced_at": "2026-07-04",
+  "tts_lines": [
+    {
+      "id": "TTS-14",
+      "character": "ElderMara",
+      "label": "ElderMara_WaterSurvival",
+      "text": "Water. Always find water first. The rivers here run north to south — follow the sound downhill. Where there is water, there is prey. Where there is prey, there are predators. Never camp on the riverbank. Drink, fill your skin, and move back into the treeline before dark.",
+      "duration_estimate": "~19s",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783125381110_ElderMara_WaterSurvival.mp3",
+      "trigger": "Player approaches river for the first time — survival tip about water sources and predator proximity",
+      "game_context": "Survival tutorial — water/predator ecology awareness"
+    },
+    {
+      "id": "TTS-15",
+      "character": "ElderMara",
+      "label": "ElderMara_BrachiosaurusWarning",
+      "text": "That sound — low, rhythmic, like stones grinding underground. That is not the earth moving. That is a Brachiosaurus herd, two valleys over. They are calm now. But when they run, you will feel it before you hear it. The ground shakes. Get to high rock immediately. Do not try to outrun them in open ground.",
+      "duration_estimate": "~21s",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783125391382_ElderMara_BrachiosaurusWarning.mp3",
+      "trigger": "Player first encounters distant Brachiosaurus herd rumble — teaches environmental audio reading",
+      "game_context": "Dinosaur behavior awareness — herd stampede danger"
+    }
+  ],
+  "freesound_references": [
+    {
+      "category": "river_ambience",
+      "freesound_id": 39831,
+      "name": "AMBIENT LOOP - River water by Field",
+      "duration_s": 7.3,
+      "preview_url": "https://cdn.freesound.org/previews/39/39831_28216-hq.mp3",
+      "tags": ["birds", "creek", "cricket", "field"],
+      "use_case": "AudioZone_River_001 — looping river ambience when player enters river trigger volume",
+      "loop": true
+    },
+    {
+      "category": "river_ambience_long",
+      "freesound_id": 446019,
+      "name": "Gentle Stream Natural Stream Sound",
+      "duration_s": 63.7,
+      "preview_url": "https://cdn.freesound.org/previews/446/446019_7241289-hq.mp3",
+      "tags": ["ambience", "brook", "flowing", "field-recording"],
+      "use_case": "Secondary river ambience layer — gentle background water sound",
+      "loop": true
+    },
+    {
+      "category": "campfire",
+      "freesound_id": 157187,
+      "name": "Campfire Crackle 3",
+      "duration_s": 2.0,
+      "preview_url": "https://cdn.freesound.org/previews/157/157187_2840005-hq.mp3",
+      "tags": ["burning", "campfire", "crackling", "fire", "wood"],
+      "use_case": "AudioSource_Campfire_001 — looping campfire crackle at hub center",
+      "loop": true
+    },
+    {
+      "category": "campfire_long",
+      "freesound_id": 394952,
+      "name": "crackling campfire",
+      "duration_s": 1805.6,
+      "preview_url": "https://cdn.freesound.org/previews/394/394952_7037-hq.mp3",
+      "tags": ["campfire", "crackle", "fire", "flame", "field-recording"],
+      "use_case": "Extended campfire session — when player rests at camp (30min+ sessions)",
+      "loop": false
+    }
+  ],
+  "ue5_audio_zones": [
+    {
+      "label": "AudioZone_River_001",
+      "location": {"x": 2300, "y": 2600, "z": 100},
+      "scale": {"x": 8, "y": 8, "z": 4},
+      "type": "TriggerVolume",
+      "sound_ref": "freesound_39831",
+      "blend_in_time_s": 2.0,
+      "blend_out_time_s": 3.0,
+      "description": "River ambience zone — insects, water flow, distant birds"
+    },
+    {
+      "label": "AudioSource_Campfire_001",
+      "location": {"x": 2100, "y": 2400, "z": 90},
+      "type": "StaticMeshActor (placeholder)",
+      "sound_ref": "freesound_157187",
+      "attenuation_radius_cm": 800,
+      "description": "Campfire crackle point source at hub center — 3D spatialized"
+    },
+    {
+      "label": "AudioZone_TRexDanger_001",
+      "location": {"x": 1800, "y": 2200, "z": 100},
+      "scale": {"x": 20, "y": 20, "z": 6},
+      "type": "TriggerVolume",
+      "sound_ref": "TRex_proximity_growl",
+      "music_intensity": "danger",
+      "heartbeat_bpm": 120,
+      "description": "T-Rex proximity danger zone — triggers danger music layer + heartbeat SFX"
+    },
+    {
+      "label": "AudioZone_ForestAmbience_001",
+      "location": {"x": 2500, "y": 2100, "z": 100},
+      "scale": {"x": 15, "y": 15, "z": 5},
+      "type": "TriggerVolume",
+      "sound_ref": "forest_insects_birds",
+      "description": "Dense forest ambience — cicadas, distant bird calls, wind through canopy"
+    }
+  ],
+  "metasounds_design": {
+    "adaptive_music_system": {
+      "layers": [
+        {"name": "base_percussion", "instruments": ["bone_drum", "stone_strike"], "always_active": true},
+        {"name": "tension_strings", "instruments": ["sinew_bow", "hide_drum"], "trigger": "predator_nearby"},
+        {"name": "danger_full", "instruments": ["all_percussion", "deep_resonance"], "trigger": "predator_attacking"},
+        {"name": "calm_ambient", "instruments": ["wind_flute", "soft_percussion"], "trigger": "safe_zone"}
+      ],
+      "transitions": {
+        "safe_to_tension": {"blend_time_s": 4.0, "crossfade": true},
+        "tension_to_danger": {"blend_time_s": 0.5, "crossfade": false},
+        "danger_to_safe": {"blend_time_s": 8.0, "crossfade": true}
+      }
+    },
+    "environmental_audio_zones": {
+      "open_savanna": {"reverb": "none", "occlusion": "low", "ambience": "wind_insects"},
+      "dense_forest": {"reverb": "medium_foliage", "occlusion": "high", "ambience": "insects_birds_canopy"},
+      "cave": {"reverb": "large_cave", "occlusion": "very_high", "ambience": "drips_echo"},
+      "riverbank": {"reverb": "light_outdoor", "occlusion": "low", "ambience": "water_frogs_birds"}
+    }
+  },
+  "tts_series_summary": {
+    "character": "ElderMara",
+    "total_lines": 15,
+    "lines_completed": ["TTS-01 through TTS-15"],
+    "voice_profile": "Aged female, weathered, authoritative, survival-focused",
+    "all_urls": [
+      "TTS-14: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783125381110_ElderMara_WaterSurvival.mp3",
+      "TTS-15: https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783125391382_ElderMara_BrachiosaurusWarning.mp3"
+    ]
+  }
+}

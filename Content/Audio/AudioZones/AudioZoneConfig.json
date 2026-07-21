@@ -1,0 +1,366 @@
+{
+  "audio_zone_system": {
+    "version": "1.0",
+    "game": "Transpersonal Game Studio — Prehistoric Survival",
+    "description": "Audio zone configuration for MinPlayableMap. Defines ambient sound zones, danger triggers, and voice line proximity activations.",
+    "last_updated": "PROD_CYCLE_AUTO_20260704_004"
+  },
+
+  "ambient_zones": [
+    {
+      "id": "AUDIO_ZONE_RIVER",
+      "actor_label": "AudioZone_River_001",
+      "world_position": { "x": 2100, "y": 3200, "z": 100 },
+      "radius": 600,
+      "priority": 2,
+      "blend_in_time": 2.5,
+      "blend_out_time": 3.0,
+      "sounds": [
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "River water flowing — constant background",
+          "freesound_query": "river water flowing jungle tropical",
+          "volume": 0.7,
+          "pitch_variation": 0.05,
+          "attenuation_falloff": "linear",
+          "loop": true
+        },
+        {
+          "type": "AMBIENT_ONESHOT",
+          "description": "Distant bird calls — random interval",
+          "freesound_query": "tropical bird call jungle",
+          "volume": 0.4,
+          "interval_min": 8.0,
+          "interval_max": 25.0,
+          "loop": false
+        }
+      ],
+      "voice_line_trigger": {
+        "actor_label": "Elder_NPC_Camp_001",
+        "trigger_distance": 400,
+        "voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140979093_ElderMara_RiverZone.mp3",
+        "trigger_once": true,
+        "dialogue_id": "ELDER_RIVER_ZONE_ADVICE"
+      }
+    },
+    {
+      "id": "AUDIO_ZONE_HILLTOP",
+      "actor_label": "AudioZone_Hilltop_001",
+      "world_position": { "x": 2800, "y": 1800, "z": 280 },
+      "radius": 500,
+      "priority": 2,
+      "blend_in_time": 2.0,
+      "blend_out_time": 2.5,
+      "sounds": [
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "Hilltop wind — exposed, strong gusts",
+          "freesound_query": "wind hilltop outdoor breeze nature",
+          "volume": 0.65,
+          "pitch_variation": 0.1,
+          "attenuation_falloff": "linear",
+          "loop": true
+        },
+        {
+          "type": "AMBIENT_ONESHOT",
+          "description": "Distant pterosaur wing flap — rare",
+          "freesound_query": "large bird wing flap whoosh",
+          "volume": 0.3,
+          "interval_min": 30.0,
+          "interval_max": 90.0,
+          "loop": false
+        }
+      ],
+      "voice_line_trigger": {
+        "actor_label": "Elder_NPC_Camp_001",
+        "trigger_distance": 350,
+        "voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140983954_ElderMara_HilltopZone.mp3",
+        "trigger_once": true,
+        "dialogue_id": "ELDER_HILLTOP_ZONE_ADVICE"
+      }
+    },
+    {
+      "id": "AUDIO_ZONE_HIGHGRASS",
+      "actor_label": "AudioZone_HighGrass_001",
+      "world_position": { "x": 1600, "y": 2700, "z": 90 },
+      "radius": 700,
+      "priority": 1,
+      "blend_in_time": 1.5,
+      "blend_out_time": 2.0,
+      "sounds": [
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "Insects — dense grassland cicadas and crickets",
+          "freesound_query": "insects cicadas grassland summer",
+          "volume": 0.55,
+          "pitch_variation": 0.03,
+          "attenuation_falloff": "logarithmic",
+          "loop": true
+        },
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "Grass rustling in wind — light breeze",
+          "freesound_query": "grass rustling wind field",
+          "volume": 0.35,
+          "pitch_variation": 0.08,
+          "attenuation_falloff": "linear",
+          "loop": true
+        }
+      ],
+      "stealth_modifier": {
+        "description": "High grass reduces player audio signature — predators detect player at 60% normal range",
+        "detection_range_multiplier": 0.6
+      }
+    },
+    {
+      "id": "AUDIO_ZONE_FOREST",
+      "actor_label": "AudioZone_Forest_001",
+      "world_position": { "x": 2400, "y": 2100, "z": 110 },
+      "radius": 800,
+      "priority": 1,
+      "blend_in_time": 3.0,
+      "blend_out_time": 3.5,
+      "sounds": [
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "Dense jungle ambience — birds, insects, distant calls",
+          "freesound_query": "jungle forest ambience birds insects tropical",
+          "volume": 0.6,
+          "pitch_variation": 0.04,
+          "attenuation_falloff": "logarithmic",
+          "loop": true
+        },
+        {
+          "type": "AMBIENT_ONESHOT",
+          "description": "Branch snap — random footstep of unseen animal",
+          "freesound_query": "branch snap twig break forest",
+          "volume": 0.45,
+          "interval_min": 15.0,
+          "interval_max": 45.0,
+          "loop": false,
+          "spatial_randomize": true,
+          "spatial_radius": 400
+        }
+      ]
+    }
+  ],
+
+  "danger_zones": [
+    {
+      "id": "AUDIO_DANGER_TREX",
+      "actor_label": "AudioZone_TRexDanger_001",
+      "world_position": { "x": 2900, "y": 2600, "z": 120 },
+      "radius": 800,
+      "priority": 10,
+      "description": "T-Rex patrol zone — documented in Elder_NPC_DialogueTree.json",
+      "tension_layers": [
+        {
+          "distance_from_center": 800,
+          "layer": "OUTER_TENSION",
+          "description": "Low bass drone — player enters awareness zone",
+          "volume": 0.25,
+          "frequency_hz": 40,
+          "blend_in_time": 4.0
+        },
+        {
+          "distance_from_center": 500,
+          "layer": "MID_TENSION",
+          "description": "Heartbeat rhythm intensifies — predator nearby",
+          "volume": 0.45,
+          "frequency_hz": 60,
+          "blend_in_time": 2.0
+        },
+        {
+          "distance_from_center": 250,
+          "layer": "CRITICAL_DANGER",
+          "description": "Full danger sting — T-Rex can see player",
+          "volume": 0.8,
+          "frequency_hz": 80,
+          "blend_in_time": 0.5,
+          "screen_shake": {
+            "enabled": true,
+            "intensity": 0.6,
+            "frequency": 8.0,
+            "description": "Ground tremor from T-Rex footsteps"
+          }
+        }
+      ],
+      "trex_vocalization": {
+        "description": "T-Rex low rumble — territorial warning before full roar",
+        "freesound_query": "deep rumble bass growl predator large animal",
+        "trigger_distance": 400,
+        "volume": 0.9,
+        "pitch": 0.7
+      }
+    }
+  ],
+
+  "proximity_triggers": [
+    {
+      "id": "AUDIO_TRIGGER_PARA_HERD",
+      "actor_label": "AudioTrigger_ParaHerd_001",
+      "world_position": { "x": 1800, "y": 2900, "z": 95 },
+      "trigger_radius": 600,
+      "description": "Parasaurolophus herd proximity — hollow crest bone resonance vocalization",
+      "sounds": [
+        {
+          "type": "ONESHOT_TRIGGER",
+          "description": "Parasaurolophus crest call — low resonant horn-like sound",
+          "freesound_query": "low horn resonant hollow tube animal call",
+          "volume": 0.85,
+          "pitch": 0.6,
+          "reverb": "large_open_space",
+          "trigger_once": false,
+          "cooldown": 20.0
+        },
+        {
+          "type": "AMBIENT_LOOP",
+          "description": "Herd movement — heavy footsteps, distant rumble",
+          "freesound_query": "herd footsteps heavy ground rumble",
+          "volume": 0.5,
+          "loop": true
+        }
+      ],
+      "stampede_trigger": {
+        "condition": "player_runs_within_200_units",
+        "description": "If player sprints within 200 units of herd, stampede audio begins",
+        "sounds": [
+          {
+            "type": "STAMPEDE_RUMBLE",
+            "description": "Thundering herd — ground shaking, panic calls",
+            "volume": 1.0,
+            "duration": 8.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "AUDIO_TRIGGER_CRAFTING",
+      "actor_label": "AudioTrigger_Crafting_001",
+      "world_position": { "x": 2100, "y": 2400, "z": 100 },
+      "trigger_radius": 150,
+      "description": "Crafting audio trigger — stone-on-stone impact sounds for resource pickup actors",
+      "sounds": [
+        {
+          "type": "CRAFTING_SFX",
+          "action": "PICKUP_ROCK",
+          "description": "Rock scrape — picking up stone from ground",
+          "freesound_query": "stone scrape rock pickup gravel",
+          "volume": 0.6,
+          "pitch_variation": 0.15,
+          "trigger_once": false
+        },
+        {
+          "type": "CRAFTING_SFX",
+          "action": "CRAFT_TOOL",
+          "description": "Stone knapping — flint on flint, primitive tool creation",
+          "freesound_query": "flint knapping stone tool primitive",
+          "volume": 0.7,
+          "pitch_variation": 0.1,
+          "trigger_once": false
+        },
+        {
+          "type": "CRAFTING_SFX",
+          "action": "PICKUP_STICK",
+          "description": "Wood snap — breaking branch from ground",
+          "freesound_query": "wood snap branch break dry",
+          "volume": 0.5,
+          "pitch_variation": 0.2,
+          "trigger_once": false
+        }
+      ]
+    }
+  ],
+
+  "voice_line_registry": {
+    "description": "All Elder NPC voice lines with URLs and trigger conditions",
+    "lines": [
+      {
+        "id": "TTS-14",
+        "character": "ElderMara",
+        "context": "WaterSurvival",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783136253406_ElderMara_TRexEncounter.mp3",
+        "trigger": "player_enters_river_zone_first_time"
+      },
+      {
+        "id": "TTS-15",
+        "character": "ElderMara",
+        "context": "TRexEncounter",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783136253406_ElderMara_TRexEncounter.mp3",
+        "trigger": "player_enters_trex_danger_zone_first_time"
+      },
+      {
+        "id": "TTS-16",
+        "character": "ElderMara",
+        "context": "NightSurvival",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140841103_Elder_NPC_ScoutWarning.mp3",
+        "trigger": "player_survives_first_night"
+      },
+      {
+        "id": "TTS-RIVER",
+        "character": "ElderMara",
+        "context": "RiverZoneAdvice",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140979093_ElderMara_RiverZone.mp3",
+        "trigger": "player_enters_AudioZone_River_001",
+        "duration_estimate": "~26s"
+      },
+      {
+        "id": "TTS-HILLTOP",
+        "character": "ElderMara",
+        "context": "HilltopZoneAdvice",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140983954_ElderMara_HilltopZone.mp3",
+        "trigger": "player_enters_AudioZone_Hilltop_001",
+        "duration_estimate": "~22s"
+      },
+      {
+        "id": "TTS-HERD-LORE",
+        "character": "ElderMara",
+        "context": "ParasaurolophusBiology",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140857411_Elder_NPC_HerdLore.mp3",
+        "trigger": "player_enters_AudioTrigger_ParaHerd_001"
+      },
+      {
+        "id": "TTS-QUEST-COMPLETE",
+        "character": "ElderMara",
+        "context": "QuestCompletion",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783140852154_Elder_NPC_QuestCompletion.mp3",
+        "trigger": "player_completes_scout_mission"
+      }
+    ]
+  },
+
+  "music_system": {
+    "description": "Adaptive music layers — intensity driven by player state and proximity to threats",
+    "base_layer": {
+      "description": "Constant low percussion — bone drum, hollow wood. Always present.",
+      "volume": 0.3,
+      "instruments": ["bone_drum", "hollow_wood_percussion", "low_drone_string"]
+    },
+    "tension_layers": [
+      {
+        "trigger": "predator_within_800_units",
+        "description": "Add rhythmic tension — faster percussion, dissonant strings",
+        "volume_add": 0.25,
+        "instruments": ["fast_percussion", "dissonant_low_strings"]
+      },
+      {
+        "trigger": "predator_within_400_units",
+        "description": "Full danger — percussion peaks, bass drops",
+        "volume_add": 0.45,
+        "instruments": ["peak_percussion", "bass_drop", "high_tension_strings"]
+      },
+      {
+        "trigger": "player_health_below_30pct",
+        "description": "Survival desperation — heartbeat rhythm, sparse melody",
+        "volume_add": 0.2,
+        "instruments": ["heartbeat_bass", "sparse_flute"]
+      }
+    ],
+    "night_layer": {
+      "trigger": "time_of_day_night",
+      "description": "Night ambience — silence punctuated by distant predator calls, insect chorus",
+      "volume": 0.4,
+      "instruments": ["night_insects", "distant_predator_calls", "low_wind"]
+    }
+  }
+}

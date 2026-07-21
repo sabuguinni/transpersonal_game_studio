@@ -1,301 +1,190 @@
 #include "Anim_CharacterAnimationController.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Engine/Engine.h"
 
 UAnim_CharacterAnimationController::UAnim_CharacterAnimationController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize default values
-    BlendSpaceInput = FVector2D::ZeroVector;
-    StaminaSpeedModifier = 1.0f;
-    FearTremblingIntensity = 0.0f;
-    InjuryLimpIntensity = 0.0f;
+    OwningCharacter = nullptr;
+    CharacterMovement = nullptr;
     
-    OwnerMesh = nullptr;
-    AnimInstance = nullptr;
-    MovementBlendSpace = nullptr;
+    WalkSpeedThreshold = 100.0f;
+    RunSpeedThreshold = 300.0f;
+    DirectionDeadZone = 5.0f;
+    
+    IdleAnimation = nullptr;
+    WalkAnimation = nullptr;
+    RunAnimation = nullptr;
+    JumpStartAnimation = nullptr;
+    JumpLoopAnimation = nullptr;
+    JumpEndAnimation = nullptr;
 }
 
-void UAnim_CharacterAnimationController::BeginPlay()
+void UAnim_CharacterAnimationController::NativeInitializeAnimation()
 {
-    Super::BeginPlay();
+    Super::NativeInitializeAnimation();
     
-    CacheAnimationReferences();
+    OwningCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwningCharacter)
+    {
+        CharacterMovement = OwningCharacter->GetCharacterMovement();
+    }
     
-    // Initialize animation state
-    CurrentAnimationState = FAnim_AnimationState();
-    PreviousAnimationState = CurrentAnimationState;
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation Controller initialized for %s"), 
-           *GetOwner()->GetName());
+    SetAnimationSequences();
 }
 
-void UAnim_CharacterAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAnim_CharacterAnimationController::NativeUpdateAnimation(float DeltaTimeX)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::NativeUpdateAnimation(DeltaTimeX);
     
-    if (!OwnerMesh || !AnimInstance)
+    if (!OwningCharacter || !CharacterMovement)
     {
         return;
     }
     
-    // Update blend space from current state
-    UpdateBlendSpaceFromState();
-    
-    // Apply survival modifiers
-    ApplySurvivalModifiers();
+    UpdateMovementData();
+    UpdateMovementState();
 }
 
-void UAnim_CharacterAnimationController::UpdateAnimationState(const FAnim_AnimationState& NewState)
+void UAnim_CharacterAnimationController::UpdateMovementData()
 {
-    if (!ShouldTransitionState(NewState))
+    if (!OwningCharacter || !CharacterMovement)
     {
         return;
     }
     
-    FAnim_AnimationState OldState = CurrentAnimationState;
-    PreviousAnimationState = CurrentAnimationState;
-    CurrentAnimationState = NewState;
+    // Get velocity and calculate speed
+    FVector Velocity = CharacterMovement->Velocity;
+    MovementData.Speed = Velocity.Size2D();
     
-    HandleStateTransition(OldState, NewState);
+    // Calculate direction relative to character forward
+    CalculateDirection();
     
-    // Broadcast event
-    OnAnimationStateChanged(CurrentAnimationState);
+    // Update movement flags
+    MovementData.bIsInAir = CharacterMovement->IsFalling();
+    MovementData.bIsCrouching = CharacterMovement->IsCrouching();
+    MovementData.bIsAccelerating = CharacterMovement->GetCurrentAcceleration().Size2D() > 0.0f;
     
-    UE_LOG(LogTemp, Log, TEXT("Animation state changed: Speed=%.2f, Direction=%.2f, State=%d"), 
-           CurrentAnimationState.Speed, CurrentAnimationState.Direction, 
-           (int32)CurrentAnimationState.MovementState);
+    // Determine movement state
+    MovementData.MovementState = DetermineMovementState();
 }
 
-void UAnim_CharacterAnimationController::SetMovementState(EDir_MovementState NewMovementState)
+void UAnim_CharacterAnimationController::CalculateDirection()
 {
-    if (CurrentAnimationState.MovementState != NewMovementState)
+    if (!OwningCharacter || !CharacterMovement)
     {
-        FAnim_AnimationState NewState = CurrentAnimationState;
-        NewState.MovementState = NewMovementState;
-        UpdateAnimationState(NewState);
-    }
-}
-
-void UAnim_CharacterAnimationController::SetSpeed(float NewSpeed)
-{
-    if (!FMath::IsNearlyEqual(CurrentAnimationState.Speed, NewSpeed, 0.1f))
-    {
-        FAnim_AnimationState NewState = CurrentAnimationState;
-        NewState.Speed = FMath::Max(0.0f, NewSpeed);
-        UpdateAnimationState(NewState);
-    }
-}
-
-void UAnim_CharacterAnimationController::SetDirection(float NewDirection)
-{
-    // Normalize direction to [-180, 180] range
-    float NormalizedDirection = FMath::UnwindDegrees(NewDirection);
-    
-    if (!FMath::IsNearlyEqual(CurrentAnimationState.Direction, NormalizedDirection, 5.0f))
-    {
-        FAnim_AnimationState NewState = CurrentAnimationState;
-        NewState.Direction = NormalizedDirection;
-        UpdateAnimationState(NewState);
-    }
-}
-
-bool UAnim_CharacterAnimationController::PlayMontage(const FAnim_MontageSettings& MontageSettings)
-{
-    if (!AnimInstance || !MontageSettings.Montage)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot play montage: Invalid AnimInstance or Montage"));
-        return false;
-    }
-    
-    // Stop current montage if playing
-    if (IsPlayingMontage())
-    {
-        StopMontage(MontageSettings.BlendOutTime);
-    }
-    
-    // Play new montage
-    float MontageLength = AnimInstance->Montage_Play(
-        MontageSettings.Montage, 
-        MontageSettings.PlayRate,
-        EMontagePlayReturnType::MontageLength,
-        0.0f,
-        true
-    );
-    
-    if (MontageLength > 0.0f)
-    {
-        OnMontageStarted(MontageSettings.Montage);
-        UE_LOG(LogTemp, Log, TEXT("Playing montage: %s (Length: %.2f)"), 
-               *MontageSettings.Montage->GetName(), MontageLength);
-        return true;
-    }
-    
-    return false;
-}
-
-void UAnim_CharacterAnimationController::StopMontage(float BlendOutTime)
-{
-    if (AnimInstance && IsPlayingMontage())
-    {
-        UAnimMontage* CurrentMontage = AnimInstance->GetCurrentActiveMontage();
-        AnimInstance->Montage_Stop(BlendOutTime);
-        
-        if (CurrentMontage)
-        {
-            OnMontageEnded(CurrentMontage, true);
-            UE_LOG(LogTemp, Log, TEXT("Stopped montage: %s"), *CurrentMontage->GetName());
-        }
-    }
-}
-
-bool UAnim_CharacterAnimationController::IsPlayingMontage() const
-{
-    return AnimInstance && AnimInstance->IsAnyMontagePlaying();
-}
-
-float UAnim_CharacterAnimationController::GetMontagePosition() const
-{
-    if (AnimInstance && IsPlayingMontage())
-    {
-        return AnimInstance->Montage_GetPosition(AnimInstance->GetCurrentActiveMontage());
-    }
-    return 0.0f;
-}
-
-void UAnim_CharacterAnimationController::SetBlendSpaceInput(float X, float Y)
-{
-    BlendSpaceInput.X = FMath::Clamp(X, -1.0f, 1.0f);
-    BlendSpaceInput.Y = FMath::Clamp(Y, -1.0f, 1.0f);
-}
-
-void UAnim_CharacterAnimationController::ApplyStaminaModifier(float StaminaLevel)
-{
-    CurrentAnimationState.StaminaLevel = FMath::Clamp(StaminaLevel, 0.0f, 1.0f);
-    
-    // Lower stamina = slower movement
-    StaminaSpeedModifier = FMath::Lerp(0.5f, 1.0f, CurrentAnimationState.StaminaLevel);
-}
-
-void UAnim_CharacterAnimationController::ApplyFearModifier(float FearLevel)
-{
-    CurrentAnimationState.FearLevel = FMath::Clamp(FearLevel, 0.0f, 1.0f);
-    
-    // Higher fear = more trembling
-    FearTremblingIntensity = CurrentAnimationState.FearLevel * 0.5f;
-}
-
-void UAnim_CharacterAnimationController::ApplyInjuryModifier(float InjuryLevel)
-{
-    InjuryLimpIntensity = FMath::Clamp(InjuryLevel, 0.0f, 1.0f);
-}
-
-void UAnim_CharacterAnimationController::CacheAnimationReferences()
-{
-    if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
-    {
-        OwnerMesh = OwnerCharacter->GetMesh();
-        if (OwnerMesh)
-        {
-            AnimInstance = OwnerMesh->GetAnimInstance();
-        }
-    }
-    
-    if (!OwnerMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Controller: No SkeletalMeshComponent found on owner"));
-    }
-    
-    if (!AnimInstance)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Controller: No AnimInstance found"));
-    }
-}
-
-void UAnim_CharacterAnimationController::UpdateBlendSpaceFromState()
-{
-    if (!MovementBlendSpace)
-    {
+        MovementData.Direction = 0.0f;
         return;
     }
     
-    // Convert speed and direction to blend space coordinates
-    float SpeedNormalized = CurrentAnimationState.Speed / 600.0f; // Assume max speed 600
-    float DirectionRadians = FMath::DegreesToRadians(CurrentAnimationState.Direction);
+    FVector Velocity = CharacterMovement->Velocity;
+    FVector ForwardVector = OwningCharacter->GetActorForwardVector();
     
-    float BlendX = SpeedNormalized * FMath::Sin(DirectionRadians);
-    float BlendY = SpeedNormalized * FMath::Cos(DirectionRadians);
-    
-    SetBlendSpaceInput(BlendX, BlendY);
-}
-
-void UAnim_CharacterAnimationController::ApplySurvivalModifiers()
-{
-    // Apply stamina modifier to current speed
-    if (StaminaSpeedModifier < 1.0f)
+    if (Velocity.Size2D() > DirectionDeadZone)
     {
-        FAnim_AnimationState ModifiedState = CurrentAnimationState;
-        ModifiedState.Speed *= StaminaSpeedModifier;
+        FVector NormalizedVelocity = Velocity.GetSafeNormal2D();
+        float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
+        FVector CrossProduct = FVector::CrossProduct(ForwardVector, NormalizedVelocity);
         
-        // Update blend space with modified speed
-        float SpeedNormalized = ModifiedState.Speed / 600.0f;
-        float DirectionRadians = FMath::DegreesToRadians(ModifiedState.Direction);
-        
-        float BlendX = SpeedNormalized * FMath::Sin(DirectionRadians);
-        float BlendY = SpeedNormalized * FMath::Cos(DirectionRadians);
-        
-        SetBlendSpaceInput(BlendX, BlendY);
+        MovementData.Direction = UKismetMathLibrary::RadiansToDegrees(FMath::Atan2(CrossProduct.Z, DotProduct));
+    }
+    else
+    {
+        MovementData.Direction = 0.0f;
     }
 }
 
-bool UAnim_CharacterAnimationController::ShouldTransitionState(const FAnim_AnimationState& NewState) const
+EAnim_MovementState UAnim_CharacterAnimationController::DetermineMovementState() const
 {
-    // Don't transition if states are too similar
-    if (CurrentAnimationState.MovementState == NewState.MovementState &&
-        FMath::IsNearlyEqual(CurrentAnimationState.Speed, NewState.Speed, 10.0f) &&
-        FMath::IsNearlyEqual(CurrentAnimationState.Direction, NewState.Direction, 10.0f))
+    if (MovementData.bIsInAir)
     {
-        return false;
-    }
-    
-    // Always allow transitions if movement state changes
-    if (CurrentAnimationState.MovementState != NewState.MovementState)
-    {
-        return true;
-    }
-    
-    // Allow transitions for significant speed or direction changes
-    return true;
-}
-
-void UAnim_CharacterAnimationController::HandleStateTransition(const FAnim_AnimationState& OldState, const FAnim_AnimationState& NewState)
-{
-    // Handle specific state transitions
-    if (OldState.MovementState != NewState.MovementState)
-    {
-        // Check if we have a montage for this state
-        if (UAnimMontage** FoundMontage = StateMontages.Find(NewState.MovementState))
+        if (CharacterMovement && CharacterMovement->Velocity.Z > 0.0f)
         {
-            if (*FoundMontage)
-            {
-                FAnim_MontageSettings MontageSettings;
-                MontageSettings.Montage = *FoundMontage;
-                MontageSettings.PlayRate = 1.0f;
-                MontageSettings.BlendInTime = 0.2f;
-                MontageSettings.BlendOutTime = 0.2f;
-                
-                PlayMontage(MontageSettings);
-            }
+            return EAnim_MovementState::Jumping;
         }
+        return EAnim_MovementState::Falling;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Animation state transition: %d -> %d"), 
-           (int32)OldState.MovementState, (int32)NewState.MovementState);
+    if (MovementData.bIsCrouching)
+    {
+        return EAnim_MovementState::Crouching;
+    }
+    
+    if (CharacterMovement && CharacterMovement->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    if (MovementData.Speed > RunSpeedThreshold)
+    {
+        return EAnim_MovementState::Running;
+    }
+    else if (MovementData.Speed > WalkSpeedThreshold)
+    {
+        return EAnim_MovementState::Walking;
+    }
+    
+    return EAnim_MovementState::Idle;
+}
+
+void UAnim_CharacterAnimationController::UpdateMovementState()
+{
+    // This function can be used to trigger animation montages or state changes
+    // based on the current movement state
+    
+    switch (MovementData.MovementState)
+    {
+        case EAnim_MovementState::Idle:
+            // Handle idle state logic
+            break;
+        case EAnim_MovementState::Walking:
+            // Handle walking state logic
+            break;
+        case EAnim_MovementState::Running:
+            // Handle running state logic
+            break;
+        case EAnim_MovementState::Jumping:
+            // Handle jumping state logic
+            break;
+        case EAnim_MovementState::Falling:
+            // Handle falling state logic
+            break;
+        case EAnim_MovementState::Crouching:
+            // Handle crouching state logic
+            break;
+        case EAnim_MovementState::Swimming:
+            // Handle swimming state logic
+            break;
+    }
+}
+
+void UAnim_CharacterAnimationController::SetAnimationSequences()
+{
+    // Load default animation sequences
+    // These would typically be set in Blueprint or loaded from content
+    
+    // For now, we'll leave these as nullptr and they can be set in Blueprint
+    // or through the editor
+}
+
+bool UAnim_CharacterAnimationController::ShouldEnterIdleState() const
+{
+    return MovementData.MovementState == EAnim_MovementState::Idle;
+}
+
+bool UAnim_CharacterAnimationController::ShouldEnterWalkState() const
+{
+    return MovementData.MovementState == EAnim_MovementState::Walking;
+}
+
+bool UAnim_CharacterAnimationController::ShouldEnterRunState() const
+{
+    return MovementData.MovementState == EAnim_MovementState::Running;
+}
+
+bool UAnim_CharacterAnimationController::ShouldEnterJumpState() const
+{
+    return MovementData.MovementState == EAnim_MovementState::Jumping || 
+           MovementData.MovementState == EAnim_MovementState::Falling;
 }

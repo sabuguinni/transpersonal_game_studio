@@ -1,92 +1,93 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "ProductionCoordinator.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogProductionCoordinator, Log, All);
-
 UENUM(BlueprintType)
-enum class ETaskPriority : uint8
+enum class EDir_ProductionPhase : uint8
 {
-    Normal      UMETA(DisplayName = "Normal"),
-    High        UMETA(DisplayName = "High"),
-    Critical    UMETA(DisplayName = "Critical")
+    PreProduction,
+    CoreSystems,
+    WorldBuilding,
+    CharacterSystems,
+    GameplayMechanics,
+    Polish,
+    Testing,
+    Release
 };
 
 USTRUCT(BlueprintType)
-struct FMilestone
+struct FDir_AgentTaskStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    FString Name;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    FString AgentName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    FString Description;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    FString CurrentTask;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    bool bCompleted = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    float CompletionPercentage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    float CompletionPercentage = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    bool bIsBlocked;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    TArray<FString> RequiredSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    FString BlockingReason;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    FDateTime StartDate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone")
-    FDateTime CompletionDate;
-
-    FMilestone()
+    FDir_AgentTaskStatus()
     {
-        Name = TEXT("Unnamed Milestone");
-        Description = TEXT("No description");
-        StartDate = FDateTime::Now();
+        AgentName = TEXT("");
+        CurrentTask = TEXT("");
+        CompletionPercentage = 0.0f;
+        bIsBlocked = false;
+        BlockingReason = TEXT("");
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAgentTask
+struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    FString AgentName;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TotalActorsInLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    FString CurrentTask;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 DinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    ETaskPriority Priority = ETaskPriority::Normal;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 CharacterCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    bool bBlocking = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TerrainActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    float ProgressPercentage = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float AverageFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    TArray<FString> RequiredDeliverables;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    bool bHasPlayableCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
-    FDateTime LastUpdate;
-
-    FAgentTask()
+    FDir_ProductionMetrics()
     {
-        LastUpdate = FDateTime::Now();
+        TotalActorsInLevel = 0;
+        DinosaurCount = 0;
+        CharacterCount = 0;
+        TerrainActorCount = 0;
+        AverageFrameRate = 0.0f;
+        bHasPlayableCharacter = false;
     }
 };
 
 /**
- * Production Coordinator - Studio Director's oversight system
- * Tracks milestone progress, coordinates agent tasks, identifies blocking issues
- * Critical for ensuring Milestone 1 (Walk Around prototype) completion
+ * Production Coordinator - Studio Director's main coordination system
+ * Manages the 19-agent production pipeline and ensures milestone delivery
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UProductionCoordinator : public UActorComponent
 {
     GENERATED_BODY()
@@ -100,55 +101,62 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // === MILESTONE TRACKING ===
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Milestones")
-    FMilestone Milestone1_WalkAround;
+    UPROPERTY(BlueprintReadOnly, Category = "Production State")
+    EDir_ProductionPhase CurrentPhase;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Production State")
+    TArray<FDir_AgentTaskStatus> AgentStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Production State")
+    FDir_ProductionMetrics CurrentMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Production State")
+    float CycleStartTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Production State")
+    int32 CurrentCycleNumber;
+
+    // Core coordination functions
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void InitializeProductionCycle();
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void UpdateMilestone1Progress();
-
-    UFUNCTION(BlueprintPure, Category = "Production")
-    float GetMilestone1Progress() const { return Milestone1_WalkAround.CompletionPercentage; }
-
-    UFUNCTION(BlueprintPure, Category = "Production")
-    bool IsMilestone1Complete() const { return Milestone1_WalkAround.bCompleted; }
-
-    // === AGENT COORDINATION ===
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Coordination")
-    TMap<int32, FAgentTask> AgentTasks;
+    void UpdateAgentStatus(const FString& AgentName, const FString& Task, float Completion, bool bBlocked = false, const FString& BlockReason = TEXT(""));
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void ReportAgentProgress(int32 AgentID, const FString& TaskUpdate, float ProgressPercentage);
+    void AnalyzeCurrentGameState();
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void BlockingIssueDetected(const FString& IssueDescription, int32 ResponsibleAgentID);
+    void GenerateProductionReport();
 
-    // === SYSTEM VALIDATION ===
-    
-    UFUNCTION(BlueprintPure, Category = "Validation")
-    bool CheckPlayerCharacterExists();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool ValidateMinimumViablePrototype();
 
-    UFUNCTION(BlueprintPure, Category = "Validation")
-    bool CheckTerrainExists();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void AdvanceToNextPhase();
 
-    UFUNCTION(BlueprintPure, Category = "Validation")
-    bool CheckDinosaurActorsExist();
+    // Agent coordination
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription);
 
-    UFUNCTION(BlueprintPure, Category = "Validation")
-    bool CheckLightingSystemExists();
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    TArray<FString> GetBlockedAgents();
 
-    UFUNCTION(BlueprintPure, Category = "Validation")
-    bool CheckMovementInputWorks();
+    UFUNCTION(BlueprintCallable, Category = "Agent Management")
+    void ResolveAgentBlocker(const FString& AgentName);
 
-protected:
-    // === INTERNAL SYSTEMS ===
-    
-    void InitializeAgentTasks();
-    void CheckProductionState();
-    void OnMilestone1Completed();
-    void InitializeMilestone2();
+    // Milestone validation
+    UFUNCTION(BlueprintCallable, Category = "Milestones")
+    bool CheckWalkAroundMilestone();
 
-    FTimerHandle ProductionCheckTimer;
+    UFUNCTION(BlueprintCallable, Category = "Milestones")
+    bool CheckDinosaurPresenceMilestone();
+
+    UFUNCTION(BlueprintCallable, Category = "Milestones")
+    bool CheckBasicSurvivalMilestone();
+
+private:
+    void UpdateProductionMetrics();
+    void LogProductionState();
+    void CheckForCriticalBlockers();
 };

@@ -1,0 +1,219 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_011",
+  "agent": "Audio Agent #16",
+  "timestamp": "2026-07-03",
+
+  "tts_lines": [
+    {
+      "id": "TTS-01",
+      "cycle": "007",
+      "character": "ElderMara",
+      "label": "NightAmbience",
+      "text": "The valley breathes at night... Stay close to the fire — not for warmth, but for the light. Darkness belongs to them, not to us.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783071533016_ElderMara_NightAmbience.mp3",
+      "trigger": "EVT_NightCycle_Begin",
+      "duration_estimate": "~13s"
+    },
+    {
+      "id": "TTS-02",
+      "cycle": "008",
+      "character": "ElderMara",
+      "label": "CraftingWisdom",
+      "text": "Stone axe, bone needle, fire striker — these are not tools. These are the distance between you and death.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783076176004_ElderMara_CraftingWisdom.mp3",
+      "trigger": "EVT_FirstCraft_Complete",
+      "duration_estimate": "~12s"
+    },
+    {
+      "id": "TTS-10",
+      "cycle": "009",
+      "character": "ElderMara",
+      "label": "TRexWarning",
+      "text": "The T-Rex does not hunt by sight alone. It reads the air — your sweat, your fear, the blood on your hands from yesterday's kill. Stand downwind. Stay still. Breathe shallow.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/TRexWarning.mp3",
+      "trigger": "EVT_TRex_NearbyDetected",
+      "duration_estimate": "~16s"
+    },
+    {
+      "id": "TTS-11",
+      "cycle": "011",
+      "character": "ElderMara",
+      "label": "ForestHeartbeat",
+      "text": "The forest has its own heartbeat. Listen — insects at dusk, silence before the storm, the distant call of something large moving through the canopy. When the birds stop singing, something is coming. That silence is your warning.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086721775_ElderMara_ForestHeartbeat.mp3",
+      "trigger": "EVT_ForestSilence_Warning",
+      "duration_estimate": "~16s",
+      "gameplay_function": "Teaches player to read ambient audio silence as danger signal — birds/insects stop when predator is near"
+    },
+    {
+      "id": "TTS-12",
+      "cycle": "011",
+      "character": "ScoutLeader_Dara",
+      "label": "RaptorFlee",
+      "text": "Move. Now. Do not stop, do not look back. The Raptors are behind us — three of them, maybe four. Head for the river. They hate water. Go!",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086729657_ScoutLeader_Dara_RaptorFlee.mp3",
+      "trigger": "NarrTrigger_RaptorWarning_002",
+      "duration_estimate": "~10s",
+      "gameplay_function": "Urgent raptor flee event — teaches river water mechanic for scent masking"
+    }
+  ],
+
+  "ambient_audio_zones": [
+    {
+      "label": "AudioSource_Campfire_Hub_001",
+      "position": {"x": 1920, "y": 2600, "z": 100},
+      "freesound_id": 856943,
+      "freesound_name": "FIREBurn_Campfire Forest Birds 01",
+      "preview_url": "https://cdn.freesound.org/previews/856/856943_12846320-hq.mp3",
+      "type": "3D_spatial_loop",
+      "radius_units": 800,
+      "falloff": "logarithmic",
+      "notes": "Primary campfire at hub — crackling fire with distant birds. Loops continuously."
+    },
+    {
+      "label": "AudioZone_ForestAmbient_North_001",
+      "position": {"x": 2100, "y": 1800, "z": 100},
+      "freesound_id": 804709,
+      "freesound_name": "Forest Ambience Chiang Mai Thailand",
+      "preview_url": "https://cdn.freesound.org/previews/804/804709_5417386-hq.mp3",
+      "type": "ambient_loop",
+      "radius_units": 2000,
+      "falloff": "linear",
+      "notes": "Dense forest ambient — birds, insects, rustling leaves. North perimeter of hub clearing."
+    },
+    {
+      "label": "AudioSource_TrikeHerd_001",
+      "position": {"x": 2500, "y": 2200, "z": 100},
+      "freesound_id": null,
+      "freesound_name": "Procedural low-frequency rumble (no direct match found)",
+      "preview_url": null,
+      "type": "3D_spatial_loop",
+      "radius_units": 1200,
+      "falloff": "logarithmic",
+      "notes": "Triceratops herd presence — low rumble, heavy breathing, occasional snort. Requires custom synthesis or licensed SFX."
+    },
+    {
+      "label": "AudioZone_ForestAmbient_South_001",
+      "position": {"x": 2100, "y": 3000, "z": 100},
+      "freesound_id": 669357,
+      "freesound_name": "Amazon Rainforest Night Ambience",
+      "preview_url": "https://cdn.freesound.org/previews/669/669357_53551-hq.mp3",
+      "type": "ambient_loop",
+      "radius_units": 2000,
+      "falloff": "linear",
+      "notes": "South perimeter ambient — night layer with insects and cicadas. Active during dusk/night cycle."
+    }
+  ],
+
+  "freesound_catalogue": [
+    {
+      "id": 856943,
+      "name": "FIREBurn_Campfire Forest Birds 01_KVV AUDIO_FREE",
+      "duration_s": 60,
+      "tags": ["Campfire", "Fire", "Forest", "Birds", "Ambient"],
+      "preview": "https://cdn.freesound.org/previews/856/856943_12846320-hq.mp3",
+      "license": "FREE",
+      "assigned_to": "AudioSource_Campfire_Hub_001"
+    },
+    {
+      "id": 729395,
+      "name": "Campfire 01",
+      "duration_s": 109,
+      "tags": ["campfire", "crackling", "fire", "loop"],
+      "preview": "https://cdn.freesound.org/previews/729/729395_12863902-hq.mp3",
+      "license": "FREE",
+      "assigned_to": "AudioSource_Campfire_Hub_001 (secondary layer)"
+    },
+    {
+      "id": 804709,
+      "name": "Forest Ambience, Chiang Mai, Thailand",
+      "duration_s": 379,
+      "tags": ["forest", "jungle", "birds", "insects", "ambience"],
+      "preview": "https://cdn.freesound.org/previews/804/804709_5417386-hq.mp3",
+      "license": "FREE",
+      "assigned_to": "AudioZone_ForestAmbient_North_001"
+    },
+    {
+      "id": 669357,
+      "name": "Amazon Rainforest Night Ambience",
+      "duration_s": 90,
+      "tags": ["amazon", "insects", "cicada", "night", "jungle"],
+      "preview": "https://cdn.freesound.org/previews/669/669357_53551-hq.mp3",
+      "license": "FREE",
+      "assigned_to": "AudioZone_ForestAmbient_South_001"
+    }
+  ],
+
+  "narrative_trigger_wiring": {
+    "NarrTrigger_RaptorWarning_001": {
+      "tts_id": "TTS-01 (Cycle 007)",
+      "character": "ScoutLeader_Dara",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086565600_ScoutLeader_Dara.mp3",
+      "play_mode": "one_shot_on_overlap",
+      "spatial": false
+    },
+    "NarrTrigger_RaptorWarning_002": {
+      "tts_id": "TTS-12",
+      "character": "ScoutLeader_Dara",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086729657_ScoutLeader_Dara_RaptorFlee.mp3",
+      "play_mode": "one_shot_on_overlap",
+      "spatial": false
+    },
+    "NarrTrigger_ElderKael_Dialogue_001": {
+      "tts_id": "TTS-02 (Cycle 010)",
+      "character": "ElderKael",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086569835_ElderKael.mp3",
+      "play_mode": "one_shot_on_overlap",
+      "spatial": false
+    }
+  },
+
+  "audio_design_notes": {
+    "silence_as_warning": "When predator is within 500u of player, suppress all ambient audio (birds, insects). This teaches the player that silence = danger without explicit UI.",
+    "campfire_safety_radius": "Within 600u of Prop_Campfire_Hub_001, increase music warmth layer. Outside = tension layer.",
+    "trike_herd_low_freq": "Triceratops herd should emit 40-80Hz sub-bass rumble detectable via controller haptics. Intensity scales with proximity to Trike_Hub_001/002/003.",
+    "day_night_audio_layers": "Day: birds dominant, insects background. Dusk: insects rise, birds fade. Night: cicadas, frogs, distant predator calls. Dawn: birds return, tension resolves."
+  },
+
+  "handoff_to_agent_17": {
+    "vfx_requests": [
+      {
+        "actor": "AudioSource_Campfire_Hub_001",
+        "vfx": "Niagara fire particle system — small campfire scale, embers rising, smoke column",
+        "position": {"x": 1920, "y": 2600, "z": 100}
+      },
+      {
+        "actor": "AudioZone_ForestAmbient_North_001",
+        "vfx": "Ambient dust motes + light shaft particles through canopy",
+        "position": {"x": 2100, "y": 1800, "z": 100}
+      },
+      {
+        "actor": "NPC_ElderKael_001",
+        "vfx": "Breath condensation particle on cold morning, subtle dust from movement",
+        "position": {"x": 1900, "y": 2550, "z": 100}
+      }
+    ],
+    "screen_effects": [
+      {
+        "trigger": "EVT_TRex_NearbyDetected",
+        "vfx": "Screen edge vignette pulse (red tint) + camera micro-shake",
+        "audio_companion": "TTS-10 ElderMara_TRexWarning"
+      },
+      {
+        "trigger": "EVT_ForestSilence_Warning",
+        "vfx": "Desaturation pulse on ambient — world goes slightly grey as birds stop",
+        "audio_companion": "TTS-11 ElderMara_ForestHeartbeat"
+      }
+    ]
+  },
+
+  "cumulative_audio_status": {
+    "total_tts_lines": 12,
+    "total_characters": 3,
+    "characters": ["ElderMara", "ScoutLeader_Dara", "ElderKael"],
+    "ambient_zones_placed": 4,
+    "narrative_triggers_wired": 3,
+    "freesound_assets_catalogued": 4,
+    "missing": ["Triceratops herd low-frequency SFX (no Freesound match)", "T-Rex footstep impact", "Raptor screech/call"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "asset_name": "cretaceous_fallen_log_mossy",
+  "prompt": "Cretaceous era fallen log with moss and ferns growing on it, game-ready low-poly prop, realistic PBR textures, Unreal Engine 5 style, 3 meters long, natural weathered wood texture, prehistoric jungle environment asset",
+  "category": "Props",
+  "status": "completed",
+  "meshy_task_id": "019ee35e-cbe9-7e15-b494-96c370ace3a8",
+  "result_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781931138756_Cretaceous_era_fallen_log_with_moss_and_.glb",
+  "thumbnail_url": "https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019ee35e-cbe9-7e15-b494-96c370ace3a8/output/preview.png",
+  "agent": "Environment Artist #06",
+  "cycle": "PROD_CYCLE_AUTO_20260620_004",
+  "biome_placement": {
+    "x": 50000,
+    "y": 50000,
+    "z": 100,
+    "label": "CretaceousFallenLog_BiomeB"
+  },
+  "notes": "Fallen log with moss — key narrative prop. Placed at BiomeB center. Companion rocks CretaceousBoulder_BiomeB_1/2/3 also spawned nearby. GLB ready for import via AssetTools pipeline."
+}

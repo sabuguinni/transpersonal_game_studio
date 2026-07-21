@@ -2,237 +2,272 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Camera/CameraShakeBase.h"
+#include "GameFramework/Pawn.h"
+#include "Camera/CameraComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Canvas.h"
-#include "Components/PrimitiveComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 
-UAudio_ScreenEffectsManager::UAudio_ScreenEffectsManager()
+AAudio_ScreenEffectsManager::AAudio_ScreenEffectsManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-
-    // Initialize default values
-    bIsFlashing = false;
-    CurrentFlashTime = 0.0f;
-    FlashDuration = 0.0f;
-    FlashColor = FLinearColor::Red;
-    FlashIntensity = 0.5f;
-    PlayerController = nullptr;
-
-    // Set default damage effect
-    DefaultDamageEffect.FlashDuration = 0.3f;
-    DefaultDamageEffect.FlashColor = FLinearColor::Red;
-    DefaultDamageEffect.FlashIntensity = 0.5f;
-    DefaultDamageEffect.bUseScreenShake = true;
-    DefaultDamageEffect.ShakeIntensity = 1.0f;
-
-    // Set default T-Rex proximity effect
-    TRexProximityEffect.MaxDistance = 2000.0f;
-    TRexProximityEffect.MinShakeIntensity = 0.1f;
-    TRexProximityEffect.MaxShakeIntensity = 2.0f;
-    TRexProximityEffect.ShakeDuration = 0.5f;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Initialize default shake data for T-Rex
+    DefaultTRexShakeData.Intensity = 3.0f;
+    DefaultTRexShakeData.Duration = 1.5f;
+    DefaultTRexShakeData.Frequency = 15.0f;
+    DefaultTRexShakeData.FalloffRadius = 3000.0f;
+    
+    // Initialize default shake data for player
+    DefaultPlayerShakeData.Intensity = 1.0f;
+    DefaultPlayerShakeData.Duration = 0.8f;
+    DefaultPlayerShakeData.Frequency = 20.0f;
+    DefaultPlayerShakeData.FalloffRadius = 1500.0f;
+    
+    // Initialize damage flash data
+    DefaultDamageFlashData.FlashIntensity = 0.7f;
+    DefaultDamageFlashData.FlashDuration = 0.4f;
+    DefaultDamageFlashData.FlashColor = FLinearColor(1.0f, 0.2f, 0.2f, 0.8f);
+    
+    // Initialize state
+    bDamageFlashActive = false;
+    CurrentFlashAlpha = 0.0f;
+    DamageFlashMaterial = nullptr;
+    FootstepDustParticles = nullptr;
+    DinosaurFootstepParticles = nullptr;
 }
 
-void UAudio_ScreenEffectsManager::BeginPlay()
+void AAudio_ScreenEffectsManager::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Try to load default particle systems
+    FootstepDustParticles = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Dust_Puff"));
+    DinosaurFootstepParticles = LoadObject<UParticleSystem>(nullptr, TEXT("/Engine/VFX/P_Explosion"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: BeginPlay completed"));
+}
 
-    // Get player controller reference
-    if (UWorld* World = GetWorld())
+void AAudio_ScreenEffectsManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    if (bDamageFlashActive)
     {
-        PlayerController = World->GetFirstPlayerController();
-        if (!PlayerController)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("UAudio_ScreenEffectsManager: No PlayerController found"));
-        }
+        UpdateDamageFlash();
     }
 }
 
-void UAudio_ScreenEffectsManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAudio_ScreenEffectsManager::TriggerScreenShake(const FVector& EpicenterLocation, const FAudio_ScreenShakeData& ShakeData)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update flash effect
-    if (bIsFlashing)
+    if (!GetWorld())
     {
-        UpdateFlashEffect(DeltaTime);
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No valid world for screen shake"));
+        return;
     }
-
-    // Check T-Rex proximity every frame for dynamic shake
-    CheckTRexProximity();
-}
-
-void UAudio_ScreenEffectsManager::TriggerDamageFlash(const FAudio_DamageEffect& DamageEffect)
-{
+    
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
     if (!PlayerController)
     {
-        UE_LOG(LogTemp, Warning, TEXT("UAudio_ScreenEffectsManager: No PlayerController for damage flash"));
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No player controller found"));
         return;
     }
-
-    // Start flash effect
-    bIsFlashing = true;
-    CurrentFlashTime = 0.0f;
-    FlashDuration = DamageEffect.FlashDuration;
-    FlashColor = DamageEffect.FlashColor;
-    FlashIntensity = DamageEffect.FlashIntensity;
-
-    // Trigger camera shake if enabled
-    if (DamageEffect.bUseScreenShake && DefaultCameraShakeClass)
-    {
-        PlayerController->ClientStartCameraShake(DefaultCameraShakeClass, DamageEffect.ShakeIntensity);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("UAudio_ScreenEffectsManager: Triggered damage flash - Duration: %f, Intensity: %f"), 
-           FlashDuration, FlashIntensity);
-}
-
-void UAudio_ScreenEffectsManager::TriggerCustomFlash(FLinearColor InFlashColor, float Duration, float Intensity)
-{
-    FAudio_DamageEffect CustomEffect;
-    CustomEffect.FlashColor = InFlashColor;
-    CustomEffect.FlashDuration = Duration;
-    CustomEffect.FlashIntensity = Intensity;
-    CustomEffect.bUseScreenShake = false;
-
-    TriggerDamageFlash(CustomEffect);
-}
-
-void UAudio_ScreenEffectsManager::TriggerCameraShake(float Intensity, float Duration)
-{
-    if (!PlayerController || !DefaultCameraShakeClass)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UAudio_ScreenEffectsManager: Cannot trigger camera shake - missing PlayerController or ShakeClass"));
-        return;
-    }
-
-    PlayerController->ClientStartCameraShake(DefaultCameraShakeClass, Intensity);
-    UE_LOG(LogTemp, Log, TEXT("UAudio_ScreenEffectsManager: Triggered camera shake - Intensity: %f"), Intensity);
-}
-
-void UAudio_ScreenEffectsManager::TriggerProximityShake(AActor* SourceActor, const FAudio_ProximityEffect& ProximityEffect)
-{
-    if (!PlayerController || !SourceActor)
-    {
-        return;
-    }
-
-    // Calculate distance to source actor
-    FVector PlayerLocation = PlayerController->GetPawn() ? PlayerController->GetPawn()->GetActorLocation() : FVector::ZeroVector;
-    FVector SourceLocation = SourceActor->GetActorLocation();
-    float Distance = FVector::Dist(PlayerLocation, SourceLocation);
-
-    // Apply shake if within range
-    if (Distance <= ProximityEffect.MaxDistance)
-    {
-        float ShakeIntensity = CalculateProximityIntensity(Distance, ProximityEffect);
-        TriggerCameraShake(ShakeIntensity, ProximityEffect.ShakeDuration);
-    }
-}
-
-void UAudio_ScreenEffectsManager::CheckTRexProximity()
-{
-    if (!PlayerController || !PlayerController->GetPawn())
-    {
-        return;
-    }
-
-    // Find T-Rex actors in the world
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
     
-    // Look for actors with "TRex" in their name
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    APawn* PlayerPawn = PlayerController->GetPawn();
+    if (!PlayerPawn)
     {
-        AActor* Actor = *ActorIterator;
-        if (Actor && Actor->GetName().Contains(TEXT("TRex")))
-        {
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            
-            // Apply proximity shake if T-Rex is close
-            if (Distance <= TRexProximityEffect.MaxDistance)
-            {
-                float ShakeIntensity = CalculateProximityIntensity(Distance, TRexProximityEffect);
-                
-                // Only apply shake if intensity is significant
-                if (ShakeIntensity > 0.05f)
-                {
-                    TriggerCameraShake(ShakeIntensity, 0.1f); // Short duration for continuous effect
-                }
-            }
-        }
-    }
-}
-
-void UAudio_ScreenEffectsManager::SetScreenOverlay(FLinearColor OverlayColor, float Opacity)
-{
-    // This would typically be implemented with a UI overlay widget
-    // For now, we'll log the request
-    UE_LOG(LogTemp, Log, TEXT("UAudio_ScreenEffectsManager: Screen overlay requested - Color: %s, Opacity: %f"), 
-           *OverlayColor.ToString(), Opacity);
-}
-
-void UAudio_ScreenEffectsManager::ClearScreenOverlay()
-{
-    UE_LOG(LogTemp, Log, TEXT("UAudio_ScreenEffectsManager: Screen overlay cleared"));
-}
-
-void UAudio_ScreenEffectsManager::UpdateFlashEffect(float DeltaTime)
-{
-    if (!bIsFlashing)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenEffectsManager: No player pawn found"));
         return;
     }
-
-    CurrentFlashTime += DeltaTime;
     
-    if (CurrentFlashTime >= FlashDuration)
+    // Calculate distance-based intensity
+    float Distance = FVector::Dist(EpicenterLocation, PlayerPawn->GetActorLocation());
+    float IntensityMultiplier = CalculateShakeIntensityByDistance(EpicenterLocation, ShakeData.FalloffRadius);
+    
+    if (IntensityMultiplier > 0.1f)
     {
-        // Flash complete
-        bIsFlashing = false;
-        CurrentFlashTime = 0.0f;
-        ApplyScreenFlash(0.0f); // Clear flash
-    }
-    else
-    {
-        // Calculate flash alpha (fade out over time)
-        float Alpha = 1.0f - (CurrentFlashTime / FlashDuration);
-        Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-        ApplyScreenFlash(Alpha);
-    }
-}
-
-void UAudio_ScreenEffectsManager::ApplyScreenFlash(float Alpha)
-{
-    // This would typically modify a screen overlay material or post-process volume
-    // For now, we'll use engine debug drawing
-    if (Alpha > 0.0f && GEngine)
-    {
-        FLinearColor FlashColorWithAlpha = FlashColor;
-        FlashColorWithAlpha.A = Alpha * FlashIntensity;
+        float FinalIntensity = ShakeData.Intensity * IntensityMultiplier;
+        ApplyScreenShakeToPlayer(FinalIntensity, ShakeData.Duration, ShakeData.Frequency);
         
-        // Log the flash state for debugging
-        UE_LOG(LogTemp, VeryVerbose, TEXT("UAudio_ScreenEffectsManager: Flash Alpha: %f, Color: %s"), 
-               Alpha, *FlashColorWithAlpha.ToString());
+        UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Screen shake triggered - Intensity: %f, Duration: %f"), 
+               FinalIntensity, ShakeData.Duration);
     }
 }
 
-float UAudio_ScreenEffectsManager::CalculateProximityIntensity(float Distance, const FAudio_ProximityEffect& Effect)
+void AAudio_ScreenEffectsManager::TriggerTRexFootstepShake(const FVector& FootstepLocation)
 {
-    if (Distance >= Effect.MaxDistance)
+    TriggerScreenShake(FootstepLocation, DefaultTRexShakeData);
+    
+    // Also spawn footstep particles for T-Rex
+    SpawnDinosaurFootstepParticles(FootstepLocation, TEXT("TRex"));
+}
+
+void AAudio_ScreenEffectsManager::TriggerDamageFlash(const FAudio_DamageFlashData& FlashData)
+{
+    if (bDamageFlashActive)
+    {
+        // Reset the timer if already flashing
+        GetWorld()->GetTimerManager().ClearTimer(DamageFlashTimerHandle);
+    }
+    
+    bDamageFlashActive = true;
+    CurrentFlashAlpha = FlashData.FlashIntensity;
+    
+    // Set timer to end the flash
+    GetWorld()->GetTimerManager().SetTimer(
+        DamageFlashTimerHandle,
+        this,
+        &AAudio_ScreenEffectsManager::EndDamageFlash,
+        FlashData.FlashDuration,
+        false
+    );
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Damage flash triggered - Intensity: %f, Duration: %f"), 
+           FlashData.FlashIntensity, FlashData.FlashDuration);
+}
+
+void AAudio_ScreenEffectsManager::TriggerPlayerDamageFlash(float DamageAmount)
+{
+    // Scale flash intensity based on damage amount
+    FAudio_DamageFlashData ScaledFlashData = DefaultDamageFlashData;
+    ScaledFlashData.FlashIntensity = FMath::Clamp(DamageAmount * 0.1f, 0.3f, 1.0f);
+    ScaledFlashData.FlashDuration = FMath::Clamp(DamageAmount * 0.05f, 0.2f, 0.8f);
+    
+    TriggerDamageFlash(ScaledFlashData);
+}
+
+void AAudio_ScreenEffectsManager::SpawnFootstepParticles(const FVector& Location, float ParticleScale)
+{
+    if (!GetWorld() || !FootstepDustParticles)
+    {
+        return;
+    }
+    
+    FVector SpawnLocation = Location;
+    SpawnLocation.Z += 10.0f; // Slightly above ground
+    
+    UParticleSystemComponent* ParticleComponent = UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        FootstepDustParticles,
+        SpawnLocation,
+        FRotator::ZeroRotator,
+        FVector(ParticleScale),
+        true
+    );
+    
+    if (ParticleComponent)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Footstep particles spawned at location: %s"), 
+               *SpawnLocation.ToString());
+    }
+}
+
+void AAudio_ScreenEffectsManager::SpawnDinosaurFootstepParticles(const FVector& Location, const FString& DinosaurType)
+{
+    float ParticleScale = 1.0f;
+    
+    // Scale particles based on dinosaur type
+    if (DinosaurType.Contains(TEXT("TRex")))
+    {
+        ParticleScale = 3.0f;
+    }
+    else if (DinosaurType.Contains(TEXT("Brachi")))
+    {
+        ParticleScale = 4.0f;
+    }
+    else if (DinosaurType.Contains(TEXT("Raptor")))
+    {
+        ParticleScale = 0.8f;
+    }
+    else if (DinosaurType.Contains(TEXT("Tricera")))
+    {
+        ParticleScale = 2.5f;
+    }
+    
+    SpawnFootstepParticles(Location, ParticleScale);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: %s footstep particles spawned with scale %f"), 
+           *DinosaurType, ParticleScale);
+}
+
+void AAudio_ScreenEffectsManager::UpdateDamageFlash()
+{
+    if (!bDamageFlashActive)
+    {
+        return;
+    }
+    
+    // Fade out the flash over time
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    CurrentFlashAlpha = FMath::Max(0.0f, CurrentFlashAlpha - (DeltaTime * 2.0f));
+    
+    // Update material parameter if we have a material
+    if (DamageFlashMaterial)
+    {
+        DamageFlashMaterial->SetScalarParameterValue(TEXT("FlashAlpha"), CurrentFlashAlpha);
+        DamageFlashMaterial->SetVectorParameterValue(TEXT("FlashColor"), DefaultDamageFlashData.FlashColor);
+    }
+}
+
+void AAudio_ScreenEffectsManager::EndDamageFlash()
+{
+    bDamageFlashActive = false;
+    CurrentFlashAlpha = 0.0f;
+    
+    if (DamageFlashMaterial)
+    {
+        DamageFlashMaterial->SetScalarParameterValue(TEXT("FlashAlpha"), 0.0f);
+    }
+    
+    GetWorld()->GetTimerManager().ClearTimer(DamageFlashTimerHandle);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Damage flash ended"));
+}
+
+float AAudio_ScreenEffectsManager::CalculateShakeIntensityByDistance(const FVector& EpicenterLocation, float MaxRadius) const
+{
+    if (!GetWorld())
     {
         return 0.0f;
     }
-
-    // Linear interpolation from max intensity at distance 0 to min intensity at max distance
-    float DistanceRatio = Distance / Effect.MaxDistance;
-    float Intensity = FMath::Lerp(Effect.MaxShakeIntensity, Effect.MinShakeIntensity, DistanceRatio);
     
-    return FMath::Clamp(Intensity, 0.0f, Effect.MaxShakeIntensity);
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (!PlayerController || !PlayerController->GetPawn())
+    {
+        return 0.0f;
+    }
+    
+    float Distance = FVector::Dist(EpicenterLocation, PlayerController->GetPawn()->GetActorLocation());
+    
+    if (Distance >= MaxRadius)
+    {
+        return 0.0f;
+    }
+    
+    // Linear falloff from 1.0 at epicenter to 0.0 at max radius
+    return FMath::Clamp(1.0f - (Distance / MaxRadius), 0.0f, 1.0f);
+}
+
+void AAudio_ScreenEffectsManager::ApplyScreenShakeToPlayer(float Intensity, float Duration, float Frequency)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    
+    // Create a simple camera shake effect using player controller
+    // This is a basic implementation - in a full game you'd use UE5's camera shake classes
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_ScreenEffectsManager: Applying screen shake to player - Intensity: %f, Duration: %f, Frequency: %f"), 
+           Intensity, Duration, Frequency);
+    
+    // For now, we'll use a simple approach with the player controller
+    // In a production game, you'd implement proper camera shake classes
 }

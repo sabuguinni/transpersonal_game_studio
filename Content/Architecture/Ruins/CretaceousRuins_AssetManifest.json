@@ -1,0 +1,53 @@
+{
+  "manifest_version": "1.0",
+  "agent": "Architecture & Interior Agent #7",
+  "cycle": "PROD_CYCLE_AUTO_20260629_011",
+  "biome_center": {"x": 50000, "y": 50000, "z": 100},
+  "assets": [
+    {
+      "asset_name": "cretaceous_stone_pillar_standing",
+      "meshy_task_id": "019f142d-2e1a-7891-b12d-4162d66ef159",
+      "glb_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1782749965557_Cretaceous_era_prehistoric_stone_ruin_an.glb",
+      "thumbnail_url": "https://assets.meshy.ai/7e457a17-614c-4e9e-9aad-9b17c2ddf7a3/tasks/019f142d-2e1a-7891-b12d-4162d66ef159/output/preview.png",
+      "category": "Buildings",
+      "description": "Standing Cretaceous limestone pillar, 3m tall, moss-covered, weathered surface, ancient carved details",
+      "polycount": 8000,
+      "art_style": "realistic",
+      "ue5_import_path": "/Game/Architecture/Ruins/CretaceousPillar_Standing",
+      "placement": {
+        "instances": [
+          {"label": "Arch_CretaceousPillar_01", "location": [50000, 50000, 100], "rotation": [0, 0, 0], "scale": [0.8, 0.8, 3.0]},
+          {"label": "Arch_CretaceousPillar_02", "location": [50200, 49800, 100], "rotation": [0, 30, 0], "scale": [0.8, 0.8, 3.0]},
+          {"label": "Arch_CretaceousPillar_03", "location": [49800, 50200, 100], "rotation": [0, 60, 0], "scale": [0.8, 0.8, 3.0]}
+        ]
+      },
+      "narrative_purpose": "Remnants of an ancient pre-human civilization or natural limestone formations shaped by geological forces — player can use as shelter markers and navigation landmarks",
+      "lod_chain": {
+        "LOD0": "8000 tris — full detail, player proximity <10m",
+        "LOD1": "3000 tris — mid distance 10-50m",
+        "LOD2": "800 tris — far distance 50m+"
+      }
+    },
+    {
+      "asset_name": "cretaceous_fallen_ancient_log",
+      "meshy_task_id": "019f142b-90b1-7839-80dc-ec2c3b2457c6",
+      "category": "Props",
+      "description": "Large fallen ancient tree log, moss-covered, partially decomposed, Cretaceous era",
+      "ue5_import_path": "/Game/Environment/Props/FallenLog_Cretaceous",
+      "narrative_purpose": "Environmental storytelling — fallen trees create natural barriers, shelter spots, and crafting resource nodes"
+    }
+  ],
+  "atmosphere_actors": [
+    {"label": "Arch_RuinTorch_01", "type": "PointLight", "location": [50000, 50000, 300], "purpose": "Ruin atmosphere warm torchlight"},
+    {"label": "Arch_RuinTorch_02", "type": "PointLight", "location": [50200, 49900, 280], "purpose": "Secondary ruin torch"},
+    {"label": "Arch_RuinAmbient_01", "type": "PointLight", "location": [49850, 50150, 320], "purpose": "Ambient ruin glow"},
+    {"label": "Arch_CaveEntrance_Placeholder", "type": "StaticMeshActor", "location": [50000, 49600, 100], "purpose": "Cave/shelter entrance arch placeholder"}
+  ],
+  "next_steps": [
+    "Import GLB from Supabase URL into /Game/Architecture/Ruins/CretaceousPillar_Standing",
+    "Replace StaticMeshActor placeholders with imported GLB mesh",
+    "Add collapsed wall section asset (request pending from previous cycles)",
+    "Create interior shelter space behind cave entrance placeholder",
+    "Agent #8 (Lighting) should add volumetric fog inside cave entrance area"
+  ]
+}

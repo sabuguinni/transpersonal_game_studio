@@ -2,78 +2,95 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "NiagaraComponent.h"
+#include "Components/ActorComponent.h"
 #include "NiagaraSystem.h"
-#include "NiagaraActor.h"
-#include "SharedTypes.h"
+#include "NiagaraComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "../SharedTypes.h"
 #include "VFX_ParticleManager.generated.h"
 
-/**
- * Sistema de gestão de efeitos visuais para o jogo pré-histórico
- * Gere partículas Niagara para pegadas, impactos, fogo e ambiente
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFX_ParticleManager : public AActor
+UENUM(BlueprintType)
+enum class EVFX_ParticleType : uint8
 {
-	GENERATED_BODY()
+    FootstepDust,
+    BloodSplatter,
+    AmbientPollen,
+    CampfireSparks,
+    RainDroplets,
+    BreathVapor,
+    ImpactDebris
+};
+
+USTRUCT(BlueprintType)
+struct FVFX_ParticleSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float Intensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float Duration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FLinearColor TintColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bAutoDestroy = true;
+};
+
+UCLASS(Blueprintable, BlueprintType, ClassGroup = (VFX))
+class TRANSPERSONALGAME_API UVFX_ParticleManager : public UActorComponent
+{
+    GENERATED_BODY()
 
 public:
-	AVFX_ParticleManager();
+    UVFX_ParticleManager();
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
+    virtual void BeginPlay() override;
 
-	// Sistemas Niagara para diferentes efeitos
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-	class UNiagaraSystem* FootstepDustSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TMap<EVFX_ParticleType, TSoftObjectPtr<UNiagaraSystem>> ParticleSystems;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-	class UNiagaraSystem* CampfireSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    TMap<EVFX_ParticleType, FVFX_ParticleSettings> ParticleSettings;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-	class UNiagaraSystem* BloodImpactSystem;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-	class UNiagaraSystem* WeatherRainSystem;
-
-	// Pool de componentes Niagara reutilizáveis
-	UPROPERTY()
-	TArray<class UNiagaraComponent*> ParticlePool;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-	int32 MaxPoolSize = 50;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
+    TArray<UNiagaraComponent*> ActiveParticles;
 
 public:
-	// Métodos para spawnar efeitos específicos
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void SpawnFootstepEffect(FVector Location, float DinosaurSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void SpawnCampfireEffect(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnFootstepDust(FVector FootLocation, float DinosaurSize = 1.0f);
 
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void SpawnBloodImpact(FVector Location, FVector ImpactDirection);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnBloodSplatter(FVector ImpactLocation, EDamageType DamageType, float DamageAmount);
 
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void SpawnWeatherEffect(EBiomeType BiomeType, FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnAmbientParticles(FVector CenterLocation, float Radius = 1000.0f);
 
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void StopAllEffects();
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void UpdateDayNightParticles(float TimeOfDay);
 
-	UFUNCTION(BlueprintCallable, Category = "VFX")
-	void SetEffectIntensity(float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void CleanupExpiredParticles();
+
+    UFUNCTION(CallInEditor, Category = "VFX Debug")
+    void TestAllParticleTypes();
+
+protected:
+    void InitializeParticleSystems();
+    void ConfigureParticleSettings();
+    UNiagaraComponent* CreateParticleComponent(UNiagaraSystem* System, FVector Location, FRotator Rotation);
 
 private:
-	// Gestão do pool de partículas
-	class UNiagaraComponent* GetPooledParticle();
-	void ReturnParticleToPool(class UNiagaraComponent* Particle);
-
-	// Configuração de efeitos por bioma
-	void ConfigureEffectForBiome(class UNiagaraComponent* Effect, EBiomeType BiomeType);
-
-	UPROPERTY()
-	float CurrentEffectIntensity = 1.0f;
+    FTimerHandle CleanupTimer;
+    float AmbientParticleIntensity = 1.0f;
 };

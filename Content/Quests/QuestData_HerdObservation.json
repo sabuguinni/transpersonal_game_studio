@@ -1,0 +1,142 @@
+{
+  "quest_id": "QUEST_HERD_OBSERVATION_001",
+  "quest_name": "Observe the Herd",
+  "quest_type": "SCOUTING",
+  "difficulty": "EASY",
+  "giver_actor": "Elder_NPC_QuestGiver_001",
+  "description": "The Elder needs a count of the Triceratops herd before the tribe plans its next hunt. Approach the grazing grounds without startling the animals, observe the herd composition, then return safely.",
+  "lore_context": "Triceratops herds migrate with the wet season. Knowing the herd size and the number of calves tells the tribe how much meat is available and how dangerous the hunt will be.",
+  "objectives": [
+    {
+      "id": "OBJ_01",
+      "type": "REACH_ZONE",
+      "description": "Travel to the Triceratops grazing grounds",
+      "target_actor": "QuestZone_HerdObserve_001",
+      "required": true,
+      "order": 1
+    },
+    {
+      "id": "OBJ_02",
+      "type": "OBSERVE_ACTORS",
+      "description": "Count the Triceratops in the herd (observe 5 or more)",
+      "target_class": "Triceratops",
+      "required_count": 5,
+      "required": true,
+      "order": 2,
+      "mechanic_note": "Player must remain within 800 units of each Triceratops for 3 seconds without triggering alert state"
+    },
+    {
+      "id": "OBJ_03",
+      "type": "OPTIONAL_OBSERVE",
+      "description": "Count the calves separately (optional — increases reward)",
+      "target_tag": "Triceratops_Calf",
+      "required": false,
+      "order": 3,
+      "reward_bonus": "EXTRA_HIDE_x2"
+    },
+    {
+      "id": "OBJ_04",
+      "type": "AVOID_DETECTION",
+      "description": "Do not trigger a Triceratops charge",
+      "fail_condition": "any Triceratops enters CHARGE state while player is in QuestZone_HerdObserve_001",
+      "required": false,
+      "order": 4,
+      "reward_bonus": "STEALTH_BONUS_XP"
+    },
+    {
+      "id": "OBJ_05",
+      "type": "RETURN_TO_ZONE",
+      "description": "Return to camp and report to the Elder",
+      "target_actor": "QuestZone_SafeCamp_001",
+      "required": true,
+      "order": 5
+    }
+  ],
+  "rewards": {
+    "base": {
+      "xp": 150,
+      "items": [
+        {"item_id": "DRIED_MEAT_x3", "quantity": 3},
+        {"item_id": "FLINT_SHARD_x2", "quantity": 2}
+      ]
+    },
+    "bonus_calf_count": {
+      "items": [{"item_id": "THICK_HIDE_x2", "quantity": 2}]
+    },
+    "bonus_stealth": {
+      "xp_bonus": 75
+    }
+  },
+  "voice_lines": {
+    "briefing": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131026096_Elder_NPC_QuestBriefing_Herd.mp3",
+    "completion": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131052563_Elder_NPC_QuestComplete_Herd.mp3"
+  },
+  "fail_conditions": [
+    {
+      "condition": "PLAYER_DEATH",
+      "description": "Player dies during the quest"
+    },
+    {
+      "condition": "HERD_SCATTERED",
+      "description": "All Triceratops flee the grazing zone before OBJ_02 is complete"
+    }
+  ],
+  "world_actors": {
+    "quest_zones": [
+      "QuestZone_HerdObserve_001",
+      "QuestZone_PredatorWatch_001",
+      "QuestZone_SafeCamp_001"
+    ],
+    "npc_markers": ["Elder_NPC_QuestGiver_001"],
+    "resource_pickups": [
+      "Rock_Resource_001", "Rock_Resource_002", "Rock_Resource_003",
+      "Rock_Resource_004", "Rock_Resource_005",
+      "Stick_Resource_001", "Stick_Resource_002", "Stick_Resource_003",
+      "Stick_Resource_004", "Stick_Resource_005",
+      "Leaf_Resource_001", "Leaf_Resource_002", "Leaf_Resource_003",
+      "Leaf_Resource_004"
+    ],
+    "crafting_stations": ["CraftingStation_Camp_001"]
+  },
+  "crafting_recipes_unlocked": [
+    {
+      "recipe_id": "RECIPE_STONE_AXE",
+      "name": "Stone Axe",
+      "ingredients": [
+        {"item_id": "ROCK", "quantity": 2},
+        {"item_id": "STICK", "quantity": 1}
+      ],
+      "result": {"item_id": "STONE_AXE", "quantity": 1},
+      "craft_time_seconds": 5.0,
+      "unlock_condition": "QUEST_HERD_OBSERVATION_001_COMPLETE"
+    },
+    {
+      "recipe_id": "RECIPE_CAMPFIRE",
+      "name": "Campfire",
+      "ingredients": [
+        {"item_id": "STICK", "quantity": 3}
+      ],
+      "result": {"item_id": "CAMPFIRE", "quantity": 1},
+      "craft_time_seconds": 8.0,
+      "unlock_condition": "DEFAULT"
+    },
+    {
+      "recipe_id": "RECIPE_WATER_CONTAINER",
+      "name": "Water Container",
+      "ingredients": [
+        {"item_id": "ROCK", "quantity": 1},
+        {"item_id": "LEAF", "quantity": 1}
+      ],
+      "result": {"item_id": "WATER_CONTAINER", "quantity": 1},
+      "craft_time_seconds": 6.0,
+      "unlock_condition": "DEFAULT"
+    }
+  ],
+  "narrative_notes": "This quest teaches the player the core stealth mechanic — staying downwind and moving slowly near large herbivores. It also introduces the tribe's dependency on ecological knowledge for survival planning. The optional calf-counting objective adds emotional weight: the player is not just counting animals, they are assessing the future of the herd.",
+  "agent_metadata": {
+    "created_by": "Agent_14_QuestDesigner",
+    "cycle": "PROD_CYCLE_AUTO_20260704_002",
+    "depends_on": ["Agent_13_CrowdSimulation", "Agent_11_NPCBehavior"],
+    "delivers_to": "Agent_15_NarrativeDialogue"
+  }
+}

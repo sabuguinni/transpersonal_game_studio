@@ -1,116 +1,134 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
-#include "../SharedTypes.h"
+#include "Engine/StaticMeshActor.h"
 #include "ArchitectureManager.generated.h"
 
+/**
+ * EArch_StructureType — Types of prehistoric architectural structures
+ * Prefix: EArch_ (Architecture Agent #7)
+ */
 UENUM(BlueprintType)
-enum class EArch_ShelterType : uint8
+enum class EArch_StructureType : uint8
 {
-    None = 0,
-    RockOverhang,
-    Cave,
-    ElevatedPlatform,
-    CliffDwelling,
-    TemporaryLean
+    RuinedPillar        UMETA(DisplayName = "Ruined Pillar"),
+    StonePlatform       UMETA(DisplayName = "Stone Platform"),
+    CaveEntrance        UMETA(DisplayName = "Cave Entrance"),
+    RockyOutcrop        UMETA(DisplayName = "Rocky Outcrop"),
+    AncientWallSegment  UMETA(DisplayName = "Ancient Wall Segment"),
+    FallenMonolith      UMETA(DisplayName = "Fallen Monolith"),
+    NaturalArch         UMETA(DisplayName = "Natural Arch"),
+    ShelterOverhang     UMETA(DisplayName = "Shelter Overhang")
 };
 
+/**
+ * EArch_WearState — Weathering/decay state of a structure
+ */
 UENUM(BlueprintType)
-enum class EArch_ConstructionMaterial : uint8
+enum class EArch_WearState : uint8
 {
-    Stone = 0,
-    Wood,
-    AnimalHide,
-    Mud,
-    Vine,
-    Bone
+    Pristine    UMETA(DisplayName = "Pristine"),
+    Weathered   UMETA(DisplayName = "Weathered"),
+    Crumbling   UMETA(DisplayName = "Crumbling"),
+    Ruined      UMETA(DisplayName = "Ruined"),
+    Collapsed   UMETA(DisplayName = "Collapsed")
 };
 
+/**
+ * FArch_StructureData — Data for a single architectural structure instance
+ */
 USTRUCT(BlueprintType)
-struct FArch_ShelterData
+struct FArch_StructureData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_StructureType StructureType = EArch_StructureType::RuinedPillar;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArch_WearState WearState = EArch_WearState::Weathered;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float SafetyRating = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FVector WorldLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float CapacityPersons = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FRotator WorldRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasWaterAccess = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bHasInterior = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    TArray<EArch_ConstructionMaterial> Materials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bCanProvideShelte = false;
 
-    FArch_ShelterData()
-    {
-        ShelterType = EArch_ShelterType::None;
-        Location = FVector::ZeroVector;
-        SafetyRating = 0.0f;
-        CapacityPersons = 1.0f;
-        bHasFirePit = false;
-        bHasWaterAccess = false;
-        Materials.Empty();
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float ShelterRadius = 300.0f;
 };
 
+/**
+ * AArch_ArchitectureManager — Manages prehistoric architectural structures in the world.
+ * Spawns, tracks, and provides shelter/interaction queries for stone ruins,
+ * rocky outcrops, cave entrances, and natural shelters.
+ *
+ * Architecture Agent #7 — Transpersonal Game Studio
+ * Structures are documents of the world's history. Every ruin tells a story.
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UArchitectureManager : public UActorComponent
+class TRANSPERSONALGAME_API AArch_ArchitectureManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UArchitectureManager();
+    AArch_ArchitectureManager();
 
-protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    /** All registered structures in the world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Structures")
+    TArray<FArch_StructureData> RegisteredStructures;
 
+    /** Maximum number of structures to maintain in memory */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Performance")
+    int32 MaxActiveStructures = 200;
+
+    /** Radius around player to keep structures loaded */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Streaming")
+    float StreamingRadius = 15000.0f;
+
+    /** Register a new structure at runtime */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterShelter(const FArch_ShelterData& ShelterData);
+    void RegisterStructure(const FArch_StructureData& StructureData);
 
+    /** Find nearest shelter structure to a world location */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_ShelterData> FindNearbyShelters(FVector PlayerLocation, float SearchRadius = 1000.0f);
+    bool FindNearestShelter(FVector FromLocation, float SearchRadius, FArch_StructureData& OutShelter);
 
+    /** Get all structures of a specific type within radius */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FArch_ShelterData GetBestShelterForLocation(FVector Location, float SearchRadius = 2000.0f);
+    TArray<FArch_StructureData> GetStructuresOfTypeInRadius(EArch_StructureType Type, FVector Center, float Radius);
 
+    /** Spawn a structure actor in the world */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CanBuildShelterAt(FVector Location, EArch_ShelterType ShelterType);
+    AActor* SpawnStructureActor(const FArch_StructureData& StructureData);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnShelterActor(const FArch_ShelterData& ShelterData);
+    /** Count of currently registered structures */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Architecture")
+    int32 GetStructureCount() const;
 
+    /** Clear all registered structures (use with caution) */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float CalculateShelterSafety(const FArch_ShelterData& ShelterData, FVector ThreatLocation);
+    void ClearAllStructures();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TArray<FArch_ShelterData> RegisteredShelters;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    float MaxShelterDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    int32 MaxSheltersPerArea = 3;
+    /** Spawned actor references for cleanup */
+    UPROPERTY()
+    TArray<AActor*> SpawnedStructureActors;
 
 private:
-    void InitializeDefaultShelters();
-    bool IsLocationSuitable(FVector Location, EArch_ShelterType ShelterType);
-    float CalculateTerrainSuitability(FVector Location, EArch_ShelterType ShelterType);
+    /** Internal: find distance squared between two points */
+    float DistSq(const FVector& A, const FVector& B) const;
 };

@@ -1,0 +1,218 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260618_007",
+  "agent": "Narrative & Dialogue Agent #15",
+  "version": "1.7",
+  "description": "NPC dialogue lines for MinPlayableMap — survival-focused prehistoric world",
+
+  "voice_assets": [
+    {
+      "character": "Elder_Narrator",
+      "line_id": "ELDER_001",
+      "text": "Stay low. The T-Rex hunts by movement. If you freeze — it passes. If you run — you die. The tribe learned this the hard way. Three hunters gone. Now we know.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781777098961_Elder_Narrator.mp3",
+      "trigger": "Trigger_TRexTerritory_001",
+      "context": "Player enters T-Rex patrol zone",
+      "tone": "urgent, experienced, pragmatic"
+    },
+    {
+      "character": "Hunter_Kael",
+      "line_id": "HUNTER_001",
+      "text": "The valley belongs to the herd. Forty beasts, each the size of three huts. They eat only leaves — but their feet crush stone. Do not stand between them and the river. Ever.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781777113475_Hunter_Kael.mp3",
+      "trigger": "Trigger_HerdPath_001",
+      "context": "Player approaches Brachiosaurus migration corridor",
+      "tone": "matter-of-fact, survival-focused"
+    },
+    {
+      "character": "Tribe_Storyteller",
+      "line_id": "STORY_001",
+      "text": "We did not always fear the night. Before the great lizards came north, we slept under open sky. Now we dig deep. We build walls of stone. The old ones say this will pass. The old ones are wrong.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781777131017_Tribe_Storyteller.mp3",
+      "trigger": "Trigger_ElderCave_001",
+      "context": "Player discovers the tribe's cave shelter",
+      "tone": "reflective, grim, world-weary"
+    }
+  ],
+
+  "dialogue_triggers": [
+    {
+      "label": "Trigger_ElderCave_001",
+      "location": {"x": -800, "y": 400, "z": 120},
+      "npc": "NPC_Elder_001",
+      "dialogue_id": "STORY_001",
+      "one_shot": false,
+      "cooldown_seconds": 120
+    },
+    {
+      "label": "Trigger_HunterCamp_001",
+      "location": {"x": 600, "y": -900, "z": 80},
+      "npc": "NPC_Hunter_001",
+      "dialogue_id": "HUNTER_CAMP_LINES",
+      "one_shot": false,
+      "cooldown_seconds": 60
+    },
+    {
+      "label": "Trigger_RiverCrossing_001",
+      "location": {"x": 1200, "y": 200, "z": 60},
+      "npc": "NPC_Scout_001",
+      "dialogue_id": "SCOUT_RIVER_LINES",
+      "one_shot": false,
+      "cooldown_seconds": 90
+    },
+    {
+      "label": "Trigger_TRexTerritory_001",
+      "location": {"x": 2000, "y": 1500, "z": 100},
+      "npc": null,
+      "dialogue_id": "ELDER_001",
+      "one_shot": false,
+      "cooldown_seconds": 180,
+      "note": "Ambient voice — no NPC visible, memory/flashback delivery"
+    },
+    {
+      "label": "Trigger_HerdPath_001",
+      "location": {"x": -400, "y": 1800, "z": 90},
+      "npc": "NPC_Hunter_002",
+      "dialogue_id": "HUNTER_001",
+      "one_shot": false,
+      "cooldown_seconds": 120
+    }
+  ],
+
+  "npc_roster": [
+    {
+      "label": "NPC_Elder_001",
+      "name": "Mara",
+      "role": "Tribe Elder",
+      "location": {"x": -800, "y": 400, "z": 200},
+      "personality": "Experienced survivor. Speaks in short, direct observations. Has seen three generations of hunters die.",
+      "knowledge": ["T-Rex behavior", "cave system layout", "seasonal migration patterns", "medicinal plants"],
+      "quest_giver": true,
+      "quest_ids": ["QUEST_ELDER_TRUST", "QUEST_CAVE_DEFENSE"]
+    },
+    {
+      "label": "NPC_Hunter_001",
+      "name": "Kael",
+      "role": "Lead Hunter",
+      "location": {"x": 600, "y": -900, "z": 180},
+      "personality": "Pragmatic. Respects competence over seniority. Will test the player before sharing information.",
+      "knowledge": ["raptor pack territories", "hunting techniques", "trap construction", "river crossings"],
+      "quest_giver": true,
+      "quest_ids": ["QUEST_FIRST_HUNT", "QUEST_RAPTOR_PACK"]
+    },
+    {
+      "label": "NPC_Hunter_002",
+      "name": "Sora",
+      "role": "Scout",
+      "location": {"x": 750, "y": -950, "z": 180},
+      "personality": "Young, fast, nervous. Has seen things the others haven't. Knows the herd migration routes.",
+      "knowledge": ["herd movement", "safe river crossings", "predator sightings"],
+      "quest_giver": false,
+      "quest_ids": []
+    },
+    {
+      "label": "NPC_Scout_001",
+      "name": "Davan",
+      "role": "River Scout",
+      "location": {"x": 1200, "y": 200, "z": 160},
+      "personality": "Calm under pressure. Stationed at the river crossing — critical supply route.",
+      "knowledge": ["river depth", "crocodilian activity", "opposite bank resources"],
+      "quest_giver": true,
+      "quest_ids": ["QUEST_RIVER_CROSSING", "QUEST_SUPPLY_RUN"]
+    },
+    {
+      "label": "NPC_Survivor_001",
+      "name": "Unknown Survivor",
+      "role": "Wounded Stranger",
+      "location": {"x": 2000, "y": 1500, "z": 180},
+      "personality": "Barely alive. Found in T-Rex territory. Carries information about what lies beyond the valley.",
+      "knowledge": ["beyond-valley geography", "second tribe location", "T-Rex nest position"],
+      "quest_giver": true,
+      "quest_ids": ["QUEST_RESCUE_SURVIVOR", "QUEST_BEYOND_VALLEY"]
+    }
+  ],
+
+  "ambient_dialogue_lines": [
+    {
+      "line_id": "AMBIENT_HUNT_001",
+      "character": "NPC_Hunter_001",
+      "text": "Blood on the trail. Fresh. Something was dragged north.",
+      "condition": "near_blood_trail",
+      "tone": "tense, quiet"
+    },
+    {
+      "line_id": "AMBIENT_NIGHT_001",
+      "character": "NPC_Elder_001",
+      "text": "Fires low tonight. The big ones see fire. They remember it.",
+      "condition": "nighttime",
+      "tone": "warning, experienced"
+    },
+    {
+      "line_id": "AMBIENT_RAIN_001",
+      "character": "NPC_Scout_001",
+      "text": "Rain covers sound. Good for moving. Bad for hearing what follows you.",
+      "condition": "raining",
+      "tone": "pragmatic, alert"
+    },
+    {
+      "line_id": "AMBIENT_HERD_001",
+      "character": "NPC_Hunter_002",
+      "text": "Ground's shaking. The long-necks are moving. Half a day's walk — maybe less.",
+      "condition": "herd_migration_active",
+      "tone": "nervous, informational"
+    },
+    {
+      "line_id": "AMBIENT_DEATH_001",
+      "character": "NPC_Elder_001",
+      "text": "Another one gone. We do not mourn long here. Mourning is a luxury. Survival is not.",
+      "condition": "npc_death_event",
+      "tone": "grim, matter-of-fact"
+    }
+  ],
+
+  "narrative_arc": {
+    "act_1": {
+      "title": "Alone in the Valley",
+      "description": "Player arrives with nothing. Must find food, water, shelter before nightfall. First contact with tribe is hostile — they don't trust outsiders.",
+      "key_beats": [
+        "Player finds first food source (berries, small game)",
+        "Player witnesses dinosaur kill from safe distance",
+        "Player discovers tribe's cave — barred from entry",
+        "Player completes first task for Hunter Kael to earn basic trust"
+      ]
+    },
+    "act_2": {
+      "title": "Earning a Place",
+      "description": "Player proves competence through hunting, scouting, and resource gathering. Tribe gradually accepts them. Dinosaur threat escalates.",
+      "key_beats": [
+        "First successful hunt with Kael",
+        "River crossing mission with Davan",
+        "Rescue of wounded survivor from T-Rex territory",
+        "Discovery of T-Rex nest — threat level rises"
+      ]
+    },
+    "act_3": {
+      "title": "The Valley Cannot Hold",
+      "description": "T-Rex territory expands. Tribe must decide: defend the cave or migrate. Player's choices determine tribe survival.",
+      "key_beats": [
+        "T-Rex attacks camp for first time",
+        "Elder Mara reveals the migration route",
+        "Final decision: fight or flee",
+        "Outcome varies by player choices and skill"
+      ]
+    }
+  },
+
+  "world_lore": {
+    "valley_name": "The Cleft",
+    "geography": "A deep valley carved by an ancient river. High walls on north and south. River runs east-west. T-Rex territory in the northeast. Brachiosaurus herd grazes the western plains.",
+    "tribe_name": "The Stone People",
+    "tribe_size": 23,
+    "tribe_history": "Arrived in the valley 4 seasons ago, fleeing drought to the south. Lost 8 members to dinosaur attacks in the first season. Now know the rules — but the rules keep changing.",
+    "dinosaur_ecology": {
+      "TRex": "Solitary. Territorial. Hunts by movement detection. Nest in northeast rock formations. Active dawn and dusk.",
+      "Raptors": "Pack hunters. 3-7 individuals. Intelligent. Test prey before committing. Can be driven off with fire.",
+      "Brachiosaurus": "Herd of ~40. Passive unless cornered. Migration follows river. Stampede kills more tribe members than predators.",
+      "Other": "Smaller herbivores provide reliable food source. Pterosaurs steal cached food. River holds large aquatic predators."
+    }
+  }
+}

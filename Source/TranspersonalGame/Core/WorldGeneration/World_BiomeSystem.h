@@ -3,24 +3,23 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "../SharedTypes.h"
 #include "World_BiomeSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Forest      UMETA(DisplayName = "Forest"), 
+    Forest      UMETA(DisplayName = "Forest"),
     Savanna     UMETA(DisplayName = "Savanna"),
-    Desert      UMETA(DisplayName = "Desert"),
-    SnowyMountain UMETA(DisplayName = "Snowy Mountain")
+    Rocky       UMETA(DisplayName = "Rocky"),
+    Wetland     UMETA(DisplayName = "Wetland"),
+    River       UMETA(DisplayName = "River"),
+    Lake        UMETA(DisplayName = "Lake")
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_BiomeConfig
+struct FWorld_BiomeData
 {
     GENERATED_BODY()
 
@@ -28,57 +27,37 @@ struct FWorld_BiomeConfig
     EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor AmbientColor = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Temperature = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TSoftObjectPtr<UMaterialInterface> GroundMaterial;
-
-    FWorld_BiomeConfig()
-    {
-        BiomeType = EWorld_BiomeType::Forest;
-        AmbientColor = FLinearColor::White;
-        Temperature = 20.0f;
-        Humidity = 0.5f;
-        VegetationDensity = 1.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
     FVector Center = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Radius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Radius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VegetationDensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Influence = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float ElevationOffset = 0.0f;
 
-    FWorld_BiomeZone()
-    {
-        Center = FVector::ZeroVector;
-        Radius = 5000.0f;
-        BiomeType = EWorld_BiomeType::Forest;
-        Influence = 1.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FLinearColor BiomeColor = FLinearColor::Green;
+};
+
+USTRUCT(BlueprintType)
+struct FWorld_RiverSegment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector StartPoint = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector EndPoint = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Width = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Depth = 50.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -95,74 +74,72 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    // Biome Configuration
+    // Biome Management
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeConfig> BiomeConfigs;
+    TArray<FWorld_BiomeData> BiomeDefinitions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
+    TArray<FWorld_RiverSegment> RiverSegments;
 
-    // World Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float WorldSize = 20000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 VegetationSeed = 12345;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 BiomeTransitionSmoothness = 5;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float TerrainNoiseScale = 0.001f;
 
-    // Vegetation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    float VegetationSpawnRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float MaxTerrainHeight = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    int32 MaxVegetationPerBiome = 50;
+    // Biome Functions
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    bool bAutoSpawnVegetation = true;
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
 
-    // Methods
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EWorld_BiomeType GetBiomeAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FLinearColor GetBiomeColorAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FWorld_BiomeConfig GetBiomeConfig(EWorld_BiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor)
+    void GenerateAllBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void InitializeBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor)
+    void GenerateRiverSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void SpawnVegetationInBiome(EWorld_BiomeType BiomeType, const FVector& Center, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor)
+    void ClearGeneratedContent();
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void CreateBiomeZone(const FVector& Center, float Radius, EWorld_BiomeType BiomeType);
+    // Terrain Functions
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetTerrainHeightAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor)
-    void RegenerateBiomes();
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    FVector GetTerrainNormalAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System", CallInEditor)
-    void ClearAllVegetation();
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    float GetDistanceToNearestWater(const FVector& WorldLocation) const;
 
-    // Utility Methods
-    UFUNCTION(BlueprintPure, Category = "Biome System")
-    float GetTemperatureAtLocation(const FVector& Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    bool IsLocationInWater(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintPure, Category = "Biome System")
-    float GetHumidityAtLocation(const FVector& Location) const;
-
-    UFUNCTION(BlueprintPure, Category = "Biome System")
-    FLinearColor GetAmbientColorAtLocation(const FVector& Location) const;
+protected:
+    // Internal generation functions
+    void SpawnVegetationForBiome(const FWorld_BiomeData& BiomeData);
+    void CreateRiverSegment(const FWorld_RiverSegment& Segment);
+    void CreateBiomeMarkers();
+    
+    // Noise generation
+    float GeneratePerlinNoise(float X, float Y, float Scale) const;
+    float GenerateTerrainNoise(float X, float Y) const;
 
 private:
-    // Internal state
-    bool bBiomesInitialized = false;
-    TArray<AActor*> SpawnedVegetation;
+    UPROPERTY()
+    TArray<AActor*> GeneratedActors;
 
-    // Helper methods
-    void SetupDefaultBiomes();
-    void SpawnVegetationMesh(UStaticMesh* Mesh, const FVector& Location, const FRotator& Rotation);
-    FVector GetRandomLocationInRadius(const FVector& Center, float Radius) const;
-    float CalculateBiomeInfluence(const FVector& Location, const FWorld_BiomeZone& Zone) const;
+    UPROPERTY()
+    TArray<AActor*> GeneratedVegetation;
+
+    UPROPERTY()
+    TArray<AActor*> GeneratedWaterBodies;
 };

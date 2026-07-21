@@ -1,0 +1,68 @@
+ATMOSPHERIC LIGHTING MOOD REFERENCE
+Agent #8 - Lighting & Atmosphere
+Cycle: PROD_CYCLE_AUTO_20260617_003
+
+=== CAVE ENTRANCE GOLDEN HOUR CONCEPT ===
+SCENE DESCRIPTION:
+Prehistoric cave entrance carved into weathered limestone cliff face. Golden hour sunlight (3200K warm amber) streams from right side at 35° angle, creating dramatic volumetric light rays that pierce through atmospheric mist. Strong contrast between warm exterior (RGB 0.98, 0.92, 0.78) and cool blue interior shadows (RGB 0.4, 0.45, 0.55).
+
+LIGHTING SETUP:
+- Main Light: Directional sun at 8.5 lux, low angle creating long shadows
+- Volumetric Fog: Density 0.015 with warm golden inscattering (RGB 0.95, 0.88, 0.72)
+- Cave Interior: Dim spot light (0.3 lux) with 45° cone for transition zone
+- Ground Fog: Rolling atmospheric haze at ankle height
+
+CINEMATIC REFERENCES:
+- The Revenant (Emmanuel Lubezki) - natural light through mist
+- Quest for Fire (1981) - prehistoric atmospheric lighting
+- RDR2 cave interiors - realistic shadow falloff and volumetric god rays
+
+GAMEPLAY INTEGRATION:
+- Player approaching cave sees dramatic silhouette framing
+- Interior darkness creates tension and mystery
+- Volumetric rays guide player eye toward cave entrance
+- Lighting supports stealth gameplay (bright exterior vs dark interior)
+
+=== PRIMITIVE SHELTER CAMPFIRE DUSK CONCEPT ===
+SCENE DESCRIPTION:
+Thatched roof survival shelter at dusk. Central campfire (2200K orange) illuminates wooden posts and roof structure from below. Smoke rises through roof gaps, catching last rays of golden hour sunlight. Warm firelight (RGB 1.0, 0.6, 0.3) at 15 lux creates intimate safe zone contrasting with darkening wilderness outside.
+
+LIGHTING SETUP:
+- Primary: Point light at campfire position, 800 unit radius
+- Secondary: Directional sun fading to dusk (reduced to 3.0 lux)
+- Volumetric Fog: Exterior fog visible through shelter entrance
+- Smoke Particles: Catching warm firelight and cool exterior light
+
+CINEMATIC REFERENCES:
+- The Revenant campfire scenes - chiaroscuro firelight on faces
+- Apocalypto (2006) - primitive shelter interiors
+- Far Cry Primal - survival campfire lighting
+
+GAMEPLAY INTEGRATION:
+- Campfire acts as save point / rest area (warm = safety)
+- Light radius defines safe zone from nocturnal predators
+- Smoke column visible from distance as navigation landmark
+- Interior lighting supports crafting UI and character close-ups
+
+=== ATMOSPHERIC COLOR PALETTE ===
+GOLDEN HOUR EXTERIOR:
+- Sun: RGB(0.98, 0.92, 0.78) @ 3200K
+- Sky Fill: RGB(0.85, 0.88, 0.95) cool ambient
+- Fog Inscattering: RGB(0.95, 0.88, 0.72) warm haze
+
+CAVE INTERIOR:
+- Shadow Zone: RGB(0.4, 0.45, 0.55) cool blue
+- Transition: Gradient from warm exterior to cool interior
+- Depth Fade: Increasing darkness toward cave depth
+
+CAMPFIRE ZONE:
+- Flame Core: RGB(1.0, 0.6, 0.3) @ 2200K
+- Smoke: RGB(0.6, 0.6, 0.65) cool grey
+- Embers: RGB(1.0, 0.4, 0.1) orange-red glow
+
+=== TECHNICAL NOTES ===
+All lighting designed for UE5 Lumen global illumination:
+- Bounce light from warm sun creates realistic fill on shadowed surfaces
+- Volumetric fog scattering enhances depth perception
+- Temperature-based lighting (3200K, 2200K) ensures color consistency
+- Contrast ratios support both exploration and combat visibility

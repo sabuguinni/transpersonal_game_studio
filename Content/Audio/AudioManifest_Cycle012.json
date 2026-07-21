@@ -1,0 +1,197 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260618_012",
+  "agent": "Audio Agent #16",
+  "description": "Audio manifest for narrative zones established by Agent #15 in cycle 012. Covers ambient layers, music triggers, and TTS voice line references for all 4 narrative trigger zones.",
+
+  "tts_voice_lines": [
+    {
+      "id": "tts_survivor_jungle_silence",
+      "character": "Survivor",
+      "text": "Something is wrong with the air tonight. The forest has gone quiet — no insects, no birds. When the jungle holds its breath like this, it means something large is moving through it. Stay low. Stay still. Do not run.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828541580_Survivor.mp3",
+      "duration_estimate": "~15s",
+      "trigger_zone": "AmbientZone_DeepForest_012",
+      "playback_condition": "player_enters_zone",
+      "fire_once_per_session": true,
+      "reverb_preset": "outdoor_light"
+    },
+    {
+      "id": "tts_scout_kill_site",
+      "character": "Scout",
+      "text": "The kill site is fresh. Blood on the stones, drag marks heading east toward the river. Whatever hunted here — it will return. We cannot camp anywhere near this place tonight.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828557439_Scout.mp3",
+      "duration_estimate": "~12s",
+      "trigger_zone": "AmbientZone_KillSite_012",
+      "playback_condition": "player_enters_zone",
+      "fire_once_per_session": true,
+      "reverb_preset": "outdoor_open"
+    }
+  ],
+
+  "narrative_zone_audio_layers": [
+    {
+      "zone_id": "NarrZone_RiverCrossing_001",
+      "ambient_actor": "AmbientZone_RiverCrossing_012",
+      "location": {"x": -2000, "y": 500, "z": 100},
+      "freesound_references": [
+        {
+          "id": 819768,
+          "name": "Small Brook Flowing Around Rocks",
+          "preview_url": "https://cdn.freesound.org/previews/819/819768_4036966-hq.mp3",
+          "tags": ["river", "water", "flowing", "rocks", "ambience"],
+          "usage": "Primary ambient layer — looping river sound at crossing point",
+          "volume_db": -6,
+          "attenuation_radius": 1500
+        }
+      ],
+      "music_layer": {
+        "type": "none",
+        "note": "River crossing is a calm narrative moment — no tension music"
+      },
+      "linked_tts": ["tts_tribal_leader_river_warning"],
+      "linked_tts_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828450235_TribalLeader.mp3"
+    },
+    {
+      "zone_id": "NarrZone_KillSite_001",
+      "ambient_actor": "AmbientZone_KillSite_012",
+      "music_trigger_actor": "MusicTrigger_KillSite_012",
+      "location": {"x": 3000, "y": -1500, "z": 120},
+      "ambient_design": {
+        "primary_layer": "silence_with_wind",
+        "note": "Kill site should feel unnaturally quiet — predator suppresses ambient fauna",
+        "wind_volume_db": -12,
+        "insect_volume_db": -24,
+        "occasional_elements": ["distant_raptor_call", "fly_buzz_on_carcass"]
+      },
+      "music_layer": {
+        "type": "tension_low_drone",
+        "description": "Sub-bass rumble 40-80Hz, slow pulse at 0.5Hz, no melody",
+        "intensity": "low",
+        "fade_in_seconds": 3.0,
+        "fade_out_seconds": 5.0,
+        "trigger_actor": "MusicTrigger_KillSite_012"
+      },
+      "linked_tts": ["tts_scout_kill_site", "tts_scout_territory_alert"],
+      "linked_tts_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828557439_Scout.mp3"
+    },
+    {
+      "zone_id": "NarrZone_ValleyEntrance_001",
+      "ambient_actor": "AmbientZone_ValleyEntrance_012",
+      "music_trigger_actor": "MusicTrigger_ValleyOpen_012",
+      "location": {"x": 0, "y": 4000, "z": 100},
+      "ambient_design": {
+        "primary_layer": "open_wind",
+        "note": "Valley entrance is exposed — wind prominent, insects sparse",
+        "wind_volume_db": -3,
+        "insect_volume_db": -18,
+        "occasional_elements": ["distant_raptor_call_echo", "hawk_screech"]
+      },
+      "music_layer": {
+        "type": "exposed_danger",
+        "description": "High strings tremolo, sparse percussion, builds if player lingers",
+        "intensity": "medium",
+        "fade_in_seconds": 4.0,
+        "fade_out_seconds": 6.0,
+        "trigger_actor": "MusicTrigger_ValleyOpen_012"
+      },
+      "linked_tts": ["tts_survivor_valley_route"],
+      "linked_tts_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828480679_Survivor.mp3"
+    },
+    {
+      "zone_id": "NarrZone_RidgeOverlook_001",
+      "ambient_actor": "AmbientZone_RidgeOverlook_012",
+      "music_trigger_actor": "MusicTrigger_RidgeDefense_012",
+      "location": {"x": -3500, "y": -2000, "z": 300},
+      "ambient_design": {
+        "primary_layer": "high_altitude_wind",
+        "note": "Ridge is elevated — strong wind, echo on voice lines, sparse fauna",
+        "wind_volume_db": 0,
+        "echo_reverb": "canyon_medium",
+        "insect_volume_db": -30
+      },
+      "music_layer": {
+        "type": "combat_readiness",
+        "description": "Tribal percussion, bone instruments, building intensity — defensive stand",
+        "intensity": "high",
+        "fade_in_seconds": 2.0,
+        "fade_out_seconds": 8.0,
+        "trigger_actor": "MusicTrigger_RidgeDefense_012"
+      },
+      "linked_tts": ["tts_tribal_leader_rally"],
+      "linked_tts_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828516131_TribalLeader.mp3"
+    },
+    {
+      "zone_id": "DeepForest_Interior",
+      "ambient_actor": "AmbientZone_DeepForest_012",
+      "location": {"x": 1500, "y": 1500, "z": 100},
+      "ambient_design": {
+        "primary_layer": "dense_insect_chorus",
+        "note": "Deep forest baseline — rich insect layer, bird calls, leaf rustle",
+        "insect_volume_db": 0,
+        "bird_volume_db": -6,
+        "leaf_rustle_volume_db": -12,
+        "occasional_elements": ["distant_herbivore_call", "branch_snap"]
+      },
+      "music_layer": {
+        "type": "none",
+        "note": "Forest interior is safe zone — ambient only, no tension music"
+      },
+      "linked_tts": ["tts_survivor_jungle_silence"],
+      "linked_tts_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781828541580_Survivor.mp3"
+    }
+  ],
+
+  "freesound_catalogue": [
+    {
+      "id": 819768,
+      "name": "Small Brook Flowing Around Rocks",
+      "preview_url": "https://cdn.freesound.org/previews/819/819768_4036966-hq.mp3",
+      "duration_seconds": 87.27,
+      "tags": ["river", "water", "flowing", "rocks", "ambience", "nature"],
+      "assigned_zone": "NarrZone_RiverCrossing_001",
+      "loop_compatible": true
+    },
+    {
+      "id": 855647,
+      "name": "Waterfall - Xiufeng Waterfall, Taiwan - Ambient Field Recording",
+      "preview_url": "https://cdn.freesound.org/previews/855/855647_17078888-hq.mp3",
+      "duration_seconds": 150.56,
+      "tags": ["waterfall", "jungle", "forest", "ambient", "nature"],
+      "assigned_zone": "AmbientZone_DeepForest_012",
+      "loop_compatible": true,
+      "note": "Use as background layer under insect chorus in deep forest"
+    }
+  ],
+
+  "audio_design_notes": {
+    "voice_mixing": {
+      "outdoor_light": "Short pre-delay 15ms, room size 0.2, wet 15% — sounds like open air near trees",
+      "outdoor_open": "No reverb, slight high-frequency rolloff — sounds like exposed clearing",
+      "canyon_medium": "Pre-delay 40ms, room size 0.6, wet 30%, decay 1.2s — ridge/canyon echo"
+    },
+    "music_philosophy": "Music should be invisible. Player must feel danger, not think 'this music is tense'. Use sub-bass and rhythm changes rather than obvious stingers. Silence is a tool — kill site zone should feel wrong because the ambient layer is absent, not because music is loud.",
+    "fire_once_logic": "All TTS voice lines use fire_once_per_session=true. Store trigger state in GameInstance. Reset on new session only, not on respawn.",
+    "walter_murch_principle": "The sound that does not exist is often more powerful than the sound that does. Kill site: remove the insects. The player will feel it before they understand why."
+  },
+
+  "ue5_actors_spawned": [
+    {"label": "AmbientZone_RiverCrossing_012", "class": "AmbientSound", "location": [-2000, 500, 100]},
+    {"label": "AmbientZone_KillSite_012", "class": "AmbientSound", "location": [3000, -1500, 120]},
+    {"label": "AmbientZone_ValleyEntrance_012", "class": "AmbientSound", "location": [0, 4000, 100]},
+    {"label": "AmbientZone_RidgeOverlook_012", "class": "AmbientSound", "location": [-3500, -2000, 300]},
+    {"label": "AmbientZone_DeepForest_012", "class": "AmbientSound", "location": [1500, 1500, 100]},
+    {"label": "MusicTrigger_KillSite_012", "class": "TriggerVolume", "location": [3000, -1500, 150]},
+    {"label": "MusicTrigger_ValleyOpen_012", "class": "TriggerVolume", "location": [0, 4000, 150]},
+    {"label": "MusicTrigger_RidgeDefense_012", "class": "TriggerVolume", "location": [-3500, -2000, 350]}
+  ],
+
+  "next_agent_notes": {
+    "vfx_agent_17": [
+      "Kill site zone (3000,-1500,120) needs fly particle emitter on ground — small dark flies circling",
+      "Valley entrance (0,4000,100) needs heat shimmer VFX — exposed open ground in sunlight",
+      "Ridge overlook (-3500,-2000,300) needs wind-blown dust/debris particles",
+      "River crossing (-2000,500,100) needs water spray mist particles near crossing point",
+      "Deep forest (1500,1500,100) needs floating dust motes in light shafts — dense canopy"
+    ]
+  }
+}

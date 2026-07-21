@@ -1,0 +1,56 @@
+CAVE ENTRANCE SYSTEM - CONCEPT ART DESCRIPTION
+==============================================
+
+ENVIRONMENT: Prehistoric Cave Entrance
+LOCATION: Rocky biome area (5000, -3000, 200)
+
+VISUAL ELEMENTS:
+- Massive natural rock arch (8x6x5 scale) as main entrance
+- 6 stalactites hanging from arch ceiling (0.4x0.4x1.5-3.5 scale)
+- 12 large boulders forming perimeter (2-5 scale, 3-7 height variation)
+- Moss and lichen covering rock surfaces
+- Dark interior receding into mystery
+- Dappled sunlight creating dramatic shadows
+
+GEOLOGICAL FEATURES:
+- Weathered limestone/sandstone formations
+- Natural erosion patterns on rock surfaces
+- Stratified rock layers visible in arch
+- Fallen debris at entrance base
+- Cracks and fissures in rock face
+
+LIGHTING:
+- Strong directional sunlight from above
+- Deep shadows in cave interior
+- Volumetric light shafts through gaps
+- Ambient occlusion in crevices
+- Cool blue-grey tones in shadows
+
+ATMOSPHERE:
+- Mysterious and inviting
+- Sense of depth and exploration
+- Ancient, untouched environment
+- Slightly dangerous (potential for collapse)
+
+VEGETATION:
+- Moss patches on north-facing rocks
+- Small ferns growing in cracks
+- Vines hanging from arch edges
+- Lichen covering weathered surfaces
+
+GAMEPLAY IMPLICATIONS:
+- Shelter from weather/predators
+- Resource gathering (minerals, mushrooms)
+- Dinosaur den potential (territorial danger)
+- Navigation landmark
+- Quest location (exploration objective)
+
+TECHNICAL NOTES:
+- Rock arch uses high-detail PBR stone material
+- Stalactites use procedural drip patterns
+- Moss/lichen use vertex painting for variation
+- Interior uses separate lighting zone
+- Collision mesh for player navigation
+
+IMPLEMENTED IN: PROD_CYCLE_AUTO_20260617_001
+ACTORS SPAWNED: 19 total (1 arch + 6 stalactites + 12 boulders)

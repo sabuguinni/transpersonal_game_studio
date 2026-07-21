@@ -1,0 +1,200 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "Narrative & Dialogue Agent #15",
+  "narrative_chain": "Valley of Survival",
+  "framing": {
+    "overarching_premise": "The player is a lone survivor — tribe lost, location unknown, skills untested. The valley is not a destination. It is a crucible. Four encounters force the player to observe, adapt, and make decisions under pressure. By the end, the player does not just survive — they understand the valley's logic. That understanding is the only currency that matters here.",
+    "emotional_spine": "isolation → curiosity → fear → competence → belonging",
+    "narrative_voice": "sparse, observational, never explains — trusts the player to interpret"
+  },
+  "voice_assets": {
+    "Narrator_ValleyOfSurvival": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751935826_Narrator_ValleyOfSurvival.mp3",
+    "NPC_Elder_MigrationAdvice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751949463_NPC_Elder_MigrationAdvice.mp3",
+    "NPC_Elder_QuestCompletion": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751956833_NPC_Elder_QuestCompletion.mp3",
+    "NPC_Scout_SurvivalTip": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751958918_NPC_Scout_SurvivalTip.mp3",
+    "QuestNarrator_WaterHole": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751841219_QuestNarrator_WaterHole.mp3",
+    "QuestNarrator_RaptorClearing": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751844003_QuestNarrator_RaptorClearing.mp3"
+  },
+  "quests": {
+    "quest_1_water_hole": {
+      "title": "Survive the Water Hole",
+      "emotional_arc": "tension → relief → urgency",
+      "trigger_actor": "QuestTrigger_WaterHole_001",
+      "dialogue_triggers": {
+        "intro": {
+          "actor": "NarrDialogue_WaterHole_Intro",
+          "location": [800, 3200, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": "QuestNarrator_WaterHole",
+          "text": "The water hole is dangerous at dusk. Every creature in the valley comes to drink — and not all of them are prey.",
+          "condition": "player_enters_trigger_radius_20m",
+          "display_mode": "subtitle_only"
+        },
+        "mid_observe": {
+          "actor": "NarrDialogue_WaterHole_Mid",
+          "location": [900, 3400, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "Count them. Three... no, four. They drink in turns. The largest goes first. Remember that.",
+          "condition": "player_crouched_and_stationary_10s",
+          "display_mode": "subtitle_only"
+        },
+        "complete": {
+          "actor": "NarrDialogue_WaterHole_Complete",
+          "location": [700, 3000, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "You made it out. The valley noticed. It always notices.",
+          "condition": "player_exits_zone_after_objective",
+          "display_mode": "subtitle_fade"
+        },
+        "fail": {
+          "actor": "NarrDialogue_WaterHole_Fail",
+          "location": [850, 3300, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "Too slow. Too loud. The valley does not forgive mistakes — it only offers them again.",
+          "condition": "player_detected_by_predator",
+          "display_mode": "subtitle_only"
+        }
+      }
+    },
+    "quest_2_migration": {
+      "title": "Follow the Prey",
+      "emotional_arc": "curiosity → wonder → belonging",
+      "trigger_actor": "QuestTrigger_MigrationStart_001",
+      "dialogue_triggers": {
+        "intro": {
+          "actor": "NarrDialogue_Migration_Intro",
+          "location": [4500, -1800, 100],
+          "speaker": "NPC_ELDER",
+          "voice_asset": "NPC_Elder_MigrationAdvice",
+          "text": "Follow the herd. They know where the water is. They know where the predators hunt. A lone human cannot survive here — but a human who watches and learns from the great beasts? That human has a chance.",
+          "condition": "player_enters_trigger_radius_15m",
+          "display_mode": "subtitle_with_speaker_label"
+        },
+        "mid_valley": {
+          "actor": "NarrDialogue_Migration_Mid",
+          "location": [3200, -2100, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "The ground shakes with each step. You feel it through your feet before you hear it. This is what the valley sounded like before humans arrived. This is what it will sound like after.",
+          "condition": "player_within_50m_of_brachio_herd",
+          "display_mode": "subtitle_only"
+        },
+        "complete": {
+          "actor": "NarrDialogue_Migration_Complete",
+          "location": [2000, -2500, 100],
+          "speaker": "NPC_ELDER",
+          "voice_asset": "NPC_Elder_QuestCompletion",
+          "text": "You came back. Not many do, after their first night alone. Sit. Eat. Then tell me what you saw out there — every detail matters. The patterns of this land are the only map we have.",
+          "condition": "player_reaches_destination_waypoint",
+          "display_mode": "subtitle_with_speaker_label"
+        }
+      }
+    },
+    "quest_3_raptor_clearing": {
+      "title": "The Empty Clearing",
+      "emotional_arc": "dread → discovery → panic",
+      "trigger_actor": "QuestTrigger_RaptorClearing_001",
+      "dialogue_triggers": {
+        "intro": {
+          "actor": "NarrDialogue_Raptor_Intro",
+          "location": [-3200, 2100, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": "QuestNarrator_RaptorClearing",
+          "text": "The herd moves south. Three days ago, this clearing was full of smaller animals. Now it is empty. Something scared them off — and it is still here.",
+          "condition": "player_enters_trigger_radius_20m",
+          "display_mode": "subtitle_only"
+        },
+        "mid_examine": {
+          "actor": "NarrDialogue_Raptor_Mid",
+          "location": [-3000, 2300, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "Claw marks. Fresh. Three toes — narrow spacing. They were running. Not hunting. Running from something larger.",
+          "condition": "player_examines_evidence_marker",
+          "display_mode": "subtitle_only"
+        },
+        "escape": {
+          "actor": "NarrDialogue_Raptor_Escape",
+          "location": [-2800, 1900, 100],
+          "speaker": "NPC_SCOUT",
+          "voice_asset": "NPC_Scout_SurvivalTip",
+          "text": "Do not run. Running tells the predator you are prey. Stand still. Let it decide you are not worth the effort. It is the hardest thing you will ever do — and the most important.",
+          "condition": "raptor_aggro_triggered",
+          "display_mode": "subtitle_with_speaker_label"
+        }
+      }
+    },
+    "quest_4_brachio_herd": {
+      "title": "Giants of the Valley",
+      "emotional_arc": "awe → patience → respect",
+      "trigger_actor": "QuestTrigger_HerdObserve_001",
+      "dialogue_triggers": {
+        "intro": {
+          "actor": "NarrDialogue_Brachio_Intro",
+          "location": [-1200, -3500, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": "Narrator_ValleyOfSurvival",
+          "text": "The valley remembers everything. Every footprint in the mud, every broken branch, every silence where there should be sound. Learn to read it, and you will survive. Ignore it, and the valley will swallow you whole.",
+          "condition": "player_enters_trigger_radius_25m",
+          "display_mode": "subtitle_only"
+        },
+        "observe": {
+          "actor": "NarrDialogue_Brachio_Observe",
+          "location": [-1400, -3700, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "Do not move. They have not seen you yet. Watch how the young ones stay at the centre of the group. The adults form a wall. They have been doing this for longer than your tribe has existed.",
+          "condition": "player_crouched_within_30m_of_herd",
+          "display_mode": "subtitle_only"
+        },
+        "retreat": {
+          "actor": "NarrDialogue_Brachio_Retreat",
+          "location": [-1000, -3300, 100],
+          "speaker": "NARRATOR",
+          "voice_asset": null,
+          "text": "Back away. Slowly. One step at a time. You have seen enough. Some knowledge costs more than it is worth.",
+          "condition": "brachio_alert_state_triggered",
+          "display_mode": "subtitle_only"
+        }
+      }
+    }
+  },
+  "npc_profiles": {
+    "NPC_ELDER": {
+      "actor_label": "NPC_Elder_QuestGiver_001",
+      "location": [-200, -300, 100],
+      "personality": "pragmatic, weathered, economical with words — speaks only when information has survival value",
+      "speech_pattern": "short declarative sentences, no metaphor, no comfort — only fact and instruction",
+      "forbidden": ["spiritual references", "mystical language", "emotional reassurance"]
+    },
+    "NPC_SCOUT": {
+      "actor_label": "NPC_Scout_Tracker_001",
+      "location": [-350, -200, 100],
+      "personality": "young, observant, nervous energy — has survived by being faster than everyone else",
+      "speech_pattern": "rapid delivery, interrupts self, corrects mid-sentence — thinking aloud",
+      "forbidden": ["calm philosophical statements", "long explanations", "certainty"]
+    },
+    "NARRATOR": {
+      "actor_label": null,
+      "personality": "the valley itself — observational, non-judgmental, ancient",
+      "speech_pattern": "present tense, second person ('you'), no comfort — describes what is, not what should be",
+      "forbidden": ["first person", "emotional language", "prediction or prophecy"]
+    }
+  },
+  "dialogue_system_notes": {
+    "trigger_radius_default_m": 20,
+    "display_duration_s": 6,
+    "subtitle_font_size": 28,
+    "speaker_label_color": {
+      "NARRATOR": "#C8A96E",
+      "NPC_ELDER": "#E8D5A3",
+      "NPC_SCOUT": "#A8C8E8"
+    },
+    "audio_integration": "Audio Agent #16 should attach voice_asset URLs to corresponding NarrDialogue_* actors as AudioComponent with attenuation radius matching trigger radius",
+    "quest_integration": "QuestTrigger_* actors from Agent #14 are the entry points — NarrDialogue_* actors fire on proximity within the quest zone"
+  }
+}

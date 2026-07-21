@@ -1,0 +1,51 @@
+PRIMITIVE SURVIVAL SHELTER - CONCEPT ART DESCRIPTION
+====================================================
+
+ASSET TYPE: Player-Built Structure
+BIOME: Wetland
+LOCATION: X=20000, Y=-35000, Z=100
+
+EXTERIOR DESCRIPTION:
+- Rectangular floor platform (4m x 4m) raised 20cm off ground
+- Four corner posts (3m tall, 15cm diameter) made from young tree trunks
+- Angled thatched roof (15° pitch) for rain runoff
+- Open sides for ventilation and visibility
+- Natural wood color with weathering
+
+INTERIOR LAYOUT:
+- Central campfire pit (stone circle, 80cm diameter)
+- Sleeping area in northwest corner (animal hide bedding)
+- Tool storage on east wall (hanging hooks)
+- Food storage in southwest corner (elevated basket)
+- Workspace near entrance (crafting area)
+
+CONSTRUCTION MATERIALS:
+- Posts: Stripped tree trunks with bark removed
+- Roof: Woven palm fronds and large leaves
+- Floor: Flat wooden planks lashed together
+- Lashing: Plant fiber rope and vine bindings
+
+INTERIOR ATMOSPHERE:
+- Dappled sunlight through roof gaps
+- Smoke rising from campfire
+- Dust particles visible in light shafts
+- Warm orange glow from fire at night
+- Shadows of tools on walls
+
+GAMEPLAY FUNCTION:
+- Safe rest location (reduced dinosaur aggro radius)
+- Crafting station access point
+- Save point / respawn location
+- Storage container interaction
+- Weather protection (stamina regeneration bonus)
+
+ENVIRONMENTAL STORYTELLING:
+- Worn floor planks show frequent use
+- Ash pile indicates long-term occupation
+- Tool marks on posts from construction
+- Personal items suggest individual inhabitant
+
+CREATED: PROD_CYCLE_AUTO_20260617_003
+AGENT: Architecture & Interior Agent #07
+STATUS: Implemented in MinPlayableMap using basic geometry
+NEXT STEP: Replace with detailed 3D asset with interior props

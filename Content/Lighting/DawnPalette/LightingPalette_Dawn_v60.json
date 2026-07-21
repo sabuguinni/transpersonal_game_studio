@@ -1,0 +1,124 @@
+{
+  "palette_id": "dawn_v60",
+  "cycle": "PROD_CYCLE_AUTO_20260629_011",
+  "agent": "Agent_08_Lighting_Atmosphere",
+  "time_of_day": "Dawn",
+  "sun_pitch_degrees": -30.0,
+  "description": "Pre-dawn glow — sun just below horizon, blue-pink sky gradient, volumetric god-rays over ruin pillars",
+
+  "sun": {
+    "pitch": -30.0,
+    "color": [1.0, 0.82, 0.65],
+    "intensity_lux": 12000,
+    "notes": "Sun below horizon — indirect scatter only, no direct illumination yet"
+  },
+
+  "fog": {
+    "type": "ExponentialHeightFog",
+    "inscattering_color": [0.35, 0.42, 0.72],
+    "density": 0.018,
+    "height_falloff": 0.22,
+    "start_distance": 2000.0,
+    "volumetric_fog": true,
+    "volumetric_scattering_distribution": 0.55,
+    "volumetric_albedo": [0.9, 0.88, 0.95],
+    "volumetric_extinction_scale": 1.1,
+    "emotional_intent": "Mystery and anticipation — the world holds its breath before first light"
+  },
+
+  "lumen": {
+    "diffuse_indirect": true,
+    "reflections": true,
+    "volumetric_fog": true,
+    "fast_sky_lut": true,
+    "sky_light_real_time_capture": true
+  },
+
+  "ruin_lighting": {
+    "god_ray_light": {
+      "label": "Light_GodRay_RuinCenter",
+      "type": "SpotLight",
+      "location": [50000.0, 50000.0, 2500.0],
+      "rotation_pitch": -85.0,
+      "intensity": 8000.0,
+      "color": [1.0, 0.92, 0.75],
+      "inner_cone_angle": 8.0,
+      "outer_cone_angle": 22.0,
+      "attenuation_radius": 3500.0,
+      "cast_volumetric_shadow": true,
+      "purpose": "God-ray shaft between Cretaceous pillars — dawn light piercing jungle canopy"
+    },
+    "cave_entrance_glow": {
+      "label": "Light_CaveEntrance_AmbientGlow",
+      "type": "PointLight",
+      "location": [50000.0, 49600.0, 120.0],
+      "intensity": 1200.0,
+      "color": [0.2, 0.55, 0.9],
+      "attenuation_radius": 800.0,
+      "cast_volumetric_shadow": true,
+      "purpose": "Cool blue ambient inside cave entrance — deeper darkness than surrounding jungle"
+    },
+    "shadow_deepener": {
+      "label": "Light_RuinShadow_AmbientDarken",
+      "type": "RectLight",
+      "location": [50000.0, 50000.0, 800.0],
+      "rotation_pitch": -90.0,
+      "intensity": 400.0,
+      "color": [0.15, 0.18, 0.35],
+      "source_width": 1200.0,
+      "source_height": 1200.0,
+      "attenuation_radius": 2000.0,
+      "purpose": "Deepen ambient shadow in ruin area vs surrounding jungle — creates visual contrast"
+    }
+  },
+
+  "fill_lights": [
+    {
+      "label": "Light_Dawn_EastRose",
+      "location": [52000.0, 50000.0, 600.0],
+      "color": [1.0, 0.65, 0.55],
+      "intensity": 2200.0,
+      "attenuation_radius": 3000.0,
+      "purpose": "Rose-gold eastern horizon glow — dawn breaking from east"
+    },
+    {
+      "label": "Light_Dawn_WestCool",
+      "location": [48000.0, 50000.0, 600.0],
+      "color": [0.45, 0.55, 0.85],
+      "intensity": 1800.0,
+      "attenuation_radius": 3000.0,
+      "purpose": "Cool blue western sky — still night on western horizon"
+    },
+    {
+      "label": "Light_Dawn_ZenithBlue",
+      "location": [50000.0, 52000.0, 1200.0],
+      "color": [0.55, 0.65, 1.0],
+      "intensity": 1500.0,
+      "attenuation_radius": 3000.0,
+      "purpose": "Deep indigo zenith — overhead sky still dark before sunrise"
+    }
+  ],
+
+  "emotional_intent": {
+    "director_note": "Dawn is the most dangerous time in the prehistoric world. Predators are active at first light. The ruins loom in pre-dawn mist — ancient, indifferent, beautiful. The player feels small.",
+    "cinematography_reference": "Roger Deakins — Sicario dawn desert sequence. Light as threat, not comfort.",
+    "color_temperature_kelvin": 4200,
+    "mood": "Tense anticipation, primal alertness, ancient mystery"
+  },
+
+  "day_night_cycle_position": {
+    "previous_palette": "Night_v59 (pitch -15°, deep blue)",
+    "current_palette": "Dawn_v60 (pitch -30°, blue-pink)",
+    "next_palette": "Sunrise_v61 (pitch -45°, warm gold breaking horizon)",
+    "cycle_progression": "Night → Dawn → Sunrise → Morning → Midday → Afternoon → Dusk → Night"
+  },
+
+  "handoff_to_agent9": {
+    "ruin_area_center": [50000.0, 50000.0, 100.0],
+    "god_ray_anchor": "Light_GodRay_RuinCenter at Z=2500",
+    "cave_entrance": [50000.0, 49600.0, 120.0],
+    "pillar_actors": ["Arch_CretaceousPillar_01", "Arch_CretaceousPillar_02", "Arch_CretaceousPillar_03"],
+    "lighting_complete": true,
+    "notes": "Dawn palette fully configured. Character artist should ensure player character materials respond correctly to Lumen GI — skin should catch dawn rose-gold from east fill light."
+  }
+}

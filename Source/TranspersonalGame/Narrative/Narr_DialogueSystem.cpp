@@ -1,331 +1,264 @@
 #include "Narr_DialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 
-// ANarr_DialogueTrigger Implementation
-ANarr_DialogueTrigger::ANarr_DialogueTrigger()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create trigger sphere
-    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
-    RootComponent = TriggerSphere;
-    TriggerSphere->SetSphereRadius(500.0f);
-    TriggerSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    TriggerSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    TriggerSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Create visual mesh
-    VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
-    VisualMesh->SetupAttachment(RootComponent);
-    VisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // Initialize properties
-    TriggerCondition = ENarr_TriggerCondition::PlayerProximity;
-    TriggerRadius = 500.0f;
-    bCanRetrigger = false;
-    RetriggerCooldown = 30.0f;
-    bHasTriggered = false;
-    LastTriggerTime = 0.0f;
-
-    // Initialize dialogue data
-    DialogueData.DialogueID = TEXT("DefaultTrigger");
-    DialogueData.DialogueText = FText::FromString(TEXT("Dialogue trigger activated"));
-    DialogueData.DialogueType = ENarr_DialogueType::FieldNarration;
-    DialogueData.Duration = 5.0f;
-    DialogueData.Priority = 1;
+    PrimaryComponentTick.bCanEverTick = true;
+    CurrentDialogueID = -1;
+    bIsDialogueActive = false;
+    DialogueRange = 500.0f;
 }
 
-void ANarr_DialogueTrigger::BeginPlay()
+void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind overlap events
-    if (TriggerSphere)
-    {
-        TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueTrigger::OnTriggerBeginOverlap);
-        TriggerSphere->SetSphereRadius(TriggerRadius);
-    }
+    LoadDefaultDialogues();
+    LoadDefaultCharacters();
 }
 
-void ANarr_DialogueTrigger::Tick(float DeltaTime)
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-
-    // Update trigger conditions that require continuous checking
-    if (TriggerCondition == ENarr_TriggerCondition::TimeOfDay ||
-        TriggerCondition == ENarr_TriggerCondition::PlayerHealth ||
-        TriggerCondition == ENarr_TriggerCondition::DinosaurPresence)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Auto-advance dialogue based on duration if no player input
+    if (bIsDialogueActive && CurrentDialogueID >= 0)
     {
-        if (CanTrigger() && CheckTriggerConditions())
+        int32 DialogueIndex = FindDialogueIndex(CurrentDialogueID);
+        if (DialogueIndex >= 0)
         {
-            TriggerDialogue();
+            // Handle auto-advance logic here if needed
         }
     }
 }
 
-void ANarr_DialogueTrigger::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                                                  UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, 
-                                                  bool bFromSweep, const FHitResult& SweepResult)
+bool UNarr_DialogueSystem::StartDialogue(const FString& CharacterName, int32 StartingDialogueID)
 {
-    // Check if the overlapping actor is a character (player)
-    if (ACharacter* Character = Cast<ACharacter>(OtherActor))
-    {
-        if (TriggerCondition == ENarr_TriggerCondition::PlayerProximity)
-        {
-            if (CanTrigger())
-            {
-                TriggerDialogue();
-            }
-        }
-    }
-}
-
-void ANarr_DialogueTrigger::TriggerDialogue()
-{
-    if (!CanTrigger())
-    {
-        return;
-    }
-
-    // Get dialogue manager
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    UGameInstance* GameInstance = World->GetGameInstance();
-    if (!GameInstance)
-    {
-        return;
-    }
-
-    UNarr_DialogueManager* DialogueManager = GameInstance->GetSubsystem<UNarr_DialogueManager>();
-    if (DialogueManager)
-    {
-        DialogueManager->PlayDialogue(DialogueData);
-    }
-
-    // Update trigger state
-    bHasTriggered = true;
-    LastTriggerTime = World->GetTimeSeconds();
-
-    // Call Blueprint event
-    OnDialogueTriggered(DialogueData);
-
-    UE_LOG(LogTemp, Log, TEXT("Dialogue triggered: %s"), *DialogueData.DialogueID);
-}
-
-bool ANarr_DialogueTrigger::CanTrigger() const
-{
-    if (!bCanRetrigger && bHasTriggered)
+    if (bIsDialogueActive)
     {
         return false;
     }
 
-    if (bCanRetrigger && bHasTriggered)
-    {
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            float CurrentTime = World->GetTimeSeconds();
-            if (CurrentTime - LastTriggerTime < RetriggerCooldown)
-            {
-                return false;
-            }
-        }
-    }
-
-    return CheckTriggerConditions();
-}
-
-bool ANarr_DialogueTrigger::CheckTriggerConditions() const
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    int32 DialogueIndex = FindDialogueIndex(StartingDialogueID);
+    if (DialogueIndex < 0)
     {
         return false;
     }
 
-    switch (TriggerCondition)
-    {
-        case ENarr_TriggerCondition::PlayerProximity:
-            // This is handled by overlap events
-            return true;
+    CurrentDialogueID = StartingDialogueID;
+    bIsDialogueActive = true;
 
-        case ENarr_TriggerCondition::TimeOfDay:
-        {
-            // Simple time of day check (can be expanded)
-            float TimeOfDay = World->GetTimeSeconds();
-            float DayLength = 1200.0f; // 20 minutes per day
-            float NormalizedTime = FMath::Fmod(TimeOfDay, DayLength) / DayLength;
-            
-            // Trigger during evening hours (0.7 - 0.9 of day cycle)
-            return (NormalizedTime >= 0.7f && NormalizedTime <= 0.9f);
-        }
-
-        case ENarr_TriggerCondition::PlayerHealth:
-        {
-            // Check if player health is low
-            APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-            if (PlayerPawn)
-            {
-                // This would need to be connected to actual health system
-                return true; // Placeholder
-            }
-            return false;
-        }
-
-        case ENarr_TriggerCondition::DinosaurPresence:
-        {
-            // Check for nearby dinosaurs
-            TArray<AActor*> FoundActors;
-            UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundActors);
-            
-            for (AActor* Actor : FoundActors)
-            {
-                if (Actor->GetName().Contains(TEXT("Dinosaur")) || 
-                    Actor->GetName().Contains(TEXT("TRex")) ||
-                    Actor->GetName().Contains(TEXT("Raptor")))
-                {
-                    float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-                    if (Distance < 2000.0f) // 20 meter radius
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        case ENarr_TriggerCondition::ResourceDiscovery:
-            // This would be triggered by resource discovery events
-            return true; // Placeholder
-
-        default:
-            return true;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Started dialogue with %s, ID: %d"), *CharacterName, StartingDialogueID);
+    return true;
 }
 
-// UNarr_DialogueManager Implementation
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void UNarr_DialogueSystem::EndDialogue()
 {
-    Super::Initialize(Collection);
+    CurrentDialogueID = -1;
+    bIsDialogueActive = false;
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue ended"));
+}
 
-    bIsPlayingDialogue = false;
-    DialogueStartTime = 0.0f;
+bool UNarr_DialogueSystem::AdvanceDialogue(int32 ResponseChoice)
+{
+    if (!bIsDialogueActive || CurrentDialogueID < 0)
+    {
+        return false;
+    }
+
+    int32 CurrentIndex = FindDialogueIndex(CurrentDialogueID);
+    if (CurrentIndex < 0)
+    {
+        return false;
+    }
+
+    const FNarr_DialogueEntry& CurrentEntry = DialogueDatabase[CurrentIndex];
     
-    UE_LOG(LogTemp, Log, TEXT("Dialogue Manager initialized"));
-}
-
-void UNarr_DialogueManager::PlayDialogue(const FNarr_DialogueEntry& Dialogue)
-{
-    if (bIsPlayingDialogue)
+    // Handle response choice and advance to next dialogue
+    if (CurrentEntry.NextDialogueID >= 0)
     {
-        // Queue the dialogue if one is already playing
-        QueueDialogue(Dialogue);
-        return;
+        CurrentDialogueID = CurrentEntry.NextDialogueID;
+        return true;
     }
-
-    CurrentDialogue = Dialogue;
-    bIsPlayingDialogue = true;
-    DialogueStartTime = GetWorld()->GetTimeSeconds();
-
-    // Call Blueprint event
-    OnDialogueStarted(Dialogue);
-
-    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: %s - %s"), 
-           *Dialogue.DialogueID, 
-           *Dialogue.DialogueText.ToString());
-
-    // Set timer to finish dialogue
-    FTimerHandle TimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+    else
     {
-        StopCurrentDialogue();
-    }, Dialogue.Duration, false);
-}
-
-void UNarr_DialogueManager::StopCurrentDialogue()
-{
-    if (!bIsPlayingDialogue)
-    {
-        return;
+        EndDialogue();
+        return false;
     }
-
-    FNarr_DialogueEntry FinishedDialogue = CurrentDialogue;
-    bIsPlayingDialogue = false;
-    DialogueStartTime = 0.0f;
-
-    // Call Blueprint event
-    OnDialogueFinished(FinishedDialogue);
-
-    UE_LOG(LogTemp, Log, TEXT("Finished dialogue: %s"), *FinishedDialogue.DialogueID);
-
-    // Process queue
-    ProcessDialogueQueue();
 }
 
-void UNarr_DialogueManager::QueueDialogue(const FNarr_DialogueEntry& Dialogue)
+FNarr_DialogueEntry UNarr_DialogueSystem::GetCurrentDialogue() const
 {
-    // Insert based on priority (higher priority first)
-    int32 InsertIndex = 0;
-    for (int32 i = 0; i < ActiveDialogues.Num(); i++)
+    if (CurrentDialogueID >= 0)
     {
-        if (ActiveDialogues[i].Priority < Dialogue.Priority)
+        int32 Index = FindDialogueIndex(CurrentDialogueID);
+        if (Index >= 0)
         {
-            InsertIndex = i;
-            break;
+            return DialogueDatabase[Index];
         }
-        InsertIndex = i + 1;
     }
-
-    ActiveDialogues.Insert(Dialogue, InsertIndex);
-    
-    UE_LOG(LogTemp, Log, TEXT("Queued dialogue: %s (Priority: %d)"), 
-           *Dialogue.DialogueID, Dialogue.Priority);
+    return FNarr_DialogueEntry();
 }
 
-void UNarr_DialogueManager::ProcessDialogueQueue()
+TArray<FString> UNarr_DialogueSystem::GetCurrentResponses() const
 {
-    if (bIsPlayingDialogue || ActiveDialogues.Num() == 0)
+    if (CurrentDialogueID >= 0)
     {
-        return;
+        int32 Index = FindDialogueIndex(CurrentDialogueID);
+        if (Index >= 0)
+        {
+            return DialogueDatabase[Index].ResponseOptions;
+        }
     }
-
-    // Play the highest priority dialogue
-    FNarr_DialogueEntry NextDialogue = ActiveDialogues[0];
-    ActiveDialogues.RemoveAt(0);
-    
-    PlayDialogue(NextDialogue);
+    return TArray<FString>();
 }
 
-void UNarr_DialogueManager::Tick(float DeltaTime)
+void UNarr_DialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
 {
-    if (bIsPlayingDialogue)
+    DialogueDatabase.Add(NewEntry);
+}
+
+void UNarr_DialogueSystem::AddCharacterProfile(const FNarr_CharacterProfile& NewProfile)
+{
+    CharacterProfiles.Add(NewProfile);
+}
+
+FNarr_CharacterProfile UNarr_DialogueSystem::GetCharacterProfile(const FString& CharacterName) const
+{
+    int32 Index = FindCharacterIndex(CharacterName);
+    if (Index >= 0)
     {
-        UpdateCurrentDialogue(DeltaTime);
+        return CharacterProfiles[Index];
+    }
+    return FNarr_CharacterProfile();
+}
+
+void UNarr_DialogueSystem::UpdateTrustLevel(const FString& CharacterName, float DeltaTrust)
+{
+    int32 Index = FindCharacterIndex(CharacterName);
+    if (Index >= 0)
+    {
+        CharacterProfiles[Index].TrustLevel = FMath::Clamp(CharacterProfiles[Index].TrustLevel + DeltaTrust, 0.0f, 1.0f);
+        UE_LOG(LogTemp, Warning, TEXT("Updated trust for %s: %f"), *CharacterName, CharacterProfiles[Index].TrustLevel);
     }
 }
 
-void UNarr_DialogueManager::UpdateCurrentDialogue(float DeltaTime)
+void UNarr_DialogueSystem::InitializeTribalDialogues()
 {
-    if (!bIsPlayingDialogue)
-    {
-        return;
-    }
+    // Tribal Leader dialogues
+    FNarr_DialogueEntry TribalGreeting;
+    TribalGreeting.SpeakerName = TEXT("Tribal Leader");
+    TribalGreeting.DialogueText = TEXT("Welcome, hunter. The elders speak of your courage against the great beasts.");
+    TribalGreeting.Duration = 4.0f;
+    TribalGreeting.ResponseOptions.Add(TEXT("I seek to prove myself worthy."));
+    TribalGreeting.ResponseOptions.Add(TEXT("What dangers threaten the tribe?"));
+    TribalGreeting.NextDialogueID = 1;
+    DialogueDatabase.Add(TribalGreeting);
 
-    float ElapsedTime = GetWorld()->GetTimeSeconds() - DialogueStartTime;
+    FNarr_DialogueEntry TribalWisdom;
+    TribalWisdom.SpeakerName = TEXT("Tribal Leader");
+    TribalWisdom.DialogueText = TEXT("The ancient ways teach us - respect the land, fear the predators, but never surrender to them.");
+    TribalWisdom.Duration = 5.0f;
+    TribalWisdom.NextDialogueID = -1;
+    DialogueDatabase.Add(TribalWisdom);
+}
+
+void UNarr_DialogueSystem::InitializeSurvivalDialogues()
+{
+    // Scout mentor dialogues
+    FNarr_DialogueEntry ScoutAdvice;
+    ScoutAdvice.SpeakerName = TEXT("Scout Mentor");
+    ScoutAdvice.DialogueText = TEXT("Read the signs carefully. Broken branches, claw marks, fresh dung - all tell the story of what passed here.");
+    ScoutAdvice.Duration = 6.0f;
+    ScoutAdvice.ResponseOptions.Add(TEXT("Teach me to track the great beasts."));
+    ScoutAdvice.ResponseOptions.Add(TEXT("How do I avoid becoming prey?"));
+    ScoutAdvice.NextDialogueID = 10;
+    DialogueDatabase.Add(ScoutAdvice);
+}
+
+void UNarr_DialogueSystem::InitializeHuntingDialogues()
+{
+    // Hunter veteran dialogues
+    FNarr_DialogueEntry HunterTactics;
+    HunterTactics.SpeakerName = TEXT("Hunter Veteran");
+    HunterTactics.DialogueText = TEXT("Never face a raptor pack alone. They coordinate like we do, but faster. Use terrain, use fire, use your brain.");
+    HunterTactics.Duration = 7.0f;
+    HunterTactics.ResponseOptions.Add(TEXT("What weapons work best?"));
+    HunterTactics.ResponseOptions.Add(TEXT("How many hunters for a T-Rex?"));
+    HunterTactics.NextDialogueID = 20;
+    DialogueDatabase.Add(HunterTactics);
+}
+
+void UNarr_DialogueSystem::LoadDefaultDialogues()
+{
+    DialogueDatabase.Empty();
+    InitializeTribalDialogues();
+    InitializeSurvivalDialogues();
+    InitializeHuntingDialogues();
     
-    // Auto-stop dialogue if duration exceeded
-    if (ElapsedTime >= CurrentDialogue.Duration)
+    UE_LOG(LogTemp, Warning, TEXT("Loaded %d dialogue entries"), DialogueDatabase.Num());
+}
+
+void UNarr_DialogueSystem::LoadDefaultCharacters()
+{
+    CharacterProfiles.Empty();
+
+    // Tribal Leader
+    FNarr_CharacterProfile TribalLeader;
+    TribalLeader.CharacterName = TEXT("Tribal Leader");
+    TribalLeader.VoiceType = TEXT("Deep_Authoritative");
+    TribalLeader.Personality = TEXT("Wise, Protective, Traditional");
+    TribalLeader.KnownTopics.Add(TEXT("Tribal History"));
+    TribalLeader.KnownTopics.Add(TEXT("Leadership"));
+    TribalLeader.KnownTopics.Add(TEXT("Ancient Wisdom"));
+    TribalLeader.TrustLevel = 0.7f;
+    CharacterProfiles.Add(TribalLeader);
+
+    // Scout Mentor
+    FNarr_CharacterProfile ScoutMentor;
+    ScoutMentor.CharacterName = TEXT("Scout Mentor");
+    ScoutMentor.VoiceType = TEXT("Experienced_Calm");
+    ScoutMentor.Personality = TEXT("Patient, Observant, Practical");
+    ScoutMentor.KnownTopics.Add(TEXT("Tracking"));
+    ScoutMentor.KnownTopics.Add(TEXT("Survival"));
+    ScoutMentor.KnownTopics.Add(TEXT("Animal Behavior"));
+    ScoutMentor.TrustLevel = 0.8f;
+    CharacterProfiles.Add(ScoutMentor);
+
+    // Hunter Veteran
+    FNarr_CharacterProfile HunterVeteran;
+    HunterVeteran.CharacterName = TEXT("Hunter Veteran");
+    HunterVeteran.VoiceType = TEXT("Gruff_Experienced");
+    HunterVeteran.Personality = TEXT("Tough, Direct, Battle-hardened");
+    HunterVeteran.KnownTopics.Add(TEXT("Combat Tactics"));
+    HunterVeteran.KnownTopics.Add(TEXT("Weapon Crafting"));
+    HunterVeteran.KnownTopics.Add(TEXT("Dinosaur Hunting"));
+    HunterVeteran.TrustLevel = 0.6f;
+    CharacterProfiles.Add(HunterVeteran);
+
+    UE_LOG(LogTemp, Warning, TEXT("Loaded %d character profiles"), CharacterProfiles.Num());
+}
+
+int32 UNarr_DialogueSystem::FindDialogueIndex(int32 DialogueID) const
+{
+    for (int32 i = 0; i < DialogueDatabase.Num(); i++)
     {
-        StopCurrentDialogue();
+        if (i == DialogueID) // Using array index as ID for simplicity
+        {
+            return i;
+        }
     }
+    return -1;
+}
+
+int32 UNarr_DialogueSystem::FindCharacterIndex(const FString& CharacterName) const
+{
+    for (int32 i = 0; i < CharacterProfiles.Num(); i++)
+    {
+        if (CharacterProfiles[i].CharacterName == CharacterName)
+        {
+            return i;
+        }
+    }
+    return -1;
 }

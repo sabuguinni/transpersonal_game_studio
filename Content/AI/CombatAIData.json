@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "agent": "Combat_Enemy_AI_Agent_12",
+  "cycle": "PROD_CYCLE_AUTO_20260617_011",
+  "description": "Combat AI attack/damage system consuming NPCBehaviorData.json from Agent #11",
+  "combat_systems": {
+    "TRex_Combat": {
+      "species": "Tyrannosaurus Rex",
+      "behavior_zone_ref": "BehaviorZone_TRex_Patrol_001",
+      "attack_range_marker": "CombatAI_TRex_AttackRange_001",
+      "detection_range_units": 1500,
+      "chase_range_units": 800,
+      "attack_range_units": 300,
+      "attack_cooldown_seconds": 2.0,
+      "damage_per_hit": 45,
+      "damage_type": "bite_crush",
+      "stamina_drain_on_hit": 30,
+      "fear_increase_on_hit": 40,
+      "states": {
+        "IDLE":    { "transition_to": "ALERT",  "trigger": "player_in_detection_range" },
+        "ALERT":   { "transition_to": "CHASE",  "trigger": "player_confirmed_threat", "duration_seconds": 3.0 },
+        "CHASE":   { "transition_to": "ATTACK", "trigger": "player_in_attack_range",  "speed_multiplier": 1.8 },
+        "ATTACK":  { "transition_to": "CHASE",  "trigger": "attack_complete",         "cooldown": 2.0 },
+        "ROAR":    { "transition_to": "CHASE",  "trigger": "roar_complete",           "fear_radius_units": 2000, "fear_increase": 25 },
+        "RETREAT": { "trigger": "player_uses_fire_or_loud_noise",                      "speed_multiplier": 1.2 }
+      },
+      "pack_behavior": false,
+      "night_modifier": { "detection_range_multiplier": 0.6, "aggression_multiplier": 1.3 },
+      "fire_response": "FLEE",
+      "loud_noise_response": "ALERT_THEN_FLEE"
+    },
+    "Raptor_Pack_Combat": {
+      "species": "Velociraptor",
+      "behavior_zone_ref": "BehaviorZone_Raptor_Ambush_001",
+      "attack_range_markers": [
+        "CombatAI_Raptor_AttackRange_001",
+        "CombatAI_Raptor_AttackRange_002",
+        "CombatAI_Raptor_AttackRange_003"
+      ],
+      "pack_size_min": 2,
+      "pack_size_max": 4,
+      "pack_call_radius_units": 1500,
+      "detection_range_units": 1000,
+      "chase_range_units": 600,
+      "attack_range_units": 200,
+      "attack_cooldown_seconds": 1.0,
+      "damage_per_hit": 22,
+      "damage_type": "slash_bite",
+      "stamina_drain_on_hit": 20,
+      "fear_increase_on_hit": 30,
+      "pack_tactics": {
+        "FLANK":     { "description": "One raptor distracts, two flank from sides",      "trigger": "player_stationary_2s" },
+        "SURROUND":  { "description": "Pack circles player before attacking",             "trigger": "pack_size_3_or_more" },
+        "PACK_CALL": { "description": "Alpha calls nearby raptors within 1500u",         "trigger": "player_spotted", "cooldown_seconds": 15.0 }
+      },
+      "states": {
+        "IDLE":      { "transition_to": "STALK",     "trigger": "player_in_detection_range" },
+        "STALK":     { "transition_to": "PACK_CALL", "trigger": "stalk_complete",           "duration_seconds": 5.0 },
+        "PACK_CALL": { "transition_to": "FLANK",     "trigger": "pack_assembled_or_timeout" },
+        "FLANK":     { "transition_to": "ATTACK",    "trigger": "flank_position_reached" },
+        "ATTACK":    { "transition_to": "FLANK",     "trigger": "attack_complete",          "cooldown": 1.0 },
+        "RETREAT":   { "trigger": "pack_reduced_to_1",                                      "speed_multiplier": 2.0 }
+      },
+      "night_modifier": { "detection_range_multiplier": 0.8, "aggression_multiplier": 1.5 },
+      "fire_response": "CAUTIOUS_CIRCLE",
+      "loud_noise_response": "SCATTER_THEN_REGROUP"
+    },
+    "Brachiosaurus_Combat": {
+      "species": "Brachiosaurus",
+      "behavior_zone_ref": "BehaviorZone_Herd_Grazing_001",
+      "attack_range_marker": "CombatAI_Brachio_StompZone_001",
+      "temperament": "PASSIVE_UNLESS_CORNERED",
+      "detection_range_units": 600,
+      "flee_range_units": 400,
+      "stomp_range_units": 150,
+      "stomp_cooldown_seconds": 3.0,
+      "stomp_damage": 80,
+      "stomp_knockback_force": 1200,
+      "stomp_aoe_radius_units": 200,
+      "tail_swipe_range_units": 300,
+      "tail_swipe_damage": 35,
+      "states": {
+        "GRAZE":      { "transition_to": "ALERT", "trigger": "player_within_600u" },
+        "ALERT":      { "transition_to": "FLEE",  "trigger": "player_confirmed_threat", "duration_seconds": 2.0 },
+        "FLEE":       { "transition_to": "STOMP", "trigger": "cornered_no_escape_route", "speed_multiplier": 1.4 },
+        "STOMP":      { "transition_to": "FLEE",  "trigger": "stomp_complete",           "cooldown": 3.0 },
+        "TAIL_SWIPE": { "transition_to": "FLEE",  "trigger": "player_behind_and_close" }
+      },
+      "herd_panic": { "trigger": "one_brachio_flees", "radius_units": 2000, "all_herd_flee": true },
+      "night_modifier": { "detection_range_multiplier": 0.7, "flee_threshold_multiplier": 0.8 }
+    }
+  },
+  "damage_system": {
+    "player_health_max": 100,
+    "player_stamina_max": 100,
+    "player_fear_max": 100,
+    "fear_effects": {
+      "fear_0_30":   "normal_movement",
+      "fear_30_60":  "slight_camera_shake_reduced_accuracy",
+      "fear_60_80":  "heavy_breathing_stamina_drain_increased",
+      "fear_80_100": "panic_mode_erratic_movement_vision_blur"
+    },
+    "death_trigger": "health_reaches_0",
+    "respawn_location": "PlayerStart",
+    "respawn_health": 50,
+    "respawn_fear": 60
+  },
+  "combat_zones_in_map": [
+    { "label": "CombatAI_TRex_AttackRange_001",   "location": [2000,  500,  200] },
+    { "label": "CombatAI_Raptor_AttackRange_001",  "location": [-1000, 1500, 200] },
+    { "label": "CombatAI_Raptor_AttackRange_002",  "location": [-800,  1700, 200] },
+    { "label": "CombatAI_Raptor_AttackRange_003",  "location": [-1200, 1300, 200] },
+    { "label": "CombatAI_Brachio_StompZone_001",   "location": [800,  -1200, 200] }
+  ],
+  "audio_refs": {
+    "trex_territory_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781722033033_SurvivalNarrator.mp3",
+    "raptor_pack_warning":    "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781722045802_SurvivalNarrator_RaptorWarning.mp3"
+  }
+}

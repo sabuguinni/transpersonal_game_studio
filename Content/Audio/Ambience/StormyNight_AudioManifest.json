@@ -1,0 +1,105 @@
+{
+  "manifest_name": "StormyNight_AudioManifest",
+  "cycle_id": "PROD_CYCLE_AUTO_20260702_011",
+  "agent": "Agent_08_Lighting_Atmosphere",
+  "description": "Audio asset manifest for the Stormy Night lighting palette. All sounds sourced from Freesound.org under CC licenses. Intended for UE5 MetaSounds integration by Agent #16 (Audio Agent).",
+
+  "primary_ambience": {
+    "freesound_id": 410078,
+    "name": "Thunder and rain during the night in the Amazonian Rainforest",
+    "preview_url": "https://cdn.freesound.org/previews/410/410078_1661766-hq.mp3",
+    "duration_seconds": 3600,
+    "license": "CC Attribution",
+    "tags": ["Amazonian", "Rainforest", "Thunder", "ambience", "lightning"],
+    "ue5_usage": {
+      "asset_type": "MetaSound Source",
+      "loop": true,
+      "volume_curve": "distance_attenuation_none",
+      "spatial": false,
+      "notes": "Non-spatial global ambience — plays at full volume regardless of player position. Loop seamlessly for sustained storm."
+    }
+  },
+
+  "thunder_accent": {
+    "freesound_id": 268148,
+    "name": "Thunder.wav",
+    "preview_url": "https://cdn.freesound.org/previews/268/268148_2340013-hq.mp3",
+    "duration_seconds": 15,
+    "license": "CC Attribution",
+    "tags": ["field-recording", "lightning", "night", "rain", "storm"],
+    "ue5_usage": {
+      "asset_type": "MetaSound Source",
+      "loop": false,
+      "trigger": "lightning_flash_event",
+      "delay_from_flash_ms": [0, 500, 1200, 2500],
+      "notes": "Trigger on lightning flash visual event. Randomize delay 0-2500ms to simulate distance variation. Pitch randomize ±5% for variation."
+    }
+  },
+
+  "distant_thunder": {
+    "freesound_id": 700375,
+    "name": "Distant Thunder - Light Rain - Nocturnal Insects 19 Minutes.wav",
+    "preview_url": "https://cdn.freesound.org/previews/700/700375_13721094-hq.mp3",
+    "duration_seconds": 1140,
+    "license": "CC Attribution",
+    "tags": ["ambiance", "crickets", "heat-lightning", "insects", "lightning", "nature"],
+    "ue5_usage": {
+      "asset_type": "MetaSound Source",
+      "loop": true,
+      "volume": 0.3,
+      "notes": "Low-volume background layer under primary ambience. Adds depth and distance. Insects create biological authenticity."
+    }
+  },
+
+  "heavy_rain_close": {
+    "freesound_id": 765477,
+    "name": "Raining Amb",
+    "preview_url": "https://cdn.freesound.org/previews/765/765477_15680685-hq.mp3",
+    "duration_seconds": 142,
+    "license": "CC0",
+    "tags": ["Lightning", "Rain", "Storm", "Thunder", "Thunderstorm", "Weather"],
+    "ue5_usage": {
+      "asset_type": "MetaSound Source",
+      "loop": true,
+      "volume": 0.7,
+      "notes": "Close rain hits — use for shelter interior vs exterior blend. Higher volume when player is exposed, lower when sheltered."
+    }
+  },
+
+  "metasound_blueprint_spec": {
+    "name": "MS_StormyNight_Ambience",
+    "inputs": [
+      {"name": "StormIntensity", "type": "float", "range": [0.0, 1.0], "default": 0.8},
+      {"name": "PlayerSheltered", "type": "bool", "default": false},
+      {"name": "LightningFlashTrigger", "type": "trigger"}
+    ],
+    "graph_description": [
+      "StormIntensity → modulates primary ambience volume (0.5 to 1.0 range)",
+      "StormIntensity → modulates fog density via Blueprint event",
+      "PlayerSheltered → crossfade between close rain (outdoor) and muffled rain (indoor)",
+      "LightningFlashTrigger → one-shot thunder accent with random delay and pitch variation",
+      "All layers mixed through MetaSound submix with reverb tail 2.5s"
+    ]
+  },
+
+  "lighting_audio_sync": {
+    "lightning_flash_sequence": {
+      "description": "Synchronized lightning flash + thunder for maximum impact",
+      "steps": [
+        "1. Blueprint timer fires random interval (8-45 seconds)",
+        "2. Light_Storm_Lightning_001 intensity spikes to 50000lm for 0.05s",
+        "3. Screen flash post-process (white, 0.1s fade)",
+        "4. MetaSound LightningFlashTrigger fires",
+        "5. Thunder sound plays after random delay 0-2500ms",
+        "6. Light returns to base 8000lm"
+      ]
+    }
+  },
+
+  "agent_16_handoff": {
+    "priority": "HIGH",
+    "action_required": "Import Freesound assets, create MS_StormyNight_Ambience MetaSound, implement lightning flash Blueprint",
+    "freesound_download_ids": [410078, 268148, 700375, 765477],
+    "ue5_content_path": "/Game/Audio/Ambience/Storm/"
+  }
+}

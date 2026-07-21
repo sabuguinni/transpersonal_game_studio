@@ -3,70 +3,51 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/BoxComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Arch_StructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    CaveDwelling,
-    TreePlatform,
-    StoneCircle,
-    CliffRuin,
-    SimpleHut,
-    WoodBridge,
-    StoneWall,
-    Watchtower
-};
-
-UENUM(BlueprintType)
-enum class EArch_StructureState : uint8
-{
-    Pristine,
-    Weathered,
-    Damaged,
-    Ruined,
-    Overgrown
+    StoneCircle     UMETA(DisplayName = "Stone Circle"),
+    CaveEntrance    UMETA(DisplayName = "Cave Entrance"),
+    RockFormation   UMETA(DisplayName = "Rock Formation"),
+    AncientRuin     UMETA(DisplayName = "Ancient Ruin"),
+    NaturalArch     UMETA(DisplayName = "Natural Arch")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct TRANSPERSONALGAME_API FArch_StructureData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArch_StructureType StructureType = EArch_StructureType::CaveDwelling;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArch_StructureState CurrentState = EArch_StructureState::Weathered;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Position;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector StructureScale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FRotator Rotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StructuralIntegrity = 75.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Scale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanBeEntered = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float WeatheringLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bProvidesWeatherShelter = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxOccupants = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasMossGrowth;
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::CaveDwelling;
-        CurrentState = EArch_StructureState::Weathered;
-        StructureScale = FVector(1.0f, 1.0f, 1.0f);
-        StructuralIntegrity = 75.0f;
-        bCanBeEntered = true;
-        bProvidesWeatherShelter = false;
-        MaxOccupants = 1;
+        StructureType = EArch_StructureType::StoneCircle;
+        Position = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        WeatheringLevel = 0.5f;
+        bHasMossGrowth = true;
     }
 };
 
@@ -82,77 +63,66 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* StructureMesh;
+    class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBoxComponent* InteractionVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FArch_StructureData> PrehistoricStructures;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    FArch_StructureData StructureData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float MinDistanceBetweenStructures;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    TArray<UStaticMesh*> StructureMeshVariants;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    int32 MaxStructuresPerBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    TArray<UMaterialInterface*> WeatheringMaterials;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* StoneMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    bool bAutoSelectMeshByType = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* WeatheredStoneMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Settings")
-    float WeatheringRate = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialInterface* MossyStoneMaterial;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SpawnStructureAtLocation(EArch_StructureType StructureType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureType(EArch_StructureType NewType);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void GenerateStructuresInRadius(FVector CenterLocation, float Radius, int32 StructureCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void SetStructureState(EArch_StructureState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeatheringToStructure(class AActor* StructureActor, float WeatheringLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ApplyWeathering(float WeatheringAmount);
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<AActor*> GetAllStructuresInRadius(FVector CenterLocation, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    bool CanPlayerEnter() const;
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
+    void GeneratePrehistoricStructures();
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    bool ProvidesWeatherProtection() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void OnPlayerEnter();
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void OnPlayerExit();
-
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    FVector GetSafeSpawnLocation() const;
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    EArch_StructureType GetStructureType() const { return StructureData.StructureType; }
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    EArch_StructureState GetStructureState() const { return StructureData.CurrentState; }
-
-    UFUNCTION(BlueprintPure, Category = "Structure Info")
-    float GetStructuralIntegrity() const { return StructureData.StructuralIntegrity; }
-
-protected:
-    UFUNCTION()
-    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    void UpdateMeshBasedOnType();
-    void UpdateMaterialBasedOnState();
-    void SetupInteractionVolume();
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
+    void ClearAllStructures();
 
 private:
-    UPROPERTY()
-    TArray<AActor*> CurrentOccupants;
+    UFUNCTION()
+    AActor* CreateStoneCircle(FVector Location, FRotator Rotation);
 
-    float WeatheringTimer = 0.0f;
-    bool bPlayerInside = false;
+    UFUNCTION()
+    AActor* CreateCaveEntrance(FVector Location, FRotator Rotation);
+
+    UFUNCTION()
+    AActor* CreateRockFormation(FVector Location, FRotator Rotation);
+
+    UFUNCTION()
+    AActor* CreateAncientRuin(FVector Location, FRotator Rotation);
+
+    UFUNCTION()
+    AActor* CreateNaturalArch(FVector Location, FRotator Rotation);
+
+    UFUNCTION()
+    void ApplyMaterialToActor(AActor* Actor, class UMaterialInterface* Material);
+
+    UFUNCTION()
+    bool IsValidSpawnLocation(FVector Location);
+
+    TArray<AActor*> SpawnedStructures;
 };

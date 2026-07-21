@@ -1,447 +1,313 @@
 #include "TribalNPCController.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardData.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Object.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Vector.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Bool.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Float.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
+#include "NavigationSystem.h"
 #include "GameFramework/Character.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 
 ATribalNPCController::ATribalNPCController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize AI components
-    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
+    // Perception component
+    AIPerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
+    SetPerceptionComponent(*AIPerceptionComp);
 
-    // Initialize tribal properties
-    TribalRole = ENPC_TribalRole::Gatherer;
-    FearLevel = 0.3f;
-    CourageLevel = 0.5f;
-    SocialBondStrength = 0.7f;
+    // Sight config
+    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = SightRadius;
+    SightConfig->LoseSightRadius = LoseSightRadius;
+    SightConfig->PeripheralVisionAngleDegrees = 90.0f;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    AIPerceptionComp->ConfigureSense(*SightConfig);
 
-    // Initialize survival stats
-    HungerLevel = 0.2f;
-    ThirstLevel = 0.1f;
-    EnergyLevel = 0.8f;
-    HealthLevel = 1.0f;
+    // Hearing config
+    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = HearingRadius;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    AIPerceptionComp->ConfigureSense(*HearingConfig);
 
-    // Initialize territory settings
-    TerritoryRadius = 2000.0f;
-    HomeLocation = FVector::ZeroVector;
+    AIPerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
 
-    // Initialize threat detection
-    DinosaurDetectionRange = 1500.0f;
-    PlayerDetectionRange = 800.0f;
-    ThreatResponseTime = 2.0f;
-
-    // Initialize state
-    CurrentPatrolIndex = 0;
-    LastThreatTime = 0.0f;
-    CurrentThreat = nullptr;
-    bIsAlarmed = false;
-    bIsReturningHome = false;
-
-    InitializeAIPerception();
+    CurrentState = ENPC_TribalState::Idle;
+    FearLevel = 0.0f;
 }
 
 void ATribalNPCController::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Set home location to spawn location
-    if (GetPawn())
-    {
-        HomeLocation = GetPawn()->GetActorLocation();
-    }
+    AIPerceptionComp->OnPerceptionUpdated.AddDynamic(this, &ATribalNPCController::OnPerceptionUpdated);
 
-    // Start behavior tree after a short delay
-    FTimerHandle StartBehaviorTimer;
-    GetWorld()->GetTimerManager().SetTimer(StartBehaviorTimer, this, &ATribalNPCController::StartBehaviorTree, 1.0f, false);
+    if (BehaviorTree && GetBlackboardComponent())
+    {
+        RunBehaviorTree(BehaviorTree);
+        UpdateBlackboard();
+    }
 }
 
 void ATribalNPCController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    UpdateSurvivalNeeds(DeltaTime);
-    UpdateBlackboardValues();
-    ProcessThreatDetection();
-    HandleRoleSpecificBehavior();
+    UpdateFear(DeltaTime);
+    ProcessMemoryDecay(DeltaTime);
+    DetermineStateFromPerception();
+    UpdateBlackboard();
 }
 
-void ATribalNPCController::InitializeAIPerception()
+void ATribalNPCController::OnPossess(APawn* InPawn)
 {
-    // Configure sight sense
-    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = FMath::Max(DinosaurDetectionRange, PlayerDetectionRange);
-    SightConfig->LoseSightRadius = SightConfig->SightRadius + 200.0f;
-    SightConfig->PeripheralVisionAngleDegrees = 120.0f;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    Super::OnPossess(InPawn);
 
-    // Configure hearing sense
-    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = 1000.0f;
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    // Configure perception component
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Bind perception events
-    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ATribalNPCController::OnPerceptionUpdated);
-}
-
-void ATribalNPCController::StartBehaviorTree()
-{
-    if (BehaviorTree && BlackboardAsset)
+    if (BehaviorTree)
     {
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->InitializeBlackboard(*BlackboardAsset);
-        }
-
-        if (BehaviorTreeComponent)
-        {
-            BehaviorTreeComponent->StartTree(*BehaviorTree);
-        }
+        RunBehaviorTree(BehaviorTree);
     }
 }
 
-void ATribalNPCController::StopBehaviorTree()
+void ATribalNPCController::OnUnPossess()
 {
-    if (BehaviorTreeComponent)
-    {
-        BehaviorTreeComponent->StopTree();
-    }
-}
-
-void ATribalNPCController::SetTribalRole(ENPC_TribalRole NewRole)
-{
-    TribalRole = NewRole;
-
-    // Adjust stats based on role
-    switch (TribalRole)
-    {
-    case ENPC_TribalRole::Hunter:
-        CourageLevel = 0.8f;
-        FearLevel = 0.2f;
-        DinosaurDetectionRange = 2000.0f;
-        break;
-    case ENPC_TribalRole::Gatherer:
-        CourageLevel = 0.4f;
-        FearLevel = 0.6f;
-        PlayerDetectionRange = 1200.0f;
-        break;
-    case ENPC_TribalRole::Scout:
-        CourageLevel = 0.6f;
-        FearLevel = 0.4f;
-        DinosaurDetectionRange = 2500.0f;
-        PlayerDetectionRange = 1500.0f;
-        break;
-    case ENPC_TribalRole::Elder:
-        CourageLevel = 0.9f;
-        FearLevel = 0.1f;
-        SocialBondStrength = 1.0f;
-        break;
-    case ENPC_TribalRole::Child:
-        CourageLevel = 0.1f;
-        FearLevel = 0.9f;
-        DinosaurDetectionRange = 800.0f;
-        break;
-    }
-}
-
-void ATribalNPCController::UpdateSurvivalNeeds(float DeltaTime)
-{
-    // Gradually increase hunger and thirst
-    HungerLevel += DeltaTime * 0.01f; // Hunger increases slowly
-    ThirstLevel += DeltaTime * 0.015f; // Thirst increases slightly faster
-
-    // Energy decreases with activity
-    if (GetPawn() && GetPawn()->GetVelocity().Size() > 100.0f)
-    {
-        EnergyLevel -= DeltaTime * 0.02f; // Moving drains energy
-    }
-    else
-    {
-        EnergyLevel += DeltaTime * 0.005f; // Resting restores energy slowly
-    }
-
-    // Health decreases if basic needs aren't met
-    if (HungerLevel > 0.8f || ThirstLevel > 0.8f)
-    {
-        HealthLevel -= DeltaTime * 0.005f;
-    }
-    else if (HungerLevel < 0.3f && ThirstLevel < 0.3f && EnergyLevel > 0.5f)
-    {
-        HealthLevel += DeltaTime * 0.002f; // Slow health recovery
-    }
-
-    // Clamp values
-    HungerLevel = FMath::Clamp(HungerLevel, 0.0f, 1.0f);
-    ThirstLevel = FMath::Clamp(ThirstLevel, 0.0f, 1.0f);
-    EnergyLevel = FMath::Clamp(EnergyLevel, 0.0f, 1.0f);
-    HealthLevel = FMath::Clamp(HealthLevel, 0.0f, 1.0f);
-}
-
-bool ATribalNPCController::IsInDanger() const
-{
-    return CurrentThreat != nullptr || bIsAlarmed || HealthLevel < 0.3f;
-}
-
-void ATribalNPCController::ReactToThreat(AActor* ThreatActor)
-{
-    if (!ThreatActor)
-    {
-        return;
-    }
-
-    CurrentThreat = ThreatActor;
-    bIsAlarmed = true;
-    LastThreatTime = GetWorld()->GetTimeSeconds();
-
-    // Increase fear based on threat type and role
-    float ThreatFear = 0.3f;
-    if (ThreatActor->GetClass()->GetName().Contains("Dinosaur"))
-    {
-        ThreatFear = 0.7f;
-    }
-
-    FearLevel = FMath::Min(FearLevel + ThreatFear, 1.0f);
-
-    // Role-specific threat responses
-    switch (TribalRole)
-    {
-    case ENPC_TribalRole::Hunter:
-        // Hunters may stand their ground or try to distract the threat
-        if (CourageLevel > FearLevel)
-        {
-            // Attempt to face the threat
-            if (GetPawn())
-            {
-                FVector Direction = (ThreatActor->GetActorLocation() - GetPawn()->GetActorLocation()).GetSafeNormal();
-                GetPawn()->SetActorRotation(Direction.Rotation());
-            }
-        }
-        break;
-    case ENPC_TribalRole::Scout:
-        // Scouts call for help and try to lead threats away
-        CallForHelp();
-        break;
-    case ENPC_TribalRole::Elder:
-        // Elders organize group response
-        CallForHelp();
-        break;
-    default:
-        // Others flee to safety
-        ReturnToHome();
-        break;
-    }
-}
-
-void ATribalNPCController::CallForHelp()
-{
-    // Find nearby tribal NPCs and alert them
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATribalNPCController::StaticClass(), FoundActors);
-
-    for (AActor* Actor : FoundActors)
-    {
-        ATribalNPCController* OtherNPC = Cast<ATribalNPCController>(Actor);
-        if (OtherNPC && OtherNPC != this)
-        {
-            float Distance = FVector::Dist(GetPawn()->GetActorLocation(), OtherNPC->GetPawn()->GetActorLocation());
-            if (Distance < 1500.0f) // Help call range
-            {
-                OtherNPC->RespondToDistressCall(this);
-            }
-        }
-    }
-}
-
-void ATribalNPCController::RespondToDistressCall(ATribalNPCController* CallingNPC)
-{
-    if (!CallingNPC || !CallingNPC->GetPawn())
-    {
-        return;
-    }
-
-    // Increase alertness
-    bIsAlarmed = true;
-    FearLevel = FMath::Min(FearLevel + 0.2f, 1.0f);
-
-    // Role-specific responses to distress calls
-    switch (TribalRole)
-    {
-    case ENPC_TribalRole::Hunter:
-        // Hunters may move to help
-        if (CourageLevel > 0.6f)
-        {
-            // Move toward the calling NPC
-            MoveToLocation(CallingNPC->GetPawn()->GetActorLocation());
-        }
-        break;
-    case ENPC_TribalRole::Elder:
-        // Elders coordinate group response
-        CallForHelp();
-        break;
-    default:
-        // Others flee to safety
-        ReturnToHome();
-        break;
-    }
-}
-
-void ATribalNPCController::SetPatrolPoints(const TArray<FVector>& NewPatrolPoints)
-{
-    PatrolPoints = NewPatrolPoints;
-    CurrentPatrolIndex = 0;
-}
-
-FVector ATribalNPCController::GetNextPatrolPoint()
-{
-    if (PatrolPoints.Num() == 0)
-    {
-        return HomeLocation;
-    }
-
-    FVector NextPoint = PatrolPoints[CurrentPatrolIndex];
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-    return NextPoint;
-}
-
-void ATribalNPCController::ReturnToHome()
-{
-    bIsReturningHome = true;
-    if (GetPawn())
-    {
-        MoveToLocation(HomeLocation);
-    }
+    Super::OnUnPossess();
 }
 
 void ATribalNPCController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (!Actor)
-        {
-            continue;
-        }
+        if (!Actor) continue;
 
-        FString ActorName = Actor->GetClass()->GetName();
-        float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+        FActorPerceptionBlueprintInfo PerceptionInfo;
+        AIPerceptionComp->GetActorsPerception(Actor, PerceptionInfo);
 
-        // Check for dinosaur threats
-        if (ActorName.Contains("Dinosaur") && Distance < DinosaurDetectionRange)
+        bool bCurrentlySensed = false;
+        for (const FAIStimulus& Stimulus : PerceptionInfo.LastSensedStimuli)
         {
-            ReactToThreat(Actor);
-        }
-        // Check for player
-        else if (ActorName.Contains("Character") && Distance < PlayerDetectionRange)
-        {
-            // Different reaction to player based on role and fear level
-            if (FearLevel > 0.5f)
+            if (Stimulus.WasSuccessfullySensed())
             {
-                ReactToThreat(Actor);
+                bCurrentlySensed = true;
+                break;
             }
         }
-    }
-}
 
-void ATribalNPCController::UpdateBlackboardValues()
-{
-    if (!BlackboardComponent)
-    {
-        return;
-    }
-
-    // Update survival stats
-    BlackboardComponent->SetValueAsFloat("HungerLevel", HungerLevel);
-    BlackboardComponent->SetValueAsFloat("ThirstLevel", ThirstLevel);
-    BlackboardComponent->SetValueAsFloat("EnergyLevel", EnergyLevel);
-    BlackboardComponent->SetValueAsFloat("HealthLevel", HealthLevel);
-    BlackboardComponent->SetValueAsFloat("FearLevel", FearLevel);
-
-    // Update state flags
-    BlackboardComponent->SetValueAsBool("IsInDanger", IsInDanger());
-    BlackboardComponent->SetValueAsBool("IsAlarmed", bIsAlarmed);
-    BlackboardComponent->SetValueAsBool("IsReturningHome", bIsReturningHome);
-
-    // Update locations
-    BlackboardComponent->SetValueAsVector("HomeLocation", HomeLocation);
-    if (PatrolPoints.Num() > 0)
-    {
-        BlackboardComponent->SetValueAsVector("NextPatrolPoint", GetNextPatrolPoint());
-    }
-
-    // Update threat information
-    if (CurrentThreat)
-    {
-        BlackboardComponent->SetValueAsObject("CurrentThreat", CurrentThreat);
-        BlackboardComponent->SetValueAsVector("ThreatLocation", CurrentThreat->GetActorLocation());
-    }
-}
-
-void ATribalNPCController::ProcessThreatDetection()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Clear threat after some time if no longer detected
-    if (CurrentThreat && (CurrentTime - LastThreatTime) > ThreatResponseTime * 2.0f)
-    {
-        CurrentThreat = nullptr;
-        bIsAlarmed = false;
-        bIsReturningHome = false;
-
-        // Gradually reduce fear
-        FearLevel = FMath::Max(FearLevel - 0.1f, 0.1f);
-    }
-}
-
-void ATribalNPCController::HandleRoleSpecificBehavior()
-{
-    // Role-specific periodic behaviors
-    switch (TribalRole)
-    {
-    case ENPC_TribalRole::Scout:
-        // Scouts have wider patrol ranges
-        if (PatrolPoints.Num() == 0)
+        if (bCurrentlySensed)
         {
-            // Generate patrol points around home
-            TArray<FVector> ScoutPatrol;
-            for (int32 i = 0; i < 4; i++)
+            // Determine threat level from actor class name
+            FString ActorClass = Actor->GetClass()->GetName();
+            ENPC_ThreatLevel Level = ENPC_ThreatLevel::Low;
+
+            if (ActorClass.Contains(TEXT("TRex")) || ActorClass.Contains(TEXT("Rex")))
             {
-                float Angle = i * 90.0f * PI / 180.0f;
-                FVector PatrolPoint = HomeLocation + FVector(
-                    FMath::Cos(Angle) * TerritoryRadius * 0.8f,
-                    FMath::Sin(Angle) * TerritoryRadius * 0.8f,
-                    0.0f
-                );
-                ScoutPatrol.Add(PatrolPoint);
+                Level = ENPC_ThreatLevel::Critical;
             }
-            SetPatrolPoints(ScoutPatrol);
+            else if (ActorClass.Contains(TEXT("Raptor")))
+            {
+                Level = ENPC_ThreatLevel::High;
+            }
+            else if (ActorClass.Contains(TEXT("Dino")) || ActorClass.Contains(TEXT("Dinosaur")))
+            {
+                Level = ENPC_ThreatLevel::Medium;
+            }
+
+            RegisterThreat(Actor, Level, Actor->GetActorLocation());
         }
-        break;
-    case ENPC_TribalRole::Gatherer:
-        // Gatherers focus on resource areas
-        if (HungerLevel > 0.6f)
-        {
-            // Look for food sources (simplified)
-            ThirstLevel = FMath::Max(ThirstLevel - 0.1f, 0.0f);
-        }
-        break;
     }
+}
+
+void ATribalNPCController::SetNPCState(ENPC_TribalState NewState)
+{
+    if (CurrentState == NewState) return;
+    CurrentState = NewState;
+    UpdateBlackboard();
+}
+
+void ATribalNPCController::RegisterThreat(AActor* ThreatActor, ENPC_ThreatLevel Level, const FVector& Location)
+{
+    // Check if this actor is already in memory
+    for (FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.ThreatActorName == ThreatActor->GetName())
+        {
+            Entry.ThreatLocation = Location;
+            Entry.ThreatTime = GetWorld()->GetTimeSeconds();
+            Entry.ThreatLevel = Level;
+            return;
+        }
+    }
+
+    // Add new entry (respect max)
+    if (MemoryEntries.Num() >= MaxMemoryEntries)
+    {
+        MemoryEntries.RemoveAt(0);
+    }
+
+    FNPC_MemoryEntry NewEntry;
+    NewEntry.ThreatLocation = Location;
+    NewEntry.ThreatTime = GetWorld()->GetTimeSeconds();
+    NewEntry.ThreatLevel = Level;
+    NewEntry.ThreatActorName = ThreatActor->GetName();
+    MemoryEntries.Add(NewEntry);
+
+    // Spike fear based on threat level
+    float FearSpike = 0.0f;
+    switch (Level)
+    {
+        case ENPC_ThreatLevel::Low:      FearSpike = 0.1f; break;
+        case ENPC_ThreatLevel::Medium:   FearSpike = 0.25f; break;
+        case ENPC_ThreatLevel::High:     FearSpike = 0.5f; break;
+        case ENPC_ThreatLevel::Critical: FearSpike = 1.0f; break;
+        default: break;
+    }
+    FearLevel = FMath::Clamp(FearLevel + FearSpike, 0.0f, 1.0f);
+}
+
+void ATribalNPCController::ClearMemory()
+{
+    MemoryEntries.Empty();
+}
+
+bool ATribalNPCController::HasRecentThreat(float WithinSeconds) const
+{
+    float Now = GetWorld()->GetTimeSeconds();
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if ((Now - Entry.ThreatTime) <= WithinSeconds)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+FVector ATribalNPCController::GetLastKnownThreatLocation() const
+{
+    if (MemoryEntries.Num() == 0) return FVector::ZeroVector;
+
+    float MostRecent = -1.0f;
+    FVector LastLocation = FVector::ZeroVector;
+    for (const FNPC_MemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.ThreatTime > MostRecent)
+        {
+            MostRecent = Entry.ThreatTime;
+            LastLocation = Entry.ThreatLocation;
+        }
+    }
+    return LastLocation;
+}
+
+void ATribalNPCController::UpdateFear(float DeltaTime)
+{
+    if (!HasRecentThreat(5.0f))
+    {
+        FearLevel = FMath::Clamp(FearLevel - FearDecayRate * DeltaTime, 0.0f, 1.0f);
+    }
+}
+
+void ATribalNPCController::ProcessMemoryDecay(float DeltaTime)
+{
+    float Now = GetWorld()->GetTimeSeconds();
+    MemoryEntries.RemoveAll([&](const FNPC_MemoryEntry& Entry)
+    {
+        return (Now - Entry.ThreatTime) > MemoryDecayTime;
+    });
+}
+
+void ATribalNPCController::UpdateBlackboard()
+{
+    UBlackboardComponent* BB = GetBlackboardComponent();
+    if (!BB) return;
+
+    BB->SetValueAsEnum(BB_NPCState, (uint8)CurrentState);
+    BB->SetValueAsFloat(BB_FearLevel, FearLevel);
+
+    if (HasRecentThreat())
+    {
+        FVector ThreatLoc = GetLastKnownThreatLocation();
+        BB->SetValueAsVector(BB_ThreatActor, ThreatLoc);
+
+        if (FearLevel >= 0.5f)
+        {
+            FVector FleeTarget = FindFleeLocation(ThreatLoc);
+            BB->SetValueAsVector(BB_FleeTarget, FleeTarget);
+        }
+    }
+}
+
+void ATribalNPCController::DetermineStateFromPerception()
+{
+    if (FearLevel >= 0.8f)
+    {
+        SetNPCState(ENPC_TribalState::Flee);
+    }
+    else if (FearLevel >= 0.4f)
+    {
+        SetNPCState(ENPC_TribalState::Hide);
+    }
+    else if (FearLevel >= 0.1f)
+    {
+        SetNPCState(ENPC_TribalState::Alert);
+    }
+    else if (HasRecentThreat(60.0f))
+    {
+        SetNPCState(ENPC_TribalState::Patrol);
+    }
+    else
+    {
+        SetNPCState(ENPC_TribalState::Idle);
+    }
+}
+
+FVector ATribalNPCController::FindFleeLocation(const FVector& ThreatLocation) const
+{
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return FVector::ZeroVector;
+
+    FVector MyLocation = MyPawn->GetActorLocation();
+    FVector AwayDirection = (MyLocation - ThreatLocation).GetSafeNormal();
+    FVector FleeTarget = MyLocation + AwayDirection * 3000.0f;
+
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
+    {
+        FNavLocation NavLocation;
+        if (NavSys->GetRandomPointInNavigableRadius(FleeTarget, 500.0f, NavLocation))
+        {
+            return NavLocation.Location;
+        }
+    }
+    return FleeTarget;
+}
+
+FVector ATribalNPCController::FindHideLocation(const FVector& ThreatLocation) const
+{
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn) return FVector::ZeroVector;
+
+    FVector MyLocation = MyPawn->GetActorLocation();
+    FVector AwayDirection = (MyLocation - ThreatLocation).GetSafeNormal();
+    // Hide behind cover — offset perpendicular to threat direction
+    FVector Perp = FVector(-AwayDirection.Y, AwayDirection.X, 0.0f);
+    FVector HideTarget = MyLocation + AwayDirection * 800.0f + Perp * 400.0f;
+
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
+    {
+        FNavLocation NavLocation;
+        if (NavSys->GetRandomPointInNavigableRadius(HideTarget, 300.0f, NavLocation))
+        {
+            return NavLocation.Location;
+        }
+    }
+    return HideTarget;
 }

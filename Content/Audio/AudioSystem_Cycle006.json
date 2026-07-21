@@ -1,0 +1,222 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_006",
+  "agent": "Audio Agent #16",
+  "description": "Complete audio system registry — voice assets, ambient zones, sound design specs",
+
+  "voice_assets": {
+    "this_cycle": [
+      {
+        "id": "VA_Narrator_TRexProximity",
+        "character": "Narrator_TRexProximity",
+        "text": "Something is close. The ground shakes. Run.",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771634713_Narrator_TRexProximity.mp3",
+        "duration": "~3s",
+        "trigger": "T-Rex within 600 units of player",
+        "audio_type": "danger_sting",
+        "priority": "HIGH"
+      },
+      {
+        "id": "VA_Hunter_RaptorAlert",
+        "character": "Hunter_RaptorAlert",
+        "text": "Raptors. Three of them. Coming from the east. Do not run — they chase. Stand your ground and use the spear.",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771648831_Hunter_RaptorAlert.mp3",
+        "duration": "~8s",
+        "trigger": "Player enters AudioZone_RaptorValley_001 (radius 1200 units)",
+        "audio_type": "npc_dialogue",
+        "priority": "HIGH",
+        "linked_dialogue_zone": "Dialogue_RaptorValley_001"
+      }
+    ],
+    "from_cycle_005": [
+      {
+        "id": "VA_TribeElder_HerdWarning",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771520678_TribeElder_HerdWarning.mp3",
+        "linked_dialogue_zone": "Dialogue_HerdPath_001"
+      },
+      {
+        "id": "VA_Scout_WaterWarning",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771532859_Scout_WaterWarning.mp3",
+        "linked_dialogue_zone": "Dialogue_WaterSource_001"
+      },
+      {
+        "id": "VA_Hunter_RaptorTactics",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771539499_Hunter_RaptorTactics.mp3",
+        "linked_dialogue_zone": "Dialogue_RaptorValley_001"
+      },
+      {
+        "id": "VA_Craftsman_StoneToolAdvice",
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771541318_Craftsman_StoneToolAdvice.mp3",
+        "linked_dialogue_zone": "Dialogue_StoneCache_001"
+      }
+    ]
+  },
+
+  "ambient_zones": [
+    {
+      "label": "AudioZone_Campfire_001",
+      "map_location": {"x": 400, "y": 600, "z": 100},
+      "attenuation_radius": 800,
+      "biome": "Camp",
+      "soundscape": {
+        "primary": "campfire_crackle_loop",
+        "secondary": "night_crickets_loop",
+        "tertiary": "low_wind_breeze",
+        "freesound_ref": 688994,
+        "freesound_url": "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3"
+      },
+      "music_layer": {
+        "style": "sparse_percussion_bone_drum",
+        "tempo": "slow_60bpm",
+        "mood": "safe_reflective"
+      },
+      "linked_dialogue": "Dialogue_CampfireNight_001",
+      "linked_voice": null
+    },
+    {
+      "label": "AudioZone_RaptorValley_001",
+      "map_location": {"x": 3500, "y": -2000, "z": 100},
+      "attenuation_radius": 1200,
+      "biome": "Valley",
+      "soundscape": {
+        "primary": "raptor_distant_call_loop",
+        "secondary": "valley_echo_wind",
+        "tertiary": "dry_leaves_rustle",
+        "escalation": {
+          "zone_outer_600": "raptor_distant_call — volume 0.3",
+          "zone_mid_400": "raptor_close_growl — volume 0.6, heartbeat_low",
+          "zone_inner_200": "raptor_breath_proximity — volume 1.0, heartbeat_fast, screen_shake_minor"
+        }
+      },
+      "music_layer": {
+        "style": "tension_staccato_percussion",
+        "tempo": "escalating_80_to_140bpm",
+        "mood": "danger_imminent"
+      },
+      "linked_dialogue": "Dialogue_RaptorValley_001",
+      "linked_voice": ["VA_Hunter_RaptorAlert", "VA_Hunter_RaptorTactics"]
+    },
+    {
+      "label": "AudioZone_Riverbank_001",
+      "map_location": {"x": 2200, "y": 1800, "z": 100},
+      "attenuation_radius": 1000,
+      "biome": "Riverbank",
+      "soundscape": {
+        "primary": "river_flow_medium_loop",
+        "secondary": "frog_calls_evening",
+        "tertiary": "distant_bird_calls",
+        "freesound_ref": 501731,
+        "freesound_url": "https://cdn.freesound.org/previews/501/501731_9573665-hq.mp3"
+      },
+      "music_layer": {
+        "style": "flowing_woodwind_bone_flute",
+        "tempo": "gentle_70bpm",
+        "mood": "resource_discovery"
+      },
+      "linked_dialogue": "Dialogue_WaterSource_001",
+      "linked_voice": ["VA_Scout_WaterWarning"]
+    },
+    {
+      "label": "AudioZone_HerdPath_001",
+      "map_location": {"x": -1500, "y": 3200, "z": 100},
+      "attenuation_radius": 1500,
+      "biome": "Savanna",
+      "soundscape": {
+        "primary": "distant_herd_rumble_loop",
+        "secondary": "savanna_wind_grass",
+        "tertiary": "occasional_herbivore_bellow",
+        "dynamic": "rumble_intensity_scales_with_herd_proximity"
+      },
+      "music_layer": {
+        "style": "open_savanna_strings_minimal",
+        "tempo": "medium_75bpm",
+        "mood": "vast_open_world"
+      },
+      "linked_dialogue": "Dialogue_HerdPath_001",
+      "linked_voice": ["VA_TribeElder_HerdWarning"]
+    },
+    {
+      "label": "AudioZone_StoneCache_001",
+      "map_location": {"x": -2800, "y": -1200, "z": 100},
+      "attenuation_radius": 600,
+      "biome": "Rocky_Outcrop",
+      "soundscape": {
+        "primary": "wind_through_rocks_loop",
+        "secondary": "distant_echo_occasional",
+        "tertiary": "stone_click_ambient",
+        "mood_note": "Near silence — emphasises isolation and focus for crafting"
+      },
+      "music_layer": {
+        "style": "percussive_stone_clicks_minimal",
+        "tempo": "sparse_50bpm",
+        "mood": "crafting_focus_solitude"
+      },
+      "linked_dialogue": "Dialogue_StoneCache_001",
+      "linked_voice": ["VA_Craftsman_StoneToolAdvice"]
+    }
+  ],
+
+  "danger_audio_system": {
+    "trex_proximity": {
+      "trigger_radius": 600,
+      "voice_sting": "VA_Narrator_TRexProximity",
+      "voice_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771634713_Narrator_TRexProximity.mp3",
+      "ground_shake": {
+        "enabled": true,
+        "camera_shake_intensity": 0.4,
+        "frequency_hz": 1.2,
+        "duration_s": 0.8
+      },
+      "music_response": "cut_to_silence_then_danger_sting",
+      "heartbeat": {
+        "enabled": true,
+        "bpm_start": 80,
+        "bpm_max": 160,
+        "ramp_over_seconds": 4
+      }
+    },
+    "raptor_pack": {
+      "trigger_radius": 400,
+      "escalation_stages": 3,
+      "stage_1": {"radius": 400, "sound": "raptor_distant", "music": "tension_low"},
+      "stage_2": {"radius": 250, "sound": "raptor_growl", "music": "tension_high"},
+      "stage_3": {"radius": 100, "sound": "raptor_attack_screech", "music": "combat_full"}
+    }
+  },
+
+  "freesound_assets": [
+    {
+      "id": 688994,
+      "name": "Campfire On The Shores St. Marys River",
+      "tags": ["campfire", "crickets", "crackling", "ambience"],
+      "preview_url": "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3",
+      "use": "AudioZone_Campfire_001 primary layer"
+    },
+    {
+      "id": 501731,
+      "name": "Summer Night With Fireworks — footsteps, cicadas, campfire",
+      "tags": ["cicadas", "fire", "footsteps", "frogs", "ASMR"],
+      "preview_url": "https://cdn.freesound.org/previews/501/501731_9573665-hq.mp3",
+      "use": "AudioZone_Riverbank_001 secondary layer — frogs/cicadas"
+    }
+  ],
+
+  "map_actors_placed": [
+    "AudioZone_Campfire_001",
+    "AudioZone_RaptorValley_001",
+    "AudioZone_Riverbank_001",
+    "AudioZone_HerdPath_001",
+    "AudioZone_StoneCache_001"
+  ],
+
+  "next_agent_handoff": {
+    "agent": "#17 VFX Agent",
+    "priority_tasks": [
+      "Add particle dust/dirt effect when T-Rex footstep audio triggers (sync with ground_shake)",
+      "Campfire particle system at AudioZone_Campfire_001 location (400, 600, 100)",
+      "Raptor breath/steam particles at AudioZone_RaptorValley_001 for stage 3 proximity",
+      "River water splash particles at AudioZone_Riverbank_001",
+      "Screen vignette red flash on raptor attack screech (stage 3)"
+    ]
+  }
+}

@@ -1,81 +1,110 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "../SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_BiomeManager.generated.h"
 
-/**
- * Engine Architect - Core Biome Management System
- * Manages the 5 biomes: Swamp, Forest, Savanna, Desert, Mountain
- * Provides biome detection, weather control, and spawn validation
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeData
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::Savana;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector Center = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D BoundsMin = FVector2D::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D BoundsMax = FVector2D::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Temperature = 25.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Humidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float WindStrength = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<TSubclassOf<class AActor>> AllowedVegetation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<TSubclassOf<class APawn>> AllowedDinosaurs;
+
+    FEng_BiomeData()
+    {
+        BiomeType = EBiomeType::Savana;
+        Center = FVector::ZeroVector;
+        BoundsMin = FVector2D(-10000, -10000);
+        BoundsMax = FVector2D(10000, 10000);
+        Temperature = 25.0f;
+        Humidity = 0.5f;
+        WindStrength = 0.3f;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
+{
+    GENERATED_BODY()
 
 public:
-	AEng_BiomeManager();
+    UEng_BiomeManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FEng_BiomeData GetBiomeData(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    bool IsLocationInBiome(const FVector& WorldLocation, EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    TArray<EBiomeType> GetAllBiomeTypes() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FVector GetBiomeCenter(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    void InitializeBiomes();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome System")
+    void ValidateBiomeSetup();
 
 protected:
-	virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System")
+    TMap<EBiomeType, FEng_BiomeData> BiomeDataMap;
 
-public:
-	virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System")
+    float BiomeTransitionDistance = 5000.0f;
 
-	// Biome Detection
-	UFUNCTION(BlueprintCallable, Category = "Biome System")
-	EBiomeType GetBiomeAtLocation(const FVector& Location) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Biome System")
-	bool IsValidSpawnLocationForBiome(const FVector& Location, EBiomeType RequiredBiome) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Biome System")
-	FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
-
-	// Weather Control
-	UFUNCTION(BlueprintCallable, Category = "Weather")
-	void SetWeatherForBiome(EBiomeType BiomeType, EWeatherType WeatherType);
-
-	UFUNCTION(BlueprintCallable, Category = "Weather")
-	EWeatherType GetCurrentWeather(EBiomeType BiomeType) const;
-
-	// Biome Properties
-	UFUNCTION(BlueprintCallable, Category = "Biome System")
-	float GetBiomeTemperature(EBiomeType BiomeType) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Biome System")
-	float GetBiomeHumidity(EBiomeType BiomeType) const;
-
-protected:
-	// Biome Configuration
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Configuration")
-	TMap<EBiomeType, FBiomeData> BiomeSettings;
-
-	// Current Weather States
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weather State")
-	TMap<EBiomeType, EWeatherType> CurrentWeatherStates;
-
-	// Biome Boundaries (hardcoded for performance)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Biome Boundaries")
-	TMap<EBiomeType, FBox> BiomeBoundaries;
-
-	// Weather Update Timer
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-	float WeatherUpdateInterval;
-
-	UPROPERTY()
-	float WeatherUpdateTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome System")
+    bool bDebugBiomes = false;
 
 private:
-	// Initialize biome boundaries based on map coordinates
-	void InitializeBiomeBoundaries();
-
-	// Update weather systems
-	void UpdateWeatherSystems(float DeltaTime);
-
-	// Validate biome data
-	bool ValidateBiomeConfiguration() const;
+    void SetupDefaultBiomes();
+    float CalculateDistanceToBiome(const FVector& WorldLocation, const FEng_BiomeData& BiomeData) const;
 };
+
+#include "Eng_BiomeManager.generated.h"

@@ -1,265 +1,131 @@
 #include "Combat_DamageSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/TriggerSphere.h"
-#include "../Characters/TranspersonalCharacter.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Check damage every 100ms
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
-    // Default damage values
-    BaseDamagePerSecond = 10.0f;
-    DamageRadius = 300.0f;
-    bIsActive = true;
-    bCanDealDamage = true;
+    MaxHealth = 100.0f;
+    CurrentHealth = MaxHealth;
+    DamageResistance = 0.0f;
+    bCanTakeDamage = true;
+    InvulnerabilityDuration = 0.5f;
+    LastDamageTime = -1.0f;
     
-    // Damage scaling by dinosaur type
-    TRexDamageMultiplier = 3.0f;
-    RaptorDamageMultiplier = 1.5f;
-    BrachiosaurusDamageMultiplier = 0.5f; // Herbivore, less aggressive
-    
-    LastDamageTime = 0.0f;
-    DamageCooldown = 1.0f; // 1 second between damage applications
+    // Initialize damage type resistances
+    DamageTypeResistances.Add(EDamageType::Physical, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Fire, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Ice, 0.0f);
+    DamageTypeResistances.Add(EDamageType::Poison, 0.0f);
 }
 
 void UCombat_DamageSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize damage system
-    SetupDamageTrigger();
-    
-    // Determine dinosaur type from owner name
-    if (AActor* Owner = GetOwner())
-    {
-        FString OwnerName = Owner->GetName().ToLower();
-        
-        if (OwnerName.Contains(TEXT("rex")))
-        {
-            DinosaurType = ECombat_DinosaurType::TRex;
-            DamageRadius = 500.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * TRexDamageMultiplier;
-        }
-        else if (OwnerName.Contains(TEXT("raptor")))
-        {
-            DinosaurType = ECombat_DinosaurType::Raptor;
-            DamageRadius = 300.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * RaptorDamageMultiplier;
-        }
-        else if (OwnerName.Contains(TEXT("brachio")))
-        {
-            DinosaurType = ECombat_DinosaurType::Brachiosaurus;
-            DamageRadius = 400.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * BrachiosaurusDamageMultiplier;
-        }
-        else
-        {
-            DinosaurType = ECombat_DinosaurType::Generic;
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Initialized for %s with damage %.1f"), 
-               *Owner->GetName(), BaseDamagePerSecond);
-    }
+    CurrentHealth = MaxHealth;
+    LastDamageTime = -1.0f;
 }
 
 void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bIsActive || !bCanDealDamage)
+    // Update invulnerability state
+    if (LastDamageTime >= 0.0f)
     {
-        return;
-    }
-    
-    // Check for nearby players and apply damage
-    CheckAndApplyDamage(DeltaTime);
-}
-
-void UCombat_DamageSystem::SetupDamageTrigger()
-{
-    if (!GetOwner())
-    {
-        return;
-    }
-    
-    // Create a sphere trigger component for damage detection
-    DamageTrigger = NewObject<USphereComponent>(GetOwner(), TEXT("DamageTrigger"));
-    if (DamageTrigger)
-    {
-        DamageTrigger->SetSphereRadius(DamageRadius);
-        DamageTrigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        DamageTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
-        DamageTrigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-        
-        // Attach to owner's root component
-        if (USceneComponent* RootComp = GetOwner()->GetRootComponent())
+        float TimeSinceLastDamage = GetWorld()->GetTimeSeconds() - LastDamageTime;
+        if (TimeSinceLastDamage >= InvulnerabilityDuration)
         {
-            DamageTrigger->AttachToComponent(RootComp, FAttachmentTransformRules::KeepWorldTransform);
-        }
-        
-        // Bind overlap events
-        DamageTrigger->OnComponentBeginOverlap.AddDynamic(this, &UCombat_DamageSystem::OnDamageTriggerBeginOverlap);
-        DamageTrigger->OnComponentEndOverlap.AddDynamic(this, &UCombat_DamageSystem::OnDamageTriggerEndOverlap);
-        
-        UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage trigger created with radius %.1f"), DamageRadius);
-    }
-}
-
-void UCombat_DamageSystem::CheckAndApplyDamage(float DeltaTime)
-{
-    if (!GetOwner() || !GetWorld())
-    {
-        return;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check cooldown
-    if (CurrentTime - LastDamageTime < DamageCooldown)
-    {
-        return;
-    }
-    
-    // Find all players within damage radius
-    TArray<AActor*> OverlappingActors;
-    if (DamageTrigger)
-    {
-        DamageTrigger->GetOverlappingActors(OverlappingActors, ATranspersonalCharacter::StaticClass());
-    }
-    
-    for (AActor* Actor : OverlappingActors)
-    {
-        if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(Actor))
-        {
-            ApplyDamageToPlayer(Player, DeltaTime);
-            LastDamageTime = CurrentTime;
+            bCanTakeDamage = true;
         }
     }
 }
 
-void UCombat_DamageSystem::ApplyDamageToPlayer(ATranspersonalCharacter* Player, float DeltaTime)
+void UCombat_DamageSystem::ApplyDamage(const FCombat_DamageData& DamageData)
 {
-    if (!Player || !GetOwner())
+    if (!bCanTakeDamage || CurrentHealth <= 0.0f)
     {
         return;
     }
     
-    // Calculate distance-based damage
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    float DamageMultiplier = FMath::Clamp(1.0f - (Distance / DamageRadius), 0.1f, 1.0f);
+    float FinalDamage = CalculateFinalDamage(DamageData.DamageAmount, DamageData.DamageType);
     
-    float FinalDamage = BaseDamagePerSecond * DamageMultiplier * DamageCooldown;
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - FinalDamage);
+    LastDamageTime = GetWorld()->GetTimeSeconds();
+    bCanTakeDamage = false;
     
-    // Apply damage
-    Player->TakeDamage(FinalDamage, FDamageEvent(), nullptr, GetOwner());
+    // Fire damage taken event
+    OnDamageTaken(DamageData);
     
-    // Increase fear based on dinosaur type
-    float FearIncrease = 0.0f;
-    switch (DinosaurType)
+    // Check for death
+    if (CurrentHealth <= 0.0f)
     {
-        case ECombat_DinosaurType::TRex:
-            FearIncrease = 25.0f;
-            break;
-        case ECombat_DinosaurType::Raptor:
-            FearIncrease = 15.0f;
-            break;
-        case ECombat_DinosaurType::Brachiosaurus:
-            FearIncrease = 5.0f;
-            break;
-        default:
-            FearIncrease = 10.0f;
-            break;
+        HandleDeath(DamageData.DamageInstigator);
     }
     
-    // Apply fear (assuming TranspersonalCharacter has fear system)
-    // Player->ModifyFear(FearIncrease);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Applied %.1f damage to %s (distance: %.1f)"), 
-           FinalDamage, *Player->GetName(), Distance);
-    
-    // Broadcast damage event
-    OnDamageApplied.Broadcast(Player, FinalDamage, GetOwner());
+    UE_LOG(LogTemp, Log, TEXT("Damage Applied: %.1f (Final: %.1f) to %s. Health: %.1f/%.1f"), 
+           DamageData.DamageAmount, FinalDamage, 
+           *GetOwner()->GetName(), CurrentHealth, MaxHealth);
 }
 
-void UCombat_DamageSystem::OnDamageTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void UCombat_DamageSystem::ApplyDamageToTarget(AActor* Target, float Damage, EDamageType DamageType, AActor* Instigator)
 {
-    if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(OtherActor))
+    if (!Target)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Player entered danger zone of %s"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+        return;
+    }
+    
+    UCombat_DamageSystem* TargetDamageSystem = Target->FindComponentByClass<UCombat_DamageSystem>();
+    if (TargetDamageSystem)
+    {
+        FCombat_DamageData DamageData;
+        DamageData.DamageAmount = Damage;
+        DamageData.DamageType = DamageType;
+        DamageData.ImpactLocation = Target->GetActorLocation();
+        DamageData.ImpactDirection = (Target->GetActorLocation() - Instigator->GetActorLocation()).GetSafeNormal();
+        DamageData.DamageInstigator = Instigator;
         
-        // Broadcast player entered danger zone
-        OnPlayerEnteredDangerZone.Broadcast(Player, GetOwner());
+        TargetDamageSystem->ApplyDamage(DamageData);
     }
 }
 
-void UCombat_DamageSystem::OnDamageTriggerEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void UCombat_DamageSystem::HandleDeath(AActor* Killer)
 {
-    if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(OtherActor))
+    UE_LOG(LogTemp, Warning, TEXT("%s has died! Killed by: %s"), 
+           *GetOwner()->GetName(), 
+           Killer ? *Killer->GetName() : TEXT("Unknown"));
+    
+    // Fire death event
+    OnDeath(Killer);
+    
+    // Disable further damage
+    bCanTakeDamage = false;
+    
+    // Optional: Destroy actor after delay or handle respawn
+    if (GetOwner())
     {
-        UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Player left danger zone of %s"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-        
-        // Broadcast player left danger zone
-        OnPlayerLeftDangerZone.Broadcast(Player, GetOwner());
+        GetOwner()->SetActorEnableCollision(false);
+        GetOwner()->SetActorHiddenInGame(true);
     }
 }
 
-void UCombat_DamageSystem::SetDamageActive(bool bActive)
+float UCombat_DamageSystem::CalculateFinalDamage(float BaseDamage, EDamageType DamageType)
 {
-    bIsActive = bActive;
-    bCanDealDamage = bActive;
+    float FinalDamage = BaseDamage;
     
-    if (DamageTrigger)
+    // Apply general damage resistance
+    FinalDamage *= (1.0f - FMath::Clamp(DamageResistance, 0.0f, 0.95f));
+    
+    // Apply damage type specific resistance
+    if (DamageTypeResistances.Contains(DamageType))
     {
-        DamageTrigger->SetCollisionEnabled(bActive ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+        float TypeResistance = DamageTypeResistances[DamageType];
+        FinalDamage *= (1.0f - FMath::Clamp(TypeResistance, 0.0f, 0.95f));
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage system %s"), 
-           bActive ? TEXT("activated") : TEXT("deactivated"));
-}
-
-void UCombat_DamageSystem::SetDamageRadius(float NewRadius)
-{
-    DamageRadius = FMath::Clamp(NewRadius, 50.0f, 1000.0f);
-    
-    if (DamageTrigger)
-    {
-        DamageTrigger->SetSphereRadius(DamageRadius);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage radius set to %.1f"), DamageRadius);
-}
-
-void UCombat_DamageSystem::SetBaseDamage(float NewDamage)
-{
-    BaseDamagePerSecond = FMath::Clamp(NewDamage, 1.0f, 100.0f);
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Base damage set to %.1f"), BaseDamagePerSecond);
-}
-
-float UCombat_DamageSystem::GetDamageRadius() const
-{
-    return DamageRadius;
-}
-
-float UCombat_DamageSystem::GetBaseDamage() const
-{
-    return BaseDamagePerSecond;
-}
-
-bool UCombat_DamageSystem::IsPlayerInDangerZone(ATranspersonalCharacter* Player) const
-{
-    if (!Player || !GetOwner())
-    {
-        return false;
-    }
-    
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    return Distance <= DamageRadius;
+    return FMath::Max(1.0f, FinalDamage); // Minimum 1 damage
 }

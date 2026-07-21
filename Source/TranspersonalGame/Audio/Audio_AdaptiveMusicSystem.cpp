@@ -1,293 +1,431 @@
 #include "Audio_AdaptiveMusicSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
+#include "Kismet/GameplayStatics.h"
 
-UAudio_AdaptiveMusicComponent::UAudio_AdaptiveMusicComponent()
+UAudio_AdaptiveMusicSystem::UAudio_AdaptiveMusicSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    
-    CurrentBiome = EAudio_BiomeType::Forest;
-    CurrentMusicLayer = EAudio_MusicLayer::Ambient;
-    CurrentThreatLevel = 0.0f;
-    LayerTransitionSpeed = 1.0f;
-    ThreatDecayRate = 0.1f;
+    PrimaryComponentTick.TickInterval = 0.5f; // Update every 0.5 seconds
+
+    // Initialize state
+    CurrentMusicState = EAudio_MusicState::Calm;
+    CurrentBiomeType = EAudio_BiomeType::Forest;
+    TensionLevel = 0.0f;
+    bIsStorytellingActive = false;
+    bIsNightTime = false;
+    bIsFading = false;
+    CurrentFadeTime = 0.0f;
+
+    // Audio settings
+    MasterVolume = 1.0f;
+    MusicVolume = 0.7f;
+    StorytellingVolume = 0.9f;
+    TensionThreshold = 0.5f;
+    DinosaurProximityThreshold = 1000.0f;
+
+    // Create audio components
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    StorytellingAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("StorytellingAudioComponent"));
 }
 
-void UAudio_AdaptiveMusicComponent::BeginPlay()
+void UAudio_AdaptiveMusicSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeBiomeProfiles();
+    InitializeAudioComponents();
+    LoadDefaultMusicTracks();
     
-    // Registar com o subsystem global
-    if (UAudio_AdaptiveMusicSubsystem* MusicSubsystem = GetWorld()->GetSubsystem<UAudio_AdaptiveMusicSubsystem>())
+    // Start with calm forest music
+    SetMusicState(EAudio_MusicState::Calm);
+    SetBiomeType(EAudio_BiomeType::Forest);
+    
+    // Setup tension decay timer
+    if (UWorld* World = GetWorld())
     {
-        MusicSubsystem->RegisterMusicComponent(this);
+        World->GetTimerManager().SetTimer(
+            TensionDecayTimerHandle,
+            this,
+            &UAudio_AdaptiveMusicSystem::DecayTensionOverTime,
+            5.0f, // Every 5 seconds
+            true
+        );
     }
     
-    // Iniciar com música ambiente
-    TransitionToLayer(EAudio_MusicLayer::Ambient);
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Initialized with %d music tracks"), MusicTracks.Num());
 }
 
-void UAudio_AdaptiveMusicComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAudio_AdaptiveMusicSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    UpdateMusicIntensity(DeltaTime);
-}
-
-void UAudio_AdaptiveMusicComponent::InitializeBiomeProfiles()
-{
-    // Forest Biome Profile
-    FAudio_BiomeMusicProfile ForestProfile;
-    ForestProfile.BiomeType = EAudio_BiomeType::Forest;
-    ForestProfile.BaseIntensity = 0.3f;
-    ForestProfile.ThreatMultiplier = 1.8f;
-    
-    // Swamp Biome Profile
-    FAudio_BiomeMusicProfile SwampProfile;
-    SwampProfile.BiomeType = EAudio_BiomeType::Swamp;
-    SwampProfile.BaseIntensity = 0.4f;
-    SwampProfile.ThreatMultiplier = 2.2f;
-    
-    // Savanna Biome Profile
-    FAudio_BiomeMusicProfile SavannaProfile;
-    SavannaProfile.BiomeType = EAudio_BiomeType::Savanna;
-    SavannaProfile.BaseIntensity = 0.2f;
-    SavannaProfile.ThreatMultiplier = 1.5f;
-    
-    // Desert Biome Profile
-    FAudio_BiomeMusicProfile DesertProfile;
-    DesertProfile.BiomeType = EAudio_BiomeType::Desert;
-    DesertProfile.BaseIntensity = 0.1f;
-    DesertProfile.ThreatMultiplier = 2.5f;
-    
-    // Mountain Biome Profile
-    FAudio_BiomeMusicProfile MountainProfile;
-    MountainProfile.BiomeType = EAudio_BiomeType::Mountain;
-    MountainProfile.BaseIntensity = 0.25f;
-    MountainProfile.ThreatMultiplier = 2.0f;
-    
-    BiomeProfiles.Add(EAudio_BiomeType::Forest, ForestProfile);
-    BiomeProfiles.Add(EAudio_BiomeType::Swamp, SwampProfile);
-    BiomeProfiles.Add(EAudio_BiomeType::Savanna, SavannaProfile);
-    BiomeProfiles.Add(EAudio_BiomeType::Desert, DesertProfile);
-    BiomeProfiles.Add(EAudio_BiomeType::Mountain, MountainProfile);
-}
-
-void UAudio_AdaptiveMusicComponent::SetBiome(EAudio_BiomeType NewBiome)
-{
-    if (CurrentBiome != NewBiome)
+    // Handle fade transitions
+    if (bIsFading && MusicAudioComponent)
     {
-        CurrentBiome = NewBiome;
+        CurrentFadeTime += DeltaTime;
+        // Fade logic would be implemented here with more complex audio mixing
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::SetMusicState(EAudio_MusicState NewState)
+{
+    if (CurrentMusicState != NewState)
+    {
+        EAudio_MusicState PreviousState = CurrentMusicState;
+        CurrentMusicState = NewState;
         
-        // Recalcular layer baseado no novo bioma
-        EAudio_MusicLayer TargetLayer = CalculateTargetLayer();
-        TransitionToLayer(TargetLayer);
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Music state changed from %d to %d"), 
+               (int32)PreviousState, (int32)NewState);
         
-        UE_LOG(LogTemp, Log, TEXT("Music system changed to biome: %d"), (int32)NewBiome);
+        UpdateMusicBasedOnState();
     }
 }
 
-void UAudio_AdaptiveMusicComponent::SetThreatLevel(float ThreatLevel)
+void UAudio_AdaptiveMusicSystem::SetBiomeType(EAudio_BiomeType NewBiome)
 {
-    CurrentThreatLevel = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
-    
-    // Calcular layer apropriado baseado no threat level
-    EAudio_MusicLayer TargetLayer = CalculateTargetLayer();
-    
-    if (TargetLayer != CurrentMusicLayer)
+    if (CurrentBiomeType != NewBiome)
     {
-        TransitionToLayer(TargetLayer);
+        EAudio_BiomeType PreviousBiome = CurrentBiomeType;
+        CurrentBiomeType = NewBiome;
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Biome changed from %d to %d"), 
+               (int32)PreviousBiome, (int32)NewBiome);
+        
+        UpdateMusicBasedOnState();
     }
 }
 
-EAudio_MusicLayer UAudio_AdaptiveMusicComponent::CalculateTargetLayer()
+void UAudio_AdaptiveMusicSystem::PlayStorytellingAudio(const FAudio_StorytellingAudioData& AudioData)
 {
-    if (!BiomeProfiles.Contains(CurrentBiome))
+    if (!StorytellingAudioComponent)
     {
-        return EAudio_MusicLayer::Ambient;
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicSystem: StorytellingAudioComponent is null"));
+        return;
     }
     
-    const FAudio_BiomeMusicProfile& Profile = BiomeProfiles[CurrentBiome];
-    float AdjustedThreat = CurrentThreatLevel * Profile.ThreatMultiplier;
+    // Stop any current storytelling
+    StopStorytellingAudio();
     
-    if (AdjustedThreat >= 0.8f)
+    bIsStorytellingActive = true;
+    
+    // Lower music volume during storytelling
+    if (MusicAudioComponent)
     {
-        return EAudio_MusicLayer::Combat;
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * 0.3f);
     }
-    else if (AdjustedThreat >= 0.6f)
+    
+    // Note: In a full implementation, we would load the audio from the URL
+    // For now, we simulate the storytelling duration
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Playing storytelling audio for %s (Duration: %.1fs)"), 
+           *AudioData.CharacterName, AudioData.Duration);
+    
+    // Set timer to finish storytelling
+    if (UWorld* World = GetWorld())
     {
-        return EAudio_MusicLayer::Danger;
+        World->GetTimerManager().SetTimer(
+            StorytellingTimerHandle,
+            this,
+            &UAudio_AdaptiveMusicSystem::OnStorytellingFinished,
+            AudioData.Duration,
+            false
+        );
     }
-    else if (AdjustedThreat >= 0.3f)
+}
+
+void UAudio_AdaptiveMusicSystem::StopStorytellingAudio()
+{
+    if (bIsStorytellingActive)
     {
-        return EAudio_MusicLayer::Tension;
+        bIsStorytellingActive = false;
+        
+        if (StorytellingAudioComponent && StorytellingAudioComponent->IsPlaying())
+        {
+            StorytellingAudioComponent->Stop();
+        }
+        
+        // Restore music volume
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+        }
+        
+        // Clear timer
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(StorytellingTimerHandle);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Storytelling audio stopped"));
     }
-    else if (AdjustedThreat >= 0.1f)
+}
+
+void UAudio_AdaptiveMusicSystem::SetMasterVolume(float Volume)
+{
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (MusicAudioComponent)
     {
-        return EAudio_MusicLayer::Exploration;
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+    }
+    
+    if (StorytellingAudioComponent)
+    {
+        StorytellingAudioComponent->SetVolumeMultiplier(StorytellingVolume * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Master volume set to %.2f"), MasterVolume);
+}
+
+void UAudio_AdaptiveMusicSystem::FadeToTrack(const FAudio_MusicTrack& NewTrack, float FadeTime)
+{
+    if (!MusicAudioComponent)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Fading to track '%s' over %.1f seconds"), 
+           *NewTrack.TrackName, FadeTime);
+    
+    StartFadeTransition(NewTrack, FadeTime);
+}
+
+void UAudio_AdaptiveMusicSystem::IncreaseTension(float Amount)
+{
+    TensionLevel = FMath::Clamp(TensionLevel + Amount, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension increased to %.2f"), TensionLevel);
+    
+    // Check if we need to transition to tension/combat music
+    if (TensionLevel >= TensionThreshold)
+    {
+        if (CurrentMusicState == EAudio_MusicState::Calm || CurrentMusicState == EAudio_MusicState::Exploration)
+        {
+            SetMusicState(EAudio_MusicState::Tension);
+        }
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::DecreaseTension(float Amount)
+{
+    TensionLevel = FMath::Clamp(TensionLevel - Amount, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension decreased to %.2f"), TensionLevel);
+    
+    // Check if we can return to calm music
+    if (TensionLevel < TensionThreshold * 0.5f)
+    {
+        if (CurrentMusicState == EAudio_MusicState::Tension)
+        {
+            SetMusicState(EAudio_MusicState::Calm);
+        }
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::ResetTension()
+{
+    TensionLevel = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Tension reset to 0"));
+    
+    if (CurrentMusicState == EAudio_MusicState::Tension || CurrentMusicState == EAudio_MusicState::Combat)
+    {
+        SetMusicState(EAudio_MusicState::Calm);
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::OnDayNightTransition(bool bIsNight)
+{
+    bIsNightTime = bIsNight;
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Day/Night transition - IsNight: %s"), 
+           bIsNight ? TEXT("true") : TEXT("false"));
+    
+    // Transition to appropriate music
+    if (bIsNight)
+    {
+        SetMusicState(EAudio_MusicState::Night);
     }
     else
     {
-        return EAudio_MusicLayer::Ambient;
+        SetMusicState(EAudio_MusicState::Day);
     }
 }
 
-void UAudio_AdaptiveMusicComponent::TransitionToLayer(EAudio_MusicLayer NewLayer)
+void UAudio_AdaptiveMusicSystem::OnDinosaurProximity(float Distance, bool bIsPredator)
 {
-    if (CurrentMusicLayer == NewLayer)
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Dinosaur proximity - Distance: %.1f, IsPredator: %s"), 
+           Distance, bIsPredator ? TEXT("true") : TEXT("false"));
     
-    // Fade out current layer
-    if (ActiveAudioComponents.Contains(CurrentMusicLayer))
+    if (Distance < DinosaurProximityThreshold)
     {
-        UAudioComponent* CurrentAudio = ActiveAudioComponents[CurrentMusicLayer];
-        if (CurrentAudio && CurrentAudio->IsPlaying())
+        if (bIsPredator)
         {
-            FadeAudioComponent(CurrentAudio, 0.0f, 2.0f);
-        }
-    }
-    
-    // Fade in new layer
-    if (!ActiveAudioComponents.Contains(NewLayer))
-    {
-        CreateAudioComponentForLayer(NewLayer);
-    }
-    
-    if (ActiveAudioComponents.Contains(NewLayer))
-    {
-        UAudioComponent* NewAudio = ActiveAudioComponents[NewLayer];
-        if (NewAudio)
-        {
-            if (!NewAudio->IsPlaying())
+            // Immediate tension increase for predators
+            IncreaseTension(0.3f);
+            
+            if (Distance < DinosaurProximityThreshold * 0.5f)
             {
-                NewAudio->Play();
+                SetMusicState(EAudio_MusicState::Combat);
             }
-            FadeAudioComponent(NewAudio, 1.0f, 2.0f);
-        }
-    }
-    
-    CurrentMusicLayer = NewLayer;
-    UE_LOG(LogTemp, Log, TEXT("Music transitioned to layer: %d"), (int32)NewLayer);
-}
-
-void UAudio_AdaptiveMusicComponent::CreateAudioComponentForLayer(EAudio_MusicLayer Layer)
-{
-    if (!BiomeProfiles.Contains(CurrentBiome))
-    {
-        return;
-    }
-    
-    const FAudio_BiomeMusicProfile& Profile = BiomeProfiles[CurrentBiome];
-    
-    if (!Profile.MusicLayers.Contains(Layer))
-    {
-        return;
-    }
-    
-    const FAudio_MusicLayerData& LayerData = Profile.MusicLayers[Layer];
-    
-    if (!LayerData.SoundAsset)
-    {
-        return;
-    }
-    
-    UAudioComponent* AudioComp = UGameplayStatics::CreateSound2D(GetWorld(), LayerData.SoundAsset);
-    if (AudioComp)
-    {
-        AudioComp->SetVolumeMultiplier(0.0f); // Start muted for fade in
-        AudioComp->bIsUISound = false;
-        AudioComp->bAutoDestroy = false;
-        
-        ActiveAudioComponents.Add(Layer, AudioComp);
-    }
-}
-
-void UAudio_AdaptiveMusicComponent::FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float FadeTime)
-{
-    if (!AudioComp)
-    {
-        return;
-    }
-    
-    // Simple fade implementation - in production would use timeline or tween
-    float CurrentVolume = AudioComp->VolumeMultiplier;
-    float VolumeStep = (TargetVolume - CurrentVolume) / (FadeTime * 60.0f); // Assuming 60 FPS
-    
-    // Store fade parameters for tick update
-    // For now, set directly - would implement proper fade in production
-    AudioComp->SetVolumeMultiplier(TargetVolume);
-    
-    if (TargetVolume <= 0.0f)
-    {
-        // Schedule stop after fade
-        FTimerHandle StopTimer;
-        GetWorld()->GetTimerManager().SetTimer(StopTimer, [AudioComp]()
-        {
-            if (AudioComp)
+            else
             {
-                AudioComp->Stop();
+                SetMusicState(EAudio_MusicState::Tension);
             }
-        }, FadeTime, false);
-    }
-}
-
-void UAudio_AdaptiveMusicComponent::UpdateMusicIntensity(float DeltaTime)
-{
-    // Decay threat level over time
-    if (CurrentThreatLevel > 0.0f)
-    {
-        CurrentThreatLevel = FMath::Max(0.0f, CurrentThreatLevel - (ThreatDecayRate * DeltaTime));
-        
-        // Check if we need to transition to a lower intensity layer
-        EAudio_MusicLayer TargetLayer = CalculateTargetLayer();
-        if (TargetLayer != CurrentMusicLayer)
+        }
+        else
         {
-            TransitionToLayer(TargetLayer);
+            // Gentle tension increase for herbivores
+            IncreaseTension(0.1f);
         }
     }
 }
 
-// Subsystem Implementation
-void UAudio_AdaptiveMusicSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UAudio_AdaptiveMusicSystem::OnDinosaurLeft()
 {
-    Super::Initialize(Collection);
-    GlobalMusicComponent = nullptr;
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Dinosaur left area"));
+    
+    // Gradual tension decrease
+    DecreaseTension(0.2f);
 }
 
-void UAudio_AdaptiveMusicSubsystem::Deinitialize()
+void UAudio_AdaptiveMusicSystem::UpdateMusicBasedOnState()
 {
-    GlobalMusicComponent = nullptr;
-    Super::Deinitialize();
-}
-
-void UAudio_AdaptiveMusicSubsystem::RegisterMusicComponent(UAudio_AdaptiveMusicComponent* MusicComponent)
-{
-    if (MusicComponent)
+    FAudio_MusicTrack* BestTrack = FindBestTrackForCurrentState();
+    
+    if (BestTrack)
     {
-        GlobalMusicComponent = MusicComponent;
-        UE_LOG(LogTemp, Log, TEXT("Global music component registered"));
+        FadeToTrack(*BestTrack, BestTrack->FadeInTime);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AdaptiveMusicSystem: No suitable track found for current state"));
     }
 }
 
-void UAudio_AdaptiveMusicSubsystem::SetGlobalThreatLevel(float ThreatLevel)
+FAudio_MusicTrack* UAudio_AdaptiveMusicSystem::FindBestTrackForCurrentState()
 {
-    if (GlobalMusicComponent)
+    // Find tracks that match current state and biome
+    for (FAudio_MusicTrack& Track : MusicTracks)
     {
-        GlobalMusicComponent->SetThreatLevel(ThreatLevel);
+        if (Track.MusicState == CurrentMusicState && Track.BiomeType == CurrentBiomeType)
+        {
+            return &Track;
+        }
+    }
+    
+    // Fallback: find tracks that match just the state
+    for (FAudio_MusicTrack& Track : MusicTracks)
+    {
+        if (Track.MusicState == CurrentMusicState)
+        {
+            return &Track;
+        }
+    }
+    
+    // Last resort: return first track if any exist
+    if (MusicTracks.Num() > 0)
+    {
+        return &MusicTracks[0];
+    }
+    
+    return nullptr;
+}
+
+void UAudio_AdaptiveMusicSystem::StartFadeTransition(const FAudio_MusicTrack& NewTrack, float FadeTime)
+{
+    bIsFading = true;
+    CurrentFadeTime = 0.0f;
+    
+    // In a full implementation, this would handle complex audio crossfading
+    // For now, we simulate the transition
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Starting fade transition to '%s'"), *NewTrack.TrackName);
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(NewTrack.Volume * MasterVolume);
+    }
+    
+    // Reset fade state after transition
+    if (UWorld* World = GetWorld())
+    {
+        FTimerHandle FadeTimerHandle;
+        World->GetTimerManager().SetTimer(
+            FadeTimerHandle,
+            [this]() { bIsFading = false; },
+            FadeTime,
+            false
+        );
     }
 }
 
-void UAudio_AdaptiveMusicSubsystem::SetGlobalBiome(EAudio_BiomeType Biome)
+void UAudio_AdaptiveMusicSystem::OnStorytellingFinished()
 {
-    if (GlobalMusicComponent)
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Storytelling finished"));
+    StopStorytellingAudio();
+}
+
+void UAudio_AdaptiveMusicSystem::DecayTensionOverTime()
+{
+    if (TensionLevel > 0.0f)
     {
-        GlobalMusicComponent->SetBiome(Biome);
+        DecreaseTension(0.05f); // Slowly decay tension over time
     }
+}
+
+void UAudio_AdaptiveMusicSystem::InitializeAudioComponents()
+{
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->bAutoActivate = true;
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+    }
+    
+    if (StorytellingAudioComponent)
+    {
+        StorytellingAudioComponent->bAutoActivate = false;
+        StorytellingAudioComponent->SetVolumeMultiplier(StorytellingVolume * MasterVolume);
+    }
+}
+
+void UAudio_AdaptiveMusicSystem::LoadDefaultMusicTracks()
+{
+    // Create default music tracks for different states and biomes
+    FAudio_MusicTrack CalmForestTrack;
+    CalmForestTrack.TrackName = TEXT("Calm Forest Ambience");
+    CalmForestTrack.MusicState = EAudio_MusicState::Calm;
+    CalmForestTrack.BiomeType = EAudio_BiomeType::Forest;
+    CalmForestTrack.Volume = 0.6f;
+    MusicTracks.Add(CalmForestTrack);
+    
+    FAudio_MusicTrack TensionTrack;
+    TensionTrack.TrackName = TEXT("Prehistoric Tension");
+    TensionTrack.MusicState = EAudio_MusicState::Tension;
+    TensionTrack.BiomeType = EAudio_BiomeType::Forest;
+    TensionTrack.Volume = 0.8f;
+    MusicTracks.Add(TensionTrack);
+    
+    FAudio_MusicTrack CombatTrack;
+    CombatTrack.TrackName = TEXT("Dinosaur Combat");
+    CombatTrack.MusicState = EAudio_MusicState::Combat;
+    CombatTrack.BiomeType = EAudio_BiomeType::Forest;
+    CombatTrack.Volume = 0.9f;
+    MusicTracks.Add(CombatTrack);
+    
+    FAudio_MusicTrack NightTrack;
+    NightTrack.TrackName = TEXT("Prehistoric Night");
+    NightTrack.MusicState = EAudio_MusicState::Night;
+    NightTrack.BiomeType = EAudio_BiomeType::Forest;
+    NightTrack.Volume = 0.5f;
+    MusicTracks.Add(NightTrack);
+    
+    FAudio_MusicTrack StorytellingTrack;
+    StorytellingTrack.TrackName = TEXT("Tribal Storytelling");
+    StorytellingTrack.MusicState = EAudio_MusicState::Storytelling;
+    StorytellingTrack.BiomeType = EAudio_BiomeType::Forest;
+    StorytellingTrack.Volume = 0.4f;
+    MusicTracks.Add(StorytellingTrack);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AdaptiveMusicSystem: Loaded %d default music tracks"), MusicTracks.Num());
 }

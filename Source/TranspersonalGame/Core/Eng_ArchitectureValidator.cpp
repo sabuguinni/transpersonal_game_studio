@@ -1,405 +1,246 @@
 #include "Eng_ArchitectureValidator.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/GameModeBase.h"
-#include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
+#include "Engine/Engine.h"
 #include "Misc/DateTime.h"
-#include "Stats/Stats.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/Paths.h"
 
 UEng_ArchitectureValidator::UEng_ArchitectureValidator()
 {
+    OverallStatus = EEng_ValidationStatus::Unknown;
+    TotalClassCount = 0;
     LastValidationTime = 0.0f;
+    
+    // Initialize known modules
+    KnownModules.Add(TEXT("TranspersonalGame"));
+    KnownModules.Add(TEXT("Engine"));
+    KnownModules.Add(TEXT("CoreUObject"));
+    KnownModules.Add(TEXT("UnrealEd"));
 }
 
 void UEng_ArchitectureValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Validator initialized"));
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureValidator: Initialized"));
     
-    // Run initial validation
-    ValidateArchitecture();
+    // Perform initial validation
+    ValidateAllModules();
 }
 
 void UEng_ArchitectureValidator::Deinitialize()
 {
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureValidator: Deinitializing"));
+    
     ValidationResults.Empty();
+    KnownModules.Empty();
     
     Super::Deinitialize();
 }
 
-bool UEng_ArchitectureValidator::ValidateArchitecture()
+bool UEng_ArchitectureValidator::ValidateAllModules()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURE VALIDATION STARTED ==="));
+    double StartTime = FPlatformTime::Seconds();
     
-    bool bOverallValid = true;
     ValidationResults.Empty();
+    TotalClassCount = 0;
+    OverallStatus = EEng_ValidationStatus::Valid;
     
-    // Update performance metrics first
-    UpdatePerformanceMetrics();
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureValidator: Starting full module validation"));
     
-    // 1. Validate lighting setup
-    bool bLightingValid = ValidateLightingSetup();
-    ValidationResults.Add(TEXT("Lighting"), bLightingValid);
-    bOverallValid &= bLightingValid;
-    
-    // 2. Validate world partitioning
-    bool bWorldValid = ValidateWorldPartitioning();
-    ValidationResults.Add(TEXT("WorldPartition"), bWorldValid);
-    bOverallValid &= bWorldValid;
-    
-    // 3. Validate character systems
-    bool bCharacterValid = ValidateCharacterSystems();
-    ValidationResults.Add(TEXT("Character"), bCharacterValid);
-    bOverallValid &= bCharacterValid;
-    
-    // 4. Validate dinosaur systems
-    bool bDinosaurValid = ValidateDinosaurSystems();
-    ValidationResults.Add(TEXT("Dinosaur"), bDinosaurValid);
-    bOverallValid &= bDinosaurValid;
-    
-    // 5. Validate module dependencies
-    bool bModulesValid = ValidateModuleDependencies();
-    ValidationResults.Add(TEXT("Modules"), bModulesValid);
-    bOverallValid &= bModulesValid;
-    
-    // 6. Validate performance constraints
-    bool bPerformanceValid = ValidatePerformanceConstraints();
-    ValidationResults.Add(TEXT("Performance"), bPerformanceValid);
-    bOverallValid &= bPerformanceValid;
-    
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Architecture validation complete: %s"), 
-           bOverallValid ? TEXT("PASS") : TEXT("FAIL"));
-    
-    return bOverallValid;
-}
-
-int32 UEng_ArchitectureValidator::CleanupDuplicateSystems()
-{
-    int32 CleanedCount = 0;
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    // Validate each known module
+    for (const FString& ModuleName : KnownModules)
     {
-        return 0;
-    }
-    
-    // Clean up duplicate lighting
-    CleanupDuplicateLighting();
-    
-    // Clean up duplicate managers
-    CleanupDuplicateManagers();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Cleaned up %d duplicate systems"), CleanedCount);
-    
-    return CleanedCount;
-}
-
-bool UEng_ArchitectureValidator::ValidateBiomeArchitecture()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check if biome manager exists and is properly configured
-    // This will be expanded when BiomeManager is implemented
-    
-    UE_LOG(LogTemp, Warning, TEXT("Biome architecture validation: PASS (placeholder)"));
-    return true;
-}
-
-bool UEng_ArchitectureValidator::ValidateModuleDependencies()
-{
-    // Check if core modules are loaded
-    bool bCoreLoaded = FModuleManager::Get().IsModuleLoaded("TranspersonalGame");
-    bool bEngineLoaded = FModuleManager::Get().IsModuleLoaded("Engine");
-    bool bCoreUObjectLoaded = FModuleManager::Get().IsModuleLoaded("CoreUObject");
-    
-    bool bAllLoaded = bCoreLoaded && bEngineLoaded && bCoreUObjectLoaded;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Module dependencies validation: %s"), 
-           bAllLoaded ? TEXT("PASS") : TEXT("FAIL"));
-    
-    if (!bAllLoaded)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Missing modules - Core: %s, Engine: %s, CoreUObject: %s"),
-               bCoreLoaded ? TEXT("OK") : TEXT("MISSING"),
-               bEngineLoaded ? TEXT("OK") : TEXT("MISSING"),
-               bCoreUObjectLoaded ? TEXT("OK") : TEXT("MISSING"));
-    }
-    
-    return bAllLoaded;
-}
-
-bool UEng_ArchitectureValidator::ValidatePerformanceConstraints()
-{
-    // Check frame rate target (60 FPS PC, 30 FPS console)
-    bool bFrameRateOK = CheckFrameRate();
-    
-    // Check memory usage
-    bool bMemoryOK = CheckMemoryUsage();
-    
-    // Check actor count limits
-    bool bActorCountOK = (CurrentMetrics.ActorCount < 10000); // Reasonable limit
-    
-    bool bPerformanceValid = bFrameRateOK && bMemoryOK && bActorCountOK;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Performance validation: %s (FPS: %.1f, Memory: %.1f MB, Actors: %d)"),
-           bPerformanceValid ? TEXT("PASS") : TEXT("FAIL"),
-           CurrentMetrics.FrameRate,
-           CurrentMetrics.MemoryUsageMB,
-           CurrentMetrics.ActorCount);
-    
-    return bPerformanceValid;
-}
-
-bool UEng_ArchitectureValidator::ValidateLightingSetup()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Count lighting actors
-    int32 DirectionalLightCount = 0;
-    int32 SkyAtmosphereCount = 0;
-    int32 SkyLightCount = 0;
-    int32 ExponentialHeightFogCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
+        FEng_ModuleValidationResult Result = ValidateModule(ModuleName);
+        ValidationResults.Add(Result);
+        TotalClassCount += Result.ClassCount;
         
-        FString ClassName = Actor->GetClass()->GetName();
-        
-        if (ClassName.Contains(TEXT("DirectionalLight")))
+        // Update overall status based on worst result
+        if (Result.Status == EEng_ValidationStatus::Failed || Result.Status == EEng_ValidationStatus::Critical)
         {
-            DirectionalLightCount++;
+            OverallStatus = EEng_ValidationStatus::Failed;
         }
-        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
+        else if (Result.Status == EEng_ValidationStatus::Warning && OverallStatus == EEng_ValidationStatus::Valid)
         {
-            SkyAtmosphereCount++;
-        }
-        else if (ClassName.Contains(TEXT("SkyLight")))
-        {
-            SkyLightCount++;
-        }
-        else if (ClassName.Contains(TEXT("ExponentialHeightFog")))
-        {
-            ExponentialHeightFogCount++;
+            OverallStatus = EEng_ValidationStatus::Warning;
         }
     }
     
-    // Should have exactly 1 of each lighting type
-    bool bLightingValid = (DirectionalLightCount == 1) && 
-                         (SkyAtmosphereCount == 1) && 
-                         (SkyLightCount == 1) && 
-                         (ExponentialHeightFogCount == 1);
+    // Validate shared types
+    ValidateSharedTypes();
     
-    UE_LOG(LogTemp, Warning, TEXT("Lighting validation: %s (Dir: %d, Sky: %d, SkyLight: %d, Fog: %d)"),
-           bLightingValid ? TEXT("PASS") : TEXT("FAIL"),
-           DirectionalLightCount, SkyAtmosphereCount, SkyLightCount, ExponentialHeightFogCount);
+    LastValidationTime = FPlatformTime::Seconds() - StartTime;
     
-    return bLightingValid;
+    LogValidationResults();
+    
+    return OverallStatus != EEng_ValidationStatus::Failed;
 }
 
-bool UEng_ArchitectureValidator::ValidateWorldPartitioning()
+FEng_ModuleValidationResult UEng_ArchitectureValidator::ValidateModule(const FString& ModuleName)
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
+    FEng_ModuleValidationResult Result;
+    Result.ModuleName = ModuleName;
+    Result.Status = EEng_ValidationStatus::Valid;
+    Result.ClassCount = 0;
     
-    // Check if world has proper bounds for our 157km x 153km map
-    FBox WorldBounds = World->GetWorldBounds();
+    double StartTime = FPlatformTime::Seconds();
     
-    // Expected bounds: X(-77500 to 79500), Y(-76500 to 76500)
-    bool bBoundsValid = (WorldBounds.GetSize().X > 150000.0f) && 
-                       (WorldBounds.GetSize().Y > 150000.0f);
+    // Validate module classes
+    ValidateModuleClasses(ModuleName, Result);
     
-    UE_LOG(LogTemp, Warning, TEXT("World partitioning validation: %s (Size: %.0f x %.0f)"),
-           bBoundsValid ? TEXT("PASS") : TEXT("FAIL"),
-           WorldBounds.GetSize().X, WorldBounds.GetSize().Y);
+    // Check header-cpp pairs
+    CheckHeaderCppPairs(ModuleName, Result);
     
-    return bBoundsValid;
+    Result.ValidationTime = FPlatformTime::Seconds() - StartTime;
+    
+    return Result;
 }
 
-bool UEng_ArchitectureValidator::ValidateCharacterSystems()
+bool UEng_ArchitectureValidator::CheckCompilationIntegrity()
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    // Check if all UCLASS types can be loaded
+    int32 LoadableClasses = 0;
+    int32 FailedClasses = 0;
+    
+    for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
     {
-        return false;
-    }
-    
-    // Check if TranspersonalCharacter class exists
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    bool bCharacterClassExists = (CharacterClass != nullptr);
-    
-    // Check if GameMode is properly set
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    bool bGameModeExists = (GameMode != nullptr);
-    
-    bool bCharacterValid = bCharacterClassExists && bGameModeExists;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Character systems validation: %s (Class: %s, GameMode: %s)"),
-           bCharacterValid ? TEXT("PASS") : TEXT("FAIL"),
-           bCharacterClassExists ? TEXT("OK") : TEXT("MISSING"),
-           bGameModeExists ? TEXT("OK") : TEXT("MISSING"));
-    
-    return bCharacterValid;
-}
-
-bool UEng_ArchitectureValidator::ValidateDinosaurSystems()
-{
-    // Placeholder for dinosaur system validation
-    // Will be expanded when dinosaur systems are implemented
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur systems validation: PASS (placeholder)"));
-    return true;
-}
-
-void UEng_ArchitectureValidator::CleanupDuplicateLighting()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Track first instance of each lighting type
-    AActor* FirstDirectionalLight = nullptr;
-    AActor* FirstSkyAtmosphere = nullptr;
-    AActor* FirstSkyLight = nullptr;
-    AActor* FirstExponentialHeightFog = nullptr;
-    
-    TArray<AActor*> ActorsToDestroy;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
-        FString ClassName = Actor->GetClass()->GetName();
-        
-        if (ClassName.Contains(TEXT("DirectionalLight")))
+        UClass* Class = *ClassIt;
+        if (Class && Class->GetPackage() && Class->GetPackage()->GetName().StartsWith(TEXT("/Script/TranspersonalGame")))
         {
-            if (!FirstDirectionalLight)
+            if (Class->IsValidLowLevel())
             {
-                FirstDirectionalLight = Actor;
+                LoadableClasses++;
             }
             else
             {
-                ActorsToDestroy.Add(Actor);
-            }
-        }
-        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
-        {
-            if (!FirstSkyAtmosphere)
-            {
-                FirstSkyAtmosphere = Actor;
-            }
-            else
-            {
-                ActorsToDestroy.Add(Actor);
-            }
-        }
-        else if (ClassName.Contains(TEXT("SkyLight")))
-        {
-            if (!FirstSkyLight)
-            {
-                FirstSkyLight = Actor;
-            }
-            else
-            {
-                ActorsToDestroy.Add(Actor);
-            }
-        }
-        else if (ClassName.Contains(TEXT("ExponentialHeightFog")))
-        {
-            if (!FirstExponentialHeightFog)
-            {
-                FirstExponentialHeightFog = Actor;
-            }
-            else
-            {
-                ActorsToDestroy.Add(Actor);
+                FailedClasses++;
+                UE_LOG(LogTemp, Warning, TEXT("ArchitectureValidator: Failed to validate class %s"), *Class->GetName());
             }
         }
     }
     
-    // Destroy duplicates
-    for (AActor* Actor : ActorsToDestroy)
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureValidator: Compilation integrity - %d loadable, %d failed"), LoadableClasses, FailedClasses);
+    
+    return FailedClasses == 0;
+}
+
+TArray<FString> UEng_ArchitectureValidator::GetMissingImplementations()
+{
+    TArray<FString> MissingImplementations;
+    
+    // This would typically scan the file system for .h files without corresponding .cpp files
+    // For now, we'll return a placeholder result
+    
+    FString ProjectDir = FPaths::ProjectDir();
+    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source/TranspersonalGame"));
+    
+    // Note: In a full implementation, this would scan the directory structure
+    // and check for .h files without corresponding .cpp files
+    
+    return MissingImplementations;
+}
+
+TArray<FString> UEng_ArchitectureValidator::GetConflictingTypes()
+{
+    TArray<FString> ConflictingTypes;
+    
+    // Check for duplicate type names across modules
+    TMap<FString, int32> TypeCounts;
+    
+    for (TObjectIterator<UStruct> StructIt; StructIt; ++StructIt)
     {
-        if (Actor)
+        UStruct* Struct = *StructIt;
+        if (Struct && Struct->GetPackage())
         {
-            UE_LOG(LogTemp, Warning, TEXT("Destroying duplicate lighting actor: %s"), 
-                   *Actor->GetClass()->GetName());
-            Actor->Destroy();
+            FString TypeName = Struct->GetName();
+            TypeCounts.FindOrAdd(TypeName)++;
         }
     }
     
-    if (ActorsToDestroy.Num() > 0)
+    // Find types with count > 1
+    for (const auto& TypePair : TypeCounts)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cleaned up %d duplicate lighting actors"), ActorsToDestroy.Num());
+        if (TypePair.Value > 1)
+        {
+            ConflictingTypes.Add(FString::Printf(TEXT("%s (found %d times)"), *TypePair.Key, TypePair.Value));
+        }
+    }
+    
+    return ConflictingTypes;
+}
+
+void UEng_ArchitectureValidator::ValidateModuleClasses(const FString& ModuleName, FEng_ModuleValidationResult& Result)
+{
+    FString PackagePrefix = FString::Printf(TEXT("/Script/%s"), *ModuleName);
+    
+    for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+    {
+        UClass* Class = *ClassIt;
+        if (Class && Class->GetPackage() && Class->GetPackage()->GetName().StartsWith(PackagePrefix))
+        {
+            Result.ClassCount++;
+            
+            // Validate class has proper UCLASS macro
+            if (!Class->HasAnyClassFlags(CLASS_Native))
+            {
+                Result.Status = EEng_ValidationStatus::Warning;
+                Result.ErrorMessage += FString::Printf(TEXT("Class %s missing native flag; "), *Class->GetName());
+            }
+            
+            // Check for proper CDO
+            if (!Class->GetDefaultObject())
+            {
+                Result.Status = EEng_ValidationStatus::Critical;
+                Result.ErrorMessage += FString::Printf(TEXT("Class %s has no CDO; "), *Class->GetName());
+            }
+        }
+    }
+    
+    if (Result.ClassCount == 0 && ModuleName == TEXT("TranspersonalGame"))
+    {
+        Result.Status = EEng_ValidationStatus::Warning;
+        Result.ErrorMessage = TEXT("No classes found in TranspersonalGame module");
     }
 }
 
-void UEng_ArchitectureValidator::CleanupDuplicateManagers()
+void UEng_ArchitectureValidator::CheckHeaderCppPairs(const FString& ModuleName, FEng_ModuleValidationResult& Result)
 {
-    // Placeholder for manager cleanup
-    // Will be expanded when manager systems are implemented
+    // This would typically check the file system for .h/.cpp pairs
+    // For now, we'll assume all headers have implementations
+    // In a full implementation, this would scan the source directory
 }
 
-void UEng_ArchitectureValidator::UpdatePerformanceMetrics()
+void UEng_ArchitectureValidator::ValidateSharedTypes()
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    // Check SharedTypes.h exists and is properly included
+    // This would validate that shared enums and structs are properly defined
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureValidator: Validating shared types"));
+}
+
+void UEng_ArchitectureValidator::LogValidationResults()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== ARCHITECTURE VALIDATION RESULTS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Overall Status: %s"), OverallStatus == EEng_ValidationStatus::Valid ? TEXT("VALID") : 
+           OverallStatus == EEng_ValidationStatus::Warning ? TEXT("WARNING") : 
+           OverallStatus == EEng_ValidationStatus::Critical ? TEXT("CRITICAL") : TEXT("FAILED"));
+    UE_LOG(LogTemp, Log, TEXT("Total Classes: %d"), TotalClassCount);
+    UE_LOG(LogTemp, Log, TEXT("Validation Time: %.3f seconds"), LastValidationTime);
+    
+    for (const FEng_ModuleValidationResult& Result : ValidationResults)
     {
-        return;
+        UE_LOG(LogTemp, Log, TEXT("Module %s: %d classes, Status: %s"), 
+               *Result.ModuleName, 
+               Result.ClassCount,
+               Result.Status == EEng_ValidationStatus::Valid ? TEXT("VALID") : 
+               Result.Status == EEng_ValidationStatus::Warning ? TEXT("WARNING") : 
+               Result.Status == EEng_ValidationStatus::Critical ? TEXT("CRITICAL") : TEXT("FAILED"));
+        
+        if (!Result.ErrorMessage.IsEmpty())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  Errors: %s"), *Result.ErrorMessage);
+        }
     }
-    
-    // Get frame rate
-    CurrentMetrics.FrameRate = 1.0f / World->GetDeltaSeconds();
-    
-    // Get memory usage (approximate)
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Count actors
-    CurrentMetrics.ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        CurrentMetrics.ActorCount++;
-    }
-    
-    // Draw calls and triangles would need rendering stats
-    CurrentMetrics.DrawCalls = 0; // Placeholder
-    CurrentMetrics.TriangleCount = 0; // Placeholder
-}
-
-bool UEng_ArchitectureValidator::CheckFrameRate()
-{
-    // Target: 60 FPS for PC, 30 FPS for console
-    // For now, accept anything above 20 FPS as reasonable
-    return (CurrentMetrics.FrameRate > 20.0f);
-}
-
-bool UEng_ArchitectureValidator::CheckMemoryUsage()
-{
-    // Accept memory usage under 4GB as reasonable for development
-    return (CurrentMetrics.MemoryUsageMB < 4096.0f);
+    UE_LOG(LogTemp, Log, TEXT("=== END VALIDATION RESULTS ==="));
 }

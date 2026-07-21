@@ -1,0 +1,238 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_008",
+  "agent": "#16 — Audio Agent",
+  "description": "Audio assets manifest — voice lines, ambient zones, sound references for prehistoric survival game",
+
+  "voice_lines": [
+    {
+      "id": "TTS-9",
+      "character": "ElderMara",
+      "label": "CraftingWisdom",
+      "text": "Stone axe, bone needle, fire striker — these are not tools. These are the distance between you and death. Lose them, and the forest wins. Keep them sharp, keep them close.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783076176004_ElderMara_CraftingWisdom.mp3",
+      "duration": "~12s",
+      "trigger": "EVT_FirstCraft_Complete",
+      "context": "Plays after player crafts their first stone tool — reinforces survival stakes and tool importance"
+    },
+    {
+      "id": "TTS-10",
+      "character": "Tracker_Dak",
+      "label": "EvasionTactics",
+      "text": "Run. Not from fear — from strategy. A T-Rex sees movement. If you freeze behind cover, you become part of the forest. If you run in the open, you become prey. Choose the moment. Choose the direction. Then move.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783076183176_Tracker_Dak_EvasionTactics.mp3",
+      "duration": "~14s",
+      "trigger": "EVT_TRex_FirstSighting",
+      "context": "Plays on first T-Rex encounter — teaches freeze vs run mechanic, core survival decision"
+    },
+    {
+      "id": "TTS-8",
+      "character": "ElderMara",
+      "label": "NightAmbience",
+      "text": "The valley breathes at night... Stay close to the fire — not for warmth, but for the light. Darkness belongs to them, not to us.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783071533016_ElderMara_NightAmbience.mp3",
+      "duration": "~13s",
+      "trigger": "EVT_NightCycle_Begin",
+      "context": "Plays at first nightfall — establishes night danger and campfire safety mechanic"
+    },
+    {
+      "id": "TTS-7",
+      "character": "ElderMara",
+      "label": "GroundTremor",
+      "text": "Listen. The ground speaks before the beast arrives. Feel the tremor through your feet — that rhythm, heavy and slow, means something enormous is moving through the valley. Count the beats...",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783067116136_ElderMara_GroundTremor.mp3",
+      "duration": "~24s",
+      "trigger": "EVT_LargeDino_Approaching",
+      "context": "Plays when large dinosaur (T-Rex, Brachiosaurus) approaches within 150m — teaches ground tremor as warning signal"
+    },
+    {
+      "id": "TTS-6",
+      "character": "Tracker_Dak",
+      "label": "ForestReading",
+      "text": "Insect silence means predator movement. Birds scatter — you have thirty seconds before it reaches you.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783062392502_Tracker_Dak_ForestReading.mp3",
+      "duration": "~19s",
+      "trigger": "EVT_ForestSilence_Detected",
+      "context": "Teaches ambient silence mechanic — when ambient insects/birds stop, predator is near"
+    }
+  ],
+
+  "ambient_zones": [
+    {
+      "id": "ZONE-001",
+      "label": "AudioZone_Campfire_Hub_001",
+      "location": {"x": 2100, "y": 2400, "z": 50},
+      "type": "campfire",
+      "radius": 600,
+      "sounds": [
+        {
+          "freesound_id": 681366,
+          "name": "Campfire (Position 1)",
+          "url": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+          "loop": true,
+          "volume": 0.8,
+          "falloff_start": 200,
+          "falloff_end": 600
+        },
+        {
+          "freesound_id": 688994,
+          "name": "Campfire On The Shores — night ambience with crickets",
+          "url": "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3",
+          "loop": true,
+          "volume": 0.4,
+          "falloff_start": 400,
+          "falloff_end": 1200
+        }
+      ],
+      "visual_proxy": "PointLight — warm orange (1.0, 0.45, 0.1), intensity 800, radius 600",
+      "gameplay_note": "Safety zone — player fear stat decreases within campfire radius at night"
+    },
+    {
+      "id": "ZONE-002",
+      "label": "AudioZone_River_Valley_001",
+      "location": {"x": 2800, "y": 2400, "z": 30},
+      "type": "river",
+      "radius": 1200,
+      "sounds": [
+        {
+          "freesound_id": 550896,
+          "name": "water.mp3 — flowing water in jungle",
+          "url": "https://cdn.freesound.org/previews/550/550896_7893846-hq.mp3",
+          "loop": true,
+          "volume": 0.6,
+          "falloff_start": 300,
+          "falloff_end": 1200
+        }
+      ],
+      "visual_proxy": "PointLight — cool blue (0.2, 0.6, 1.0), intensity 200, radius 1200",
+      "gameplay_note": "Water source — player thirst refill zone; Brachiosaurus grazing area"
+    },
+    {
+      "id": "ZONE-003",
+      "label": "AudioZone_TRex_Danger_001",
+      "location": {"x": 1500, "y": 3200, "z": 80},
+      "type": "danger_proximity",
+      "radius": 2000,
+      "sounds": [],
+      "visual_proxy": "PointLight — danger red (1.0, 0.05, 0.0), intensity 100, radius 2000",
+      "gameplay_note": "T-Rex territory marker — ambient music shifts to high-tension when player enters; heartbeat SFX activates; EVT_LargeDino_Approaching fires at 150m"
+    },
+    {
+      "id": "ZONE-004",
+      "label": "AudioZone_NightForest_001",
+      "location": {"x": 2100, "y": 1600, "z": 60},
+      "type": "night_forest_edge",
+      "radius": 800,
+      "sounds": [
+        {
+          "freesound_id": 501731,
+          "name": "Summer Night With Fireworks — cicadas, owl, forest night",
+          "url": "https://cdn.freesound.org/previews/501/501731_9573665-hq.mp3",
+          "loop": true,
+          "volume": 0.5,
+          "falloff_start": 200,
+          "falloff_end": 800,
+          "time_of_day": "night_only"
+        }
+      ],
+      "visual_proxy": "PointLight — deep blue (0.1, 0.1, 0.5), intensity 50, radius 800",
+      "gameplay_note": "Forest edge at night — EVT_NightCycle_Begin fires here; ElderMara TTS-8 triggers"
+    }
+  ],
+
+  "freesound_references": [
+    {
+      "id": 681366,
+      "name": "Campfire (Position 1)",
+      "preview": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+      "use": "Primary campfire loop — ZONE-001"
+    },
+    {
+      "id": 681367,
+      "name": "Campfire (Position 2)",
+      "preview": "https://cdn.freesound.org/previews/681/681367_5752443-hq.mp3",
+      "use": "Secondary campfire variation — ZONE-001 alternate"
+    },
+    {
+      "id": 688994,
+      "name": "Campfire On The Shores — night ambience",
+      "preview": "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3",
+      "use": "Night campfire with crickets — ZONE-001 night layer"
+    },
+    {
+      "id": 550896,
+      "name": "water.mp3 — flowing water in jungle",
+      "preview": "https://cdn.freesound.org/previews/550/550896_7893846-hq.mp3",
+      "use": "River ambient loop — ZONE-002"
+    },
+    {
+      "id": 855647,
+      "name": "Waterfall — Xiufeng Waterfall Taiwan (150s)",
+      "preview": "https://cdn.freesound.org/previews/855/855647_17078888-hq.mp3",
+      "use": "Waterfall/rapids variation — ZONE-002 high-flow"
+    },
+    {
+      "id": 501731,
+      "name": "Summer Night — cicadas, owl, forest night",
+      "preview": "https://cdn.freesound.org/previews/501/501731_9573665-hq.mp3",
+      "use": "Night forest ambience — ZONE-004"
+    }
+  ],
+
+  "audio_event_map": {
+    "EVT_FirstCraft_Complete": {
+      "voice": "TTS-9 ElderMara_CraftingWisdom",
+      "sfx": "stone_knapping_finish.wav",
+      "music": "none"
+    },
+    "EVT_TRex_FirstSighting": {
+      "voice": "TTS-10 Tracker_Dak_EvasionTactics",
+      "sfx": "trex_distant_roar.wav",
+      "music": "tension_layer_1_fade_in"
+    },
+    "EVT_NightCycle_Begin": {
+      "voice": "TTS-8 ElderMara_NightAmbience",
+      "sfx": "crickets_fade_in.wav",
+      "music": "night_ambient_drone"
+    },
+    "EVT_LargeDino_Approaching": {
+      "voice": "TTS-7 ElderMara_GroundTremor",
+      "sfx": "ground_tremor_pulse.wav + heartbeat_slow.wav",
+      "music": "danger_swell_low_percussion"
+    },
+    "EVT_ForestSilence_Detected": {
+      "voice": "TTS-6 Tracker_Dak_ForestReading",
+      "sfx": "silence_fade_out_insects.wav",
+      "music": "tension_layer_2_minimal"
+    }
+  },
+
+  "music_system": {
+    "engine": "MetaSounds UE5",
+    "approach": "Adaptive horizontal re-sequencing",
+    "layers": [
+      {"name": "base_ambient", "description": "Always playing — low drone, wind, distant nature", "instruments": "bone flute, stone percussion, wind"},
+      {"name": "exploration", "description": "Daytime exploration — curious, cautious", "instruments": "wooden percussion, animal bone rattles"},
+      {"name": "tension_1", "description": "Predator nearby (50-150m)", "instruments": "low percussion pulse, held breath rhythm"},
+      {"name": "tension_2", "description": "Predator very close (<50m)", "instruments": "rapid percussion, dissonant tones"},
+      {"name": "combat", "description": "Active combat/chase", "instruments": "full percussion, urgent rhythm"},
+      {"name": "night_ambient", "description": "Night cycle — eerie, dangerous", "instruments": "deep resonance, sparse bone percussion"},
+      {"name": "safety", "description": "Near campfire, shelter", "instruments": "warm tones, slower rhythm, resolution"}
+    ],
+    "transition_rules": [
+      "base_ambient → exploration: player moves > 5m from spawn",
+      "exploration → tension_1: predator within 150m",
+      "tension_1 → tension_2: predator within 50m",
+      "tension_2 → combat: predator aggro triggered",
+      "any → safety: player within campfire radius AND night cycle",
+      "any → night_ambient: night cycle begins AND player not in safety zone"
+    ]
+  },
+
+  "next_cycle_priorities": [
+    "VFX Agent (#17): Screen shake when T-Rex walks nearby (AudioZone_TRex_Danger_001 radius)",
+    "VFX Agent (#17): Campfire particle system at AudioZone_Campfire_Hub_001 (2100, 2400, 50)",
+    "VFX Agent (#17): Dust particles on player footsteps and dinosaur footfalls",
+    "VFX Agent (#17): Damage flash (red screen overlay) when player health drops",
+    "Integration (#19): Wire audio event map EVT_* to actual game state triggers in TranspersonalGameState"
+  ]
+}

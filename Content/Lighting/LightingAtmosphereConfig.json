@@ -1,0 +1,152 @@
+{
+  "agent": "Lighting & Atmosphere Agent #08",
+  "cycle": "PROD_CYCLE_AUTO_20260703_012",
+  "description": "Lighting configuration for Transpersonal Game Studio — Cretaceous Survival Game",
+  "hub_coordinates": { "x": 2100, "y": 2400, "z": 0 },
+
+  "directional_light": {
+    "label": "Sun_Primary_001",
+    "intensity_lux": 75000,
+    "pitch_degrees": -50.0,
+    "yaw_degrees": -30.0,
+    "color_rgb": [255, 245, 220],
+    "atmosphere_sun_light": true,
+    "cast_shadows": true,
+    "indirect_lighting_intensity": 1.2,
+    "notes": "Warm midday Cretaceous sun. Pitch guard enforced: must be <= -30 degrees."
+  },
+
+  "sky_atmosphere": {
+    "label": "SkyAtmosphere_001",
+    "dedup_enforced": true,
+    "notes": "Single SkyAtmosphere. Duplicates are destroyed on CAP enforcement."
+  },
+
+  "sky_light": {
+    "label": "SkyLight_001",
+    "real_time_capture": true,
+    "intensity": 1.5,
+    "cast_shadows": true,
+    "notes": "Real-time capture essential for Lumen sky contribution."
+  },
+
+  "exponential_height_fog": {
+    "label": "Fog_Primary_001",
+    "fog_density": 0.02,
+    "fog_inscattering_color": [0.5, 0.65, 0.8],
+    "fog_max_opacity": 0.85,
+    "start_distance": 2000.0,
+    "fog_cutoff_distance": 200000.0,
+    "volumetric_fog": true,
+    "volumetric_fog_scattering_distribution": 0.2,
+    "volumetric_fog_albedo": [0.9, 0.9, 0.9],
+    "volumetric_fog_extinction_scale": 1.0,
+    "notes": "Light atmospheric haze for depth. Volumetric fog for light shaft interaction."
+  },
+
+  "volumetric_cloud": {
+    "label": "VolumetricCloud_001",
+    "notes": "Spawned if not present. Provides realistic cloud coverage for Cretaceous sky."
+  },
+
+  "hub_lighting": {
+    "canopy_rect_light": {
+      "label": "Light_HubCanopy_001",
+      "location": [2100, 2400, 800],
+      "rotation": [-90, 0, 0],
+      "intensity": 8000.0,
+      "color_rgb": [255, 240, 180],
+      "source_width": 600.0,
+      "source_height": 600.0,
+      "attenuation_radius": 2500.0,
+      "cast_shadows": true,
+      "notes": "Simulates warm sunlight filtering through jungle canopy at the main hub clearing."
+    },
+    "ambient_fill_lights": [
+      {
+        "label": "Light_HubFill_001",
+        "location": [2100, 2400, 300],
+        "intensity": 3000.0,
+        "color_rgb": [220, 240, 200],
+        "attenuation_radius": 1500.0,
+        "cast_shadows": false
+      },
+      {
+        "label": "Light_HubFill_002",
+        "location": [1800, 2200, 250],
+        "intensity": 3000.0,
+        "color_rgb": [220, 240, 200],
+        "attenuation_radius": 1500.0,
+        "cast_shadows": false
+      },
+      {
+        "label": "Light_HubFill_003",
+        "location": [2400, 2600, 250],
+        "intensity": 3000.0,
+        "color_rgb": [220, 240, 200],
+        "attenuation_radius": 1500.0,
+        "cast_shadows": false
+      }
+    ]
+  },
+
+  "lumen_settings": {
+    "r.Lumen.Reflections.Allow": 1,
+    "r.Lumen.GlobalIllumination.Allow": 1,
+    "r.GenerateMeshDistanceFields": 1,
+    "r.DynamicGlobalIlluminationMethod": 1,
+    "r.ReflectionMethod": 1,
+    "r.SkyLight.RealTimeCapture": 1,
+    "r.VolumetricFog": 1,
+    "r.FastSkyLUT": 1,
+    "r.Shadow.Virtual.Enable": 1,
+    "r.Nanite.Enabled": 1
+  },
+
+  "audio_references": {
+    "jungle_ambience_primary": {
+      "freesound_id": 813632,
+      "name": "AMBTrop_Daytime tropical forest_Tim Kahn_MKH80208030st",
+      "description": "Late morning Panamanian rainforest — insects, birds, water drops on leaves",
+      "duration_seconds": 4653.97,
+      "preview_url": "https://cdn.freesound.org/previews/813/813632_7037-hq.mp3",
+      "usage": "Primary ambient loop for hub clearing (X=2100, Y=2400)"
+    },
+    "jungle_ambience_secondary": {
+      "freesound_id": 749737,
+      "name": "denseforestwithbirds",
+      "description": "Dense forest with birds — Goa, India field recording",
+      "duration_seconds": 101.631,
+      "preview_url": "https://cdn.freesound.org/previews/749/749737_16219462-hq.mp3",
+      "usage": "Secondary ambient layer for dense vegetation zones"
+    }
+  },
+
+  "visual_direction": {
+    "cinematographer_reference": "Roger Deakins",
+    "game_reference": "Red Dead Redemption 2 lighting team",
+    "mood": "Bright, alive, dangerous Cretaceous midday",
+    "key_principle": "Light does not illuminate — light signifies. The player must feel the heat and danger of the prehistoric sun.",
+    "color_palette": {
+      "sky": "Deep azure with white volumetric clouds",
+      "sunlight": "Warm golden-white (5500K)",
+      "shadow": "Cool blue-green (jungle ambient bounce)",
+      "fog": "Pale blue atmospheric haze for depth"
+    },
+    "hub_composition": {
+      "target_coords": "X=2100, Y=2400",
+      "description": "Sunlit jungle clearing — the single PlayerStart. Dense vegetation surrounds a bright open space. Dinosaurs visible at clearing edge. Warm light shafts through canopy. Ancient stone ruins partially buried in undergrowth."
+    }
+  },
+
+  "cap_enforcement_rules": {
+    "min_sun_intensity_lux": 10000,
+    "max_directional_lights": 1,
+    "max_sky_atmospheres": 1,
+    "max_exponential_height_fogs": 1,
+    "skylight_real_time_capture_required": true,
+    "fast_sky_lut_required": true,
+    "sun_pitch_max_degrees": -30,
+    "notes": "Server guard enforces 10000-lux floor. Never fight it with low values."
+  }
+}

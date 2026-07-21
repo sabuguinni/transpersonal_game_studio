@@ -1,454 +1,377 @@
 #include "NPCBehaviorSystem.h"
-#include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Perception/AIPerceptionComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
 
-UNPCBehaviorSystem::UNPCBehaviorSystem()
+UNPC_BehaviorSystem::UNPC_BehaviorSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    // Default values
-    Personality = ENPCPersonality::Peaceful;
-    CurrentState = ENPCState::Idle;
-    NPCName = TEXT("Unnamed NPC");
-    NPCAge = 25;
-    
-    // Memory settings
-    MemoryRetentionTime = 300.0f; // 5 minutes
-    MemoryCleanupTimer = 0.0f;
-    
-    // Routine settings
-    bFollowDailyRoutine = true;
-    RoutineUpdateTimer = 0.0f;
-    
-    // Perception settings
-    SightRadius = 1500.0f;
-    HearingRadius = 800.0f;
-    PeripheralVisionAngle = 90.0f;
-    
-    // Initialize memory
-    NPCMemory = FNPCMemory();
+    PrimaryComponentTick.TickInterval = 0.1f;
+
+    // Initialize default values
+    CurrentState = ENPC_BehaviorState::Idle;
+    PersonalityType = ENPC_Personality::Cautious;
+    AwarenessRadius = 1500.0f;
+    FleeRadius = 800.0f;
+    SocialRadius = 500.0f;
+
+    MaxMemories = 20;
+    MemoryDecayRate = 0.1f;
+
+    CurrentPatrolIndex = 0;
+    PatrolSpeed = 200.0f;
+    bIsPatrolling = false;
+    CurrentTarget = nullptr;
+    LastBehaviorUpdate = 0.0f;
+    LastMemoryProcess = 0.0f;
 }
 
-void UNPCBehaviorSystem::BeginPlay()
+void UNPC_BehaviorSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Get AI Controller reference
-    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+
+    // Store home location
+    if (GetOwner())
     {
-        NPCAIController = Cast<AAIController>(OwnerPawn->GetController());
-        
-        if (NPCAIController)
+        HomeLocation = GetOwner()->GetActorLocation();
+    }
+
+    // Set up default patrol points in a circle around home
+    if (PatrolPoints.Num() == 0)
+    {
+        for (int32 i = 0; i < 4; i++)
         {
-            BlackboardComponent = NPCAIController->GetBlackboardComponent();
-            
-            // Start behavior tree if available
-            if (BehaviorTree)
-            {
-                StartBehaviorTree();
-            }
+            float Angle = (i * 90.0f) * PI / 180.0f;
+            FVector PatrolPoint = HomeLocation + FVector(FMath::Cos(Angle) * 800.0f, FMath::Sin(Angle) * 800.0f, 0.0f);
+            PatrolPoints.Add(PatrolPoint);
         }
     }
-    
-    // Setup default daily routine if none exists
-    if (DailyRoutines.Num() == 0)
-    {
-        SetupDefaultRoutines();
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NPC Behavior System initialized for: %s"), *NPCName);
+
+    // Start behavior systems
+    GetWorld()->GetTimerManager().SetTimer(BehaviorUpdateTimer, [this]() { UpdateBehavior(0.5f); }, 0.5f, true);
+    GetWorld()->GetTimerManager().SetTimer(MemoryProcessTimer, [this]() { ProcessMemories(1.0f); }, 1.0f, true);
+    GetWorld()->GetTimerManager().SetTimer(EnvironmentScanTimer, [this]() { ScanEnvironment(); }, 0.2f, true);
+
+    UE_LOG(LogTemp, Log, TEXT("NPC Behavior System initialized for %s"), *GetOwner()->GetName());
 }
 
-void UNPCBehaviorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPC_BehaviorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Update memory system
-    ProcessMemory(DeltaTime);
-    
-    // Update daily routine
-    if (bFollowDailyRoutine)
+
+    if (bIsPatrolling)
     {
-        UpdateDailyRoutine();
-    }
-    
-    // Handle perception
-    HandlePerception();
-    
-    // Update blackboard values
-    if (BlackboardComponent)
-    {
-        UpdateBlackboardValues();
+        UpdatePatrol(DeltaTime);
     }
 }
 
-void UNPCBehaviorSystem::SetNPCState(ENPCState NewState)
+void UNPC_BehaviorSystem::SetBehaviorState(ENPC_BehaviorState NewState)
 {
     if (CurrentState != NewState)
     {
-        ENPCState PreviousState = CurrentState;
+        ENPC_BehaviorState PreviousState = CurrentState;
         CurrentState = NewState;
-        
-        UE_LOG(LogTemp, Log, TEXT("NPC %s state changed from %d to %d"), 
-               *NPCName, (int32)PreviousState, (int32)CurrentState);
-        
-        // Update blackboard
-        if (BlackboardComponent)
+
+        // Log state change
+        UE_LOG(LogTemp, Log, TEXT("NPC %s changed state from %d to %d"), 
+               *GetOwner()->GetName(), (int32)PreviousState, (int32)NewState);
+
+        // Handle state-specific initialization
+        switch (NewState)
         {
-            BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), (uint8)CurrentState);
+        case ENPC_BehaviorState::Patrolling:
+            StartPatrol();
+            break;
+        case ENPC_BehaviorState::Fleeing:
+            StopPatrol();
+            break;
+        case ENPC_BehaviorState::Resting:
+            StopPatrol();
+            break;
+        default:
+            break;
         }
     }
 }
 
-void UNPCBehaviorSystem::RememberActor(AActor* Actor, float ThreatLevel)
+void UNPC_BehaviorSystem::AddMemory(FVector Location, FString EventType, float Importance)
 {
-    if (!Actor) return;
-    
-    // Add to known actors if not already known
-    if (!NPCMemory.KnownActors.Contains(Actor))
+    FNPC_Memory NewMemory;
+    NewMemory.LastSeenLocation = Location;
+    NewMemory.EventType = EventType;
+    NewMemory.Importance = Importance;
+    NewMemory.Timestamp = GetWorld()->GetTimeSeconds();
+
+    Memories.Add(NewMemory);
+
+    // Remove oldest memory if we exceed max
+    if (Memories.Num() > MaxMemories)
     {
-        NPCMemory.KnownActors.Add(Actor);
+        Memories.RemoveAt(0);
     }
-    
-    // Update threat level
-    NPCMemory.ActorThreatLevels.Add(Actor, ThreatLevel);
-    
-    // Special handling for player
-    if (Actor->IsA<APawn>() && Cast<APawn>(Actor)->IsPlayerControlled())
+
+    UE_LOG(LogTemp, Log, TEXT("NPC %s added memory: %s at %s"), 
+           *GetOwner()->GetName(), *EventType, *Location.ToString());
+}
+
+void UNPC_BehaviorSystem::UpdateRelationship(AActor* Target, float AffinityChange, float TrustChange, float FearChange)
+{
+    if (!Target) return;
+
+    // Find existing relationship or create new one
+    FNPC_Relationship* ExistingRelationship = nullptr;
+    for (FNPC_Relationship& Relationship : Relationships)
     {
-        NPCMemory.bPlayerIsKnown = true;
-        NPCMemory.LastPlayerInteractionTime = GetWorld()->GetTimeSeconds();
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NPC %s remembered actor: %s (Threat: %f)"), 
-           *NPCName, *Actor->GetName(), ThreatLevel);
-}
-
-void UNPCBehaviorSystem::ForgetActor(AActor* Actor)
-{
-    if (!Actor) return;
-    
-    NPCMemory.KnownActors.Remove(Actor);
-    NPCMemory.ActorThreatLevels.Remove(Actor);
-    
-    UE_LOG(LogTemp, Log, TEXT("NPC %s forgot actor: %s"), *NPCName, *Actor->GetName());
-}
-
-bool UNPCBehaviorSystem::IsActorKnown(AActor* Actor) const
-{
-    return NPCMemory.KnownActors.Contains(Actor);
-}
-
-FNPCRoutine UNPCBehaviorSystem::GetCurrentRoutine() const
-{
-    float CurrentTime = GetCurrentTimeOfDay();
-    
-    for (const FNPCRoutine& Routine : DailyRoutines)
-    {
-        float EndTime = Routine.StartTime + Routine.Duration;
-        
-        // Handle routines that cross midnight
-        if (EndTime > 24.0f)
+        if (Relationship.TargetActor == Target)
         {
-            if (CurrentTime >= Routine.StartTime || CurrentTime <= (EndTime - 24.0f))
-            {
-                return Routine;
-            }
-        }
-        else
-        {
-            if (CurrentTime >= Routine.StartTime && CurrentTime <= EndTime)
-            {
-                return Routine;
-            }
+            ExistingRelationship = &Relationship;
+            break;
         }
     }
-    
-    // Return default idle routine if no routine matches
-    FNPCRoutine DefaultRoutine;
-    DefaultRoutine.Activity = ENPCState::Idle;
-    DefaultRoutine.ActivityDescription = TEXT("Free Time");
-    return DefaultRoutine;
+
+    if (!ExistingRelationship)
+    {
+        FNPC_Relationship NewRelationship;
+        NewRelationship.TargetActor = Target;
+        Relationships.Add(NewRelationship);
+        ExistingRelationship = &Relationships.Last();
+    }
+
+    // Update relationship values
+    ExistingRelationship->Affinity = FMath::Clamp(ExistingRelationship->Affinity + AffinityChange, -100.0f, 100.0f);
+    ExistingRelationship->Trust = FMath::Clamp(ExistingRelationship->Trust + TrustChange, -100.0f, 100.0f);
+    ExistingRelationship->Fear = FMath::Clamp(ExistingRelationship->Fear + FearChange, 0.0f, 100.0f);
+    ExistingRelationship->LastInteractionTime = GetWorld()->GetTimeSeconds();
 }
 
-void UNPCBehaviorSystem::AddRoutine(const FNPCRoutine& NewRoutine)
+AActor* UNPC_BehaviorSystem::GetNearestThreat()
 {
-    DailyRoutines.Add(NewRoutine);
-    
-    // Sort routines by start time
-    DailyRoutines.Sort([](const FNPCRoutine& A, const FNPCRoutine& B) {
-        return A.StartTime < B.StartTime;
-    });
-}
+    AActor* NearestThreat = nullptr;
+    float NearestDistance = AwarenessRadius;
 
-void UNPCBehaviorSystem::UpdateRelationship(AActor* OtherActor, float RelationshipChange)
-{
-    if (!OtherActor) return;
-    
-    float* CurrentValue = RelationshipValues.Find(OtherActor);
-    if (CurrentValue)
-    {
-        *CurrentValue = FMath::Clamp(*CurrentValue + RelationshipChange, -1.0f, 1.0f);
-    }
-    else
-    {
-        RelationshipValues.Add(OtherActor, FMath::Clamp(RelationshipChange, -1.0f, 1.0f));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("NPC %s relationship with %s changed by %f"), 
-           *NPCName, *OtherActor->GetName(), RelationshipChange);
-}
+    if (!GetOwner()) return nullptr;
 
-float UNPCBehaviorSystem::GetRelationshipValue(AActor* OtherActor) const
-{
-    if (const float* Value = RelationshipValues.Find(OtherActor))
-    {
-        return *Value;
-    }
-    return 0.0f; // Neutral relationship
-}
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
 
-void UNPCBehaviorSystem::StartBehaviorTree()
-{
-    if (NPCAIController && BehaviorTree)
-    {
-        // Set blackboard asset
-        if (BlackboardAsset)
-        {
-            NPCAIController->GetBlackboardComponent()->InitializeBlackboard(*BlackboardAsset);
-        }
-        
-        // Start behavior tree
-        NPCAIController->RunBehaviorTree(BehaviorTree);
-        
-        UE_LOG(LogTemp, Log, TEXT("Started behavior tree for NPC: %s"), *NPCName);
-    }
-}
-
-void UNPCBehaviorSystem::StopBehaviorTree()
-{
-    if (NPCAIController)
-    {
-        NPCAIController->GetBrainComponent()->StopLogic(TEXT("Manual Stop"));
-        UE_LOG(LogTemp, Log, TEXT("Stopped behavior tree for NPC: %s"), *NPCName);
-    }
-}
-
-void UNPCBehaviorSystem::UpdateBlackboardValues()
-{
-    if (!BlackboardComponent) return;
-    
-    // Update basic state information
-    BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), (uint8)CurrentState);
-    BlackboardComponent->SetValueAsEnum(TEXT("Personality"), (uint8)Personality);
-    
-    // Update routine information
-    FNPCRoutine CurrentRoutine = GetCurrentRoutine();
-    BlackboardComponent->SetValueAsVector(TEXT("RoutineLocation"), CurrentRoutine.TargetLocation);
-    BlackboardComponent->SetValueAsEnum(TEXT("RoutineActivity"), (uint8)CurrentRoutine.Activity);
-    
-    // Update player information if known
-    if (NPCMemory.bPlayerIsKnown)
-    {
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            BlackboardComponent->SetValueAsObject(TEXT("PlayerPawn"), PlayerPawn);
-            BlackboardComponent->SetValueAsVector(TEXT("PlayerLocation"), PlayerPawn->GetActorLocation());
-            
-            float TimeSinceLastInteraction = GetWorld()->GetTimeSeconds() - NPCMemory.LastPlayerInteractionTime;
-            BlackboardComponent->SetValueAsFloat(TEXT("TimeSincePlayerInteraction"), TimeSinceLastInteraction);
-        }
-    }
-    
-    // Update threat information
-    float HighestThreat = 0.0f;
-    AActor* MostThreateningActor = nullptr;
-    
-    for (const auto& ThreatPair : NPCMemory.ActorThreatLevels)
-    {
-        if (ThreatPair.Value > HighestThreat && IsValid(ThreatPair.Key))
-        {
-            HighestThreat = ThreatPair.Value;
-            MostThreateningActor = ThreatPair.Key;
-        }
-    }
-    
-    BlackboardComponent->SetValueAsFloat(TEXT("HighestThreatLevel"), HighestThreat);
-    BlackboardComponent->SetValueAsObject(TEXT("MostThreateningActor"), MostThreateningActor);
-}
-
-void UNPCBehaviorSystem::UpdateDailyRoutine()
-{
-    RoutineUpdateTimer += GetWorld()->GetDeltaSeconds();
-    
-    // Check routine every 10 seconds
-    if (RoutineUpdateTimer >= 10.0f)
-    {
-        RoutineUpdateTimer = 0.0f;
-        
-        FNPCRoutine CurrentRoutine = GetCurrentRoutine();
-        
-        // Update state based on routine
-        if (CurrentState != CurrentRoutine.Activity)
-        {
-            SetNPCState(CurrentRoutine.Activity);
-            
-            UE_LOG(LogTemp, Log, TEXT("NPC %s starting routine: %s"), 
-                   *NPCName, *CurrentRoutine.ActivityDescription);
-        }
-    }
-}
-
-void UNPCBehaviorSystem::ProcessMemory(float DeltaTime)
-{
-    MemoryCleanupTimer += DeltaTime;
-    
-    // Clean up memory every 30 seconds
-    if (MemoryCleanupTimer >= 30.0f)
-    {
-        MemoryCleanupTimer = 0.0f;
-        
-        float CurrentTime = GetWorld()->GetTimeSeconds();
-        
-        // Remove invalid actors
-        NPCMemory.KnownActors.RemoveAll([](AActor* Actor) {
-            return !IsValid(Actor);
-        });
-        
-        // Clean up threat levels for invalid actors
-        TArray<AActor*> ActorsToRemove;
-        for (const auto& ThreatPair : NPCMemory.ActorThreatLevels)
-        {
-            if (!IsValid(ThreatPair.Key))
-            {
-                ActorsToRemove.Add(ThreatPair.Key);
-            }
-        }
-        
-        for (AActor* Actor : ActorsToRemove)
-        {
-            NPCMemory.ActorThreatLevels.Remove(Actor);
-        }
-        
-        // Forget old player interactions
-        if (NPCMemory.bPlayerIsKnown && 
-            (CurrentTime - NPCMemory.LastPlayerInteractionTime) > MemoryRetentionTime)
-        {
-            NPCMemory.bPlayerIsKnown = false;
-            UE_LOG(LogTemp, Log, TEXT("NPC %s forgot about player due to time"), *NPCName);
-        }
-    }
-}
-
-void UNPCBehaviorSystem::HandlePerception()
-{
-    // This would integrate with UE5's AI Perception system
-    // For now, we'll do basic distance-based perception
-    
-    if (!GetOwner()) return;
-    
-    FVector NPCLocation = GetOwner()->GetActorLocation();
-    
-    // Find nearby actors
+    // Check for dinosaurs
     TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
-    
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
+
     for (AActor* Actor : FoundActors)
     {
-        if (Actor == GetOwner()) continue;
-        
-        float Distance = FVector::Dist(NPCLocation, Actor->GetActorLocation());
-        
-        // Within sight range
-        if (Distance <= SightRadius)
+        if (Actor && Actor != GetOwner())
         {
-            // Simple line of sight check would go here
-            if (!IsActorKnown(Actor))
+            FString ActorName = Actor->GetName().ToLower();
+            if (ActorName.Contains("trex") || ActorName.Contains("raptor") || ActorName.Contains("carno"))
             {
-                float ThreatLevel = 0.0f;
-                
-                // Determine threat level based on personality and actor type
-                if (APawn* Pawn = Cast<APawn>(Actor))
+                float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
+                if (Distance < NearestDistance)
                 {
-                    if (Pawn->IsPlayerControlled())
-                    {
-                        switch (Personality)
-                        {
-                            case ENPCPersonality::Aggressive:
-                                ThreatLevel = 0.7f;
-                                break;
-                            case ENPCPersonality::Fearful:
-                                ThreatLevel = 0.8f;
-                                break;
-                            case ENPCPersonality::Curious:
-                                ThreatLevel = 0.1f;
-                                break;
-                            default:
-                                ThreatLevel = 0.3f;
-                                break;
-                        }
-                    }
+                    NearestDistance = Distance;
+                    NearestThreat = Actor;
                 }
-                
-                RememberActor(Actor, ThreatLevel);
             }
+        }
+    }
+
+    return NearestThreat;
+}
+
+AActor* UNPC_BehaviorSystem::GetNearestFriend()
+{
+    AActor* NearestFriend = nullptr;
+    float NearestDistance = SocialRadius;
+
+    if (!GetOwner()) return nullptr;
+
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+
+    // Check relationships for friendly NPCs
+    for (const FNPC_Relationship& Relationship : Relationships)
+    {
+        if (Relationship.TargetActor && Relationship.Affinity > 20.0f)
+        {
+            float Distance = FVector::Dist(OwnerLocation, Relationship.TargetActor->GetActorLocation());
+            if (Distance < NearestDistance)
+            {
+                NearestDistance = Distance;
+                NearestFriend = Relationship.TargetActor;
+            }
+        }
+    }
+
+    return NearestFriend;
+}
+
+void UNPC_BehaviorSystem::StartPatrol()
+{
+    if (PatrolPoints.Num() > 0)
+    {
+        bIsPatrolling = true;
+        CurrentPatrolIndex = 0;
+        UE_LOG(LogTemp, Log, TEXT("NPC %s started patrolling"), *GetOwner()->GetName());
+    }
+}
+
+void UNPC_BehaviorSystem::StopPatrol()
+{
+    bIsPatrolling = false;
+    UE_LOG(LogTemp, Log, TEXT("NPC %s stopped patrolling"), *GetOwner()->GetName());
+}
+
+void UNPC_BehaviorSystem::UpdateBehavior(float DeltaTime)
+{
+    if (!GetOwner()) return;
+
+    LastBehaviorUpdate = GetWorld()->GetTimeSeconds();
+
+    // Check for immediate threats
+    AActor* Threat = GetNearestThreat();
+    if (Threat)
+    {
+        float ThreatDistance = FVector::Dist(GetOwner()->GetActorLocation(), Threat->GetActorLocation());
+        
+        if (ThreatDistance < FleeRadius)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Fleeing);
+            AddMemory(Threat->GetActorLocation(), TEXT("Threat Encountered"), 8.0f);
+            return;
+        }
+        else if (ThreatDistance < AwarenessRadius)
+        {
+            SetBehaviorState(ENPC_BehaviorState::Investigating);
+            AddMemory(Threat->GetActorLocation(), TEXT("Threat Spotted"), 5.0f);
+            return;
+        }
+    }
+
+    // Check for player interaction
+    ReactToPlayer();
+
+    // Default behavior based on personality
+    if (CurrentState == ENPC_BehaviorState::Idle)
+    {
+        switch (PersonalityType)
+        {
+        case ENPC_Personality::Curious:
+            if (FMath::RandRange(0.0f, 1.0f) < 0.3f)
+            {
+                SetBehaviorState(ENPC_BehaviorState::Investigating);
+            }
+            break;
+        case ENPC_Personality::Social:
+            {
+                AActor* Friend = GetNearestFriend();
+                if (Friend)
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Socializing);
+                }
+                else
+                {
+                    SetBehaviorState(ENPC_BehaviorState::Patrolling);
+                }
+            }
+            break;
+        default:
+            SetBehaviorState(ENPC_BehaviorState::Patrolling);
+            break;
         }
     }
 }
 
-float UNPCBehaviorSystem::GetCurrentTimeOfDay() const
+void UNPC_BehaviorSystem::ProcessMemories(float DeltaTime)
 {
-    // This should integrate with the game's time system
-    // For now, return a simple time based on world time
-    if (UWorld* World = GetWorld())
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    // Decay memories over time
+    for (int32 i = Memories.Num() - 1; i >= 0; i--)
     {
-        float GameTime = World->GetTimeSeconds();
-        // Convert to 24-hour format (1 real second = 1 game minute)
-        return FMath::Fmod(GameTime / 60.0f, 24.0f);
+        float MemoryAge = CurrentTime - Memories[i].Timestamp;
+        Memories[i].Importance -= MemoryDecayRate * MemoryAge;
+
+        // Remove memories that have decayed too much
+        if (Memories[i].Importance <= 0.0f)
+        {
+            Memories.RemoveAt(i);
+        }
     }
-    return 12.0f; // Default to noon
+
+    LastMemoryProcess = CurrentTime;
 }
 
-void UNPCBehaviorSystem::SetupDefaultRoutines()
+void UNPC_BehaviorSystem::UpdatePatrol(float DeltaTime)
 {
-    // Morning routine
-    FNPCRoutine MorningRoutine;
-    MorningRoutine.StartTime = 6.0f;
-    MorningRoutine.Duration = 2.0f;
-    MorningRoutine.Activity = ENPCState::Eating;
-    MorningRoutine.ActivityDescription = TEXT("Morning Meal");
-    AddRoutine(MorningRoutine);
-    
-    // Work routine
-    FNPCRoutine WorkRoutine;
-    WorkRoutine.StartTime = 8.0f;
-    WorkRoutine.Duration = 8.0f;
-    WorkRoutine.Activity = ENPCState::Working;
-    WorkRoutine.ActivityDescription = TEXT("Daily Work");
-    AddRoutine(WorkRoutine);
-    
-    // Evening social time
-    FNPCRoutine SocialRoutine;
-    SocialRoutine.StartTime = 18.0f;
-    SocialRoutine.Duration = 3.0f;
-    SocialRoutine.Activity = ENPCState::Socializing;
-    SocialRoutine.ActivityDescription = TEXT("Evening Gathering");
-    AddRoutine(SocialRoutine);
-    
-    // Sleep routine
-    FNPCRoutine SleepRoutine;
-    SleepRoutine.StartTime = 22.0f;
-    SleepRoutine.Duration = 8.0f;
-    SleepRoutine.Activity = ENPCState::Sleeping;
-    SleepRoutine.ActivityDescription = TEXT("Rest");
-    AddRoutine(SleepRoutine);
-    
-    UE_LOG(LogTemp, Log, TEXT("Setup default routines for NPC: %s"), *NPCName);
+    if (!GetOwner() || PatrolPoints.Num() == 0) return;
+
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
+    FVector TargetPoint = PatrolPoints[CurrentPatrolIndex];
+
+    // Move towards current patrol point
+    FVector Direction = (TargetPoint - CurrentLocation).GetSafeNormal();
+    FVector NewLocation = CurrentLocation + (Direction * PatrolSpeed * DeltaTime);
+
+    // Check if we've reached the patrol point
+    if (FVector::Dist(CurrentLocation, TargetPoint) < 100.0f)
+    {
+        CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+        AddMemory(TargetPoint, TEXT("Patrol Point Reached"), 2.0f);
+    }
+
+    // Move the actor (simplified - in real implementation would use movement component)
+    GetOwner()->SetActorLocation(NewLocation);
+}
+
+void UNPC_BehaviorSystem::ScanEnvironment()
+{
+    if (!GetOwner()) return;
+
+    // This would typically use line traces or overlap checks
+    // For now, just log that we're scanning
+    if (CurrentState == ENPC_BehaviorState::Investigating)
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("NPC %s scanning environment"), *GetOwner()->GetName());
+    }
+}
+
+void UNPC_BehaviorSystem::ReactToPlayer()
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn || !GetOwner()) return;
+
+    float PlayerDistance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+
+    if (PlayerDistance < AwarenessRadius)
+    {
+        // Update relationship with player based on personality
+        float AffinityChange = 0.0f;
+        float FearChange = 0.0f;
+
+        switch (PersonalityType)
+        {
+        case ENPC_Personality::Social:
+            AffinityChange = 1.0f;
+            break;
+        case ENPC_Personality::Cautious:
+            FearChange = 2.0f;
+            break;
+        case ENPC_Personality::Aggressive:
+            AffinityChange = -1.0f;
+            break;
+        default:
+            break;
+        }
+
+        UpdateRelationship(PlayerPawn, AffinityChange, 0.0f, FearChange);
+        AddMemory(PlayerPawn->GetActorLocation(), TEXT("Player Spotted"), 4.0f);
+    }
+}
+
+void UNPC_BehaviorSystem::ReactToDinosaurs()
+{
+    // This would handle specific reactions to different dinosaur types
+    // Implementation would depend on dinosaur AI system
 }

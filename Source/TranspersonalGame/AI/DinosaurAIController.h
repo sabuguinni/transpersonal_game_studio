@@ -2,137 +2,137 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "DinosaurAIController.generated.h"
 
 UENUM(BlueprintType)
-enum class ENPC_DinosaurState : uint8
+enum class ECombat_DinoState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
-    Patrol      UMETA(DisplayName = "Patrol"),
-    Hunt        UMETA(DisplayName = "Hunt"),
-    Flee        UMETA(DisplayName = "Flee"),
-    Attack      UMETA(DisplayName = "Attack"),
-    Dead        UMETA(DisplayName = "Dead")
+    Patrolling  UMETA(DisplayName = "Patrolling"),
+    Alerted     UMETA(DisplayName = "Alerted"),
+    Chasing     UMETA(DisplayName = "Chasing"),
+    Attacking   UMETA(DisplayName = "Attacking"),
+    Fleeing     UMETA(DisplayName = "Fleeing"),
+    Feeding     UMETA(DisplayName = "Feeding"),
+};
+
+UENUM(BlueprintType)
+enum class ECombat_DinoSpecies : uint8
+{
+    TRex            UMETA(DisplayName = "T-Rex"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
+    Triceratops     UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
+    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
 };
 
 USTRUCT(BlueprintType)
-struct FNPC_DinosaurStats
+struct FCombat_DinoStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Health = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float DetectionRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MaxHealth = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRadius = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackDamage = 25.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackDamage = 40.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float MovementSpeed = 400.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackCooldown = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float SightRange = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float ChaseSpeed = 600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float AttackRange = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float PatrolSpeed = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float PatrolRadius = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bIsPackHunter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float PackAlertRadius = 800.0f;
 };
 
-/**
- * AI Controller base para todos os dinossauros
- * Implementa comportamento básico: patrulha, caça, fuga, ataque
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANPC_DinosaurAIController : public AAIController
+UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
 {
     GENERATED_BODY()
 
 public:
-    ANPC_DinosaurAIController();
+    ADinosaurAIController();
 
-protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
-    // Componentes de IA
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBehaviorTreeComponent* BehaviorTreeComponent;
+    // State machine
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetDinoState(ECombat_DinoState NewState);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UBlackboardComponent* BlackboardComponent;
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    ECombat_DinoState GetDinoState() const { return CurrentState; }
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AlertNearbyPackMembers(AActor* Threat);
 
-    // Configuração da IA
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Config")
-    class UBehaviorTree* BehaviorTree;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    float GetDistanceToTarget() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Config")
-    class UBlackboardData* BlackboardAsset;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool CanAttack() const;
 
-    // Stats do dinossauro
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteAttack();
+
+    // Species configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FNPC_DinosaurStats DinosaurStats;
+    ECombat_DinoSpecies Species = ECombat_DinoSpecies::Velociraptor;
 
-    // Estado actual
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    ENPC_DinosaurState CurrentState;
+    FCombat_DinoStats DinoStats;
 
-    // Target actual
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    AActor* CurrentTarget;
-
-    // Posição inicial para patrulha
-    UPROPERTY(BlueprintReadOnly, Category = "AI")
-    FVector HomeLocation;
-
-public:
-    // Funções públicas para controlo da IA
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetDinosaurState(ENPC_DinosaurState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    ENPC_DinosaurState GetDinosaurState() const { return CurrentState; }
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetTarget(AActor* NewTarget);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    AActor* GetTarget() const { return CurrentTarget; }
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void TakeDamage(float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool IsAlive() const { return DinosaurStats.Health > 0.0f; }
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    float GetHealthPercentage() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    UBehaviorTree* BehaviorTreeAsset;
 
 protected:
-    // Callbacks de percepção
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI", meta = (AllowPrivateAccess = "true"))
+    UAIPerceptionComponent* PerceptionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI", meta = (AllowPrivateAccess = "true"))
+    UBlackboardComponent* BlackboardComp;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    ECombat_DinoState CurrentState = ECombat_DinoState::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat AI", meta = (AllowPrivateAccess = "true"))
+    AActor* CurrentTarget = nullptr;
+
+    float LastAttackTime = 0.0f;
+    float StateEnteredTime = 0.0f;
+
+    // Patrol
+    TArray<FVector> PatrolPoints;
+    int32 CurrentPatrolIndex = 0;
+
+    void UpdateIdleState(float DeltaTime);
+    void UpdatePatrolState(float DeltaTime);
+    void UpdateAlertedState(float DeltaTime);
+    void UpdateChaseState(float DeltaTime);
+    void UpdateAttackState(float DeltaTime);
+    void UpdateFleeState(float DeltaTime);
+
+    void GeneratePatrolPoints();
+    void OnTargetPerceived(AActor* Actor, FAIStimulus Stimulus);
+
     UFUNCTION()
-    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+    void HandlePerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
-    // Lógica de comportamento
-    void UpdateBehavior(float DeltaTime);
-    void HandleIdleState();
-    void HandlePatrolState();
-    void HandleHuntState();
-    void HandleAttackState();
-    void HandleFleeState();
-
-    // Utilitários
-    bool CanSeeTarget(AActor* Target) const;
-    float GetDistanceToTarget(AActor* Target) const;
-    FVector GetRandomPatrolPoint() const;
+    void ApplySpeciesDefaults();
 };

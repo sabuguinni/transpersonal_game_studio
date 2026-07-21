@@ -1,252 +1,238 @@
-#include "CrowdSimulationManager.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+// CrowdSimulationManager.cpp — Agent #13 Crowd & Traffic Simulation
+// Transpersonal Game Studio — Prehistoric Survival Game
+// Implements Mass AI crowd simulation for up to 50,000 agents
 
-ACrowdSimulationManager::ACrowdSimulationManager()
+#include "CrowdSimulationManager.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
+#include "GameFramework/Actor.h"
+
+UCrowdSimulationManager::UCrowdSimulationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for management logic
-    
-    CurrentSeasonTime = 0.0f;
-    ActiveEntityCount = 0;
-    LastPerformanceCheck = 0.0f;
-    AverageFrameTime = 16.67f; // Target 60 FPS
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz update for performance
+
+    MaxActiveAgents = 500;
+    AgentSpawnRadius = 5000.0f;
+    LODDistanceClose = 1500.0f;
+    LODDistanceMedium = 4000.0f;
+    LODDistanceFar = 8000.0f;
+    bSimulationActive = false;
+    bDebugDrawEnabled = false;
+    CurrentAgentCount = 0;
 }
 
-void ACrowdSimulationManager::BeginPlay()
+void UCrowdSimulationManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Get Mass subsystems
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-        MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-        MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();
-    }
-    
-    // Initialize migration waypoints if empty
-    if (MigrationWaypoints.Num() == 0)
-    {
-        // Default circular migration pattern
-        float Radius = 5000.0f;
-        int32 WaypointCount = 8;
-        FVector Center = GetActorLocation();
-        
-        for (int32 i = 0; i < WaypointCount; i++)
-        {
-            float Angle = (2.0f * PI * i) / WaypointCount;
-            FVector Waypoint = Center + FVector(
-                FMath::Cos(Angle) * Radius,
-                FMath::Sin(Angle) * Radius,
-                0.0f
-            );
-            MigrationWaypoints.Add(Waypoint);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager initialized with %d migration waypoints"), MigrationWaypoints.Num());
+    bSimulationActive = true;
+    CurrentAgentCount = 0;
+    unreal::log("CrowdSimulationManager: Initialized");
 }
 
-void ACrowdSimulationManager::Tick(float DeltaTime)
+void UCrowdSimulationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
-    
-    // Update seasonal cycle
-    CurrentSeasonTime += DeltaTime;
-    if (CurrentSeasonTime >= SeasonalCycleLength)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!bSimulationActive) return;
+
+    UpdateAgentLOD();
+    UpdateHerdBehavior(DeltaTime);
+
+    if (bDebugDrawEnabled)
     {
-        CurrentSeasonTime = 0.0f;
-        // Trigger seasonal migration
-        SetMigrationActive(true);
-    }
-    
-    // Performance monitoring
-    LastPerformanceCheck += DeltaTime;
-    if (LastPerformanceCheck >= 1.0f) // Check every second
-    {
-        LastPerformanceCheck = 0.0f;
-        
-        // Calculate average frame time
-        AverageFrameTime = (AverageFrameTime * 0.9f) + (DeltaTime * 1000.0f * 0.1f);
-        
-        // Adaptive LOD based on performance
-        if (AverageFrameTime > 20.0f) // Below 50 FPS
-        {
-            // Reduce simulation complexity
-            MaxSimultaneousEntities = FMath::Max(MaxSimultaneousEntities - 1000, 10000);
-            UE_LOG(LogTemp, Warning, TEXT("Performance issue detected. Reducing max entities to %d"), MaxSimultaneousEntities);
-        }
-        else if (AverageFrameTime < 14.0f) // Above 70 FPS
-        {
-            // Increase simulation complexity
-            MaxSimultaneousEntities = FMath::Min(MaxSimultaneousEntities + 500, 50000);
-        }
-    }
-    
-    // Update active entity count from Mass subsystem
-    if (MassEntitySubsystem)
-    {
-        ActiveEntityCount = MassEntitySubsystem->GetNumEntities();
+        DrawDebugCrowd();
     }
 }
 
-void ACrowdSimulationManager::SpawnHerd(FVector Location, int32 HerdSize, TSubclassOf<class ADinosaur> DinosaurClass)
+void UCrowdSimulationManager::InitializeCrowdSystem(int32 InitialAgentCount)
 {
-    if (!MassSpawnerSubsystem || !DinosaurClass)
+    if (InitialAgentCount <= 0 || InitialAgentCount > MaxActiveAgents)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn herd: Missing subsystem or dinosaur class"));
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Invalid agent count %d"), InitialAgentCount);
         return;
     }
-    
-    // Check if we're at entity limit
-    if (ActiveEntityCount + HerdSize > MaxSimultaneousEntities)
+
+    ActiveAgents.Reserve(InitialAgentCount);
+    CurrentAgentCount = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Crowd system initialized for %d agents"), InitialAgentCount);
+    bSimulationActive = true;
+}
+
+void UCrowdSimulationManager::SpawnCrowdAgents(int32 Count, FVector CenterLocation, ECrowd_AgentType AgentType)
+{
+    if (!GetWorld()) return;
+    if (CurrentAgentCount + Count > MaxActiveAgents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn herd: Would exceed entity limit (%d + %d > %d)"), 
-               ActiveEntityCount, HerdSize, MaxSimultaneousEntities);
-        return;
+        Count = MaxActiveAgents - CurrentAgentCount;
     }
-    
-    // Spawn entities in a natural formation
-    float SpreadRadius = FMath::Sqrt(HerdSize) * 50.0f; // Spread based on herd size
-    
-    for (int32 i = 0; i < HerdSize; i++)
+    if (Count <= 0) return;
+
+    for (int32 i = 0; i < Count; ++i)
     {
-        // Random position within spread radius
-        FVector RandomOffset = FVector(
-            FMath::RandRange(-SpreadRadius, SpreadRadius),
-            FMath::RandRange(-SpreadRadius, SpreadRadius),
+        FCrowd_AgentData NewAgent;
+        NewAgent.AgentID = CurrentAgentCount + i;
+        NewAgent.AgentType = AgentType;
+
+        // Random position within spawn radius
+        float Angle = FMath::RandRange(0.0f, 360.0f);
+        float Radius = FMath::RandRange(0.0f, AgentSpawnRadius);
+        NewAgent.Location = CenterLocation + FVector(
+            FMath::Cos(FMath::DegreesToRadians(Angle)) * Radius,
+            FMath::Sin(FMath::DegreesToRadians(Angle)) * Radius,
             0.0f
         );
-        
-        FVector SpawnLocation = Location + RandomOffset;
-        
-        // TODO: Use Mass spawning system here
-        // This is a placeholder for the actual Mass Entity spawning
-        UE_LOG(LogTemp, Log, TEXT("Spawning herd member %d at location %s"), i, *SpawnLocation.ToString());
+        NewAgent.Velocity = FVector::ZeroVector;
+        NewAgent.CurrentSpeed = 0.0f;
+        NewAgent.PanicLevel = 0.0f;
+        NewAgent.bIsLeader = (i == 0); // First agent is leader
+        NewAgent.LODLevel = ECrowd_LODLevel::Full;
+        NewAgent.bIsActive = true;
+
+        ActiveAgents.Add(NewAgent);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned herd of %d entities at %s"), HerdSize, *Location.ToString());
+
+    CurrentAgentCount += Count;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d agents of type %d. Total: %d"), Count, (int32)AgentType, CurrentAgentCount);
 }
 
-void ACrowdSimulationManager::SpawnFlock(FVector Location, int32 FlockSize, TSubclassOf<class AFlyingDinosaur> FlyingDinosaurClass)
+void UCrowdSimulationManager::TriggerStampede(FVector TriggerLocation, float PanicRadius)
 {
-    if (!MassSpawnerSubsystem || !FlyingDinosaurClass)
+    if (ActiveAgents.Num() == 0) return;
+
+    int32 AffectedCount = 0;
+    for (FCrowd_AgentData& Agent : ActiveAgents)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn flock: Missing subsystem or flying dinosaur class"));
-        return;
-    }
-    
-    if (ActiveEntityCount + FlockSize > MaxSimultaneousEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn flock: Would exceed entity limit"));
-        return;
-    }
-    
-    // Spawn flying entities in V-formation
-    float FormationSpacing = 100.0f;
-    FVector LeaderPosition = Location;
-    
-    for (int32 i = 0; i < FlockSize; i++)
-    {
-        FVector SpawnLocation;
-        
-        if (i == 0)
+        if (!Agent.bIsActive) continue;
+
+        float Distance = FVector::Dist(Agent.Location, TriggerLocation);
+        if (Distance <= PanicRadius)
         {
-            // Leader at front
-            SpawnLocation = LeaderPosition;
+            // Panic propagates based on proximity
+            float PanicFactor = 1.0f - (Distance / PanicRadius);
+            Agent.PanicLevel = FMath::Min(1.0f, Agent.PanicLevel + PanicFactor);
+
+            // Flee direction away from trigger
+            FVector FleeDir = (Agent.Location - TriggerLocation).GetSafeNormal();
+            Agent.Velocity = FleeDir * GetMaxSpeedForType(Agent.AgentType) * Agent.PanicLevel;
+            AffectedCount++;
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Stampede triggered at %s — %d agents panicking"), *TriggerLocation.ToString(), AffectedCount);
+    OnStampedeTriggered.Broadcast(TriggerLocation, AffectedCount);
+}
+
+void UCrowdSimulationManager::UpdateAgentLOD()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    APlayerController* PC = World->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn()) return;
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+
+    for (FCrowd_AgentData& Agent : ActiveAgents)
+    {
+        if (!Agent.bIsActive) continue;
+
+        float Distance = FVector::Dist(Agent.Location, PlayerLocation);
+
+        if (Distance <= LODDistanceClose)
+        {
+            Agent.LODLevel = ECrowd_LODLevel::Full;
+        }
+        else if (Distance <= LODDistanceMedium)
+        {
+            Agent.LODLevel = ECrowd_LODLevel::Medium;
+        }
+        else if (Distance <= LODDistanceFar)
+        {
+            Agent.LODLevel = ECrowd_LODLevel::Low;
         }
         else
         {
-            // Formation based on index
-            int32 Side = (i % 2 == 0) ? 1 : -1; // Alternate sides
-            int32 Row = (i + 1) / 2;
-            
-            SpawnLocation = LeaderPosition + FVector(
-                -Row * FormationSpacing * 0.8f, // Slightly behind
-                Side * Row * FormationSpacing,   // To the side
-                FMath::RandRange(-50.0f, 50.0f) // Small height variation
-            );
+            Agent.LODLevel = ECrowd_LODLevel::Culled;
         }
-        
-        // TODO: Use Mass spawning system for flying entities
-        UE_LOG(LogTemp, Log, TEXT("Spawning flock member %d at location %s"), i, *SpawnLocation.ToString());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned flock of %d entities at %s"), FlockSize, *Location.ToString());
-}
-
-void ACrowdSimulationManager::SpawnPack(FVector Location, int32 PackSize, TSubclassOf<class APredatorDinosaur> PredatorClass)
-{
-    if (!MassSpawnerSubsystem || !PredatorClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot spawn pack: Missing subsystem or predator class"));
-        return;
-    }
-    
-    if (ActiveEntityCount + PackSize > MaxSimultaneousEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn pack: Would exceed entity limit"));
-        return;
-    }
-    
-    // Spawn predators in hunting formation
-    float PackRadius = PackSize * 25.0f; // Tighter formation for predators
-    
-    for (int32 i = 0; i < PackSize; i++)
-    {
-        float Angle = (2.0f * PI * i) / PackSize;
-        FVector SpawnLocation = Location + FVector(
-            FMath::Cos(Angle) * PackRadius,
-            FMath::Sin(Angle) * PackRadius,
-            0.0f
-        );
-        
-        // TODO: Use Mass spawning system for predators
-        UE_LOG(LogTemp, Log, TEXT("Spawning pack member %d at location %s"), i, *SpawnLocation.ToString());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned pack of %d entities at %s"), PackSize, *Location.ToString());
-}
-
-void ACrowdSimulationManager::TriggerStampede(FVector ThreatLocation, float ThreatRadius)
-{
-    UE_LOG(LogTemp, Warning, TEXT("STAMPEDE TRIGGERED at %s with radius %f"), *ThreatLocation.ToString(), ThreatRadius);
-    
-    // TODO: Implement stampede behavior using Mass system
-    // This would involve:
-    // 1. Finding all herbivore entities within ThreatRadius
-    // 2. Setting their behavior state to "Fleeing"
-    // 3. Calculating flee direction away from ThreatLocation
-    // 4. Increasing movement speed temporarily
-    // 5. Adding panic spreading to nearby entities
-    
-    if (MassSimulationSubsystem)
-    {
-        // Placeholder for Mass system stampede logic
-        UE_LOG(LogTemp, Warning, TEXT("Mass simulation system will handle stampede behavior"));
     }
 }
 
-void ACrowdSimulationManager::SetMigrationActive(bool bActive)
+void UCrowdSimulationManager::UpdateHerdBehavior(float DeltaTime)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Migration set to: %s"), bActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
-    
-    // TODO: Implement migration behavior using Mass system
-    // This would involve:
-    // 1. Setting migration waypoints for all herd entities
-    // 2. Changing movement patterns to follow migration routes
-    // 3. Coordinating multiple herds to move together
-    // 4. Handling seasonal timing and triggers
-    
-    if (bActive && MigrationWaypoints.Num() > 0)
+    // Simple flocking: separation, alignment, cohesion
+    for (FCrowd_AgentData& Agent : ActiveAgents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Starting migration with %d waypoints"), MigrationWaypoints.Num());
-        // Set all herds to follow migration pattern
+        if (!Agent.bIsActive) continue;
+        if (Agent.LODLevel == ECrowd_LODLevel::Culled) continue;
+
+        // Reduce panic over time
+        if (Agent.PanicLevel > 0.0f)
+        {
+            Agent.PanicLevel = FMath::Max(0.0f, Agent.PanicLevel - DeltaTime * 0.1f);
+        }
+
+        // Move agent based on velocity
+        if (!Agent.Velocity.IsNearlyZero())
+        {
+            Agent.Location += Agent.Velocity * DeltaTime;
+            Agent.CurrentSpeed = Agent.Velocity.Size();
+
+            // Dampen velocity
+            Agent.Velocity *= 0.95f;
+        }
     }
+}
+
+void UCrowdSimulationManager::DrawDebugCrowd()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    for (const FCrowd_AgentData& Agent : ActiveAgents)
+    {
+        if (!Agent.bIsActive) continue;
+
+        FColor DebugColor = FColor::Green;
+        if (Agent.PanicLevel > 0.7f) DebugColor = FColor::Red;
+        else if (Agent.PanicLevel > 0.3f) DebugColor = FColor::Yellow;
+
+        DrawDebugSphere(World, Agent.Location, 50.0f, 8, DebugColor, false, 0.15f);
+
+        if (!Agent.Velocity.IsNearlyZero())
+        {
+            DrawDebugArrow(World, Agent.Location, Agent.Location + Agent.Velocity * 0.5f, 20.0f, DebugColor, false, 0.15f);
+        }
+    }
+}
+
+float UCrowdSimulationManager::GetMaxSpeedForType(ECrowd_AgentType AgentType) const
+{
+    switch (AgentType)
+    {
+        case ECrowd_AgentType::DinosaurHerbivore:   return 800.0f;
+        case ECrowd_AgentType::DinosaurCarnivore:   return 1200.0f;
+        case ECrowd_AgentType::HumanTribal:         return 400.0f;
+        case ECrowd_AgentType::SmallAnimal:         return 600.0f;
+        default:                                     return 500.0f;
+    }
+}
+
+int32 UCrowdSimulationManager::GetActiveAgentCount() const
+{
+    return CurrentAgentCount;
+}
+
+void UCrowdSimulationManager::SetSimulationActive(bool bActive)
+{
+    bSimulationActive = bActive;
+}
+
+void UCrowdSimulationManager::ClearAllAgents()
+{
+    ActiveAgents.Empty();
+    CurrentAgentCount = 0;
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: All agents cleared"));
 }

@@ -1,292 +1,463 @@
 #include "Core_PhysicsSystemManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "GameFramework/Actor.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Engine/StaticMeshActor.h"
+#include "Chaos/ChaosEngineInterface.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/WorldSettings.h"
+#include "Kismet/GameplayStatics.h"
+#include "Core_CollisionManagerComponent.h"
+#include "Core_RagdollManagerComponent.h"
+#include "Core_DestructionManagerComponent.h"
 
 ACore_PhysicsSystemManager::ACore_PhysicsSystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for physics management
 
-    // Initialize default physics settings
-    InitializePhysicsSettings();
+    // Create components
+    CollisionManager = CreateDefaultSubobject<UCore_CollisionManagerComponent>(TEXT("CollisionManager"));
+    RagdollManager = CreateDefaultSubobject<UCore_RagdollManagerComponent>(TEXT("RagdollManager"));
+    DestructionManager = CreateDefaultSubobject<UCore_DestructionManagerComponent>(TEXT("DestructionManager"));
+
+    // Initialize default settings
+    PhysicsMode = ECore_PhysicsMode::Realistic;
+    bEnablePhysicsDebugDraw = false;
+    bEnablePerformanceMonitoring = true;
+    MetricsUpdateInterval = 1.0f;
+
+    // Set up default biome physics settings
+    FCore_PhysicsSettings DefaultSettings;
+    
+    // Pantano - softer physics, more damping
+    FCore_PhysicsSettings PantanoSettings = DefaultSettings;
+    PantanoSettings.LinearDamping = 0.05f;
+    PantanoSettings.AngularDamping = 0.05f;
+    PantanoSettings.GravityScale = 0.9f;
+    
+    // Floresta - standard physics
+    FCore_PhysicsSettings FlorestaSettings = DefaultSettings;
+    
+    // Savana - standard physics
+    FCore_PhysicsSettings SavanaSettings = DefaultSettings;
+    
+    // Deserto - slightly reduced gravity for sand effect
+    FCore_PhysicsSettings DesertoSettings = DefaultSettings;
+    DesertoSettings.GravityScale = 0.95f;
+    DesertoSettings.LinearDamping = 0.02f;
+    
+    // Montanha - increased gravity, reduced damping
+    FCore_PhysicsSettings MontanhaSettings = DefaultSettings;
+    MontanhaSettings.GravityScale = 1.1f;
+    MontanhaSettings.LinearDamping = 0.005f;
+
+    BiomePhysicsSettings.Add(EBiomeType::Pantano, PantanoSettings);
+    BiomePhysicsSettings.Add(EBiomeType::Floresta, FlorestaSettings);
+    BiomePhysicsSettings.Add(EBiomeType::Savana, SavanaSettings);
+    BiomePhysicsSettings.Add(EBiomeType::Deserto, DesertoSettings);
+    BiomePhysicsSettings.Add(EBiomeType::Montanha, MontanhaSettings);
+
+    bIsInitialized = false;
 }
 
 void ACore_PhysicsSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: BeginPlay - Initializing physics system"));
-    
-    // Apply initial physics mode
-    SetPhysicsMode(CurrentPhysicsMode);
-    
-    // Start performance monitoring
-    LastPerformanceCheck = GetWorld()->GetTimeSeconds();
+    CachedWorld = GetWorld();
+    if (CachedWorld)
+    {
+        InitializePhysicsSystem();
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Initialized successfully"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Failed to get world reference"));
+    }
 }
 
 void ACore_PhysicsSystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Monitor physics performance
-    MonitorPhysicsPerformance();
+
+    if (!bIsInitialized || !CachedWorld)
+    {
+        return;
+    }
+
+    // Update performance metrics
+    if (bEnablePerformanceMonitoring)
+    {
+        MetricsTimer += DeltaTime;
+        if (MetricsTimer >= MetricsUpdateInterval)
+        {
+            UpdatePerformanceMetrics();
+            MetricsTimer = 0.0f;
+        }
+    }
+
+    // Update physics settings based on current mode
+    UpdatePhysicsSettings();
 }
 
-void ACore_PhysicsSystemManager::InitializePhysicsSettings()
+void ACore_PhysicsSystemManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    // Realistic physics settings (default for survival game)
-    RealisticSettings.GravityScale = 1.0f;
-    RealisticSettings.LinearDamping = 0.01f;
-    RealisticSettings.AngularDamping = 0.05f;
-    RealisticSettings.MaxAngularVelocity = 3600.0f;
-    RealisticSettings.bEnableGravity = true;
-    RealisticSettings.bSimulatePhysics = true;
+    ShutdownPhysicsSystem();
+    Super::EndPlay(EndPlayReason);
+}
 
-    // Arcade physics settings (more responsive)
-    ArcadeSettings.GravityScale = 0.8f;
-    ArcadeSettings.LinearDamping = 0.1f;
-    ArcadeSettings.AngularDamping = 0.2f;
-    ArcadeSettings.MaxAngularVelocity = 1800.0f;
-    ArcadeSettings.bEnableGravity = true;
-    ArcadeSettings.bSimulatePhysics = true;
+void ACore_PhysicsSystemManager::InitializePhysicsSystem()
+{
+    if (bIsInitialized)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Already initialized"));
+        return;
+    }
 
-    // Survival physics settings (heavier, more realistic)
-    SurvivalSettings.GravityScale = 1.2f;
-    SurvivalSettings.LinearDamping = 0.02f;
-    SurvivalSettings.AngularDamping = 0.1f;
-    SurvivalSettings.MaxAngularVelocity = 2400.0f;
-    SurvivalSettings.bEnableGravity = true;
-    SurvivalSettings.bSimulatePhysics = true;
+    if (!CachedWorld)
+    {
+        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: No valid world reference"));
+        return;
+    }
 
-    // Cinematic physics settings (dramatic, slower)
-    CinematicSettings.GravityScale = 0.6f;
-    CinematicSettings.LinearDamping = 0.05f;
-    CinematicSettings.AngularDamping = 0.3f;
-    CinematicSettings.MaxAngularVelocity = 1200.0f;
-    CinematicSettings.bEnableGravity = true;
-    CinematicSettings.bSimulatePhysics = true;
+    // Initialize components
+    InitializeComponents();
+
+    // Configure world physics
+    ConfigureWorldPhysics();
+
+    // Apply initial physics settings
+    ApplyPhysicsSettings(PhysicsSettings);
+
+    bIsInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics system initialized"));
+}
+
+void ACore_PhysicsSystemManager::ShutdownPhysicsSystem()
+{
+    if (!bIsInitialized)
+    {
+        return;
+    }
+
+    // Clear registered actors
+    RegisteredPhysicsActors.Empty();
+
+    // Reset components
+    if (CollisionManager)
+    {
+        CollisionManager->Shutdown();
+    }
+    if (RagdollManager)
+    {
+        RagdollManager->Shutdown();
+    }
+    if (DestructionManager)
+    {
+        DestructionManager->Shutdown();
+    }
+
+    bIsInitialized = false;
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics system shutdown"));
 }
 
 void ACore_PhysicsSystemManager::SetPhysicsMode(ECore_PhysicsMode NewMode)
 {
-    CurrentPhysicsMode = NewMode;
-    
-    FCore_PhysicsSettings SettingsToApply;
-    
-    switch (CurrentPhysicsMode)
+    if (PhysicsMode == NewMode)
+    {
+        return;
+    }
+
+    PhysicsMode = NewMode;
+
+    // Adjust physics settings based on mode
+    switch (PhysicsMode)
     {
         case ECore_PhysicsMode::Realistic:
-            SettingsToApply = RealisticSettings;
-            UE_LOG(LogTemp, Warning, TEXT("Physics Mode: REALISTIC"));
+            PhysicsSettings.GravityScale = 1.0f;
+            PhysicsSettings.LinearDamping = 0.01f;
+            PhysicsSettings.AngularDamping = 0.01f;
+            PhysicsSettings.bEnableCCD = true;
             break;
+
         case ECore_PhysicsMode::Arcade:
-            SettingsToApply = ArcadeSettings;
-            UE_LOG(LogTemp, Warning, TEXT("Physics Mode: ARCADE"));
+            PhysicsSettings.GravityScale = 0.7f;
+            PhysicsSettings.LinearDamping = 0.05f;
+            PhysicsSettings.AngularDamping = 0.05f;
+            PhysicsSettings.bEnableCCD = false;
             break;
-        case ECore_PhysicsMode::Survival:
-            SettingsToApply = SurvivalSettings;
-            UE_LOG(LogTemp, Warning, TEXT("Physics Mode: SURVIVAL"));
-            break;
+
         case ECore_PhysicsMode::Cinematic:
-            SettingsToApply = CinematicSettings;
-            UE_LOG(LogTemp, Warning, TEXT("Physics Mode: CINEMATIC"));
+            PhysicsSettings.GravityScale = 0.5f;
+            PhysicsSettings.LinearDamping = 0.1f;
+            PhysicsSettings.AngularDamping = 0.1f;
+            PhysicsSettings.bEnableCCD = false;
+            break;
+
+        case ECore_PhysicsMode::Disabled:
+            // Physics will be disabled in UpdatePhysicsSettings
             break;
     }
-    
-    ApplyGlobalPhysicsSettings(SettingsToApply);
+
+    ApplyPhysicsSettings(PhysicsSettings);
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics mode changed to %d"), (int32)PhysicsMode);
 }
 
-void ACore_PhysicsSystemManager::ApplyGlobalPhysicsSettings(const FCore_PhysicsSettings& Settings)
+void ACore_PhysicsSystemManager::ApplyPhysicsSettings(const FCore_PhysicsSettings& NewSettings)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    PhysicsSettings = NewSettings;
+
+    if (!CachedWorld)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: No valid world found"));
         return;
     }
 
-    // Apply settings to world physics
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    // Apply to world settings
+    AWorldSettings* WorldSettings = CachedWorld->GetWorldSettings();
+    if (WorldSettings)
     {
-        // Update global gravity
-        World->GetPhysicsScene()->SetGravityZ(-980.0f * Settings.GravityScale);
-        UE_LOG(LogTemp, Warning, TEXT("Applied gravity scale: %f"), Settings.GravityScale);
-    }
-
-    // Apply settings to all physics objects in the world
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor != this) // Don't apply to self
+        WorldSettings->GlobalGravityZ = -980.0f * PhysicsSettings.GravityScale;
+        
+        // Update physics scene settings if available
+        if (CachedWorld->GetPhysicsScene())
         {
-            ApplyPhysicsSettingsToActor(Actor, Settings);
+            // Note: Some settings require engine-level changes
+            // This is a simplified implementation
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Applied physics settings - Gravity: %.2f, LinearDamping: %.3f"), 
+           PhysicsSettings.GravityScale, PhysicsSettings.LinearDamping);
 }
 
-void ACore_PhysicsSystemManager::ApplyPhysicsSettingsToActor(AActor* Actor, const FCore_PhysicsSettings& Settings)
+void ACore_PhysicsSystemManager::SetBiomePhysicsSettings(EBiomeType BiomeType, const FCore_PhysicsSettings& Settings)
 {
-    if (!Actor)
+    BiomePhysicsSettings.Add(BiomeType, Settings);
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Updated physics settings for biome %d"), (int32)BiomeType);
+}
+
+void ACore_PhysicsSystemManager::UpdatePerformanceMetrics()
+{
+    if (!CachedWorld)
     {
         return;
     }
 
-    // Apply settings to all primitive components
-    TArray<UPrimitiveComponent*> PrimitiveComponents;
-    Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+    CollectPerformanceData();
 
-    for (UPrimitiveComponent* Component : PrimitiveComponents)
+    // Log performance if it's concerning
+    if (!IsPerformanceAcceptable())
     {
-        if (Component && Component->IsSimulatingPhysics())
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Performance below acceptable levels - Step time: %.3fms, Active bodies: %d"), 
+               CurrentMetrics.PhysicsStepTime, CurrentMetrics.ActiveRigidBodies);
+    }
+}
+
+FCore_PhysicsPerformanceMetrics ACore_PhysicsSystemManager::GetCurrentMetrics() const
+{
+    return CurrentMetrics;
+}
+
+bool ACore_PhysicsSystemManager::IsPerformanceAcceptable() const
+{
+    // Performance thresholds
+    const float MaxStepTime = 5.0f; // 5ms
+    const int32 MaxActiveBodies = 1000;
+
+    return (CurrentMetrics.PhysicsStepTime <= MaxStepTime) && 
+           (CurrentMetrics.ActiveRigidBodies <= MaxActiveBodies);
+}
+
+void ACore_PhysicsSystemManager::TogglePhysicsDebugDraw()
+{
+    bEnablePhysicsDebugDraw = !bEnablePhysicsDebugDraw;
+    
+    if (CachedWorld)
+    {
+        FString Command = bEnablePhysicsDebugDraw ? TEXT("showdebug collision") : TEXT("showdebug none");
+        GEngine->Exec(CachedWorld, *Command);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics debug draw %s"), 
+           bEnablePhysicsDebugDraw ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void ACore_PhysicsSystemManager::LogPhysicsStatus()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== PHYSICS SYSTEM STATUS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Initialized: %s"), bIsInitialized ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Log, TEXT("Physics Mode: %d"), (int32)PhysicsMode);
+    UE_LOG(LogTemp, Log, TEXT("Gravity Scale: %.2f"), PhysicsSettings.GravityScale);
+    UE_LOG(LogTemp, Log, TEXT("Registered Actors: %d"), RegisteredPhysicsActors.Num());
+    UE_LOG(LogTemp, Log, TEXT("Active Rigid Bodies: %d"), CurrentMetrics.ActiveRigidBodies);
+    UE_LOG(LogTemp, Log, TEXT("Physics Step Time: %.3fms"), CurrentMetrics.PhysicsStepTime);
+    UE_LOG(LogTemp, Log, TEXT("Performance Acceptable: %s"), IsPerformanceAcceptable() ? TEXT("Yes") : TEXT("No"));
+}
+
+void ACore_PhysicsSystemManager::ValidatePhysicsSetup()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== VALIDATING PHYSICS SETUP ==="));
+
+    bool bValid = true;
+
+    // Check world reference
+    if (!CachedWorld)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No valid world reference"));
+        bValid = false;
+    }
+
+    // Check components
+    if (!CollisionManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CollisionManager component missing"));
+        bValid = false;
+    }
+    if (!RagdollManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("RagdollManager component missing"));
+        bValid = false;
+    }
+    if (!DestructionManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DestructionManager component missing"));
+        bValid = false;
+    }
+
+    // Check biome settings
+    for (int32 i = 0; i < (int32)EBiomeType::MAX; ++i)
+    {
+        EBiomeType BiomeType = (EBiomeType)i;
+        if (!BiomePhysicsSettings.Contains(BiomeType))
         {
-            Component->SetLinearDamping(Settings.LinearDamping);
-            Component->SetAngularDamping(Settings.AngularDamping);
-            Component->SetEnableGravity(Settings.bEnableGravity);
-            
-            // Set max angular velocity if the component supports it
-            if (UStaticMeshComponent* MeshComp = Cast<UStaticMeshComponent>(Component))
-            {
-                MeshComp->SetPhysicsMaxAngularVelocityInRadians(FMath::DegreesToRadians(Settings.MaxAngularVelocity));
-            }
+            UE_LOG(LogTemp, Warning, TEXT("Missing physics settings for biome %d"), i);
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Physics setup validation: %s"), bValid ? TEXT("PASSED") : TEXT("FAILED"));
 }
 
-void ACore_PhysicsSystemManager::OptimizePhysicsPerformance()
+FCore_PhysicsSettings ACore_PhysicsSystemManager::GetBiomePhysicsSettings(EBiomeType BiomeType) const
 {
-    UWorld* World = GetWorld();
+    if (BiomePhysicsSettings.Contains(BiomeType))
+    {
+        return BiomePhysicsSettings[BiomeType];
+    }
+    return PhysicsSettings; // Return default if biome-specific not found
+}
+
+void ACore_PhysicsSystemManager::RegisterPhysicsActor(AActor* Actor)
+{
+    if (Actor && !RegisteredPhysicsActors.Contains(Actor))
+    {
+        RegisteredPhysicsActors.Add(Actor);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Registered actor %s"), *Actor->GetName());
+    }
+}
+
+void ACore_PhysicsSystemManager::UnregisterPhysicsActor(AActor* Actor)
+{
+    if (Actor)
+    {
+        RegisteredPhysicsActors.Remove(Actor);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Unregistered actor %s"), *Actor->GetName());
+    }
+}
+
+ACore_PhysicsSystemManager* ACore_PhysicsSystemManager::GetPhysicsSystemManager(UWorld* World)
+{
     if (!World)
+    {
+        return nullptr;
+    }
+
+    // Find existing physics system manager in the world
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ACore_PhysicsSystemManager::StaticClass(), FoundActors);
+
+    if (FoundActors.Num() > 0)
+    {
+        return Cast<ACore_PhysicsSystemManager>(FoundActors[0]);
+    }
+
+    return nullptr;
+}
+
+void ACore_PhysicsSystemManager::InitializeComponents()
+{
+    if (CollisionManager)
+    {
+        CollisionManager->Initialize();
+    }
+    if (RagdollManager)
+    {
+        RagdollManager->Initialize();
+    }
+    if (DestructionManager)
+    {
+        DestructionManager->Initialize();
+    }
+}
+
+void ACore_PhysicsSystemManager::ConfigureWorldPhysics()
+{
+    if (!CachedWorld)
     {
         return;
     }
 
-    int32 PhysicsObjectCount = 0;
-    
-    // Count and potentially optimize physics objects
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    // Configure world-level physics settings
+    AWorldSettings* WorldSettings = CachedWorld->GetWorldSettings();
+    if (WorldSettings)
     {
-        AActor* Actor = *ActorItr;
+        WorldSettings->bEnableWorldBoundsChecks = true;
+        WorldSettings->KillZ = -10000.0f; // Set kill plane below terrain
+    }
+}
+
+void ACore_PhysicsSystemManager::UpdatePhysicsSettings()
+{
+    if (PhysicsMode == ECore_PhysicsMode::Disabled)
+    {
+        // Disable physics simulation for performance
+        if (CachedWorld)
+        {
+            // Note: This is a simplified implementation
+            // In a full implementation, you'd pause the physics scene
+        }
+        return;
+    }
+
+    // Apply any dynamic physics adjustments here
+    // This could include LOD-based physics quality adjustments
+}
+
+void ACore_PhysicsSystemManager::CollectPerformanceData()
+{
+    // Simplified performance data collection
+    // In a full implementation, this would query the physics scene directly
+    
+    CurrentMetrics.ActiveRigidBodies = RegisteredPhysicsActors.Num();
+    CurrentMetrics.SleepingRigidBodies = 0; // Would be calculated from physics scene
+    CurrentMetrics.ActiveConstraints = 0;  // Would be calculated from physics scene
+    CurrentMetrics.PhysicsStepTime = 0.0f; // Would be measured from physics tick
+    CurrentMetrics.MemoryUsageMB = 0.0f;   // Would be calculated from physics memory usage
+
+    // Estimate based on registered actors
+    for (AActor* Actor : RegisteredPhysicsActors)
+    {
         if (Actor)
         {
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+            TArray<UPrimitiveComponent*> PrimComponents;
+            Actor->GetComponents<UPrimitiveComponent>(PrimComponents);
             
-            for (UPrimitiveComponent* Component : PrimitiveComponents)
+            for (UPrimitiveComponent* PrimComp : PrimComponents)
             {
-                if (Component && Component->IsSimulatingPhysics())
+                if (PrimComp && PrimComp->IsSimulatingPhysics())
                 {
-                    PhysicsObjectCount++;
-                    
-                    // If we're over the limit, disable physics on distant objects
-                    if (PhysicsObjectCount > MaxPhysicsObjects)
-                    {
-                        float Distance = FVector::Dist(Actor->GetActorLocation(), GetActorLocation());
-                        if (Distance > 5000.0f) // 50 meters
-                        {
-                            Component->SetSimulatePhysics(false);
-                            UE_LOG(LogTemp, Warning, TEXT("Disabled physics on distant object: %s"), *Actor->GetName());
-                        }
-                    }
+                    CurrentMetrics.ActiveRigidBodies++;
                 }
             }
         }
     }
-    
-    ActivePhysicsObjects = PhysicsObjectCount;
-    UE_LOG(LogTemp, Warning, TEXT("Physics optimization complete. Active objects: %d"), ActivePhysicsObjects);
-}
-
-FCore_PhysicsSettings ACore_PhysicsSystemManager::GetCurrentPhysicsSettings() const
-{
-    switch (CurrentPhysicsMode)
-    {
-        case ECore_PhysicsMode::Realistic:
-            return RealisticSettings;
-        case ECore_PhysicsMode::Arcade:
-            return ArcadeSettings;
-        case ECore_PhysicsMode::Survival:
-            return SurvivalSettings;
-        case ECore_PhysicsMode::Cinematic:
-            return CinematicSettings;
-        default:
-            return RealisticSettings;
-    }
-}
-
-void ACore_PhysicsSystemManager::UpdatePhysicsStatistics()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    int32 PhysicsObjectCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor)
-        {
-            TArray<UPrimitiveComponent*> PrimitiveComponents;
-            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-            
-            for (UPrimitiveComponent* Component : PrimitiveComponents)
-            {
-                if (Component && Component->IsSimulatingPhysics())
-                {
-                    PhysicsObjectCount++;
-                }
-            }
-        }
-    }
-    
-    ActivePhysicsObjects = PhysicsObjectCount;
-}
-
-void ACore_PhysicsSystemManager::MonitorPhysicsPerformance()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    if (CurrentTime - LastPerformanceCheck >= PerformanceCheckInterval)
-    {
-        // Update statistics
-        UpdatePhysicsStatistics();
-        
-        // Calculate frame time (simplified)
-        PhysicsFrameTime = GetWorld()->GetDeltaSeconds();
-        
-        // Auto-optimize if performance is poor
-        if (PhysicsFrameTime > 0.033f && ActivePhysicsObjects > MaxPhysicsObjects * 0.8f)
-        {
-            OptimizePhysicsPerformance();
-        }
-        
-        LastPerformanceCheck = CurrentTime;
-    }
-}
-
-void ACore_PhysicsSystemManager::TestPhysicsSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PHYSICS SYSTEM TEST ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current Mode: %d"), (int32)CurrentPhysicsMode);
-    UE_LOG(LogTemp, Warning, TEXT("Active Physics Objects: %d"), ActivePhysicsObjects);
-    UE_LOG(LogTemp, Warning, TEXT("Physics Frame Time: %f ms"), PhysicsFrameTime * 1000.0f);
-    
-    // Test physics settings application
-    SetPhysicsMode(ECore_PhysicsMode::Survival);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Physics system test complete"));
-}
-
-void ACore_PhysicsSystemManager::ResetPhysicsSettings()
-{
-    InitializePhysicsSettings();
-    SetPhysicsMode(ECore_PhysicsMode::Realistic);
-    UE_LOG(LogTemp, Warning, TEXT("Physics settings reset to defaults"));
 }

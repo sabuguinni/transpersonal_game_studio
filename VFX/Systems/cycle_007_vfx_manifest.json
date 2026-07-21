@@ -1,0 +1,157 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_006",
+  "agent": "#17 VFX Agent",
+  "timestamp": "2026-07-03",
+  "description": "VFX placeholder lights and scene audit for MinPlayableMap hub at (2100, 2400)",
+
+  "vfx_actors_spawned": [
+    {
+      "label": "VFX_Campfire_Hub_001",
+      "type": "PointLight",
+      "location": {"x": 2250, "y": 2320, "z": 220},
+      "color": "warm orange (1.0, 0.45, 0.1)",
+      "intensity": 3000,
+      "attenuation_radius": 600,
+      "purpose": "Campfire VFX placeholder — represents Niagara flame emitter NS_Fire_Campfire",
+      "niagara_target": "NS_Fire_Campfire",
+      "audio_sync": "AudioTrigger_Campfire_Hub_001",
+      "freesound_assets": [
+        {"id": 729395, "name": "Campfire 01", "duration": "109s", "use": "primary campfire loop"},
+        {"id": 463737, "name": "Small Bonfire", "duration": "34s", "use": "loopable campfire variant"}
+      ]
+    },
+    {
+      "label": "VFX_TRex_Tremor_001",
+      "type": "PointLight",
+      "location": {"x": 1500, "y": 2800, "z": 200},
+      "color": "danger red (0.8, 0.1, 0.05)",
+      "intensity": 1500,
+      "attenuation_radius": 800,
+      "purpose": "T-Rex tremor VFX zone — represents ground shake + dust burst Niagara system",
+      "niagara_target": "NS_Dino_TRex_Footstep",
+      "audio_sync": "AudioTrigger_TRex_Tremor_001",
+      "mechanic": "Screen shake + dust particle burst triggered by EVT_TRex_Proximity_Detected"
+    },
+    {
+      "label": "VFX_Raptor_DustBurst_001",
+      "type": "PointLight",
+      "location": {"x": 2900, "y": 3000, "z": 200},
+      "color": "forest green (0.2, 0.6, 0.1)",
+      "intensity": 800,
+      "attenuation_radius": 500,
+      "purpose": "Raptor ambush VFX zone — represents dust burst + foliage disturbance Niagara system",
+      "niagara_target": "NS_Dino_Raptor_Ambush",
+      "audio_sync": "AudioTrigger_ForestEdge_Raptor_001",
+      "mechanic": "Foliage disturbance particles + ambient silence = raptor warning system"
+    }
+  ],
+
+  "niagara_systems_planned": [
+    {
+      "id": "NS_Fire_Campfire",
+      "category": "AMBIENTE_NATURAL",
+      "description": "Campfire flame with rising smoke column and floating embers",
+      "emitters": [
+        {"name": "Flame_Core", "particle_count": 150, "lifetime": "0.8-1.5s", "color": "orange-yellow gradient"},
+        {"name": "Smoke_Column", "particle_count": 80, "lifetime": "3-6s", "color": "grey-white fading"},
+        {"name": "Embers", "particle_count": 40, "lifetime": "2-4s", "velocity": "upward + random drift"}
+      ],
+      "light_function": "dynamic flickering PointLight (3000 lux, 600u radius)",
+      "lod_chain": ["LOD0: full emitters at <500u", "LOD1: flame+smoke only at 500-1500u", "LOD2: billboard sprite at >1500u"]
+    },
+    {
+      "id": "NS_Dino_TRex_Footstep",
+      "category": "DINOSSAUROS",
+      "description": "T-Rex footstep impact — dust cloud burst + ground crack particles",
+      "emitters": [
+        {"name": "Dust_Burst", "particle_count": 200, "lifetime": "1.5-3s", "velocity": "radial outward"},
+        {"name": "Dirt_Chunks", "particle_count": 30, "lifetime": "0.5-1s", "physics": "gravity affected"},
+        {"name": "Ground_Ring", "particle_count": 60, "lifetime": "0.3s", "shape": "expanding ring"}
+      ],
+      "trigger": "EVT_TRex_Proximity_Detected + ground contact event",
+      "screen_shake": {"amplitude": 8.0, "frequency": 2.0, "duration": 0.6},
+      "lod_chain": ["LOD0: full at <800u", "LOD1: dust only at 800-2000u", "LOD2: none at >2000u"]
+    },
+    {
+      "id": "NS_Dino_Raptor_Ambush",
+      "category": "DINOSSAUROS",
+      "description": "Raptor ambush approach — foliage disturbance + ground dust trail",
+      "emitters": [
+        {"name": "Foliage_Shake", "particle_count": 50, "lifetime": "0.5-1s", "type": "leaf sprites"},
+        {"name": "Dust_Trail", "particle_count": 80, "lifetime": "1-2s", "velocity": "directional"},
+        {"name": "Ground_Disturb", "particle_count": 30, "lifetime": "0.3-0.8s", "color": "brown-grey"}
+      ],
+      "trigger": "EVT_Raptor_Ambush_Proximity",
+      "mechanic": "Subtle visual cue — complements ambient silence audio warning",
+      "lod_chain": ["LOD0: full at <600u", "LOD1: dust only at 600-1500u", "LOD2: none at >1500u"]
+    },
+    {
+      "id": "NS_Weather_Rain",
+      "category": "AMBIENTE_NATURAL",
+      "description": "Rain storm — vertical streaks + ground splash impacts + rising mist",
+      "emitters": [
+        {"name": "Rain_Streaks", "particle_count": 2000, "lifetime": "0.3-0.6s", "velocity": "downward + wind drift"},
+        {"name": "Splash_Impacts", "particle_count": 500, "lifetime": "0.1-0.3s", "spawn": "on ground contact"},
+        {"name": "Ground_Mist", "particle_count": 100, "lifetime": "2-5s", "color": "white semi-transparent"}
+      ],
+      "trigger": "WeatherSystem_Rain event",
+      "lod_chain": ["LOD0: full at <300u", "LOD1: streaks only at 300-800u", "LOD2: none at >800u"]
+    },
+    {
+      "id": "NS_Dino_Breath_Vapor",
+      "category": "DINOSSAUROS",
+      "description": "Dinosaur breath vapor in cold environments — exhaled steam cloud",
+      "emitters": [
+        {"name": "Steam_Puff", "particle_count": 40, "lifetime": "1-2s", "velocity": "forward + upward"},
+        {"name": "Condensation", "particle_count": 20, "lifetime": "0.5-1s", "color": "white fading"}
+      ],
+      "trigger": "Temperature < 5C AND dinosaur breathing animation event",
+      "lod_chain": ["LOD0: full at <400u", "LOD1: none at >400u"]
+    }
+  ],
+
+  "freesound_assets": [
+    {
+      "id": 729395,
+      "name": "Campfire 01",
+      "duration": "109s",
+      "preview": "https://cdn.freesound.org/previews/729/729395_12863902-hq.mp3",
+      "use": "Primary campfire loop at hub (2250, 2320)",
+      "vfx_sync": "NS_Fire_Campfire"
+    },
+    {
+      "id": 729396,
+      "name": "Campfire 02",
+      "duration": "268s",
+      "preview": "https://cdn.freesound.org/previews/729/729396_12863902-hq.mp3",
+      "use": "Extended campfire ambient — night variant",
+      "vfx_sync": "NS_Fire_Campfire"
+    },
+    {
+      "id": 463737,
+      "name": "Small Bonfire",
+      "duration": "34s (loopable)",
+      "preview": "https://cdn.freesound.org/previews/463/463737_7965922-hq.mp3",
+      "use": "Loopable campfire variant for performance",
+      "vfx_sync": "NS_Fire_Campfire"
+    }
+  ],
+
+  "hub_composition_status": {
+    "hub_center": {"x": 2100, "y": 2400},
+    "audio_zones": 4,
+    "vfx_lights": 3,
+    "campfire_vfx": "VFX_Campfire_Hub_001 (warm orange PointLight placeholder)",
+    "trex_zone_vfx": "VFX_TRex_Tremor_001 (danger red PointLight placeholder)",
+    "raptor_zone_vfx": "VFX_Raptor_DustBurst_001 (forest green PointLight placeholder)",
+    "next_step": "Replace PointLight placeholders with actual Niagara emitters when Niagara assets are available"
+  },
+
+  "vfx_design_philosophy": {
+    "principle": "VFX serves gameplay readability — every effect must communicate information to the player",
+    "campfire": "Warm light = safety zone, shelter, rest point",
+    "trex_tremor": "Ground dust + screen shake = danger proximity warning (syncs with ElderMara audio cue)",
+    "raptor_dust": "Subtle foliage disturbance = stealth danger (complements ambient silence audio mechanic)",
+    "no_magic": "Zero spiritual/mystical effects — all VFX are physically plausible in prehistoric world"
+  }
+}

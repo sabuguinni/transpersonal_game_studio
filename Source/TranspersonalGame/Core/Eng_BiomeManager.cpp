@@ -1,237 +1,230 @@
 #include "Eng_BiomeManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/Engine.h"
+#include "Kismet/KismetMathLibrary.h"
 
-AEng_BiomeManager::AEng_BiomeManager()
+UEng_BiomeManager::UEng_BiomeManager()
 {
-	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickInterval = 1.0f; // Update every second
-	
-	WeatherUpdateInterval = 30.0f; // Update weather every 30 seconds
-	WeatherUpdateTimer = 0.0f;
-	
-	// Set actor properties
-	SetActorTickEnabled(true);
-	bReplicates = true;
+    BiomeTransitionDistance = 5000.0f;
+    bDebugBiomes = false;
 }
 
-void AEng_BiomeManager::BeginPlay()
+void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::BeginPlay();
-	
-	// Initialize biome system
-	InitializeBiomeBoundaries();
-	
-	// Set initial weather states
-	CurrentWeatherStates.Add(EBiomeType::Swamp, EWeatherType::Foggy);
-	CurrentWeatherStates.Add(EBiomeType::Forest, EWeatherType::Overcast);
-	CurrentWeatherStates.Add(EBiomeType::Savanna, EWeatherType::Clear);
-	CurrentWeatherStates.Add(EBiomeType::Desert, EWeatherType::Clear);
-	CurrentWeatherStates.Add(EBiomeType::Mountain, EWeatherType::Snowy);
-	
-	// Initialize biome settings
-	FBiomeData SwampData;
-	SwampData.Temperature = 25.0f;
-	SwampData.Humidity = 90.0f;
-	SwampData.WindStrength = 0.2f;
-	BiomeSettings.Add(EBiomeType::Swamp, SwampData);
-	
-	FBiomeData ForestData;
-	ForestData.Temperature = 20.0f;
-	ForestData.Humidity = 70.0f;
-	ForestData.WindStrength = 0.3f;
-	BiomeSettings.Add(EBiomeType::Forest, ForestData);
-	
-	FBiomeData SavannaData;
-	SavannaData.Temperature = 30.0f;
-	SavannaData.Humidity = 40.0f;
-	SavannaData.WindStrength = 0.5f;
-	BiomeSettings.Add(EBiomeType::Savanna, SavannaData);
-	
-	FBiomeData DesertData;
-	DesertData.Temperature = 40.0f;
-	DesertData.Humidity = 10.0f;
-	DesertData.WindStrength = 0.7f;
-	BiomeSettings.Add(EBiomeType::Desert, DesertData);
-	
-	FBiomeData MountainData;
-	MountainData.Temperature = -5.0f;
-	MountainData.Humidity = 60.0f;
-	MountainData.WindStrength = 1.0f;
-	BiomeSettings.Add(EBiomeType::Mountain, MountainData);
-	
-	if (ValidateBiomeConfiguration())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Successfully initialized all 5 biomes"));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("BiomeManager: Configuration validation failed"));
-	}
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initializing biome system"));
+    SetupDefaultBiomes();
+    
+    if (bDebugBiomes)
+    {
+        ValidateBiomeSetup();
+    }
 }
 
-void AEng_BiomeManager::Tick(float DeltaTime)
+void UEng_BiomeManager::Deinitialize()
 {
-	Super::Tick(DeltaTime);
-	
-	UpdateWeatherSystems(DeltaTime);
+    BiomeDataMap.Empty();
+    Super::Deinitialize();
 }
 
-EBiomeType AEng_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
+void UEng_BiomeManager::SetupDefaultBiomes()
 {
-	// Check each biome boundary
-	for (const auto& BiomePair : BiomeBoundaries)
-	{
-		if (BiomePair.Value.IsInside(Location))
-		{
-			return BiomePair.Key;
-		}
-	}
-	
-	// Default to Savanna if outside all boundaries
-	return EBiomeType::Savanna;
+    // Clear existing data
+    BiomeDataMap.Empty();
+    
+    // PANTANO (Southwest) - Swamp biome
+    FEng_BiomeData SwampBiome;
+    SwampBiome.BiomeType = EBiomeType::Pantano;
+    SwampBiome.Center = FVector(-50000.0f, -45000.0f, 0.0f);
+    SwampBiome.BoundsMin = FVector2D(-77500.0f, -76500.0f);
+    SwampBiome.BoundsMax = FVector2D(-25000.0f, -15000.0f);
+    SwampBiome.Temperature = 28.0f;
+    SwampBiome.Humidity = 0.9f;
+    SwampBiome.WindStrength = 0.1f;
+    BiomeDataMap.Add(EBiomeType::Pantano, SwampBiome);
+    
+    // FLORESTA (Northwest) - Forest biome
+    FEng_BiomeData ForestBiome;
+    ForestBiome.BiomeType = EBiomeType::Floresta;
+    ForestBiome.Center = FVector(-45000.0f, 40000.0f, 0.0f);
+    ForestBiome.BoundsMin = FVector2D(-77500.0f, 15000.0f);
+    ForestBiome.BoundsMax = FVector2D(-15000.0f, 76500.0f);
+    ForestBiome.Temperature = 22.0f;
+    ForestBiome.Humidity = 0.8f;
+    ForestBiome.WindStrength = 0.2f;
+    BiomeDataMap.Add(EBiomeType::Floresta, ForestBiome);
+    
+    // SAVANA (Center) - Savanna biome
+    FEng_BiomeData SavannaBiome;
+    SavannaBiome.BiomeType = EBiomeType::Savana;
+    SavannaBiome.Center = FVector(0.0f, 0.0f, 0.0f);
+    SavannaBiome.BoundsMin = FVector2D(-20000.0f, -20000.0f);
+    SavannaBiome.BoundsMax = FVector2D(20000.0f, 20000.0f);
+    SavannaBiome.Temperature = 30.0f;
+    SavannaBiome.Humidity = 0.4f;
+    SavannaBiome.WindStrength = 0.3f;
+    BiomeDataMap.Add(EBiomeType::Savana, SavannaBiome);
+    
+    // DESERTO (East) - Desert biome
+    FEng_BiomeData DesertBiome;
+    DesertBiome.BiomeType = EBiomeType::Deserto;
+    DesertBiome.Center = FVector(55000.0f, 0.0f, 0.0f);
+    DesertBiome.BoundsMin = FVector2D(25000.0f, -30000.0f);
+    DesertBiome.BoundsMax = FVector2D(79500.0f, 30000.0f);
+    DesertBiome.Temperature = 40.0f;
+    DesertBiome.Humidity = 0.1f;
+    DesertBiome.WindStrength = 0.5f;
+    BiomeDataMap.Add(EBiomeType::Deserto, DesertBiome);
+    
+    // MONTANHA_NEVADA (Northeast) - Snowy Mountain biome
+    FEng_BiomeData MountainBiome;
+    MountainBiome.BiomeType = EBiomeType::MontanhaNevada;
+    MountainBiome.Center = FVector(40000.0f, 50000.0f, 500.0f);
+    MountainBiome.BoundsMin = FVector2D(15000.0f, 20000.0f);
+    MountainBiome.BoundsMax = FVector2D(79500.0f, 76500.0f);
+    MountainBiome.Temperature = -5.0f;
+    MountainBiome.Humidity = 0.6f;
+    MountainBiome.WindStrength = 0.8f;
+    BiomeDataMap.Add(EBiomeType::MontanhaNevada, MountainBiome);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Setup complete - %d biomes configured"), BiomeDataMap.Num());
 }
 
-bool AEng_BiomeManager::IsValidSpawnLocationForBiome(const FVector& Location, EBiomeType RequiredBiome) const
+EBiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-	EBiomeType LocationBiome = GetBiomeAtLocation(Location);
-	return LocationBiome == RequiredBiome;
+    float ClosestDistance = FLT_MAX;
+    EBiomeType ClosestBiome = EBiomeType::Savana;
+    
+    for (const auto& BiomePair : BiomeDataMap)
+    {
+        const FEng_BiomeData& BiomeData = BiomePair.Value;
+        float Distance = CalculateDistanceToBiome(WorldLocation, BiomeData);
+        
+        if (Distance < ClosestDistance)
+        {
+            ClosestDistance = Distance;
+            ClosestBiome = BiomeData.BiomeType;
+        }
+    }
+    
+    return ClosestBiome;
 }
 
-FVector AEng_BiomeManager::GetRandomLocationInBiome(EBiomeType BiomeType) const
+FEng_BiomeData UEng_BiomeManager::GetBiomeData(EBiomeType BiomeType) const
 {
-	if (!BiomeBoundaries.Contains(BiomeType))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Invalid biome type requested"));
-		return FVector::ZeroVector;
-	}
-	
-	const FBox& BiomeBounds = BiomeBoundaries[BiomeType];
-	
-	float RandomX = FMath::RandRange(BiomeBounds.Min.X, BiomeBounds.Max.X);
-	float RandomY = FMath::RandRange(BiomeBounds.Min.Y, BiomeBounds.Max.Y);
-	float RandomZ = FMath::RandRange(BiomeBounds.Min.Z, BiomeBounds.Max.Z);
-	
-	return FVector(RandomX, RandomY, RandomZ);
+    if (const FEng_BiomeData* FoundData = BiomeDataMap.Find(BiomeType))
+    {
+        return *FoundData;
+    }
+    
+    // Return default savanna if not found
+    FEng_BiomeData DefaultData;
+    DefaultData.BiomeType = EBiomeType::Savana;
+    return DefaultData;
 }
 
-void AEng_BiomeManager::SetWeatherForBiome(EBiomeType BiomeType, EWeatherType WeatherType)
+FVector UEng_BiomeManager::GetRandomLocationInBiome(EBiomeType BiomeType) const
 {
-	CurrentWeatherStates.Add(BiomeType, WeatherType);
-	
-	UE_LOG(LogTemp, Log, TEXT("BiomeManager: Set weather for biome %d to %d"), 
-		   (int32)BiomeType, (int32)WeatherType);
+    const FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    
+    float RandomX = FMath::RandRange(BiomeData.BoundsMin.X, BiomeData.BoundsMax.X);
+    float RandomY = FMath::RandRange(BiomeData.BoundsMin.Y, BiomeData.BoundsMax.Y);
+    float RandomZ = 0.0f; // Ground level, can be adjusted based on terrain
+    
+    return FVector(RandomX, RandomY, RandomZ);
 }
 
-EWeatherType AEng_BiomeManager::GetCurrentWeather(EBiomeType BiomeType) const
+bool UEng_BiomeManager::IsLocationInBiome(const FVector& WorldLocation, EBiomeType BiomeType) const
 {
-	if (CurrentWeatherStates.Contains(BiomeType))
-	{
-		return CurrentWeatherStates[BiomeType];
-	}
-	
-	return EWeatherType::Clear; // Default weather
+    const FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    
+    return (WorldLocation.X >= BiomeData.BoundsMin.X && WorldLocation.X <= BiomeData.BoundsMax.X &&
+            WorldLocation.Y >= BiomeData.BoundsMin.Y && WorldLocation.Y <= BiomeData.BoundsMax.Y);
 }
 
-float AEng_BiomeManager::GetBiomeTemperature(EBiomeType BiomeType) const
+TArray<EBiomeType> UEng_BiomeManager::GetAllBiomeTypes() const
 {
-	if (BiomeSettings.Contains(BiomeType))
-	{
-		return BiomeSettings[BiomeType].Temperature;
-	}
-	
-	return 20.0f; // Default temperature
+    TArray<EBiomeType> BiomeTypes;
+    BiomeDataMap.GetKeys(BiomeTypes);
+    return BiomeTypes;
 }
 
-float AEng_BiomeManager::GetBiomeHumidity(EBiomeType BiomeType) const
+float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
 {
-	if (BiomeSettings.Contains(BiomeType))
-	{
-		return BiomeSettings[BiomeType].Humidity;
-	}
-	
-	return 50.0f; // Default humidity
+    EBiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
+    const FEng_BiomeData BiomeData = GetBiomeData(CurrentBiome);
+    return BiomeData.Temperature;
 }
 
-void AEng_BiomeManager::InitializeBiomeBoundaries()
+float UEng_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
 {
-	// Based on brain memory coordinates - 157,000 x 153,000 UU map
-	// X range: -77,500 to +79,500 | Y range: -76,500 to +76,500
-	
-	// Swamp (southwest)
-	FBox SwampBounds(FVector(-77500, -76500, -100), FVector(-25000, -15000, 1000));
-	BiomeBoundaries.Add(EBiomeType::Swamp, SwampBounds);
-	
-	// Forest (northwest) 
-	FBox ForestBounds(FVector(-77500, 15000, -100), FVector(-15000, 76500, 1000));
-	BiomeBoundaries.Add(EBiomeType::Forest, ForestBounds);
-	
-	// Savanna (center)
-	FBox SavannaBounds(FVector(-20000, -20000, -100), FVector(20000, 20000, 1000));
-	BiomeBoundaries.Add(EBiomeType::Savanna, SavannaBounds);
-	
-	// Desert (east)
-	FBox DesertBounds(FVector(25000, -30000, -100), FVector(79500, 30000, 1000));
-	BiomeBoundaries.Add(EBiomeType::Desert, DesertBounds);
-	
-	// Mountain (northeast)
-	FBox MountainBounds(FVector(15000, 20000, 0), FVector(79500, 76500, 2000));
-	BiomeBoundaries.Add(EBiomeType::Mountain, MountainBounds);
-	
-	UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d biome boundaries"), BiomeBoundaries.Num());
+    EBiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
+    const FEng_BiomeData BiomeData = GetBiomeData(CurrentBiome);
+    return BiomeData.Humidity;
 }
 
-void AEng_BiomeManager::UpdateWeatherSystems(float DeltaTime)
+FVector UEng_BiomeManager::GetBiomeCenter(EBiomeType BiomeType) const
 {
-	WeatherUpdateTimer += DeltaTime;
-	
-	if (WeatherUpdateTimer >= WeatherUpdateInterval)
-	{
-		WeatherUpdateTimer = 0.0f;
-		
-		// Simple weather cycling logic
-		for (auto& WeatherPair : CurrentWeatherStates)
-		{
-			EBiomeType BiomeType = WeatherPair.Key;
-			EWeatherType CurrentWeather = WeatherPair.Value;
-			
-			// Random weather change (20% chance)
-			if (FMath::RandRange(0.0f, 1.0f) < 0.2f)
-			{
-				// Cycle to next weather type
-				int32 WeatherIndex = (int32)CurrentWeather;
-				WeatherIndex = (WeatherIndex + 1) % 6; // 6 weather types
-				EWeatherType NewWeather = (EWeatherType)WeatherIndex;
-				
-				CurrentWeatherStates[BiomeType] = NewWeather;
-				
-				UE_LOG(LogTemp, Log, TEXT("BiomeManager: Weather changed in biome %d to %d"), 
-					   (int32)BiomeType, (int32)NewWeather);
-			}
-		}
-	}
+    const FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
+    return BiomeData.Center;
 }
 
-bool AEng_BiomeManager::ValidateBiomeConfiguration() const
+void UEng_BiomeManager::InitializeBiomes()
 {
-	// Check that all 5 biomes are configured
-	if (BiomeBoundaries.Num() != 5 || BiomeSettings.Num() != 5 || CurrentWeatherStates.Num() != 5)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BiomeManager: Missing biome configurations"));
-		return false;
-	}
-	
-	// Validate each biome has valid bounds
-	for (const auto& BiomePair : BiomeBoundaries)
-	{
-		const FBox& Bounds = BiomePair.Value;
-		if (!Bounds.IsValid || Bounds.GetSize().SizeSquared() < 1000000.0f) // Minimum 1km²
-		{
-			UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid bounds for biome %d"), (int32)BiomePair.Key);
-			return false;
-		}
-	}
-	
-	return true;
+    SetupDefaultBiomes();
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Manual biome initialization complete"));
+}
+
+void UEng_BiomeManager::ValidateBiomeSetup()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validating biome setup..."));
+    
+    for (const auto& BiomePair : BiomeDataMap)
+    {
+        const FEng_BiomeData& BiomeData = BiomePair.Value;
+        
+        // Check bounds validity
+        if (BiomeData.BoundsMin.X >= BiomeData.BoundsMax.X || BiomeData.BoundsMin.Y >= BiomeData.BoundsMax.Y)
+        {
+            UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid bounds for biome %d"), (int32)BiomeData.BiomeType);
+        }
+        
+        // Check if center is within bounds
+        if (BiomeData.Center.X < BiomeData.BoundsMin.X || BiomeData.Center.X > BiomeData.BoundsMax.X ||
+            BiomeData.Center.Y < BiomeData.BoundsMin.Y || BiomeData.Center.Y > BiomeData.BoundsMax.Y)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Center outside bounds for biome %d"), (int32)BiomeData.BiomeType);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("BiomeManager: Biome %d - Center: %s, Temp: %.1f, Humidity: %.2f"), 
+               (int32)BiomeData.BiomeType, *BiomeData.Center.ToString(), BiomeData.Temperature, BiomeData.Humidity);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validation complete"));
+}
+
+float UEng_BiomeManager::CalculateDistanceToBiome(const FVector& WorldLocation, const FEng_BiomeData& BiomeData) const
+{
+    // Check if location is within biome bounds
+    if (WorldLocation.X >= BiomeData.BoundsMin.X && WorldLocation.X <= BiomeData.BoundsMax.X &&
+        WorldLocation.Y >= BiomeData.BoundsMin.Y && WorldLocation.Y <= BiomeData.BoundsMax.Y)
+    {
+        return 0.0f; // Inside biome
+    }
+    
+    // Calculate distance to nearest edge of biome bounds
+    float DistanceX = 0.0f;
+    if (WorldLocation.X < BiomeData.BoundsMin.X)
+        DistanceX = BiomeData.BoundsMin.X - WorldLocation.X;
+    else if (WorldLocation.X > BiomeData.BoundsMax.X)
+        DistanceX = WorldLocation.X - BiomeData.BoundsMax.X;
+    
+    float DistanceY = 0.0f;
+    if (WorldLocation.Y < BiomeData.BoundsMin.Y)
+        DistanceY = BiomeData.BoundsMin.Y - WorldLocation.Y;
+    else if (WorldLocation.Y > BiomeData.BoundsMax.Y)
+        DistanceY = WorldLocation.Y - BiomeData.BoundsMax.Y;
+    
+    return FMath::Sqrt(DistanceX * DistanceX + DistanceY * DistanceY);
 }

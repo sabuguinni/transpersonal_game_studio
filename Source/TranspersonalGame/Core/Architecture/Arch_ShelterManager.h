@@ -3,56 +3,47 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/World.h"
-#include "../SharedTypes.h"
+#include "Components/BoxComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "SharedTypes.h"
 #include "Arch_ShelterManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EArch_ShelterType : uint8
-{
-    Cave UMETA(DisplayName = "Cave Dwelling"),
-    TreePlatform UMETA(DisplayName = "Tree Platform"),
-    StoneCircle UMETA(DisplayName = "Stone Circle"),
-    CliffDwelling UMETA(DisplayName = "Cliff Dwelling"),
-    Underground UMETA(DisplayName = "Underground Bunker")
-};
-
 USTRUCT(BlueprintType)
-struct FArch_ShelterData
+struct TRANSPERSONALGAME_API FArch_ShelterConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::Cave;
+    EArch_ShelterType ShelterType = EArch_ShelterType::CaveEntrance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector Location = FVector::ZeroVector;
+    float ProtectionRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FRotator Rotation = FRotator::ZeroRotator;
+    float WeatherProtection = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float SafetyRadius = 500.0f;
+    float TemperatureModifier = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
+    int32 MaxOccupants = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasStorage = false;
+    bool bHasFirePit = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    int32 MaxOccupants = 1;
+    bool bHasStorageArea = true;
 
-    FArch_ShelterData()
+    FArch_ShelterConfig()
     {
-        ShelterType = EArch_ShelterType::Cave;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        SafetyRadius = 500.0f;
-        bHasFirePit = false;
-        bHasStorage = false;
-        MaxOccupants = 1;
+        ShelterType = EArch_ShelterType::CaveEntrance;
+        ProtectionRadius = 500.0f;
+        WeatherProtection = 0.8f;
+        TemperatureModifier = 5.0f;
+        MaxOccupants = 4;
+        bHasFirePit = true;
+        bHasStorageArea = true;
     }
 };
 
@@ -67,54 +58,103 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+public:
+    virtual void Tick(float DeltaTime) override;
 
+    // Core Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ShelterMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UPointLightComponent* InteriorLight;
+    UBoxComponent* ProtectionZone;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* FirePitMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StorageAreaMesh;
+
+    // Shelter Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
+    FArch_ShelterConfig ShelterConfig;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    FArch_ShelterData ShelterData;
+    TArray<UStaticMesh*> ShelterMeshVariants;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    TArray<FArch_ShelterData> ManagedShelters;
+    TArray<UMaterialInterface*> ShelterMaterials;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    // Shelter State
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    TArray<AActor*> CurrentOccupants;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void CreateShelter(EArch_ShelterType ShelterType, FVector Location, FRotator Rotation);
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    bool bIsOccupied;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void DestroyShelter(int32 ShelterIndex);
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    float CurrentTemperature;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    bool IsLocationSafe(FVector TestLocation, float TestRadius = 100.0f);
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter State")
+    bool bFireLit;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    FArch_ShelterData GetNearestShelter(FVector PlayerLocation);
+    // Shelter Functions
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void InitializeShelter(const FArch_ShelterConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void AddFirePit(int32 ShelterIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool CanEnterShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void AddStorage(int32 ShelterIndex);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void EnterShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void SetupInteriorLighting(EArch_ShelterType ShelterType);
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void ExitShelter(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management")
-    void ValidateAllShelters();
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void LightFire();
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter Management", CallInEditor)
-    void CreateDefaultShelters();
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    void ExtinguishFire();
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetWeatherProtectionAt(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    float GetTemperatureModifierAt(const FVector& Location);
+
+    // Environmental Integration
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void UpdateShelterConditions(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void ApplyWeatherEffects(float RainIntensity, float WindStrength);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void UpdateFireEffects(float DeltaTime);
+
+protected:
+    // Internal Functions
+    void SetupShelterMesh();
+    void SetupProtectionZone();
+    void SetupInteriorElements();
+    void UpdateOccupancyState();
+    bool IsLocationProtected(const FVector& Location);
+
+    // Overlap Events
+    UFUNCTION()
+    void OnProtectionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnProtectionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 private:
-    void InitializeShelterMesh(EArch_ShelterType ShelterType);
-    void SetupShelterLighting(EArch_ShelterType ShelterType);
-    bool CheckShelterSafety(const FArch_ShelterData& Shelter);
-    void UpdateShelterVisuals();
+    // Internal State
+    float FireIntensity;
+    float ShelterAge;
+    float LastMaintenanceTime;
+    bool bNeedsRepair;
+    
+    // Timers
+    FTimerHandle FireUpdateTimer;
+    FTimerHandle ConditionUpdateTimer;
 };

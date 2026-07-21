@@ -1,0 +1,164 @@
+{
+  "quest_id": "QUEST_MIGRATION_TRAIL_001",
+  "quest_name": "Track the Migration Trail",
+  "quest_type": "exploration_tracking",
+  "difficulty": "medium",
+  "recommended_level": 3,
+  "giver_npc": "Elder_NPC_Tribe",
+  "giver_location": { "x": 2100, "y": 2400, "z": 120 },
+
+  "description": "The great herbivore herd has begun its seasonal migration. Follow the trail from the tribal camp to the river crossing, document the path, and return with proof of the migration route. The tribe needs this information to plan the next hunt and ensure food supply through the dry season.",
+
+  "lore_context": "Every dry season, the massive Parasaurolophus herds migrate from the northern forests to the southern wetlands. The tribe has tracked this migration for generations, but last season a T-Rex attack scattered the scouts before they could complete the survey. This year, you must succeed where others failed.",
+
+  "objectives": [
+    {
+      "objective_id": "OBJ_001",
+      "label": "Depart from Tribal Camp",
+      "type": "reach_location",
+      "trigger_actor": "QuestMarker_Migration_001",
+      "trigger_radius": 300,
+      "description": "Gather your tracking tools and leave the camp at dawn.",
+      "optional": false,
+      "reward_xp": 50
+    },
+    {
+      "objective_id": "OBJ_002",
+      "label": "Reach the River Crossing",
+      "type": "reach_location",
+      "trigger_actor": "QuestMarker_Migration_002",
+      "trigger_radius": 400,
+      "description": "Follow the herd tracks east to the river crossing. Watch for predators — the T-Rex patrols this route.",
+      "optional": false,
+      "reward_xp": 100,
+      "hazard": "TRex_Savana_001 patrols within 800 units of this checkpoint"
+    },
+    {
+      "objective_id": "OBJ_003",
+      "label": "Observe from the Hilltop",
+      "type": "reach_location_and_wait",
+      "trigger_actor": "QuestMarker_Migration_003",
+      "trigger_radius": 350,
+      "wait_duration_seconds": 30,
+      "description": "Climb to the hilltop observation point. Observe and count the herd as it passes below. Stay hidden — do not startle the animals.",
+      "optional": false,
+      "reward_xp": 150,
+      "stealth_required": true
+    },
+    {
+      "objective_id": "OBJ_004",
+      "label": "Mark the Trail End",
+      "type": "reach_location_and_interact",
+      "trigger_actor": "QuestMarker_Migration_004",
+      "trigger_radius": 300,
+      "description": "Follow the herd to its destination and mark the location with a stone cairn. This becomes the new hunting ground for the tribe.",
+      "optional": false,
+      "reward_xp": 200
+    },
+    {
+      "objective_id": "OBJ_005",
+      "label": "Collect Herd Evidence",
+      "type": "collect_items",
+      "items_required": [
+        { "item_id": "ITEM_DINO_TRACK_CAST", "quantity": 3, "description": "Mud cast of a Parasaurolophus footprint" },
+        { "item_id": "ITEM_DINO_FEATHER", "quantity": 2, "description": "Shed feathers from the herd" }
+      ],
+      "description": "Collect physical evidence of the herd's passage to prove your route to the elders.",
+      "optional": true,
+      "reward_xp": 75,
+      "reward_bonus": "ITEM_ELDER_APPROVAL_TOKEN"
+    }
+  ],
+
+  "failure_conditions": [
+    {
+      "condition": "player_death",
+      "description": "Player is killed by a predator during the mission",
+      "consequence": "Quest resets to last checkpoint"
+    },
+    {
+      "condition": "herd_spooked",
+      "description": "Player runs through the herd at OBJ_003, causing a stampede",
+      "consequence": "OBJ_003 fails, must wait 5 minutes for herd to resettle"
+    }
+  ],
+
+  "rewards": {
+    "experience": 575,
+    "items": [
+      { "item_id": "ITEM_STONE_AXE", "quantity": 1 },
+      { "item_id": "ITEM_DRIED_MEAT", "quantity": 5 },
+      { "item_id": "ITEM_TRIBE_REPUTATION", "quantity": 10 }
+    ],
+    "unlocks": [
+      "QUEST_HUNT_THE_HERD_002",
+      "LOCATION_SOUTHERN_WETLANDS"
+    ]
+  },
+
+  "dialogue": {
+    "briefing_audio": "tts/1783140727991_Elder_NPC_QuestBriefing_Migrat.mp3",
+    "checkpoint_audio": "tts/1783140747327_Elder_NPC_QuestUpdate_RiverCro.mp3",
+    "completion_text": "You have done well, young tracker. The tribe will feast this season because of your courage. The migration route is marked — we will follow the herd when the time comes.",
+    "failure_text": "The predators drove you back. Rest, heal your wounds, and try again when you are ready. The herd will return."
+  },
+
+  "world_actors": {
+    "quest_markers": [
+      "QuestMarker_Migration_001",
+      "QuestMarker_Migration_002",
+      "QuestMarker_Migration_003",
+      "QuestMarker_Migration_004"
+    ],
+    "relevant_dinos": [
+      "TRex_Savana_001",
+      "Para_Herd_001",
+      "Para_Herd_002",
+      "Para_Herd_003"
+    ],
+    "resource_actors": [
+      "Rock_Resource_001", "Rock_Resource_002", "Rock_Resource_003",
+      "Stick_Resource_001", "Stick_Resource_002",
+      "Leaf_Resource_001"
+    ]
+  },
+
+  "crafting_integration": {
+    "required_tools": [
+      {
+        "tool_id": "ITEM_STONE_AXE",
+        "recipe": {
+          "ingredients": [
+            { "item_id": "ITEM_ROCK", "quantity": 2 },
+            { "item_id": "ITEM_STICK", "quantity": 1 }
+          ],
+          "craft_time_seconds": 5,
+          "crafting_station": "any"
+        }
+      }
+    ],
+    "recommended_tools": [
+      {
+        "tool_id": "ITEM_WATER_CONTAINER",
+        "recipe": {
+          "ingredients": [
+            { "item_id": "ITEM_ROCK", "quantity": 1 },
+            { "item_id": "ITEM_LARGE_LEAF", "quantity": 1 }
+          ],
+          "craft_time_seconds": 8,
+          "crafting_station": "any"
+        }
+      }
+    ]
+  },
+
+  "meta": {
+    "agent": "Agent_14_QuestDesigner",
+    "cycle": "PROD_CYCLE_AUTO_20260704_004",
+    "created": "2026-07-04",
+    "status": "production_ready",
+    "voice_lines_recorded": 2,
+    "ue5_markers_placed": 4,
+    "crafting_resources_placed": 16
+  }
+}

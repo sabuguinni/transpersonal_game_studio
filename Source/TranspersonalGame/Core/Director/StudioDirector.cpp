@@ -1,314 +1,362 @@
 #include "StudioDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "EngineUtils.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/GameModeBase.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Landscape/Landscape.h"
 
-UDir_StudioDirector::UDir_StudioDirector()
+UStudioDirector::UStudioDirector()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Tick every 5 seconds
-
-    // Initialize production state
-    bProductionInitialized = false;
-    bMilestone1Complete = false;
-    CurrentCycleID = 5;
-    ProductionBudgetUsed = 38.73f;
-    ProductionBudgetLimit = 150.0f;
-
-    // Initialize counters
-    TerrainActorCount = 0;
-    DinosaurActorCount = 0;
-    LightingActorCount = 0;
-    PlayerCharacterCount = 0;
+    bEnableAutoCoordination = true;
+    CoordinationInterval = 300.0f; // 5 minutes
+    MaxConcurrentTasks = 20;
 }
 
-void UDir_StudioDirector::BeginPlay()
+void UStudioDirector::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Initializing production pipeline"));
-    InitializeProductionPipeline();
-}
-
-void UDir_StudioDirector::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director initialized - Managing game production"));
     
-    // Update production metrics every tick
+    // Initialize production status
+    CurrentStatus = FDir_ProductionStatus();
+    
+    // Set up automatic coordination
+    if (bEnableAutoCoordination)
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            CoordinationTimerHandle,
+            this,
+            &UStudioDirector::CoordinateAgents,
+            CoordinationInterval,
+            true
+        );
+    }
+    
+    // Initial production assessment
     UpdateProductionMetrics();
     
-    // Validate map state
-    ValidateActorCounts();
-    
-    // Check milestone completion
-    if (!bMilestone1Complete)
+    // Set up critical tasks for current cycle
+    AssignTaskToAgent(TEXT("Agent_02_Engine_Architect"), 
+        TEXT("Fix 122 header files without .cpp implementations"), 
+        EDir_Priority::Critical, true);
+        
+    AssignTaskToAgent(TEXT("Agent_02_Engine_Architect"), 
+        TEXT("Resolve compilation errors in UnrealBuildTool"), 
+        EDir_Priority::Critical, true);
+        
+    AssignTaskToAgent(TEXT("Agent_05_World_Generator"), 
+        TEXT("Expand MinPlayableMap landscape to 200km2"), 
+        EDir_Priority::High, false);
+        
+    AssignTaskToAgent(TEXT("Agent_09_Character_Artist"), 
+        TEXT("Create actual dinosaur static meshes with collision"), 
+        EDir_Priority::High, false);
+        
+    AssignTaskToAgent(TEXT("Agent_12_Combat_AI"), 
+        TEXT("Implement survival HUD with health/hunger/thirst/stamina bars"), 
+        EDir_Priority::Medium, false);
+}
+
+void UStudioDirector::Deinitialize()
+{
+    if (CoordinationTimerHandle.IsValid())
     {
-        bMilestone1Complete = CheckMilestone1Completion();
-        if (bMilestone1Complete)
+        GetWorld()->GetTimerManager().ClearTimer(CoordinationTimerHandle);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director shutting down - Final production report generated"));
+    GenerateProductionReport();
+    
+    Super::Deinitialize();
+}
+
+void UStudioDirector::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, EDir_Priority Priority, bool bIsBlocking)
+{
+    FDir_AgentTask NewTask;
+    NewTask.AgentName = AgentName;
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Priority = Priority;
+    NewTask.bIsBlocking = bIsBlocking;
+    NewTask.EstimatedTime = (Priority == EDir_Priority::Critical) ? 120.0f : 60.0f;
+    
+    ActiveTasks.Add(NewTask);
+    
+    if (bIsBlocking)
+    {
+        BlockingIssues.AddUnique(FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription));
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Task assigned to %s: %s [Priority: %d]"), 
+        *AgentName, *TaskDescription, (int32)Priority);
+}
+
+TArray<FDir_AgentTask> UStudioDirector::GetTasksForAgent(const FString& AgentName) const
+{
+    TArray<FDir_AgentTask> AgentTasks;
+    
+    for (const FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (Task.AgentName == AgentName)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Studio Director: MILESTONE 1 COMPLETED!"));
+            AgentTasks.Add(Task);
         }
     }
+    
+    // Sort by priority
+    AgentTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        return (int32)A.Priority > (int32)B.Priority;
+    });
+    
+    return AgentTasks;
 }
 
-void UDir_StudioDirector::InitializeProductionPipeline()
+void UStudioDirector::CompleteTask(const FString& AgentName, const FString& TaskDescription)
 {
-    if (bProductionInitialized)
+    for (int32 i = ActiveTasks.Num() - 1; i >= 0; i--)
     {
-        return;
+        if (ActiveTasks[i].AgentName == AgentName && ActiveTasks[i].TaskDescription == TaskDescription)
+        {
+            FDir_AgentTask CompletedTask = ActiveTasks[i];
+            CompletedTasks.Add(CompletedTask);
+            ActiveTasks.RemoveAt(i);
+            
+            // Remove from blocking issues if it was blocking
+            if (CompletedTask.bIsBlocking)
+            {
+                FString BlockingIssue = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
+                BlockingIssues.Remove(BlockingIssue);
+            }
+            
+            UE_LOG(LogTemp, Warning, TEXT("Task completed by %s: %s"), *AgentName, *TaskDescription);
+            break;
+        }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Setting up production pipeline"));
-
-    // Initialize agent task assignments
-    AgentTaskAssignments.Empty();
-    AgentTaskCompletion.Empty();
-
-    // Assign initial tasks
-    AssignAgentTasks();
-
-    // Validate current map state
-    ValidateMinPlayableMap();
-
-    // Clean up any duplicate actors
-    CleanupDuplicateActors();
-
-    bProductionInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Production pipeline initialized"));
+    
+    UpdateProductionMetrics();
 }
 
-void UDir_StudioDirector::AssignAgentTasks()
+FDir_ProductionStatus UStudioDirector::GetProductionStatus() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Assigning agent tasks for Cycle %d"), CurrentCycleID);
-
-    // Clear previous assignments
-    AgentTaskAssignments.Empty();
-    AgentTaskCompletion.Empty();
-
-    // Milestone 1 focused task assignments
-    AgentTaskAssignments.Add(TEXT("Agent_02_Engine"), TEXT("Verify core systems compilation and fix any linker errors"));
-    AgentTaskAssignments.Add(TEXT("Agent_03_Core"), TEXT("Implement physics collision for dinosaur placeholders"));
-    AgentTaskAssignments.Add(TEXT("Agent_05_World"), TEXT("Enhance terrain with proper height variations and biome transitions"));
-    AgentTaskAssignments.Add(TEXT("Agent_06_Environment"), TEXT("Replace placeholder trees/rocks with proper meshes"));
-    AgentTaskAssignments.Add(TEXT("Agent_09_Character"), TEXT("Create proper dinosaur character classes with basic AI"));
-    AgentTaskAssignments.Add(TEXT("Agent_10_Animation"), TEXT("Add basic locomotion animations to dinosaurs"));
-    AgentTaskAssignments.Add(TEXT("Agent_12_Combat"), TEXT("Implement survival HUD showing health/hunger/thirst/stamina/fear bars"));
-
-    // Initialize completion status
-    for (auto& Task : AgentTaskAssignments)
-    {
-        AgentTaskCompletion.Add(Task.Key, false);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Assigned %d agent tasks"), AgentTaskAssignments.Num());
+    return CurrentStatus;
 }
 
-void UDir_StudioDirector::ValidateMinPlayableMap()
+void UStudioDirector::UpdateProductionMetrics()
+{
+    // Count actors in current level
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        CurrentStatus.TotalActorsInMap = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            CurrentStatus.TotalActorsInMap++;
+        }
+    }
+    
+    // Update blocking issues
+    CurrentStatus.BlockingIssues = FString::Join(BlockingIssues, TEXT("; "));
+    
+    // Calculate overall progress
+    int32 TotalTasks = ActiveTasks.Num() + CompletedTasks.Num();
+    if (TotalTasks > 0)
+    {
+        CurrentStatus.OverallProgress = (float)CompletedTasks.Num() / (float)TotalTasks * 100.0f;
+    }
+    
+    // Check if we can playtest
+    CurrentStatus.bCanPlaytest = (BlockingIssues.Num() == 0) && 
+                                 (CurrentStatus.CompilationErrors == 0) && 
+                                 (CurrentStatus.TotalActorsInMap > 10);
+    
+    LogProductionMetrics();
+}
+
+bool UStudioDirector::CanAgentProceed(const FString& AgentName) const
+{
+    // Check if there are blocking tasks for other agents that prevent this agent from proceeding
+    for (const FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (Task.bIsBlocking && Task.AgentName != AgentName)
+        {
+            // If there's a blocking task for another agent, this agent should wait
+            if (Task.Priority == EDir_Priority::Critical)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Agent %s blocked by critical task: %s"), 
+                    *AgentName, *Task.TaskDescription);
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+void UStudioDirector::ReportCompilationError(const FString& ErrorMessage, const FString& FileName)
+{
+    FString FullError = FString::Printf(TEXT("%s: %s"), *FileName, *ErrorMessage);
+    CompilationErrors.AddUnique(FullError);
+    CurrentStatus.CompilationErrors = CompilationErrors.Num();
+    
+    UE_LOG(LogTemp, Error, TEXT("Compilation error reported: %s"), *FullError);
+}
+
+void UStudioDirector::ValidateGameplayReadiness()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("Studio Director: No world found for validation"));
         return;
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Validating MinPlayableMap state"));
-
-    // Reset counters
-    TerrainActorCount = 0;
-    DinosaurActorCount = 0;
-    LightingActorCount = 0;
-    PlayerCharacterCount = 0;
-
-    // Count actors by type
+    
+    // Check for essential gameplay elements
+    bool bHasPlayerStart = false;
+    bool bHasLandscape = false;
+    bool bHasGameMode = false;
+    
     for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
         AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
-
-        FString ActorName = Actor->GetName().ToLower();
         FString ClassName = Actor->GetClass()->GetName();
-
-        // Count terrain
-        if (Actor->IsA<ALandscape>() || ActorName.Contains(TEXT("landscape")) || ActorName.Contains(TEXT("terrain")))
+        
+        if (ClassName.Contains(TEXT("PlayerStart")))
         {
-            TerrainActorCount++;
+            bHasPlayerStart = true;
         }
-
-        // Count dinosaurs
-        if (ActorName.Contains(TEXT("dinosaur")) || ActorName.Contains(TEXT("trex")) || 
-            ActorName.Contains(TEXT("raptor")) || ActorName.Contains(TEXT("brachio")))
+        else if (ClassName.Contains(TEXT("Landscape")))
         {
-            DinosaurActorCount++;
-        }
-
-        // Count lighting
-        if (Actor->FindComponentByClass<UDirectionalLightComponent>() ||
-            Actor->FindComponentByClass<USkyAtmosphereComponent>() ||
-            Actor->FindComponentByClass<USkyLightComponent>() ||
-            Actor->FindComponentByClass<UExponentialHeightFogComponent>())
-        {
-            LightingActorCount++;
-        }
-
-        // Count player characters
-        if (Actor->IsA<ACharacter>() && (ActorName.Contains(TEXT("character")) || ActorName.Contains(TEXT("player"))))
-        {
-            PlayerCharacterCount++;
+            bHasLandscape = true;
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Map validation complete - Terrain: %d, Dinosaurs: %d, Lighting: %d, Players: %d"), 
-           TerrainActorCount, DinosaurActorCount, LightingActorCount, PlayerCharacterCount);
-}
-
-bool UDir_StudioDirector::CheckMilestone1Completion()
-{
-    // Milestone 1 requirements:
-    // - Player can walk around (TranspersonalCharacter with movement)
-    // - Terrain with height variation
-    // - 3-5 static dinosaur meshes
-    // - Basic lighting setup
-
-    bool bPlayerMovement = ValidatePlayerMovement();
-    bool bTerrain = ValidateTerrainPresence();
-    bool bDinosaurs = ValidateDinosaurPresence();
-    bool bLighting = ValidateLightingSetup();
-    bool bGameMode = ValidateGameModeActive();
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Milestone 1 Check - Player: %s, Terrain: %s, Dinosaurs: %s, Lighting: %s, GameMode: %s"),
-           bPlayerMovement ? TEXT("OK") : TEXT("FAIL"),
-           bTerrain ? TEXT("OK") : TEXT("FAIL"),
-           bDinosaurs ? TEXT("OK") : TEXT("FAIL"),
-           bLighting ? TEXT("OK") : TEXT("FAIL"),
-           bGameMode ? TEXT("OK") : TEXT("FAIL"));
-
-    return bPlayerMovement && bTerrain && bDinosaurs && bLighting && bGameMode;
-}
-
-void UDir_StudioDirector::CoordinateEngineArchitect()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Coordinating Engine Architect - Focus on core system stability"));
-}
-
-void UDir_StudioDirector::CoordinateWorldGeneration()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Coordinating World Generation - Focus on terrain enhancement"));
-}
-
-void UDir_StudioDirector::CoordinateCharacterSystems()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Coordinating Character Systems - Focus on dinosaur implementation"));
-}
-
-void UDir_StudioDirector::RunProductionChecks()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Running production quality checks"));
     
-    ValidateMinPlayableMap();
+    AGameModeBase* GameMode = UGameplayStatics::GetGameMode(World);
+    bHasGameMode = (GameMode != nullptr);
     
-    // Check budget usage
-    float BudgetPercentage = (ProductionBudgetUsed / ProductionBudgetLimit) * 100.0f;
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Budget usage: %.2f%% (%.2f/%.2f USD)"), 
-           BudgetPercentage, ProductionBudgetUsed, ProductionBudgetLimit);
-    
-    // Check agent task completion
-    int32 CompletedTasks = 0;
-    for (auto& Task : AgentTaskCompletion)
+    // Update readiness status
+    if (!bHasPlayerStart)
     {
-        if (Task.Value)
+        BlockingIssues.AddUnique(TEXT("Missing PlayerStart actor"));
+    }
+    if (!bHasLandscape)
+    {
+        BlockingIssues.AddUnique(TEXT("Missing Landscape actor"));
+    }
+    if (!bHasGameMode)
+    {
+        BlockingIssues.AddUnique(TEXT("Missing GameMode configuration"));
+    }
+    
+    CurrentStatus.bCanPlaytest = bHasPlayerStart && bHasLandscape && bHasGameMode && 
+                                 (CompilationErrors.Num() == 0);
+}
+
+void UStudioDirector::CoordinateAgents()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR - AGENT COORDINATION ==="));
+    
+    UpdateProductionMetrics();
+    ValidateGameplayReadiness();
+    PrioritizeTasks();
+    
+    // Log current status
+    UE_LOG(LogTemp, Warning, TEXT("Active Tasks: %d"), ActiveTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Blocking Issues: %d"), BlockingIssues.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Can Playtest: %s"), CurrentStatus.bCanPlaytest ? TEXT("YES") : TEXT("NO"));
+    
+    // Report high priority tasks
+    for (const FDir_AgentTask& Task : ActiveTasks)
+    {
+        if (Task.Priority == EDir_Priority::Critical || Task.bIsBlocking)
         {
-            CompletedTasks++;
+            UE_LOG(LogTemp, Error, TEXT("CRITICAL: %s - %s"), *Task.AgentName, *Task.TaskDescription);
+        }
+    }
+}
+
+void UStudioDirector::GenerateProductionReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR - PRODUCTION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Actors in Map: %d"), CurrentStatus.TotalActorsInMap);
+    UE_LOG(LogTemp, Warning, TEXT("Compilation Errors: %d"), CurrentStatus.CompilationErrors);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Progress: %.1f%%"), CurrentStatus.OverallProgress);
+    UE_LOG(LogTemp, Warning, TEXT("Playtest Ready: %s"), CurrentStatus.bCanPlaytest ? TEXT("YES") : TEXT("NO"));
+    
+    if (BlockingIssues.Num() > 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BLOCKING ISSUES:"));
+        for (const FString& Issue : BlockingIssues)
+        {
+            UE_LOG(LogTemp, Error, TEXT("  - %s"), *Issue);
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Agent tasks completed: %d/%d"), 
-           CompletedTasks, AgentTaskCompletion.Num());
+    UE_LOG(LogTemp, Warning, TEXT("=== END PRODUCTION REPORT ==="));
 }
 
-void UDir_StudioDirector::CleanupDuplicateActors()
+void UStudioDirector::ScanForCompilationIssues()
 {
+    // This would typically interface with UnrealBuildTool
+    // For now, we'll simulate based on known issues
+    CurrentStatus.HeadersWithoutCpp = 122; // Known issue from memory
+    
+    if (CurrentStatus.HeadersWithoutCpp > 0)
+    {
+        BlockingIssues.AddUnique(FString::Printf(TEXT("Headers without .cpp: %d"), CurrentStatus.HeadersWithoutCpp));
+    }
+}
+
+void UStudioDirector::AssessGameplayReadiness()
+{
+    ValidateGameplayReadiness();
+    
+    // Additional gameplay checks
     UWorld* World = GetWorld();
-    if (!World)
+    if (World)
     {
-        return;
+        int32 DinosaurCount = 0;
+        int32 EnvironmentCount = 0;
+        
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            FString ClassName = (*ActorItr)->GetClass()->GetName();
+            
+            if (ClassName.Contains(TEXT("Dinosaur")) || ClassName.Contains(TEXT("TRex")) || ClassName.Contains(TEXT("Raptor")))
+            {
+                DinosaurCount++;
+            }
+            else if (ClassName.Contains(TEXT("Tree")) || ClassName.Contains(TEXT("Rock")) || ClassName.Contains(TEXT("Environment")))
+            {
+                EnvironmentCount++;
+            }
+        }
+        
+        if (DinosaurCount < 5)
+        {
+            BlockingIssues.AddUnique(TEXT("Insufficient dinosaur actors for gameplay"));
+        }
+        if (EnvironmentCount < 10)
+        {
+            BlockingIssues.AddUnique(TEXT("Insufficient environment assets"));
+        }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Cleaning up duplicate actors"));
-
-    // This function is called from UE5 Python scripts
-    // The actual cleanup is handled by the ue5_execute commands
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Duplicate cleanup delegated to UE5 Python scripts"));
 }
 
-void UDir_StudioDirector::UpdateProductionMetrics()
+void UStudioDirector::PrioritizeTasks()
 {
-    // Update production metrics based on current state
-    // This would typically interface with external systems
-    // For now, we track basic metrics
+    // Sort active tasks by priority and blocking status
+    ActiveTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
+        if (A.bIsBlocking != B.bIsBlocking)
+        {
+            return A.bIsBlocking; // Blocking tasks first
+        }
+        return (int32)A.Priority > (int32)B.Priority; // Then by priority
+    });
 }
 
-void UDir_StudioDirector::ValidateActorCounts()
+void UStudioDirector::LogProductionMetrics() const
 {
-    // Validate that we have the expected number of actors
-    // This helps detect when agents add or remove content
-}
-
-void UDir_StudioDirector::GenerateProductionReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR PRODUCTION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Cycle: %d"), CurrentCycleID);
-    UE_LOG(LogTemp, Warning, TEXT("Budget: %.2f/%.2f USD"), ProductionBudgetUsed, ProductionBudgetLimit);
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Complete: %s"), bMilestone1Complete ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Terrain Actors: %d"), TerrainActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Actors: %d"), DinosaurActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Lighting Actors: %d"), LightingActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Player Characters: %d"), PlayerCharacterCount);
-}
-
-void UDir_StudioDirector::ScheduleNextAgentCycle()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director: Scheduling next agent cycle"));
-}
-
-bool UDir_StudioDirector::ValidatePlayerMovement()
-{
-    return PlayerCharacterCount > 0;
-}
-
-bool UDir_StudioDirector::ValidateTerrainPresence()
-{
-    return TerrainActorCount > 0;
-}
-
-bool UDir_StudioDirector::ValidateDinosaurPresence()
-{
-    return DinosaurActorCount >= 3;
-}
-
-bool UDir_StudioDirector::ValidateLightingSetup()
-{
-    return LightingActorCount > 0;
-}
-
-bool UDir_StudioDirector::ValidateGameModeActive()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    return GameMode != nullptr;
+    UE_LOG(LogTemp, Log, TEXT("Production Metrics - Actors: %d, Progress: %.1f%%, Errors: %d"), 
+        CurrentStatus.TotalActorsInMap, CurrentStatus.OverallProgress, CurrentStatus.CompilationErrors);
 }

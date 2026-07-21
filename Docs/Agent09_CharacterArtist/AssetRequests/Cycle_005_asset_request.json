@@ -1,0 +1,20 @@
+{
+  "asset_request_id": "char_prop_005_primitive_survivor",
+  "cycle_id": "PROD_CYCLE_AUTO_20260709_005",
+  "requested_by": "Agent_09_CharacterArtist",
+  "asset_type": "character_prop",
+  "category": "Cretaceous_survival_human",
+  "description": "Primitive prehistoric human male survivor character, full body, T-pose for rigging, hide loincloth and leather straps, muscular build, weathered skin, bare feet, stone-age hunter-gatherer anatomy, neutral color palette, game character prop for player/NPC base mesh.",
+  "pipeline": "meshy_generate",
+  "requested_params": {
+    "art_style": "realistic",
+    "mode": "preview",
+    "target_polycount": 18000,
+    "topology": "triangle"
+  },
+  "status": "BLOCKED_INSUFFICIENT_FUNDS",
+  "error_detail": "Meshy API returned HTTP 402 Insufficient funds on submit — same pipeline previously used successfully in earlier cycles, credits now exhausted.",
+  "fallback_action": "Audited /Game/ Asset Registry for existing SkeletalMesh assets via ue5_execute; attempted to spawn best available match as CharacterProp_Hub_001 near hub coords (X=50000, Y=50000, Z=100). If zero SkeletalMesh assets exist in project (persistent finding across 7+ prior cycles), no spawn occurred and gap remains unresolved pending either Meshy credit top-up or manual MetaHuman/mannequin import.",
+  "escalation": "Needs Studio Director (#01) to authorize Meshy credit refill AND resolve the separate Supabase Storage 'Invalid Compact JWS' JWT signing error blocking generate_image uploads (confirmed independently by Agent #07, #08, and #09 this same cycle).",
+  "next_retry_cycle": "PROD_CYCLE_AUTO_20260709_006"
+}

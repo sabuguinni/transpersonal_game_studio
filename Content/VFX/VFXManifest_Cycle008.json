@@ -1,0 +1,213 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_008",
+  "agent": "#17 — VFX Agent",
+  "timestamp": "2026-07-03",
+  "status": "COMPLETE",
+
+  "vfx_systems_placed": {
+    "campfire_hub": {
+      "label": "VFX_Fire_Campfire_Hub_001",
+      "location": [2100, 2400, 80],
+      "type": "PointLight",
+      "color_rgb": [1.0, 0.45, 0.05],
+      "intensity": 3500,
+      "radius": 600,
+      "cast_shadows": true,
+      "gameplay_function": "Campfire safety zone — fear stat decreases at night within radius",
+      "niagara_target": "NS_Fire_Campfire — flames + embers + smoke column",
+      "trigger_event": "EVT_Campfire_Lit"
+    },
+    "campfire_embers": {
+      "label": "VFX_Ember_Campfire_Hub_001",
+      "location": [2100, 2400, 55],
+      "type": "PointLight",
+      "color_rgb": [1.0, 0.2, 0.0],
+      "intensity": 800,
+      "radius": 200,
+      "cast_shadows": false,
+      "gameplay_function": "Ground ember scatter — secondary warmth glow"
+    },
+    "campfire_smoke": {
+      "label": "VFX_Smoke_Campfire_Hub_001",
+      "location": [2100, 2400, 100],
+      "type": "SpotLight",
+      "color_rgb": [0.3, 0.25, 0.2],
+      "intensity": 200,
+      "direction": "upward -90 pitch",
+      "gameplay_function": "Smoke column occlusion simulation — visible from distance"
+    },
+    "trex_danger_zone": {
+      "label": "VFX_Danger_TRex_001",
+      "location": [1500, 3200, 120],
+      "type": "PointLight",
+      "color_rgb": [1.0, 0.05, 0.0],
+      "intensity": 5000,
+      "radius": 2000,
+      "cast_shadows": true,
+      "gameplay_function": "T-Rex territory warning — red pulse when player enters 2000u radius",
+      "screen_shake_trigger": "EVT_TRex_Proximity",
+      "niagara_target": "NS_Dino_Footstep — dust + ground impact particles"
+    },
+    "footstep_dust": {
+      "positions": [
+        {"label": "VFX_Dust_Footstep_TRex_001", "location": [1500, 3000, 52]},
+        {"label": "VFX_Dust_Footstep_TRex_002", "location": [1600, 3100, 52]},
+        {"label": "VFX_Dust_Footstep_TRex_003", "location": [1700, 3200, 52]}
+      ],
+      "type": "PointLight",
+      "color_rgb": [0.8, 0.65, 0.4],
+      "intensity": 400,
+      "radius": 150,
+      "gameplay_function": "T-Rex footstep dust trail — tan/brown dust cloud on each step",
+      "niagara_target": "NS_Dino_Footstep — triggered by AnimNotify_FootL / AnimNotify_FootR"
+    },
+    "waterfall_mist": {
+      "label": "VFX_Mist_Waterfall_River_001",
+      "location": [2800, 2400, 60],
+      "type": "PointLight",
+      "color_rgb": [0.6, 0.8, 1.0],
+      "intensity": 1200,
+      "radius": 500,
+      "gameplay_function": "River/waterfall mist zone — thirst refill area visual indicator",
+      "niagara_target": "NS_Water_WaterfallMist — spray + droplets + ripple"
+    },
+    "volcanic_ash": {
+      "positions": [
+        {"label": "VFX_Ash_Volcanic_001", "location": [1800, 1800, 200]},
+        {"label": "VFX_Ash_Volcanic_002", "location": [1900, 2000, 180]},
+        {"label": "VFX_Ash_Volcanic_003", "location": [2000, 1900, 190]}
+      ],
+      "type": "PointLight",
+      "color_rgb": [0.5, 0.45, 0.4],
+      "intensity": 150,
+      "radius": 300,
+      "gameplay_function": "Volcanic ash drift from distant volcano — atmospheric hazard",
+      "niagara_target": "NS_Ambient_VolcanicAsh — slow drifting grey particles"
+    },
+    "night_trigger": {
+      "label": "VFX_NightTrigger_Forest_001",
+      "location": [2100, 1600, 80],
+      "type": "PointLight",
+      "color_rgb": [0.05, 0.1, 0.5],
+      "intensity": 600,
+      "radius": 800,
+      "gameplay_function": "Night cycle visual transition zone — sky darkens, fog thickens",
+      "trigger_event": "EVT_NightCycle_Begin"
+    },
+    "rain_splashes": {
+      "positions": [
+        {"label": "VFX_Rain_Splash_001", "location": [2050, 2350, 52]},
+        {"label": "VFX_Rain_Splash_002", "location": [2150, 2450, 52]},
+        {"label": "VFX_Rain_Splash_003", "location": [2100, 2500, 52]},
+        {"label": "VFX_Rain_Splash_004", "location": [2050, 2300, 52]}
+      ],
+      "type": "PointLight",
+      "color_rgb": [0.7, 0.8, 1.0],
+      "intensity": 80,
+      "radius": 120,
+      "gameplay_function": "Rain splash markers — cool blue ground-level rain impact points",
+      "niagara_target": "NS_Weather_Rain — vertical rain + ground splash + ripple rings"
+    }
+  },
+
+  "niagara_systems_planned": {
+    "NS_Fire_Campfire": {
+      "category": "AMBIENTE NATURAL",
+      "emitters": ["FlameCore", "EmberSparks", "SmokeColumn", "HeatDistortion"],
+      "lod_levels": 3,
+      "lod_distances": [500, 1500, 3000],
+      "gameplay_trigger": "EVT_Campfire_Lit",
+      "performance_budget_ms": 0.8
+    },
+    "NS_Dino_Footstep": {
+      "category": "DINOSSAUROS",
+      "emitters": ["DustCloud", "GroundDebris", "ImpactRing"],
+      "lod_levels": 3,
+      "lod_distances": [300, 800, 2000],
+      "gameplay_trigger": "AnimNotify_FootL / AnimNotify_FootR",
+      "performance_budget_ms": 0.3
+    },
+    "NS_Weather_Rain": {
+      "category": "AMBIENTE NATURAL",
+      "emitters": ["RainDrops", "GroundSplash", "RippleRings", "MistLayer"],
+      "lod_levels": 2,
+      "lod_distances": [1000, 3000],
+      "gameplay_trigger": "EVT_Weather_RainStart",
+      "performance_budget_ms": 1.2
+    },
+    "NS_Water_WaterfallMist": {
+      "category": "MUNDO",
+      "emitters": ["WaterSpray", "MistParticles", "RippleBase"],
+      "lod_levels": 2,
+      "lod_distances": [800, 2500],
+      "gameplay_trigger": "Always On — proximity activated",
+      "performance_budget_ms": 0.5
+    },
+    "NS_Ambient_VolcanicAsh": {
+      "category": "MUNDO",
+      "emitters": ["AshParticles", "CinderGlow"],
+      "lod_levels": 2,
+      "lod_distances": [2000, 5000],
+      "gameplay_trigger": "EVT_Volcano_Active",
+      "performance_budget_ms": 0.4
+    },
+    "NS_Combat_BloodImpact": {
+      "category": "JOGADOR E COMBATE",
+      "emitters": ["BloodSpray", "BloodDroplets", "WoundDecal"],
+      "lod_levels": 2,
+      "lod_distances": [200, 600],
+      "gameplay_trigger": "EVT_Player_TakeDamage",
+      "performance_budget_ms": 0.2
+    },
+    "NS_Combat_WeaponImpact": {
+      "category": "JOGADOR E COMBATE",
+      "emitters": ["SparkFlash", "DebrisChips", "DustPuff"],
+      "lod_levels": 2,
+      "lod_distances": [300, 1000],
+      "gameplay_trigger": "EVT_Weapon_Hit",
+      "performance_budget_ms": 0.2
+    }
+  },
+
+  "vfx_actor_audit": {
+    "total_vfx_actors_placed_this_cycle": 14,
+    "total_vfx_actors_cumulative": 22,
+    "categories": {
+      "campfire": 3,
+      "danger_zone": 1,
+      "footstep_dust": 3,
+      "waterfall_mist": 1,
+      "volcanic_ash": 3,
+      "night_trigger": 1,
+      "rain_splash": 4
+    }
+  },
+
+  "sfx_references": {
+    "note": "Freesound API returned empty results this cycle — using catalogue from Audio Agent cycle",
+    "campfire_loop": {"freesound_id": 681366, "name": "Campfire (Position 1)", "use": "Primary campfire loop"},
+    "campfire_night": {"freesound_id": 688994, "name": "Campfire night ambience + crickets", "use": "Night campfire layer"},
+    "river_ambient": {"freesound_id": 550896, "name": "Flowing water in jungle", "use": "River/waterfall zone"},
+    "night_forest": {"freesound_id": 501731, "name": "Summer Night — cicadas, owl, forest", "use": "Night cycle trigger zone"}
+  },
+
+  "generate_image_status": "FAIL (401) — fallback executed via ue5_execute procedural visual",
+
+  "next_agent_handoff": {
+    "agent": "#18 — QA & Testing Agent",
+    "priority_tests": [
+      "Verify all 22 VFX_ actors exist in MinPlayableMap by label",
+      "Confirm VFX_Fire_Campfire_Hub_001 at (2100,2400,80) with intensity=3500",
+      "Confirm VFX_Danger_TRex_001 at (1500,3200,120) with radius=2000",
+      "Test EVT_TRex_Proximity trigger fires when player enters 2000u radius",
+      "Test EVT_NightCycle_Begin fires at VFX_NightTrigger_Forest_001 zone",
+      "Verify no duplicate VFX_ actors at same coordinates",
+      "Performance check: all PointLights within budget (no >5000 intensity except danger zone)"
+    ],
+    "known_issues": [
+      "Niagara particle systems (NS_Fire_Campfire etc.) are PLANNED — not yet created as actual Niagara assets",
+      "PointLight proxies are placeholders until real Niagara systems are built",
+      "generate_image returned 401 — VFX reference sheet not generated this cycle"
+    ]
+  }
+}

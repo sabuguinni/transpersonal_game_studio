@@ -1,0 +1,160 @@
+{
+  "dialogue_tree_id": "DIALOGUE_SURVIVOR_CAMP_001",
+  "npc_id": "SurvivorNPC_Camp_001",
+  "npc_role": "ScoutRunner",
+  "npc_label": "SurvivorNPC_Camp_001",
+  "world_location": [0.0, 280.0, 5.0],
+  "trigger_radius": 250.0,
+  "audio_assets": {
+    "crafting_hint": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782992007038_SurvivorNPC_CraftingQuest.mp3",
+    "raptor_warning": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782992017308_ChiefHunter_RaptorWarning.mp3"
+  },
+  "root_node": "NODE_GREET",
+  "nodes": {
+    "NODE_GREET": {
+      "speaker": "SurvivorNPC",
+      "text": "You made it. Didn't think anyone else was still out there.",
+      "audio_key": null,
+      "condition": "None",
+      "choices": [
+        {
+          "text": "What is this place?",
+          "next_node": "NODE_EXPLAIN_CAMP"
+        },
+        {
+          "text": "I need tools. How do I make them?",
+          "next_node": "NODE_CRAFTING_INTRO",
+          "sets_flag": "QUEST_CRAFTING_001_STARTED"
+        },
+        {
+          "text": "Are there dinosaurs nearby?",
+          "next_node": "NODE_RAPTOR_WARNING"
+        }
+      ]
+    },
+    "NODE_EXPLAIN_CAMP": {
+      "speaker": "SurvivorNPC",
+      "text": "I found something at the old camp. A flat stone, worn smooth — someone used it to shape tools. Whoever they were, they knew what they were doing. If we can find more rocks like the ones near the river bend, we can make the same tools. Maybe better ones.",
+      "audio_key": "crafting_hint",
+      "condition": "None",
+      "choices": [
+        {
+          "text": "Show me the stone.",
+          "next_node": "NODE_CRAFTING_INTRO",
+          "sets_flag": "QUEST_CRAFTING_001_STARTED"
+        },
+        {
+          "text": "I'll look around first.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_CRAFTING_INTRO": {
+      "speaker": "SurvivorNPC",
+      "text": "That flat stone over there — that's your workbench. Bring me two river rocks and a straight stick. I'll show you how to make an axe head. Once you have that, nothing out here can stop you.",
+      "audio_key": null,
+      "condition": "None",
+      "quest_trigger": "QUEST_CRAFTING_001",
+      "objective_index": 0,
+      "choices": [
+        {
+          "text": "Where do I find river rocks?",
+          "next_node": "NODE_ROCKS_LOCATION"
+        },
+        {
+          "text": "I'll get started.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_ROCKS_LOCATION": {
+      "speaker": "SurvivorNPC",
+      "text": "Follow the slope east until you hit the dry riverbed. Rocks everywhere down there. Watch the tree line though — raptors use that corridor at dusk.",
+      "audio_key": null,
+      "condition": "None",
+      "choices": [
+        {
+          "text": "Got it. I'll be careful.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_RAPTOR_WARNING": {
+      "speaker": "SurvivorNPC",
+      "text": "They move in threes. Always threes. One circles left, one circles right, one comes straight at you. If you see one raptor — find the other two before they find you.",
+      "audio_key": "raptor_warning",
+      "condition": "None",
+      "choices": [
+        {
+          "text": "How do I fight them off?",
+          "next_node": "NODE_COMBAT_ADVICE"
+        },
+        {
+          "text": "I'll stay near the fire.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_COMBAT_ADVICE": {
+      "speaker": "SurvivorNPC",
+      "text": "Don't fight them — not without a spear. Make noise, wave your arms, back toward the fire. They don't like fire. Get a weapon first. Then worry about fighting.",
+      "audio_key": null,
+      "condition": "None",
+      "choices": [
+        {
+          "text": "I need to make tools then.",
+          "next_node": "NODE_CRAFTING_INTRO",
+          "sets_flag": "QUEST_CRAFTING_001_STARTED"
+        },
+        {
+          "text": "Understood.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_QUEST_COMPLETE_CHECK": {
+      "speaker": "SurvivorNPC",
+      "text": "You made the axe. Good. Now you can cut wood, shape bone, strip hide. Everything else follows from this. The elder wants to talk to you — she's been watching since you arrived.",
+      "audio_key": null,
+      "condition": "HasStoneAxe",
+      "quest_trigger": "QUEST_CRAFTING_001_COMPLETE",
+      "next_quest": "QUEST_CRAFTING_002",
+      "choices": [
+        {
+          "text": "What does the elder want?",
+          "next_node": "NODE_ELDER_REDIRECT"
+        },
+        {
+          "text": "I'll find her.",
+          "next_node": "NODE_FAREWELL"
+        }
+      ]
+    },
+    "NODE_ELDER_REDIRECT": {
+      "speaker": "SurvivorNPC",
+      "text": "She's by the fire. Has been for three days. Says she's waiting for someone who knows how to listen. Maybe that's you.",
+      "audio_key": null,
+      "condition": "None",
+      "choices": [
+        {
+          "text": "I'll go to her.",
+          "next_node": "NODE_FAREWELL",
+          "sets_flag": "ELDER_INTRO_UNLOCKED"
+        }
+      ]
+    },
+    "NODE_FAREWELL": {
+      "speaker": "SurvivorNPC",
+      "text": "Stay close to camp after dark. The big ones hunt at night.",
+      "audio_key": null,
+      "condition": "None",
+      "choices": []
+    }
+  },
+  "follow_up_quest": "QUEST_CRAFTING_002",
+  "lore_text": {
+    "crafting_bench_first_look": "The stone is flat — too flat to be natural. Someone shaped this. Spent time on it. Whoever they were, they understood something: that survival isn't luck. It's preparation. You run your hand across the surface and feel the grooves where tools were made. You can do this.",
+    "camp_arrival": "The fire is small but real. Someone kept it alive. That means someone is still here — or was, recently. You scan the perimeter. Tracks in the mud. Human tracks. You're not alone.",
+    "first_axe_crafted": "The axe head fits the shaft perfectly. You feel the weight of it — heavier than you expected. More real. This is the difference between prey and hunter. You made this. With your hands, from nothing. The world just got a little smaller."
+  }
+}

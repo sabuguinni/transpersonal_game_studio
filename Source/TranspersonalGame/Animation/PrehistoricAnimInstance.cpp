@@ -1,294 +1,115 @@
+// PrehistoricAnimInstance.cpp
+// Animation Agent #10 — Transpersonal Game Studio
+// Locomotion AnimInstance for the prehistoric survivor character.
+// Drives idle/walk/run/crouch/jump blend states from character movement data.
+
 #include "PrehistoricAnimInstance.h"
-#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UPrehistoricAnimInstance::UPrehistoricAnimInstance()
 {
-    // Initialize default values
-    Speed = 0.0f;
-    Direction = 0.0f;
-    LeanAmount = 0.0f;
-    bIsInAir = false;
-    bIsCrouching = false;
-    bIsMoving = false;
-    
-    // Survival states
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    // Combat states
-    bIsInCombat = false;
-    bIsBlocking = false;
-    bIsAttacking = false;
-    bIsDodging = false;
-    
-    // Animation settings
-    IdleBreakChance = 0.1f;
-    IdleBreakMinInterval = 5.0f;
-    LookAroundChance = 0.05f;
-    
-    // Internal state
-    LastIdleBreakTime = 0.0f;
-    LastLookAroundTime = 0.0f;
-    bWasMoving = false;
-    
-    MovementState = EAnim_MovementState::Idle;
+    Speed            = 0.f;
+    Direction        = 0.f;
+    bIsInAir         = false;
+    bIsCrouching     = false;
+    bIsSprinting     = false;
+    bIsAttacking     = false;
+    bIsDead          = false;
+    LeanAngle        = 0.f;
+    AimPitch         = 0.f;
+    LandedBlendAlpha = 0.f;
+    FearIntensity    = 0.f;
+    StaminaRatio     = 1.f;
 }
 
 void UPrehistoricAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    
-    // Get character reference
-    OwningCharacter = Cast<ACharacter>(GetOwningActor());
-    if (!OwningCharacter)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: Failed to get owning character"));
-        return;
-    }
-    
-    // Get movement component
-    CharacterMovement = OwningCharacter->GetCharacterMovement();
-    if (!CharacterMovement)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: Failed to get character movement component"));
-        return;
-    }
-    
-    // Get animation controller
-    AnimationController = OwningCharacter->FindComponentByClass<UPrimitiveAnimationController>();
-    if (!AnimationController)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: No PrimitiveAnimationController found on character"));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAnimInstance: Initialized successfully"));
+    OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
 }
 
-void UPrehistoricAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
+void UPrehistoricAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-    Super::NativeUpdateAnimation(DeltaTimeX);
-    
-    if (!OwningCharacter || !CharacterMovement)
-    {
-        return;
-    }
-    
-    // Update movement variables
-    UpdateMovementVariables();
-    
-    // Update survival and combat states
-    UpdateSurvivalStates();
-    UpdateCombatStates();
-    
-    // Check for idle animations
-    CheckIdleAnimations();
-}
+    Super::NativeUpdateAnimation(DeltaSeconds);
 
-void UPrehistoricAnimInstance::UpdateMovementVariables()
-{
-    if (!CharacterMovement)
+    if (!OwnerCharacter)
     {
-        return;
+        OwnerCharacter = Cast<ACharacter>(TryGetPawnOwner());
+        if (!OwnerCharacter) return;
     }
-    
-    // Get data from animation controller if available
-    if (AnimationController)
-    {
-        MovementState = AnimationController->GetCurrentMovementState();
-        BlendParams = AnimationController->GetBlendParameters();
-        
-        Speed = BlendParams.Speed;
-        Direction = BlendParams.Direction;
-        LeanAmount = BlendParams.LeanAmount;
-        bIsInAir = BlendParams.bIsInAir;
-        bIsCrouching = BlendParams.bIsCrouching;
-    }
-    else
-    {
-        // Fallback calculation if no animation controller
-        FVector Velocity = CharacterMovement->Velocity;
-        Velocity.Z = 0.0f;
-        Speed = Velocity.Size();
-        
-        bIsInAir = CharacterMovement->IsFalling();
-        bIsCrouching = CharacterMovement->IsCrouching();
-        
-        // Simple direction calculation
-        if (Speed > 10.0f)
-        {
-            FVector Forward = OwningCharacter->GetActorForwardVector();
-            Forward.Z = 0.0f;
-            Forward.Normalize();
-            
-            Velocity.Normalize();
-            float DotProduct = FVector::DotProduct(Forward, Velocity);
-            float CrossProduct = FVector::CrossProduct(Forward, Velocity).Z;
-            Direction = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
-        }
-        else
-        {
-            Direction = 0.0f;
-        }
-    }
-    
-    // Update movement flag
-    bWasMoving = bIsMoving;
-    bIsMoving = Speed > 50.0f;
-}
 
-void UPrehistoricAnimInstance::UpdateSurvivalStates()
-{
-    // These would be updated based on gameplay systems
-    // For now, we'll leave them as placeholders that can be set by other systems
-    
-    // Example: Check if character is near crafting station
-    // bIsCrafting = CheckNearCraftingStation();
-    
-    // Example: Check if character is in hunting mode
-    // bIsHunting = CheckHuntingMode();
-    
-    // Example: Check if character is gathering resources
-    // bIsGathering = CheckGatheringMode();
-    
-    // Example: Check if character is resting
-    // bIsResting = CheckRestingMode();
-}
+    UCharacterMovementComponent* MovComp = OwnerCharacter->GetCharacterMovement();
+    if (!MovComp) return;
 
-void UPrehistoricAnimInstance::UpdateCombatStates()
-{
-    // These would be updated based on combat system
-    // For now, we'll leave them as placeholders
-    
-    // Example: Check if character is in combat
-    // bIsInCombat = CheckCombatState();
-    
-    // Example: Check if character is blocking
-    // bIsBlocking = CheckBlockingState();
-    
-    // Example: Check if character is attacking
-    // bIsAttacking = CheckAttackingState();
-    
-    // Example: Check if character is dodging
-    // bIsDodging = CheckDodgingState();
-}
+    // ── Velocity & Speed ────────────────────────────────────────────────────
+    FVector Velocity = MovComp->Velocity;
+    Speed = Velocity.Size2D();
 
-void UPrehistoricAnimInstance::CheckIdleAnimations()
-{
-    if (!IsIdleState() || bIsMoving)
-    {
-        return;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check for idle break animations
-    if (ShouldPlayIdleBreak())
-    {
-        LastIdleBreakTime = CurrentTime;
-        // Trigger idle break animation
-        UE_LOG(LogTemp, Log, TEXT("Triggering idle break animation"));
-    }
-    
-    // Check for look around animations
-    if (ShouldLookAround())
-    {
-        LastLookAroundTime = CurrentTime;
-        // Trigger look around animation
-        UE_LOG(LogTemp, Log, TEXT("Triggering look around animation"));
-    }
-}
+    // ── Direction (strafe angle relative to actor forward) ─────────────────
+    FRotator ActorRot = OwnerCharacter->GetActorRotation();
+    FRotator VelRot   = UKismetMathLibrary::MakeRotFromX(Velocity);
+    FRotator Delta    = UKismetMathLibrary::NormalizedDeltaRotator(VelRot, ActorRot);
+    Direction = FMath::FInterpTo(Direction, Delta.Yaw, DeltaSeconds, 8.f);
 
-bool UPrehistoricAnimInstance::ShouldPlayIdleBreak() const
-{
-    if (!GetWorld())
-    {
-        return false;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float TimeSinceLastBreak = CurrentTime - LastIdleBreakTime;
-    
-    return TimeSinceLastBreak > IdleBreakMinInterval && 
-           FMath::RandRange(0.0f, 1.0f) < IdleBreakChance;
-}
+    // ── Air state ───────────────────────────────────────────────────────────
+    bIsInAir = MovComp->IsFalling();
 
-bool UPrehistoricAnimInstance::ShouldLookAround() const
-{
-    if (!GetWorld())
-    {
-        return false;
-    }
-    
-    return FMath::RandRange(0.0f, 1.0f) < LookAroundChance;
-}
+    // ── Crouch ──────────────────────────────────────────────────────────────
+    bIsCrouching = MovComp->IsCrouching();
 
-// Animation event functions
-void UPrehistoricAnimInstance::OnJumpStart()
-{
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Jump Start"));
+    // ── Sprint (speed threshold: >400 = sprinting) ──────────────────────────
+    bIsSprinting = (Speed > 400.f && !bIsInAir && !bIsCrouching);
+
+    // ── Lean (lateral tilt based on direction angle) ────────────────────────
+    float TargetLean = FMath::Clamp(Direction * 0.15f, -15.f, 15.f);
+    LeanAngle = FMath::FInterpTo(LeanAngle, TargetLean, DeltaSeconds, 5.f);
+
+    // ── Aim pitch (look up/down) ─────────────────────────────────────────────
+    FRotator ControlRot = OwnerCharacter->GetControlRotation();
+    AimPitch = FMath::ClampAngle(ControlRot.Pitch, -90.f, 90.f);
+
+    // ── Land blend alpha (smoothly fade out landing pose) ──────────────────
+    if (!bIsInAir && LandedBlendAlpha > 0.f)
+    {
+        LandedBlendAlpha = FMath::FInterpTo(LandedBlendAlpha, 0.f, DeltaSeconds, 4.f);
+    }
+
+    // ── Stamina ratio drives animation speed scale ──────────────────────────
+    // StaminaRatio is set externally by the character's survival component.
+    // When stamina is low, movement animations slow slightly.
+    float AnimSpeedScale = FMath::Lerp(0.75f, 1.0f, StaminaRatio);
+    SetRootMotionMode(ERootMotionMode::RootMotionFromMontagesOnly);
+    (void)AnimSpeedScale; // Used in Blueprint via GetAnimSpeedScale()
 }
 
 void UPrehistoricAnimInstance::OnLanded()
 {
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Landed"));
+    LandedBlendAlpha = 1.0f;
 }
 
-void UPrehistoricAnimInstance::OnCombatStart()
+void UPrehistoricAnimInstance::SetAttacking(bool bAttacking)
 {
-    bIsInCombat = true;
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Combat Start"));
+    bIsAttacking = bAttacking;
 }
 
-void UPrehistoricAnimInstance::OnCombatEnd()
+void UPrehistoricAnimInstance::SetDead(bool bDead)
 {
-    bIsInCombat = false;
-    bIsBlocking = false;
-    bIsAttacking = false;
-    bIsDodging = false;
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Combat End"));
+    bIsDead = bDead;
 }
 
-void UPrehistoricAnimInstance::OnSurvivalActionStart(ESurvivalAction Action)
+void UPrehistoricAnimInstance::SetFearIntensity(float Intensity)
 {
-    // Reset all survival states
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    // Set the appropriate state
-    switch (Action)
-    {
-        case ESurvivalAction::Hunting:
-            bIsHunting = true;
-            break;
-        case ESurvivalAction::Gathering:
-            bIsGathering = true;
-            break;
-        case ESurvivalAction::Crafting:
-            bIsCrafting = true;
-            break;
-        case ESurvivalAction::Resting:
-            bIsResting = true;
-            break;
-        default:
-            break;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Survival Action Start - %d"), (int32)Action);
+    FearIntensity = FMath::Clamp(Intensity, 0.f, 1.f);
 }
 
-void UPrehistoricAnimInstance::OnSurvivalActionEnd()
+void UPrehistoricAnimInstance::SetStaminaRatio(float Ratio)
 {
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Survival Action End"));
+    StaminaRatio = FMath::Clamp(Ratio, 0.f, 1.f);
+}
+
+float UPrehistoricAnimInstance::GetAnimSpeedScale() const
+{
+    return FMath::Lerp(0.75f, 1.0f, StaminaRatio);
 }

@@ -5,16 +5,43 @@
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Animation/BlendSpace.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "../Core/SharedTypes.h"
 #include "Anim_CharacterMovementController.generated.h"
 
-/**
- * Controlador de animações de movimento para o TranspersonalCharacter
- * Gere transições entre idle, walk, run, jump, crouch baseado no estado do movimento
- */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_MovementState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float Speed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float Direction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    bool bIsInAir;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    bool bIsCrouching;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    EAnim_MovementMode MovementMode;
+
+    FAnim_MovementState()
+    {
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsInAir = false;
+        bIsCrouching = false;
+        MovementMode = EAnim_MovementMode::Walking;
+    }
+};
+
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_CharacterMovementController : public UActorComponent
 {
     GENERATED_BODY()
@@ -28,50 +55,57 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Estados de movimento
-    UENUM(BlueprintType)
-    enum class EAnim_MovementState : uint8
-    {
-        Idle        UMETA(DisplayName = "Idle"),
-        Walking     UMETA(DisplayName = "Walking"),
-        Running     UMETA(DisplayName = "Running"),
-        Jumping     UMETA(DisplayName = "Jumping"),
-        Falling     UMETA(DisplayName = "Falling"),
-        Crouching   UMETA(DisplayName = "Crouching"),
-        CrouchWalk  UMETA(DisplayName = "Crouch Walking")
-    };
+    // Movement state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    FAnim_MovementState CurrentMovementState;
 
-    // Estado actual do movimento
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    EAnim_MovementState CurrentMovementState;
-
-    // Velocidades para transições
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float WalkSpeedThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float RunSpeedThreshold;
-
-    // Referências de animação
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    // Animation assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Idle")
     class UAnimSequence* IdleAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimSequence* WalkAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Movement")
+    class UBlendSpace* WalkRunBlendSpace;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimSequence* RunAnimation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Jump")
     class UAnimMontage* JumpMontage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Crouch")
     class UAnimSequence* CrouchIdleAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UAnimSequence* CrouchWalkAnimation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Crouch")
+    class UBlendSpace* CrouchWalkBlendSpace;
 
-    // Componentes cached
+    // Movement thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float WalkSpeedThreshold = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float RunSpeedThreshold = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Settings")
+    float DirectionSmoothingSpeed = 10.0f;
+
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementState();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayJumpAnimation();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    EAnim_MovementMode GetCurrentMovementMode() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float GetMovementSpeed() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float GetMovementDirection() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    bool IsMoving() const;
+
+private:
+    // Cached references
     UPROPERTY()
     class ACharacter* OwnerCharacter;
 
@@ -79,46 +113,13 @@ public:
     class UCharacterMovementComponent* MovementComponent;
 
     UPROPERTY()
-    class USkeletalMeshComponent* MeshComponent;
-
-    UPROPERTY()
     class UAnimInstance* AnimInstance;
 
-    // Métodos públicos
-    UFUNCTION(BlueprintCallable, Category = "Animation Control")
-    void UpdateMovementState();
+    // Internal state
+    float PreviousDirection;
+    float DirectionSmoothingTimer;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation Control")
-    void PlayJumpAnimation();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Control")
-    void SetCrouchState(bool bIsCrouching);
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    float GetCurrentSpeed() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    bool IsInAir() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    bool IsCrouching() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    FVector GetVelocity() const;
-
-private:
-    // Estado anterior para detectar mudanças
-    EAnim_MovementState PreviousMovementState;
-
-    // Timer para evitar mudanças muito rápidas
-    float StateChangeTimer;
-
-    UPROPERTY(EditAnywhere, Category = "Animation Settings", meta = (AllowPrivateAccess = "true"))
-    float StateChangeDelay;
-
-    // Métodos privados
-    void CacheComponents();
-    void UpdateAnimationState();
-    EAnim_MovementState CalculateMovementState();
-    void OnMovementStateChanged(EAnim_MovementState NewState);
+    void CacheReferences();
+    void UpdateAnimationBlueprint();
+    EAnim_MovementMode DetermineMovementMode();
 };

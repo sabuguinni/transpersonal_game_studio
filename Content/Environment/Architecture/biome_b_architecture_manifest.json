@@ -1,0 +1,71 @@
+{
+  "manifest_id": "BiomeB_Architecture_v1",
+  "agent": "Architecture & Interior Agent #07",
+  "cycle": "PROD_CYCLE_AUTO_20260620_004",
+  "biome": "BiomeB",
+  "biome_center": {"x": 50000, "y": 50000, "z": 100},
+  "description": "Architectural props and structural elements placed in BiomeB. All structures are geological/natural formations consistent with Cretaceous era — no human-built structures. These are ancient stone formations shaped by erosion, volcanic activity, and time.",
+
+  "spawned_actors": [
+    {
+      "label": "Arch_StoneRuinPillar_01",
+      "type": "stone_pillar",
+      "position": {"x": 50000, "y": 50000, "z": 100},
+      "scale": {"x": 0.5, "y": 0.5, "z": 3.0},
+      "mesh_status": "placeholder_cube",
+      "target_mesh": "cretaceous_stone_ruin_pillar.glb",
+      "narrative": "Tallest pillar — visible from distance, acts as landmark"
+    },
+    {
+      "label": "Arch_StoneRuinPillar_02",
+      "type": "stone_pillar",
+      "position": {"x": 50300, "y": 50000, "z": 100},
+      "scale": {"x": 0.5, "y": 0.5, "z": 3.0},
+      "mesh_status": "placeholder_cube",
+      "target_mesh": "cretaceous_stone_ruin_pillar.glb",
+      "narrative": "Second pillar — flanks the formation"
+    },
+    {
+      "label": "Arch_StoneRuinPillar_03",
+      "type": "stone_pillar",
+      "position": {"x": 50150, "y": 50250, "z": 100},
+      "scale": {"x": 0.5, "y": 0.5, "z": 3.0},
+      "mesh_status": "placeholder_cube",
+      "target_mesh": "cretaceous_stone_ruin_pillar.glb",
+      "narrative": "Third pillar — completes the triangular formation"
+    },
+    {
+      "label": "Arch_StoneRuinWall_01",
+      "type": "stone_wall_slab",
+      "position": {"x": 50150, "y": 49800, "z": 100},
+      "scale": {"x": 5.0, "y": 0.3, "z": 2.0},
+      "mesh_status": "placeholder_cube",
+      "target_mesh": "cretaceous_stone_wall_slab.glb",
+      "narrative": "Fallen stone slab — creates natural windbreak and shelter opportunity for player"
+    }
+  ],
+
+  "pending_assets": [
+    {
+      "asset_name": "cretaceous_stone_wall_slab",
+      "prompt": "Ancient weathered stone slab wall section, Cretaceous era, moss-covered limestone, crumbling edges, game-ready low-poly, PBR textures, Unreal Engine 5",
+      "category": "Buildings",
+      "priority": "high",
+      "cycle_target": "PROD_CYCLE_AUTO_20260620_005"
+    },
+    {
+      "asset_name": "cretaceous_cave_entrance_arch",
+      "prompt": "Natural cave entrance arch formed from limestone rock, Cretaceous era, stalactites visible, moss and ferns growing, game-ready low-poly prop, PBR textures, Unreal Engine 5",
+      "category": "Terrain",
+      "priority": "medium",
+      "cycle_target": "PROD_CYCLE_AUTO_20260620_006"
+    }
+  ],
+
+  "design_notes": {
+    "philosophy": "Every structure in BiomeB is a geological document. The triangular pillar formation creates a natural arena — defensible position for the player, hunting ground for predators. The stone slab provides first-tier shelter: blocks wind, hides from line-of-sight.",
+    "gameplay_function": "Pillars = navigation landmarks visible at 500m. Wall slab = tier-1 shelter (no crafting required). Cave arch (pending) = tier-2 shelter with temperature regulation.",
+    "anti_spiritual_check": "PASS — all structures are natural geological formations. No sacred sites, no ritual markers, no spiritual significance. Pure survival utility.",
+    "next_agent_handoff": "Agent #08 Lighting should add point lights or emissive materials near pillar bases to make them visible at night. Shadow casting from pillars creates tactical cover indicators."
+  }
+}

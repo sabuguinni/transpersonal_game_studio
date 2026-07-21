@@ -1,0 +1,172 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260619_002",
+  "agent": "Audio Agent #16",
+  "timestamp": "2026-06-19",
+
+  "voice_lines": [
+    {
+      "id": "VL_Narrator_Survival_001",
+      "character": "Narrator_Survival",
+      "text": "Something moves in the dark. Stay low, stay quiet. The predators hunt by sound as much as by sight.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834841104_Narrator_Survival.mp3",
+      "duration_estimate": "~7s",
+      "trigger_actor": "AudioTrigger_NorthCliff_001",
+      "trigger_radius_cm": 400,
+      "spatial_attenuation": true,
+      "attenuation_falloff_start_cm": 200,
+      "attenuation_falloff_end_cm": 800,
+      "context": "Player approaches north cliff at night — stealth warning"
+    },
+    {
+      "id": "VL_Elder_Hunter_001",
+      "character": "Elder_Hunter",
+      "text": "The herd is moving. When the big ones run, you run too. Do not ask why — just run.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781834842850_Elder_Hunter.mp3",
+      "duration_estimate": "~6s",
+      "trigger_actor": "AudioTrigger_HerdPath_001",
+      "trigger_radius_cm": 600,
+      "spatial_attenuation": true,
+      "attenuation_falloff_start_cm": 300,
+      "attenuation_falloff_end_cm": 1200,
+      "context": "Player enters herd migration path — danger/urgency cue"
+    }
+  ],
+
+  "voice_lines_previous_cycle": [
+    {
+      "id": "VL_TribalLeader_001",
+      "character": "TribalLeader",
+      "audio_url": "tts/1781834748478_TribalLeader.mp3",
+      "trigger_actor": "AudioTrigger_RiverCamp_001"
+    },
+    {
+      "id": "VL_Scout_Narrator_001",
+      "character": "Scout_Narrator",
+      "audio_url": "tts/1781834763973_Scout_Narrator.mp3",
+      "trigger_actor": "AudioTrigger_HerdPath_001"
+    },
+    {
+      "id": "VL_Veteran_Hunter_001",
+      "character": "Veteran_Hunter",
+      "audio_url": "tts/1781834771141_Veteran_Hunter.mp3",
+      "trigger_actor": "AudioTrigger_NorthCliff_001"
+    },
+    {
+      "id": "VL_Crafter_NPC_001",
+      "character": "Crafter_NPC",
+      "audio_url": "tts/1781834773049_Crafter_NPC.mp3",
+      "trigger_actor": "AudioTrigger_Quarry_001"
+    }
+  ],
+
+  "ambient_zones": [
+    {
+      "id": "AMB_River_001",
+      "actor_label": "AmbientZone_River_001",
+      "location": {"x": 500, "y": 800, "z": 50},
+      "radius_cm": 1500,
+      "sound_layer_primary": "running_water_brook_crickets",
+      "freesound_ref": "78375",
+      "freesound_preview": "https://cdn.freesound.org/previews/78/78375_1218676-hq.mp3",
+      "loop": true,
+      "volume_db": -6,
+      "description": "River camp — flowing water with cricket ambience, loops continuously"
+    },
+    {
+      "id": "AMB_Forest_001",
+      "actor_label": "AmbientZone_Forest_001",
+      "location": {"x": -800, "y": -400, "z": 80},
+      "radius_cm": 2000,
+      "sound_layer_primary": "dense_forest_wind_insects",
+      "freesound_ref": null,
+      "loop": true,
+      "volume_db": -9,
+      "description": "Dense forest — wind through canopy, distant animal calls, low insect drone"
+    },
+    {
+      "id": "AMB_Cliff_001",
+      "actor_label": "AmbientZone_Cliff_001",
+      "location": {"x": -1200, "y": 400, "z": 180},
+      "radius_cm": 1200,
+      "sound_layer_primary": "wind_howl_cliff_echo",
+      "freesound_ref": null,
+      "loop": true,
+      "volume_db": -4,
+      "description": "North cliff — strong wind howl, stone echo reverb, exposed height"
+    },
+    {
+      "id": "AMB_Quarry_001",
+      "actor_label": "AmbientZone_Quarry_001",
+      "location": {"x": 1800, "y": -600, "z": 30},
+      "radius_cm": 1000,
+      "sound_layer_primary": "stone_echo_dry_wind",
+      "freesound_ref": null,
+      "loop": true,
+      "volume_db": -8,
+      "description": "Quarry — stone resonance, dry wind, sparse insect presence"
+    },
+    {
+      "id": "AMB_HerdPath_001",
+      "actor_label": "AmbientZone_HerdPath_001",
+      "location": {"x": -400, "y": -1500, "z": 20},
+      "radius_cm": 2500,
+      "sound_layer_primary": "low_rumble_distant_bellows",
+      "freesound_ref": null,
+      "loop": true,
+      "volume_db": -12,
+      "description": "Herd migration path — subsonic ground rumble, distant dinosaur bellows, open plain wind"
+    }
+  ],
+
+  "freesound_assets": [
+    {
+      "id": 78375,
+      "name": "running_water_in_a_brook_with_crickets_01.wav",
+      "duration_s": 76.09,
+      "preview_url": "https://cdn.freesound.org/previews/78/78375_1218676-hq.mp3",
+      "tags": ["brook", "creek", "cricket", "flowing", "river", "running"],
+      "assigned_zone": "AmbientZone_River_001",
+      "license": "Freesound — check individual license before commercial use"
+    },
+    {
+      "id": 78376,
+      "name": "running_water_in_a_brook_with_crickets_02.wav",
+      "duration_s": 186.52,
+      "preview_url": "https://cdn.freesound.org/previews/78/78376_1218676-hq.mp3",
+      "tags": ["brook", "creek", "cricket", "flowing", "river", "running"],
+      "assigned_zone": "AmbientZone_River_001",
+      "license": "Freesound — check individual license before commercial use"
+    }
+  ],
+
+  "audio_design_notes": {
+    "spatial_audio_system": "UE5 MetaSounds + Attenuation Settings",
+    "reverb_zones": [
+      {"zone": "AmbientZone_Cliff_001", "reverb_preset": "Cave", "wet_level": 0.6},
+      {"zone": "AmbientZone_Quarry_001", "reverb_preset": "Stone", "wet_level": 0.4},
+      {"zone": "AmbientZone_Forest_001", "reverb_preset": "Forest", "wet_level": 0.2}
+    ],
+    "adaptive_music_states": [
+      {"state": "Exploration", "intensity": 0.2, "instrumentation": "low_percussion_bone_flute"},
+      {"state": "Danger_Near", "intensity": 0.6, "instrumentation": "rapid_percussion_tension_strings"},
+      {"state": "Combat", "intensity": 1.0, "instrumentation": "full_percussion_dissonant_brass"},
+      {"state": "Safe_Camp", "intensity": 0.1, "instrumentation": "ambient_fire_soft_wind"}
+    ],
+    "footstep_system": {
+      "surfaces": ["dirt", "rock", "water_shallow", "grass", "mud"],
+      "player_footstep_interval_ms": 400,
+      "dino_footstep_interval_ms": 800,
+      "screen_shake_on_trex_step": true,
+      "screen_shake_radius_cm": 3000
+    },
+    "wiring_instructions": "Each AudioTrigger_* actor marks the 3D position for Blueprint TriggerBox overlap. On PlayerBeginOverlap: play voice line URL via UAudioComponent at actor location with attenuation settings from this manifest. One-shot per session (bHasPlayed flag)."
+  },
+
+  "next_agent_instructions": {
+    "agent": "#17 VFX Agent",
+    "priority_1": "Add particle footstep dust at AmbientZone_HerdPath_001 — large ground impact puffs for dino footsteps",
+    "priority_2": "Add campfire particle emitter near AmbientZone_River_001 (river camp location)",
+    "priority_3": "Add screen shake Blueprint at AudioTrigger_HerdPath_001 — triggered when dino stomps nearby",
+    "priority_4": "Add dust/debris particle at AmbientZone_Quarry_001 — stone quarry atmosphere"
+  }
+}

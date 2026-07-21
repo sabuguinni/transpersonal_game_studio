@@ -1,0 +1,114 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260703_010",
+  "agent": "#15 — Narrative & Dialogue Agent",
+  "hub_coordinates": { "x": 2100, "y": 2400, "z": 100 },
+  "tts_lines": [
+    {
+      "id": "narr_010_001",
+      "character": "ScoutLeader_Dara",
+      "trigger_actor": "NarrTrigger_RaptorWarning_002",
+      "context": "Player approaches northern forest edge — raptor pack territory",
+      "text": "Stay low. Do not move. The pack leader is circling — if it sees you run, the others will follow. Wait for it to pass the ridge, then move west along the creek bed. The water will hide your scent. Go now, quietly.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086565600_ScoutLeader_Dara.mp3",
+      "duration_estimate": "~15s",
+      "tone": "urgent, whispered, tactical",
+      "gameplay_function": "Teaches player raptor evasion — water scent masking mechanic"
+    },
+    {
+      "id": "narr_010_002",
+      "character": "ElderKael",
+      "trigger_actor": "NarrTrigger_ElderKael_Dialogue_001",
+      "context": "Player approaches NPC_ElderKael_001 at hub campfire",
+      "text": "The old ones say this valley was different once. Before the great lizards came down from the northern hills. We built our fires here, we dried our meat here. Now we move camp every four days. You want to reclaim this ground? Then you must learn their patterns — when they feed, when they sleep, where they drink. Knowledge is the only weapon that does not break.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086569835_ElderKael.mp3",
+      "duration_estimate": "~25s",
+      "tone": "weathered, pragmatic, authoritative",
+      "gameplay_function": "Introduces dinosaur pattern-learning mechanic — feeding/sleeping/drinking schedules"
+    }
+  ],
+  "scene_actors_placed": [
+    {
+      "label": "NPC_ElderKael_001",
+      "type": "NPC placeholder (cylinder)",
+      "location": { "x": 1900, "y": 2550, "z": 100 },
+      "purpose": "Quest giver — valley history, dinosaur pattern knowledge"
+    },
+    {
+      "label": "Prop_Campfire_Hub_001",
+      "type": "Prop placeholder (sphere)",
+      "location": { "x": 1920, "y": 2600, "z": 100 },
+      "purpose": "Visual anchor for ElderKael scene"
+    },
+    {
+      "label": "Trike_Hub_001",
+      "type": "Dinosaur placeholder (cube)",
+      "location": { "x": 2500, "y": 2200, "z": 100 },
+      "purpose": "Triceratops herd — grazing near hub clearing"
+    },
+    {
+      "label": "Trike_Hub_002",
+      "type": "Dinosaur placeholder (cube)",
+      "location": { "x": 2650, "y": 2500, "z": 100 },
+      "purpose": "Triceratops herd member 2"
+    },
+    {
+      "label": "Trike_Hub_003",
+      "type": "Dinosaur placeholder (cube)",
+      "location": { "x": 2400, "y": 2750, "z": 100 },
+      "purpose": "Triceratops herd member 3"
+    },
+    {
+      "label": "NarrTrigger_ElderKael_Dialogue_001",
+      "type": "TriggerBox",
+      "location": { "x": 1900, "y": 2550, "z": 150 },
+      "purpose": "Proximity trigger — plays ElderKael audio on player approach"
+    },
+    {
+      "label": "NarrTrigger_RaptorWarning_002",
+      "type": "TriggerBox",
+      "location": { "x": 2900, "y": 1800, "z": 150 },
+      "purpose": "Proximity trigger — plays Dara raptor warning on forest approach"
+    }
+  ],
+  "cumulative_tts_registry": {
+    "cycle_007": {
+      "ScoutLeader_Dara_RaptorTactics": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783071439415_ScoutLeader_Dara.mp3"
+    },
+    "cycle_008": {
+      "Narrator_StoneAxe": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/cycle008_narrator.mp3",
+      "Narrator_Observation": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/cycle008_narrator2.mp3"
+    },
+    "cycle_009": {
+      "ElderKael_HerdObservation": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/cycle009_elder.mp3",
+      "ScoutLeader_Dara_ShedHorn": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/cycle009_scout.mp3"
+    },
+    "cycle_010": {
+      "ScoutLeader_Dara_RaptorEvasion": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086565600_ScoutLeader_Dara.mp3",
+      "ElderKael_ValleyHistory": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783086569835_ElderKael.mp3"
+    }
+  },
+  "narrative_arc_status": {
+    "act_1_survival": "ACTIVE — player learning dinosaur behaviors, resource gathering",
+    "key_npcs": ["ScoutLeader_Dara", "ElderKael"],
+    "established_mechanics_via_dialogue": [
+      "Raptor pack flanking — hunt in threes",
+      "Water as scent mask for evasion",
+      "Dinosaur pattern learning (feeding/sleeping/drinking schedules)",
+      "Camp relocation every 4 days (territory pressure mechanic)",
+      "Triceratops herd observation and tracking"
+    ],
+    "next_narrative_beat": "Player proves competence → earns tribe trust → unlocks camp upgrade quests"
+  },
+  "handoff_to_agent_16": {
+    "audio_triggers": [
+      "NarrTrigger_ElderKael_Dialogue_001 → play ElderKael_ValleyHistory.mp3",
+      "NarrTrigger_RaptorWarning_002 → play ScoutLeader_Dara_RaptorEvasion.mp3",
+      "NarrTrigger_RaptorWarning_001 → play ScoutLeader_Dara_RaptorTactics.mp3 (cycle 007)"
+    ],
+    "ambient_audio_requests": [
+      "Campfire crackling loop at Prop_Campfire_Hub_001",
+      "Distant Triceratops low rumble near Trike_Hub_001/002/003",
+      "Forest ambience (insects, wind) at hub clearing perimeter"
+    ]
+  }
+}

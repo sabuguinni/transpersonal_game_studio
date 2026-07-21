@@ -1,203 +1,156 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/TriggerVolume.h"
+#include "Sound/SoundWave.h"
 #include "Audio_SystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_AtmosphereType : uint8
+enum class EAudio_MusicLayer : uint8
 {
-    Forest_Calm         UMETA(DisplayName = "Forest Calm"),
-    Forest_Tense        UMETA(DisplayName = "Forest Tense"),
-    Predator_Territory  UMETA(DisplayName = "Predator Territory"),
-    Water_Source        UMETA(DisplayName = "Water Source"),
-    Safe_Zone          UMETA(DisplayName = "Safe Zone"),
-    Danger_Zone        UMETA(DisplayName = "Danger Zone")
+    Ambient     UMETA(DisplayName = "Ambient"),
+    Tension     UMETA(DisplayName = "Tension"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Exploration UMETA(DisplayName = "Exploration"),
+    Stealth     UMETA(DisplayName = "Stealth")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_SFXCategory : uint8
+{
+    Footsteps   UMETA(DisplayName = "Footsteps"),
+    Environment UMETA(DisplayName = "Environment"),
+    Dinosaurs   UMETA(DisplayName = "Dinosaurs"),
+    UI          UMETA(DisplayName = "UI"),
+    Combat      UMETA(DisplayName = "Combat"),
+    Crafting    UMETA(DisplayName = "Crafting")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_TriggerZone
+struct TRANSPERSONALGAME_API FAudio_MusicState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    FVector Location;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    EAudio_MusicLayer CurrentLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    float Radius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float TensionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    EAudio_AtmosphereType AtmosphereType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float FadeTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    bool bIsTransitioning;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    float VolumeMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Trigger")
-    bool bIsActive;
-
-    FAudio_TriggerZone()
+    FAudio_MusicState()
     {
-        Location = FVector::ZeroVector;
-        Radius = 500.0f;
-        AtmosphereType = EAudio_AtmosphereType::Forest_Calm;
-        VolumeMultiplier = 1.0f;
-        bIsActive = true;
+        CurrentLayer = EAudio_MusicLayer::Ambient;
+        TensionLevel = 0.0f;
+        FadeTime = 2.0f;
+        bIsTransitioning = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_NarrativeClip
+struct TRANSPERSONALGAME_API FAudio_SpatialConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    FString ClipName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float MaxDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    TSoftObjectPtr<USoundCue> AudioClip;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float AttenuationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    float Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    bool bUseOcclusion;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    bool bPlayOnce;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+    float OcclusionStrength;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Audio")
-    bool bHasPlayed;
-
-    FAudio_NarrativeClip()
+    FAudio_SpatialConfig()
     {
-        ClipName = TEXT("DefaultClip");
-        Priority = 1.0f;
-        bPlayOnce = true;
-        bHasPlayed = false;
+        MaxDistance = 5000.0f;
+        AttenuationRadius = 1000.0f;
+        bUseOcclusion = true;
+        OcclusionStrength = 0.8f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_SystemManager : public AActor
+class TRANSPERSONALGAME_API UAudio_SystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AAudio_SystemManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // Music System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetMusicLayer(EAudio_MusicLayer NewLayer, float FadeTime = 2.0f);
 
-    // Audio Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* AmbientAudioComponent;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetTensionLevel(float TensionValue);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* NarrativeAudioComponent;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void PlayStinger(USoundCue* StingerSound);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* EffectsAudioComponent;
+    // SFX System
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    UAudioComponent* PlaySFXAtLocation(USoundWave* Sound, FVector Location, float VolumeMultiplier = 1.0f);
 
-    // Audio Trigger Zones
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    TArray<FAudio_TriggerZone> TriggerZones;
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    UAudioComponent* PlaySFXAttached(USoundWave* Sound, USceneComponent* AttachComponent, float VolumeMultiplier = 1.0f);
 
-    // Narrative Audio Clips
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio System")
-    TArray<FAudio_NarrativeClip> NarrativeClips;
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    void StopAllSFXOfCategory(EAudio_SFXCategory Category);
 
-    // Current Audio State
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudio_AtmosphereType CurrentAtmosphere;
+    // Footstep System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
+    void PlayFootstepSound(FVector Location, float Weight, bool bIsRunning);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float CurrentTensionLevel;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Footsteps")
+    void RegisterFootstepSurface(const FString& SurfaceType, USoundWave* WalkSound, USoundWave* RunSound);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    bool bIsNarrativePlaying;
-
-    // Audio Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MasterVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float AmbientVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float NarrativeVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float EffectsVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float FadeTime;
-
-private:
-    // Internal state
-    FVector LastPlayerLocation;
-    float TensionUpdateTimer;
-    int32 CurrentTriggerZoneIndex;
-
-public:
-    // Audio Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetAtmosphere(EAudio_AtmosphereType NewAtmosphere, bool bFadeTransition = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void PlayNarrativeClip(const FString& ClipName, float Priority = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void StopNarrative();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void SetTensionLevel(float TensionLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Control")
-    void UpdatePlayerLocation(FVector PlayerLocation);
-
-    // Trigger Zone Management
-    UFUNCTION(BlueprintCallable, Category = "Audio Triggers")
-    void AddTriggerZone(FVector Location, float Radius, EAudio_AtmosphereType AtmosphereType);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Triggers")
-    void RemoveTriggerZone(int32 ZoneIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Triggers")
-    int32 GetActiveZoneForLocation(FVector Location);
-
-    // Volume Control
-    UFUNCTION(BlueprintCallable, Category = "Audio Volume")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Volume")
+    // Environmental Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
     void SetAmbientVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Volume")
-    void SetNarrativeVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void PlayEnvironmentalLoop(USoundWave* LoopSound, FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Volume")
-    void SetEffectsVolume(float Volume);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio Utility")
-    bool IsNarrativePlaying() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Utility")
-    float GetCurrentTensionLevel() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Utility")
-    EAudio_AtmosphereType GetCurrentAtmosphere() const;
+    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
+    void StopEnvironmentalLoop(USoundWave* LoopSound);
 
 protected:
-    // Internal helper functions
-    void UpdateAmbientAudio();
-    void UpdateTensionBasedOnLocation(FVector PlayerLocation);
-    void CrossfadeAmbientAudio(USoundCue* NewSound);
-    FAudio_NarrativeClip* FindNarrativeClip(const FString& ClipName);
-    void InitializeDefaultTriggerZones();
-    void InitializeDefaultNarrativeClips();
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|State")
+    FAudio_MusicState MusicState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio|Config")
+    FAudio_SpatialConfig SpatialConfig;
+
+    UPROPERTY()
+    TArray<UAudioComponent*> ActiveAudioComponents;
+
+    UPROPERTY()
+    TMap<EAudio_SFXCategory, TArray<UAudioComponent*>> CategoryComponents;
+
+    UPROPERTY()
+    TMap<FString, USoundWave*> FootstepWalkSounds;
+
+    UPROPERTY()
+    TMap<FString, USoundWave*> FootstepRunSounds;
+
+    UPROPERTY()
+    TArray<UAudioComponent*> EnvironmentalLoops;
+
+private:
+    void UpdateMusicLayers();
+    void CleanupFinishedComponents();
+    FString GetSurfaceTypeAtLocation(FVector Location);
 };

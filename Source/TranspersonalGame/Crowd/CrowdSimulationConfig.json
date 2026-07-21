@@ -1,0 +1,147 @@
+{
+  "crowd_simulation_version": "1.2.0",
+  "agent": "Agent #13 — Crowd & Traffic Simulation",
+  "cycle": "PROD_CYCLE_AUTO_20260703_005",
+  "hub_coords": { "x": 2100, "y": 2400, "z": 100 },
+
+  "herds": [
+    {
+      "id": "trike_herd_savana",
+      "species": "Triceratops horridus",
+      "type": "herbivore",
+      "behavior": "grazing_herd",
+      "zone": "hub_clearing",
+      "center": { "x": 2100, "y": 2400 },
+      "radius": 700,
+      "count": 6,
+      "spacing_min": 300,
+      "spacing_max": 500,
+      "facing_yaw": 315,
+      "facing_variance_deg": 25,
+      "members": [
+        { "label": "Trike_Savana_001", "role": "dominant_female", "x": 2100, "y": 2400, "yaw": 310 },
+        { "label": "Trike_Savana_002", "role": "juvenile",        "x": 2450, "y": 2200, "yaw": 320 },
+        { "label": "Trike_Savana_003", "role": "adult_male",      "x": 1750, "y": 2200, "yaw": 300 },
+        { "label": "Trike_Savana_004", "role": "adult_female",    "x": 2400, "y": 2700, "yaw": 330 },
+        { "label": "Trike_Savana_005", "role": "sub_adult",       "x": 1800, "y": 2650, "yaw": 295 },
+        { "label": "Trike_Savana_006", "role": "sentinel",        "x": 2100, "y": 1950, "yaw": 315 }
+      ],
+      "behaviors": {
+        "idle": "graze_in_place",
+        "alert": "form_defensive_circle_horns_out",
+        "flee": "stampede_north",
+        "predator_response": "charge_if_cornered"
+      },
+      "predator_threat_radius": 1200,
+      "flee_trigger_distance": 800
+    },
+    {
+      "id": "brach_herd_floresta",
+      "species": "Brachiosaurus altithorax",
+      "type": "herbivore",
+      "behavior": "browsing_herd",
+      "zone": "north_forest",
+      "center": { "x": 2100, "y": 900 },
+      "radius": 600,
+      "count": 5,
+      "spacing_min": 400,
+      "spacing_max": 600,
+      "facing_yaw": 135,
+      "facing_variance_deg": 20,
+      "members": [
+        { "label": "Brach_Floresta_001", "role": "matriarch",    "x": 2100, "y":  900, "yaw": 135 },
+        { "label": "Brach_Floresta_002", "role": "adult_male",   "x": 2500, "y":  750, "yaw": 120 },
+        { "label": "Brach_Floresta_003", "role": "adult_female", "x": 1700, "y":  750, "yaw": 150 },
+        { "label": "Brach_Floresta_004", "role": "sub_adult",    "x": 2300, "y": 1200, "yaw": 140 },
+        { "label": "Brach_Floresta_005", "role": "juvenile",     "x": 1900, "y": 1200, "yaw": 130 }
+      ],
+      "behaviors": {
+        "idle": "browse_canopy",
+        "alert": "raise_neck_scan",
+        "flee": "lumber_north_slow",
+        "predator_response": "stomp_and_scatter"
+      },
+      "predator_threat_radius": 1500,
+      "flee_trigger_distance": 1000,
+      "notes": "Brachiosaurus are too large to sprint — flee is slow but devastating if trampled"
+    },
+    {
+      "id": "para_herd_savana",
+      "species": "Parasaurolophus walkeri",
+      "type": "herbivore",
+      "behavior": "grazing_herd",
+      "zone": "mid_savana",
+      "center": { "x": 2100, "y": 1600 },
+      "radius": 450,
+      "count": 4,
+      "spacing_min": 280,
+      "spacing_max": 420,
+      "facing_yaw": 300,
+      "facing_variance_deg": 20,
+      "members": [
+        { "label": "Para_Savana_001", "role": "alpha",      "x": 2100, "y": 1600, "yaw": 300 },
+        { "label": "Para_Savana_002", "role": "adult",      "x": 2380, "y": 1450, "yaw": 310 },
+        { "label": "Para_Savana_003", "role": "adult",      "x": 1820, "y": 1450, "yaw": 290 },
+        { "label": "Para_Savana_004", "role": "juvenile",   "x": 2250, "y": 1800, "yaw": 315 }
+      ],
+      "behaviors": {
+        "idle": "graze_and_vocalize",
+        "alert": "honk_warning_call",
+        "flee": "sprint_north_fast",
+        "predator_response": "scatter_and_regroup"
+      },
+      "predator_threat_radius": 1000,
+      "flee_trigger_distance": 600,
+      "vocalization": {
+        "idle_sound": "Para_LowHonk",
+        "alert_sound": "Para_WarningHonk",
+        "flee_sound": "Para_PanicHonk",
+        "interval_seconds": 8
+      },
+      "notes": "Parasaurolophus are the fastest fleers — first to detect predators and trigger herd-wide alert"
+    }
+  ],
+
+  "herd_ecology": {
+    "predator_prey_dynamic": {
+      "trex_territory_center": { "x": 2100, "y": 2400 },
+      "trex_threat_radius": 1500,
+      "herbivore_safe_distance": 1800,
+      "herd_alert_propagation_radius": 2000,
+      "comment": "When T-Rex enters hub, Para herd alerts first (closest), Trike herd forms defensive circle, Brach herd lumbers north"
+    },
+    "migration_corridor": {
+      "direction": "north_to_south",
+      "seasonal": true,
+      "waypoints": [
+        { "x": 2100, "y":  500, "label": "forest_entry" },
+        { "x": 2100, "y":  900, "label": "brach_browsing_zone" },
+        { "x": 2100, "y": 1600, "label": "para_grazing_zone" },
+        { "x": 2100, "y": 2400, "label": "trike_hub_clearing" },
+        { "x": 2100, "y": 3200, "label": "river_watering_hole" }
+      ]
+    }
+  },
+
+  "crowd_lod": {
+    "full_behavior_distance": 3000,
+    "simplified_behavior_distance": 8000,
+    "static_impostor_distance": 15000,
+    "culled_distance": 25000
+  },
+
+  "mass_ai_config": {
+    "entity_template": "HerbivoreHerdMember",
+    "processor_chain": ["HerdCohesionProcessor", "ObstacleAvoidanceProcessor", "PredatorFleeProcessor"],
+    "max_agents_per_herd": 20,
+    "global_max_agents": 200,
+    "tick_rate_hz": 10,
+    "notes": "Mass AI not available in headless editor — using StaticMeshActor placeholders. Swap to MassEntitySubsystem when runtime is available."
+  },
+
+  "lighting": {
+    "herd_ambient_lights": [
+      { "label": "HerdLight_Floresta_001", "x": 2100, "y": 900, "z": 400, "color": "amber", "intensity": 3000 }
+    ]
+  }
+}

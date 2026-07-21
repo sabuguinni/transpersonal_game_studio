@@ -1,0 +1,49 @@
+{
+  "manifest_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260627_005",
+  "agent": "Environment Artist #06",
+  "biome_center": { "x": 50000, "y": 50000, "z": 100 },
+  "props_spawned": [
+    {
+      "label": "CretaceousBoulder_01-08",
+      "type": "VolcanicBoulder",
+      "count": 8,
+      "scale_range": [1.5, 3.5],
+      "description": "Volcanic basalt boulders scattered across Cretaceous jungle floor"
+    },
+    {
+      "label": "FallenLog_01-05",
+      "type": "FallenLog",
+      "count": 5,
+      "scale": [0.4, 4.0, 0.4],
+      "description": "Fallen ancient tree logs, mossy and weathered"
+    },
+    {
+      "label": "ForestAmbientLight_01-03",
+      "type": "PointLight",
+      "count": 3,
+      "color": "warm_golden_1.0_0.75_0.4",
+      "intensity": 500,
+      "attenuation_radius": 800,
+      "description": "Warm golden hour dappled light through forest canopy"
+    }
+  ],
+  "meshy_asset_generated": {
+    "asset_name": "cretaceous_campfire_primitive",
+    "task_id": "019f0802-00d8-7714-8c67-77155bbce5d1",
+    "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1782545831260_Cretaceous_era_prehistoric_campfire_with.glb",
+    "category": "Props",
+    "status": "SUCCEEDED"
+  },
+  "asset_request_pending": {
+    "asset_name": "cretaceous_volcanic_rock_cluster",
+    "prompt": "Cretaceous era volcanic rock cluster with 3 large basalt boulders grouped together, moss-covered, realistic PBR textures, game-ready, Unreal Engine 5 compatible, low-poly optimized",
+    "category": "Terrain"
+  },
+  "cap_enforcement": {
+    "fog_dedup": true,
+    "sun_pitch_guard": true,
+    "FastSkyLUT": 1,
+    "map_saved": true
+  }
+}

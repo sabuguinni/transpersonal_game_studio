@@ -1,105 +1,117 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
-#include "Engine/Engine.h"
 #include "Audio_AdaptiveMusicManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_MusicState : uint8
 {
-    Calm        UMETA(DisplayName = "Calm"),
-    Tension     UMETA(DisplayName = "Tension"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Combat      UMETA(DisplayName = "Combat")
+    Calm,
+    Tension,
+    Danger,
+    Combat,
+    Exploration,
+    Dawn,
+    Dusk,
+    Night
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_AdaptiveMusicManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_MusicLayer
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<USoundCue> SoundCue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Volume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FadeTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActive = false;
+
+    FAudio_MusicLayer()
+    {
+        Volume = 1.0f;
+        FadeTime = 2.0f;
+        bIsActive = false;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio_AdaptiveMusicManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAudio_AdaptiveMusicManager();
+    UAudio_AdaptiveMusicManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // Music components for different states
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* CalmMusicComponent;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* TensionMusicComponent;
+    // Music state management
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMusicState(EAudio_MusicState NewState);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* DangerMusicComponent;
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    EAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* CombatMusicComponent;
+    // Layer management
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void EnableMusicLayer(int32 LayerIndex, float FadeInTime = 2.0f);
 
-    // Current music state
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void DisableMusicLayer(int32 LayerIndex, float FadeOutTime = 2.0f);
+
+    // Proximity-based music
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateProximityMusic(const TArray<AActor*>& NearbyActors);
+
+    // Time of day music
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateTimeOfDayMusic(float TimeOfDay);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music Layers")
+    TArray<FAudio_MusicLayer> MusicLayers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Components")
+    TArray<UAudioComponent*> AudioComponents;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
     EAudio_MusicState CurrentMusicState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music State")
     EAudio_MusicState TargetMusicState;
 
-    // Transition settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float TransitionDuration;
+    // Transition timing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float StateTransitionTime = 3.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Transition")
-    float TransitionTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float CurrentTransitionTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Transition")
-    bool bIsTransitioning;
+    // Proximity settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float DangerDetectionRadius = 2000.0f;
 
-    // Volume settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MasterVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float CalmVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TensionVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DangerVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float CombatVolume;
-
-public:
-    // Music state control functions
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void SetMusicState(EAudio_MusicState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void TransitionToMusicState(EAudio_MusicState NewState, float Duration = 2.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void StopAllMusic();
-
-    UFUNCTION(BlueprintCallable, Category = "Music Control")
-    void SetMasterVolume(float Volume);
-
-    // Utility functions
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    UAudioComponent* GetCurrentMusicComponent() const;
-
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    UAudioComponent* GetMusicComponentForState(EAudio_MusicState State) const;
-
-    UFUNCTION(BlueprintPure, Category = "Music State")
-    bool IsTransitioning() const { return bIsTransitioning; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity")
+    float TensionDetectionRadius = 3000.0f;
 
 private:
-    void UpdateMusicTransition(float DeltaTime);
-    void StartMusicComponent(UAudioComponent* Component);
-    void StopMusicComponent(UAudioComponent* Component);
-    void SetComponentVolume(UAudioComponent* Component, float Volume);
+    void InitializeAudioComponents();
+    void ProcessMusicTransition(float DeltaTime);
+    void UpdateLayerVolumes(float DeltaTime);
+    EAudio_MusicState DetermineMusicStateFromProximity(const TArray<AActor*>& NearbyActors);
+    EAudio_MusicState DetermineMusicStateFromTimeOfDay(float TimeOfDay);
 };

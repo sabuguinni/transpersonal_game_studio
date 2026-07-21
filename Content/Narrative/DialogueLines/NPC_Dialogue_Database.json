@@ -1,0 +1,135 @@
+{
+  "dialogue_database": {
+    "version": "1.4",
+    "cycle": "PROD_CYCLE_AUTO_20260703_001",
+    "agent": "Narrative_Agent_15",
+    "description": "NPC dialogue lines for hub characters — Elder Mara, Tracker Dak, Scout Mira",
+    "characters": {
+      "ElderMara": {
+        "id": "NPC_Elder_Hub_001",
+        "role": "Tribal Elder — knowledge keeper of migration patterns and survival history",
+        "location": "Hub center (X=2300, Y=2500)",
+        "dialogue_lines": [
+          {
+            "id": "ELDER_001",
+            "trigger": "first_meeting",
+            "line": "You survived the crossing. Good. Most do not. Sit, eat, and listen — there is much you do not know about this valley.",
+            "audio_url": null,
+            "condition": "player_health > 0.3"
+          },
+          {
+            "id": "ELDER_002",
+            "trigger": "migration_lore",
+            "line": "Before the great cold came, this valley fed ten thousand people. The herds of long-necks would pass through every dry season, shaking the ground for two days straight. We followed them north, built camps, moved on. That is how we survived. The ones who built permanent shelters — they are bones now. Movement is life. Stillness is death.",
+            "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040273257_ElderMara_MigrationLore.mp3",
+            "condition": "quest_migration_active OR player_days_survived > 5"
+          },
+          {
+            "id": "ELDER_003",
+            "trigger": "season_warning",
+            "line": "The dry season comes in forty days. The river will drop to your knees. That is when the predators concentrate near the water. Every kill within a day's walk of the river. Plan accordingly.",
+            "audio_url": null,
+            "condition": "game_day > 10"
+          },
+          {
+            "id": "ELDER_004",
+            "trigger": "player_injured",
+            "line": "You are bleeding. Sit. The leaves of the grey-bark tree — crush them, press them to the wound. You will live. But next time, do not fight what you cannot outrun.",
+            "audio_url": null,
+            "condition": "player_health < 0.4"
+          }
+        ]
+      },
+      "TrackerDak": {
+        "id": "NPC_Tracker_Hub_001",
+        "role": "Master Tracker — expert in predator behavior and hunting strategy",
+        "location": "Hub east edge (X=1950, Y=2600)",
+        "dialogue_lines": [
+          {
+            "id": "DAK_001",
+            "trigger": "raptor_warning",
+            "line": "The raptors move in threes. One drives the prey toward open ground, two flank from the sides. If you see one raptor, the other two are already behind you. Never run in a straight line. Break left, then right, use the trees. And if you hear the clicking sound — drop flat and do not move. They hunt by motion.",
+            "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040249957_TrackerDak_RaptorWarning.mp3",
+            "condition": "raptor_zone_proximity < 800 OR quest_raptor_hunt_active"
+          },
+          {
+            "id": "DAK_002",
+            "trigger": "trex_tracks",
+            "line": "Those prints — three-toed, deep in the mud, spaced eight feet apart. That is a T-Rex. Full grown. Moving north, maybe six hours ago. Do not follow. Circle wide to the east and rejoin the river path two miles up.",
+            "audio_url": null,
+            "condition": "player_near_trex_tracks"
+          },
+          {
+            "id": "DAK_003",
+            "trigger": "hunting_advice",
+            "line": "You want to hunt the big herbivores? Watch the herd. Find the one that lags behind — old, injured, young. That is your target. Never attack the center of the herd. The adults will trample you flat.",
+            "audio_url": null,
+            "condition": "player_has_spear AND quest_food_gathering_active"
+          },
+          {
+            "id": "DAK_004",
+            "trigger": "trex_nest_discovery",
+            "line": "A T-Rex nest nearby means the female will not stray more than half a mile from it. She is more aggressive than usual — anything that gets close dies. But it also means she is predictable. We can plan around her.",
+            "audio_url": null,
+            "condition": "trex_nest_discovered"
+          }
+        ]
+      },
+      "ScoutMira": {
+        "id": "NPC_Scout_Hub_001",
+        "role": "Scout Runner — fast reconnaissance specialist, reports on terrain and threats",
+        "location": "Hub south (X=2150, Y=2200)",
+        "dialogue_lines": [
+          {
+            "id": "MIRA_001",
+            "trigger": "nest_report",
+            "line": "I found their nest. Three days south, in the ravine where the black rocks jut out of the hillside. Twelve eggs, maybe more. If we destroy the nest now, before they hatch, the pack loses its next generation. But the adults will be frenzied — they will hunt anything that moves for three days straight. Your call, Chief.",
+            "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783040300737_ScoutMira_NestReport.mp3",
+            "condition": "quest_raptor_nest_found"
+          },
+          {
+            "id": "MIRA_002",
+            "trigger": "river_crossing",
+            "line": "Three days east, past the river bend where the raptors hunt — there is a cave. Inside, bones of the old ones. But also tools. Stone blades, still sharp. Worth the risk if you move fast and stay low.",
+            "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783038370941_ScoutRunner_Mira.mp3",
+            "condition": "player_explored_east_zone"
+          },
+          {
+            "id": "MIRA_003",
+            "trigger": "patrol_report",
+            "line": "The T-Rex was at the northern ridge at dawn. It moved south along the river by midday. If the pattern holds, it will circle back north by nightfall. We have a window — four hours, maybe five.",
+            "audio_url": null,
+            "condition": "trex_patrol_tracked AND time_of_day > 12"
+          },
+          {
+            "id": "MIRA_004",
+            "trigger": "weather_warning",
+            "line": "Storm coming from the west. Big one — the birds are flying east in mass. When the flying reptiles flee, you run too. Last storm like this flooded the lower valley in two hours. Get to high ground now.",
+            "audio_url": null,
+            "condition": "weather_storm_incoming"
+          }
+        ]
+      }
+    },
+    "dialogue_system": {
+      "trigger_radius": 300,
+      "interaction_key": "E",
+      "max_concurrent_dialogues": 1,
+      "cooldown_seconds": 30,
+      "priority_order": ["condition_based", "proximity", "random"],
+      "audio_playback": "3D_spatial",
+      "subtitle_display": true,
+      "npc_face_player_on_talk": true
+    },
+    "ai_behavior_integration": {
+      "patrol_nodes": {
+        "TRex_patrol": ["PatrolNode_TRex_001", "PatrolNode_TRex_002", "PatrolNode_TRex_003"],
+        "Raptor_flank": ["FlankPos_Raptor_001", "FlankPos_Raptor_002", "FlankPos_Raptor_003"],
+        "Brachio_herd": ["HerdWaypoint_Brachio_001", "HerdWaypoint_Brachio_002", "HerdWaypoint_Brachio_003"]
+      },
+      "npc_awareness_radius": 800,
+      "npc_flee_threshold": 0.3,
+      "npc_call_for_help_radius": 1200
+    }
+  }
+}

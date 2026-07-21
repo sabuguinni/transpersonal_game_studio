@@ -1,0 +1,141 @@
+{
+  "lighting_spec": {
+    "name": "Hub_Clearing_Cretaceous_Midday",
+    "version": "PROD_CYCLE_AUTO_20260703_002",
+    "agent": "Agent_08_Lighting_Atmosphere",
+    "target_area": {
+      "center": { "x": 2100, "y": 2400, "z": 0 },
+      "radius_ue_units": 1500,
+      "description": "Hero screenshot composition — PlayerStart clearing with ruin cluster"
+    },
+    "lighting_intent": "Bright Cretaceous midday — living jungle, warm golden canopy light, visible god-ray shaft over ruins",
+    "cinematography_reference": "Roger Deakins — Blade Runner 2049 desert scenes (shaft of light through haze), RDR2 golden hour jungle",
+
+    "global_settings": {
+      "directional_light": {
+        "actor_type": "DirectionalLight",
+        "pitch_degrees": -55.0,
+        "yaw_degrees": -30.0,
+        "intensity_lux": 75000,
+        "color_temperature_K": 5800,
+        "color_hex": "#FFF5E0",
+        "atmosphere_sun_light": true,
+        "cast_shadows": true,
+        "shadow_distance_fadeout_fraction": 1.0,
+        "notes": "CAP floor: pitch MUST be <= -45 for daytime. Intensity MUST be >= 10000 lux."
+      },
+      "sky_atmosphere": {
+        "count": 1,
+        "rayleigh_scattering_scale": 0.0331,
+        "mie_scattering_scale": 0.003996,
+        "absorption_scale": 1.0,
+        "notes": "Single instance only — dedup enforced by CAP guard"
+      },
+      "sky_light": {
+        "count": 1,
+        "real_time_capture": true,
+        "intensity": 1.0,
+        "notes": "Real-time capture for Lumen GI bounce accuracy"
+      },
+      "lumen": {
+        "global_illumination": true,
+        "reflections": true,
+        "dynamic_gi_method": 1,
+        "notes": "r.DynamicGlobalIlluminationMethod 1 = Lumen"
+      }
+    },
+
+    "volumetric_fog": {
+      "enabled": true,
+      "volumetric_fog": true,
+      "fog_density": 0.015,
+      "fog_height_falloff": 0.2,
+      "scattering_distribution": 0.7,
+      "albedo": { "r": 0.95, "g": 0.92, "b": 0.88 },
+      "extinction_scale": 0.4,
+      "purpose": "Makes god-ray light shaft visible — forward scattering (0.7) concentrates light in beam direction",
+      "fast_sky_lut": true
+    },
+
+    "hub_specific_lights": [
+      {
+        "label": "RuinGodRay_Hub_001",
+        "type": "RectLight",
+        "position": { "x": 2100, "y": 2400, "z": 600 },
+        "rotation": { "pitch": -85, "yaw": 0, "roll": 0 },
+        "intensity": 8000,
+        "source_width": 200,
+        "source_height": 200,
+        "attenuation_radius": 800,
+        "color": { "r": 1.0, "g": 0.92, "b": 0.75 },
+        "cast_shadows": true,
+        "cast_volumetric_shadow": true,
+        "purpose": "Primary god-ray shaft — simulates sunlight piercing jungle canopy above ruin cluster"
+      },
+      {
+        "label": "RuinLight_Hub_001",
+        "type": "PointLight",
+        "intensity": 600,
+        "use_inverse_squared_falloff": true,
+        "cast_shadows": false,
+        "purpose": "Warm amber fill — ground-level ruin atmosphere (from Agent #7, enhanced)"
+      },
+      {
+        "label": "RuinLight_Hub_002",
+        "type": "PointLight",
+        "intensity": 600,
+        "use_inverse_squared_falloff": true,
+        "cast_shadows": false,
+        "purpose": "Warm amber fill — ground-level ruin atmosphere (from Agent #7, enhanced)"
+      },
+      {
+        "label": "RuinLight_Hub_003",
+        "type": "PointLight",
+        "intensity": 600,
+        "use_inverse_squared_falloff": true,
+        "cast_shadows": false,
+        "purpose": "Warm amber fill — ground-level ruin atmosphere (from Agent #7, enhanced)"
+      }
+    ],
+
+    "ambient_audio_references": {
+      "freesound_candidates": [
+        {
+          "id": 860231,
+          "name": "Taiwan Chiayi Alishan Forest Birds Dawn Ambience",
+          "duration_s": 40,
+          "preview": "https://cdn.freesound.org/previews/860/860231_17078888-hq.mp3",
+          "use_case": "Daytime jungle ambience loop — birds + forest atmosphere"
+        },
+        {
+          "id": 327659,
+          "name": "Ambience Bird Conservatory Nature",
+          "duration_s": 160,
+          "preview": "https://cdn.freesound.org/previews/327/327659_5655138-hq.mp3",
+          "use_case": "Dense bird chorus — Cretaceous jungle feel, multiple species"
+        },
+        {
+          "id": 564270,
+          "name": "Edge Forest Dawn Chorus",
+          "duration_s": 86,
+          "preview": "https://cdn.freesound.org/previews/564/564270_1648170-hq.mp3",
+          "use_case": "Atmospheric background — distant bird calls, forest depth"
+        }
+      ],
+      "notes": "Hand to Agent #16 (Audio) for MetaSounds integration. Layer: (1) dense bird chorus base, (2) distant calls for depth, (3) insect drone sub-layer"
+    },
+
+    "performance_settings": {
+      "fast_sky_lut": "r.SkyAtmosphere.FastSkyLUT 1",
+      "ruin_lights_no_shadow": true,
+      "god_ray_cast_volumetric_shadow": true,
+      "notes": "Ruin fill lights have shadow disabled for performance. Only god-ray RectLight casts volumetric shadow."
+    },
+
+    "next_agent_handoff": {
+      "agent": "#09 Character Artist",
+      "lighting_context": "Hub clearing is bright midday Cretaceous. Character materials should be tuned for warm golden-white top light (5800K). Subsurface scattering on skin will catch the god-ray nicely. Avoid dark/desaturated character designs — the scene is high-key daylight.",
+      "lumen_note": "Lumen GI is active — character materials with Subsurface Profile will receive realistic bounce light from the green foliage around the clearing."
+    }
+  }
+}

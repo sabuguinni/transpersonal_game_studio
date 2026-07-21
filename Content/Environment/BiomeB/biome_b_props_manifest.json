@@ -1,0 +1,57 @@
+{
+  "biome_id": "BiomeB",
+  "biome_name": "Cretaceous Jungle — Dense Canopy Zone",
+  "center": { "x": 50000, "y": 50000, "z": 100 },
+  "radius_uu": 5000,
+  "cycle_created": "PROD_CYCLE_AUTO_20260620_004",
+  "agent": "Environment Artist #06",
+  "props": [
+    {
+      "label": "CretaceousFallenLog_BiomeB",
+      "type": "FallenLog",
+      "mesh_source": "meshy_019ee35e",
+      "glb_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1781931138756_Cretaceous_era_fallen_log_with_moss_and_.glb",
+      "location": { "x": 50000, "y": 50000, "z": 100 },
+      "scale": { "x": 3.0, "y": 0.5, "z": 0.5 },
+      "narrative_note": "Fallen ancient conifer. Moss and ferns colonising the bark. Suggests old-growth forest undisturbed for centuries."
+    },
+    {
+      "label": "CretaceousBoulder_BiomeB_1",
+      "type": "Boulder",
+      "mesh_source": "engine_sphere_proxy",
+      "location": { "x": 49800, "y": 50200, "z": 100 },
+      "scale": { "x": 0.8, "y": 0.8, "z": 0.56 },
+      "narrative_note": "Weathered granite outcrop. Lichen-covered. Shelter potential for small fauna."
+    },
+    {
+      "label": "CretaceousBoulder_BiomeB_2",
+      "type": "Boulder",
+      "mesh_source": "engine_sphere_proxy",
+      "location": { "x": 50300, "y": 49700, "z": 100 },
+      "scale": { "x": 1.1, "y": 1.1, "z": 0.77 },
+      "narrative_note": "Larger boulder formation. Claw marks possible on surface — dinosaur territory marker."
+    },
+    {
+      "label": "CretaceousBoulder_BiomeB_3",
+      "type": "Boulder",
+      "mesh_source": "engine_sphere_proxy",
+      "location": { "x": 50100, "y": 50400, "z": 100 },
+      "scale": { "x": 1.4, "y": 1.4, "z": 0.98 },
+      "narrative_note": "Dominant rock in cluster. Elevated vantage point. Player can climb for scouting."
+    }
+  ],
+  "pending_assets": [
+    {
+      "asset_name": "cretaceous_giant_cycad_tree",
+      "prompt": "Giant Cretaceous cycad tree, prehistoric palm-like trunk with crown of large feathery fronds, 8 meters tall, game-ready, PBR textures, Unreal Engine 5",
+      "category": "Vegetation",
+      "priority": "high"
+    },
+    {
+      "asset_name": "cretaceous_giant_fern_cluster",
+      "prompt": "Cluster of giant prehistoric ferns, Cretaceous era, 2 meters tall, lush green fronds, game-ready low-poly, PBR textures, Unreal Engine 5",
+      "category": "Vegetation",
+      "priority": "high"
+    }
+  ]
+}

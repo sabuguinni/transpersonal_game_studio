@@ -1,0 +1,105 @@
+{
+  "npc_behavior_config": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260704_005",
+    "agent": "NPC_Behavior_Agent_11",
+    "hub_center": { "x": 2100, "y": 2400, "z": 0 },
+
+    "dinosaur_behaviors": {
+      "TRex": {
+        "patrol_radius_units": 2000,
+        "patrol_waypoints": 5,
+        "aggro_range_units": 3000,
+        "attack_range_units": 300,
+        "chase_speed_multiplier": 1.4,
+        "patrol_speed_multiplier": 0.6,
+        "behavior_states": ["Patrol", "Alert", "Chase", "Attack", "Return"],
+        "trigger_zone_label": "TriggerZone_TRex_Aggro_001",
+        "waypoint_prefix": "WP_TRex_Patrol_",
+        "threat_response": "immediate_chase",
+        "pack_behavior": false,
+        "territory_center": { "x": 2100, "y": 2400, "z": 0 }
+      },
+      "Raptor": {
+        "patrol_radius_units": 1200,
+        "patrol_waypoints": 4,
+        "aggro_range_units": 1500,
+        "attack_range_units": 150,
+        "chase_speed_multiplier": 1.8,
+        "patrol_speed_multiplier": 0.8,
+        "behavior_states": ["Patrol", "Stalk", "Flank", "Attack", "Retreat"],
+        "trigger_zone_label": "TriggerZone_Raptor_Pack_001",
+        "waypoint_prefix": "WP_Raptor_Patrol_",
+        "threat_response": "coordinated_flank",
+        "pack_behavior": true,
+        "pack_size_min": 2,
+        "pack_size_max": 4,
+        "territory_center": { "x": 2900, "y": 3000, "z": 0 }
+      },
+      "Triceratops": {
+        "patrol_radius_units": 1500,
+        "patrol_waypoints": 6,
+        "aggro_range_units": 800,
+        "attack_range_units": 400,
+        "chase_speed_multiplier": 1.2,
+        "patrol_speed_multiplier": 0.4,
+        "behavior_states": ["Graze", "Alert", "Charge", "Retreat"],
+        "threat_response": "charge_if_threatened",
+        "pack_behavior": true,
+        "pack_size_min": 3,
+        "pack_size_max": 8,
+        "protects_young": true,
+        "territory_center": { "x": 1500, "y": 2800, "z": 0 }
+      },
+      "Brachiosaurus": {
+        "patrol_radius_units": 3000,
+        "patrol_waypoints": 4,
+        "aggro_range_units": 200,
+        "attack_range_units": 600,
+        "chase_speed_multiplier": 0.8,
+        "patrol_speed_multiplier": 0.3,
+        "behavior_states": ["Graze", "Alert", "Flee"],
+        "threat_response": "flee_or_stomp",
+        "pack_behavior": true,
+        "pack_size_min": 2,
+        "pack_size_max": 5,
+        "territory_center": { "x": 2100, "y": 1200, "z": 0 }
+      }
+    },
+
+    "npc_voice_lines": {
+      "TribeElder": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783145067461_TribeElder_NPCVoice.mp3",
+        "trigger": "player_near_herd",
+        "content": "Herd movement advice — dawn migration toward river"
+      },
+      "ScoutNPC": {
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783145119138_ScoutNPC_Warning.mp3",
+        "trigger": "raptor_pack_detected",
+        "content": "Raptor pack hunting strategy warning"
+      }
+    },
+
+    "patrol_waypoints_placed": {
+      "TRex": ["WP_TRex_Patrol_01","WP_TRex_Patrol_02","WP_TRex_Patrol_03","WP_TRex_Patrol_04","WP_TRex_Patrol_05"],
+      "Raptor": ["WP_Raptor_Patrol_01","WP_Raptor_Patrol_02","WP_Raptor_Patrol_03","WP_Raptor_Patrol_04"]
+    },
+
+    "trigger_zones_placed": [
+      "TriggerZone_TRex_Aggro_001",
+      "TriggerZone_Raptor_Pack_001"
+    ],
+
+    "hub_vegetation_added": {
+      "fern_ring_count": 12,
+      "label_prefix": "Fern_Hub_",
+      "placement": "800-1400 unit radius ring around hub center"
+    },
+
+    "navigation": {
+      "navmesh_label": "NavMesh_Hub_001",
+      "navmesh_scale": [50, 50, 10],
+      "rebuild_triggered": true
+    }
+  }
+}

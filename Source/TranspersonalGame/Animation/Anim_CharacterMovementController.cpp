@@ -1,80 +1,57 @@
 #include "Anim_CharacterMovementController.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimSequence.h"
 #include "Animation/AnimMontage.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnim_CharacterMovementController::UAnim_CharacterMovementController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    
-    // Valores padrão
-    WalkSpeedThreshold = 100.0f;
-    RunSpeedThreshold = 400.0f;
-    StateChangeDelay = 0.1f;
-    
-    // Estado inicial
-    CurrentMovementState = EAnim_MovementState::Idle;
-    PreviousMovementState = EAnim_MovementState::Idle;
-    StateChangeTimer = 0.0f;
-    
-    // Componentes serão cached no BeginPlay
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
-    MeshComponent = nullptr;
-    AnimInstance = nullptr;
-    
-    // Assets de animação (serão definidos no Blueprint ou via código)
-    IdleAnimation = nullptr;
-    WalkAnimation = nullptr;
-    RunAnimation = nullptr;
-    JumpMontage = nullptr;
-    CrouchIdleAnimation = nullptr;
-    CrouchWalkAnimation = nullptr;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+
+    // Initialize default values
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 300.0f;
+    DirectionSmoothingSpeed = 10.0f;
+    PreviousDirection = 0.0f;
+    DirectionSmoothingTimer = 0.0f;
+
+    // Initialize movement state
+    CurrentMovementState = FAnim_MovementState();
 }
 
 void UAnim_CharacterMovementController::BeginPlay()
 {
     Super::BeginPlay();
     
-    CacheComponents();
-    
-    if (OwnerCharacter)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Anim_CharacterMovementController: Initialized for character %s"), *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Anim_CharacterMovementController: Failed to find owner character"));
-    }
+    CacheReferences();
 }
 
 void UAnim_CharacterMovementController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Actualizar timer de mudança de estado
-    StateChangeTimer += DeltaTime;
-    
-    // Actualizar estado de movimento
-    UpdateMovementState();
+
+    if (OwnerCharacter && MovementComponent)
+    {
+        UpdateMovementState();
+        UpdateAnimationBlueprint();
+    }
 }
 
-void UAnim_CharacterMovementController::CacheComponents()
+void UAnim_CharacterMovementController::CacheReferences()
 {
     OwnerCharacter = Cast<ACharacter>(GetOwner());
-    
     if (OwnerCharacter)
     {
         MovementComponent = OwnerCharacter->GetCharacterMovement();
-        MeshComponent = OwnerCharacter->GetMesh();
         
-        if (MeshComponent)
+        USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+        if (MeshComp)
         {
-            AnimInstance = MeshComponent->GetAnimInstance();
+            AnimInstance = MeshComp->GetAnimInstance();
         }
     }
 }
@@ -85,164 +62,135 @@ void UAnim_CharacterMovementController::UpdateMovementState()
     {
         return;
     }
-    
-    // Calcular novo estado baseado nas condições actuais
-    EAnim_MovementState NewState = CalculateMovementState();
-    
-    // Só mudar se passou tempo suficiente desde a última mudança
-    if (NewState != CurrentMovementState && StateChangeTimer >= StateChangeDelay)
-    {
-        PreviousMovementState = CurrentMovementState;
-        CurrentMovementState = NewState;
-        StateChangeTimer = 0.0f;
-        
-        OnMovementStateChanged(NewState);
-    }
-}
 
-UAnim_CharacterMovementController::EAnim_MovementState UAnim_CharacterMovementController::CalculateMovementState()
-{
-    if (!MovementComponent)
+    // Update speed
+    FVector Velocity = MovementComponent->Velocity;
+    CurrentMovementState.Speed = Velocity.Size2D();
+
+    // Update direction (relative to character forward)
+    if (CurrentMovementState.Speed > 1.0f)
     {
-        return EAnim_MovementState::Idle;
-    }
-    
-    // Verificar se está no ar
-    if (MovementComponent->IsFalling())
-    {
-        // Distinguir entre jump e fall baseado na velocidade vertical
-        if (MovementComponent->Velocity.Z > 0.0f)
-        {
-            return EAnim_MovementState::Jumping;
-        }
-        else
-        {
-            return EAnim_MovementState::Falling;
-        }
-    }
-    
-    // Verificar se está agachado
-    bool bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Calcular velocidade horizontal
-    FVector HorizontalVelocity = MovementComponent->Velocity;
-    HorizontalVelocity.Z = 0.0f;
-    float Speed = HorizontalVelocity.Size();
-    
-    // Determinar estado baseado na velocidade e postura
-    if (Speed < WalkSpeedThreshold)
-    {
-        return bIsCrouching ? EAnim_MovementState::Crouching : EAnim_MovementState::Idle;
-    }
-    else if (Speed < RunSpeedThreshold)
-    {
-        return bIsCrouching ? EAnim_MovementState::CrouchWalk : EAnim_MovementState::Walking;
+        FVector Forward = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityNormalized = Velocity.GetSafeNormal2D();
+        
+        float DotProduct = FVector::DotProduct(Forward, VelocityNormalized);
+        float CrossProduct = FVector::CrossProduct(Forward, VelocityNormalized).Z;
+        
+        float TargetDirection = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
+        
+        // Smooth direction changes
+        CurrentMovementState.Direction = FMath::FInterpTo(
+            PreviousDirection, 
+            TargetDirection, 
+            GetWorld()->GetDeltaSeconds(), 
+            DirectionSmoothingSpeed
+        );
+        
+        PreviousDirection = CurrentMovementState.Direction;
     }
     else
     {
-        // Não pode correr agachado
-        return bIsCrouching ? EAnim_MovementState::CrouchWalk : EAnim_MovementState::Running;
+        CurrentMovementState.Direction = 0.0f;
+        PreviousDirection = 0.0f;
+    }
+
+    // Update air state
+    CurrentMovementState.bIsInAir = MovementComponent->IsFalling();
+
+    // Update crouch state
+    CurrentMovementState.bIsCrouching = MovementComponent->IsCrouching();
+
+    // Update movement mode
+    CurrentMovementState.MovementMode = DetermineMovementMode();
+}
+
+EAnim_MovementMode UAnim_CharacterMovementController::DetermineMovementMode()
+{
+    if (CurrentMovementState.bIsInAir)
+    {
+        return EAnim_MovementMode::Jumping;
+    }
+    
+    if (CurrentMovementState.bIsCrouching)
+    {
+        return CurrentMovementState.Speed > 1.0f ? EAnim_MovementMode::CrouchWalking : EAnim_MovementMode::CrouchIdle;
+    }
+
+    if (CurrentMovementState.Speed < 1.0f)
+    {
+        return EAnim_MovementMode::Idle;
+    }
+    else if (CurrentMovementState.Speed < WalkSpeedThreshold)
+    {
+        return EAnim_MovementMode::Walking;
+    }
+    else if (CurrentMovementState.Speed < RunSpeedThreshold)
+    {
+        return EAnim_MovementMode::Running;
+    }
+    else
+    {
+        return EAnim_MovementMode::Sprinting;
     }
 }
 
-void UAnim_CharacterMovementController::OnMovementStateChanged(EAnim_MovementState NewState)
-{
-    UE_LOG(LogTemp, Log, TEXT("Movement state changed to: %d"), (int32)NewState);
-    
-    // Aqui seria onde activaríamos as animações específicas
-    // Por agora apenas fazemos log para debug
-    UpdateAnimationState();
-}
-
-void UAnim_CharacterMovementController::UpdateAnimationState()
+void UAnim_CharacterMovementController::UpdateAnimationBlueprint()
 {
     if (!AnimInstance)
     {
         return;
     }
+
+    // Set animation blueprint variables (these would be consumed by the AnimBP)
+    // In a real implementation, these would be exposed as animation blueprint variables
     
-    // Esta função seria expandida para aplicar as animações correctas
-    // baseadas no CurrentMovementState
-    
-    switch (CurrentMovementState)
+    // For now, we'll use the engine's built-in logging to show the system is working
+    if (GEngine && GetWorld()->GetTimeSeconds() - DirectionSmoothingTimer > 1.0f)
     {
-        case EAnim_MovementState::Idle:
-            // Aplicar animação idle
-            break;
-            
-        case EAnim_MovementState::Walking:
-            // Aplicar animação walk
-            break;
-            
-        case EAnim_MovementState::Running:
-            // Aplicar animação run
-            break;
-            
-        case EAnim_MovementState::Jumping:
-            // Trigger jump montage
-            PlayJumpAnimation();
-            break;
-            
-        case EAnim_MovementState::Falling:
-            // Aplicar animação falling
-            break;
-            
-        case EAnim_MovementState::Crouching:
-            // Aplicar animação crouch idle
-            break;
-            
-        case EAnim_MovementState::CrouchWalk:
-            // Aplicar animação crouch walk
-            break;
+        DirectionSmoothingTimer = GetWorld()->GetTimeSeconds();
+        
+        FString ModeString = "";
+        switch (CurrentMovementState.MovementMode)
+        {
+            case EAnim_MovementMode::Idle: ModeString = "Idle"; break;
+            case EAnim_MovementMode::Walking: ModeString = "Walking"; break;
+            case EAnim_MovementMode::Running: ModeString = "Running"; break;
+            case EAnim_MovementMode::Sprinting: ModeString = "Sprinting"; break;
+            case EAnim_MovementMode::Jumping: ModeString = "Jumping"; break;
+            case EAnim_MovementMode::CrouchIdle: ModeString = "CrouchIdle"; break;
+            case EAnim_MovementMode::CrouchWalking: ModeString = "CrouchWalking"; break;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Animation State - Mode: %s, Speed: %.1f, Direction: %.1f"), 
+               *ModeString, CurrentMovementState.Speed, CurrentMovementState.Direction);
     }
 }
 
 void UAnim_CharacterMovementController::PlayJumpAnimation()
 {
-    if (JumpMontage && AnimInstance)
+    if (AnimInstance && JumpMontage)
     {
-        AnimInstance->Montage_Play(JumpMontage);
-        UE_LOG(LogTemp, Log, TEXT("Playing jump animation"));
+        AnimInstance->Montage_Play(JumpMontage, 1.0f);
+        UE_LOG(LogTemp, Log, TEXT("Playing jump animation montage"));
     }
 }
 
-void UAnim_CharacterMovementController::SetCrouchState(bool bIsCrouching)
+EAnim_MovementMode UAnim_CharacterMovementController::GetCurrentMovementMode() const
 {
-    if (OwnerCharacter)
-    {
-        if (bIsCrouching)
-        {
-            OwnerCharacter->Crouch();
-        }
-        else
-        {
-            OwnerCharacter->UnCrouch();
-        }
-    }
+    return CurrentMovementState.MovementMode;
 }
 
-float UAnim_CharacterMovementController::GetCurrentSpeed() const
+float UAnim_CharacterMovementController::GetMovementSpeed() const
 {
-    if (MovementComponent)
-    {
-        FVector HorizontalVelocity = MovementComponent->Velocity;
-        HorizontalVelocity.Z = 0.0f;
-        return HorizontalVelocity.Size();
-    }
-    return 0.0f;
+    return CurrentMovementState.Speed;
 }
 
-bool UAnim_CharacterMovementController::IsInAir() const
+float UAnim_CharacterMovementController::GetMovementDirection() const
 {
-    return MovementComponent ? MovementComponent->IsFalling() : false;
+    return CurrentMovementState.Direction;
 }
 
-bool UAnim_CharacterMovementController::IsCrouching() const
+bool UAnim_CharacterMovementController::IsMoving() const
 {
-    return MovementComponent ? MovementComponent->IsCrouching() : false;
-}
-
-FVector UAnim_CharacterMovementController::GetVelocity() const
-{
-    return MovementComponent ? MovementComponent->Velocity : FVector::ZeroVector;
+    return CurrentMovementState.Speed > 1.0f;
 }

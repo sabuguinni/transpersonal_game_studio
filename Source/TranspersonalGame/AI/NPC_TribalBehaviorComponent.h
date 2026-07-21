@@ -2,21 +2,58 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
 #include "NPC_TribalBehaviorComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class ENPC_TribalState : uint8
+enum class ENPC_TribalRole : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Patrolling  UMETA(DisplayName = "Patrolling"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Fleeing     UMETA(DisplayName = "Fleeing"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Socializing UMETA(DisplayName = "Socializing"),
-    Sleeping    UMETA(DisplayName = "Sleeping")
+    CampGuard       UMETA(DisplayName = "Camp Guard"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Crafter         UMETA(DisplayName = "Crafter"),
+    Elder           UMETA(DisplayName = "Elder"),
+    Child           UMETA(DisplayName = "Child")
+};
+
+UENUM(BlueprintType)
+enum class ENPC_DailyActivity : uint8
+{
+    Sleeping        UMETA(DisplayName = "Sleeping"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Eating          UMETA(DisplayName = "Eating"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Fleeing         UMETA(DisplayName = "Fleeing")
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_DailySchedule
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    float StartHour;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    float EndHour;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    ENPC_DailyActivity Activity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    FVector TargetLocation;
+
+    FNPC_DailySchedule()
+    {
+        StartHour = 8.0f;
+        EndHour = 10.0f;
+        Activity = ENPC_DailyActivity::Resting;
+        TargetLocation = FVector::ZeroVector;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -24,56 +61,24 @@ struct FNPC_TribalMemory
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    FVector LastKnownPlayerLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    AActor* RememberedActor;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    float TimeSincePlayerSeen;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    FVector LastSeenLocation;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    TArray<FVector> DangerousLocations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float LastSeenTime;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    TArray<FVector> SafeLocations;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    float LastMealTime;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    bool bHasSeenDinosaur;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    bool bIsThreat;
 
     FNPC_TribalMemory()
     {
-        LastKnownPlayerLocation = FVector::ZeroVector;
-        TimeSincePlayerSeen = 999.0f;
-        LastMealTime = 0.0f;
-        bHasSeenDinosaur = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FNPC_TribalPersonality
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Personality")
-    float Courage; // 0.0 = coward, 1.0 = fearless
-
-    UPROPERTY(BlueprintReadWrite, Category = "Personality")
-    float Curiosity; // 0.0 = cautious, 1.0 = explorer
-
-    UPROPERTY(BlueprintReadWrite, Category = "Personality")
-    float Sociability; // 0.0 = loner, 1.0 = social
-
-    UPROPERTY(BlueprintReadWrite, Category = "Personality")
-    float Aggression; // 0.0 = peaceful, 1.0 = hostile
-
-    FNPC_TribalPersonality()
-    {
-        Courage = 0.5f;
-        Curiosity = 0.5f;
-        Sociability = 0.5f;
-        Aggression = 0.3f;
+        RememberedActor = nullptr;
+        LastSeenLocation = FVector::ZeroVector;
+        LastSeenTime = 0.0f;
+        bIsThreat = false;
     }
 };
 
@@ -91,79 +96,76 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Estado actual do NPC
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    ENPC_TribalState CurrentState;
+    // Tribal role and identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    ENPC_TribalRole TribalRole;
 
-    // Personalidade do NPC
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    FNPC_TribalPersonality Personality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    FString NPCName;
 
-    // Memória do NPC
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    FNPC_TribalMemory Memory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    int32 Age;
 
-    // Configurações de comportamento
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    float DetectionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Identity")
+    float ExperienceLevel;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    float FleeRadius;
+    // Daily schedule system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Daily Routine")
+    TArray<FNPC_DailySchedule> DailySchedule;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    float PatrolRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routine")
+    ENPC_DailyActivity CurrentActivity;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    float MovementSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routine")
+    float CurrentGameHour;
 
-    // Pontos de patrulha
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    TArray<FVector> PatrolPoints;
+    // Memory and awareness system
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TArray<FNPC_TribalMemory> MemoryBank;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    int32 CurrentPatrolIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDuration;
 
-    // Funções de comportamento
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetState(ENPC_TribalState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float SightRange;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdateMemory(const FVector& PlayerLocation, bool bPlayerVisible);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float HearingRange;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void AddDangerousLocation(const FVector& Location);
+    // Social relationships
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    TMap<AActor*, float> RelationshipValues;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void AddSafeLocation(const FVector& Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float TrustLevel;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    FVector GetNextPatrolPoint();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    float FearLevel;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldFlee() const;
+    // Behavior functions
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void UpdateCurrentActivity();
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldApproachPlayer() const;
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void AddMemory(AActor* Actor, FVector Location, bool bThreat);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    FVector GetFleeDirection() const;
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void UpdateRelationship(AActor* OtherActor, float DeltaValue);
 
-protected:
-    // Funções internas
-    void UpdateBehavior(float DeltaTime);
-    void HandleIdleState(float DeltaTime);
-    void HandlePatrollingState(float DeltaTime);
-    void HandleFleeingState(float DeltaTime);
-    void HandleGatheringState(float DeltaTime);
-    
-    APawn* GetOwnerPawn() const;
-    APawn* FindNearestPlayer() const;
-    bool IsPlayerVisible(APawn* Player) const;
-    float GetDistanceToPlayer() const;
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    bool ShouldFlee();
+
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    FVector GetCurrentTargetLocation();
+
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void ReactToPlayer(AActor* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Tribal Behavior")
+    void ReactToDinosaur(AActor* Dinosaur);
 
 private:
-    float StateTimer;
-    float LastBehaviorUpdate;
+    void CleanupOldMemories();
+    void PerformRoleSpecificBehavior();
+    void UpdateEmotionalState();
 };
-
-#include "NPC_TribalBehaviorComponent.generated.h"

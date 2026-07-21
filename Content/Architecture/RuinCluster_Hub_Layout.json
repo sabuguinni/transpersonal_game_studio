@@ -1,0 +1,103 @@
+{
+  "ruin_cluster": {
+    "name": "Hub_Cretaceous_Ruin_Cluster",
+    "description": "Ancient stone ruin cluster at the main hub clearing. Weathered limestone pillars and fallen stone blocks overgrown with prehistoric ferns and cycads. Serves as a landmark and environmental storytelling element.",
+    "center_coords": { "x": 2100, "y": 2400, "z": 100 },
+    "meshy_asset": {
+      "task_id": "019f25b3-fc04-75a6-86b6-e5157c04a2c9",
+      "glb_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/meshes/1783044022806_Ancient_Cretaceous_stone_ruin_pillar__we.glb",
+      "ue5_import_path": "/Game/Assets/Architecture/RuinPillar_Cretaceous",
+      "status": "generated_pending_import"
+    },
+    "actors": [
+      {
+        "label": "Ruin_Hub_Pillar_001",
+        "type": "StaticMeshActor",
+        "mesh": "Cylinder (placeholder → RuinPillar_Cretaceous)",
+        "location": { "x": 2050, "y": 2350, "z": 100 },
+        "scale": { "x": 0.3, "y": 0.3, "z": 3.0 },
+        "notes": "Primary landmark pillar, tallest in cluster"
+      },
+      {
+        "label": "Ruin_Hub_Pillar_002",
+        "type": "StaticMeshActor",
+        "mesh": "Cylinder (placeholder → RuinPillar_Cretaceous)",
+        "location": { "x": 2150, "y": 2450, "z": 100 },
+        "scale": { "x": 0.3, "y": 0.3, "z": 3.0 },
+        "notes": "Secondary pillar, slightly offset for natural grouping"
+      },
+      {
+        "label": "Ruin_Hub_Pillar_003",
+        "type": "StaticMeshActor",
+        "mesh": "Cylinder (placeholder → RuinPillar_Cretaceous)",
+        "location": { "x": 2200, "y": 2300, "z": 100 },
+        "scale": { "x": 0.3, "y": 0.3, "z": 3.0 },
+        "notes": "Tertiary pillar, partially collapsed (use broken variant when available)"
+      },
+      {
+        "label": "Ruin_Hub_Pillar_004",
+        "type": "StaticMeshActor",
+        "mesh": "Cylinder (placeholder → RuinPillar_Cretaceous)",
+        "location": { "x": 1980, "y": 2420, "z": 100 },
+        "scale": { "x": 0.3, "y": 0.3, "z": 3.0 },
+        "notes": "Outer pillar, marks western edge of ruin cluster"
+      },
+      {
+        "label": "Ruin_Hub_FallenBlock_001",
+        "type": "StaticMeshActor",
+        "mesh": "Cube (placeholder → FallenStoneBlock)",
+        "location": { "x": 2080, "y": 2480, "z": 100 },
+        "rotation": { "pitch": 0, "yaw": 45, "roll": 15 },
+        "scale": { "x": 1.5, "y": 0.8, "z": 0.5 },
+        "notes": "Fallen stone block, tilted to suggest collapse over centuries"
+      },
+      {
+        "label": "Ruin_Hub_FallenBlock_002",
+        "type": "StaticMeshActor",
+        "mesh": "Cube (placeholder → FallenStoneBlock)",
+        "location": { "x": 2170, "y": 2370, "z": 100 },
+        "rotation": { "pitch": 0, "yaw": 45, "roll": 15 },
+        "scale": { "x": 1.5, "y": 0.8, "z": 0.5 },
+        "notes": "Second fallen block, creates natural cover geometry"
+      }
+    ],
+    "atmospheric_lights": [
+      {
+        "label": "RuinLight_Hub_001",
+        "type": "PointLight",
+        "location": { "x": 2060, "y": 2360, "z": 200 },
+        "color": { "r": 1.0, "g": 0.75, "b": 0.4 },
+        "intensity": 400.0,
+        "attenuation_radius": 3000.0,
+        "notes": "Warm amber shaft of light filtering through canopy near pillar 1"
+      },
+      {
+        "label": "RuinLight_Hub_002",
+        "type": "PointLight",
+        "location": { "x": 2160, "y": 2440, "z": 200 },
+        "color": { "r": 1.0, "g": 0.75, "b": 0.4 },
+        "intensity": 300.0,
+        "attenuation_radius": 2500.0,
+        "notes": "Softer fill light near pillar 2"
+      },
+      {
+        "label": "RuinLight_Hub_003",
+        "type": "PointLight",
+        "location": { "x": 2190, "y": 2310, "z": 180 },
+        "color": { "r": 1.0, "g": 0.75, "b": 0.4 },
+        "intensity": 350.0,
+        "attenuation_radius": 2800.0,
+        "notes": "Accent light for pillar 3 silhouette"
+      }
+    ],
+    "narrative_context": {
+      "lore": "These stone pillars predate human memory in the game world. Their origin is unknown — they may be natural formations shaped by ancient geological processes, or evidence of a civilization lost to deep time. The player can examine them for crafting material (stone chips) or use them as shelter from predators.",
+      "gameplay_uses": [
+        "Landmark for navigation — visible from distance",
+        "Shelter geometry — player can hide behind fallen blocks from dinosaur AI",
+        "Crafting resource — stone chips from fallen blocks",
+        "Environmental storytelling — moss growth patterns indicate age and moisture"
+      ]
+    }
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "dialogue_tree_id": "DIALOGUE_ELDER_NPC_001",
+  "character_id": "Elder_NPC_QuestGiver_001",
+  "character_name": "Elder",
+  "world_actor_label": "Elder_NPC_QuestGiver_001",
+  "world_location": { "x": 2100, "y": 2300, "z": 120 },
+  "trigger_zones": [
+    "DialogZone_Elder_Greeting_001",
+    "DialogZone_Elder_MidQuest_001",
+    "DialogZone_Elder_Lore_001",
+    "DialogZone_Elder_SurvivalTip_001",
+    "DialogZone_Elder_Complete_001"
+  ],
+  "voice_lines": {
+    "quest_briefing": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131026096_Elder_NPC_QuestBriefing_Herd.mp3",
+      "duration_estimate": "~16s",
+      "text": "The Triceratops herd moves at dawn. Stay downwind, move slowly, and count their numbers. We need to know if the young ones survived the last storm."
+    },
+    "quest_midcheck": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131150647_Elder_NPC_MidQuest_CheckIn.mp3",
+      "duration_estimate": "~19s",
+      "text": "The herd split three days ago. Half went east, toward the river bend — the other half stayed near the old salt lick. That does not happen unless something frightened them. Something big. I need you to find out what drove them apart before the rains come and wash away every track."
+    },
+    "survival_tip_night": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131163483_Elder_NPC_SurvivalTip_Night.mp3",
+      "duration_estimate": "~25s",
+      "text": "Do not follow the river at night. I know you think you are quiet enough — you are not. The long-necks hear things we cannot. They feel the ground shake when something heavy moves nearby. If you must cross after dark, wade through the shallows, not along the bank. And keep your fire small. A big fire tells every predator within two hills exactly where you are sleeping."
+    },
+    "lore_trex_memory": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131169023_Elder_NPC_Lore_TRex_Memory.mp3",
+      "duration_estimate": "~29s",
+      "text": "I remember the first time I saw the great one — the one with the scarred flank. I was young, barely past my first winter hunt. It stood at the edge of the treeline and looked at me. Not like prey. Like it was deciding something. I did not move. It did not move. Then it turned and walked back into the forest. My elder told me later that I had passed a test. I still do not know if that is true. But I have never forgotten those eyes."
+    },
+    "quest_completion": {
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783131052563_Elder_NPC_QuestComplete_Herd.mp3",
+      "duration_estimate": "~12s",
+      "text": "You have returned safely. Tell me what you saw. How many calves? Were the old bulls still leading the herd? This matters more than you know."
+    }
+  },
+  "dialogue_nodes": [
+    {
+      "node_id": "NODE_GREETING",
+      "trigger_zone": "DialogZone_Elder_Greeting_001",
+      "condition": "first_approach OR quest_not_started",
+      "voice_key": "quest_briefing",
+      "player_responses": [
+        {
+          "response_id": "RESP_ACCEPT",
+          "text": "[Accept] I will find the herd.",
+          "next_node": "NODE_QUEST_ACTIVE",
+          "sets_flag": "QUEST_HERD_OBSERVATION_001_ACCEPTED"
+        },
+        {
+          "response_id": "RESP_ASK_DANGER",
+          "text": "[Ask] What should I watch out for?",
+          "next_node": "NODE_SURVIVAL_TIP"
+        },
+        {
+          "response_id": "RESP_DECLINE",
+          "text": "[Decline] Not now.",
+          "next_node": null,
+          "closes_dialogue": true
+        }
+      ]
+    },
+    {
+      "node_id": "NODE_SURVIVAL_TIP",
+      "trigger_zone": "DialogZone_Elder_SurvivalTip_001",
+      "condition": "player_asked_danger",
+      "voice_key": "survival_tip_night",
+      "player_responses": [
+        {
+          "response_id": "RESP_UNDERSTOOD",
+          "text": "[Understood] I will be careful.",
+          "next_node": "NODE_QUEST_ACTIVE",
+          "sets_flag": "QUEST_HERD_OBSERVATION_001_ACCEPTED"
+        }
+      ]
+    },
+    {
+      "node_id": "NODE_QUEST_ACTIVE",
+      "trigger_zone": "DialogZone_Elder_MidQuest_001",
+      "condition": "quest_accepted AND objective_1_complete AND NOT objective_2_complete",
+      "voice_key": "quest_midcheck",
+      "player_responses": [
+        {
+          "response_id": "RESP_EAST",
+          "text": "[Report] I will check the river bend first.",
+          "next_node": null,
+          "sets_waypoint": "NarrWaypoint_RiverBend_East_001",
+          "closes_dialogue": true
+        },
+        {
+          "response_id": "RESP_SALT",
+          "text": "[Report] I will check the salt lick first.",
+          "next_node": null,
+          "sets_waypoint": "NarrWaypoint_SaltLick_001",
+          "closes_dialogue": true
+        },
+        {
+          "response_id": "RESP_LORE",
+          "text": "[Ask] Have you seen this before?",
+          "next_node": "NODE_LORE_TREX"
+        }
+      ]
+    },
+    {
+      "node_id": "NODE_LORE_TREX",
+      "trigger_zone": "DialogZone_Elder_Lore_001",
+      "condition": "player_asked_lore",
+      "voice_key": "lore_trex_memory",
+      "player_responses": [
+        {
+          "response_id": "RESP_UNDERSTOOD_LORE",
+          "text": "[Nod] I understand.",
+          "next_node": null,
+          "closes_dialogue": true
+        }
+      ]
+    },
+    {
+      "node_id": "NODE_COMPLETION",
+      "trigger_zone": "DialogZone_Elder_Complete_001",
+      "condition": "all_objectives_complete",
+      "voice_key": "quest_completion",
+      "player_responses": [
+        {
+          "response_id": "RESP_REPORT_CALVES",
+          "text": "[Report] Three calves. The old bulls are gone.",
+          "next_node": null,
+          "sets_flag": "QUEST_HERD_OBSERVATION_001_COMPLETE_A",
+          "triggers_reward": "REWARD_HERD_OBSERVATION_FULL",
+          "closes_dialogue": true
+        },
+        {
+          "response_id": "RESP_REPORT_SPLIT",
+          "text": "[Report] Something large drove them apart. Tracks near the ridge.",
+          "next_node": null,
+          "sets_flag": "QUEST_HERD_OBSERVATION_001_COMPLETE_B",
+          "triggers_reward": "REWARD_HERD_OBSERVATION_BONUS",
+          "closes_dialogue": true
+        }
+      ]
+    }
+  ],
+  "lore_item_descriptions": {
+    "flint_rock": {
+      "world_marker": "LoreMarker_Flint_001",
+      "item_name": "Flint",
+      "short_description": "Sharp-edged stone. Strikes sparks. Cuts hide.",
+      "elder_comment": "The grey ones from the riverbed are best. The brown ones crumble.",
+      "crafting_uses": ["Stone Knife", "Fire Starter", "Spear Tip"]
+    },
+    "broad_leaf": {
+      "world_marker": "LoreMarker_Leaf_001",
+      "item_name": "Broad Leaf",
+      "short_description": "Wide, waxy leaf. Holds water. Wraps wounds.",
+      "elder_comment": "Do not eat the ones with red veins. They will make you slow.",
+      "crafting_uses": ["Water Container", "Wound Wrap", "Insulation Layer"]
+    },
+    "dry_wood": {
+      "world_marker": "LoreMarker_Wood_001",
+      "item_name": "Dry Branch",
+      "short_description": "Seasoned wood. Burns long. Holds weight.",
+      "elder_comment": "Snap it — if it cracks clean, it is dry enough. If it bends, leave it.",
+      "crafting_uses": ["Campfire", "Spear Shaft", "Shelter Frame"]
+    }
+  },
+  "narrative_context": {
+    "quest_link": "QUEST_HERD_OBSERVATION_001",
+    "quest_json": "Content/Quests/QuestData_HerdObservation.json",
+    "story_beat": "ACT_1_SURVIVAL_FOUNDATION",
+    "emotional_arc": "Stranger earns trust through observation and patience — not combat.",
+    "character_notes": {
+      "elder": "Pragmatic, economical with words. Respects competence over bravado. Knows the land better than anyone alive. Does not explain things twice.",
+      "player_role": "Newcomer proving worth through reliable scouting. No special powers — just patience and attention."
+    },
+    "herd_split_mystery": {
+      "cause": "A large predator (TRex_Savana_001 or similar) moved through the valley three days ago, leaving tracks near the ridge north of the salt lick.",
+      "resolution_path_A": "Player finds TRex tracks → reports to Elder → Elder identifies the predator from track description → warns tribe to avoid north ridge.",
+      "resolution_path_B": "Player finds herd at river bend → counts calves → discovers two calves missing → Elder concludes predator took them."
+    }
+  },
+  "agent_handoff": {
+    "audio_agent_16": {
+      "action": "Wire all 5 voice_line URLs into MetaSounds dialogue system. Trigger by zone overlap with player pawn.",
+      "priority_line": "quest_midcheck — longest, most plot-critical (~19s)"
+    },
+    "quest_agent_14": {
+      "action": "Link dialogue node flags (QUEST_HERD_OBSERVATION_001_ACCEPTED, _COMPLETE_A, _COMPLETE_B) to quest objective state machine.",
+      "waypoints": ["NarrWaypoint_RiverBend_East_001", "NarrWaypoint_SaltLick_001"]
+    },
+    "character_agent_09": {
+      "action": "Replace Elder_NPC_QuestGiver_001 PointLight placeholder with MetaHuman. Position at (2100, 2300, 120). Idle animation: seated, tending small fire."
+    }
+  }
+}

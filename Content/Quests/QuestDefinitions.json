@@ -1,0 +1,248 @@
+{
+  "quest_database_version": "1.0.0",
+  "game": "Transpersonal Survival — Cretaceous",
+  "quests": [
+    {
+      "quest_id": "QUEST_001",
+      "title": "Silent Observer",
+      "type": "observation",
+      "difficulty": "tutorial",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "trigger_actor": "QuestTrigger_SilentObserver_001",
+      "description": "Approach the Triceratops herd within 500 units without running or making sudden movements. Observe their grazing patterns for 30 seconds.",
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "type": "approach_without_running",
+          "target_actor_tag": "Herd_Triceratops",
+          "required_distance_units": 500,
+          "player_speed_constraint": "walk_only",
+          "description": "Approach the Triceratops herd while walking"
+        },
+        {
+          "id": "OBJ_001_B",
+          "type": "observe_duration",
+          "target_actor_tag": "Herd_Triceratops",
+          "duration_seconds": 30,
+          "max_player_speed": 200,
+          "description": "Observe the herd for 30 seconds without disturbing them"
+        }
+      ],
+      "rewards": {
+        "experience": 100,
+        "knowledge_unlock": "Triceratops Behavior",
+        "crafting_recipe_unlock": "Camouflage_Mud_Pack"
+      },
+      "failure_conditions": [
+        "player_runs_within_800u_of_herd",
+        "herd_flee_behavior_triggered",
+        "player_attacks_any_herd_member"
+      ],
+      "dialogue": {
+        "intro_audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783080668646_Elder_QuestGiver.mp3",
+        "completion_audio": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783080695027_Elder_QuestGiver.mp3",
+        "intro_text": "Listen carefully. The great horned ones graze near the water. Do not startle them. Move slow, stay low, and watch how they move together. If you learn their patterns, you will know when the predators come. This is your first lesson in survival.",
+        "completion_text": "You did it. You stood among the giants and they did not flee. Few survive long enough to learn this. The herd trusts stillness. Remember that when the ground shakes and the horns lower — because the next lesson will not be so peaceful."
+      },
+      "world_markers": {
+        "trigger_volume": "QuestTrigger_SilentObserver_001",
+        "herd_actors": ["Trike_Savana_001", "Trike_Savana_002", "Trike_Savana_003", "Trike_Savana_004", "Trike_Savana_005", "Trike_Savana_006"]
+      }
+    },
+    {
+      "quest_id": "QUEST_002",
+      "title": "The Long Neck Trail",
+      "type": "tracking",
+      "difficulty": "easy",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "prerequisite_quest": "QUEST_001",
+      "description": "Follow the Brachiosaurus herd as they migrate north. Discover what lies beyond the tree line.",
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "type": "reach_waypoint",
+          "target_actor": "QuestMarker_LongNeckTrail_001",
+          "description": "Follow the Brachiosaurus herd north to the waypoint"
+        },
+        {
+          "id": "OBJ_002_B",
+          "type": "observe_duration",
+          "target_actor_tag": "Herd_Brachiosaurus",
+          "duration_seconds": 20,
+          "description": "Observe the Brachiosaurus browsing behavior for 20 seconds"
+        },
+        {
+          "id": "OBJ_002_C",
+          "type": "discover_area",
+          "area_tag": "NorthernForest",
+          "description": "Explore the northern forest biome revealed by following the herd"
+        }
+      ],
+      "rewards": {
+        "experience": 200,
+        "knowledge_unlock": "Brachiosaurus Migration Patterns",
+        "map_area_unlock": "Northern Forest"
+      },
+      "failure_conditions": [
+        "player_attacks_any_herd_member",
+        "player_leaves_tracking_zone_for_60s"
+      ],
+      "world_markers": {
+        "waypoint_1": "QuestMarker_LongNeckTrail_001",
+        "herd_actors": ["Brach_Floresta_001", "Brach_Floresta_002", "Brach_Floresta_003"]
+      }
+    },
+    {
+      "quest_id": "QUEST_003",
+      "title": "Stampede Survival",
+      "type": "survival_event",
+      "difficulty": "medium",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "prerequisite_quest": "QUEST_001",
+      "description": "A predator has entered the grazing grounds. The Triceratops herd is panicking. Survive the stampede and drive away the threat.",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "type": "survive_duration",
+          "duration_seconds": 60,
+          "hazard_tag": "Stampede_Active",
+          "description": "Survive 60 seconds of stampede chaos without being trampled"
+        },
+        {
+          "id": "OBJ_003_B",
+          "type": "reach_safe_zone",
+          "target_actor": "QuestTrigger_StampedeZone_001",
+          "description": "Reach the high ground safe zone east of the herd"
+        },
+        {
+          "id": "OBJ_003_C",
+          "type": "drive_away_predator",
+          "target_actor_tag": "Predator_Raptor",
+          "method": "fire_or_noise",
+          "description": "Drive the raptor away using fire or loud noise"
+        }
+      ],
+      "rewards": {
+        "experience": 350,
+        "knowledge_unlock": "Stampede Behavior",
+        "crafting_recipe_unlock": "Fire_Torch"
+      },
+      "failure_conditions": [
+        "player_health_reaches_zero",
+        "player_trampled_3_times"
+      ],
+      "world_markers": {
+        "trigger_volume": "QuestTrigger_StampedeZone_001",
+        "safe_zone": "QuestMarker_StampedeSafeZone_001"
+      }
+    },
+    {
+      "quest_id": "QUEST_004",
+      "title": "First Tools",
+      "type": "crafting",
+      "difficulty": "tutorial",
+      "giver_actor": "NPC_Elder_QuestGiver_001",
+      "description": "Gather rocks and sticks from the forest floor to craft your first stone axe. You cannot survive empty-handed.",
+      "objectives": [
+        {
+          "id": "OBJ_004_A",
+          "type": "gather_resource",
+          "resource_tag": "Resource_Rock",
+          "required_count": 2,
+          "area_actor": "QuestMarker_FirstHunt_001",
+          "description": "Pick up 2 rocks from the resource zone"
+        },
+        {
+          "id": "OBJ_004_B",
+          "type": "gather_resource",
+          "resource_tag": "Resource_Stick",
+          "required_count": 1,
+          "area_actor": "QuestMarker_FirstHunt_001",
+          "description": "Pick up 1 stick from the resource zone"
+        },
+        {
+          "id": "OBJ_004_C",
+          "type": "craft_item",
+          "recipe_id": "RECIPE_STONE_AXE",
+          "description": "Craft a Stone Axe using the gathered materials"
+        }
+      ],
+      "rewards": {
+        "experience": 150,
+        "item_grant": "Stone_Axe",
+        "crafting_recipe_unlock": "Campfire"
+      },
+      "failure_conditions": [],
+      "world_markers": {
+        "resource_zone": "QuestMarker_FirstHunt_001",
+        "resource_actors": [
+          "Resource_Rock_QuestArea_001",
+          "Resource_Rock_QuestArea_002",
+          "Resource_Rock_QuestArea_003",
+          "Resource_Rock_QuestArea_004",
+          "Resource_Rock_QuestArea_005",
+          "Resource_Stick_QuestArea_001",
+          "Resource_Stick_QuestArea_002",
+          "Resource_Stick_QuestArea_003",
+          "Resource_Stick_QuestArea_004"
+        ]
+      }
+    }
+  ],
+  "crafting_recipes": [
+    {
+      "recipe_id": "RECIPE_STONE_AXE",
+      "name": "Stone Axe",
+      "ingredients": [
+        {"resource": "Rock", "count": 2},
+        {"resource": "Stick", "count": 1}
+      ],
+      "output_item": "Stone_Axe",
+      "craft_time_seconds": 5,
+      "description": "A crude but effective cutting tool. Can chop wood and defend against small predators."
+    },
+    {
+      "recipe_id": "RECIPE_CAMPFIRE",
+      "name": "Campfire",
+      "ingredients": [
+        {"resource": "Stick", "count": 3}
+      ],
+      "output_item": "Campfire",
+      "craft_time_seconds": 8,
+      "description": "A small fire that provides warmth, light, and deters small predators at night."
+    },
+    {
+      "recipe_id": "RECIPE_WATER_CONTAINER",
+      "name": "Stone Water Container",
+      "ingredients": [
+        {"resource": "Rock", "count": 1},
+        {"resource": "Leaf", "count": 1}
+      ],
+      "output_item": "Water_Container",
+      "craft_time_seconds": 10,
+      "description": "A hollowed rock lined with leaves. Holds enough water for one day of travel."
+    },
+    {
+      "recipe_id": "RECIPE_CAMOUFLAGE_MUD_PACK",
+      "name": "Camouflage Mud Pack",
+      "ingredients": [
+        {"resource": "Mud", "count": 2},
+        {"resource": "Leaf", "count": 2}
+      ],
+      "output_item": "Camouflage_Mud_Pack",
+      "craft_time_seconds": 6,
+      "description": "Reduces your scent and visual signature. Dinosaurs are less likely to detect you while coated."
+    },
+    {
+      "recipe_id": "RECIPE_FIRE_TORCH",
+      "name": "Fire Torch",
+      "ingredients": [
+        {"resource": "Stick", "count": 1},
+        {"resource": "Dry_Grass", "count": 2}
+      ],
+      "output_item": "Fire_Torch",
+      "craft_time_seconds": 4,
+      "description": "A burning torch. Deters predators and illuminates dark caves. Burns for 5 minutes."
+    }
+  ]
+}

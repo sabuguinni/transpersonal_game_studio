@@ -1,0 +1,254 @@
+{
+  "vfx_system": {
+    "version": "1.0",
+    "agent": "VFX_Agent_17",
+    "cycle": "PROD_CYCLE_AUTO_20260704_004",
+    "game": "Prehistoric Dinosaur Survival",
+    "engine": "Unreal Engine 5 — Niagara VFX System"
+  },
+
+  "niagara_systems": [
+    {
+      "id": "NS_Fire_Campfire",
+      "label": "Campfire Fire & Embers",
+      "category": "ENVIRONMENT",
+      "world_anchor": "VFX_CampfireBase_001",
+      "position": {"x": 2100, "y": 2400, "z": 30},
+      "niagara_path": "/Game/VFX/Niagara/NS_Fire_Campfire",
+      "parameters": {
+        "spawn_rate": 80,
+        "lifetime": {"min": 0.8, "max": 1.6},
+        "velocity": {"min": 60, "max": 120, "direction": "up"},
+        "size": {"min": 8, "max": 20},
+        "color_gradient": ["#FF6600", "#FF3300", "#FFAA00", "#222222"],
+        "ember_spawn_rate": 15,
+        "smoke_spawn_rate": 12,
+        "smoke_rise_speed": 40,
+        "smoke_spread": 80,
+        "lod_distances": [0, 800, 1500, 3000],
+        "lod_quality": ["full", "medium", "low", "off"]
+      },
+      "audio_link": "AudioTrigger_Crafting_001",
+      "trigger": "always_on_when_player_in_camp"
+    },
+    {
+      "id": "NS_Dust_TRexFootstep",
+      "label": "T-Rex Footstep Ground Dust",
+      "category": "DINOSAUR",
+      "world_anchor": "VFX_Dust_TRexStep_001",
+      "position": {"x": 2900, "y": 2600, "z": 30},
+      "niagara_path": "/Game/VFX/Niagara/NS_Dust_TRexFootstep",
+      "parameters": {
+        "spawn_rate": 0,
+        "burst_count": 120,
+        "trigger": "on_footstep_event",
+        "lifetime": {"min": 1.2, "max": 2.5},
+        "velocity": {"min": 80, "max": 200, "direction": "radial_outward"},
+        "size": {"min": 15, "max": 45},
+        "color": "#8B6914",
+        "gravity_scale": 0.3,
+        "drag": 0.8,
+        "screen_shake_radius": 250,
+        "screen_shake_intensity": 0.4,
+        "lod_distances": [0, 600, 1200, 2500],
+        "lod_quality": ["full", "medium", "low", "off"]
+      },
+      "audio_link": "AudioZone_TRexDanger_001",
+      "trigger": "TRex_footstep_bone_notify"
+    },
+    {
+      "id": "NS_Mist_RiverSplash",
+      "label": "River Water Mist & Splash",
+      "category": "ENVIRONMENT",
+      "world_anchor": "VFX_Mist_River_001",
+      "position": {"x": 2100, "y": 3200, "z": 40},
+      "niagara_path": "/Game/VFX/Niagara/NS_Mist_RiverSplash",
+      "parameters": {
+        "spawn_rate": 60,
+        "lifetime": {"min": 1.5, "max": 3.0},
+        "velocity": {"min": 20, "max": 60, "direction": "up_random"},
+        "size": {"min": 5, "max": 18},
+        "color": "#AADDFF",
+        "opacity": {"min": 0.1, "max": 0.4},
+        "translucency": true,
+        "wind_response": 0.6,
+        "lod_distances": [0, 700, 1400, 2800],
+        "lod_quality": ["full", "medium", "low", "off"]
+      },
+      "audio_link": "AudioZone_River_001",
+      "trigger": "always_on_near_river"
+    },
+    {
+      "id": "NS_Spark_StoneKnapping",
+      "label": "Stone Knapping Sparks",
+      "category": "PLAYER_CRAFTING",
+      "world_anchor": "VFX_Spark_Crafting_001",
+      "position": {"x": 2100, "y": 2400, "z": 80},
+      "niagara_path": "/Game/VFX/Niagara/NS_Spark_StoneKnapping",
+      "parameters": {
+        "spawn_rate": 0,
+        "burst_count": 25,
+        "trigger": "on_crafting_strike",
+        "lifetime": {"min": 0.1, "max": 0.4},
+        "velocity": {"min": 100, "max": 300, "direction": "cone_forward"},
+        "size": {"min": 1, "max": 4},
+        "color_gradient": ["#FFFFFF", "#FFFF00", "#FF6600"],
+        "gravity_scale": 1.2,
+        "emissive_intensity": 8.0,
+        "lod_distances": [0, 400, 800, 1500],
+        "lod_quality": ["full", "medium", "off", "off"]
+      },
+      "audio_link": "AudioTrigger_Crafting_001",
+      "trigger": "crafting_animation_notify"
+    },
+    {
+      "id": "NS_Dust_HerdStampede",
+      "label": "Parasaurolophus Herd Stampede Dust",
+      "category": "DINOSAUR",
+      "world_anchor": "VFX_Dust_HerdStampede_001",
+      "position": {"x": 1800, "y": 2900, "z": 30},
+      "niagara_path": "/Game/VFX/Niagara/NS_Dust_HerdStampede",
+      "parameters": {
+        "spawn_rate": 200,
+        "lifetime": {"min": 2.0, "max": 4.0},
+        "velocity": {"min": 150, "max": 400, "direction": "herd_movement_direction"},
+        "size": {"min": 30, "max": 80},
+        "color": "#A08050",
+        "opacity": {"min": 0.3, "max": 0.7},
+        "ribbon_width": 120,
+        "trail_length": 600,
+        "lod_distances": [0, 1000, 2000, 4000],
+        "lod_quality": ["full", "medium", "low", "off"]
+      },
+      "audio_link": "AudioTrigger_ParaHerd_001",
+      "trigger": "herd_stampede_condition_true"
+    },
+    {
+      "id": "NS_Vapor_DinoBreath",
+      "label": "Dinosaur Breath Vapor (Cold Weather)",
+      "category": "DINOSAUR",
+      "world_anchor": "VFX_Vapor_DinoBreath_001",
+      "position": {"x": 2400, "y": 2100, "z": 60},
+      "niagara_path": "/Game/VFX/Niagara/NS_Vapor_DinoBreath",
+      "parameters": {
+        "spawn_rate": 0,
+        "burst_count": 30,
+        "trigger": "on_exhale_animation_notify",
+        "lifetime": {"min": 0.8, "max": 1.8},
+        "velocity": {"min": 30, "max": 80, "direction": "dino_mouth_forward"},
+        "size": {"min": 10, "max": 35},
+        "color": "#DDEEFF",
+        "opacity": {"min": 0.05, "max": 0.25},
+        "temperature_threshold": 10,
+        "active_when": "ambient_temp_below_10C",
+        "lod_distances": [0, 500, 1000, 2000],
+        "lod_quality": ["full", "medium", "low", "off"]
+      },
+      "audio_link": null,
+      "trigger": "dino_exhale_bone_notify"
+    }
+  ],
+
+  "danger_ring_system": {
+    "description": "T-Rex 3-layer visual danger system matching AudioZone_TRexDanger_001",
+    "center": {"x": 2900, "y": 2600},
+    "rings": [
+      {
+        "id": "ring_outer",
+        "radius": 800,
+        "vfx_effect": "subtle_heat_shimmer",
+        "vfx_intensity": 0.1,
+        "color_hint": "yellow_orange",
+        "world_markers": ["VFX_TRexRing_Outer_001_N0", "VFX_TRexRing_Outer_001_N1", "VFX_TRexRing_Outer_001_N2", "VFX_TRexRing_Outer_001_N3"],
+        "player_feedback": "subtle_vignette_0.05"
+      },
+      {
+        "id": "ring_mid",
+        "radius": 500,
+        "vfx_effect": "ground_vibration_particles",
+        "vfx_intensity": 0.35,
+        "color_hint": "orange",
+        "world_markers": ["VFX_TRexRing_Mid_001_N0", "VFX_TRexRing_Mid_001_N1", "VFX_TRexRing_Mid_001_N2", "VFX_TRexRing_Mid_001_N3"],
+        "player_feedback": "vignette_0.2_plus_screen_shake_0.1"
+      },
+      {
+        "id": "ring_critical",
+        "radius": 250,
+        "vfx_effect": "heavy_dust_plus_distortion",
+        "vfx_intensity": 0.8,
+        "color_hint": "red",
+        "world_markers": ["VFX_TRexRing_Critical_001_N0", "VFX_TRexRing_Critical_001_N1", "VFX_TRexRing_Critical_001_N2", "VFX_TRexRing_Critical_001_N3"],
+        "player_feedback": "full_screen_shake_0.4_red_vignette_0.4"
+      }
+    ]
+  },
+
+  "materials": [
+    {
+      "id": "M_VFX_FireEmber",
+      "path": "/Game/VFX/Materials/M_VFX_FireEmber",
+      "blend_mode": "Additive",
+      "emissive": true,
+      "two_sided": true
+    },
+    {
+      "id": "M_VFX_Dust",
+      "path": "/Game/VFX/Materials/M_VFX_Dust",
+      "blend_mode": "Translucent",
+      "emissive": false,
+      "two_sided": true
+    },
+    {
+      "id": "M_VFX_WaterMist",
+      "path": "/Game/VFX/Materials/M_VFX_WaterMist",
+      "blend_mode": "Translucent",
+      "emissive": false,
+      "two_sided": true,
+      "refraction": 0.05
+    },
+    {
+      "id": "M_VFX_Spark",
+      "path": "/Game/VFX/Materials/M_VFX_Spark",
+      "blend_mode": "Additive",
+      "emissive": true,
+      "two_sided": false
+    },
+    {
+      "id": "M_VFX_BreathVapor",
+      "path": "/Game/VFX/Materials/M_VFX_BreathVapor",
+      "blend_mode": "Translucent",
+      "emissive": false,
+      "two_sided": true,
+      "subsurface_scattering": true
+    }
+  ],
+
+  "lod_policy": {
+    "description": "3-level LOD chain for all VFX systems per performance mandate",
+    "levels": [
+      {"level": 0, "label": "full",   "max_particles": "100%", "distance": "0-600u"},
+      {"level": 1, "label": "medium", "max_particles": "50%",  "distance": "600-1200u"},
+      {"level": 2, "label": "low",    "max_particles": "20%",  "distance": "1200-2500u"},
+      {"level": 3, "label": "off",    "max_particles": "0%",   "distance": "2500u+"}
+    ],
+    "budget_per_frame_ms": 2.0,
+    "max_concurrent_systems": 12
+  },
+
+  "world_actors_placed": [
+    "VFX_Fire_Campfire_001",
+    "VFX_Dust_TRexStep_001",
+    "VFX_Mist_River_001",
+    "VFX_Spark_Crafting_001",
+    "VFX_Dust_HerdStampede_001",
+    "VFX_Vapor_DinoBreath_001",
+    "VFX_CampfireBase_001",
+    "VFX_FireLight_001",
+    "VFX_TRexRing_Outer_001_N0-N3",
+    "VFX_TRexRing_Mid_001_N0-N3",
+    "VFX_TRexRing_Critical_001_N0-N3",
+    "VFX_RiverMist_001",
+    "VFX_RiverMist_002",
+    "VFX_RiverMist_003"
+  ]
+}

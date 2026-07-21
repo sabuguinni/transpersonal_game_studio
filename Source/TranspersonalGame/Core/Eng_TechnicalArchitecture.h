@@ -1,258 +1,279 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_TechnicalArchitecture.generated.h"
 
+// Forward declarations
+class UBiomeManager;
+class UCore_PhysicsManager;
+class UArchitectureValidationSuite;
+
 /**
- * Technical Architecture Manager - Engine Architect Agent #2
- * Defines and enforces the core technical architecture for the entire game
- * Ensures all 19 agents follow consistent patterns and standards
+ * Engine Architect's Technical Architecture Framework
+ * Defines the core technical standards and validation systems for the entire project
  */
 
+UENUM(BlueprintType)
+enum class EEng_SystemPriority : uint8
+{
+    Critical        UMETA(DisplayName = "Critical"),
+    High           UMETA(DisplayName = "High"),
+    Medium         UMETA(DisplayName = "Medium"),
+    Low            UMETA(DisplayName = "Low"),
+    Background     UMETA(DisplayName = "Background")
+};
+
+UENUM(BlueprintType)
+enum class EEng_ValidationResult : uint8
+{
+    Pass           UMETA(DisplayName = "Pass"),
+    Warning        UMETA(DisplayName = "Warning"),
+    Fail           UMETA(DisplayName = "Fail"),
+    Critical       UMETA(DisplayName = "Critical"),
+    NotTested      UMETA(DisplayName = "Not Tested")
+};
+
+UENUM(BlueprintType)
+enum class EEng_ModuleType : uint8
+{
+    Core           UMETA(DisplayName = "Core Systems"),
+    Gameplay       UMETA(DisplayName = "Gameplay"),
+    Rendering      UMETA(DisplayName = "Rendering"),
+    Audio          UMETA(DisplayName = "Audio"),
+    Physics        UMETA(DisplayName = "Physics"),
+    AI             UMETA(DisplayName = "AI"),
+    Networking     UMETA(DisplayName = "Networking"),
+    UI             UMETA(DisplayName = "User Interface")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemRequirements
+struct TRANSPERSONALGAME_API FEng_SystemMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    FString SystemName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float FrameTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    int32 MinMemoryMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float MemoryUsage = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    float MaxCPUUsagePercent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 ActiveActors = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    int32 MaxDrawCalls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 PhysicsBodies = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    bool bRequiresWorldPartition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float CPUUsage = 0.0f;
 
-    FEng_SystemRequirements()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float GPUUsage = 0.0f;
+
+    FEng_SystemMetrics()
     {
-        SystemName = TEXT("Unknown");
-        MinMemoryMB = 512;
-        MaxCPUUsagePercent = 10.0f;
-        MaxDrawCalls = 1000;
-        bRequiresWorldPartition = false;
+        FrameTime = 16.67f; // Target 60fps
+        MemoryUsage = 0.0f;
+        ActiveActors = 0;
+        PhysicsBodies = 0;
+        CPUUsage = 0.0f;
+        GPUUsage = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitectureRule
+struct TRANSPERSONALGAME_API FEng_ArchitecturalStandard
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    FString RuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
+    FString StandardName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
     FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    EDir_Priority Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
+    EEng_SystemPriority Priority = EEng_SystemPriority::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    bool bMandatory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
+    bool bMandatory = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    TArray<FString> AffectedAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
+    float MaxFrameTime = 16.67f; // 60fps target
 
-    FEng_ArchitectureRule()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Standard")
+    float MaxMemoryMB = 8192.0f; // 8GB limit
+
+    FEng_ArchitecturalStandard()
     {
-        RuleName = TEXT("Default Rule");
-        Description = TEXT("No description");
-        Priority = EDir_Priority::Medium;
-        bMandatory = false;
+        StandardName = TEXT("Default Standard");
+        Description = TEXT("Default architectural standard");
+        Priority = EEng_SystemPriority::Medium;
+        bMandatory = true;
+        MaxFrameTime = 16.67f;
+        MaxMemoryMB = 8192.0f;
     }
 };
 
-UENUM(BlueprintType)
-enum class EEng_ArchitectureLayer : uint8
-{
-    Core            UMETA(DisplayName = "Core Systems"),
-    Gameplay        UMETA(DisplayName = "Gameplay Systems"),
-    Presentation    UMETA(DisplayName = "Presentation Layer"),
-    Platform        UMETA(DisplayName = "Platform Layer"),
-    Tools           UMETA(DisplayName = "Tools & Pipeline")
-};
-
-UENUM(BlueprintType)
-enum class EEng_SystemCategory : uint8
-{
-    Physics         UMETA(DisplayName = "Physics & Collision"),
-    Rendering       UMETA(DisplayName = "Rendering & Graphics"),
-    Audio           UMETA(DisplayName = "Audio & Sound"),
-    AI              UMETA(DisplayName = "AI & Behavior"),
-    Networking      UMETA(DisplayName = "Networking"),
-    Input           UMETA(DisplayName = "Input & Controls"),
-    UI              UMETA(DisplayName = "User Interface"),
-    World           UMETA(DisplayName = "World Generation"),
-    Character       UMETA(DisplayName = "Character Systems"),
-    Combat          UMETA(DisplayName = "Combat & Interaction")
-};
-
+/**
+ * Technical Architecture Subsystem - Core engine management
+ * Manages all technical standards, validation, and cross-system integration
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UActorComponent
+class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_TechnicalArchitecture();
 
-protected:
-    virtual void BeginPlay() override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // Core Architecture Rules
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rules")
-    TArray<FEng_ArchitectureRule> CoreRules;
+    // Core Architecture Management
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void InitializeArchitecture();
 
-    // System Requirements
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    TArray<FEng_SystemRequirements> SystemRequirements;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    bool ValidateSystemCompliance();
 
-    // Performance Targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_PC;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    FEng_SystemMetrics GetCurrentSystemMetrics();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_Console;
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void RegisterSubsystem(const FString& SubsystemName, EEng_ModuleType ModuleType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryUsageMB;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTimeMS;
-
-    // World Partition Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    bool bEnforceWorldPartition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    float WorldPartitionCellSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    int32 MaxLoadedCells;
-
-    // Lumen Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    bool bEnableLumen;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    float LumenSceneDetailLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    int32 LumenMaxTraceDistance;
-
-    // Nanite Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    bool bEnableNanite;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    int32 NaniteMaxTriangles;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    float NaniteLODBias;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Architecture Validation Functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemCompliance(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void EnforceArchitectureRules();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FEng_SystemRequirements GetSystemRequirements(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterNewSystem(const FString& SystemName, EEng_SystemCategory Category, const FEng_SystemRequirements& Requirements);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetNonCompliantSystems();
+    UFUNCTION(BlueprintCallable, Category = "Technical Architecture")
+    void UnregisterSubsystem(const FString& SubsystemName);
 
     // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceTargets();
+    void UpdatePerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime();
+    bool IsPerformanceWithinLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentMemoryUsage();
+    void SetPerformanceTarget(float TargetFrameTime, float MaxMemoryMB);
 
-    // Milestone 1 Validation
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    bool ValidateMilestone1Requirements();
+    // Validation and Compliance
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    EEng_ValidationResult ValidateModule(EEng_ModuleType ModuleType);
 
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    int32 GetMilestone1Progress();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    TArray<FString> GetValidationErrors();
 
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    TArray<FString> GetMissingMilestone1Requirements();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    void RunFullSystemValidation();
 
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    void NotifyAgentProgress(int32 AgentID, const FString& TaskCompleted);
+    // Cross-System Integration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void IntegratePhysicsWithBiomes();
 
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    bool IsAgentReadyForWork(int32 AgentID);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateCrossSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    TArray<FString> GetBlockedAgents();
+    // Debug and Diagnostics
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void PrintArchitecturalStatus();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void GenerateSystemReport();
+
+protected:
+    // Core architectural standards
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TArray<FEng_ArchitecturalStandard> ArchitecturalStandards;
+
+    // System metrics tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    FEng_SystemMetrics CurrentMetrics;
+
+    // Registered subsystems
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Systems")
+    TMap<FString, EEng_ModuleType> RegisteredSubsystems;
+
+    // Validation results
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
+    TArray<FString> ValidationErrors;
+
+    // Performance targets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameTime = 16.67f; // 60fps
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxMemoryUsageMB = 8192.0f; // 8GB
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveActors = 10000;
 
 private:
-    // Internal tracking
-    TMap<FString, bool> SystemComplianceStatus;
-    TMap<int32, FString> AgentLastTask;
-    TMap<int32, float> AgentLastUpdateTime;
-
-    // Architecture enforcement
-    void ValidateWorldPartitionSetup();
-    void ValidateLumenConfiguration();
-    void ValidateNaniteSettings();
-    void CheckSystemDependencies();
+    // Internal validation methods
+    void ValidatePhysicsIntegration();
+    void ValidateBiomeSystem();
+    void ValidateCharacterSystems();
+    void ValidateWorldGeneration();
     
     // Performance monitoring
-    float LastFrameTime;
-    int32 LastMemoryUsage;
-    TArray<float> FrameTimeHistory;
+    void CollectFrameTimeMetrics();
+    void CollectMemoryMetrics();
+    void CollectActorMetrics();
     
-    // Milestone tracking
-    bool bMilestone1CharacterMovement;
-    bool bMilestone1TerrainVariation;
-    bool bMilestone1DinosaurMeshes;
-    bool bMilestone1LightingSystem;
-    bool bMilestone1PlayerInteraction;
+    // System initialization
+    void InitializeStandardsDatabase();
+    void SetupPerformanceMonitoring();
+    void RegisterCoreSubsystems();
 };
 
 /**
- * Technical Architecture Actor - Spawnable in levels for architecture management
+ * World-level Technical Architecture Manager
+ * Handles world-specific technical validation and integration
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_TechnicalArchitectureActor : public AActor
+class TRANSPERSONALGAME_API UEng_WorldArchitectureManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_TechnicalArchitectureActor();
+    UEng_WorldArchitectureManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+    // World-specific validation
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void ValidateWorldSetup();
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    bool IsWorldCompliant();
+
+    UFUNCTION(BlueprintCallable, Category = "World Architecture")
+    void IntegrateWorldSystems();
+
+    // Biome integration
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void ValidateBiomeConfiguration();
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void InitializeBiomePhysics();
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UEng_TechnicalArchitecture* ArchitectureComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World")
+    bool bWorldValidated = false;
 
-    virtual void BeginPlay() override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World")
+    TArray<FString> WorldValidationErrors;
 
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    UEng_TechnicalArchitecture* GetArchitectureComponent() const { return ArchitectureComponent; }
+private:
+    void ValidateTerrainSetup();
+    void ValidateLightingSetup();
+    void ValidatePhysicsWorld();
+    void ValidateNavMesh();
 };
+
+#include "Eng_TechnicalArchitecture.generated.h"

@@ -1,188 +1,126 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
 #include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Anim_CharacterAnimationController.generated.h"
 
+UENUM(BlueprintType)
+enum class EAnim_MovementState : uint8
+{
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Running     UMETA(DisplayName = "Running"),
+    Jumping     UMETA(DisplayName = "Jumping"),
+    Falling     UMETA(DisplayName = "Falling"),
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Swimming    UMETA(DisplayName = "Swimming")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_AnimationState
+struct FAnim_MovementData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    EDir_MovementState MovementState;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Speed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    float Speed;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float Direction = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    float Direction;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsInAir = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    bool bIsInAir;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsCrouching = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    bool bIsCrouching;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsAccelerating = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    float StaminaLevel;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
-    float FearLevel;
-
-    FAnim_AnimationState()
+    FAnim_MovementData()
     {
-        MovementState = EDir_MovementState::Idle;
         Speed = 0.0f;
         Direction = 0.0f;
         bIsInAir = false;
         bIsCrouching = false;
-        StaminaLevel = 1.0f;
-        FearLevel = 0.0f;
+        bIsAccelerating = false;
+        MovementState = EAnim_MovementState::Idle;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MontageSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    class UAnimMontage* Montage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float PlayRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float BlendInTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float BlendOutTime;
-
-    FAnim_MontageSettings()
-    {
-        Montage = nullptr;
-        PlayRate = 1.0f;
-        BlendInTime = 0.25f;
-        BlendOutTime = 0.25f;
-    }
-};
-
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnim_CharacterAnimationController : public UActorComponent
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API UAnim_CharacterAnimationController : public UAnimInstance
 {
     GENERATED_BODY()
 
 public:
     UAnim_CharacterAnimationController();
 
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // === ANIMATION STATE MANAGEMENT ===
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void UpdateAnimationState(const FAnim_AnimationState& NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    FAnim_AnimationState GetCurrentAnimationState() const { return CurrentAnimationState; }
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void SetMovementState(EDir_MovementState NewMovementState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void SetSpeed(float NewSpeed);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void SetDirection(float NewDirection);
-
-    // === MONTAGE MANAGEMENT ===
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    bool PlayMontage(const FAnim_MontageSettings& MontageSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void StopMontage(float BlendOutTime = 0.25f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    bool IsPlayingMontage() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    float GetMontagePosition() const;
-
-    // === BLEND SPACE MANAGEMENT ===
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void SetBlendSpaceInput(float X, float Y);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    FVector2D GetBlendSpaceInput() const { return BlendSpaceInput; }
-
-    // === SURVIVAL ANIMATION MODIFIERS ===
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void ApplyStaminaModifier(float StaminaLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void ApplyFearModifier(float FearLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation Controller")
-    void ApplyInjuryModifier(float InjuryLevel);
-
-    // === ANIMATION EVENTS ===
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnAnimationStateChanged(const FAnim_AnimationState& NewState);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnMontageStarted(UAnimMontage* Montage);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Animation Events")
-    void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
 protected:
-    // === CURRENT STATE ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
-    FAnim_AnimationState CurrentAnimationState;
+    UPROPERTY(BlueprintReadOnly, Category = "Character Reference")
+    class ACharacter* OwningCharacter;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
-    FAnim_AnimationState PreviousAnimationState;
+    UPROPERTY(BlueprintReadOnly, Category = "Character Reference")
+    class UCharacterMovementComponent* CharacterMovement;
 
-    // === BLEND SPACE ===
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Space")
-    FVector2D BlendSpaceInput;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
+    FAnim_MovementData MovementData;
 
-    // === ANIMATION REFERENCES ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UBlendSpace* MovementBlendSpace;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* IdleAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TMap<EDir_MovementState, UAnimMontage*> StateMontages;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* WalkAnimation;
 
-    // === SURVIVAL MODIFIERS ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Modifiers")
-    float StaminaSpeedModifier;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* RunAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Modifiers")
-    float FearTremblingIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* JumpStartAnimation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Modifiers")
-    float InjuryLimpIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* JumpLoopAnimation;
 
-    // === CACHED REFERENCES ===
-    UPROPERTY()
-    class USkeletalMeshComponent* OwnerMesh;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Sequences")
+    class UAnimSequence* JumpEndAnimation;
 
-    UPROPERTY()
-    class UAnimInstance* AnimInstance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold = 100.0f;
 
-    // === INTERNAL METHODS ===
-    void CacheAnimationReferences();
-    void UpdateBlendSpaceFromState();
-    void ApplySurvivalModifiers();
-    bool ShouldTransitionState(const FAnim_AnimationState& NewState) const;
-    void HandleStateTransition(const FAnim_AnimationState& OldState, const FAnim_AnimationState& NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float DirectionDeadZone = 5.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateMovementState();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetAnimationSequences();
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterIdleState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterWalkState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterRunState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldEnterJumpState() const;
+
+private:
+    void UpdateMovementData();
+    void CalculateDirection();
+    EAnim_MovementState DetermineMovementState() const;
 };

@@ -1,0 +1,47 @@
+{
+  "quest_id": "track_herd_hub01",
+  "title": "Reading the Herd",
+  "type": "observation",
+  "region": "content_hub",
+  "hub_reference_coords": { "x": 2100.0, "y": 2400.0 },
+  "description": "Study a wild herbivore herd near camp without provoking it, then report findings back to camp.",
+  "npc_giver": "TrackerElder",
+  "target_actor_tag": "Crowd_HerdID_Hub01",
+  "prerequisite_tags": ["Combat_NonAggressive"],
+  "stages": [
+    {
+      "stage": 1,
+      "id": "observe",
+      "trigger_actor": "Quest_TrackHerd_Observe_001",
+      "location": { "x": 2450.0, "y": 2600.0, "z": 100.0 },
+      "objective_text": "Spot the herd from a safe ridge distance.",
+      "completion_condition": "player_enters_trigger_volume",
+      "failure_condition": "none"
+    },
+    {
+      "stage": 2,
+      "id": "approach",
+      "trigger_actor": "Quest_TrackHerd_Approach_002",
+      "location": { "x": 2250.0, "y": 2100.0, "z": 100.0 },
+      "objective_text": "Move downwind through cover and study the herd up close.",
+      "completion_condition": "player_enters_trigger_volume",
+      "failure_condition": "herd_flees_or_charges"
+    },
+    {
+      "stage": 3,
+      "id": "report",
+      "trigger_actor": "Quest_TrackHerd_Report_003",
+      "location": { "x": 1700.0, "y": 2500.0, "z": 100.0 },
+      "objective_text": "Return toward camp to report herd migration findings.",
+      "completion_condition": "player_enters_trigger_volume",
+      "failure_condition": "none",
+      "reward": {
+        "type": "survival_knowledge",
+        "unlocks": "safe_hunting_zone_marker_hub01"
+      }
+    }
+  ],
+  "narrative_notes": "No spiritual/mystical framing. Tracker Elder is a practical camp scout, not a shaman. Emotional arc: curiosity -> tension -> quiet competence.",
+  "next_quest_chain_suggestion": "craft_stone_axe_hub01",
+  "implementation_note": "Implemented via engine-native TriggerBox actors + Actor Tags (no custom C++), since headless editor does not recompile C++ per hugo_no_cpp_h_v2 rule."
+}

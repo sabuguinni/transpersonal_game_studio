@@ -1,0 +1,146 @@
+{
+  "combat_ai_config_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_006",
+  "agent": "Combat & Enemy AI Agent #12",
+
+  "trex_combat_sequence": {
+    "territory_radius": 5000,
+    "roar_range": 2000,
+    "chase_range": 3000,
+    "attack_range": 350,
+    "patrol_speed": 350,
+    "chase_speed": 900,
+    "attack_damage": 85,
+    "attack_cooldown_seconds": 2.5,
+    "roar_stagger_duration_seconds": 1.8,
+    "day_night_modifiers": {
+      "night_patrol_speed_multiplier": 0.7,
+      "day_territory_aggression_multiplier": 1.2
+    },
+    "combat_states": ["PATROL", "ALERT", "ROAR", "CHASE", "ATTACK", "RETURN"],
+    "state_transitions": {
+      "PATROL_to_ALERT": "player_detected_at_roar_range",
+      "ALERT_to_ROAR": "player_within_2000_units",
+      "ROAR_to_CHASE": "roar_animation_complete",
+      "CHASE_to_ATTACK": "player_within_350_units",
+      "ATTACK_to_CHASE": "player_escaped_attack_range",
+      "CHASE_to_RETURN": "player_outside_5000_unit_territory"
+    },
+    "fire_deterrent": {
+      "suppression_radius": 800,
+      "aggression_multiplier_near_fire": 0.1,
+      "description": "T-Rex will not enter within 800 units of active campfire"
+    },
+    "patrol_waypoints": [
+      "TRexPatrol_Anchor_001",
+      "TRexPatrol_Waypoint_A",
+      "TRexPatrol_Waypoint_B",
+      "TRexPatrol_Waypoint_C",
+      "TRexPatrol_Waypoint_D"
+    ]
+  },
+
+  "raptor_combat_sequence": {
+    "pack_size": 3,
+    "detection_range": 1800,
+    "flank_initiation_range": 1200,
+    "attack_range": 280,
+    "patrol_speed": 450,
+    "chase_speed": 1100,
+    "flank_speed": 800,
+    "attack_damage": 35,
+    "attack_cooldown_seconds": 1.2,
+    "day_night_modifiers": {
+      "night_aggression_multiplier": 1.8,
+      "night_detection_range_multiplier": 1.4,
+      "day_pack_hunt_active": true
+    },
+    "combat_states": ["PATROL", "ALERT", "FLANK", "AMBUSH", "ATTACK", "RETREAT", "REGROUP"],
+    "flanking_behavior": {
+      "description": "Pack splits: 1 distracts from front, 2 flank from sides",
+      "distractor_role": "approaches_from_front_makes_noise",
+      "flanker_role": "silent_approach_from_left_and_right",
+      "ambush_trigger": "player_focused_on_distractor",
+      "retreat_trigger": "pack_member_killed_or_player_uses_fire"
+    },
+    "combat_triggers": [
+      "CombatTrigger_Raptor_Flank_L",
+      "CombatTrigger_Raptor_Flank_R",
+      "CombatTrigger_Raptor_Ambush",
+      "CombatTrigger_Raptor_Retreat"
+    ],
+    "fire_deterrent": {
+      "suppression_radius": 800,
+      "aggression_multiplier_near_fire": 0.05,
+      "description": "Raptors will not approach within 800 units of active fire — strongest deterrent"
+    }
+  },
+
+  "brachiosaurus_combat_response": {
+    "aggression_level": "defensive_only",
+    "stomp_range": 400,
+    "stomp_damage": 120,
+    "tail_sweep_range": 600,
+    "tail_sweep_damage": 60,
+    "stampede_trigger": "pack_member_attacked_or_loud_noise_within_500",
+    "stampede_speed": 700,
+    "stampede_damage_per_second": 200,
+    "description": "Brachiosaurs are not predators. They only attack if directly threatened or if herd is stampeding.",
+    "fire_response": "neutral — not deterred by fire, may investigate"
+  },
+
+  "global_combat_rules": {
+    "fire_deterrent_active": true,
+    "fire_suppression_radius_units": 800,
+    "fire_actors_in_map": [
+      "FireDeterrent_Camp_001",
+      "FireDeterrent_Camp_002",
+      "FireDeterrent_Camp_003"
+    ],
+    "day_night_system": {
+      "night_start_hour": 20,
+      "night_end_hour": 6,
+      "night_combat_modifiers_active": true
+    },
+    "player_detection_methods": [
+      "line_of_sight",
+      "footstep_sound_radius_400",
+      "scent_downwind_radius_600",
+      "torch_light_visibility_radius_1200"
+    ],
+    "combat_zones_in_map": [
+      "CombatZone_TRex_Roar",
+      "CombatZone_TRex_Chase",
+      "CombatZone_TRex_Attack",
+      "BehaviorZone_Raptor_Flank_L",
+      "BehaviorZone_Raptor_Flank_R",
+      "BehaviorZone_Raptor_Ambush"
+    ]
+  },
+
+  "audio_assets": {
+    "trex_combat_narrator": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771107282_CombatNarrator_TRex.mp3",
+    "raptor_combat_narrator": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771125090_CombatNarrator_Raptor.mp3",
+    "previous_cycle_trex_charge": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781771007614_DinoNarrator_Raptor.mp3"
+  },
+
+  "handoff_to_agent_13": {
+    "crowd_simulation_notes": "Combat zones defined above should suppress crowd/herd simulation within their radii. When T-Rex is in CHASE state, all NPC crowd agents within 3000 units should enter FLEE behavior. Raptor AMBUSH trigger should cause nearby crowd agents to scatter.",
+    "combat_zone_actors": [
+      "CombatZone_TRex_Roar",
+      "CombatZone_TRex_Chase",
+      "CombatZone_TRex_Attack",
+      "CombatTrigger_Raptor_Flank_L",
+      "CombatTrigger_Raptor_Flank_R",
+      "CombatTrigger_Raptor_Ambush",
+      "CombatTrigger_Raptor_Retreat"
+    ],
+    "fire_deterrent_actors": [
+      "FireDeterrent_Camp_001",
+      "FireDeterrent_Camp_002",
+      "FireDeterrent_Camp_003"
+    ],
+    "crowd_flee_radius_from_trex": 3000,
+    "crowd_scatter_radius_from_raptor_ambush": 1500
+  }
+}

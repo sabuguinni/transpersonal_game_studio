@@ -1,0 +1,272 @@
+{
+  "quest_pack": "SurvivalQuests_Cycle014",
+  "agent": "#14 Quest & Mission Designer",
+  "cycle": "PROD_CYCLE_AUTO_20260704_014",
+  "voice_assets": {
+    "quest_raptor_nest": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783213665211_QuestGiver_Elder.mp3",
+    "quest_river_rescue": "<pending_cycle014_tts>"
+  },
+  "quests": [
+    {
+      "id": "QST_001_RaptorNest",
+      "title": "The Nest on the Eastern Ridge",
+      "type": "stealth_retrieval",
+      "giver_npc": "Elder_Kara",
+      "voice_line": "QuestGiver_Elder.mp3",
+      "location": {
+        "world_x": 2800,
+        "world_y": 1600,
+        "world_z": 120,
+        "label": "EasternRidge_RaptorNest"
+      },
+      "objectives": [
+        {
+          "id": "OBJ_001a",
+          "description": "Approach the raptor nest from downwind (from the west)",
+          "mechanic": "wind_direction_check",
+          "fail_condition": "player_detected_by_raptor"
+        },
+        {
+          "id": "OBJ_001b",
+          "description": "Retrieve 3 raptor eggs from the nest",
+          "mechanic": "item_pickup",
+          "item_id": "ITEM_RaptorEgg",
+          "count": 3
+        },
+        {
+          "id": "OBJ_001c",
+          "description": "Return to Elder Kara without being followed",
+          "mechanic": "return_to_npc",
+          "npc_id": "Elder_Kara",
+          "fail_condition": "raptor_follows_player_to_camp"
+        }
+      ],
+      "rewards": {
+        "crafting_materials": ["bone_needle x5", "raptor_claw x2"],
+        "knowledge": "raptor_pack_behavior_unlocked"
+      },
+      "emotional_arc": "Tension builds as player must suppress instinct to run. Success feels earned through patience, not power.",
+      "failure_consequence": "Raptor pack attacks the camp — triggers defensive quest QST_004"
+    },
+    {
+      "id": "QST_002_RiverRescue",
+      "title": "Trapped at the Flood Crossing",
+      "type": "rescue_under_pressure",
+      "giver_npc": "Scout_Davan",
+      "voice_line": "QuestGiver_Scout.mp3",
+      "location": {
+        "world_x": 1200,
+        "world_y": 3400,
+        "world_z": 80,
+        "label": "RiverCrossing_SpinosaTerritory"
+      },
+      "time_limit_seconds": 600,
+      "objectives": [
+        {
+          "id": "OBJ_002a",
+          "description": "Scout the river crossing — observe Spinosaurus patrol pattern",
+          "mechanic": "observation_timer",
+          "duration_seconds": 30
+        },
+        {
+          "id": "OBJ_002b",
+          "description": "Choose approach: canyon route, carcass distraction, or wait for nightfall",
+          "mechanic": "branching_choice",
+          "choices": [
+            {
+              "id": "CHOICE_canyon",
+              "label": "Take the canyon route",
+              "risk": "rockfall_hazard",
+              "time_cost_seconds": 180
+            },
+            {
+              "id": "CHOICE_distract",
+              "label": "Use a carcass to distract the Spinosaurus",
+              "prerequisite": "player_has_carcass_item",
+              "risk": "spinosaurus_may_ignore_bait",
+              "time_cost_seconds": 60
+            },
+            {
+              "id": "CHOICE_nightfall",
+              "label": "Wait for nightfall",
+              "risk": "hunters_may_die_of_exposure",
+              "time_cost_seconds": 300
+            }
+          ]
+        },
+        {
+          "id": "OBJ_002c",
+          "description": "Escort all 3 hunters back to camp",
+          "mechanic": "escort_npc",
+          "npc_ids": ["Hunter_Brek", "Hunter_Sola", "Hunter_Maren"],
+          "partial_success": "1-2 hunters rescued = partial reward"
+        }
+      ],
+      "rewards": {
+        "crafting_materials": ["river_reed x10", "fish_bone x6"],
+        "camp_upgrade": "river_watch_post"
+      },
+      "emotional_arc": "Player feels the weight of others depending on them. Each choice has a cost — no perfect solution exists.",
+      "failure_consequence": "Camp loses 3 hunters permanently — reduces hunting party size for 5 in-game days"
+    },
+    {
+      "id": "QST_003_MigrationTrack",
+      "title": "Follow the Triceratops Herd",
+      "type": "exploration_tracking",
+      "giver_npc": "Tracker_Fen",
+      "location": {
+        "world_x": 3200,
+        "world_y": 2800,
+        "world_z": 100,
+        "label": "Savanna_HerdTrail_Start"
+      },
+      "objectives": [
+        {
+          "id": "OBJ_003a",
+          "description": "Find the herd's trail (look for tracks, broken vegetation, dung)",
+          "mechanic": "environmental_clue_scan",
+          "clue_count": 3
+        },
+        {
+          "id": "OBJ_003b",
+          "description": "Follow the herd to the river without spooking them",
+          "mechanic": "proximity_stealth",
+          "max_distance_meters": 80,
+          "min_distance_meters": 20
+        },
+        {
+          "id": "OBJ_003c",
+          "description": "Identify the new grazing ground and mark it on the map",
+          "mechanic": "map_marker_place",
+          "location_label": "Triceratops_GrazingGround_New"
+        }
+      ],
+      "rewards": {
+        "map_unlock": "northern_grazing_plains",
+        "crafting_materials": ["triceratops_horn_fragment x1"],
+        "knowledge": "herd_migration_pattern_unlocked"
+      },
+      "emotional_arc": "Wonder and scale — following a massive herd makes the player feel small but connected to the living world.",
+      "failure_consequence": "Herd moves to unknown location — hunting becomes harder for 3 in-game days"
+    },
+    {
+      "id": "QST_004_CampDefense",
+      "title": "Predators at the Gate",
+      "type": "defense_wave",
+      "trigger": "raptor_pack_attack_from_QST_001_failure OR random_night_event",
+      "location": {
+        "world_x": 2100,
+        "world_y": 2400,
+        "world_z": 100,
+        "label": "Camp_MainHub"
+      },
+      "objectives": [
+        {
+          "id": "OBJ_004a",
+          "description": "Light the camp perimeter fires before raptors breach",
+          "mechanic": "interact_with_firepit",
+          "count": 4,
+          "time_limit_seconds": 45
+        },
+        {
+          "id": "OBJ_004b",
+          "description": "Defend the camp through 3 attack waves",
+          "mechanic": "wave_defense",
+          "waves": [
+            {"wave": 1, "enemies": "Velociraptor x2"},
+            {"wave": 2, "enemies": "Velociraptor x3"},
+            {"wave": 3, "enemies": "Velociraptor x2 + Alpha_Raptor x1"}
+          ]
+        }
+      ],
+      "rewards": {
+        "camp_upgrade": "sharpened_stake_perimeter",
+        "crafting_materials": ["raptor_hide x4", "raptor_claw x3"]
+      },
+      "emotional_arc": "Desperation and teamwork — the camp is home, and losing it means everything.",
+      "failure_consequence": "Camp partially destroyed — must rebuild 2 structures before next quest chain"
+    },
+    {
+      "id": "QST_005_StoneAxeCraft",
+      "title": "First Tool, First Step",
+      "type": "crafting_tutorial",
+      "giver_npc": "Craftsman_Oru",
+      "location": {
+        "world_x": 2100,
+        "world_y": 2400,
+        "world_z": 100,
+        "label": "Camp_CraftingArea"
+      },
+      "objectives": [
+        {
+          "id": "OBJ_005a",
+          "description": "Gather 2 flint rocks from the riverbed",
+          "mechanic": "item_pickup",
+          "item_id": "ITEM_FlintRock",
+          "count": 2,
+          "location_hint": "River_Flint_Deposit"
+        },
+        {
+          "id": "OBJ_005b",
+          "description": "Find a hardwood branch (look near fallen trees)",
+          "mechanic": "item_pickup",
+          "item_id": "ITEM_HardwoodBranch",
+          "count": 1
+        },
+        {
+          "id": "OBJ_005c",
+          "description": "Craft a Stone Axe at the crafting stone",
+          "mechanic": "crafting_interaction",
+          "recipe_id": "RECIPE_StoneAxe",
+          "ingredients": ["ITEM_FlintRock x2", "ITEM_HardwoodBranch x1"]
+        },
+        {
+          "id": "OBJ_005d",
+          "description": "Test the axe by chopping a dead tree",
+          "mechanic": "destructible_interact",
+          "target_label": "DeadTree_Tutorial"
+        }
+      ],
+      "rewards": {
+        "item": "ITEM_StoneAxe",
+        "knowledge": "crafting_system_unlocked",
+        "crafting_materials": ["wood_plank x3"]
+      },
+      "emotional_arc": "Empowerment — the first tool transforms the player from prey to survivor. Simple but meaningful.",
+      "is_tutorial": true,
+      "auto_start": true
+    }
+  ],
+  "quest_chain": {
+    "main_chain": ["QST_005_StoneAxeCraft", "QST_003_MigrationTrack", "QST_001_RaptorNest", "QST_002_RiverRescue"],
+    "branching": {
+      "QST_001_fail": "QST_004_CampDefense"
+    }
+  },
+  "npc_definitions": [
+    {
+      "id": "Elder_Kara",
+      "role": "Camp Elder — practical, weathered, no-nonsense",
+      "location": "Camp_MainHub",
+      "actor_label": "NPC_Elder_Kara_001"
+    },
+    {
+      "id": "Scout_Davan",
+      "role": "Young scout — fast, anxious, observant",
+      "location": "RiverCrossing_SpinosaTerritory",
+      "actor_label": "NPC_Scout_Davan_001"
+    },
+    {
+      "id": "Tracker_Fen",
+      "role": "Experienced tracker — quiet, reads the land",
+      "location": "Savanna_HerdTrail_Start",
+      "actor_label": "NPC_Tracker_Fen_001"
+    },
+    {
+      "id": "Craftsman_Oru",
+      "role": "Camp craftsman — patient teacher, proud of his work",
+      "location": "Camp_CraftingArea",
+      "actor_label": "NPC_Craftsman_Oru_001"
+    }
+  ]
+}

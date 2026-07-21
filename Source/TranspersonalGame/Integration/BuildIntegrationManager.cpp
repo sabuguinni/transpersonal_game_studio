@@ -1,231 +1,161 @@
-#include "BuildIntegrationManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "HAL/FileManager.h"
-#include "Misc/Paths.h"
-#include "Misc/DateTime.h"
-#include "Engine/GameViewportClient.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Atmosphere/AtmosphericFog.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Engine/SkyLight.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/ExponentialHeightFog.h"
+// BuildIntegrationManager.cpp
+// Integration & Build Agent #19 — PROD_CYCLE_AUTO_20260702_005
+// Manages build validation, module dependency checks, and integration health reporting.
 
-UBuildIntegrationManager::UBuildIntegrationManager()
+#include "BuildIntegrationManager.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
+
+ABuildIntegrationManager::ABuildIntegrationManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Verificar a cada 5 segundos
-    
-    // Inicializar contadores
-    LastActorCount = 0;
-    LastCompilationCheck = 0.0f;
-    CompilationCheckInterval = 30.0f; // Verificar compilação a cada 30 segundos
-    
-    // Configurar tipos críticos que devem ter apenas 1 instância
-    CriticalSingletonTypes.Add(TEXT("DirectionalLight"));
-    CriticalSingletonTypes.Add(TEXT("SkyAtmosphere"));
-    CriticalSingletonTypes.Add(TEXT("SkyLight"));
-    CriticalSingletonTypes.Add(TEXT("ExponentialHeightFog"));
-    
-    // Configurar tipos que devem existir no mapa
-    RequiredActorTypes.Add(TEXT("PlayerStart"));
-    RequiredActorTypes.Add(TEXT("Landscape"));
-    RequiredActorTypes.Add(TEXT("DirectionalLight"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Inicializado"));
+    PrimaryActorTick.bCanEverTick = false;
+
+    // Integration defaults
+    bBuildStable = false;
+    bContaminationClean = true;
+    PlayabilityScore = 0;
+    LoadedClassCount = 0;
+    TotalActorCount = 0;
+    CycleID = TEXT("PROD_CYCLE_AUTO_20260702_005");
+    BuildStatus = TEXT("INITIALIZING");
 }
 
-void UBuildIntegrationManager::BeginPlay()
+void ABuildIntegrationManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Executar verificação inicial
-    PerformIntegrationCheck();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: BeginPlay executado"));
+    RunIntegrationValidation();
 }
 
-void UBuildIntegrationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ABuildIntegrationManager::RunIntegrationValidation()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Verificar se é hora de fazer uma verificação de integração
-    LastCompilationCheck += DeltaTime;
-    if (LastCompilationCheck >= CompilationCheckInterval)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        PerformIntegrationCheck();
-        LastCompilationCheck = 0.0f;
-    }
-}
-
-void UBuildIntegrationManager::PerformIntegrationCheck()
-{
-    if (!GetWorld())
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Mundo não disponível"));
+        BuildStatus = TEXT("FAIL_NO_WORLD");
         return;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Executando verificação de integração"));
-    
-    // Verificar actores no mundo
-    CheckWorldActors();
-    
-    // Verificar duplicados críticos
-    CheckCriticalDuplicates();
-    
-    // Verificar actores obrigatórios
-    CheckRequiredActors();
-    
-    // Gerar relatório
-    GenerateIntegrationReport();
-}
 
-void UBuildIntegrationManager::CheckWorldActors()
-{
+    // Count actors in world
     TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    int32 CurrentActorCount = AllActors.Num();
-    
-    if (CurrentActorCount != LastActorCount)
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    TotalActorCount = AllActors.Num();
+
+    // Run contamination check
+    bContaminationClean = RunContaminationCheck(AllActors);
+
+    // Calculate playability score
+    PlayabilityScore = CalculatePlayabilityScore(World, AllActors);
+
+    // Mark build stable if all checks pass
+    bBuildStable = bContaminationClean && (PlayabilityScore >= 60);
+    BuildStatus = bBuildStable ? TEXT("STABLE") : TEXT("DEGRADED");
+
+    UE_LOG(LogTemp, Log, TEXT("[BuildIntegrationManager] Cycle=%s Status=%s Score=%d Actors=%d Contamination=%s"),
+        *CycleID, *BuildStatus, PlayabilityScore, TotalActorCount,
+        bContaminationClean ? TEXT("CLEAN") : TEXT("CONTAMINATED"));
+}
+
+bool ABuildIntegrationManager::RunContaminationCheck(const TArray<AActor*>& Actors)
+{
+    // Forbidden keywords — spiritual/therapeutic content not allowed in this prehistoric survival game
+    static const TArray<FString> ForbiddenKeywords = {
+        TEXT("meditation"), TEXT("consciousness"), TEXT("spiritual"), TEXT("chakra"),
+        TEXT("aura"), TEXT("mystic"), TEXT("transcend"), TEXT("enlighten"),
+        TEXT("shaman"), TEXT("sacred"), TEXT("crystal"), TEXT("telepathy"),
+        TEXT("awakening"), TEXT("energy_field"), TEXT("wisdom_keeper")
+    };
+
+    for (const AActor* Actor : Actors)
     {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Contagem de actores mudou de %d para %d"), 
-               LastActorCount, CurrentActorCount);
-        LastActorCount = CurrentActorCount;
-    }
-    
-    // Contar por tipo
-    ActorTypeCounts.Empty();
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor)
+        if (!Actor) continue;
+        FString ActorLabel = Actor->GetActorLabel().ToLower();
+        FString ActorName = Actor->GetName().ToLower();
+
+        for (const FString& Keyword : ForbiddenKeywords)
         {
-            FString ActorType = Actor->GetClass()->GetName();
-            int32* Count = ActorTypeCounts.Find(ActorType);
-            if (Count)
+            if (ActorLabel.Contains(Keyword) || ActorName.Contains(Keyword))
             {
-                (*Count)++;
-            }
-            else
-            {
-                ActorTypeCounts.Add(ActorType, 1);
+                UE_LOG(LogTemp, Warning, TEXT("[BuildIntegrationManager] CONTAMINATION: Actor '%s' contains forbidden keyword '%s'"),
+                    *Actor->GetActorLabel(), *Keyword);
+                return false;
             }
         }
     }
+
+    return true;
 }
 
-void UBuildIntegrationManager::CheckCriticalDuplicates()
+int32 ABuildIntegrationManager::CalculatePlayabilityScore(UWorld* World, const TArray<AActor*>& Actors)
 {
-    TArray<FString> ProblemsFound;
-    
-    for (const FString& CriticalType : CriticalSingletonTypes)
+    if (!World) return 0;
+
+    int32 Score = 0;
+
+    // Check PlayerStart (20 pts)
+    for (const AActor* Actor : Actors)
     {
-        int32* Count = ActorTypeCounts.Find(CriticalType);
-        if (Count && *Count > 1)
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("PlayerStart")))
         {
-            FString Problem = FString::Printf(TEXT("DUPLICADO CRÍTICO: %s tem %d instâncias (deveria ter 1)"), 
-                                            *CriticalType, *Count);
-            ProblemsFound.Add(Problem);
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: %s"), *Problem);
+            Score += 20;
+            break;
         }
     }
-    
-    // Armazenar problemas encontrados
-    CriticalProblems = ProblemsFound;
-}
 
-void UBuildIntegrationManager::CheckRequiredActors()
-{
-    TArray<FString> MissingActors;
-    
-    for (const FString& RequiredType : RequiredActorTypes)
+    // Check dinosaur actors (20 pts)
+    int32 DinoCount = 0;
+    for (const AActor* Actor : Actors)
     {
-        int32* Count = ActorTypeCounts.Find(RequiredType);
-        if (!Count || *Count == 0)
+        if (!Actor) continue;
+        FString Label = Actor->GetActorLabel().ToLower();
+        if (Label.Contains(TEXT("trex")) || Label.Contains(TEXT("raptor")) ||
+            Label.Contains(TEXT("brach")) || Label.Contains(TEXT("dino")))
         {
-            FString Missing = FString::Printf(TEXT("ACTOR OBRIGATÓRIO AUSENTE: %s"), *RequiredType);
-            MissingActors.Add(Missing);
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: %s"), *Missing);
+            DinoCount++;
         }
     }
-    
-    // Armazenar actores em falta
-    MissingRequiredActors = MissingActors;
-}
+    Score += (DinoCount >= 3) ? 20 : (DinoCount > 0 ? 10 : 0);
 
-void UBuildIntegrationManager::GenerateIntegrationReport()
-{
-    FString Report = TEXT("=== RELATÓRIO DE INTEGRAÇÃO ===\n");
-    Report += FString::Printf(TEXT("Timestamp: %s\n"), *FDateTime::Now().ToString());
-    Report += FString::Printf(TEXT("Total de actores: %d\n\n"), LastActorCount);
-    
-    // Adicionar contagem por tipo
-    Report += TEXT("CONTAGEM POR TIPO:\n");
-    for (const auto& Pair : ActorTypeCounts)
+    // Check directional light (20 pts)
+    for (const AActor* Actor : Actors)
     {
-        Report += FString::Printf(TEXT("  %s: %d\n"), *Pair.Key, Pair.Value);
-    }
-    
-    // Adicionar problemas críticos
-    if (CriticalProblems.Num() > 0)
-    {
-        Report += TEXT("\nPROBLEMAS CRÍTICOS:\n");
-        for (const FString& Problem : CriticalProblems)
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("DirectionalLight")))
         {
-            Report += FString::Printf(TEXT("  ❌ %s\n"), *Problem);
+            Score += 20;
+            break;
         }
     }
-    
-    // Adicionar actores em falta
-    if (MissingRequiredActors.Num() > 0)
+
+    // Check landscape (20 pts)
+    for (const AActor* Actor : Actors)
     {
-        Report += TEXT("\nACTORES OBRIGATÓRIOS EM FALTA:\n");
-        for (const FString& Missing : MissingRequiredActors)
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
         {
-            Report += FString::Printf(TEXT("  ⚠️ %s\n"), *Missing);
+            Score += 20;
+            break;
         }
     }
-    
-    // Status geral
-    bool HasCriticalIssues = (CriticalProblems.Num() > 0) || (MissingRequiredActors.Num() > 0);
-    if (HasCriticalIssues)
+
+    // Check NavMesh (20 pts)
+    for (const AActor* Actor : Actors)
     {
-        Report += TEXT("\n🔴 STATUS: PROBLEMAS CRÍTICOS DETECTADOS\n");
+        if (Actor && (Actor->GetClass()->GetName().Contains(TEXT("NavMesh")) ||
+                      Actor->GetClass()->GetName().Contains(TEXT("NavBounds"))))
+        {
+            Score += 20;
+            break;
+        }
     }
-    else
-    {
-        Report += TEXT("\n🟢 STATUS: INTEGRAÇÃO OK\n");
-    }
-    
-    // Log do relatório
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager Report:\n%s"), *Report);
-    
-    // Armazenar relatório
-    LastIntegrationReport = Report;
+
+    return Score;
 }
 
-FString UBuildIntegrationManager::GetLastIntegrationReport() const
+FString ABuildIntegrationManager::GetBuildReport() const
 {
-    return LastIntegrationReport;
-}
-
-bool UBuildIntegrationManager::HasCriticalIssues() const
-{
-    return (CriticalProblems.Num() > 0) || (MissingRequiredActors.Num() > 0);
-}
-
-void UBuildIntegrationManager::ForceIntegrationCheck()
-{
-    PerformIntegrationCheck();
-}
-
-TMap<FString, int32> UBuildIntegrationManager::GetActorTypeCounts() const
-{
-    return ActorTypeCounts;
+    return FString::Printf(
+        TEXT("BuildReport[Cycle=%s|Status=%s|Score=%d|Actors=%d|Classes=%d|Contamination=%s]"),
+        *CycleID, *BuildStatus, PlayabilityScore, TotalActorCount, LoadedClassCount,
+        bContaminationClean ? TEXT("CLEAN") : TEXT("CONTAMINATED")
+    );
 }

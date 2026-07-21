@@ -1,0 +1,163 @@
+{
+  "combat_ai_config": {
+    "version": "1.0",
+    "cycle": "PROD_CYCLE_AUTO_20260703_008",
+    "agent": "#12 Combat & Enemy AI",
+    "hub_coords": { "x": 2100, "y": 2400 },
+
+    "dinosaur_combat_profiles": {
+      "TRex": {
+        "aggro_radius": 800,
+        "attack_radius": 250,
+        "patrol_radius": 600,
+        "patrol_waypoints": [
+          { "id": "WP_TRex_Patrol_001", "x": 2200, "y": 2500, "z": 100 },
+          { "id": "WP_TRex_Patrol_002", "x": 2000, "y": 2600, "z": 100 },
+          { "id": "WP_TRex_Patrol_003", "x": 1900, "y": 2300, "z": 100 },
+          { "id": "WP_TRex_Patrol_004", "x": 2300, "y": 2200, "z": 100 }
+        ],
+        "threat_level": "HIGH",
+        "behavior_states": ["Patrol", "Alert", "Chase", "Attack", "Roar", "Retreat"],
+        "attack_patterns": {
+          "charge": { "speed_multiplier": 2.5, "damage": 80, "cooldown_s": 4.0 },
+          "stomp": { "aoe_radius": 300, "damage": 40, "cooldown_s": 6.0 },
+          "bite": { "range": 250, "damage": 100, "cooldown_s": 3.0 }
+        },
+        "detection": {
+          "sight_range": 1200,
+          "sight_angle_deg": 120,
+          "hearing_range": 600,
+          "smell_range": 400
+        },
+        "ai_personality": "apex_predator",
+        "pack_behavior": false,
+        "flee_threshold_health_pct": 0.15
+      },
+
+      "Raptor": {
+        "aggro_radius": 500,
+        "attack_radius": 150,
+        "patrol_radius": 400,
+        "threat_level": "MEDIUM",
+        "behavior_states": ["Patrol", "Alert", "Flank", "Ambush", "Attack", "PackCall", "Flee"],
+        "attack_patterns": {
+          "pounce": { "range": 300, "damage": 35, "cooldown_s": 2.5 },
+          "slash": { "range": 150, "damage": 25, "cooldown_s": 1.5 },
+          "pack_coordinate": { "triggers_at": 2, "flanking_offset_deg": 120 }
+        },
+        "detection": {
+          "sight_range": 800,
+          "sight_angle_deg": 160,
+          "hearing_range": 400,
+          "smell_range": 300
+        },
+        "ai_personality": "pack_hunter",
+        "pack_behavior": true,
+        "pack_size_min": 2,
+        "pack_size_max": 4,
+        "flanking_positions": [
+          { "id": "CombatPos_Raptor_Flank_L_001", "x": 2050, "y": 2350 },
+          { "id": "CombatPos_Raptor_Flank_R_001", "x": 2150, "y": 2350 },
+          { "id": "CombatPos_Raptor_Ambush_001",  "x": 2100, "y": 2250 }
+        ],
+        "flee_threshold_health_pct": 0.30
+      },
+
+      "Triceratops": {
+        "aggro_radius": 400,
+        "attack_radius": 200,
+        "threat_level": "MEDIUM",
+        "behavior_states": ["Graze", "Alert", "Charge", "Defend", "Retreat"],
+        "attack_patterns": {
+          "charge": { "speed_multiplier": 2.0, "damage": 60, "knockback": 500, "cooldown_s": 5.0 },
+          "gore": { "range": 200, "damage": 45, "cooldown_s": 2.0 }
+        },
+        "detection": {
+          "sight_range": 600,
+          "sight_angle_deg": 100,
+          "hearing_range": 300
+        },
+        "ai_personality": "territorial_herbivore",
+        "pack_behavior": false,
+        "aggro_trigger": "proximity_or_attack",
+        "flee_threshold_health_pct": 0.20
+      },
+
+      "Pterodactyl": {
+        "aggro_radius": 600,
+        "attack_radius": 100,
+        "threat_level": "LOW",
+        "behavior_states": ["Soar", "Dive", "Snatch", "Flee"],
+        "attack_patterns": {
+          "dive_bomb": { "speed_multiplier": 3.0, "damage": 20, "cooldown_s": 3.0 },
+          "snatch": { "range": 100, "damage": 15, "steals_item": true, "cooldown_s": 5.0 }
+        },
+        "detection": {
+          "sight_range": 1500,
+          "sight_angle_deg": 200,
+          "altitude_min": 300
+        },
+        "ai_personality": "opportunist_flyer",
+        "pack_behavior": false
+      }
+    },
+
+    "combat_zones": {
+      "CombatZone_TRex_001": {
+        "center": { "x": 2100, "y": 2400, "z": 150 },
+        "radius": 800,
+        "threat_level": "HIGH",
+        "resident_species": "TRex",
+        "ambient_audio": "trex_distant_roar",
+        "visual_cues": ["broken_trees", "large_footprints", "carcass_remains"]
+      },
+      "CombatZone_Raptor_Pack_001": {
+        "center": { "x": 2100, "y": 2300, "z": 100 },
+        "radius": 500,
+        "threat_level": "MEDIUM",
+        "resident_species": "Raptor",
+        "pack_size": 3,
+        "ambient_audio": "raptor_chirp_distant",
+        "visual_cues": ["claw_marks_on_trees", "small_bones", "disturbed_undergrowth"]
+      }
+    },
+
+    "safe_zones": {
+      "SafeZone_Retreat_N_001": {
+        "center": { "x": 2100, "y": 2700, "z": 100 },
+        "radius": 150,
+        "type": "retreat_corridor"
+      },
+      "SafeZone_Retreat_S_001": {
+        "center": { "x": 2100, "y": 2100, "z": 100 },
+        "radius": 150,
+        "type": "retreat_corridor"
+      }
+    },
+
+    "player_combat_mechanics": {
+      "weapons": {
+        "stone_spear": { "damage": 25, "range": 300, "throw_speed": 800, "craft_cost": ["stone_x2", "wood_x1", "vine_x1"] },
+        "stone_axe":   { "damage": 35, "range": 120, "swing_speed": 1.2, "craft_cost": ["stone_x3", "wood_x1"] },
+        "fire_torch":  { "damage": 10, "range": 150, "fear_bonus": 50, "craft_cost": ["wood_x1", "dry_grass_x2"] },
+        "bow_arrow":   { "damage": 20, "range": 800, "fire_rate": 0.5, "craft_cost": ["wood_x2", "vine_x3", "feather_x2"] }
+      },
+      "combat_modifiers": {
+        "fire_vs_dinosaur": 2.0,
+        "spear_vs_charging": 1.5,
+        "flanked_penalty": 0.5,
+        "stamina_empty_penalty": 0.3
+      },
+      "death_conditions": {
+        "health_zero": true,
+        "trex_bite_instant_kill": false,
+        "trex_bite_instant_kill_threshold_health": 30
+      }
+    },
+
+    "audio_assets": {
+      "combat_alert_narration": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075573010_CombatAlert_Narrator.mp3",
+      "raptor_tactical_narration": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783075598333_CombatTactical_Narrator.mp3"
+    }
+  }
+}

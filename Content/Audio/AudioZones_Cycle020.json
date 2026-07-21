@@ -1,0 +1,114 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260702_010",
+  "agent": "#16 Audio Agent",
+  "description": "Audio zone definitions and voiced dialogue assets for MinPlayableMap",
+
+  "voice_lines": [
+    {
+      "id": "VL_Day5_Journal",
+      "character": "Survivor_Journal_Day5",
+      "text": "Day five. The herd moved south overnight. I followed the tracks to the river bend — the water is low, barely knee-deep. That means the big ones will be exposed crossing. Stay low, stay downwind, and do not run until I give the signal.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008321086_Survivor_Journal_Day5.mp3",
+      "duration": "~16s",
+      "trigger": "DayStart_Day5",
+      "zone": "RiverCrossing",
+      "quest_link": "QST_HerdCrossing_Escort"
+    },
+    {
+      "id": "VL_Kael_CanyonWarning2",
+      "character": "ChiefHunter_Kael",
+      "text": "Something is wrong with the canyon. The birds stopped calling an hour ago. When the birds go quiet, something big is moving through the rocks. We do not go in there today.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008342365_ChiefHunter_Kael_Warning2.mp3",
+      "duration": "~12s",
+      "trigger": "PlayerEntersRaptorCanyonZone",
+      "zone": "RaptorCanyon",
+      "quest_link": "QST_RaptorNest_Recon"
+    }
+  ],
+
+  "audio_zones": [
+    {
+      "id": "AudioZone_RaptorCanyon_001",
+      "label": "AudioZone_RaptorCanyon_001",
+      "location": {"x": -600, "y": 1200, "z": 150},
+      "radius": 800,
+      "ambient_loop": "raptor_canyon_wind_loop",
+      "trigger_sfx": ["raptor_distant_shriek", "rock_scrape", "wing_flutter"],
+      "music_layer": "tension_raptor_theme",
+      "npc_ref": "ChiefHunter_Savana_001",
+      "dialogue_ref": ["VL_Kael_CanyonWarning", "VL_Kael_CanyonWarning2"],
+      "ue5_light_color": {"r": 1.0, "g": 0.1, "b": 0.0},
+      "notes": "Red light marker in editor. Ambient: distant raptor calls, wind through canyon walls. Music shifts to tense percussive layer."
+    },
+    {
+      "id": "AudioZone_RiverCrossing_001",
+      "label": "AudioZone_RiverCrossing_001",
+      "location": {"x": 1500, "y": -400, "z": 150},
+      "radius": 1200,
+      "ambient_loop": "river_flow_shallow_loop",
+      "trigger_sfx": ["herd_distant_rumble", "water_splash_large", "bird_call_tropical"],
+      "music_layer": "herd_crossing_theme",
+      "npc_ref": "ScoutRunner_Savana_001",
+      "dialogue_ref": ["VL_Mira_HerdCrossing"],
+      "ue5_light_color": {"r": 0.0, "g": 0.3, "b": 1.0},
+      "notes": "Blue light marker in editor. Ambient: flowing water, distant herd rumble, tropical birds. Music: rhythmic, movement-driven."
+    },
+    {
+      "id": "AudioZone_ElderCamp_001",
+      "label": "AudioZone_ElderCamp_001",
+      "location": {"x": 800, "y": 200, "z": 150},
+      "radius": 600,
+      "ambient_loop": "campfire_crackle_loop",
+      "trigger_sfx": ["fire_pop", "ember_crackle", "night_insects_soft"],
+      "music_layer": "camp_safe_theme",
+      "npc_ref": "TribalElder_Savana_001",
+      "dialogue_ref": ["VL_Voss_FireTutorial", "VL_Voss_TRexGate"],
+      "ue5_light_color": {"r": 1.0, "g": 0.5, "b": 0.0},
+      "notes": "Orange light marker in editor. Ambient: campfire crackle, soft insects, wind. Music: calm, tribal percussion, safe zone."
+    },
+    {
+      "id": "AudioZone_TRexTerritory_001",
+      "label": "AudioZone_TRexTerritory_001",
+      "location": {"x": -2000, "y": -1500, "z": 200},
+      "radius": 2000,
+      "ambient_loop": "trex_territory_rumble_loop",
+      "trigger_sfx": ["ground_shake_heavy", "trex_distant_roar", "flock_scatter"],
+      "music_layer": "apex_predator_theme",
+      "npc_ref": null,
+      "dialogue_ref": [],
+      "ue5_light_color": {"r": 0.8, "g": 0.0, "b": 0.0},
+      "notes": "Deep red light marker. Ambient: low ground rumble, distant T-Rex roar every 45-90s random. Music: heavy, ominous, low frequency."
+    }
+  ],
+
+  "audio_design_notes": {
+    "freesound_status": "API returning empty results this cycle — Freesound search unavailable. Sound IDs to be sourced in next cycle.",
+    "metasound_integration": "Audio zones use PointLight actors as editor markers. In production, replace with AmbientSound actors using MetaSounds assets.",
+    "music_system": "Adaptive music layers: base_ambient → tension_layer (predator proximity) → danger_layer (combat). Crossfade time: 3-8s.",
+    "spatial_audio": "All SFX use UE5 Attenuation with logarithmic falloff. Raptor calls: max range 1500u. T-Rex roar: max range 3000u.",
+    "voice_pipeline": "ElevenLabs TTS → Supabase Storage → UE5 Sound Wave import → MetaSound source → Dialogue Component on NPC"
+  },
+
+  "previous_voice_lines": [
+    {
+      "id": "VL_Kael_CanyonWarning",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008233273_ChiefHunter_Kael.mp3"
+    },
+    {
+      "id": "VL_Mira_HerdCrossing",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008235491_ScoutRunner_Mira.mp3"
+    },
+    {
+      "id": "VL_Voss_FireTutorial",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008249125_TribalElder_Voss.mp3"
+    },
+    {
+      "id": "VL_Voss_TRexGate",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1783008267604_TribalElder_Voss_Quest.mp3"
+    },
+    {
+      "id": "VL_Day4_Journal",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782992138765_Survivor_Journal_Day4.mp3"
+    }
+  ]
+}

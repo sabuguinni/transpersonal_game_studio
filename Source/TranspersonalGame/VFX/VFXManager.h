@@ -1,185 +1,225 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
+#include "GameFramework/Actor.h"
 #include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "SharedTypes.h"
+#include "NiagaraComponent.h"
 #include "VFXManager.generated.h"
 
-class UNiagaraSystem;
-class UNiagaraComponent;
-class AActor;
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_FootstepData
+// === VFX CATEGORY ENUM ===
+UENUM(BlueprintType)
+enum class EVFX_Category : uint8
 {
-    GENERATED_BODY()
-
-    // Sistema de partículas para pegadas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    TSoftObjectPtr<UNiagaraSystem> FootstepParticleSystem;
-
-    // Intensidade do efeito baseada no peso do dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float ImpactIntensity = 1.0f;
-
-    // Duração do efeito em segundos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float EffectDuration = 2.0f;
-
-    // Raio de partículas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep VFX")
-    float ParticleRadius = 100.0f;
-
-    FVFX_FootstepData()
-    {
-        ImpactIntensity = 1.0f;
-        EffectDuration = 2.0f;
-        ParticleRadius = 100.0f;
-    }
+    Environment     UMETA(DisplayName = "Environment"),
+    Dinosaur        UMETA(DisplayName = "Dinosaur"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Weather         UMETA(DisplayName = "Weather"),
+    World           UMETA(DisplayName = "World"),
+    Crafting        UMETA(DisplayName = "Crafting"),
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_WeatherData
+// === VFX LOD LEVEL ===
+UENUM(BlueprintType)
+enum class EVFX_LODLevel : uint8
 {
-    GENERATED_BODY()
-
-    // Sistema de partículas para chuva
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> RainSystem;
-
-    // Sistema de partículas para neve
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> SnowSystem;
-
-    // Sistema de partículas para nevoeiro
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    TSoftObjectPtr<UNiagaraSystem> FogSystem;
-
-    // Intensidade do tempo
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather VFX")
-    float WeatherIntensity = 0.5f;
-
-    FVFX_WeatherData()
-    {
-        WeatherIntensity = 0.5f;
-    }
+    High    UMETA(DisplayName = "High (0-15m)"),
+    Medium  UMETA(DisplayName = "Medium (15-40m)"),
+    Low     UMETA(DisplayName = "Low (40-80m)"),
+    Culled  UMETA(DisplayName = "Culled (>80m)"),
 };
 
+// === VFX SYSTEM ENTRY ===
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_CombatData
+struct FVFX_SystemEntry
 {
     GENERATED_BODY()
 
-    // Sistema de partículas para sangue
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> BloodSplatterSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FName SystemName;
 
-    // Sistema de partículas para impacto de armas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> WeaponImpactSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_Category Category = EVFX_Category::Environment;
 
-    // Sistema de partículas para poeira de combate
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
-    TSoftObjectPtr<UNiagaraSystem> CombatDustSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraAsset;
 
-    FVFX_CombatData()
-    {
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float CullDistanceHigh = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float CullDistanceMedium = 40.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float CullDistanceLow = 80.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bLooping = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float DefaultScale = 1.0f;
+};
+
+// === VFX SPAWN PARAMS ===
+USTRUCT(BlueprintType)
+struct FVFX_SpawnParams
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FRotator Rotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Scale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    AActor* AttachTarget = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FName AttachSocketName = NAME_None;
 };
 
 /**
- * VFX Manager - Sistema central de gestão de efeitos visuais
- * Responsável por criar e gerir todos os efeitos de partículas Niagara do jogo
+ * UVFX_Manager — Central VFX registry and spawn controller.
+ * Manages all Niagara particle systems for the prehistoric survival game.
+ * Categories: Environment (campfire, embers), Dinosaur (footstep dust, breath vapor, roar distortion),
+ *             Combat (blood impact, weapon impact), Weather (rain, snow, fog),
+ *             World (volcanic ash, water splash, pollen), Crafting (sparks, smoke).
+ * LOD chain: High (0-15m), Medium (15-40m), Low (40-80m), Culled (>80m).
  */
-UCLASS()
-class TRANSPERSONALGAME_API UVFX_Manager : public UGameInstanceSubsystem
+UCLASS(ClassGroup = "TranspersonalGame", meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_Manager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UVFX_Manager();
 
-    // Footstep VFX
+    // === NIAGARA ASSET REFERENCES ===
+    // Environment
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Environment")
+    TSoftObjectPtr<UNiagaraSystem> NS_Fire_Campfire;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Environment")
+    TSoftObjectPtr<UNiagaraSystem> NS_Fire_CampfireSmoke;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Environment")
+    TSoftObjectPtr<UNiagaraSystem> NS_Fire_CampfireEmbers;
+
+    // Dinosaur
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
+    TSoftObjectPtr<UNiagaraSystem> NS_Dino_FootstepDust;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
+    TSoftObjectPtr<UNiagaraSystem> NS_Dino_BreathVapor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
+    TSoftObjectPtr<UNiagaraSystem> NS_Dino_RoarDistortion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Dinosaur")
+    TSoftObjectPtr<UNiagaraSystem> NS_Dino_BloodImpact;
+
+    // Weather
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
+    TSoftObjectPtr<UNiagaraSystem> NS_Weather_Rain;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
+    TSoftObjectPtr<UNiagaraSystem> NS_Weather_Snow;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
+    TSoftObjectPtr<UNiagaraSystem> NS_Weather_Fog;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Weather")
+    TSoftObjectPtr<UNiagaraSystem> NS_Weather_DustStorm;
+
+    // Combat
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    TSoftObjectPtr<UNiagaraSystem> NS_Combat_BloodSplatter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    TSoftObjectPtr<UNiagaraSystem> NS_Combat_WeaponImpact;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Combat")
+    TSoftObjectPtr<UNiagaraSystem> NS_Combat_RockImpact;
+
+    // World
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|World")
+    TSoftObjectPtr<UNiagaraSystem> NS_World_VolcanicAsh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|World")
+    TSoftObjectPtr<UNiagaraSystem> NS_World_WaterSplash;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|World")
+    TSoftObjectPtr<UNiagaraSystem> NS_World_PollenDrift;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|World")
+    TSoftObjectPtr<UNiagaraSystem> NS_World_InsectSwarm;
+
+    // Crafting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Crafting")
+    TSoftObjectPtr<UNiagaraSystem> NS_Crafting_FlintSparks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Crafting")
+    TSoftObjectPtr<UNiagaraSystem> NS_Crafting_CookingSmoke;
+
+    // === LOD SETTINGS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD_HighMaxDistance = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD_MediumMaxDistance = 4000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    float LOD_LowMaxDistance = 8000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|LOD")
+    int32 MaxActiveVFXSystems = 32;
+
+    // === SPAWN FUNCTIONS ===
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayFootstepEffect(const FVector& Location, EDinosaurSpecies Species, EBiomeType BiomeType);
+    UNiagaraComponent* SpawnVFX_Campfire(const FVector& Location, float Scale = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayPlayerFootstepEffect(const FVector& Location, EBiomeType BiomeType);
-
-    // Weather VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StartWeatherEffect(EWeatherType WeatherType, float Intensity = 0.5f);
+    UNiagaraComponent* SpawnVFX_DinoFootstep(const FVector& Location, float DinoMassKg = 6000.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopWeatherEffect();
+    UNiagaraComponent* SpawnVFX_BloodImpact(const FVector& Location, const FVector& ImpactNormal, float DamageAmount);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateWeatherIntensity(float NewIntensity);
-
-    // Combat VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayBloodSplatterEffect(const FVector& Location, const FVector& ImpactDirection);
+    UNiagaraComponent* SpawnVFX_WeaponImpact(const FVector& Location, const FVector& ImpactNormal, bool bOnDinosaur);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayWeaponImpactEffect(const FVector& Location, const FVector& ImpactDirection);
-
-    // Environment VFX
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayCampfireEffect(const FVector& Location);
+    void SetWeatherVFX(EVFX_Category WeatherType, float Intensity);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopCampfireEffect();
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CleanupExpiredEffects();
+    void StopAllWeatherVFX();
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const;
+    EVFX_LODLevel GetLODLevelForDistance(float DistanceCm) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveVFXCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void ClearAllVFX();
 
 protected:
-    // Dados de configuração VFX por espécie de dinossauro
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    TMap<EDinosaurSpecies, FVFX_FootstepData> DinosaurFootstepData;
-
-    // Dados de configuração VFX por bioma
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    TMap<EBiomeType, FVFX_FootstepData> BiomeFootstepData;
-
-    // Dados de configuração de tempo
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    FVFX_WeatherData WeatherData;
-
-    // Dados de configuração de combate
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Configuration")
-    FVFX_CombatData CombatData;
-
-    // Componentes Niagara activos
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
-
-    // Componente de tempo actual
-    UPROPERTY()
-    UNiagaraComponent* CurrentWeatherEffect;
-
-    // Componente de fogueira actual
-    UPROPERTY()
-    UNiagaraComponent* CurrentCampfireEffect;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-    // Métodos internos
-    void InitializeFootstepData();
-    void InitializeWeatherData();
-    void InitializeCombatData();
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveVFXComponents;
 
-    UNiagaraComponent* SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
-    void RegisterActiveEffect(UNiagaraComponent* Effect);
-    void UnregisterActiveEffect(UNiagaraComponent* Effect);
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveWeatherComponents;
+
+    void CleanupFinishedVFX();
+    UNiagaraComponent* SpawnNiagaraAtLocation(TSoftObjectPtr<UNiagaraSystem> NiagaraAsset, const FVector& Location, const FRotator& Rotation, float Scale, bool bAutoDestroy);
 };

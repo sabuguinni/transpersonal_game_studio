@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260619_004",
+  "agent": "#14 Quest & Mission Designer",
+  "quests": [
+    {
+      "id": "Q002",
+      "title": "Observe the Herd at Dawn",
+      "type": "observation",
+      "difficulty": "easy",
+      "description": "Reach the observation point near the watering hole and watch the Parasaurolophus herd drink without disturbing them.",
+      "trigger_actor": "QuestTrigger_ObserveHerd",
+      "objective_actor": "QuestMarker_ObserveHerd",
+      "location": "WateringHole_Central_001",
+      "objectives": [
+        { "step": 1, "text": "Reach the observation point near the watering hole", "actor": "QuestMarker_ObserveHerd" },
+        { "step": 2, "text": "Wait and observe the herd for 30 seconds without moving", "condition": "player_stationary_30s" },
+        { "step": 3, "text": "Do not trigger panic in the herd", "condition": "no_scatter_zone_breach" }
+      ],
+      "rewards": { "xp": 50, "resources": ["Parasaur_Feather_x2", "Clay_x1"] },
+      "failure_condition": "Player enters scatter zone radius — herd panics",
+      "emotional_arc": "Patience rewarded — player learns to read animal behavior",
+      "voice_line": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844814026_QuestNPC_Elder.mp3"
+    },
+    {
+      "id": "Q003",
+      "title": "Survive the Stampede",
+      "type": "survival_emergency",
+      "difficulty": "hard",
+      "description": "A TRex has entered the herd's territory. The Parasaurolophus are panicking. Reach high ground before the stampede crushes you.",
+      "trigger_actor": "QuestTrigger_Stampede",
+      "trigger_condition": "TRex enters ScatterZone_TRex_001",
+      "objectives": [
+        { "step": 1, "text": "The herd is panicking! Get to high ground immediately", "condition": "quest_triggered_by_scatter" },
+        { "step": 2, "text": "Reach one of the three high ground escape points", "actors": ["QuestEscape_HighGround_001", "QuestEscape_HighGround_002", "QuestEscape_HighGround_003"] },
+        { "step": 3, "text": "Survive until the herd disperses (60 seconds)", "condition": "survive_60s_on_high_ground" }
+      ],
+      "rewards": { "xp": 120, "resources": ["Bone_Fragment_x3", "Hide_x1"] },
+      "failure_condition": "Player is caught in stampede path — instant death",
+      "emotional_arc": "Chaos and terror — player understands the raw power of herd animals",
+      "voice_line": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844844263_QuestNPC_Scout.mp3"
+    },
+    {
+      "id": "Q004",
+      "title": "Follow the Herd North",
+      "type": "escort_tracking",
+      "difficulty": "medium",
+      "description": "The Parasaurolophus herd is beginning its seasonal migration north. Follow them to discover new territory and resources before the rains come.",
+      "trigger_actor": "QuestTrigger_Migration_Start",
+      "objectives": [
+        { "step": 1, "text": "Locate the migrating herd near the savanna", "actor": "QuestTrigger_Migration_Start" },
+        { "step": 2, "text": "Follow the herd to checkpoint 1", "actor": "QuestCP_Migration_001" },
+        { "step": 3, "text": "Continue north through the valley", "actor": "QuestCP_Migration_002" },
+        { "step": 4, "text": "Keep pace with the herd — do not fall too far behind", "actor": "QuestCP_Migration_003" },
+        { "step": 5, "text": "Reach the northern camp before dawn", "actor": "QuestGoal_NorthCamp" }
+      ],
+      "rewards": { "xp": 200, "resources": ["New_Biome_Unlocked", "Flint_x5", "Herb_x3"] },
+      "failure_condition": "Player loses sight of herd for more than 120 seconds",
+      "emotional_arc": "Discovery and endurance — the world is larger than the player imagined",
+      "voice_line": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844814026_QuestNPC_Elder.mp3"
+    },
+    {
+      "id": "Q005",
+      "title": "Silent Approach",
+      "type": "stealth",
+      "difficulty": "medium",
+      "description": "The watering hole animals are skittish. Approach the watering hole without triggering their panic response — stay downwind and move slowly.",
+      "trigger_actor": "QuestTrigger_ObserveHerd",
+      "objectives": [
+        { "step": 1, "text": "Approach the watering hole from downwind (south side)", "condition": "player_approaches_from_south" },
+        { "step": 2, "text": "Stay outside the stealth boundary markers", "actors": ["QuestStealth_Boundary_001", "QuestStealth_Boundary_002", "QuestStealth_Boundary_003"] },
+        { "step": 3, "text": "Crouch and move slowly — no sprinting within 600 units", "condition": "player_crouched_slow" },
+        { "step": 4, "text": "Reach the water's edge without spooking the animals", "actor": "WateringHole_Central_001" }
+      ],
+      "rewards": { "xp": 80, "resources": ["Water_Skin_Filled_x1", "Mud_x2"] },
+      "failure_condition": "Any animal at watering hole enters panic state",
+      "emotional_arc": "Respect for nature — player learns animals are not obstacles but living creatures",
+      "notes": "Connects to crafting system — filled water skin satisfies thirst survival stat"
+    }
+  ],
+  "world_actors_used": {
+    "WateringHole_Central_001": "Quest 2 and 5 location",
+    "ScatterZone_TRex_001": "Quest 3 trigger condition",
+    "Parasaur_Herd_001-005": "Quest 2, 3, 4 NPC herd",
+    "MigrationWP_North_001-003": "Quest 4 waypoint reference",
+    "QuestTrigger_ObserveHerd": "Quest 2 start",
+    "QuestMarker_ObserveHerd": "Quest 2 objective",
+    "QuestEscape_HighGround_001-003": "Quest 3 escape goals",
+    "QuestTrigger_Stampede": "Quest 3 trigger",
+    "QuestTrigger_Migration_Start": "Quest 4 start",
+    "QuestCP_Migration_001-004": "Quest 4 checkpoints",
+    "QuestGoal_NorthCamp": "Quest 4 end goal",
+    "QuestStealth_Boundary_001-003": "Quest 5 stealth zone"
+  },
+  "audio_assets": {
+    "QuestNPC_Elder_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844814026_QuestNPC_Elder.mp3",
+    "QuestNPC_Scout_voice": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781844844263_QuestNPC_Scout.mp3"
+  }
+}

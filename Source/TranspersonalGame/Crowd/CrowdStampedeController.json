@@ -1,0 +1,160 @@
+{
+  "crowd_stampede_system": {
+    "version": "1.3.0",
+    "agent": "Crowd_Simulation_Agent_13",
+    "cycle": "PROD_CYCLE_AUTO_20260702_010",
+    "description": "Stampede trigger and herd panic propagation system for prehistoric crowd simulation",
+
+    "stampede_triggers": {
+      "predator_proximity": {
+        "trigger_radius_cm": 80000,
+        "panic_threshold_predators": 1,
+        "propagation_speed_cm_per_s": 1200,
+        "description": "Herd panics when predator enters detection radius"
+      },
+      "loud_noise": {
+        "trigger_radius_cm": 50000,
+        "noise_threshold_db": 85,
+        "propagation_speed_cm_per_s": 900,
+        "description": "Volcanic eruption, thunder, or player-made noise triggers stampede"
+      },
+      "player_action": {
+        "trigger_radius_cm": 30000,
+        "actions": ["fire", "weapon_swing", "shout", "explosion"],
+        "propagation_speed_cm_per_s": 1500
+      }
+    },
+
+    "herd_states": {
+      "Grazing": {
+        "movement_speed_cm_s": 80,
+        "alert_radius_cm": 60000,
+        "cohesion_strength": 0.3,
+        "description": "Normal feeding state, low awareness"
+      },
+      "Alert": {
+        "movement_speed_cm_s": 150,
+        "alert_radius_cm": 80000,
+        "cohesion_strength": 0.6,
+        "heads_up": true,
+        "duration_s": 15,
+        "description": "Herd detected threat, preparing to flee or resume grazing"
+      },
+      "Fleeing": {
+        "movement_speed_cm_s": 1200,
+        "cohesion_strength": 0.8,
+        "flee_direction": "away_from_threat",
+        "duration_s": 30,
+        "description": "Active flight from threat"
+      },
+      "Stampeding": {
+        "movement_speed_cm_s": 1800,
+        "cohesion_strength": 0.95,
+        "trample_damage": 250,
+        "trample_radius_cm": 150,
+        "knockback_force": 8000,
+        "player_danger": "LETHAL",
+        "description": "Full panic stampede — player must dodge or die"
+      },
+      "Resting": {
+        "movement_speed_cm_s": 0,
+        "alert_radius_cm": 40000,
+        "cohesion_strength": 0.1,
+        "duration_s": 120,
+        "description": "Herd resting, most vulnerable state"
+      },
+      "Migrating": {
+        "movement_speed_cm_s": 200,
+        "cohesion_strength": 0.7,
+        "follow_waypoints": true,
+        "waypoint_set": "MigrationWP_Savana",
+        "description": "Seasonal migration along established corridor"
+      }
+    },
+
+    "boid_parameters": {
+      "separation_radius_cm": 300,
+      "separation_weight": 1.5,
+      "alignment_radius_cm": 800,
+      "alignment_weight": 1.0,
+      "cohesion_radius_cm": 1200,
+      "cohesion_weight": 0.8,
+      "leader_follow_weight": 2.0,
+      "obstacle_avoidance_radius_cm": 500,
+      "obstacle_avoidance_weight": 3.0
+    },
+
+    "lod_configuration": {
+      "lod_0_full_simulation": {
+        "max_distance_cm": 200000,
+        "update_rate_hz": 30,
+        "features": ["boids", "state_machine", "animation", "sound", "collision"]
+      },
+      "lod_1_simplified": {
+        "max_distance_cm": 500000,
+        "update_rate_hz": 10,
+        "features": ["boids_simplified", "state_machine", "animation_low"]
+      },
+      "lod_2_impostor": {
+        "max_distance_cm": 1000000,
+        "update_rate_hz": 2,
+        "features": ["position_only", "impostor_mesh"]
+      },
+      "lod_3_culled": {
+        "max_distance_cm": 9999999,
+        "update_rate_hz": 0,
+        "features": ["none"],
+        "description": "Beyond render distance — tracked but not simulated"
+      }
+    },
+
+    "herd_species": {
+      "Triceratops": {
+        "herd_size_min": 4,
+        "herd_size_max": 12,
+        "territory_radius_cm": 500000,
+        "migration_season": "dry",
+        "predators": ["TRex", "Carnotaurus"],
+        "trample_damage": 300,
+        "charge_speed_cm_s": 1600
+      },
+      "Parasaurolophus": {
+        "herd_size_min": 8,
+        "herd_size_max": 25,
+        "territory_radius_cm": 800000,
+        "migration_season": "wet",
+        "predators": ["Raptor", "Spinosaurus"],
+        "trample_damage": 150,
+        "alarm_call_radius_cm": 120000
+      },
+      "Gallimimus": {
+        "herd_size_min": 15,
+        "herd_size_max": 50,
+        "territory_radius_cm": 1200000,
+        "migration_season": "both",
+        "predators": ["TRex", "Raptor", "Carnotaurus"],
+        "trample_damage": 80,
+        "max_speed_cm_s": 2200,
+        "description": "Fastest herd animal — mass stampede is spectacular"
+      }
+    },
+
+    "scene_actors": {
+      "herd_actors": [
+        "Trike_Savana_001", "Trike_Savana_002", "Trike_Savana_003",
+        "Trike_Savana_004", "Trike_Savana_005", "Trike_Savana_006",
+        "Trike_Savana_007", "Trike_Savana_008"
+      ],
+      "predator_actors": [
+        "Raptor_Floresta_001", "Raptor_Floresta_002", "Raptor_Floresta_003",
+        "Raptor_Floresta_004", "Raptor_Floresta_005"
+      ],
+      "trigger_zones": ["StampedeTrigger_Savana_001"],
+      "migration_waypoints": [
+        "MigrationWP_Savana_001", "MigrationWP_Savana_002",
+        "MigrationWP_Savana_003", "MigrationWP_Savana_004"
+      ],
+      "lod_markers": ["LODZone_Near_001", "LODZone_Mid_001", "LODZone_Far_001"]
+    }
+  }
+}

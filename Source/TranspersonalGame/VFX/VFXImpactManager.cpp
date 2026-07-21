@@ -1,303 +1,220 @@
 #include "VFXImpactManager.h"
-#include "NiagaraFunctionLibrary.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystem.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
 
 AVFX_ImpactManager::AVFX_ImpactManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
     // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Initialize performance settings
-    MaxActiveEffects = 50;
-    PoolSize = 20;
-    EffectLifetime = 5.0f;
+    // Create particle system components
+    DustParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("DustParticleComponent"));
+    DustParticleComponent->SetupAttachment(RootComponent);
+    DustParticleComponent->bAutoActivate = false;
 
-    // Initialize impact systems map (will be populated in Blueprint or BeginPlay)
-    ImpactSystems.Empty();
-    SurfaceEffects.Empty();
-    ImpactSounds.Empty();
+    BloodParticleComponent = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("BloodParticleComponent"));
+    BloodParticleComponent->SetupAttachment(RootComponent);
+    BloodParticleComponent->bAutoActivate = false;
+
+    // Initialize default values
+    MaxImpactDistance = 5000.0f;
+    DustLifetime = 3.0f;
+    BloodLifetime = 8.0f;
 }
 
 void AVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Initialize the effect pool
-    InitializeEffectPool();
-
-    // Start cleanup timer
-    GetWorldTimerManager().SetTimer(
-        CleanupTimer,
-        this,
-        &AVFX_ImpactManager::CleanupExpiredEffects,
-        1.0f,
-        true
-    );
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager initialized with %d pooled effects"), PoolSize);
+    InitializeParticleSystems();
 }
 
-void AVFX_ImpactManager::CreateImpactEffect(const FVFX_ImpactData& ImpactData)
+void AVFX_ImpactManager::Tick(float DeltaTime)
 {
-    // Check if we've reached the maximum active effects
-    if (ActiveEffects.Num() >= MaxActiveEffects)
+    Super::Tick(DeltaTime);
+    UpdateImpactEffects(DeltaTime);
+    CleanupExpiredEffects();
+}
+
+void AVFX_ImpactManager::CreateFootstepImpact(const FVector& Location, float DinosaurMass)
+{
+    if (!DustParticleComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Maximum active effects reached (%d), skipping impact"), MaxActiveEffects);
         return;
     }
 
-    // Get the appropriate Niagara system
-    UNiagaraSystem* SystemToUse = GetSystemForImpact(ImpactData);
-    if (!SystemToUse)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No Niagara system found for impact type"));
-        return;
-    }
-
-    // Get a pooled effect component
-    UNiagaraComponent* EffectComponent = GetPooledEffect();
-    if (!EffectComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No available effect components in pool"));
-        return;
-    }
-
-    // Configure the effect
-    EffectComponent->SetAsset(SystemToUse);
-    EffectComponent->SetWorldLocation(ImpactData.ImpactLocation);
-    EffectComponent->SetWorldRotation(FRotationMatrix::MakeFromZ(ImpactData.ImpactNormal).Rotator());
-
-    // Configure effect parameters
-    ConfigureEffectParameters(EffectComponent, ImpactData);
-
-    // Activate the effect
-    EffectComponent->Activate();
-    ActiveEffects.Add(EffectComponent);
-
-    // Play sound effect
-    PlayImpactSound(ImpactData);
-
-    UE_LOG(LogTemp, Log, TEXT("Created impact effect at location: %s"), *ImpactData.ImpactLocation.ToString());
-}
-
-void AVFX_ImpactManager::CreateFootstepEffect(FVector Location, EVFX_SurfaceType Surface, float CreatureSize)
-{
-    FVFX_ImpactData ImpactData;
-    ImpactData.ImpactType = (CreatureSize > 5.0f) ? EVFX_ImpactType::DinosaurFootstep : EVFX_ImpactType::PlayerFootstep;
-    ImpactData.SurfaceType = Surface;
-    ImpactData.ImpactLocation = Location;
-    ImpactData.ImpactNormal = FVector::UpVector;
-    ImpactData.ImpactForce = CreatureSize;
-    ImpactData.ParticleScale = FMath::Clamp(CreatureSize, 0.5f, 10.0f);
-
-    CreateImpactEffect(ImpactData);
-}
-
-void AVFX_ImpactManager::CreateWeaponImpact(FVector Location, FVector Normal, EVFX_SurfaceType Surface, float Force)
-{
-    FVFX_ImpactData ImpactData;
-    ImpactData.ImpactType = EVFX_ImpactType::WeaponImpact;
-    ImpactData.SurfaceType = Surface;
-    ImpactData.ImpactLocation = Location;
-    ImpactData.ImpactNormal = Normal;
-    ImpactData.ImpactForce = Force;
-    ImpactData.ParticleScale = FMath::Clamp(Force, 0.5f, 3.0f);
-
-    CreateImpactEffect(ImpactData);
-}
-
-void AVFX_ImpactManager::CreateBloodEffect(FVector Location, FVector Direction, float Intensity)
-{
-    FVFX_ImpactData ImpactData;
-    ImpactData.ImpactType = EVFX_ImpactType::BloodSpatter;
-    ImpactData.SurfaceType = EVFX_SurfaceType::Bone; // Default surface for blood
-    ImpactData.ImpactLocation = Location;
-    ImpactData.ImpactNormal = Direction;
-    ImpactData.ImpactForce = Intensity;
-    ImpactData.ParticleScale = FMath::Clamp(Intensity, 0.3f, 2.0f);
-
-    CreateImpactEffect(ImpactData);
-}
-
-void AVFX_ImpactManager::CreateDustCloud(FVector Location, float Radius, float Duration)
-{
-    FVFX_ImpactData ImpactData;
-    ImpactData.ImpactType = EVFX_ImpactType::DustCloud;
-    ImpactData.SurfaceType = EVFX_SurfaceType::Dirt;
-    ImpactData.ImpactLocation = Location;
-    ImpactData.ImpactNormal = FVector::UpVector;
-    ImpactData.ImpactForce = Radius / 100.0f;
-    ImpactData.ParticleScale = FMath::Clamp(Radius / 100.0f, 0.5f, 5.0f);
-
-    CreateImpactEffect(ImpactData);
-}
-
-void AVFX_ImpactManager::InitializeEffectPool()
-{
-    EffectPool.Empty();
+    // Calculate dust cloud size based on dinosaur mass
+    float CloudSize = FMath::Clamp(DinosaurMass * 0.1f, 50.0f, 500.0f);
     
-    for (int32 i = 0; i < PoolSize; i++)
-    {
-        UNiagaraComponent* PooledEffect = CreateDefaultSubobject<UNiagaraComponent>(*FString::Printf(TEXT("PooledEffect_%d"), i));
-        PooledEffect->SetupAttachment(RootComponent);
-        PooledEffect->SetAutoDestroy(false);
-        PooledEffect->SetVisibility(false);
-        PooledEffect->Deactivate();
-        
-        EffectPool.Add(PooledEffect);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Initialized VFX pool with %d components"), PoolSize);
-}
-
-UNiagaraComponent* AVFX_ImpactManager::GetPooledEffect()
-{
-    for (UNiagaraComponent* Effect : EffectPool)
-    {
-        if (Effect && !Effect->IsActive())
-        {
-            Effect->SetVisibility(true);
-            return Effect;
-        }
-    }
-
-    // If no pooled effects available, create a new one temporarily
-    UNiagaraComponent* NewEffect = NewObject<UNiagaraComponent>(this);
-    NewEffect->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
-    NewEffect->SetAutoDestroy(false);
+    // Create impact data
+    FVFX_ImpactData NewImpact;
+    NewImpact.ImpactLocation = Location;
+    NewImpact.ImpactForce = DinosaurMass;
+    NewImpact.ImpactType = EVFX_ImpactType::Footstep;
+    NewImpact.DustCloudSize = CloudSize;
     
-    UE_LOG(LogTemp, Warning, TEXT("Effect pool exhausted, created temporary effect"));
-    return NewEffect;
+    ActiveImpacts.Add(NewImpact);
+
+    // Spawn dust cloud effect
+    CreateDustCloud(Location, CloudSize);
+
+    UE_LOG(LogTemp, Log, TEXT("VFX: Footstep impact created at %s with mass %f"), 
+           *Location.ToString(), DinosaurMass);
 }
 
-void AVFX_ImpactManager::ReturnEffectToPool(UNiagaraComponent* Effect)
+void AVFX_ImpactManager::CreateBloodSplatter(const FVector& Location, const FVector& Direction, float Intensity)
 {
-    if (!Effect)
+    if (!BloodParticleComponent)
     {
         return;
     }
 
-    Effect->Deactivate();
-    Effect->SetVisibility(false);
-    Effect->SetAsset(nullptr);
+    // Create blood impact data
+    FVFX_ImpactData BloodImpact;
+    BloodImpact.ImpactLocation = Location;
+    BloodImpact.ImpactForce = Intensity;
+    BloodImpact.ImpactType = EVFX_ImpactType::Blood;
+    BloodImpact.BloodColor = FLinearColor(0.8f, 0.1f, 0.1f, 1.0f); // Dark red
 
-    // Remove from active effects
-    ActiveEffects.Remove(Effect);
+    ActiveImpacts.Add(BloodImpact);
 
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Returned effect to pool"));
+    // Set particle system location and activate
+    BloodParticleComponent->SetWorldLocation(Location);
+    BloodParticleComponent->SetVectorParameter(TEXT("ImpactDirection"), Direction);
+    BloodParticleComponent->SetFloatParameter(TEXT("Intensity"), Intensity);
+    BloodParticleComponent->ActivateSystem();
+
+    UE_LOG(LogTemp, Log, TEXT("VFX: Blood splatter created at %s with intensity %f"), 
+           *Location.ToString(), Intensity);
+}
+
+void AVFX_ImpactManager::CreateDustCloud(const FVector& Location, float CloudSize)
+{
+    if (!DustParticleComponent)
+    {
+        return;
+    }
+
+    // Set dust particle parameters
+    DustParticleComponent->SetWorldLocation(Location);
+    DustParticleComponent->SetFloatParameter(TEXT("CloudSize"), CloudSize);
+    DustParticleComponent->SetFloatParameter(TEXT("Lifetime"), DustLifetime);
+    
+    // Activate dust system
+    DustParticleComponent->ActivateSystem();
+
+    UE_LOG(LogTemp, Log, TEXT("VFX: Dust cloud created at %s with size %f"), 
+           *Location.ToString(), CloudSize);
+}
+
+void AVFX_ImpactManager::CreateCombatImpact(const FVector& Location, EVFX_ImpactType Type, float Force)
+{
+    FVFX_ImpactData CombatImpact;
+    CombatImpact.ImpactLocation = Location;
+    CombatImpact.ImpactForce = Force;
+    CombatImpact.ImpactType = Type;
+
+    switch (Type)
+    {
+        case EVFX_ImpactType::Bite:
+            CreateBloodSplatter(Location, FVector::UpVector, Force * 0.5f);
+            break;
+        case EVFX_ImpactType::Claw:
+            CreateBloodSplatter(Location, FVector::ForwardVector, Force * 0.3f);
+            CreateDustCloud(Location, Force * 0.2f);
+            break;
+        case EVFX_ImpactType::Tail:
+            CreateDustCloud(Location, Force * 0.4f);
+            break;
+        default:
+            CreateDustCloud(Location, Force * 0.1f);
+            break;
+    }
+
+    ActiveImpacts.Add(CombatImpact);
+}
+
+void AVFX_ImpactManager::UpdateVFXLOD(float DistanceToPlayer)
+{
+    if (!DustParticleComponent || !BloodParticleComponent)
+    {
+        return;
+    }
+
+    // Calculate LOD level based on distance
+    float LODLevel = FMath::Clamp(DistanceToPlayer / 1000.0f, 0.1f, 1.0f);
+    
+    // Adjust particle density based on distance
+    DustParticleComponent->SetFloatParameter(TEXT("LODLevel"), LODLevel);
+    BloodParticleComponent->SetFloatParameter(TEXT("LODLevel"), LODLevel);
+
+    // Disable effects if too far away
+    if (DistanceToPlayer > MaxImpactDistance)
+    {
+        DustParticleComponent->DeactivateSystem();
+        BloodParticleComponent->DeactivateSystem();
+    }
 }
 
 void AVFX_ImpactManager::CleanupExpiredEffects()
 {
-    TArray<UNiagaraComponent*> ExpiredEffects;
-
-    for (UNiagaraComponent* Effect : ActiveEffects)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    ActiveImpacts.RemoveAll([CurrentTime, this](const FVFX_ImpactData& Impact)
     {
-        if (Effect && !Effect->IsActive())
+        float EffectLifetime = (Impact.ImpactType == EVFX_ImpactType::Blood) ? BloodLifetime : DustLifetime;
+        return (CurrentTime - Impact.ImpactForce) > EffectLifetime;
+    });
+}
+
+void AVFX_ImpactManager::TestFootstepVFX()
+{
+    FVector TestLocation = GetActorLocation() + FVector(0, 0, -100);
+    CreateFootstepImpact(TestLocation, 5000.0f); // T-Rex mass
+    UE_LOG(LogTemp, Warning, TEXT("VFX Test: Footstep effect triggered at %s"), *TestLocation.ToString());
+}
+
+void AVFX_ImpactManager::TestBloodVFX()
+{
+    FVector TestLocation = GetActorLocation();
+    CreateBloodSplatter(TestLocation, FVector::UpVector, 100.0f);
+    UE_LOG(LogTemp, Warning, TEXT("VFX Test: Blood effect triggered at %s"), *TestLocation.ToString());
+}
+
+void AVFX_ImpactManager::InitializeParticleSystems()
+{
+    // Initialize particle system parameters
+    if (DustParticleComponent)
+    {
+        DustParticleComponent->SetFloatParameter(TEXT("DefaultSize"), 100.0f);
+        DustParticleComponent->SetVectorParameter(TEXT("DefaultColor"), FVector(0.6f, 0.4f, 0.2f));
+    }
+
+    if (BloodParticleComponent)
+    {
+        BloodParticleComponent->SetFloatParameter(TEXT("DefaultIntensity"), 50.0f);
+        BloodParticleComponent->SetVectorParameter(TEXT("BloodColor"), FVector(0.8f, 0.1f, 0.1f));
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager: Particle systems initialized"));
+}
+
+void AVFX_ImpactManager::UpdateImpactEffects(float DeltaTime)
+{
+    // Update active impact effects
+    for (FVFX_ImpactData& Impact : ActiveImpacts)
+    {
+        // Fade out effects over time
+        Impact.ImpactForce *= 0.98f; // Gradual fade
+        
+        if (Impact.ImpactForce < 1.0f)
         {
-            ExpiredEffects.Add(Effect);
+            Impact.ImpactForce = 0.0f; // Mark for cleanup
         }
     }
-
-    for (UNiagaraComponent* ExpiredEffect : ExpiredEffects)
-    {
-        ReturnEffectToPool(ExpiredEffect);
-    }
-
-    if (ExpiredEffects.Num() > 0)
-    {
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Cleaned up %d expired effects"), ExpiredEffects.Num());
-    }
-}
-
-void AVFX_ImpactManager::SetMaxActiveEffects(int32 NewMax)
-{
-    MaxActiveEffects = FMath::Max(1, NewMax);
-    UE_LOG(LogTemp, Log, TEXT("Max active effects set to %d"), MaxActiveEffects);
-}
-
-void AVFX_ImpactManager::PlayImpactSound(const FVFX_ImpactData& ImpactData)
-{
-    USoundCue* SoundToPlay = ImpactSounds.FindRef(ImpactData.ImpactType);
-    if (SoundToPlay)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            SoundToPlay,
-            ImpactData.ImpactLocation,
-            FMath::Clamp(ImpactData.ImpactForce, 0.3f, 2.0f)
-        );
-    }
-}
-
-UNiagaraSystem* AVFX_ImpactManager::GetSystemForImpact(const FVFX_ImpactData& ImpactData)
-{
-    // First try to get impact-specific system
-    UNiagaraSystem* ImpactSystem = ImpactSystems.FindRef(ImpactData.ImpactType);
-    if (ImpactSystem)
-    {
-        return ImpactSystem;
-    }
-
-    // Fallback to surface-specific system
-    UNiagaraSystem* SurfaceSystem = SurfaceEffects.FindRef(ImpactData.SurfaceType);
-    if (SurfaceSystem)
-    {
-        return SurfaceSystem;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("No Niagara system found for impact type %d and surface type %d"), 
-           (int32)ImpactData.ImpactType, (int32)ImpactData.SurfaceType);
-    
-    return nullptr;
-}
-
-void AVFX_ImpactManager::ConfigureEffectParameters(UNiagaraComponent* Effect, const FVFX_ImpactData& ImpactData)
-{
-    if (!Effect)
-    {
-        return;
-    }
-
-    // Set common parameters that most Niagara systems should support
-    Effect->SetFloatParameter(TEXT("ParticleScale"), ImpactData.ParticleScale);
-    Effect->SetFloatParameter(TEXT("ImpactForce"), ImpactData.ImpactForce);
-    Effect->SetVectorParameter(TEXT("ImpactNormal"), ImpactData.ImpactNormal);
-    Effect->SetFloatParameter(TEXT("Lifetime"), EffectLifetime);
-
-    // Set surface-specific parameters
-    switch (ImpactData.SurfaceType)
-    {
-        case EVFX_SurfaceType::Dirt:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.4f, 0.3f, 0.2f, 1.0f));
-            break;
-        case EVFX_SurfaceType::Rock:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.6f, 0.6f, 0.6f, 1.0f));
-            break;
-        case EVFX_SurfaceType::Mud:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.3f, 0.2f, 0.1f, 1.0f));
-            break;
-        case EVFX_SurfaceType::Sand:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.8f, 0.7f, 0.5f, 1.0f));
-            break;
-        case EVFX_SurfaceType::Grass:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.2f, 0.4f, 0.1f, 1.0f));
-            break;
-        case EVFX_SurfaceType::Water:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor(0.3f, 0.5f, 0.8f, 0.7f));
-            break;
-        default:
-            Effect->SetColorParameter(TEXT("ParticleColor"), FLinearColor::White);
-            break;
-    }
-}
-
-void AVFX_ImpactManager::OnEffectFinished(UNiagaraComponent* FinishedEffect)
-{
-    ReturnEffectToPool(FinishedEffect);
 }

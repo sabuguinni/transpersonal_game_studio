@@ -1,414 +1,233 @@
 #include "Anim_MontageController.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/Engine.h"
 
 UAnim_MontageController::UAnim_MontageController()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for efficiency
-
-    // Initialize state
-    CurrentMontageType = EAnim_MontageType::None;
-    CurrentMontage = nullptr;
-    bIsMontageActive = false;
-    MontagePosition = 0.0f;
-    MontageLength = 0.0f;
-
-    // Settings
-    bAutoStopOnMovement = true;
-    MovementThreshold = 50.0f; // cm/s
-    bQueueMontages = false;
-
-    // Cache
-    LastLocation = FVector::ZeroVector;
-    LastMovementTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = false;
+    bIsPlayingMontage = false;
+    CurrentMontage = NAME_None;
+    CurrentMontagePriority = -1;
+    OwnerCharacter = nullptr;
+    AnimInstance = nullptr;
 }
 
 void UAnim_MontageController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Cache owner references
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter.IsValid())
-    {
-        SkeletalMeshComponent = OwnerCharacter->GetMesh();
-        if (SkeletalMeshComponent.IsValid())
-        {
-            AnimInstance = SkeletalMeshComponent->GetAnimInstance();
-        }
-        LastLocation = OwnerCharacter->GetActorLocation();
-    }
-
-    // Setup default montage library (these would be set in Blueprint or data assets)
-    if (MontageLibrary.Num() == 0)
-    {
-        // Initialize with default values - actual montage assets would be assigned in Blueprint
-        FAnim_MontageData JumpData;
-        JumpData.PlayRate = 1.0f;
-        JumpData.BlendInTime = 0.1f;
-        JumpData.BlendOutTime = 0.2f;
-        MontageLibrary.Add(EAnim_MontageType::Jump, JumpData);
-
-        FAnim_MontageData InteractData;
-        InteractData.PlayRate = 1.0f;
-        InteractData.BlendInTime = 0.25f;
-        InteractData.BlendOutTime = 0.25f;
-        MontageLibrary.Add(EAnim_MontageType::Interact, InteractData);
-
-        FAnim_MontageData CraftData;
-        CraftData.PlayRate = 1.0f;
-        CraftData.BlendInTime = 0.3f;
-        CraftData.BlendOutTime = 0.3f;
-        CraftData.bLooping = true;
-        MontageLibrary.Add(EAnim_MontageType::Craft, CraftData);
-
-        FAnim_MontageData GatherData;
-        GatherData.PlayRate = 1.2f;
-        GatherData.BlendInTime = 0.2f;
-        GatherData.BlendOutTime = 0.2f;
-        MontageLibrary.Add(EAnim_MontageType::Gather, GatherData);
-
-        FAnim_MontageData EatData;
-        EatData.PlayRate = 0.8f;
-        EatData.BlendInTime = 0.4f;
-        EatData.BlendOutTime = 0.4f;
-        MontageLibrary.Add(EAnim_MontageType::Eat, EatData);
-
-        FAnim_MontageData DrinkData;
-        DrinkData.PlayRate = 1.0f;
-        DrinkData.BlendInTime = 0.3f;
-        DrinkData.BlendOutTime = 0.3f;
-        MontageLibrary.Add(EAnim_MontageType::Drink, DrinkData);
-
-        FAnim_MontageData FearData;
-        FearData.PlayRate = 1.5f;
-        FearData.BlendInTime = 0.1f;
-        FearData.BlendOutTime = 0.5f;
-        MontageLibrary.Add(EAnim_MontageType::Fear, FearData);
-
-        FAnim_MontageData PainData;
-        PainData.PlayRate = 1.2f;
-        PainData.BlendInTime = 0.05f;
-        PainData.BlendOutTime = 0.3f;
-        MontageLibrary.Add(EAnim_MontageType::Pain, PainData);
-    }
-}
-
-void UAnim_MontageController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    UpdateMontageState();
     
-    if (bAutoStopOnMovement && bIsMontageActive)
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!OwnerCharacter)
     {
-        CheckMovementInterrupt();
+        UE_LOG(LogTemp, Warning, TEXT("MontageController: Owner is not a Character"));
+        return;
     }
 
-    if (bQueueMontages && MontageQueue.Num() > 0)
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (MeshComp)
     {
-        ProcessMontageQueue();
+        AnimInstance = MeshComp->GetAnimInstance();
+        if (AnimInstance)
+        {
+            // Bind montage delegates
+            AnimInstance->OnMontageEnded.AddDynamic(this, &UAnim_MontageController::OnMontageEnded);
+            AnimInstance->OnMontageBlendingOut.AddDynamic(this, &UAnim_MontageController::OnMontageBlendingOut);
+        }
     }
 }
 
-bool UAnim_MontageController::PlayMontage(EAnim_MontageType MontageType, float CustomPlayRate, FName StartSection)
+bool UAnim_MontageController::PlayMontage(FName MontageName, float PlayRate, bool bForcePlay)
 {
-    if (!AnimInstance.IsValid() || MontageType == EAnim_MontageType::None)
+    if (!AnimInstance || !OwnerCharacter)
     {
+        UE_LOG(LogTemp, Warning, TEXT("MontageController: Invalid AnimInstance or Character"));
         return false;
     }
 
-    const FAnim_MontageData* MontageData = MontageLibrary.Find(MontageType);
-    if (!MontageData || !MontageData->Montage)
+    FAnim_MontageData* MontageData = FindMontageData(MontageName);
+    if (!MontageData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Montage not found for type: %d"), (int32)MontageType);
+        UE_LOG(LogTemp, Warning, TEXT("MontageController: Montage '%s' not found in database"), *MontageName.ToString());
+        return false;
+    }
+
+    if (!CanPlayMontage(*MontageData, bForcePlay))
+    {
+        UE_LOG(LogTemp, Log, TEXT("MontageController: Cannot play montage '%s' - higher priority montage playing"), *MontageName.ToString());
+        return false;
+    }
+
+    // Load the montage asset
+    UAnimMontage* Montage = MontageData->Montage.LoadSynchronous();
+    if (!Montage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("MontageController: Failed to load montage asset for '%s'"), *MontageName.ToString());
         return false;
     }
 
     // Stop current montage if playing
-    if (bIsMontageActive && CurrentMontage)
+    if (bIsPlayingMontage)
     {
-        AnimInstance->Montage_Stop(MontageData->BlendOutTime, CurrentMontage);
+        StopCurrentMontage(0.1f);
     }
 
     // Play the new montage
-    float PlayRate = (CustomPlayRate > 0.0f) ? CustomPlayRate : MontageData->PlayRate;
-    FName Section = (StartSection != NAME_None) ? StartSection : MontageData->StartSection;
-
-    float MontageLength = AnimInstance->Montage_Play(MontageData->Montage, PlayRate, EMontagePlayReturnType::MontageLength, 0.0f, true);
-    
+    float MontageLength = AnimInstance->Montage_Play(Montage, PlayRate * MontageData->PlayRate);
     if (MontageLength > 0.0f)
     {
-        CurrentMontageType = MontageType;
-        CurrentMontage = MontageData->Montage;
-        bIsMontageActive = true;
-        this->MontageLength = MontageLength;
+        CurrentMontage = MontageName;
+        bIsPlayingMontage = true;
+        CurrentMontagePriority = MontageData->Priority;
 
-        // Jump to section if specified
-        if (Section != NAME_None)
-        {
-            AnimInstance->Montage_JumpToSection(Section, CurrentMontage);
-        }
-
-        // Bind montage events
-        FOnMontageBlendingOutStarted BlendingOutDelegate;
-        BlendingOutDelegate.BindUObject(this, &UAnim_MontageController::OnMontageBlendingOut);
-        AnimInstance->Montage_SetBlendingOutDelegate(BlendingOutDelegate, CurrentMontage);
-
-        FOnMontageEnded EndedDelegate;
-        EndedDelegate.BindUObject(this, &UAnim_MontageController::OnMontageEnded_Internal);
-        AnimInstance->Montage_SetEndDelegate(EndedDelegate, CurrentMontage);
-
-        // Broadcast event
-        OnMontageStarted.Broadcast(MontageType, CurrentMontage);
-
-        UE_LOG(LogTemp, Log, TEXT("Started montage: %s"), *CurrentMontage->GetName());
+        OnMontageStarted.Broadcast(MontageName);
+        UE_LOG(LogTemp, Log, TEXT("MontageController: Playing montage '%s' with length %f"), *MontageName.ToString(), MontageLength);
         return true;
     }
 
+    UE_LOG(LogTemp, Warning, TEXT("MontageController: Failed to play montage '%s'"), *MontageName.ToString());
     return false;
 }
 
-bool UAnim_MontageController::PlayMontageByAsset(UAnimMontage* Montage, float PlayRate, float BlendInTime, FName StartSection)
+bool UAnim_MontageController::PlayMontageByType(EAnim_MontageType MontageType, float PlayRate, bool bForcePlay)
 {
-    if (!AnimInstance.IsValid() || !Montage)
+    FAnim_MontageData* MontageData = FindMontageDataByType(MontageType);
+    if (!MontageData)
     {
+        UE_LOG(LogTemp, Warning, TEXT("MontageController: No montage found for type %d"), (int32)MontageType);
         return false;
     }
 
-    // Stop current montage
-    if (bIsMontageActive && CurrentMontage)
-    {
-        AnimInstance->Montage_Stop(BlendInTime, CurrentMontage);
-    }
-
-    float MontageLength = AnimInstance->Montage_Play(Montage, PlayRate, EMontagePlayReturnType::MontageLength, 0.0f, true);
-    
-    if (MontageLength > 0.0f)
-    {
-        CurrentMontageType = EAnim_MontageType::None; // Custom montage
-        CurrentMontage = Montage;
-        bIsMontageActive = true;
-        this->MontageLength = MontageLength;
-
-        if (StartSection != NAME_None)
-        {
-            AnimInstance->Montage_JumpToSection(StartSection, CurrentMontage);
-        }
-
-        OnMontageStarted.Broadcast(EAnim_MontageType::None, CurrentMontage);
-        return true;
-    }
-
-    return false;
+    return PlayMontage(MontageData->MontageName, PlayRate, bForcePlay);
 }
 
-void UAnim_MontageController::StopMontage(float BlendOutTime)
+void UAnim_MontageController::StopCurrentMontage(float BlendOutTime)
 {
-    if (!AnimInstance.IsValid() || !bIsMontageActive || !CurrentMontage)
+    if (!AnimInstance || !bIsPlayingMontage)
     {
         return;
     }
 
-    float ActualBlendOutTime = (BlendOutTime >= 0.0f) ? BlendOutTime : 0.25f;
-    AnimInstance->Montage_Stop(ActualBlendOutTime, CurrentMontage);
+    AnimInstance->Montage_Stop(BlendOutTime);
+    UE_LOG(LogTemp, Log, TEXT("MontageController: Stopping current montage '%s'"), *CurrentMontage.ToString());
 }
 
-void UAnim_MontageController::PauseMontage()
+void UAnim_MontageController::StopAllMontages(float BlendOutTime)
 {
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
+    if (!AnimInstance)
     {
-        AnimInstance->Montage_Pause(CurrentMontage);
+        return;
     }
+
+    AnimInstance->StopAllMontages(BlendOutTime);
+    bIsPlayingMontage = false;
+    CurrentMontage = NAME_None;
+    CurrentMontagePriority = -1;
+    UE_LOG(LogTemp, Log, TEXT("MontageController: Stopping all montages"));
 }
 
-void UAnim_MontageController::ResumeMontage()
+float UAnim_MontageController::GetMontagePosition() const
 {
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
+    if (!AnimInstance || !bIsPlayingMontage)
     {
-        AnimInstance->Montage_Resume(CurrentMontage);
+        return 0.0f;
     }
+
+    return AnimInstance->Montage_GetPosition(nullptr);
 }
 
 void UAnim_MontageController::SetMontagePosition(float Position)
 {
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
-    {
-        AnimInstance->Montage_SetPosition(CurrentMontage, Position);
-    }
-}
-
-void UAnim_MontageController::JumpToSection(FName SectionName)
-{
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
-    {
-        AnimInstance->Montage_JumpToSection(SectionName, CurrentMontage);
-    }
-}
-
-float UAnim_MontageController::GetMontagePlayRate() const
-{
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
-    {
-        return AnimInstance->Montage_GetPlayRate(CurrentMontage);
-    }
-    return 0.0f;
-}
-
-FName UAnim_MontageController::GetCurrentSection() const
-{
-    if (AnimInstance.IsValid() && bIsMontageActive && CurrentMontage)
-    {
-        return AnimInstance->Montage_GetCurrentSection(CurrentMontage);
-    }
-    return NAME_None;
-}
-
-TArray<FName> UAnim_MontageController::GetMontageSections() const
-{
-    TArray<FName> Sections;
-    if (CurrentMontage)
-    {
-        for (const FCompositeSection& Section : CurrentMontage->CompositeSections)
-        {
-            Sections.Add(Section.SectionName);
-        }
-    }
-    return Sections;
-}
-
-// Survival Specific Montages
-void UAnim_MontageController::PlayJumpMontage()
-{
-    PlayMontage(EAnim_MontageType::Jump);
-}
-
-void UAnim_MontageController::PlayInteractMontage()
-{
-    PlayMontage(EAnim_MontageType::Interact);
-}
-
-void UAnim_MontageController::PlayCraftMontage()
-{
-    PlayMontage(EAnim_MontageType::Craft);
-}
-
-void UAnim_MontageController::PlayGatherMontage()
-{
-    PlayMontage(EAnim_MontageType::Gather);
-}
-
-void UAnim_MontageController::PlayEatMontage()
-{
-    PlayMontage(EAnim_MontageType::Eat);
-}
-
-void UAnim_MontageController::PlayDrinkMontage()
-{
-    PlayMontage(EAnim_MontageType::Drink);
-}
-
-void UAnim_MontageController::PlayFearMontage()
-{
-    PlayMontage(EAnim_MontageType::Fear);
-}
-
-void UAnim_MontageController::PlayPainMontage()
-{
-    PlayMontage(EAnim_MontageType::Pain);
-}
-
-// Private Methods
-void UAnim_MontageController::UpdateMontageState()
-{
-    if (!AnimInstance.IsValid())
+    if (!AnimInstance || !bIsPlayingMontage)
     {
         return;
     }
 
-    if (bIsMontageActive && CurrentMontage)
+    AnimInstance->Montage_SetPosition(nullptr, Position);
+}
+
+void UAnim_MontageController::AddMontageToDatabase(const FAnim_MontageData& MontageData)
+{
+    // Remove existing entry with same name
+    RemoveMontageFromDatabase(MontageData.MontageName);
+    
+    // Add new entry
+    MontageDatabase.Add(MontageData);
+    UE_LOG(LogTemp, Log, TEXT("MontageController: Added montage '%s' to database"), *MontageData.MontageName.ToString());
+}
+
+void UAnim_MontageController::RemoveMontageFromDatabase(FName MontageName)
+{
+    int32 RemovedCount = MontageDatabase.RemoveAll([MontageName](const FAnim_MontageData& Data)
     {
-        if (AnimInstance->Montage_IsActive(CurrentMontage))
-        {
-            MontagePosition = AnimInstance->Montage_GetPosition(CurrentMontage);
-        }
-        else
-        {
-            // Montage finished
-            bIsMontageActive = false;
-            CurrentMontage = nullptr;
-            CurrentMontageType = EAnim_MontageType::None;
-            MontagePosition = 0.0f;
-            MontageLength = 0.0f;
-        }
+        return Data.MontageName == MontageName;
+    });
+
+    if (RemovedCount > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("MontageController: Removed montage '%s' from database"), *MontageName.ToString());
     }
 }
 
-void UAnim_MontageController::ProcessMontageQueue()
+void UAnim_MontageController::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-    if (!bIsMontageActive && MontageQueue.Num() > 0)
+    if (bIsPlayingMontage)
     {
-        EAnim_MontageType NextMontage = MontageQueue[0];
-        MontageQueue.RemoveAt(0);
-        PlayMontage(NextMontage);
+        FName EndedMontageName = CurrentMontage;
+        bIsPlayingMontage = false;
+        CurrentMontage = NAME_None;
+        CurrentMontagePriority = -1;
+
+        OnMontageComplete.Broadcast(EndedMontageName, bInterrupted);
+        UE_LOG(LogTemp, Log, TEXT("MontageController: Montage ended - '%s', Interrupted: %s"), 
+               *EndedMontageName.ToString(), bInterrupted ? TEXT("true") : TEXT("false"));
     }
 }
 
 void UAnim_MontageController::OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted)
 {
-    if (Montage == CurrentMontage)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Montage blending out: %s (Interrupted: %s)"), 
-               *Montage->GetName(), bInterrupted ? TEXT("Yes") : TEXT("No"));
-    }
+    // Handle blending out if needed
+    UE_LOG(LogTemp, Log, TEXT("MontageController: Montage blending out"));
 }
 
-void UAnim_MontageController::OnMontageEnded_Internal(UAnimMontage* Montage, bool bInterrupted)
+FAnim_MontageData* UAnim_MontageController::FindMontageData(FName MontageName)
 {
-    if (Montage == CurrentMontage)
+    for (FAnim_MontageData& Data : MontageDatabase)
     {
-        EAnim_MontageType EndedType = CurrentMontageType;
-        
-        bIsMontageActive = false;
-        CurrentMontage = nullptr;
-        CurrentMontageType = EAnim_MontageType::None;
-        MontagePosition = 0.0f;
-        MontageLength = 0.0f;
-
-        OnMontageEnded.Broadcast(EndedType, !bInterrupted);
-        
-        UE_LOG(LogTemp, Log, TEXT("Montage ended: %s (Completed: %s)"), 
-               *Montage->GetName(), bInterrupted ? TEXT("No") : TEXT("Yes"));
-    }
-}
-
-void UAnim_MontageController::CheckMovementInterrupt()
-{
-    if (!OwnerCharacter.IsValid())
-    {
-        return;
-    }
-
-    FVector CurrentLocation = OwnerCharacter->GetActorLocation();
-    float Distance = FVector::Dist(CurrentLocation, LastLocation);
-    float DeltaTime = GetWorld()->GetTimeSeconds() - LastMovementTime;
-    
-    if (DeltaTime > 0.0f)
-    {
-        float Speed = Distance / DeltaTime;
-        if (Speed > MovementThreshold)
+        if (Data.MontageName == MontageName)
         {
-            // Character is moving fast enough to interrupt montage
-            StopMontage(0.2f);
-            UE_LOG(LogTemp, Log, TEXT("Montage interrupted by movement (Speed: %.1f cm/s)"), Speed);
+            return &Data;
         }
     }
+    return nullptr;
+}
 
-    LastLocation = CurrentLocation;
-    LastMovementTime = GetWorld()->GetTimeSeconds();
+FAnim_MontageData* UAnim_MontageController::FindMontageDataByType(EAnim_MontageType MontageType)
+{
+    for (FAnim_MontageData& Data : MontageDatabase)
+    {
+        if (Data.MontageType == MontageType)
+        {
+            return &Data;
+        }
+    }
+    return nullptr;
+}
+
+bool UAnim_MontageController::CanPlayMontage(const FAnim_MontageData& MontageData, bool bForcePlay) const
+{
+    if (bForcePlay)
+    {
+        return true;
+    }
+
+    if (!bIsPlayingMontage)
+    {
+        return true;
+    }
+
+    // Check priority - higher priority can interrupt lower priority
+    return MontageData.Priority >= CurrentMontagePriority;
 }

@@ -1,0 +1,202 @@
+{
+  "combat_ai_zones": {
+    "version": "1.0.0",
+    "agent": "Combat_Enemy_AI_12",
+    "cycle": "PROD_CYCLE_AUTO_20260619_001",
+    "description": "Combat AI zone configuration — state machine ranges, flanking patterns, territorial behaviors",
+
+    "trex_combat_system": {
+      "species": "Tyrannosaurus Rex",
+      "ai_states": {
+        "IDLE": {
+          "description": "Patrolling BTWaypoint_TRex_001-004 circuit",
+          "patrol_speed": 150,
+          "patrol_waypoints": ["BTWaypoint_TRex_001","BTWaypoint_TRex_002","BTWaypoint_TRex_003","BTWaypoint_TRex_004"],
+          "idle_animation": "TRex_Walk_Patrol",
+          "sensory_active": true
+        },
+        "ALERT": {
+          "description": "Player detected — investigating. Triggered at CombatZone_TRex_AggroRing_001 (3000u)",
+          "trigger_range_units": 3000,
+          "trigger_zone_marker": "CombatZone_TRex_AggroRing_001",
+          "detection_method": "sound_or_sight",
+          "wind_modifier": true,
+          "alert_animation": "TRex_HeadLift_Sniff",
+          "transition_to_CHASE": "player_confirmed_in_sight_or_smell",
+          "transition_to_IDLE": "no_stimulus_30s"
+        },
+        "CHASE": {
+          "description": "Active pursuit — player must reach CombatZone_TRex_SafeRetreat_001 to break chase",
+          "chase_speed": 650,
+          "max_chase_range_units": 3000,
+          "break_chase_zone": "CombatZone_TRex_SafeRetreat_001",
+          "chase_animation": "TRex_Run_Chase",
+          "roar_on_enter": true,
+          "stamina_drain_player": 8.0,
+          "transition_to_ATTACK": "distance_less_than_300u",
+          "transition_to_IDLE": "player_in_safe_retreat_zone OR distance_greater_than_3000u"
+        },
+        "ATTACK": {
+          "description": "Lunge attack — triggered at CombatZone_TRex_LungeRange_001 (300u)",
+          "trigger_range_units": 300,
+          "trigger_zone_marker": "CombatZone_TRex_LungeRange_001",
+          "attack_animation": "TRex_Bite_Lunge",
+          "damage_per_hit": 85,
+          "knockback_force": 1200,
+          "attack_cooldown_seconds": 2.5,
+          "transition_to_CHASE": "player_escapes_300u_range"
+        },
+        "TERRITORIAL": {
+          "description": "Defending kill or nest — heightened aggression, no retreat",
+          "aggro_range_multiplier": 1.5,
+          "damage_multiplier": 1.3,
+          "trigger_condition": "player_near_active_kill_site"
+        }
+      },
+      "sensory_system": {
+        "sight_range_units": 2500,
+        "sight_fov_degrees": 45,
+        "smell_range_units": 3000,
+        "wind_direction_affects_smell": true,
+        "hearing_range_units": 1800,
+        "movement_detection_multiplier": 2.0,
+        "stillness_detection_reduction": 0.1,
+        "night_sight_penalty": 0.4
+      },
+      "voice_lines": {
+        "on_alert": "TRex_Roar_Alert.wav",
+        "on_chase": "TRex_Roar_Chase.wav",
+        "on_attack": "TRex_Bite_Impact.wav",
+        "on_lose_target": "TRex_Growl_Confused.wav"
+      }
+    },
+
+    "raptor_pack_combat_system": {
+      "species": "Velociraptor",
+      "pack_size": { "min": 2, "max": 4 },
+      "ai_states": {
+        "STALK": {
+          "description": "Pack spreading to flank positions. Triggered at CombatZone_Raptor_StalkTrigger_001 (800u)",
+          "trigger_range_units": 800,
+          "trigger_zone_marker": "CombatZone_Raptor_StalkTrigger_001",
+          "stalk_speed": 120,
+          "stalk_animation": "Raptor_Crouch_Stalk",
+          "flank_positions": {
+            "left_flank": "CombatZone_Raptor_FlankLeft_001",
+            "right_flank": "CombatZone_Raptor_FlankRight_001",
+            "center_distract": "BTZone_Raptor_Ambush_001"
+          },
+          "coordination": "alpha_signals_when_all_in_position",
+          "transition_to_PINCER": "all_raptors_in_flank_positions"
+        },
+        "PINCER": {
+          "description": "Coordinated pincer — left+right close simultaneously while center distracts",
+          "trigger_condition": "all_raptors_in_flank_positions",
+          "pincer_speed": 380,
+          "pincer_animation": "Raptor_Sprint_Attack",
+          "coordination_delay_seconds": 0.3,
+          "transition_to_SURROUND_COLLAPSE": "player_cornered OR distance_less_than_400u"
+        },
+        "SURROUND_COLLAPSE": {
+          "description": "Pack collapses on player from all sides. Zone: CombatZone_Raptor_SurroundCollapse_001",
+          "trigger_zone_marker": "CombatZone_Raptor_SurroundCollapse_001",
+          "attack_rotation_seconds": 1.5,
+          "damage_per_raptor_hit": 35,
+          "knockdown_chance": 0.4,
+          "escape_condition": "player_reaches_high_ground OR kills_2_raptors",
+          "pack_retreat_on_loss": true
+        },
+        "RETREAT": {
+          "description": "Pack retreats if 2+ members killed or player reaches high ground",
+          "retreat_trigger": "pack_size_below_2 OR player_elevation_above_400u",
+          "retreat_speed": 500,
+          "regroup_distance_units": 2000,
+          "regroup_cooldown_seconds": 45
+        }
+      },
+      "pack_coordination": {
+        "alpha_raptor": "first_spawned_in_pack",
+        "communication_range_units": 1200,
+        "pack_signal_type": "vocalisation_bark",
+        "independent_hunt_if_separated": true
+      },
+      "sensory_system": {
+        "sight_range_units": 1500,
+        "sight_fov_degrees": 120,
+        "smell_range_units": 800,
+        "hearing_range_units": 1200,
+        "dusk_hunt_bonus": 1.4,
+        "pack_detection_sharing": true
+      }
+    },
+
+    "brachiosaurus_territorial_system": {
+      "species": "Brachiosaurus",
+      "default_behavior": "PEACEFUL",
+      "territorial_zone_marker": "CombatZone_Brachio_TerritorialWarn_001",
+      "ai_states": {
+        "PEACEFUL": {
+          "description": "Grazing, ignores player unless provoked",
+          "graze_animation": "Brachio_Graze_Idle",
+          "move_speed": 80
+        },
+        "DEFENSIVE_WARN": {
+          "description": "Player too close — warning stomp and head shake",
+          "trigger_range_units": 1500,
+          "trigger_zone_marker": "CombatZone_Brachio_TerritorialWarn_001",
+          "warn_animation": "Brachio_HeadShake_Stomp",
+          "stomp_shockwave_radius": 400,
+          "stomp_damage": 20,
+          "transition_to_CHARGE": "player_remains_in_zone_10s OR player_attacks"
+        },
+        "CHARGE": {
+          "description": "Full territorial charge — devastating but slow",
+          "charge_speed": 320,
+          "charge_damage": 150,
+          "charge_animation": "Brachio_Charge",
+          "charge_duration_max_seconds": 8,
+          "transition_to_PEACEFUL": "player_exits_2000u_range"
+        }
+      }
+    },
+
+    "combat_voice_lines": {
+      "CombatNarrator_TRex": {
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781830037600_CombatNarrator.mp3",
+        "text": "It's charging. Don't run — you cannot outrun it. Drop flat, press against the ground, stay still. It hunts by movement. If it loses sight of you, it will circle. Wait for it to turn its back. That is your only window to escape.",
+        "trigger": "TRex_CHASE_state_entered",
+        "cooldown_seconds": 120
+      },
+      "CombatNarrator_Raptor": {
+        "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781830064185_CombatNarrator_Raptor.mp3",
+        "text": "The raptors are coordinating. One is circling left, one right — they're trying to flank you. Get your back against something solid. A tree, a rock face, anything. Force them to come at you from the front. They lose their advantage if they can't surround you.",
+        "trigger": "Raptor_PINCER_state_entered",
+        "cooldown_seconds": 90
+      }
+    },
+
+    "combat_zone_markers_in_map": {
+      "trex_zones": [
+        { "label": "CombatZone_TRex_AggroRing_001", "purpose": "ALERT state trigger", "range_units": 3000, "color": "orange" },
+        { "label": "CombatZone_TRex_LungeRange_001", "purpose": "ATTACK state trigger", "range_units": 300, "color": "deep_red" },
+        { "label": "CombatZone_TRex_SafeRetreat_001", "purpose": "Chase break zone", "range_units": 800, "color": "cyan" }
+      ],
+      "raptor_zones": [
+        { "label": "CombatZone_Raptor_FlankLeft_001", "purpose": "Left pincer position", "range_units": 600, "color": "magenta" },
+        { "label": "CombatZone_Raptor_FlankRight_001", "purpose": "Right pincer position", "range_units": 600, "color": "magenta" },
+        { "label": "CombatZone_Raptor_StalkTrigger_001", "purpose": "Pack stalk initiation", "range_units": 800, "color": "yellow_green" },
+        { "label": "CombatZone_Raptor_SurroundCollapse_001", "purpose": "Kill zone collapse", "range_units": 400, "color": "red_orange" }
+      ],
+      "brachio_zones": [
+        { "label": "CombatZone_Brachio_TerritorialWarn_001", "purpose": "Territorial warning trigger", "range_units": 1500, "color": "amber" }
+      ]
+    },
+
+    "integration_with_agent11": {
+      "bt_waypoints_used": ["BTWaypoint_TRex_001","BTWaypoint_TRex_002","BTWaypoint_TRex_003","BTWaypoint_TRex_004"],
+      "bt_ambush_zones_used": ["BTZone_Raptor_Ambush_001","BTZone_Raptor_Ambush_002"],
+      "memory_events_consumed": ["TRexHeard","RaptorAttack","PlayerSpotted"],
+      "memory_events_produced": ["TRexAttacked","RaptorPackEngaged","PlayerFled","PlayerKilled"]
+    }
+  }
+}

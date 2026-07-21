@@ -1,0 +1,59 @@
+CINEMATIC LIGHTING SYSTEM - TECHNICAL REFERENCE
+Agent #8 - Lighting & Atmosphere
+Cycle: PROD_CYCLE_AUTO_20260617_003
+
+=== DIRECTIONAL LIGHT (Golden Hour Sun) ===
+Intensity: 8.5 lux
+Color: RGB(0.98, 0.92, 0.78) - warm amber
+Temperature: 3200K (warm prehistoric atmosphere)
+Rotation: Pitch=-35°, Yaw=45° (low angle golden hour)
+Volumetric Scattering: 2.5 (enhanced god rays)
+Volumetric Shadows: ENABLED
+
+=== SKY LIGHT (Ambient Fill) ===
+Intensity: 1.2
+Color: RGB(0.85, 0.88, 0.95) - cool blue ambient
+Purpose: Fill shadows with realistic sky bounce light
+
+=== VOLUMETRIC FOG (Atmospheric Depth) ===
+Density: 0.015 (subtle atmospheric haze)
+Inscattering Color: RGB(0.95, 0.88, 0.72) - warm golden
+Scattering Distribution: 0.6 (forward scattering bias)
+Albedo: RGB(0.92, 0.85, 0.70) - warm prehistoric tint
+Extinction Scale: 1.8 (enhanced depth fade)
+
+=== CAVE INTERIOR LIGHTING ===
+Type: Spot Light
+Location: Cave entrance interior (X=-30000, Y=40000, Z=300 offset)
+Intensity: 0.3 lux (dim transition zone)
+Color: RGB(0.4, 0.45, 0.55) - cool blue shadow
+Attenuation Radius: 2000 units
+Cone Angles: Inner=25°, Outer=45°
+Label: Cave_Interior_Spot_Light
+
+=== SHELTER CAMPFIRE LIGHTING ===
+Type: Point Light
+Location: Shelter campfire marker (X=20000, Y=-35000, Z=50 offset)
+Intensity: 15.0 lux (warm firelight)
+Color: RGB(1.0, 0.6, 0.3) - orange flame
+Temperature: 2200K (fire temperature)
+Attenuation Radius: 800 units
+Label: Shelter_Campfire_Light
+
+=== LIGHTING PHILOSOPHY ===
+- Golden hour sun creates dramatic long shadows from architectural structures
+- Volumetric fog enhances depth and atmosphere in prehistoric setting
+- Cave entrance uses cool/warm contrast (exterior warm sun vs interior cool shadow)
+- Campfire provides localized warm light for shelter interior gameplay
+- All lighting supports Lumen global illumination for realistic bounce light
+
+=== AUDIO INTEGRATION NOTES ===
+Cave Interior: Requires reverb zone + dripping water ambience
+Shelter Campfire: Requires crackling fire loop + wood burning sounds
+Outdoor: Wind ambience with volumetric fog movement
+
+=== NEXT STEPS (Character Artist #9) ===
+- Character skin materials should respond to warm 3200K directional light
+- MetaHuman subsurface scattering will enhance with current lighting setup
+- Cave interior lighting provides dramatic rim lighting for character reveals
+- Campfire light creates cinematic close-up opportunities for character interactions

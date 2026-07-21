@@ -1,0 +1,165 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "NPC_Behavior_Agent_11",
+  "description": "Dinosaur NPC behavior configuration for MinPlayableMap. Defines patrol routes, detection radii, behavior states, and zone assignments.",
+
+  "behavior_zones": [
+    {
+      "label": "BehaviorZone_RaptorAmbush_001",
+      "location": [-3200, 2100, 100],
+      "scale": [8, 8, 3],
+      "behavior_type": "AMBUSH",
+      "assigned_species": ["Raptor"],
+      "trigger_radius_cm": 4000,
+      "description": "Dense forest zone where raptors coordinate ambush attacks. Player entering triggers pack alert."
+    },
+    {
+      "label": "BehaviorZone_TRexTerritory_001",
+      "location": [4500, -1800, 100],
+      "scale": [15, 15, 4],
+      "behavior_type": "TERRITORY",
+      "assigned_species": ["TRex"],
+      "trigger_radius_cm": 7500,
+      "description": "T-Rex exclusive territory. Any large animal or player entering triggers aggressive chase."
+    },
+    {
+      "label": "BehaviorZone_BrachioGrazing_001",
+      "location": [-1200, -3500, 100],
+      "scale": [12, 12, 3],
+      "behavior_type": "GRAZING",
+      "assigned_species": ["Brachiosaurus"],
+      "trigger_radius_cm": 6000,
+      "description": "Open plains grazing area. Brachiosaurus feeds here during daylight. Passive unless threatened."
+    },
+    {
+      "label": "BehaviorZone_WaterSource_001",
+      "location": [800, 3200, 80],
+      "scale": [6, 6, 2],
+      "behavior_type": "WATER",
+      "assigned_species": ["TRex", "Raptor", "Brachiosaurus"],
+      "trigger_radius_cm": 3000,
+      "description": "Shared water source. All species converge at dawn/dusk. High tension zone — predators hunt here."
+    },
+    {
+      "label": "BehaviorZone_NightRoost_001",
+      "location": [-4000, -2000, 100],
+      "scale": [10, 10, 3],
+      "behavior_type": "ROOST",
+      "assigned_species": ["Raptor"],
+      "trigger_radius_cm": 5000,
+      "description": "Raptor pack resting zone at night. Pack is more alert here — detection radius doubled."
+    }
+  ],
+
+  "patrol_waypoints": {
+    "TRex": {
+      "circuit": [
+        {"label": "Waypoint_TRex_001", "location": [4500, -1800, 100]},
+        {"label": "Waypoint_TRex_002", "location": [5800, -800, 100]},
+        {"label": "Waypoint_TRex_003", "location": [6200, -2800, 100]},
+        {"label": "Waypoint_TRex_004", "location": [4200, -4000, 100]},
+        {"label": "Waypoint_TRex_005", "location": [3000, -2200, 100]}
+      ],
+      "patrol_speed_cm_s": 250,
+      "wait_at_waypoint_seconds": 4.0,
+      "patrol_type": "LOOP"
+    },
+    "Raptor": {
+      "circuit": [
+        {"label": "Waypoint_Raptor_001", "location": [-3200, 2100, 100]},
+        {"label": "Waypoint_Raptor_002", "location": [-2400, 3000, 100]},
+        {"label": "Waypoint_Raptor_003", "location": [-1800, 2200, 100]},
+        {"label": "Waypoint_Raptor_004", "location": [-2600, 1200, 100]},
+        {"label": "Waypoint_Raptor_005", "location": [-3600, 1600, 100]}
+      ],
+      "patrol_speed_cm_s": 350,
+      "wait_at_waypoint_seconds": 2.0,
+      "patrol_type": "LOOP"
+    }
+  },
+
+  "species_behavior_profiles": {
+    "TRex": {
+      "detection_radius_cm": 3000,
+      "detection_angle_degrees": 120,
+      "chase_radius_cm": 6000,
+      "attack_radius_cm": 300,
+      "give_up_chase_radius_cm": 8000,
+      "base_speed_cm_s": 600,
+      "sprint_speed_cm_s": 900,
+      "attack_damage": 80,
+      "attack_cooldown_seconds": 2.5,
+      "hearing_radius_cm": 5000,
+      "roar_cooldown_seconds": 15.0,
+      "states": ["PATROL", "ALERT", "CHASE", "ATTACK", "ROAR", "IDLE", "DRINK"],
+      "daily_routine": {
+        "dawn": "DRINK",
+        "morning": "PATROL",
+        "midday": "IDLE",
+        "afternoon": "PATROL",
+        "dusk": "DRINK",
+        "night": "IDLE"
+      }
+    },
+    "Raptor": {
+      "detection_radius_cm": 2000,
+      "detection_angle_degrees": 160,
+      "chase_radius_cm": 4000,
+      "attack_radius_cm": 150,
+      "give_up_chase_radius_cm": 5000,
+      "base_speed_cm_s": 700,
+      "sprint_speed_cm_s": 1100,
+      "attack_damage": 35,
+      "attack_cooldown_seconds": 0.8,
+      "hearing_radius_cm": 3000,
+      "pack_size": 3,
+      "pack_coordination": true,
+      "flanking_behavior": true,
+      "states": ["PATROL", "ALERT", "FLANK", "CHASE", "ATTACK", "IDLE", "ROOST"],
+      "daily_routine": {
+        "dawn": "PATROL",
+        "morning": "HUNT",
+        "midday": "IDLE",
+        "afternoon": "HUNT",
+        "dusk": "PATROL",
+        "night": "ROOST"
+      }
+    },
+    "Brachiosaurus": {
+      "detection_radius_cm": 1500,
+      "detection_angle_degrees": 200,
+      "flee_radius_cm": 2500,
+      "base_speed_cm_s": 300,
+      "sprint_speed_cm_s": 500,
+      "stomp_damage": 60,
+      "stomp_radius_cm": 400,
+      "hearing_radius_cm": 4000,
+      "states": ["GRAZE", "IDLE", "FLEE", "DRINK", "ALERT"],
+      "daily_routine": {
+        "dawn": "DRINK",
+        "morning": "GRAZE",
+        "midday": "IDLE",
+        "afternoon": "GRAZE",
+        "dusk": "DRINK",
+        "night": "IDLE"
+      }
+    }
+  },
+
+  "player_detection_modifiers": {
+    "crouching": 0.4,
+    "sprinting": 2.5,
+    "in_water": 0.6,
+    "upwind": 0.3,
+    "downwind": 3.0,
+    "carrying_meat": 2.0,
+    "covered_in_mud": 0.2,
+    "near_fire": 1.8
+  },
+
+  "npc_voice_lines": {
+    "narrator_survival_tip_1": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751431588_SurvivalNarrator.mp3",
+    "narrator_survival_tip_2": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751444165_SurvivalNarrator.mp3"
+  }
+}

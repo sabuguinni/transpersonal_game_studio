@@ -1,0 +1,104 @@
+{
+  "voice_line_registry": {
+    "version": "2.0",
+    "cycle": "PROD_CYCLE_AUTO_20260628_002",
+    "generated_by": "Agent_15_Narrative",
+    "description": "Registry of all generated voice lines for NPC dialogue system",
+    "lines": [
+      {
+        "id": "VL_HUNT_LEADER_001",
+        "character": "HuntLeader",
+        "trigger": "QuestStart",
+        "context": "Player approaches hunt leader before Triceratops hunt mission",
+        "text": "Stay low. The Triceratops herd moves at dawn — if we cross the open ground before they reach the river, we can flank the wounded bull from the east. But if they smell us, we run. No hesitation.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782613524301_HuntLeader.mp3",
+        "duration_estimate": "13s",
+        "play_once": true,
+        "cycle": "PROD_CYCLE_AUTO_20260628_002"
+      },
+      {
+        "id": "VL_SURVIVAL_SCOUT_001",
+        "character": "SurvivalScout",
+        "trigger": "ProximityEnter",
+        "context": "Player enters eastern canyon area — scout warns about rockslide and large creature tracks",
+        "text": "The canyon walls are unstable after the storm. Three days ago a rockslide buried the eastern trail. We found tracks — something large, moving south. Could be the same creature that took Brak's shelter apart last season.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782613526778_SurvivalScout.mp3",
+        "duration_estimate": "15s",
+        "play_once": true,
+        "cycle": "PROD_CYCLE_AUTO_20260628_002"
+      },
+      {
+        "id": "VL_NIGHT_WATCHER_001",
+        "character": "NightWatcher",
+        "trigger": "DinosaurSighted",
+        "context": "Night encounter — NPC reports large predator circling camp perimeter",
+        "text": "We lost two from the northern camp last night. Something circled the perimeter for hours — we heard it breathing in the dark. Big. Patient. Whatever it is, it knows how to wait.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782613551351_NightWatcher.mp3",
+        "duration_estimate": "12s",
+        "play_once": false,
+        "cycle": "PROD_CYCLE_AUTO_20260628_002"
+      },
+      {
+        "id": "VL_TRIBE_ELDER_001",
+        "character": "TribeElder",
+        "trigger": "QuestStart",
+        "context": "River flooding forces tribe relocation — elder urges player to help move camp before ford is lost",
+        "text": "The river is rising. Another day and the ford will be gone — we'll be cut off from the southern hunting grounds for the whole wet season. Pack what you can carry. We move before nightfall.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782613553488_TribeElder.mp3",
+        "duration_estimate": "13s",
+        "play_once": true,
+        "cycle": "PROD_CYCLE_AUTO_20260628_002"
+      },
+      {
+        "id": "VL_SCOUT_WARRIOR_001",
+        "character": "ScoutWarrior",
+        "trigger": "DinosaurSighted",
+        "context": "Raptor pack spotted — scout warns player to freeze or retreat to ridge",
+        "text": "Raptor pack — three of them, maybe four. Don't run. Freeze. If they haven't spotted you yet, back up slowly toward the ridge. Running triggers the chase. Don't give them a reason.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782608729354_ScoutWarrior.mp3",
+        "duration_estimate": "~12s",
+        "play_once": false,
+        "cycle": "PROD_CYCLE_AUTO_20260628_001"
+      },
+      {
+        "id": "VL_ELDER_HUNTER_001",
+        "character": "ElderHunter",
+        "trigger": "PlayerDanger",
+        "context": "Warning against solo hunting of wounded prey — elder cautions player",
+        "text": "A wounded animal is the most dangerous thing in this world. It has nothing left to lose. You go after that Triceratops alone and you won't come back. Wait for the others. We hunt together or we don't hunt.",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1782608731891_ElderHunter.mp3",
+        "duration_estimate": "~16s",
+        "play_once": true,
+        "cycle": "PROD_CYCLE_AUTO_20260628_001"
+      }
+    ],
+    "dialogue_trigger_actors": [
+      {
+        "label": "DialogueTrigger_HuntLeader",
+        "location": {"x": 800.0, "y": 200.0, "z": 50.0},
+        "voice_line_id": "VL_HUNT_LEADER_001",
+        "map": "MinPlayableMap"
+      },
+      {
+        "label": "DialogueTrigger_SurvivalScout",
+        "location": {"x": -600.0, "y": 900.0, "z": 50.0},
+        "voice_line_id": "VL_SURVIVAL_SCOUT_001",
+        "map": "MinPlayableMap"
+      },
+      {
+        "label": "DialogueTrigger_NightWatcher",
+        "location": {"x": 200.0, "y": -800.0, "z": 50.0},
+        "voice_line_id": "VL_NIGHT_WATCHER_001",
+        "map": "MinPlayableMap"
+      }
+    ],
+    "npc_voice_profiles": [
+      {"speaker": "HuntLeader", "pitch": 0.9, "volume": 1.0, "tone": "commanding, direct"},
+      {"speaker": "SurvivalScout", "pitch": 1.05, "volume": 0.95, "tone": "cautious, observational"},
+      {"speaker": "NightWatcher", "pitch": 0.85, "volume": 0.9, "tone": "tense, fearful"},
+      {"speaker": "TribeElder", "pitch": 0.8, "volume": 1.0, "tone": "authoritative, urgent"},
+      {"speaker": "ScoutWarrior", "pitch": 1.0, "volume": 1.1, "tone": "sharp, tactical"},
+      {"speaker": "ElderHunter", "pitch": 0.75, "volume": 1.0, "tone": "grave, experienced"}
+    ]
+  }
+}

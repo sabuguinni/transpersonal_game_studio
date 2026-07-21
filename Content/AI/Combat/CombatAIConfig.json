@@ -1,0 +1,128 @@
+{
+  "version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_002",
+  "agent": "Combat & Enemy AI Agent #12",
+  "description": "Combat AI configuration — attack parameters, flanking logic, charge paths, trigger zones",
+
+  "combat_triggers": [
+    {
+      "label": "CombatTrigger_TRex_001",
+      "location": [4500, -1800, 100],
+      "scale": [8.0, 8.0, 3.0],
+      "species": "TRex",
+      "behavior": "charge",
+      "activation_radius_cm": 800,
+      "notes": "Player entering this box triggers T-Rex charge sequence"
+    },
+    {
+      "label": "CombatTrigger_Raptor_001",
+      "location": [-3200, 2100, 100],
+      "scale": [5.0, 5.0, 2.0],
+      "species": "Raptor",
+      "behavior": "ambush_flanking",
+      "activation_radius_cm": 500,
+      "notes": "Player entering triggers raptor pack split into flanking formation"
+    },
+    {
+      "label": "CombatTrigger_WaterSource_001",
+      "location": [800, 3200, 80],
+      "scale": [6.0, 6.0, 2.5],
+      "species": "all",
+      "behavior": "territorial_contest",
+      "activation_radius_cm": 600,
+      "notes": "Highest tension zone — T-Rex and raptors both converge here. Player caught between species."
+    }
+  ],
+
+  "attack_parameters": {
+    "TRex": {
+      "damage_per_hit": 80,
+      "attack_cooldown_seconds": 2.5,
+      "attack_range_cm": 300,
+      "charge_speed_multiplier": 2.8,
+      "charge_duration_seconds": 3.0,
+      "detection_radius_cm": 2500,
+      "aggro_threshold": "enters_territory_OR_makes_noise",
+      "deaggro_distance_cm": 4000,
+      "special_behavior": "charges_in_straight_line_cannot_turn_sharply"
+    },
+    "Raptor": {
+      "damage_per_hit": 35,
+      "attack_cooldown_seconds": 0.8,
+      "attack_range_cm": 150,
+      "pack_size": 3,
+      "flanking_enabled": true,
+      "flanking_split_angle_degrees": 90,
+      "detection_radius_cm": 1500,
+      "aggro_threshold": "player_visible_OR_enters_ambush_zone",
+      "deaggro_distance_cm": 2500,
+      "special_behavior": "pack_coordinates_front_blocker_plus_two_flankers"
+    },
+    "Brachiosaurus": {
+      "damage_per_hit": 120,
+      "attack_cooldown_seconds": 4.0,
+      "attack_range_cm": 500,
+      "aggro_threshold": "player_within_200cm_OR_startled",
+      "deaggro_distance_cm": 1500,
+      "special_behavior": "defensive_only_stampedes_if_cornered",
+      "notes": "Normally passive — only attacks if player gets too close or throws objects"
+    }
+  },
+
+  "flanking_positions": {
+    "RaptorAmbush_Zone": {
+      "center": [-3200, 2100, 100],
+      "positions": [
+        {
+          "label": "FlankPos_Raptor_Front_001",
+          "location": [-3200, 1600, 100],
+          "role": "front_blocker",
+          "behavior": "face_player_hold_position_until_flankers_ready"
+        },
+        {
+          "label": "FlankPos_Raptor_Left_001",
+          "location": [-3700, 2100, 100],
+          "role": "left_flanker",
+          "behavior": "circle_wide_attack_from_left_when_player_focused_on_front"
+        },
+        {
+          "label": "FlankPos_Raptor_Right_001",
+          "location": [-2700, 2100, 100],
+          "role": "right_flanker",
+          "behavior": "mirror_left_flanker_coordinate_simultaneous_attack"
+        }
+      ],
+      "coordination_logic": "Front raptor engages first. Left+right wait 2s then attack simultaneously from sides. If player turns to face a flanker, front raptor attacks from behind."
+    }
+  },
+
+  "trex_charge_path": {
+    "territory_center": [4500, -1800, 100],
+    "charge_markers": [
+      {"label": "ChargePos_TRex_001", "location": [4500, -1200, 100], "order": 1},
+      {"label": "ChargePos_TRex_002", "location": [4500, -500, 100], "order": 2},
+      {"label": "ChargePos_TRex_003", "location": [4500, 200, 100], "order": 3}
+    ],
+    "charge_logic": "T-Rex locks on player position at start of charge. Follows straight line through markers. Cannot course-correct mid-charge. Player survival strategy: dodge perpendicular to charge vector.",
+    "player_counter": "step_sideways_at_last_moment — T-Rex overshoots by 800-1200cm"
+  },
+
+  "combat_design_principles": {
+    "fairness": "Every attack has a readable tell animation (0.4-0.8s window). Player always has a survival option if they read the tell.",
+    "tension": "Player never knows if they will win until the last second. Outcome determined by player skill, not RNG.",
+    "raptor_philosophy": "Raptors are terrifying because they coordinate. One raptor alone is manageable. Three is a death sentence unless player uses terrain.",
+    "trex_philosophy": "T-Rex is unstoppable in open ground. Survival requires using trees, rocks, narrow gaps the T-Rex cannot fit through.",
+    "water_source_design": "Water source is the highest-tension area because both predator species converge there. Player must choose: risk dehydration or risk predator encounter."
+  },
+
+  "voice_lines": {
+    "trex_charge": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751571847_SurvivalNarrator.mp3",
+    "raptor_flanking": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781751597904_SurvivalNarrator.mp3"
+  },
+
+  "references": {
+    "behavior_config": "Content/AI/NPC/BehaviorConfig/DinosaurBehaviorConfig.json",
+    "behavior_zones": ["BehaviorZone_TRexTerritory_001", "BehaviorZone_RaptorAmbush_001", "BehaviorZone_WaterSource_001"],
+    "patrol_waypoints": ["Waypoint_TRex_001-005", "Waypoint_Raptor_001-005"]
+  }
+}

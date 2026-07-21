@@ -1,0 +1,235 @@
+{
+  "quest_system_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_011",
+  "agent": "#14 Quest & Mission Designer",
+  "quests": [
+    {
+      "id": "QUEST_001_FIRST_HUNT",
+      "title": "First Hunt",
+      "description": "Craft a Stone Axe and track your first T-Rex.",
+      "arc": "Survival — the player transitions from helpless survivor to active hunter.",
+      "objectives": [
+        {
+          "id": "OBJ_001_A",
+          "type": "collect",
+          "description": "Gather 2 Rocks",
+          "resource": "Resource_Rock",
+          "quantity": 2,
+          "map_actors": ["Resource_Rock_001", "Resource_Rock_002", "Resource_Rock_003", "Resource_Rock_004"]
+        },
+        {
+          "id": "OBJ_001_B",
+          "type": "collect",
+          "description": "Gather 1 Stick",
+          "resource": "Resource_Stick",
+          "quantity": 1,
+          "map_actors": ["Resource_Stick_001", "Resource_Stick_002", "Resource_Stick_003"]
+        },
+        {
+          "id": "OBJ_001_C",
+          "type": "craft",
+          "description": "Craft Stone Axe at the Crafting Bench",
+          "recipe": "Stone_Axe",
+          "location_actor": "CraftingBench_001",
+          "trigger_key": "C"
+        },
+        {
+          "id": "OBJ_001_D",
+          "type": "navigate",
+          "description": "Reach the Hunt Zone and find T-Rex tracks",
+          "marker_actor": "QuestMarker_HuntZone_001",
+          "position": {"x": 1200, "y": 800, "z": 100}
+        }
+      ],
+      "rewards": {
+        "xp": 100,
+        "items": ["Stone_Axe"],
+        "unlocks": ["QUEST_002_CAMPFIRE"]
+      },
+      "npc_voice": {
+        "character": "QuestNPC_Elder",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Elder.mp3",
+        "line": "Gather two rocks and a stick. Bring them to the crafting stone. You will make your first axe. Without it, you cannot hunt. Without the hunt, you cannot survive."
+      }
+    },
+    {
+      "id": "QUEST_002_CAMPFIRE",
+      "title": "Light the Night",
+      "description": "Build a campfire before darkness falls. Predators are bolder in the dark.",
+      "arc": "Survival — the player learns that night changes the threat landscape.",
+      "objectives": [
+        {
+          "id": "OBJ_002_A",
+          "type": "collect",
+          "description": "Gather 3 Sticks",
+          "resource": "Resource_Stick",
+          "quantity": 3,
+          "map_actors": ["Resource_Stick_001", "Resource_Stick_002", "Resource_Stick_003"]
+        },
+        {
+          "id": "OBJ_002_B",
+          "type": "craft",
+          "description": "Craft Campfire at the designated location",
+          "recipe": "Campfire",
+          "location_actor": "QuestMarker_Campfire_001",
+          "trigger_key": "C"
+        },
+        {
+          "id": "OBJ_002_C",
+          "type": "survive",
+          "description": "Survive until dawn at the campfire",
+          "duration_seconds": 120,
+          "condition": "stay_within_radius",
+          "radius": 500,
+          "center_actor": "QuestMarker_Campfire_001"
+        }
+      ],
+      "rewards": {
+        "xp": 150,
+        "items": ["Campfire"],
+        "unlocks": ["QUEST_003_WATER"]
+      },
+      "npc_voice": {
+        "character": "QuestNPC_Scout",
+        "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Scout.mp3",
+        "line": "The T-Rex has been spotted near the eastern ridge. Its tracks lead north. Follow them carefully — stay downwind, move slow, and do not run until you are ready to strike."
+      }
+    },
+    {
+      "id": "QUEST_003_WATER",
+      "title": "Find Water",
+      "description": "Locate the water source and craft a water container before dehydration sets in.",
+      "arc": "Survival — thirst is the silent killer. The player learns resource scarcity.",
+      "objectives": [
+        {
+          "id": "OBJ_003_A",
+          "type": "navigate",
+          "description": "Find the water source",
+          "marker_actor": "QuestMarker_WaterSource_001",
+          "position": {"x": 800, "y": -1200, "z": 80}
+        },
+        {
+          "id": "OBJ_003_B",
+          "type": "collect",
+          "description": "Collect 1 large leaf near the water",
+          "resource": "Resource_Leaf",
+          "quantity": 1
+        },
+        {
+          "id": "OBJ_003_C",
+          "type": "craft",
+          "description": "Craft Water Container (1 Rock + 1 Leaf)",
+          "recipe": "Water_Container",
+          "trigger_key": "C"
+        },
+        {
+          "id": "OBJ_003_D",
+          "type": "interact",
+          "description": "Fill container at the water source",
+          "target_actor": "QuestMarker_WaterSource_001",
+          "interaction_key": "E"
+        }
+      ],
+      "rewards": {
+        "xp": 120,
+        "items": ["Water_Container_Full"],
+        "unlocks": ["QUEST_004_SAFE_CAMP"]
+      }
+    },
+    {
+      "id": "QUEST_004_SAFE_CAMP",
+      "title": "Establish Camp",
+      "description": "Find a defensible position and establish a permanent base camp.",
+      "arc": "Survival — the player shifts from reactive to proactive. This is the first moment of agency.",
+      "objectives": [
+        {
+          "id": "OBJ_004_A",
+          "type": "navigate",
+          "description": "Reach the safe zone on the ridge",
+          "marker_actor": "QuestMarker_SafeZone_001",
+          "position": {"x": -800, "y": -600, "z": 60}
+        },
+        {
+          "id": "OBJ_004_B",
+          "type": "build",
+          "description": "Place a campfire in the safe zone",
+          "recipe": "Campfire",
+          "must_be_within_radius": 800,
+          "center_actor": "QuestMarker_SafeZone_001"
+        },
+        {
+          "id": "OBJ_004_C",
+          "type": "survive",
+          "description": "Defend the camp from a Raptor scout (1 raptor, scripted)",
+          "enemy_type": "Raptor",
+          "enemy_count": 1,
+          "trigger": "on_campfire_placed"
+        }
+      ],
+      "rewards": {
+        "xp": 200,
+        "items": ["Camp_Flag"],
+        "unlocks": ["QUEST_005_PACK_HUNT"]
+      }
+    }
+  ],
+  "crafting_recipes": [
+    {
+      "id": "Stone_Axe",
+      "name": "Stone Axe",
+      "ingredients": [
+        {"resource": "Resource_Rock", "quantity": 2},
+        {"resource": "Resource_Stick", "quantity": 1}
+      ],
+      "craft_time_seconds": 3,
+      "result_item": "Stone_Axe",
+      "result_quantity": 1
+    },
+    {
+      "id": "Campfire",
+      "name": "Campfire",
+      "ingredients": [
+        {"resource": "Resource_Stick", "quantity": 3}
+      ],
+      "craft_time_seconds": 5,
+      "result_item": "Campfire",
+      "result_quantity": 1
+    },
+    {
+      "id": "Water_Container",
+      "name": "Water Container",
+      "ingredients": [
+        {"resource": "Resource_Rock", "quantity": 1},
+        {"resource": "Resource_Leaf", "quantity": 1}
+      ],
+      "craft_time_seconds": 4,
+      "result_item": "Water_Container_Empty",
+      "result_quantity": 1
+    }
+  ],
+  "map_actors_placed": {
+    "resource_pickups": [
+      "Resource_Rock_001", "Resource_Rock_002", "Resource_Rock_003", "Resource_Rock_004",
+      "Resource_Stick_001", "Resource_Stick_002", "Resource_Stick_003"
+    ],
+    "quest_markers": [
+      "QuestMarker_HuntZone_001",
+      "QuestMarker_Campfire_001",
+      "QuestMarker_WaterSource_001",
+      "QuestMarker_SafeZone_001"
+    ],
+    "crafting_stations": ["CraftingBench_001"]
+  },
+  "voice_assets": [
+    {
+      "character": "QuestNPC_Elder",
+      "quest": "QUEST_001_FIRST_HUNT",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Elder.mp3"
+    },
+    {
+      "character": "QuestNPC_Scout",
+      "quest": "QUEST_002_CAMPFIRE",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810602766_QuestNPC_Scout.mp3"
+    }
+  ]
+}

@@ -7,9 +7,15 @@
 #include "EngineArchitecture.generated.h"
 
 /**
- * Engine Architecture System - Core architectural validation and management
- * Ensures all game systems follow established architectural patterns
- * Validates system dependencies and prevents architectural violations
+ * Engine Architecture Manager - Central system that enforces architectural rules
+ * and manages the technical foundation of the Transpersonal Game Studio project.
+ * 
+ * CRITICAL RESPONSIBILITIES:
+ * - Enforce compilation rules and prevent orphan headers
+ * - Manage module dependencies and cross-system communication
+ * - Validate biome coordinate usage across all systems
+ * - Monitor performance constraints and memory usage
+ * - Coordinate between different agent-created systems
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecture : public UGameInstanceSubsystem
@@ -19,118 +25,94 @@ class TRANSPERSONALGAME_API UEngineArchitecture : public UGameInstanceSubsystem
 public:
     UEngineArchitecture();
 
-    // Subsystem interface
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Architecture validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateSystemDependencies();
+    bool ValidateSystemIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateModuleIntegrity();
+    void RegisterSystem(const FString& SystemName, const FString& AgentOwner);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
+    bool IsSystemRegistered(const FString& SystemName) const;
+
+    // Biome coordinate validation (enforces brain memory rules)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateBiomeCoordinates(const FVector& Location, EEng_BiomeType ExpectedBiome) const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CheckCompilationStatus();
+    FVector GetValidBiomeLocation(EEng_BiomeType BiomeType) const;
 
     // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetCurrentFrameTime() const;
+    void MonitorPerformance();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    int32 GetActiveActorCount() const;
+    float GetCurrentFrameRate() const;
+
+    // Module dependency management
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateModuleDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void LogSystemStatus();
+    void ReportArchitecturalViolation(const FString& ViolationType, const FString& Details);
 
 protected:
-    // System registry
+    // Registered systems tracking
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, int32> RegisteredSystems;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bArchitectureValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    float LastValidationTime;
+    TMap<FString, FString> RegisteredSystems;
 
     // Performance metrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameTime;
+    float CurrentFrameRate;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 PeakActorCount;
+    float MemoryUsageMB;
+
+    // Architecture violations log
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> ArchitecturalViolations;
+
+    // Biome coordinate definitions (from brain memories)
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    TMap<EEng_BiomeType, FEng_BiomeCoordinates> BiomeCoordinates;
 
 private:
-    // Internal validation methods
-    bool ValidateWorldGeneration();
-    bool ValidateCharacterSystems();
-    bool ValidateDinosaurSystems();
-    bool ValidateRenderingPipeline();
-
-    // Performance tracking
-    void UpdatePerformanceMetrics();
-    
-    // System dependencies
-    TArray<FString> CoreSystemModules;
-    TArray<FString> GameplaySystemModules;
-    TArray<FString> RenderingSystemModules;
+    void InitializeBiomeCoordinates();
+    void ValidateExistingSystems();
+    bool CheckForOrphanHeaders();
+    void EnforceCompilationRules();
 };
 
 /**
- * Architecture validation result structure
+ * Architecture Rule Enforcer - Static utility class for compile-time validation
  */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitectureValidationResult
+UCLASS(BlueprintType, NotBlueprintable)
+class TRANSPERSONALGAME_API UEng_ArchitectureRules : public UObject
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsValid;
+public:
+    // Static validation functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool ValidateHeaderCppPairs();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ValidationMessage;
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void CleanupOrphanHeaders();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> FailedSystems;
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool CheckDuplicateSystems();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationTime;
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void EnforceNamingConventions();
 
-    FEng_ArchitectureValidationResult()
-    {
-        bIsValid = false;
-        ValidationTime = 0.0f;
-    }
-};
+    // Compilation enforcement
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool TriggerCompilationCheck();
 
-/**
- * System module registration info
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemModuleInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 Priority;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    float LastUpdateTime;
-
-    FEng_SystemModuleInfo()
-    {
-        Priority = 0;
-        bIsActive = false;
-        LastUpdateTime = 0.0f;
-    }
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void ReportCompilationStatus();
 };

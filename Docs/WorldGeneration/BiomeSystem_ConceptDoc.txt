@@ -1,0 +1,100 @@
+# BIOME SYSTEM CONCEPT DOCUMENTATION
+## Transpersonal Game Studio - World Generation Agent #5
+
+### BIOME SYSTEM OVERVIEW
+The World_BiomeSystem provides procedural generation and management of distinct ecological zones within the prehistoric world. Each biome has unique characteristics that affect gameplay, survival mechanics, and visual atmosphere.
+
+### IMPLEMENTED BIOMES
+
+#### 1. FOREST BIOME
+- **Temperature**: 22°C (Moderate)
+- **Humidity**: 80% (High)
+- **Fertility**: 90% (Very High)
+- **Vegetation**: Ferns, Conifers, Cycads
+- **Wildlife**: Triceratops, Parasaurolophus
+- **Survival Impact**: High food availability, good shelter, moderate water sources
+
+#### 2. PLAINS BIOME  
+- **Temperature**: 25°C (Warm)
+- **Humidity**: 40% (Low)
+- **Fertility**: 60% (Moderate)
+- **Vegetation**: Grasses, Small Shrubs
+- **Wildlife**: Brachiosaurus, Ankylosaurus
+- **Survival Impact**: Open terrain, limited shelter, good visibility for hunting
+
+#### 3. SWAMP BIOME
+- **Temperature**: 28°C (Hot)
+- **Humidity**: 95% (Very High)
+- **Fertility**: 85% (High)
+- **Vegetation**: Moss, Reeds, Water Plants
+- **Wildlife**: Spinosaurus, Crocodiles
+- **Survival Impact**: Abundant water, disease risk, dangerous predators
+
+#### 4. MOUNTAIN BIOME
+- **Temperature**: 15°C (Cool)
+- **Humidity**: 30% (Very Low)
+- **Fertility**: 25% (Low)
+- **Vegetation**: Hardy Shrubs, Rock Lichens
+- **Wildlife**: Pterodactyls
+- **Survival Impact**: Limited resources, extreme weather, strategic vantage points
+
+### PROCEDURAL GENERATION SYSTEM
+
+#### Noise-Based Biome Distribution
+- Uses Perlin noise for natural, organic biome boundaries
+- Biome transitions based on noise thresholds:
+  - Forest: noise > 0.5
+  - Plains: noise 0.0 to 0.5
+  - Swamp: noise -0.3 to 0.0
+  - Mountain: noise < -0.3
+
+#### Grid-Based Region System
+- 4x4 grid of biome regions
+- Each region: 100m x 100m (10,000 units)
+- Automatic vegetation spawning per region
+- 5-15 vegetation actors per biome region
+
+### TECHNICAL IMPLEMENTATION
+
+#### Core Classes
+- **AWorld_BiomeSystem**: Main biome management actor
+- **FWorld_BiomeData**: Biome data structure
+- **EWorld_BiomeType**: Biome type enumeration
+
+#### Key Methods
+- `GetBiomeAtLocation()`: Determines biome type at world position
+- `GenerateBiomeRegions()`: Creates procedural biome layout
+- `SpawnBiomeVegetation()`: Places biome-appropriate vegetation
+- `CalculateBiomeInfluence()`: Handles biome transition zones
+
+### INTEGRATION POINTS
+
+#### With Environment Artist (Agent #6)
+- Biome data provides vegetation placement guidelines
+- Temperature/humidity affects material selection
+- Fertility determines vegetation density
+
+#### With Lighting & Atmosphere (Agent #8)
+- Biome temperature affects lighting color temperature
+- Humidity influences fog and atmospheric effects
+- Different biomes require unique ambient lighting
+
+#### With NPC Behavior (Agent #11)
+- Dinosaur species distribution based on biome preferences
+- Territorial behavior influenced by biome boundaries
+- Migration patterns follow biome seasonal changes
+
+### FUTURE ENHANCEMENTS
+1. **Seasonal Biome Changes**: Temperature and vegetation cycles
+2. **Weather Integration**: Biome-specific weather patterns
+3. **Resource Distribution**: Biome-based crafting materials
+4. **Dynamic Boundaries**: Biomes that shift over time
+5. **Micro-Biomes**: Smaller ecological niches within main biomes
+
+### PERFORMANCE CONSIDERATIONS
+- Biome calculation uses efficient noise functions
+- Vegetation spawning limited to visible regions
+- LOD system for distant biome details
+- Cached biome data for frequently accessed locations
+
+This biome system forms the foundation for realistic ecological gameplay where player survival strategies must adapt to different environmental conditions.

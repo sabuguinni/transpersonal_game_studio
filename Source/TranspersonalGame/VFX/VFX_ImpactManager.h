@@ -1,49 +1,59 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_ImpactType : uint8
 {
-    DinosaurFootstep,
-    WeaponHit,
-    RockFall,
-    TreeFall,
-    BloodSplatter,
-    DustCloud
+    FootstepLight UMETA(DisplayName = "Light Footstep"),
+    FootstepHeavy UMETA(DisplayName = "Heavy Footstep"),
+    BloodSplatter UMETA(DisplayName = "Blood Splatter"),
+    RockImpact UMETA(DisplayName = "Rock Impact"),
+    WoodImpact UMETA(DisplayName = "Wood Impact"),
+    WaterSplash UMETA(DisplayName = "Water Splash"),
+    DustCloud UMETA(DisplayName = "Dust Cloud"),
+    SparkShower UMETA(DisplayName = "Spark Shower")
 };
 
 USTRUCT(BlueprintType)
-struct FVFX_ImpactData
+struct TRANSPERSONALGAME_API FVFX_ImpactData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    EVFX_ImpactType ImpactType = EVFX_ImpactType::DinosaurFootstep;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    class UNiagaraSystem* ParticleEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector ImpactLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* ImpactSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float ImpactForce = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector EffectScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector ImpactNormal = FVector::UpVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAttachToActor;
 
     FVFX_ImpactData()
     {
-        ImpactType = EVFX_ImpactType::DinosaurFootstep;
-        ImpactLocation = FVector::ZeroVector;
-        ImpactForce = 1.0f;
-        ImpactNormal = FVector::UpVector;
+        ParticleEffect = nullptr;
+        ImpactSound = nullptr;
+        EffectScale = FVector(1.0f, 1.0f, 1.0f);
+        Duration = 2.0f;
+        bAttachToActor = false;
     }
 };
 
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UVFX_ImpactManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -54,44 +64,59 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float ParticleLifetime = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact System")
+    TMap<EVFX_ImpactType, FVFX_ImpactData> ImpactEffects;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    TArray<class UNiagaraComponent*> ActiveEffects;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    TArray<class UAudioComponent*> ActiveAudioComponents;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float MaxParticleDistance = 5000.0f;
+    float MaxConcurrentEffects;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    int32 MaxActiveParticles = 50;
+    float EffectCullDistance;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    int32 CurrentActiveParticles = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableDistanceCulling;
 
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerImpact(const FVFX_ImpactData& ImpactData);
+    void TriggerImpact(EVFX_ImpactType ImpactType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, AActor* AttachActor = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CreateFootstepVFX(FVector Location, float DinosaurSize = 1.0f);
+    void TriggerFootstepImpact(FVector Location, bool bIsHeavy = false, float IntensityMultiplier = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CreateBloodVFX(FVector Location, FVector Direction);
+    void TriggerBloodEffect(FVector Location, FVector Direction, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CreateDustCloudVFX(FVector Location, float Intensity = 1.0f);
+    void TriggerDustCloud(FVector Location, float Radius = 100.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CleanupOldParticles();
+    void StopAllEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void SetEffectIntensity(float NewIntensity);
+
+    UFUNCTION(BlueprintPure, Category = "VFX Impact")
+    int32 GetActiveEffectCount() const;
 
 protected:
     UFUNCTION()
-    void SpawnParticleSystem(FVector Location, EVFX_ImpactType Type);
+    void CleanupFinishedEffects();
 
     UFUNCTION()
-    bool IsLocationValid(FVector Location) const;
+    void InitializeDefaultEffects();
+
+    UFUNCTION()
+    bool ShouldCullEffect(FVector EffectLocation) const;
 
 private:
-    TArray<AActor*> ActiveParticleActors;
-    float LastCleanupTime = 0.0f;
+    float CurrentIntensityMultiplier;
+    FTimerHandle CleanupTimerHandle;
 };

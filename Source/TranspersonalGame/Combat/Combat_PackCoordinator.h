@@ -3,91 +3,64 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "../SharedTypes.h"
+#include "Components/SphereComponent.h"
+#include "SharedTypes.h"
 #include "Combat_PackCoordinator.generated.h"
 
-UENUM(BlueprintType)
-enum class ECombat_PackFormation : uint8
-{
-    Triangle        UMETA(DisplayName = "Triangle Formation"),
-    Line           UMETA(DisplayName = "Line Formation"), 
-    Pincer         UMETA(DisplayName = "Pincer Movement"),
-    Ambush         UMETA(DisplayName = "Ambush Formation"),
-    Scatter        UMETA(DisplayName = "Scatter Formation")
-};
-
-UENUM(BlueprintType)
-enum class ECombat_PackRole : uint8
-{
-    Alpha          UMETA(DisplayName = "Pack Alpha"),
-    Beta           UMETA(DisplayName = "Pack Beta"),
-    Hunter         UMETA(DisplayName = "Hunter"),
-    Flanker        UMETA(DisplayName = "Flanker"),
-    Distractor     UMETA(DisplayName = "Distractor")
-};
+class ACombat_AIController;
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCombat_PackMember
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Member")
-    class APawn* MemberPawn;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    TWeakObjectPtr<APawn> Member;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Member")
-    ECombat_PackRole Role;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    ECombat_Role AssignedRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Member")
-    FVector AssignedPosition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    FVector TargetPosition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Member")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
     bool bIsInPosition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Member")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
     float DistanceToTarget;
 
     FCombat_PackMember()
     {
-        MemberPawn = nullptr;
-        Role = ECombat_PackRole::Hunter;
-        AssignedPosition = FVector::ZeroVector;
+        Member = nullptr;
+        AssignedRole = ECombat_Role::Flanker;
+        TargetPosition = FVector::ZeroVector;
         bIsInPosition = false;
         DistanceToTarget = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_PackTactics
+struct TRANSPERSONALGAME_API FCombat_PackFormation
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    ECombat_PackFormation CurrentFormation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    ECombat_Formation FormationType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    AActor* PrimaryTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    TArray<FVector> Positions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    FVector TargetLastKnownPosition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    float FormationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    float CoordinationRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    FVector CenterPoint;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    bool bIsHunting;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Tactics")
-    float HuntStartTime;
-
-    FCombat_PackTactics()
+    FCombat_PackFormation()
     {
-        CurrentFormation = ECombat_PackFormation::Triangle;
-        PrimaryTarget = nullptr;
-        TargetLastKnownPosition = FVector::ZeroVector;
-        CoordinationRadius = 1500.0f;
-        bIsHunting = false;
-        HuntStartTime = 0.0f;
+        FormationType = ECombat_Formation::Circle;
+        FormationRadius = 500.0f;
+        CenterPoint = FVector::ZeroVector;
     }
 };
 
@@ -101,8 +74,6 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
     // Pack Management
@@ -110,72 +81,113 @@ public:
     TArray<FCombat_PackMember> PackMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Management")
-    FCombat_PackTactics CurrentTactics;
+    TWeakObjectPtr<APawn> PackLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Management")
+    TWeakObjectPtr<APawn> CurrentTarget;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Management")
     int32 MaxPackSize;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Management")
-    float FormationSpacing;
+    float PackCohesionRadius;
 
-    // Pack Behavior
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
-    void AddPackMember(APawn* NewMember, ECombat_PackRole Role);
+    // Formation System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    FCombat_PackFormation CurrentFormation;
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    ECombat_TacticState CurrentTactic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    float FormationUpdateInterval;
+
+    // Combat Coordination
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bInCombat;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float CombatEngagementRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float RetreatHealthThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 MinimumPackSizeForAttack;
+
+    // Communication
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication")
+    float CommunicationRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication")
+    TArray<FString> TacticalCallouts;
+
+public:
+    // Pack Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
+    void AddPackMember(APawn* NewMember, ECombat_Role Role = ECombat_Role::Flanker);
+
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
     void RemovePackMember(APawn* Member);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
-    void SetPrimaryTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
+    void SetPackLeader(APawn* NewLeader);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
-    void ChangeFormation(ECombat_PackFormation NewFormation);
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
+    void SetPackTarget(APawn* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
-    void InitiateHunt();
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
+    int32 GetPackSize() const { return PackMembers.Num(); }
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
-    void AbortHunt();
+    UFUNCTION(BlueprintCallable, Category = "Pack Management")
+    bool IsPackMember(APawn* Pawn) const;
 
-    // Formation Calculation
-    UFUNCTION(BlueprintCallable, Category = "Pack Formation")
-    TArray<FVector> CalculateFormationPositions(FVector TargetPosition);
+    // Formation Functions
+    UFUNCTION(BlueprintCallable, Category = "Formation")
+    void SetFormation(ECombat_Formation Formation);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Formation")
-    void UpdateMemberPositions();
+    UFUNCTION(BlueprintCallable, Category = "Formation")
+    void UpdateFormationPositions();
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Formation")
-    bool IsPackInFormation();
+    UFUNCTION(BlueprintCallable, Category = "Formation")
+    FVector GetAssignedPosition(APawn* Member) const;
 
-    // Pack Communication
-    UFUNCTION(BlueprintCallable, Category = "Pack Communication")
-    void BroadcastThreatAlert(FVector ThreatLocation);
+    UFUNCTION(BlueprintCallable, Category = "Formation")
+    bool IsPackInFormation() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Communication")
-    void BroadcastTargetLost();
+    // Combat Coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void InitiateCombat(APawn* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Pack Communication")
-    void BroadcastAttackSignal();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ExecuteTactic(ECombat_TacticState Tactic);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OrderRetreat();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void AssignCombatRoles();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldEngageTarget(APawn* PotentialTarget) const;
+
+    // Communication
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    void BroadcastTacticalCommand(const FString& Command);
+
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    void SendPackSignal(ECombat_PackSignal Signal);
 
 protected:
-    // Internal Methods
-    void UpdatePackBehavior(float DeltaTime);
-    void CheckPackCohesion();
-    void AssignRolesBasedOnPosition();
-    FVector GetAlphaPosition();
-    FCombat_PackMember* FindPackAlpha();
-
-    // Formation Calculations
-    TArray<FVector> CalculateTriangleFormation(FVector TargetPosition);
-    TArray<FVector> CalculateLineFormation(FVector TargetPosition);
-    TArray<FVector> CalculatePincerFormation(FVector TargetPosition);
-    TArray<FVector> CalculateAmbushFormation(FVector TargetPosition);
-    TArray<FVector> CalculateScatterFormation(FVector TargetPosition);
+    // Internal Functions
+    void UpdatePackCohesion(float DeltaTime);
+    void EvaluateThreatLevel();
+    void UpdateTacticalState(float DeltaTime);
+    FVector CalculateFormationCenter() const;
+    void ValidatePackMembers();
 
 private:
-    UPROPERTY()
-    float LastUpdateTime;
-
-    UPROPERTY()
-    bool bPackInitialized;
+    float LastFormationUpdate;
+    float LastTacticalEvaluation;
+    ECombat_ThreatLevel CurrentThreatLevel;
 };

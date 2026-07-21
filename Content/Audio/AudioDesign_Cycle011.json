@@ -1,0 +1,142 @@
+{
+  "audio_design_version": "1.0",
+  "cycle": "PROD_CYCLE_AUTO_20260618_011",
+  "agent": "Audio Agent #16",
+
+  "tts_voice_lines": [
+    {
+      "character": "Scout",
+      "line": "The river is close. I can hear it. Water means life — but it also means predators. Move carefully. Stay low.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810819964_Scout.mp3",
+      "duration": "~8s",
+      "context": "Player approaches river biome — warning NPC dialogue",
+      "trigger": "proximity_river_100m"
+    },
+    {
+      "character": "Elder",
+      "line": "Fire tonight. Eat. Rest. Tomorrow we move before the sun rises — before they wake up and start hunting again.",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781810833775_Elder.mp3",
+      "duration": "~8s",
+      "context": "Campfire rest event — Elder NPC motivational dialogue",
+      "trigger": "campfire_rest_event"
+    }
+  ],
+
+  "freesound_assets": [
+    {
+      "id": 681366,
+      "name": "Campfire (Position 1)",
+      "url_preview": "https://cdn.freesound.org/previews/681/681366_5752443-hq.mp3",
+      "duration_s": 83.6,
+      "tags": ["campfire", "crackling", "fire", "night", "ambience"],
+      "use_case": "AudioZone_Campfire_001 — looping campfire ambient at base camp",
+      "loop": true,
+      "volume_db": -12
+    },
+    {
+      "id": 556841,
+      "name": "Small river water stream",
+      "url_preview": "https://cdn.freesound.org/previews/556/556841_12184473-hq.mp3",
+      "duration_s": 321.6,
+      "tags": ["river", "stream", "flowing", "water", "nature"],
+      "use_case": "AudioZone_River_001 — looping river ambient near water source",
+      "loop": true,
+      "volume_db": -10
+    },
+    {
+      "id": 688994,
+      "name": "Campfire On The Shores",
+      "url_preview": "https://cdn.freesound.org/previews/688/688994_13721094-hq.mp3",
+      "duration_s": 180.0,
+      "tags": ["campfire", "birds", "crickets", "night", "ambience"],
+      "use_case": "AudioZone_NightAmbient_001 — night insects/birds prehistoric jungle",
+      "loop": true,
+      "volume_db": -15
+    },
+    {
+      "id": 683711,
+      "name": "WATRFlow_Dumping Channel On The River",
+      "url_preview": "https://cdn.freesound.org/previews/683/683711_5828667-hq.mp3",
+      "duration_s": 65.1,
+      "tags": ["water", "river", "creek", "ambient", "flow"],
+      "use_case": "Secondary river ambient layer — adds depth to river zone",
+      "loop": true,
+      "volume_db": -18
+    }
+  ],
+
+  "audio_zones_spawned_in_map": [
+    {
+      "label": "AudioZone_Campfire_001",
+      "location": {"x": 200, "y": 100, "z": 50},
+      "freesound_id": 681366,
+      "radius_m": 15
+    },
+    {
+      "label": "AudioZone_River_001",
+      "location": {"x": -800, "y": 1200, "z": 30},
+      "freesound_id": 556841,
+      "radius_m": 30
+    },
+    {
+      "label": "AudioZone_NightAmbient_001",
+      "location": {"x": 0, "y": 0, "z": 100},
+      "freesound_id": 688994,
+      "radius_m": 200
+    }
+  ],
+
+  "adaptive_music_design": {
+    "states": [
+      {
+        "state": "Exploration_Safe",
+        "description": "Player exploring with no predators nearby",
+        "instrumentation": "Low percussion (bone drum), distant wind, sparse melodic motif",
+        "tempo_bpm": 60,
+        "intensity": 0.2
+      },
+      {
+        "state": "Predator_Nearby",
+        "description": "Predator within 80m — player undetected",
+        "instrumentation": "Sustained low strings, heartbeat-like percussion, tension build",
+        "tempo_bpm": 75,
+        "intensity": 0.6
+      },
+      {
+        "state": "Combat_Active",
+        "description": "Player in active combat with dinosaur",
+        "instrumentation": "Full percussion, aggressive rhythmic pattern, high energy",
+        "tempo_bpm": 140,
+        "intensity": 1.0
+      },
+      {
+        "state": "Campfire_Rest",
+        "description": "Player resting at campfire — safe zone",
+        "instrumentation": "Crackling fire, soft wind, minimal melodic theme — warmth and safety",
+        "tempo_bpm": 45,
+        "intensity": 0.1
+      },
+      {
+        "state": "Night_Danger",
+        "description": "Night cycle with predators active",
+        "instrumentation": "Sparse percussion, silence gaps, sudden stings on predator proximity",
+        "tempo_bpm": 50,
+        "intensity": 0.7
+      }
+    ],
+    "transition_rules": {
+      "safe_to_predator_nearby": "crossfade 4s",
+      "predator_nearby_to_combat": "immediate cut + percussion hit",
+      "combat_to_safe": "fade out 8s",
+      "any_to_campfire_rest": "crossfade 6s"
+    }
+  },
+
+  "cumulative_audio_library": {
+    "tts_lines_total": 18,
+    "freesound_assets_catalogued": 24,
+    "audio_zones_in_map": 12,
+    "npc_dialogue_trees": 3,
+    "adaptive_music_states": 5
+  }
+}

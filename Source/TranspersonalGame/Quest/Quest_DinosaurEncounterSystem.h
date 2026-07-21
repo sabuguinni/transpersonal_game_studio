@@ -2,31 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataTable.h"
+#include "../SharedTypes.h"
 #include "Quest_DinosaurEncounterSystem.generated.h"
-
-UENUM(BlueprintType)
-enum class EQuest_DinosaurSpecies : uint8
-{
-    TRex           UMETA(DisplayName = "Tyrannosaurus Rex"),
-    Raptor         UMETA(DisplayName = "Velociraptor"),
-    Triceratops    UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus  UMETA(DisplayName = "Brachiosaurus"),
-    Stegosaurus    UMETA(DisplayName = "Stegosaurus")
-};
-
-UENUM(BlueprintType)
-enum class EQuest_EncounterType : uint8
-{
-    Peaceful       UMETA(DisplayName = "Peaceful Observation"),
-    Territorial    UMETA(DisplayName = "Territorial Warning"),
-    Hunting        UMETA(DisplayName = "Hunting Behavior"),
-    Feeding        UMETA(DisplayName = "Feeding Time"),
-    Migration      UMETA(DisplayName = "Migration Movement")
-};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FQuest_DinosaurEncounter
@@ -34,31 +13,60 @@ struct TRANSPERSONALGAME_API FQuest_DinosaurEncounter
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    EQuest_DinosaurSpecies Species;
+    FString DinosaurSpecies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
     EQuest_EncounterType EncounterType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    FVector Location;
+    FVector SpawnLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    float TriggerRadius;
+    int32 DinosaurCount;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    FString EncounterDescription;
+    float ThreatLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
-    bool bIsActive;
+    float RewardPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    bool bIsActiveEncounter;
 
     FQuest_DinosaurEncounter()
     {
-        Species = EQuest_DinosaurSpecies::Raptor;
-        EncounterType = EQuest_EncounterType::Peaceful;
-        Location = FVector::ZeroVector;
-        TriggerRadius = 500.0f;
-        EncounterDescription = TEXT("A dinosaur encounter");
-        bIsActive = true;
+        DinosaurSpecies = TEXT("TRex");
+        EncounterType = EQuest_EncounterType::Hunt;
+        SpawnLocation = FVector::ZeroVector;
+        DinosaurCount = 1;
+        ThreatLevel = 5.0f;
+        RewardPoints = 100.0f;
+        bIsActiveEncounter = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_EncounterReward
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    int32 ExperiencePoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FString> ItemRewards;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    float SurvivalPoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    bool bUnlocksNewArea;
+
+    FQuest_EncounterReward()
+    {
+        ExperiencePoints = 50;
+        SurvivalPoints = 25.0f;
+        bUnlocksNewArea = false;
     }
 };
 
@@ -73,71 +81,59 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounters")
+    TArray<FQuest_DinosaurEncounter> ActiveEncounters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounters")
+    TMap<FString, FQuest_EncounterReward> EncounterRewards;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounters")
+    float EncounterCheckRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounters")
+    float EncounterSpawnRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounters")
+    int32 MaxActiveEncounters;
+
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void SpawnDinosaurEncounter(const FString& Species, EQuest_EncounterType Type, const FVector& Location);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* DetectionSphere;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void CompleteEncounter(const FString& EncounterId);
 
-    // Encounter Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    TArray<FQuest_DinosaurEncounter> ActiveEncounters;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    bool CheckPlayerNearEncounter(const FVector& PlayerLocation, float CheckDistance);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    float EncounterCheckInterval;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    TArray<FQuest_DinosaurEncounter> GetActiveEncounters() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    int32 MaxSimultaneousEncounters;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void TriggerRandomEncounter(const FVector& PlayerLocation);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    bool bDebugMode;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void SetEncounterDifficulty(float NewDifficulty);
 
-    // Quest Integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    FString CurrentQuestObjective;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    FQuest_EncounterReward GetEncounterReward(const FString& EncounterId) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
-    bool bQuestEncounterActive;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void InitializeEncounterSystem();
 
-    // Encounter Methods
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CreateDinosaurEncounter(EQuest_DinosaurSpecies Species, EQuest_EncounterType Type, FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void TriggerEncounter(int32 EncounterIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CompleteEncounter(int32 EncounterIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsPlayerInEncounterRange(const FQuest_DinosaurEncounter& Encounter);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void UpdateQuestObjective(const FString& NewObjective);
-
-    // Audio Integration
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void PlayEncounterAudio(EQuest_DinosaurSpecies Species, EQuest_EncounterType Type);
-
-    // Event Delegates
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDinosaurEncounterTriggered, EQuest_DinosaurSpecies, Species, EQuest_EncounterType, Type);
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnDinosaurEncounterTriggered OnEncounterTriggered;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveUpdated, const FString&, NewObjective);
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnQuestObjectiveUpdated OnObjectiveUpdated;
+    UFUNCTION(BlueprintCallable, Category = "Quest Encounters")
+    void CleanupCompletedEncounters();
 
 private:
-    float LastEncounterCheckTime;
-    int32 ActiveEncounterCount;
+    void UpdateEncounterStates(float DeltaTime);
+    void CheckEncounterTriggers();
+    FString GenerateEncounterId() const;
+    void LoadEncounterData();
+    void SaveEncounterProgress();
 
-    void CheckForPlayerEncounters();
-    void SpawnDinosaurAtLocation(EQuest_DinosaurSpecies Species, FVector Location);
-    FString GetSpeciesName(EQuest_DinosaurSpecies Species);
-    FString GetEncounterTypeName(EQuest_EncounterType Type);
+    float EncounterTimer;
+    float CurrentDifficulty;
+    int32 EncounterCounter;
 };

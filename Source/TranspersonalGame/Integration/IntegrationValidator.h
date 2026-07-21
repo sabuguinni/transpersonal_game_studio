@@ -2,142 +2,167 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
 #include "IntegrationValidator.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteg_ValidationResult
+UENUM(BlueprintType)
+enum class EBuild_ValidationResult : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsValid = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ErrorMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ErrorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 WarningCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> Details;
+    Pass        UMETA(DisplayName = "Pass"),
+    Warning     UMETA(DisplayName = "Warning"), 
+    Fail        UMETA(DisplayName = "Fail"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteg_ModuleStatus
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsLoaded = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    EBuild_ValidationResult Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bHasErrors = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString Message;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 ClassCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float PerformanceScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> FailedClasses;
+    FBuild_SystemStatus()
+    {
+        SystemName = TEXT("");
+        Status = EBuild_ValidationResult::Pass;
+        Message = TEXT("");
+        PerformanceScore = 1.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteg_LevelStatus
+struct TRANSPERSONALGAME_API FBuild_BiomeDistribution
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    FString LevelName;
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    FString BiomeName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    int32 TotalActors = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    int32 DuplicateActors = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    FVector BiomeCenter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    bool bHasPlayerStart = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Distribution")
+    float DistributionScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    bool bHasCharacter = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    bool bHasLighting = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Level")
-    TMap<FString, int32> ActorCounts;
+    FBuild_BiomeDistribution()
+    {
+        BiomeName = TEXT("");
+        ActorCount = 0;
+        BiomeCenter = FVector::ZeroVector;
+        DistributionScore = 0.0f;
+    }
 };
 
 /**
- * Integration Validator Subsystem
- * Validates system integration, module loading, and level consistency
+ * Integration validation system for cross-agent compatibility
+ * Validates that all 18 agent outputs work together correctly
  */
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UIntegrationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
+    UIntegrationValidator();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Validation functions
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_ValidationResult ValidateFullSystem();
+    EBuild_ValidationResult ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_ModuleStatus ValidateModule(const FString& ModuleName);
+    TArray<FBuild_SystemStatus> GetSystemStatusReport();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_LevelStatus ValidateLevel(const FString& LevelPath);
+    TArray<FBuild_BiomeDistribution> GetBiomeDistribution();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool CleanupDuplicateActors(const FString& LevelPath);
+    bool ValidateActorLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetLoadedModules();
+    bool ValidateDinosaurLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool TestClassLoading(const FString& ClassName);
+    float GetOverallIntegrationScore();
+
+    // Cross-system validation
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateCharacterWorldIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport();
+    bool ValidateAIDinosaurIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateEnvironmentFoliageIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateQuestNarrativeIntegration();
 
     // Performance validation
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFramerate();
+    bool ValidatePerformanceTargets();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceAcceptable();
+    float GetMemoryUsageScore();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetTotalActorCount();
 
 protected:
     // Internal validation helpers
-    bool ValidateModuleClasses(const FString& ModuleName, FInteg_ModuleStatus& OutStatus);
-    bool ValidateLevelActors(UWorld* World, FInteg_LevelStatus& OutStatus);
-    void CleanupLightingDuplicates(UWorld* World);
-    void LogValidationResults(const FInteg_ValidationResult& Results);
+    bool ValidateCoreClasses();
+    bool ValidateModuleDependencies();
+    bool CheckBiomeDistribution();
+    float CalculatePerformanceScore();
+
+    // System status tracking
+    UPROPERTY()
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY()
+    TArray<FBuild_BiomeDistribution> BiomeDistributions;
+
+    // Validation thresholds
+    UPROPERTY(EditAnywhere, Category = "Limits")
+    int32 MaxTotalActors = 8000;
+
+    UPROPERTY(EditAnywhere, Category = "Limits")
+    int32 MaxDinosaurs = 150;
+
+    UPROPERTY(EditAnywhere, Category = "Limits")
+    int32 MaxActorsPerBiome = 4000;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float MinPerformanceScore = 0.7f;
+
+    // Core system classes to validate
+    UPROPERTY()
+    TArray<FString> CoreSystemClasses;
+
+    // Biome centers for distribution validation
+    UPROPERTY()
+    TMap<FString, FVector> BiomeCenters;
 
 private:
-    UPROPERTY()
-    TArray<FString> KnownModules;
-
-    UPROPERTY()
-    TArray<FString> CriticalClasses;
-
-    UPROPERTY()
-    float LastValidationTime = 0.0f;
-
-    UPROPERTY()
-    bool bValidationInProgress = false;
+    void InitializeBiomeCenters();
+    void InitializeCoreSystemClasses();
+    EBuild_ValidationResult ValidateSystemClass(const FString& ClassName);
+    float CalculateBiomeDistributionScore();
 };

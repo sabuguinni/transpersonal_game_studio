@@ -1,0 +1,244 @@
+{
+  "cycle": "PROD_CYCLE_AUTO_20260618_007",
+  "agent": "Audio Agent #16",
+  "description": "Spatial audio zone definitions and TTS voice line registry for MinPlayableMap",
+
+  "audio_zones": [
+    {
+      "label": "Audio_Cave_Ambience_001",
+      "location": { "x": -1800, "y": -2200, "z": 120 },
+      "attenuation_radius": 800,
+      "color_hex": "#0D1A99",
+      "soundscape": {
+        "primary": "cave_drip_echo",
+        "secondary": "cold_wind_hollow",
+        "tertiary": "stone_settling",
+        "freesound_refs": [
+          { "id": 558982, "name": "Hot spring cave ambience", "url": "https://cdn.freesound.org/previews/558/558982_5828667-hq.mp3" },
+          { "id": 559081, "name": "Spring cave water drip", "url": "https://cdn.freesound.org/previews/559/559081_5828667-hq.mp3" },
+          { "id": 237265, "name": "Ape Cave lava tube", "url": "https://cdn.freesound.org/previews/237/237265_7037-hq.mp3" }
+        ],
+        "volume_base": 0.65,
+        "reverb_preset": "Cave_Large",
+        "loop": true,
+        "fade_in_sec": 3.0,
+        "fade_out_sec": 4.0
+      },
+      "tts_trigger": {
+        "label": "TTS_ElderMara_Cave_001",
+        "audio_url": "tts/1781777228004_Elder_Mara_Cave.mp3",
+        "trigger_actor": "Trigger_ElderCave_001",
+        "npc_anchor": "NPC_Elder_001",
+        "voice_character": "Elder_Mara",
+        "line": "The cave breathes cold air. Somewhere deeper, water drips on stone. You are not alone in this darkness — but whatever shares it with you has not moved. Yet.",
+        "play_once": true,
+        "volume": 0.85
+      }
+    },
+    {
+      "label": "Audio_Camp_Fire_001",
+      "location": { "x": 1200, "y": 800, "z": 100 },
+      "attenuation_radius": 600,
+      "color_hex": "#E6660D",
+      "soundscape": {
+        "primary": "campfire_crackle_loop",
+        "secondary": "night_insects_low",
+        "tertiary": "wood_pop_occasional",
+        "freesound_refs": [],
+        "volume_base": 0.7,
+        "reverb_preset": "Outdoor_Open",
+        "loop": true,
+        "fade_in_sec": 2.0,
+        "fade_out_sec": 3.0
+      },
+      "tts_trigger": {
+        "label": "TTS_HunterKael_Camp_001",
+        "audio_url": "tts/1781777249511_Hunter_Kael_Camp.mp3",
+        "trigger_actor": "Trigger_HunterCamp_001",
+        "npc_anchor": "NPC_Hunter_001",
+        "voice_character": "Hunter_Kael",
+        "line": "Fire tonight. Small fire — just enough to keep the cold away. Not enough to draw the big ones. You learn that fast out here, or you do not learn anything again.",
+        "play_once": true,
+        "volume": 0.9
+      }
+    },
+    {
+      "label": "Audio_River_Flow_001",
+      "location": { "x": 2800, "y": -400, "z": 80 },
+      "attenuation_radius": 1000,
+      "color_hex": "#1A80E6",
+      "soundscape": {
+        "primary": "river_rapids_loop",
+        "secondary": "jungle_birds_distant",
+        "tertiary": "frog_calls_occasional",
+        "freesound_refs": [
+          { "id": 855648, "name": "Xiufeng Waterfall Taiwan (panned)", "url": "https://cdn.freesound.org/previews/855/855648_17078888-hq.mp3" },
+          { "id": 855647, "name": "Xiufeng Waterfall Taiwan (full)", "url": "https://cdn.freesound.org/previews/855/855647_17078888-hq.mp3" }
+        ],
+        "volume_base": 0.75,
+        "reverb_preset": "Outdoor_Valley",
+        "loop": true,
+        "fade_in_sec": 2.5,
+        "fade_out_sec": 3.5
+      },
+      "tts_trigger": {
+        "label": null,
+        "trigger_actor": "Trigger_RiverCrossing_001",
+        "npc_anchor": "NPC_Scout_001",
+        "voice_character": "Scout_Davan",
+        "line": "Cross here. The current is slower. But watch the far bank — something big drinks at dusk.",
+        "play_once": true,
+        "volume": 0.8,
+        "tts_url_pending": true
+      }
+    },
+    {
+      "label": "Audio_TRex_Territory_001",
+      "location": { "x": -3200, "y": 1800, "z": 150 },
+      "attenuation_radius": 1500,
+      "color_hex": "#B20000",
+      "soundscape": {
+        "primary": "oppressive_silence",
+        "secondary": "low_subsonic_rumble",
+        "tertiary": "distant_heavy_footstep_occasional",
+        "freesound_refs": [],
+        "volume_base": 0.3,
+        "reverb_preset": "Outdoor_Vast",
+        "loop": true,
+        "fade_in_sec": 5.0,
+        "fade_out_sec": 6.0,
+        "notes": "Silence IS the sound design here. Reduce ambient birds/insects to near-zero. Occasional subsonic LFE pulse at 18-22Hz to trigger unease without conscious awareness (Walter Murch principle)."
+      },
+      "tts_trigger": {
+        "trigger_actor": "Trigger_TRexTerritory_001",
+        "npc_anchor": null,
+        "voice_character": "Elder_Narrator",
+        "line": "Stay low. The T-Rex hunts by movement. If you freeze — it passes. If you run — you die. The tribe learned this the hard way. Most of them.",
+        "audio_url": "tts/1781777098961_Elder_Narrator.mp3",
+        "play_once": true,
+        "volume": 0.7
+      }
+    },
+    {
+      "label": "Audio_HerdPath_Ambience_001",
+      "location": { "x": 500, "y": 3200, "z": 100 },
+      "attenuation_radius": 1200,
+      "color_hex": "#99CC33",
+      "soundscape": {
+        "primary": "distant_herd_movement",
+        "secondary": "ground_vibration_low",
+        "tertiary": "sauropod_low_call_occasional",
+        "freesound_refs": [],
+        "volume_base": 0.5,
+        "reverb_preset": "Outdoor_Plains",
+        "loop": true,
+        "fade_in_sec": 4.0,
+        "fade_out_sec": 5.0,
+        "notes": "Herd sound should feel like distant thunder — rhythmic, massive, inevitable. Ground vibration as haptic cue for controller players."
+      },
+      "tts_trigger": {
+        "trigger_actor": "Trigger_HerdPath_001",
+        "npc_anchor": null,
+        "voice_character": "Hunter_Kael",
+        "line": "The valley belongs to the herd. Forty beasts, each the size of three huts. They eat only leaves — but their feet do not care what they step on.",
+        "audio_url": "tts/1781777113475_Hunter_Kael.mp3",
+        "play_once": true,
+        "volume": 0.85
+      }
+    }
+  ],
+
+  "tts_voice_lines_this_cycle": [
+    {
+      "id": "tts_cycle007_001",
+      "character": "Elder_Mara",
+      "url": "tts/1781777228004_Elder_Mara_Cave.mp3",
+      "full_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781777228004_Elder_Mara_Cave.mp3",
+      "duration_estimate": "~11s",
+      "context": "Cave entrance ambient — plays when player enters cave zone",
+      "trigger": "Trigger_ElderCave_001"
+    },
+    {
+      "id": "tts_cycle007_002",
+      "character": "Hunter_Kael",
+      "url": "tts/1781777249511_Hunter_Kael_Camp.mp3",
+      "full_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781777249511_Hunter_Kael_Camp.mp3",
+      "duration_estimate": "~11s",
+      "context": "Hunter camp ambient — plays when player approaches camp fire",
+      "trigger": "Trigger_HunterCamp_001"
+    }
+  ],
+
+  "tts_voice_lines_from_cycle006": [
+    {
+      "character": "Elder_Narrator",
+      "url": "tts/1781777098961_Elder_Narrator.mp3",
+      "trigger": "Trigger_TRexTerritory_001"
+    },
+    {
+      "character": "Hunter_Kael",
+      "url": "tts/1781777113475_Hunter_Kael.mp3",
+      "trigger": "Trigger_HerdPath_001"
+    },
+    {
+      "character": "Tribe_Storyteller",
+      "url": "tts/1781777131017_Tribe_Storyteller.mp3",
+      "trigger": "Trigger_ElderCave_001"
+    }
+  ],
+
+  "freesound_catalogue": {
+    "cave_ambience": [
+      { "id": 558982, "name": "Hot spring cave", "duration": 26.8, "tags": ["cave","drip","ambience"], "preview": "https://cdn.freesound.org/previews/558/558982_5828667-hq.mp3" },
+      { "id": 559081, "name": "Spring cave water", "duration": 27.6, "tags": ["cave","drip","water"], "preview": "https://cdn.freesound.org/previews/559/559081_5828667-hq.mp3" },
+      { "id": 237265, "name": "Ape Cave lava tube", "duration": 611.3, "tags": ["cave","echo","field-recording"], "preview": "https://cdn.freesound.org/previews/237/237265_7037-hq.mp3" },
+      { "id": 381418, "name": "Water drain reverb", "duration": 65.6, "tags": ["cave","echo","underground"], "preview": "https://cdn.freesound.org/previews/381/381418_3530854-hq.mp3" }
+    ],
+    "river_ambience": [
+      { "id": 855648, "name": "Xiufeng Waterfall panned", "duration": 19.3, "tags": ["waterfall","jungle","outdoor"], "preview": "https://cdn.freesound.org/previews/855/855648_17078888-hq.mp3" },
+      { "id": 855647, "name": "Xiufeng Waterfall full", "duration": 150.6, "tags": ["waterfall","forest","ambient"], "preview": "https://cdn.freesound.org/previews/855/855647_17078888-hq.mp3" }
+    ]
+  },
+
+  "audio_design_principles": {
+    "walter_murch_rule": "The sound that does NOT exist is often more powerful than the sound that does. T-Rex territory uses silence as the primary sound design tool.",
+    "rdr2_principle": "Music the player never consciously notices but that changes what they feel is the peak of interactive composition.",
+    "spatial_audio_strategy": "All zones use attenuation falloff — player hears the zone before they see it. Sound is the first sense that tells them where they are.",
+    "subsonic_design": "T-Rex territory uses 18-22Hz LFE pulses below conscious hearing threshold. Player feels unease without knowing why.",
+    "reverb_zones": {
+      "cave": "Cave_Large — long tail, high diffusion, cold character",
+      "camp": "Outdoor_Open — minimal reverb, dry, intimate",
+      "river": "Outdoor_Valley — medium reverb, wet character",
+      "trex_territory": "Outdoor_Vast — very long tail, sparse, oppressive",
+      "herd_path": "Outdoor_Plains — wide, open, low-frequency emphasis"
+    }
+  },
+
+  "integration_map": {
+    "narrative_agent_15_triggers": [
+      "Trigger_ElderCave_001",
+      "Trigger_HunterCamp_001",
+      "Trigger_RiverCrossing_001",
+      "Trigger_TRexTerritory_001",
+      "Trigger_HerdPath_001"
+    ],
+    "npc_anchors": [
+      "NPC_Elder_001",
+      "NPC_Hunter_001",
+      "NPC_Hunter_002",
+      "NPC_Scout_001",
+      "NPC_Survivor_001"
+    ],
+    "audio_zones_spawned_this_cycle": [
+      "Audio_Cave_Ambience_001",
+      "Audio_Camp_Fire_001",
+      "Audio_River_Flow_001",
+      "Audio_TRex_Territory_001",
+      "Audio_HerdPath_Ambience_001"
+    ],
+    "tts_markers_spawned_this_cycle": [
+      "TTS_ElderMara_Cave_001",
+      "TTS_HunterKael_Camp_001"
+    ]
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "narrative_cycle": "PROD_CYCLE_AUTO_20260618_005",
+  "agent": "Narrative & Dialogue Agent #15",
+  "version": "1.5.0",
+  "description": "NPC dialogue registry — voice lines, trigger zones, and narrative metadata for MinPlayableMap",
+
+  "characters": {
+    "Elder_Tracker": {
+      "id": "NPC_Elder_Tracker_001",
+      "role": "Tribal elder and master tracker — primary narrative guide",
+      "location_label": "NPC_Elder_Tracker_001",
+      "map_position": {"x": 800, "y": -400, "z": 100},
+      "personality": "Pragmatic, weathered, speaks in observations not opinions. Never wastes words.",
+      "voice_style": "Low, measured, gravelly. Pauses between sentences. Never raises voice."
+    },
+    "Scout_Kael": {
+      "id": "NPC_Scout_Kael_001",
+      "role": "Young tribal scout — danger warning system and world information",
+      "location_label": "NPC_Scout_Kael_001",
+      "map_position": {"x": -600, "y": 900, "z": 100},
+      "personality": "Alert, fast-talking under stress, precise about facts. Respects the elder.",
+      "voice_style": "Urgent, clipped sentences when reporting danger. Calmer when safe."
+    }
+  },
+
+  "dialogue_lines": [
+    {
+      "id": "ELDER_INTRO_01",
+      "character": "Elder_Tracker",
+      "trigger": "NPC_Elder_Tracker_001",
+      "trigger_type": "proximity_enter",
+      "trigger_radius_cm": 400,
+      "text": "Stay low. The T-Rex hunts by movement — if you freeze, it loses you. But the raptors... they remember. They will circle back. Your only chance is the river crossing — they hate deep water.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766899895_Elder_Tracker.mp3",
+      "duration_s": 13,
+      "conditions": {"requires_quest": null, "min_player_level": 0},
+      "repeatable": false,
+      "tags": ["survival_tip", "predator_behavior", "T-Rex", "raptor", "river"]
+    },
+    {
+      "id": "ELDER_LORE_01",
+      "character": "Elder_Tracker",
+      "trigger": "NarrTrigger_KillSite_001",
+      "trigger_type": "proximity_enter",
+      "trigger_radius_cm": 600,
+      "text": "This is where my father's father made his first kill. A young Stegosaurus, separated from the herd. He tracked it for two days. He said the land itself guided him — the bent grass, the disturbed mud, the silence of birds. Learn to read these signs, and the valley will feed you. Ignore them, and the valley will feed on you.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766943888_Elder_Tracker.mp3",
+      "duration_s": 22,
+      "conditions": {"requires_quest": null, "min_player_level": 0},
+      "repeatable": false,
+      "tags": ["lore", "tracking", "stegosaurus", "hunting_technique", "environmental_reading"]
+    },
+    {
+      "id": "SCOUT_WARN_01",
+      "character": "Scout_Kael",
+      "trigger": "NPC_Scout_Kael_001",
+      "trigger_type": "proximity_enter",
+      "trigger_radius_cm": 350,
+      "text": "We found their kill site — three adults, taken in one night. Something is hunting in packs now. Something we have never seen before. We move camp at first light. Anyone who stays behind stays forever.",
+      "audio_url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766915869_Scout_Kael.mp3",
+      "duration_s": 14,
+      "conditions": {"requires_quest": null, "min_player_level": 0},
+      "repeatable": false,
+      "tags": ["warning", "pack_hunting", "danger", "camp_move", "urgency"]
+    },
+    {
+      "id": "ENV_RIVER_01",
+      "character": "Elder_Tracker",
+      "trigger": "NarrTrigger_RiverCross_001",
+      "trigger_type": "proximity_enter",
+      "trigger_radius_cm": 500,
+      "text": "The river is both road and wall. Predators avoid deep crossings — use that. But the current is strongest at midday when snowmelt peaks. Cross at dawn or dusk. And watch the far bank before you step in — a crocodile waits where the water slows.",
+      "audio_url": null,
+      "duration_s": 0,
+      "conditions": {"requires_quest": null, "min_player_level": 0},
+      "repeatable": false,
+      "tags": ["river", "survival", "crossing", "crocodile", "timing"]
+    }
+  ],
+
+  "narrative_triggers": [
+    {
+      "label": "NarrTrigger_KillSite_001",
+      "type": "environmental_discovery",
+      "map_position": {"x": 2200, "y": 1500, "z": 100},
+      "radius_cm": 600,
+      "dialogue_id": "ELDER_LORE_01",
+      "quest_flag_set": "KILLSITE_DISCOVERED",
+      "description": "Ancient kill site with scattered bones — triggers elder lore about tracking"
+    },
+    {
+      "label": "NarrTrigger_RiverCross_001",
+      "type": "environmental_discovery",
+      "map_position": {"x": -1800, "y": 2800, "z": 80},
+      "radius_cm": 500,
+      "dialogue_id": "ENV_RIVER_01",
+      "quest_flag_set": "RIVER_DISCOVERED",
+      "description": "River crossing point — triggers survival advice about water crossing"
+    }
+  ],
+
+  "voice_asset_manifest": [
+    {
+      "file": "1781766899895_Elder_Tracker.mp3",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766899895_Elder_Tracker.mp3",
+      "character": "Elder_Tracker",
+      "dialogue_id": "ELDER_INTRO_01",
+      "cycle": "PROD_CYCLE_AUTO_20260618_005"
+    },
+    {
+      "file": "1781766915869_Scout_Kael.mp3",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766915869_Scout_Kael.mp3",
+      "character": "Scout_Kael",
+      "dialogue_id": "SCOUT_WARN_01",
+      "cycle": "PROD_CYCLE_AUTO_20260618_005"
+    },
+    {
+      "file": "1781766943888_Elder_Tracker.mp3",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766943888_Elder_Tracker.mp3",
+      "character": "Elder_Tracker",
+      "dialogue_id": "ELDER_LORE_01",
+      "cycle": "PROD_CYCLE_AUTO_20260618_005"
+    }
+  ],
+
+  "previous_cycles_voice_assets": [
+    {
+      "cycle": "PROD_CYCLE_AUTO_20260618_004",
+      "character": "Elder_Tracker",
+      "dialogue_id": "ELDER_HERD_01",
+      "url": "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1781766899895_Elder_Tracker.mp3"
+    }
+  ],
+
+  "handoff_to_audio_agent_16": {
+    "priority_audio_tasks": [
+      {
+        "task": "Integrate voice lines into MetaSounds dialogue system",
+        "assets": ["ELDER_INTRO_01", "SCOUT_WARN_01", "ELDER_LORE_01"],
+        "trigger_method": "proximity_overlap_sphere",
+        "notes": "Voice lines should duck ambient audio by -12dB during playback. Fade in 0.3s, fade out 0.5s."
+      },
+      {
+        "task": "Add ambient soundscape to NarrTrigger_KillSite_001",
+        "notes": "Bone creak, distant wind, low predator growl at distance. No music — pure environmental tension."
+      },
+      {
+        "task": "Add river ambient audio to NarrTrigger_RiverCross_001",
+        "notes": "Fast-moving water, occasional splash, bird calls. Volume increases as player approaches."
+      }
+    ]
+  }
+}

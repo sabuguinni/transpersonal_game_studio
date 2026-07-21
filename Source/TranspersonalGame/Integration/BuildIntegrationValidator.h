@@ -6,85 +6,116 @@
 #include "Components/ActorComponent.h"
 #include "BuildIntegrationValidator.generated.h"
 
-/**
- * Build Integration Validator - Validates cross-module integration and build consistency
- * Used by Integration Agent #19 to ensure all agent outputs work together
- */
+UENUM(BlueprintType)
+enum class EBuild_ValidationResult : uint8
+{
+    Success UMETA(DisplayName = "Success"),
+    Warning UMETA(DisplayName = "Warning"),
+    Error UMETA(DisplayName = "Error"),
+    Critical UMETA(DisplayName = "Critical")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_SystemStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    bool bIsLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    bool bIsCompiled;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    EBuild_ValidationResult ValidationResult;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FString ErrorMessage;
+
+    FBuild_SystemStatus()
+    {
+        SystemName = TEXT("");
+        bIsLoaded = false;
+        bIsCompiled = false;
+        ValidationResult = EBuild_ValidationResult::Error;
+        ErrorMessage = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TArray<FBuild_SystemStatus> SystemStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 TotalActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 DinosaurCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float PerformanceScore;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    bool bBuildHealthy;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FDateTime ValidationTimestamp;
+
+    FBuild_IntegrationReport()
+    {
+        TotalActorCount = 0;
+        DinosaurCount = 0;
+        PerformanceScore = 0.0f;
+        bBuildHealthy = false;
+        ValidationTimestamp = FDateTime::Now();
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationValidator : public UObject
+class TRANSPERSONALGAME_API UBuildIntegrationValidator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationValidator();
 
-    // Core validation methods
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateMapIntegrity(UWorld* World);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateLightingSetup(UWorld* World);
+    FBuild_IntegrationReport ValidateFullBuild();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateGameplayActors(UWorld* World);
+    bool ValidateSystemIntegration(const FString& SystemName, const FString& ClassPath);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleIntegration();
+    void EnforceActorLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CleanDuplicateActors(UWorld* World);
-
-    // Validation results
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Results")
-    TArray<FString> ValidationErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Results")
-    TArray<FString> ValidationWarnings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Results")
-    int32 TotalActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Results")
-    int32 DuplicatesRemoved;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Results")
-    bool bMapIsValid;
-
-    // Actor counting and analysis
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TMap<FString, int32> GetActorCountsByClass(UWorld* World);
+    float CalculatePerformanceScore();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<AActor*> FindDuplicateLightingActors(UWorld* World);
+    TArray<FBuild_SystemStatus> GetCriticalSystemStatuses();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidatePlayerStart(UWorld* World);
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TMap<FString, FString> EssentialSystems;
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateTranspersonalGameClasses();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 MaxDinosaurCount;
 
-    // Build system validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleCompilation();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 MaxTotalActorCount;
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetMissingImplementations();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCrossModuleDependencies();
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void LogValidationResults();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float MinPerformanceThreshold;
 
 private:
-    // Internal validation helpers
-    bool ValidateActorClass(const FString& ClassName);
-    bool CheckForDuplicateTypes(UWorld* World, const FString& ActorType);
-    void AddValidationError(const FString& Error);
-    void AddValidationWarning(const FString& Warning);
-    void ClearValidationResults();
+    void InitializeEssentialSystems();
+    bool ValidateClassLoading(const FString& ClassPath);
+    void LogValidationResult(const FString& SystemName, EBuild_ValidationResult Result, const FString& Message);
 };
