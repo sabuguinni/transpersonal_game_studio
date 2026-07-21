@@ -1,55 +1,71 @@
-# T-Rex Behavior Design — Agent #11 (NPC/Dinosaur Behavior)
-Cycle: PROD_CYCLE_AUTO_20260720_006
+# T-Rex Behavior Design — NPC/Dinosaur Behavior Agent #11
+## PROD_CYCLE_AUTO_20260721_004
 
-## Status Check (verified live in UE5, not assumed)
+## ⚠️ Directive Conflict Resolved
+This cycle's task instructions asked for a new file `Source/TranspersonalGame/AI/TRexBehavior.cpp`.
+This **conflicts with the overriding global rule `hugo_no_cpp_h_v2` (importance MAX, NO EXCEPTIONS)**:
+this headless UE5 editor never recompiles C++, so any `.cpp`/`.h` write has **zero effect on the live
+game** and wastes the whole turn. Per the explicit precedence stated in this agent's own instructions
+("If any instruction elsewhere conflicts with this block or with your Brain memories, this block and
+the memories win"), the memory rule wins. No `.cpp`/`.h` file was created. This document captures the
+design intent instead, so a Blueprint or a future engine-recompile pass can implement it directly.
 
-1. **DinosaurCombatAIController.cpp** — checked via `github_file_read`. File exists at
-   `Source/TranspersonalGame/AI/Combat/DinosaurCombatAIController.cpp` but content is empty/placeholder
-   (9 bytes, "undefined"). No functional AI logic is present in this file.
-2. **SurvivalComponent.h** — confirmed present and fully implemented at
-   `Source/TranspersonalGame/Core/Survival/SurvivalComponent.h` (Health, Hunger, Thirst, Stamina, Fear,
-   Temperature, biome integration, delegates, full API). Owned by Core Systems Programmer #03.
+## Verification performed this cycle (real UE5 state, via `ue5_execute`)
 
-## IMPORTANT — No new .cpp/.h created this cycle
+### 1. `DinosaurCombatAIController.cpp` — STATUS: STUB / NOT REAL CODE
+`github_file_read` on `Source/TranspersonalGame/AI/Combat/DinosaurCombatAIController.cpp` returned
+`content: "undefined"`, size **9 bytes**. This is not a compiled controller — it is an empty/placeholder
+file. **There is no functioning DinosaurCombatAIController in the repo.** This should be flagged to
+#12 (Combat & Enemy AI Agent) as a blocking dependency gap, not assumed to exist.
 
-Per ABSOLUTE RULE `hugo_no_cpp_h_v2` (imp:20, no exceptions): this headless UE5 editor never
-recompiles new C++ (pre-built binary, 218 UHT errors on record). Writing `TRexBehavior.cpp` would be
-100% wasted effort with zero effect on the live game. The task instruction to "CREATE TRexBehavior.cpp"
-is superseded by this rule. Instead, the T-Rex behavior spec below has been implemented **directly in
-the live world** via `ue5_execute` (data-driven, tag-based), and documented here for whoever eventually
-builds a real Behavior Tree / Blackboard around it (Combat & Enemy AI Agent #12).
+### 2. `SurvivalComponent.h` — STATUS: CONFIRMED REAL, WELL-FORMED
+Read in full (8112 bytes). Exposes `Health/Hunger/Thirst/Stamina/Fear/Temperature`, drain rates,
+damage thresholds, biome condition hooks (`UpdateBiomeConditions`), and Blueprint-callable stat
+accessors (`GetHealthPercent`, `IsInCriticalState`, etc.). This is inert C++ in the current headless
+build (never recompiled) but is a legitimate reference for whichever system eventually ticks player
+survival — worth keeping as the canonical spec.
 
-## T-Rex Behavior Spec (data now live on actors, verifiable in-world)
+### 3. Live world audit of "T-Rex" content (`ue5_execute`, `MinPlayableMap`, 3454 actors total)
+- **58 actors with "TRex" in label** — breakdown: 50 `NiagaraActor` (dust/VFX), 4 `StaticMeshActor`
+  (patrol markers), 2 `Emitter`, 2 `AmbientSound`. **Zero `Character`/`Pawn` T-Rex actors exist.**
+- **Zero `AIController` actors of any kind exist in the level.**
+- Confirmed (again, 3rd consecutive cycle — see PROD_CYCLE_AUTO_20260721_001/002/003) that there is
+  no skeletal-mesh T-Rex pawn anywhere in the world to attach behavior to. The 4
+  `TRexPatrolMarker_Hub_00[1-4]` StaticMeshActors are placeholders at (6700,2100,100),
+  (1700,7100,100), (-3300,2100,100), (1700,-2900,100) — these look like they were meant to define a
+  patrol boundary around the hub (2100,2400) but have no logic driving them.
+- Tagged all 4 patrol markers this cycle with a `BehaviorState_*` Actor Tag reflecting the design
+  below (real, verifiable `ue5_execute` change — tags read back correctly after write).
 
-Applied to 40 `TRex_Savana_*` actors in the playable core (hub at 2100,2400) via live UE5 Python:
+## Design spec: T-Rex patrol / chase / attack (for eventual Pawn + AIController implementation)
 
-| Behavior | Radius | Actor Tag |
+State machine driven by distance from T-Rex pawn to player capsule (ground-traced XY, never
+hardcoded Z — per `hugo_terrain_savana_v1`):
+
+| State | Trigger | Behavior |
 |---|---|---|
-| Patrol | 5000 units around spawn point | `Behavior_Patrol_5000` |
-| Chase player | Triggers within 3000 units | `Behavior_Chase_3000` |
-| Attack player | Triggers within 300 units | `Behavior_Attack_300` |
+| **PATROL** | player absent or > 5000u from home point | Move between patrol markers within a 5000-unit radius of spawn/home point at walk speed. Random dwell time at each marker (feeding/sniffing idle pose). |
+| **CHASE** | player within 3000u | Break patrol, path toward player at run speed, roar/VFX trigger (reuse existing `Audio_TRexRoarProximity_001` / `VFX_DustBurst_TRex_*` assets already in the level — do not duplicate, tag-link them per `hugo_naming_dedup_v2`). |
+| **ATTACK** | player within 300u | Stop moving, trigger bite/attack animation, apply damage via `SurvivalComponent::ApplyHealthDamage` on the player's component (hook point already exists — `UFUNCTION(BlueprintCallable)`). Cooldown between attacks (attack anim length + ~1.5s). |
+| **RETURN** | player breaks CHASE range and > 5000u again | Path back to home/patrol point, resume PATROL. |
 
-These tags are now readable by any Behavior Tree / Blackboard the Combat AI Agent (#12) builds on top —
-no C++ required, purely actor tag + Blueprint/BT decorator driven.
+Home point recommendation: hub area (2100,2400), radius 5000u covers the existing 4 patrol markers
+already placed by a previous cycle — reuse them as waypoints rather than spawning new ones
+(`hugo_naming_dedup_v2` compliance).
 
-## Live Verification (this cycle, real ue5_execute calls)
+## Blocking dependency for #12 (Combat & Enemy AI Agent)
+1. No real T-Rex `Pawn`/`Character` + `AIController` pair exists — this is prerequisite work before
+   any combat AI can run. Recommend #12 either requests an engine recompile cycle to activate real
+   C++ classes, or builds the state machine as a Blueprint (`ABP`/`BT` assets), which **can** be
+   authored live via `ue5_execute` Python in this headless editor (Blueprint assets are data, not
+   compiled C++, and do take effect).
+2. `DinosaurCombatAIController.cpp` in the repo is an empty stub — do not assume it is functional.
 
-- Bridge check: `MinPlayableMap` loaded, confirmed live.
-- Found **101 actors** with "TRex" in label; **40** are the tagged `TRex_Savana_*_Posed` instances that
-  received the 3 behavior tags above.
-- Ground-check via line trace to Landscape at each TRex's XY: **0 of 40 needed correction** — all 40 were
-  already within 15 units of terrain surface (grounded, consistent with Environment/Animation agents'
-  prior passes).
-- `CombatZone_TRex_Hub` anchor actor confirmed present at (2000, 2500, 120) — reused, not duplicated.
-- Level saved once, at end of turn, after verification (per Definition of Done rule #5).
+## Files changed this cycle
+- `Docs/AI/TRexBehavior_Design.md` (this file) — design doc, NOT compiled code, documents verified
+  world state + the requested T-Rex logic for the next agent(s) who can act on it via Blueprint/data.
 
-## Handoff to Combat & Enemy AI Agent (#12)
-
-- `DinosaurCombatAIController.cpp` is an empty placeholder — needs real Behavior Tree / EQS asset work
-  (Blueprint-side, not C++, since C++ won't compile here).
-- The 3 tags (`Behavior_Patrol_5000`, `Behavior_Chase_3000`, `Behavior_Attack_300`) are live on 40 TRex
-  actors and ready to be read by BT decorators/services.
-- `SurvivalComponent` (player-side) is fully implemented and exposes `AddFear`/`ReduceFear` — Combat AI
-  should call into this when T-Rex threatens the player, to drive the Fear stat shown in HUD.
-- No new actors were spawned this cycle (naming/dedup rule respected — reused existing `TRex_Savana_*`
-  and `CombatZone_TRex_Hub`).
+## No world-breaking changes made
+- No actors deleted, no player/terrain/lighting touched, no `NiagaraSystemFactoryNew` called.
+- Only change to live world: Actor Tags added to 4 pre-existing `TRexPatrolMarker_Hub_00N` actors
+  (`BehaviorState_*`), verified by read-back in the same `ue5_execute` call.
